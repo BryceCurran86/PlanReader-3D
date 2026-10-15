@@ -9,6 +9,7 @@ from pb_opening_label_dimension_authority import parse_opening_label_dimensions
 from pb_opening_quantity_first_fail_shadow import (
     classify_opening_quantity_first_fail,
     classify_opening_quantity_first_fail_from_producer,
+    classify_second_axis_source_ownership,
 )
 
 
@@ -205,6 +206,116 @@ def test_classification_does_not_mutate_caller_dimensions() -> None:
 def test_replay_is_deterministic() -> None:
     kwargs = _laundry_kwargs()
     assert _classify(**kwargs) == _classify(**kwargs)
+
+
+def test_bare_870_on_the_sheet_owns_one_axis() -> None:
+    parsed = parse_opening_label_dimensions("870")
+    assert parsed is not None
+    assert parsed.dimension_values_mm == (870.0,)
+    assert parsed.area_m2 is None
+    result = classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=parsed.dimension_values_mm,
+        candidates=(),
+    )
+    assert result["second_axis_status"] == "no_source_owned_second_axis"
+    assert result["first_failing_authority"] == "figured_label_second_axis_unavailable"
+    assert result["invented_second_axis_mm"] is None
+    assert result["would_publish_live_opening_area"] is False
+
+
+def test_storey_height_2100_is_a_lookalike_not_a_second_axis() -> None:
+    result = classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=(870.0,),
+        candidates=(
+            {
+                "value_mm": 2100.0,
+                "role": "storey_height",
+                "uniquely_owned_by_opening": False,
+            },
+            {
+                "value_mm": 2110.0,
+                "role": "furniture",
+                "uniquely_owned_by_opening": False,
+            },
+            {
+                "value_mm": 1200.0,
+                "role": "half_wall",
+                "uniquely_owned_by_opening": False,
+            },
+        ),
+    )
+    assert result["second_axis_status"] == "no_source_owned_second_axis"
+    assert result["first_failing_authority"] == "figured_label_second_axis_unavailable"
+    assert result["source_owned_second_axis_mm"] is None
+    assert result["invented_second_axis_mm"] is None
+    assert result["would_publish_live_opening_area"] is False
+    assert result["retained_candidate_count"] == 3
+
+
+def test_storey_height_stays_a_lookalike_even_if_flagged_owned() -> None:
+    result = classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=(870.0,),
+        candidates=({
+            "value_mm": 2100.0,
+            "role": "storey_height",
+            "uniquely_owned_by_opening": True,
+        },),
+    )
+    assert result["second_axis_status"] == "no_source_owned_second_axis"
+    assert result["invented_second_axis_mm"] is None
+    assert result["would_publish_live_opening_area"] is False
+
+
+def test_two_owned_second_axes_are_retained_not_nearest_or_smallest() -> None:
+    first = classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=(870.0,),
+        candidates=(
+            {"value_mm": 2040.0, "role": "figured_span", "uniquely_owned_by_opening": True},
+            {"value_mm": 2340.0, "role": "schedule_row", "uniquely_owned_by_opening": True},
+        ),
+    )
+    reversed_order = classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=(870.0,),
+        candidates=(
+            {"value_mm": 2340.0, "role": "schedule_row", "uniquely_owned_by_opening": True},
+            {"value_mm": 2040.0, "role": "figured_span", "uniquely_owned_by_opening": True},
+        ),
+    )
+    assert first == reversed_order
+    assert first["second_axis_status"] == "ambiguous_owned_second_axis"
+    assert first["source_owned_second_axis_mm"] is None
+    assert first["retained_candidate_count"] == 2
+    assert first["would_publish_live_opening_area"] is False
+
+
+def test_owned_second_axis_still_does_not_publish_live_area() -> None:
+    result = classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=(870.0,),
+        candidates=({
+            "value_mm": 2040.0,
+            "role": "figured_span",
+            "uniquely_owned_by_opening": True,
+        },),
+    )
+    assert result["second_axis_status"] == "source_owned_second_axis_present"
+    assert result["source_owned_second_axis_mm"] == 2040.0
+    assert result["invented_second_axis_mm"] is None
+    assert result["would_publish_live_opening_area"] is False
+    assert result["first_failing_authority"] == "live_area_publication_requires_promotion"
+
+
+def test_second_axis_classifier_does_not_mutate_candidates() -> None:
+    candidates = [{
+        "value_mm": 2100.0,
+        "role": "storey_height",
+        "uniquely_owned_by_opening": False,
+    }]
+    before = deepcopy(candidates)
+    classify_second_axis_source_ownership(
+        owned_label_dimension_values_mm=(870.0,),
+        candidates=candidates,
+    )
+    assert candidates == before
 
 
 class TestNoQuantityOrLiveWiring:

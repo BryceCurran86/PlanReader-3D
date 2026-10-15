@@ -204,3 +204,94 @@ def classify_opening_quantity_first_fail_from_producer(
         exact_frozen_location_join=exact_frozen_location_join,
         quantity_family=quantity_family,
     )
+
+
+_ALLOWED_SECOND_AXIS_ROLES = frozenset({
+    "figured_span",
+    "schedule_row",
+    "elevation_frame",
+})
+_LOOKALIKE_SECOND_AXIS_ROLES = frozenset({
+    "storey_height",
+    "typical_note",
+    "furniture",
+    "half_wall",
+    "unrelated_mark",
+})
+
+
+def classify_second_axis_source_ownership(
+    *,
+    owned_label_dimension_values_mm: Sequence[Any] | None,
+    candidates: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Decide whether any candidate is a unique source-owned second axis.
+
+    OBSERVED: a single 870 callout has one millimetre value. Section HEIGHT
+    marks, furniture chest heights, and half-wall notes are look-alikes.
+    INFERENCE: only a uniquely owned figured span, schedule row, or
+    elevation frame may supply the missing axis.
+    PROPOSED: classify ownership only. A look-alike value is never copied
+    onto the opening. Live area stays unpublished.
+    BENCHMARK expected door heights must not enter this function.
+    """
+    dims = _dimension_values_mm(owned_label_dimension_values_mm)
+    if len(dims) >= 2:
+        return {
+            "second_axis_status": "already_present_on_owned_label",
+            "first_failing_authority": "none_area_already_published",
+            "source_owned_second_axis_mm": None,
+            "invented_second_axis_mm": None,
+            "retained_candidate_count": 0,
+            "would_publish_live_opening_area": False,
+            "diagnostic_only": True,
+        }
+
+    owned: list[float] = []
+    lookalikes = 0
+    for raw in candidates:
+        if not isinstance(raw, Mapping):
+            continue
+        role = str(raw.get("role") or "").strip().lower()
+        unique = bool(raw.get("uniquely_owned_by_opening"))
+        value = raw.get("value_mm")
+        if not _finite_positive(value):
+            continue
+        if role in _LOOKALIKE_SECOND_AXIS_ROLES or not unique:
+            lookalikes += 1
+            continue
+        if role not in _ALLOWED_SECOND_AXIS_ROLES:
+            lookalikes += 1
+            continue
+        owned.append(float(value))
+
+    unique_values = tuple(sorted(set(owned)))
+    if len(unique_values) > 1:
+        return {
+            "second_axis_status": "ambiguous_owned_second_axis",
+            "first_failing_authority": "opening_label_dimension_ambiguous",
+            "source_owned_second_axis_mm": None,
+            "invented_second_axis_mm": None,
+            "retained_candidate_count": len(unique_values),
+            "would_publish_live_opening_area": False,
+            "diagnostic_only": True,
+        }
+    if len(unique_values) == 1:
+        return {
+            "second_axis_status": "source_owned_second_axis_present",
+            "first_failing_authority": "live_area_publication_requires_promotion",
+            "source_owned_second_axis_mm": unique_values[0],
+            "invented_second_axis_mm": None,
+            "retained_candidate_count": 1,
+            "would_publish_live_opening_area": False,
+            "diagnostic_only": True,
+        }
+    return {
+        "second_axis_status": "no_source_owned_second_axis",
+        "first_failing_authority": "figured_label_second_axis_unavailable",
+        "source_owned_second_axis_mm": None,
+        "invented_second_axis_mm": None,
+        "retained_candidate_count": lookalikes,
+        "would_publish_live_opening_area": False,
+        "diagnostic_only": True,
+    }
