@@ -99,6 +99,36 @@ def summarize_source_selection(rows: list[dict], target: str) -> dict:
     }
 
 
+
+def audit_original_new_source_overlaps(old_canonical: list[dict], new_canonical: list[dict]) -> list[dict]:
+    """Collision is an audit fact, NEVER proof of sameness or distinctness."""
+    old_by_id = {row["physical_opening_id"]: row for row in old_canonical}
+    new_by_id = {row["physical_opening_id"]: row for row in new_canonical}
+    if len(old_by_id) != len(old_canonical) or len(new_by_id) != len(new_canonical):
+        raise ValueError("duplicate original or candidate physical identity")
+    collisions = []
+    for new_id in sorted(set(new_by_id) - set(old_by_id)):
+        new_source = new_by_id[new_id]["source_observation_ids"]
+        if len(new_source) != len(set(new_source)):
+            raise ValueError("duplicate new physical source membership")
+        for old_id, old_row in sorted(old_by_id.items()):
+            old_source = old_row["source_observation_ids"]
+            if len(old_source) != len(set(old_source)):
+                raise ValueError("duplicate old physical source membership")
+            overlap = sorted(set(old_source).intersection(new_source))
+            if overlap:
+                collisions.append({
+                    "new_physical_opening_id": new_id,
+                    "original_physical_opening_id": old_id,
+                    "shared_source_observation_ids": overlap,
+                    "shared_observation_count": len(overlap),
+                    "independent_identity_proven": False,
+                    "source_member_partition_proven": False,
+                    "publication_granted": False,
+                })
+    return collisions
+
+
 def original_selector_policy_matrix(
     original_pdf: bytes, *, page_id: str, expected_sha256: str, existing_physical_id: str,
 ) -> dict:
@@ -138,6 +168,7 @@ def original_selector_policy_matrix(
             or old["sealed_run"] != new["sealed_run"]
             or old["customer_verification"] != new["customer_verification"]):
         raise ValueError("signed customer receipt protection failed")
+    collisions = audit_original_new_source_overlaps(old["canonical"], new["canonical"])
     compared = [
         {
             "source_observation_id": a["source_observation_id"],
@@ -161,6 +192,8 @@ def original_selector_policy_matrix(
         "original_policy": old_choice,
         "shadow_policy": new_choice,
         "per_observation": compared,
+        "new_physical_vs_original_source_member_collisions": collisions,
+        "source_member_collision_count": len(collisions),
         "changed_observation_decision_count": sum(x["actual_source_decision_changed"] for x in compared),
         "original_physical_count": len(old["canonical"]),
         "shadow_physical_count": len(new["canonical"]),
