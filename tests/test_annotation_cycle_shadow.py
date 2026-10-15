@@ -594,3 +594,125 @@ def test_string_path_index_does_not_raise_or_quarantine():
         ring, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
     )
     assert result["quarantined_primitive_ids"] == []
+
+
+def test_endpoints_that_only_meet_after_rounding_do_not_close():
+    ring = _ring()
+    ring[0]["x1"] += 5e-7
+    result = _classify(ring)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_word_corner_on_a_ring_vertex_does_not_quarantine():
+    result = _classify(_ring(), [_word(x0=7.5, y0=-0.2, x1=8.0, y1=0.2)])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_reversed_viewport_does_not_own_the_ring():
+    result = classify_exact_annotation_cycles(
+        _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=(500.0, 500.0, -500.0, -500.0),
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_non_finite_page_span_fails_closed():
+    with pytest.raises(ValueError):
+        classify_exact_annotation_cycles(_ring(), [_word()], page_span=float("nan"))
+
+
+def test_negative_page_span_fails_closed():
+    with pytest.raises(ValueError):
+        classify_exact_annotation_cycles(_ring(), [_word()], page_span=-PAGE_SPAN)
+
+
+def test_missing_viewport_leaves_the_shadow_input_unchanged():
+    from pb_annotation_cycle_shadow import segments_without_proven_annotation_cycles
+    ring = _ring()
+    kept = segments_without_proven_annotation_cycles(
+        ring, [_word()], page_span=PAGE_SPAN, viewport_bbox=None,
+    )
+    assert [segment["id"] for segment in kept] == [segment["id"] for segment in ring]
+
+
+def test_empty_segment_list_returns_no_quarantine():
+    result = classify_exact_annotation_cycles(
+        [], [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+    assert result["diagnostic_only"]
+    assert not result["quantity_or_metric_area_published"]
+
+
+def test_a_layer_name_does_not_quarantine_an_open_chain():
+    chain = [
+        _line("c0", 0.0, 0.0, 4.0, 1.0, path=1),
+        _line("c1", 4.0, 1.0, 8.0, 0.0, path=2),
+    ]
+    for segment in chain:
+        segment["layer"] = "DIM"
+    result = _classify(chain)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_a_layer_name_does_not_block_a_proven_ring():
+    ring = _ring()
+    for segment in ring:
+        segment["layer"] = "ANNO"
+    result = _classify(ring)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_a_five_edge_path_is_not_a_frame():
+    ring = _ring()
+    frame = _frame(50, -20.0, -20.0, 20.0, 20.0, "frame")
+    extra = _rect_edge("frame4", -20.0, -20.0, -20.0, -10.0, path=50)
+    result = classify_exact_annotation_cycles(
+        ring + frame + [extra], [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    quarantined = set(result["quarantined_primitive_ids"])
+    assert {f"mark{i}" for i in range(16)} <= quarantined
+    assert not quarantined.intersection({"frame0", "frame4"})
+
+
+def test_quarantine_ids_are_a_subset_of_the_input_ids():
+    segments = _ring() + [_line("wall", 0.0, 0.0, 80.0, 0.0, path=7)]
+    result = _classify(segments)
+    assert set(result["quarantined_primitive_ids"]) <= {segment["id"] for segment in segments}
+    assert "wall" not in result["quarantined_primitive_ids"]
+
+
+def test_absent_viewport_uses_the_page_box_for_an_in_page_mark():
+    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
+    ring = _ring(cx=100.0, cy=100.0)
+    kept = _without_proven_annotation_cycles(
+        ring, classification_segments=ring,
+        text_receipts=(_receipt("MARK", (99.0, 99.0, 101.0, 101.0)),),
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN, viewport=None,
+    )
+    assert kept == ()
+
+
+def test_absent_viewport_does_not_own_a_mark_outside_the_page():
+    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
+    ring = _ring(cx=-100.0, cy=-100.0)
+    kept = _without_proven_annotation_cycles(
+        ring, classification_segments=ring,
+        text_receipts=(_receipt("MARK", (-101.0, -101.0, -99.0, -99.0)),),
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN, viewport=None,
+    )
+    assert [segment["id"] for segment in kept] == [segment["id"] for segment in ring]
+
+
+def test_non_finite_frame_edge_does_not_raise():
+    bad = _rect_edge("bad", float("nan"), 0.0, 10.0, 0.0, path=9)
+    result = classify_exact_annotation_cycles(
+        _ring() + [bad], [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert "bad" not in result["quarantined_primitive_ids"]
+    assert len(result["quarantined_primitive_ids"]) == 16
+
+
+def test_repeated_word_boxes_quarantine_the_ring_once():
+    result = _classify(_ring(), [_word(), _word()])
+    assert result["quarantined_primitive_ids"].count("mark0") == 1
+    assert len(result["quarantined_primitive_ids"]) == 16

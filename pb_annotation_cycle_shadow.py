@@ -21,16 +21,11 @@ from pb_physical_wall_candidate_authority import (
     _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION,
 )
 
-EXACT_ENDPOINT_DECIMALS = 6
 MIN_CYCLE_EDGES = 8
 MIN_DISTINCT_DIRECTED_ANGLES = 8
 _COLLINEAR_TOL_PT = 1e-4
 _SOLID_DASHES = ("", "[] 0", "[]")
 Point = Tuple[float, float]
-
-
-def _endpoint_key(x: float, y: float) -> Point:
-    return (round(float(x), EXACT_ENDPOINT_DECIMALS), round(float(y), EXACT_ENDPOINT_DECIMALS))
 
 
 def _path_index(segment: Mapping[str, Any]) -> Optional[int]:
@@ -173,15 +168,16 @@ def _smooth_cycles(segments: Sequence[Mapping[str, Any]]) -> List[Tuple[List[str
     """Trace closed cycles by the smallest turn at each exact shared endpoint.
 
     A face walk jumps into the gap between two rings that share vertices.
-    The smallest turn stays on one ring. This does not join nearby endpoints.
+    The smallest turn stays on one ring. Endpoints stay the original floats:
+    rounding them together is not a connection.
     """
     incidents: Dict[Point, List[Tuple[float, Point, str]]] = defaultdict(list)
     endpoints: Dict[str, Tuple[Point, Point]] = {}
     for segment in segments:
         if str(segment.get("kind") or "") != "line":
             continue
-        start = _endpoint_key(float(segment["x1"]), float(segment["y1"]))
-        end = _endpoint_key(float(segment["x2"]), float(segment["y2"]))
+        start = (float(segment["x1"]), float(segment["y1"]))
+        end = (float(segment["x2"]), float(segment["y2"]))
         if start == end or not segment.get("id"):
             continue
         sid = str(segment["id"])
