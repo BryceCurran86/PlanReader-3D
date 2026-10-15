@@ -291,3 +291,76 @@ def test_imported_producer_quantity_inventory_requires_an_array(original, untrus
     bad["original_production_receipts"]["quantities"] = untrusted_rows
     with pytest.raises(consumer.OriginalSourceScopeConsumerError):
         consumer._verified_join(bad, **_args(report))
+
+
+@pytest.mark.parametrize("changed_input", ["pdf", "sealed", "customer"])
+def test_diagnostic_cli_refuses_to_publish_when_input_changes_during_original_replay(
+    original, tmp_path, monkeypatch, changed_input,
+):
+    import json
+    source, report = original
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    paths = {
+        "pdf": tmp_path / "original.pdf",
+        "sealed": tmp_path / "sealed.json",
+        "customer": tmp_path / "customer.json",
+    }
+    paths["pdf"].write_bytes(source)
+    paths["sealed"].write_text(json.dumps(_args(report)["sealed_payload"]))
+    paths["customer"].write_text(json.dumps(_args(report)["customer_rows"]))
+    target = paths[changed_input]
+    old = target.read_bytes()
+    def mutate_original_input(*args, **kwargs):
+        target.write_bytes(old + b" ")
+        return {
+            "status": "SOURCE_REPLAY_CONSISTENT_UNSIGNED_UNPUBLISHED",
+            "source_owned_quantity_count": 1,
+        }
+    monkeypatch.setattr(
+        consumer, "verify_original_scope_to_v1_customer",
+        mutate_original_input,
+    )
+    out = tmp_path / "artifacts" / "must-not-be-created.json"
+    argv = [
+        "--pdf", str(paths["pdf"]), "--page-id", "1",
+        "--sealed-run", str(paths["sealed"]),
+        "--customer-rows", str(paths["customer"]),
+        "--expected-source-sha256", report["source_sha256"],
+        "--expected-snapshot-id", report["snapshot_id"],
+        "--project-id", "original-source-retention",
+        "--output", str(out),
+    ]
+    with pytest.raises(consumer.OriginalSourceScopeConsumerError,
+                       match="changed during replay"):
+        consumer.main(argv)
+    assert not out.exists()
+
+
+def test_forbidden_diagnostic_destination_is_rejected_before_replay(
+    original, tmp_path, monkeypatch,
+):
+    import json
+    source, report = original
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    pdf = tmp_path / "original.pdf"
+    sealed = tmp_path / "sealed.json"
+    customer = tmp_path / "customer.json"
+    pdf.write_bytes(source)
+    sealed.write_text(json.dumps(_args(report)["sealed_payload"]))
+    customer.write_text(json.dumps(_args(report)["customer_rows"]))
+    def impossible(*args, **kwargs):
+        raise AssertionError("must never invoke original producer for forbidden output")
+    monkeypatch.setattr(consumer, "verify_original_scope_to_v1_customer", impossible)
+    args = [
+        "--pdf", str(pdf), "--page-id", "1",
+        "--sealed-run", str(sealed), "--customer-rows", str(customer),
+        "--expected-source-sha256", report["source_sha256"],
+        "--expected-snapshot-id", report["snapshot_id"],
+        "--project-id", "original-source-retention",
+    ]
+    with pytest.raises(ValueError, match="artifacts workspace"):
+        consumer.main(args + [
+            "--output", str(tmp_path / "benchmarks/frozen_holdout/forbidden.json")
+        ])
