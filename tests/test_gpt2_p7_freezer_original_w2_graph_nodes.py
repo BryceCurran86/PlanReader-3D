@@ -152,3 +152,45 @@ def test_foreign_or_nonfinite_w3_junction_replay_fails_closed():
         trace(original_wall_scope=scope,graph=graph,
               reconstructed_walls=walls,selected_wall_ids=("wall_source_1",),
               junctions=(j,))
+
+
+
+def test_source_native_snap_cluster_spans_more_than_running_centroid_radius():
+    scope, graph, walls = fixture()
+    # Source-native endpoint extent is intentionally > the 2.5pt centroid
+    # admission radius. Audit that fact but do NOT change source W2 graph.
+    for index, x in enumerate((0., 2.880005)):
+        graph["edges"].append({
+            "id": f"split_lookalike_{index}",
+            "a": 0, "b": 1,
+            "x1": x, "y1": 0., "x2": 10., "y2": 0.,
+            "primitive_lineage": {
+                "source_primitive_ids": [f"d_native_{index}"]
+            },
+        })
+    prior = [(row["id"], row["a"], row["b"]) for row in graph["edges"]]
+    result = trace(
+        original_wall_scope=scope, graph=graph,
+        reconstructed_walls=walls, selected_wall_ids=("wall_source_1",)
+    )
+    node = result["selected_original_w4_node_rows"][0][
+        "w2_surviving_fragment_nodes"][0]["endpoints"][0]
+    assert node["source_native_retained_endpoint_diameter_pdf_pt"] == pytest.approx(2.880005)
+    assert node["producer_nominal_gap_snap_tolerance_pdf_pt"] == 2.5
+    assert node["diameter_exceeds_nominal_tolerance_diagnostic_only"]
+    assert node["centroid_snap_cluster_membership_not_reversed_or_changed"]
+    assert [(row["id"], row["a"], row["b"]) for row in graph["edges"]] == prior
+    assert not result["source_structural_role_granted"]
+
+
+def test_source_native_single_coordinate_cluster_does_not_claim_problem():
+    scope, graph, walls = fixture()
+    result = trace(
+        original_wall_scope=scope, graph=graph,
+        reconstructed_walls=walls, selected_wall_ids=("wall_source_1",)
+    )
+    node = result["selected_original_w4_node_rows"][0][
+        "w2_surviving_fragment_nodes"][0]["endpoints"][0]
+    assert node["source_native_retained_endpoint_diameter_pdf_pt"] == 0.
+    assert not node["diameter_exceeds_nominal_tolerance_diagnostic_only"]
+    assert not result["room_or_metric_published"]
