@@ -99,3 +99,19 @@ def test_same_native_source_profile_yields_order_independent_candidate_ids():
         "original_indexed_native_linear_receipts"] != b[
             "source_native_linear_ink_queries"][0][
             "original_indexed_native_linear_receipts"]
+
+
+def test_real_pdf_degenerate_native_line_is_retained_as_negative_not_fatal():
+    native=drawings()
+    native.insert(0,{"type":"s","items":[
+        ("l",fitz.Point(5,5),fitz.Point(5,5)),
+        ("re",fitz.Rect(8,8,8,12),1),
+    ],"seqno":2})
+    report=census_original_native_linear_ink(
+        native,source_atoms=[((2,0),(9,0))]
+    )
+    assert report["original_indexed_degenerate_linear_source_count"]>=1
+    assert "d0i0" in report["original_indexed_degenerate_linear_source_ids"]
+    assert report["source_native_linear_ink_queries"][0][
+        "original_indexed_linear_native_full_span_count"]==2
+    assert report["new_commercial_quantities"]==[]
