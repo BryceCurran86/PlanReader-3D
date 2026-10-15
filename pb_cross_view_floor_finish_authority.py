@@ -358,6 +358,26 @@ def _floor_finish_viewports(
     return MappingProxyType(output)
 
 
+def _source_owned_mark_eligible_for_existing_physical_floor(
+    *,
+    floor: LiveCanonicalFloorSurfaceObject,
+    occurrence: SourceMaterialOccurrenceRecord,
+    source_owned_shadow: bool,
+) -> bool:
+    """Do not reinterpret cross-sheet mark containment as physical equality.
+
+    A new, independently issued cross-sheet structural correspondence receipt
+    is needed before this isolated mode could accept p11→p7 finishes.
+    Existing same-view/default quantities keep their original authority.
+    """
+    if type(source_owned_shadow) is not bool:
+        raise ValueError("source-owned floor mode must be an explicit boolean")
+    return (
+        not source_owned_shadow
+        or _clean(floor.page_id) == _clean(occurrence.page_id)
+    )
+
+
 def _source_owned_floor_finish_viewports(
     producer: SourceMaterialSemanticProducer,
     *,
@@ -1051,9 +1071,10 @@ class CrossViewFloorFinishProducer:
                 # become a p7 physical-floor material without an independent
                 # source wall/room correspondence producer. Preserve the
                 # ordinary existing consumer unmodified.
-                if (
-                    self._physical_plan_page_ids
-                    and _clean(occurrence.page_id) != _clean(floor.page_id)
+                if not _source_owned_mark_eligible_for_existing_physical_floor(
+                    floor=floor,
+                    occurrence=occurrence,
+                    source_owned_shadow=bool(self._physical_plan_page_ids),
                 ):
                     unresolved.add(floor.canonical_floor_id)
                     continue
