@@ -1,0 +1,291 @@
+"""Synthetic proofs for exact annotation-cycle shadow classification.
+
+Colour, width, and text nearness alone must not quarantine a segment.
+"""
+from __future__ import annotations
+
+import math
+from copy import deepcopy
+
+import pytest
+
+from pb_annotation_cycle_shadow import (
+    classify_exact_annotation_cycles,
+    shadow_annotation_cycle_topology,
+)
+
+PAGE_SPAN = 2000.0
+VIEW = (-500.0, -500.0, 500.0, 500.0)
+
+
+def _line(sid, x1, y1, x2, y2, *, path, width=0.48, stroke=(0.0, 0.0, 0.0),
+          dashes="[] 0", fill=None):
+    return {
+        "id": sid, "kind": "line", "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+        "width": width, "stroke": stroke, "fill": fill, "dashes": dashes,
+        "layer": "", "path_index": path, "item_index": 0,
+    }
+
+
+def _ring(n=16, radius=8.0, cx=0.0, cy=0.0, prefix="mark"):
+    segments = []
+    points = [
+        (cx + radius * math.cos(2.0 * math.pi * i / n),
+         cy + radius * math.sin(2.0 * math.pi * i / n))
+        for i in range(n)
+    ]
+    for index, (start, end) in enumerate(zip(points, points[1:] + points[:1])):
+        segments.append(_line(
+            f"{prefix}{index}", start[0], start[1], end[0], end[1], path=1000 + index,
+        ))
+    return segments
+
+
+def _word(text="MARK", x0=-1.0, y0=-1.0, x1=1.0, y1=1.0):
+    return {"text": text, "x0": x0, "y0": y0, "x1": x1, "y1": y1}
+
+
+def test_closed_singleton_cycle_containing_text_is_quarantined():
+    result = classify_exact_annotation_cycles(
+        _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+    assert result["cycles"][0]["status"] == "source_proven_annotation_cycle"
+    assert result["cycles"][0]["contained_source_text"][0]["text"] == "MARK"
+    assert result["diagnostic_only"]
+    assert not result["quantity_or_metric_area_published"]
+    assert not result["structural_wall_role_authenticated"]
+
+
+def test_same_cycle_is_proven_for_a_different_stroke_and_width():
+    segments = _ring()
+    for segment in segments:
+        segment["width"] = 0.24
+        segment["stroke"] = (0.5, 0.5, 0.5)
+    result = classify_exact_annotation_cycles(
+        segments, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert len(result["quarantined_primitive_ids"]) == 16
+
+
+def test_input_order_does_not_change_the_quarantine():
+    forward = classify_exact_annotation_cycles(
+        _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    backward = classify_exact_annotation_cycles(
+        list(reversed(_ring())), [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert forward["quarantined_primitive_ids"] == backward["quarantined_primitive_ids"]
+
+
+def test_orthogonal_room_loop_with_interior_text_is_preserved():
+    room = [
+        _line("w0", 0, 0, 80, 0, path=1),
+        _line("w1", 80, 0, 80, 40, path=2),
+        _line("w2", 80, 40, 0, 40, path=3),
+        _line("w3", 0, 40, 0, 0, path=4),
+    ]
+    result = classify_exact_annotation_cycles(
+        room, [_word("ROOM", 30, 15, 40, 20)], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_short_wall_return_and_nearby_text_are_preserved():
+    segments = [_line("return", 0, 0, 4, 0, path=1)]
+    result = classify_exact_annotation_cycles(
+        segments, [_word("N", 0.2, 0.4, 1.0, 1.2)], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_text_outside_a_closed_cycle_does_not_quarantine_it():
+    result = classify_exact_annotation_cycles(
+        _ring(), [_word(x0=30, y0=30, x1=34, y1=34)],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_open_chord_chain_is_not_a_cycle():
+    segments = _ring()[:-1]
+    result = classify_exact_annotation_cycles(
+        segments, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_dashed_closed_mark_and_multi_item_path_are_preserved():
+    dashed = _ring()
+    for segment in dashed:
+        segment["dashes"] = "[1 1] 0"
+    shared = _ring(prefix="shared")
+    for segment in shared:
+        segment["path_index"] = 7
+    dashed_result = classify_exact_annotation_cycles(
+        dashed, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    shared_result = classify_exact_annotation_cycles(
+        shared, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert dashed_result["quarantined_primitive_ids"] == []
+    assert shared_result["quarantined_primitive_ids"] == []
+
+
+def test_collinear_structural_continuation_blocks_quarantine():
+    segments = _ring()
+    chord = segments[0]
+    dx = float(chord["x2"]) - float(chord["x1"])
+    dy = float(chord["y2"]) - float(chord["y1"])
+    length = math.hypot(dx, dy)
+    segments.append(_line(
+        "wall", chord["x2"], chord["y2"],
+        chord["x2"] + dx / length * 40.0, chord["y2"] + dy / length * 40.0,
+        path=50,
+    ))
+    result = classify_exact_annotation_cycles(
+        segments, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+    blocked = next(row for row in result["cycles"] if "mark0" in row["primitive_ids"])
+    assert "competing_structural_continuation" in blocked["failed_gates"]
+
+
+def test_cycle_outside_the_viewport_is_not_owned():
+    result = classify_exact_annotation_cycles(
+        _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=(100, 100, 120, 120),
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_shadow_withholds_the_cycle_and_keeps_the_crossing_geometry():
+    segments = _ring(n=16, radius=4.0, cx=4.528, cy=4.528)
+    segments.extend((
+        _line("h", -40, 0, 40, 0, path=1, width=0.24, stroke=(0.5, 0.5, 0.5)),
+        _line("v", 0, -40, 0, 40, path=2, width=0.24, stroke=(0.5, 0.5, 0.5)),
+    ))
+    report = shadow_annotation_cycle_topology(
+        segments, [_word("MARK", 4.0, 4.0, 5.0, 5.0)],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-shadow",
+    )
+    assert report["classification"]["quarantined_primitive_ids"]
+    assert report["unaffected_non_annotation_edge_geometry_unchanged"]
+    baseline_nodes = {(node["x"], node["y"], node["samples"]) for node in report["baseline"]["w2_nodes"]}
+    shadow_nodes = {(node["x"], node["y"], node["samples"]) for node in report["shadow_with_proven_cycles_withheld_from_snap_input"]["w2_nodes"]}
+    assert any(samples > 4 for _x, _y, samples in baseline_nodes)
+    assert (0.0, 0.0, 4) in {(round(x, 6), round(y, 6), samples) for x, y, samples in shadow_nodes}
+    assert not any(
+        sid.startswith("mark")
+        for wall in report["shadow_with_proven_cycles_withheld_from_snap_input"]["w4_source_primitive_ids"]
+        for sid in wall
+    )
+    assert report["diagnostic_only"]
+
+
+def test_shadow_copy_does_not_mutate_the_caller_segments():
+    segments = _ring()
+    original = deepcopy(segments)
+    classify_exact_annotation_cycles(
+        segments, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert segments == original
+
+
+def test_unstroked_rectangle_side_does_not_count_as_a_wall_continuation():
+    segments = _ring()
+    chord = segments[0]
+    dx = float(chord["x2"]) - float(chord["x1"])
+    dy = float(chord["y2"]) - float(chord["y1"])
+    length = math.hypot(dx, dy)
+    segments.append(_line(
+        "rect-side", chord["x2"], chord["y2"],
+        chord["x2"] + dx / length * 40.0, chord["y2"] + dy / length * 40.0,
+        path=60, width=0.0, stroke=None,
+    ))
+    result = classify_exact_annotation_cycles(
+        segments, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert len(result["quarantined_primitive_ids"]) == 16
+    assert "rect-side" not in result["quarantined_primitive_ids"]
+
+
+def test_missing_page_span_fails_closed():
+    with pytest.raises(ValueError):
+        classify_exact_annotation_cycles(_ring(), [_word()], page_span=0.0)
+
+
+def test_proven_cycle_is_removed_from_wall_input_and_a_room_is_not():
+    from types import SimpleNamespace
+    from pb_annotation_cycle_shadow import segments_without_proven_annotation_cycles
+    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
+
+    ring = _ring()
+    room = [
+        _line("w0", 0, 0, 80, 0, path=1),
+        _line("w1", 80, 0, 80, 40, path=2),
+        _line("w2", 80, 40, 0, 40, path=3),
+        _line("w3", 0, 40, 0, 0, path=4),
+    ]
+    kept = segments_without_proven_annotation_cycles(
+        ring + room, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert [segment["id"] for segment in kept] == ["w0", "w1", "w2", "w3"]
+    unchanged = segments_without_proven_annotation_cycles(
+        ring, [], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert [segment["id"] for segment in unchanged] == [segment["id"] for segment in ring]
+    receipt = SimpleNamespace(raw_text="MARK", geometry=(-1.0, -1.0, 1.0, 1.0))
+    withheld = _without_proven_annotation_cycles(
+        ring, classification_segments=ring, text_receipts=(receipt,),
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN,
+        viewport=SimpleNamespace(bounding_box=VIEW),
+    )
+    assert withheld == ()
+
+
+def test_leftover_chord_is_removed_when_the_cycle_is_proved_earlier():
+    from types import SimpleNamespace
+    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
+
+    ring = _ring()
+    receipt = SimpleNamespace(raw_text="MARK", geometry=(-1.0, -1.0, 1.0, 1.0))
+    leftover = _without_proven_annotation_cycles(
+        ring[:1], classification_segments=ring, text_receipts=(receipt,),
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN,
+        viewport=SimpleNamespace(bounding_box=VIEW),
+    )
+    assert leftover == ()
+
+
+def _rect_edge(sid, x1, y1, x2, y2, *, path, stroke=None, width=0.0, fill=(1.0, 1.0, 1.0)):
+    return {
+        "id": sid, "kind": "rect_edge", "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+        "width": width, "stroke": stroke, "fill": fill, "dashes": "",
+        "layer": "", "path_index": path, "item_index": 0,
+    }
+
+
+def _frame(path, x0, y0, x1, y1, prefix, **kwargs):
+    return [
+        _rect_edge(f"{prefix}0", x0, y0, x1, y0, path=path, **kwargs),
+        _rect_edge(f"{prefix}1", x1, y0, x1, y1, path=path, **kwargs),
+        _rect_edge(f"{prefix}2", x1, y1, x0, y1, path=path, **kwargs),
+        _rect_edge(f"{prefix}3", x0, y1, x0, y0, path=path, **kwargs),
+    ]
+
+
+def test_unstroked_frame_around_a_proven_cycle_is_withheld():
+    ring = _ring()
+    frame = _frame(50, -20.0, -20.0, 20.0, 20.0, "frame")
+    far = _frame(51, 200.0, 200.0, 230.0, 230.0, "far")
+    stroked = _frame(52, -20.0, -20.0, 20.0, 20.0, "stroke", stroke=(0.0, 0.0, 0.0), width=0.48)
+    huge = _frame(53, -80.0, -80.0, 80.0, 80.0, "huge")
+    result = classify_exact_annotation_cycles(
+        ring + frame + far + stroked + huge, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    quarantined = set(result["quarantined_primitive_ids"])
+    assert set(result["frame_primitive_ids"]) == {"frame0", "frame1", "frame2", "frame3"}
+    assert {"frame0", "frame1", "frame2", "frame3"} <= quarantined
+    assert not quarantined.intersection({"far0", "stroke0", "huge0"})
