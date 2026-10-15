@@ -34,6 +34,9 @@ def fixture():
         "baseline_receipts": {
             "walls": [{
                 "decision_scope_id": "wall-source:page-1",
+                "document_id": "live-source:synthetic",
+                "revision_id": "source_revision_test",
+                "page_id": "1",
                 "scope_complete": True,
                 "source_sha256": SHA,
                 "snapshot_id": SNAP,
@@ -62,7 +65,15 @@ def fixture():
         "baseline_source_audit": {
             "raw_registered_gaps": [{
                 "source_observation_ids": obs,
+                "raw_candidate_id": "raw_selected",
                 "aperture_bbox_pt": [5, -2, 9, 2],
+                "source_scope": {
+                    "document_id": "live-source:synthetic",
+                    "revision_id": "source_revision_test",
+                    "page_id": "1",
+                    "source_sha256": SHA,
+                    "snapshot_id": SNAP,
+                },
             }],
         },
     }
@@ -140,3 +151,17 @@ def test_unrelated_missing_record_never_grants_positive_authority():
     r = run(d)
     assert not any(r["authority_grants"].values())
     assert r["unproven_noncomponent_fragment_count"] == 0
+
+
+def test_duplicate_prior_source_snapshot_is_not_aliased_to_selected_root():
+    d = fixture()
+    older = deepcopy(d["baseline_source_audit"]["raw_registered_gaps"][0])
+    older["raw_candidate_id"] = "raw_older_snapshot"
+    older["source_scope"]["snapshot_id"] = "source_snapshot_old"
+    older["aperture_bbox_pt"] = [5, 300, 9, 320]
+    d["baseline_source_audit"]["raw_registered_gaps"].append(older)
+    r = run(d)
+    assert r["horizontal_stripe_y_bounds_pt"] == [-2, 2]
+    assert r["target_hosted_unframed_openings"][0]["original_raw_candidate_ids"] == ["raw_selected"]
+    assert r["target_hosted_unframed_openings"][0]["selected_source_root_only"] == SNAP
+    assert not any(r["authority_grants"].values())
