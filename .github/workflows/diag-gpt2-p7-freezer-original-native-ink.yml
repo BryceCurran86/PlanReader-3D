@@ -58,6 +58,19 @@ jobs:
           assert not r['source_role_or_room_authentication_granted']
           assert r['new_commercial_quantities']==[]
           assert not r['frozen_benchmark_scored']
+          cubic=r['original_native_cubic_ink_shadow']
+          assert cubic['source_query_atom_count']==2
+          assert cubic['all_original_native_cubic_items_examined']
+          assert not cubic['complete_source_universe_including_raster_or_clip']
+          assert not cubic['physical_wall_or_room_role_granted']
+          assert cubic['metric_quantities_published']==0
+          assert len(cubic['source_native_cubic_ink_queries'])==2
+          for row in cubic['source_native_cubic_ink_queries']:
+              assert row['original_indexed_cubic_full_span_count']==len(row['original_indexed_cubic_candidate_receipts'])
+              assert not row['physical_wall_or_room_role_granted']
+          print('GPT2_P7_ORIGINAL_NATIVE_CUBIC_COUNT',cubic['original_native_cubic_item_count'],
+                'exact_collinear_fullspan_counts',[row['original_indexed_cubic_full_span_count']
+                    for row in cubic['source_native_cubic_ink_queries']])
           for item in r['source_native_linear_ink_queries']:
               count=item['original_indexed_linear_native_full_span_count']
               assert count==len(item['original_indexed_native_linear_receipts'])
