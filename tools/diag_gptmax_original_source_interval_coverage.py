@@ -117,7 +117,7 @@ def main():
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(derived,sort_keys=True,indent=2)+'\n')
     print(json.dumps(dict(unhosted_openings_examined=derived['unhosted_openings_examined'],
-                          no_new_host=not derived['new_host_granted'],source_sha256=derived['source_sha256']))
+                          no_new_host=not derived['new_host_granted'],source_sha256=derived['source_sha256'])))
 
 
 if __name__=='__main__':
