@@ -99,7 +99,12 @@ def test_missing_original_vertical_witness_never_publishes_metric_quantity():
     assert row["quantity_published"] is False
     assert row["producer_area_authority_proven"] is False
     assert len(row["horizontal_dimensions"]) >= 1
-    # The duplicate box makes the source parser reject every vertical witness.\n    # Retain that native negative; do not modify the scale/witness gates to\n    # manufacture an HxV pair for this synthetic drawing.\n    assert row["vertical_dimensions"] == []\n    assert row["pairs"] == []\n    assert row["reason"] == "source_pair_unavailable"
+    # The duplicate box makes the source parser reject every vertical witness.
+    # Retain that native negative; do not modify the scale/witness gates to
+    # manufacture an HxV pair for this synthetic drawing.
+    assert row["vertical_dimensions"] == []
+    assert row["pairs"] == []
+    assert row["reason"] == "source_pair_unavailable"
 
 
 def test_source_face_selector_permutation_cannot_change_receipts():
