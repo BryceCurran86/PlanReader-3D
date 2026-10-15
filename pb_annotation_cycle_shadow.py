@@ -49,6 +49,24 @@ def _usable_annotation_word(word: Mapping[str, Any]) -> bool:
     return all(math.isfinite(value) for value in box) and x0 < x1 and y0 < y1
 
 
+def _numeric_width(segment: Mapping[str, Any]) -> Optional[float]:
+    value = segment.get("width")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return round(number, 6)
+
+
+def _colour(value: Any) -> Optional[Tuple[float, ...]]:
+    if not isinstance(value, (tuple, list)):
+        return None
+    if not value or any(isinstance(channel, bool) or not isinstance(channel, (int, float)) for channel in value):
+        return None
+    return tuple(round(float(channel), 6) for channel in value)
+
+
 def _eligible_block_line(segment: Mapping[str, Any], duplicate_ids: set[str]) -> bool:
     if str(segment.get("kind") or "") != "line":
         return False
@@ -59,28 +77,15 @@ def _eligible_block_line(segment: Mapping[str, Any], duplicate_ids: set[str]) ->
         coords = tuple(float(segment[key]) for key in ("x1", "y1", "x2", "y2"))
     except (KeyError, TypeError, ValueError):
         return False
-    return all(math.isfinite(value) for value in coords) and _path_index(segment) is not None
+    return all(math.isfinite(value) for value in coords) and _path_index(segment) is not None and _numeric_width(segment) is not None
 
 
 def _family(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
-    stroke = segment.get("stroke")
-    if isinstance(stroke, tuple):
-        stroke = tuple(round(float(v), 6) for v in stroke)
-    else:
-        stroke = None
-    fill = segment.get("fill")
-    if isinstance(fill, tuple):
-        fill = tuple(round(float(v), 6) for v in fill)
-    width = segment.get("width")
-    try:
-        width = round(float(width), 6)
-    except (TypeError, ValueError):
-        width = None
     return (
         str(segment.get("kind") or ""),
-        width,
-        stroke,
-        fill,
+        _numeric_width(segment),
+        _colour(segment.get("stroke")),
+        _colour(segment.get("fill")),
         str(segment.get("dashes") or ""),
     )
 
@@ -331,7 +336,7 @@ def _prove_block(
     if max_length > span_limit:
         reasons.append("cycle_edge_exceeds_existing_multi_angle_span")
     if any(_path_index(segment) is None for segment in members) or not all(
-        path_counts.get(segment.get("path_index"), 0) == 1 for segment in members
+        path_counts.get(_path_index(segment), 0) == 1 for segment in members
     ):
         reasons.append("path_ancestry_not_singleton")
     if not all(str(segment.get("dashes") or "") in _SOLID_DASHES for segment in members):
@@ -517,9 +522,11 @@ def classify_exact_annotation_cycles(
         for segment in segments
         if _eligible_block_line(segment, duplicate_ids)
     }
-    path_counts: Dict[Any, int] = defaultdict(int)
+    path_counts: Dict[int, int] = defaultdict(int)
     for segment in segments:
-        path_counts[segment.get("path_index")] += 1
+        index = _path_index(segment)
+        if index is not None:
+            path_counts[index] += 1
     families: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = defaultdict(list)
     for segment in by_id.values():
         families[_family(segment)].append(segment)

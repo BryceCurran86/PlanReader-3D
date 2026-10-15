@@ -716,3 +716,129 @@ def test_repeated_word_boxes_quarantine_the_ring_once():
     result = _classify(_ring(), [_word(), _word()])
     assert result["quarantined_primitive_ids"].count("mark0") == 1
     assert len(result["quarantined_primitive_ids"]) == 16
+
+
+def _collinear_tail(length):
+    segments = _ring()
+    chord = segments[0]
+    dx = float(chord["x2"]) - float(chord["x1"])
+    dy = float(chord["y2"]) - float(chord["y1"])
+    edge = math.hypot(dx, dy)
+    segments.append(_line(
+        "wall", chord["x2"], chord["y2"],
+        chord["x2"] + dx / edge * length, chord["y2"] + dy / edge * length,
+        path=50,
+    ))
+    return segments
+
+
+def test_integer_and_float_path_indexes_are_the_same_path():
+    ring = _ring()
+    ring[0]["path_index"] = 1
+    other = _line("other", 100.0, 100.0, 104.0, 100.0, path=1.0)
+    result = _classify(ring + [other])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_missing_dash_pattern_still_counts_as_solid():
+    ring = _ring()
+    for segment in ring:
+        segment["dashes"] = None
+    result = _classify(ring)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_list_and_tuple_strokes_form_one_family():
+    ring = _ring()
+    for segment in ring[:8]:
+        segment["stroke"] = [0, 0, 0]
+    result = _classify(ring)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_integer_and_float_stroke_components_form_one_family():
+    ring = _ring()
+    for segment in ring[::2]:
+        segment["stroke"] = (0, 0, 0)
+    result = _classify(ring)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_an_empty_fill_list_does_not_quarantine_or_raise():
+    ring = _ring()
+    for segment in ring:
+        segment["fill"] = []
+    result = _classify(ring)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_a_non_numeric_width_is_not_quarantined():
+    ring = _ring()
+    for segment in ring:
+        segment["width"] = "wide"
+    result = _classify(ring)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_a_zero_length_edge_does_not_enter_the_quarantine():
+    dot = _line("dot", 0.0, 0.0, 0.0, 0.0, path=3)
+    result = _classify(_ring() + [dot])
+    assert "dot" not in result["quarantined_primitive_ids"]
+    assert len(result["quarantined_primitive_ids"]) == 16
+
+
+def test_a_clockwise_ring_is_quarantined():
+    ring = _ring()
+    for segment in ring:
+        segment["x1"], segment["y1"], segment["x2"], segment["y2"] = (
+            segment["x2"], segment["y2"], segment["x1"], segment["y1"],
+        )
+    result = _classify(ring)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_only_the_ring_containing_the_word_is_quarantined():
+    far = _ring(cx=40.0, cy=40.0, prefix="far")
+    for segment in far:
+        segment["path_index"] += 2000
+    result = _classify(_ring() + far)
+    quarantined = set(result["quarantined_primitive_ids"])
+    assert quarantined == {f"mark{i}" for i in range(16)}
+
+
+def test_a_short_collinear_tail_does_not_block_the_ring():
+    result = _classify(_collinear_tail(4.0))
+    assert {f"mark{i}" for i in range(16)} <= set(result["quarantined_primitive_ids"])
+    assert "wall" not in result["quarantined_primitive_ids"]
+
+
+def test_a_tail_at_the_span_limit_does_not_block_the_ring():
+    result = _classify(_collinear_tail(PAGE_SPAN * 0.006))
+    assert {f"mark{i}" for i in range(16)} <= set(result["quarantined_primitive_ids"])
+
+
+def test_a_rectangle_edge_sharing_the_path_blocks_the_ring():
+    ring = _ring()
+    side = _rect_edge("side", 0.0, 0.0, 4.0, 0.0, path=ring[0]["path_index"])
+    result = _classify(ring + [side])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_a_non_finite_viewport_bound_does_not_own_the_ring():
+    result = classify_exact_annotation_cycles(
+        _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=(0.0, 0.0, float("nan"), 10.0),
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_an_infinite_page_span_fails_closed():
+    with pytest.raises(ValueError):
+        classify_exact_annotation_cycles(_ring(), [_word()], page_span=float("inf"))
+
+
+def test_a_zero_width_hairline_ring_can_still_be_proven():
+    ring = _ring()
+    for segment in ring:
+        segment["width"] = 0.0
+    result = _classify(ring)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
