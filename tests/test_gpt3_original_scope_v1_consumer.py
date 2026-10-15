@@ -174,3 +174,97 @@ def test_replay_source_flags_are_fail_closed_not_unpublished_proof(original):
         bad[key] = forged
         with pytest.raises(consumer.OriginalSourceScopeConsumerError):
             consumer._verified_join(bad, **_args(report))
+
+
+@pytest.mark.parametrize("selector_field,value", [
+    ("document_id", "foreign-document"),
+    ("source_sha256", "b" * 64),
+    ("revision_id", "source_revision_foreign"),
+    ("snapshot_id", "source_snapshot_foreign"),
+    ("page_id", "999"),
+    ("decision_scope_id", "wall-source:another"),
+    ("opening_identity_id", "foreign-physical-id"),
+])
+def test_producer_frame_selector_cannot_borrow_foreign_source_scope(
+    original, selector_field, value,
+):
+    _, report = original
+    bad = deepcopy(report)
+    positive = next(row for row in bad["openings"] if row["quantity_id"])
+    assert positive["frame_record"] is not None
+    positive["frame_record"]["selector"][selector_field] = value
+    with pytest.raises(consumer.OriginalSourceScopeConsumerError,
+                       match="superseded or conflicting"):
+        consumer._verified_join(bad, **_args(report))
+
+
+@pytest.mark.parametrize("key,value", [
+    ("opening_identity_id", "foreign-physical"),
+    ("host_binding_record_id", "replaced-host"),
+    ("host_wall_id", "replaced-wall"),
+    ("record_id", ""),
+])
+def test_producer_frame_body_cannot_be_reissued_against_old_seal(original, key, value):
+    _, report = original
+    bad = deepcopy(report)
+    positive = next(row for row in bad["openings"] if row["quantity_id"])
+    assert positive["frame_record"] is not None
+    positive["frame_record"][key] = value
+    with pytest.raises(consumer.OriginalSourceScopeConsumerError):
+        consumer._verified_join(bad, **_args(report))
+
+
+def test_diagnostic_cli_refuses_to_replace_original_inputs_or_frozen_paths(
+    original, tmp_path, monkeypatch,
+):
+    source, report = original
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    source_path = tmp_path / "original.pdf"
+    signed_path = tmp_path / "artifacts" / "signed.json"
+    customer_path = tmp_path / "artifacts" / "customer.json"
+    source_path.write_bytes(source)
+    import json
+    signed_path.write_text(json.dumps(_args(report)["sealed_payload"]))
+    customer_path.write_text(json.dumps(_args(report)["customer_rows"]))
+    before = (source_path.read_bytes(), signed_path.read_bytes(),
+              customer_path.read_bytes())
+    monkeypatch.setattr(
+        consumer, "verify_original_scope_to_v1_customer",
+        lambda *args, **kwargs: {"status": "SOURCE_REPLAY_CONSISTENT_UNSIGNED_UNPUBLISHED"},
+    )
+    base = [
+        "--pdf", str(source_path), "--page-id", "1",
+        "--sealed-run", str(signed_path),
+        "--customer-rows", str(customer_path),
+        "--expected-source-sha256", report["source_sha256"],
+        "--expected-snapshot-id", report["snapshot_id"],
+        "--project-id", "original-source-retention",
+    ]
+    for destination, error in (
+        (str(source_path), ValueError),
+        (str(signed_path), FileExistsError),
+        (str(customer_path), FileExistsError),
+        (str(tmp_path / "benchmarks" / "frozen_holdout" / "gold.json"), ValueError),
+    ):
+        with pytest.raises(error):
+            consumer.main(base + ["--output", destination])
+        assert (source_path.read_bytes(), signed_path.read_bytes(),
+                customer_path.read_bytes()) == before
+    output = tmp_path / "artifacts" / "new-report.json"
+    assert consumer.main(base + ["--output", str(output)]) == 0
+    assert json.loads(output.read_text())["status"] == (
+        "SOURCE_REPLAY_CONSISTENT_UNSIGNED_UNPUBLISHED"
+    )
+    with pytest.raises(FileExistsError):
+        consumer.main(base + ["--output", str(output)])
+    assert (source_path.read_bytes(), signed_path.read_bytes(),
+            customer_path.read_bytes()) == before
+
+
+def test_synthetic_source_inventory_with_nondict_record_fails_closed(original):
+    _, report = original
+    bad = deepcopy(report)
+    bad["original_production_receipts"]["quantities"].append("not-a-source-record")
+    with pytest.raises(consumer.OriginalSourceScopeConsumerError):
+        consumer._verified_join(bad, **_args(report))
