@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 import fitz
 
 import pb_cross_view_floor_finish_authority as floor_finish_authority
