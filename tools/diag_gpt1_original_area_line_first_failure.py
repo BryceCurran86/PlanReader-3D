@@ -157,7 +157,7 @@ def replay(source_bytes: bytes, *, page_number: int, raster_supports: bool = Fal
 
     sha = hashlib.sha256(source_bytes).hexdigest()
     source = SourceVisibilityProducer(
-        producer_method="live-gpt1-native-area-shadow", producer_version="1")
+        producer_method="live-physical-net-wall", producer_version="1")
     original = source.ingest_native_pdf_bytes(
         document_id=f"live-source:{sha[:32]}", source_bytes=source_bytes,
         source_locator="memory://original-area-text-shadow.pdf",
