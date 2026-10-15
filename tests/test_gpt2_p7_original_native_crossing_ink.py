@@ -144,7 +144,7 @@ def test_original_indexed_cubic_true_collinear_source_and_fill_roles_preserved()
             fitz.Point(7, 0), fitz.Point(float("nan"), 0),
         )]},
     ]
-    before = deepcopy(native)
+    before = repr(native)
     rowset = census_original_native_cubic_ink(
         native, source_atoms=[((2, 0), (8, 0))],
     )
@@ -161,7 +161,7 @@ def test_original_indexed_cubic_true_collinear_source_and_fill_roles_preserved()
     assert not rowset["complete_source_universe_including_raster_or_clip"]
     assert not rowset["physical_wall_or_room_role_granted"]
     assert rowset["metric_quantities_published"] == 0
-    assert native == before
+    assert repr(native) == before
 
 
 def test_curve_control_polygon_never_means_ink_fully_covers_query():
