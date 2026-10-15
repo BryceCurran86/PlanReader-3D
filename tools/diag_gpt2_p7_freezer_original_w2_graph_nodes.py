@@ -317,9 +317,9 @@ def audit_original_complete_link_counterfactual(*, scoped_inputs,
          tuple(tuple(v) for v in r.wall_candidate.centerline_pts))
         for r in original_wall_scope.records
     ]
-    alternative_full = build_wall_graph_for_viewport(
-        scoped_inputs, complete_link_snap_shadow=True,
-    )
+    # Reuse the same exact original split list. Rebuilding the entire
+    # wall graph again would repeat expensive original source splitting and
+    # introduces no new evidence into this node-membership counterfactual.
     report = []
     for node in original_rows:
         alternative_membership = {}
@@ -361,8 +361,7 @@ def audit_original_complete_link_counterfactual(*, scoped_inputs,
         "status": "SOURCE_OWNED_COUNTERFACTUAL_GRAPH_COMPLETE",
         "original_selected_w2_node_count": len(report),
         "alternate_w2_node_count": len(alternate_snapped["nodes"]),
-        "alternate_merged_w2_node_count": len(alternative_full["nodes"]),
-        "alternate_w2_edge_count": len(alternative_full["edges"]),
+        "alternate_premerge_w2_edge_count": len(alternate_snapped["edges"]),
         "complete_link_snap_observations": alternate_snapped[
             "complete_link_snap_shadow"
         ],
