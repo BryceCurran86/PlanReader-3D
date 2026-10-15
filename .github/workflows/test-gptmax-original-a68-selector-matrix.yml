@@ -1,0 +1,90 @@
+name: GPT MAX Original A68 Source Selector Policy Matrix
+on:
+  pull_request:
+    branches:
+      - gptmax/original-paired-wall-faces-shadow-20261015
+    paths:
+      - tools/diag_gptmax_original_selector_policy_matrix.py
+      - tests/test_gptmax_original_selector_policy_matrix.py
+      - docs/engineering/gptmax_original_a68_selector_first_gate_20261015.md
+      - .github/workflows/test-gptmax-original-a68-selector-matrix.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  source-selector-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_selector_policy_matrix.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_selector_policy_matrix.py tests/test_gptmax_original_selector_policy_matrix.py
+
+  original-sha-pinned-each-selector-classification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original Lot16 eight source observation reproofs under both policies
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_original_selector_policy_matrix.py \
+            --pdf "$PDF" --page-id 3 \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --existing-physical-id physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f \
+            --output artifacts/a68-original-selector-policy-matrix.json
+      - name: Assert original source-first retention failure, never green by rewriting representative
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/a68-original-selector-policy-matrix.json').read_text())
+          assert r['status']=='UNPUBLISHED_ORIGINAL_SELECTOR_POLICY_TRANSITION_AUDIT'
+          assert r['snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
+          assert r['original_source_observation_count']==8 and len(r['per_observation'])==8
+          assert r['changed_observation_decision_count']>=1
+          old='source_observation_119ef8ca51e38a54cfd660353d490774'
+          new='source_observation_39961957b3140d852383b76b25574113'
+          assert r['old_representative']==old and r['shadow_representative']==new
+          assert r['original_policy']['recomputed_representative_id']==old
+          assert r['shadow_policy']['recomputed_representative_id']==new
+          assert old in r['original_policy']['eligible_source_observation_ids']
+          assert old not in r['shadow_policy']['eligible_source_observation_ids']
+          assert new in r['shadow_policy']['eligible_source_observation_ids']
+          assert r['original_canonical_source_geometry']==[[716.16,429.36,760.32,429.36]]
+          assert r['shadow_canonical_source_geometry']==[[692.4,429.12,716.16,429.12]]
+          assert not r['strict_existing_canonical_receipt_retained']
+          assert r['original_physical_count']==21 and r['shadow_physical_count']==22
+          assert r['original_host_count']==r['shadow_host_count']==15
+          assert r['original_frame_count']==r['shadow_frame_count']==9
+          assert r['original_signed_quantity_count']==8
+          assert r['signed_customer_receipts_preserved'] is True
+          assert r['primitive_safety_cap']==20000
+          assert all(x is False for x in r['authority_grants'].values())
+          print('Original a68 source/semantic selector first gate reproduced, strict old receipt retention remains BLOCKED.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-a68-selector-policy-matrix
+          path: artifacts/a68-original-selector-policy-matrix.json
+          retention-days: 21
