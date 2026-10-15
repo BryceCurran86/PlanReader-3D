@@ -115,3 +115,108 @@ def test_real_pdf_degenerate_native_line_is_retained_as_negative_not_fatal():
     assert report["source_native_linear_ink_queries"][0][
         "original_indexed_linear_native_full_span_count"]==2
     assert report["new_commercial_quantities"]==[]
+
+
+
+def test_original_indexed_cubic_true_collinear_source_and_fill_roles_preserved():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_cubic_ink,
+    )
+    native = [
+        {"type": "s", "color": (0, 0, 0), "items": [(
+            "c", fitz.Point(0, 0), fitz.Point(3, 0),
+            fitz.Point(7, 0), fitz.Point(10, 0),
+        )]},
+        {"type": "f", "fill": (1, 1, 1), "items": [(
+            "c", fitz.Point(10, 0), fitz.Point(7, 0),
+            fitz.Point(3, 0), fitz.Point(0, 0),
+        )]},
+        {"type": "s", "items": [(
+            "c", fitz.Point(0, 0), fitz.Point(3, 0),
+            fitz.Point(7, 0.001), fitz.Point(10, 0),
+        )]},
+        {"type": "s", "items": [(
+            "c", fitz.Point(3, 0), fitz.Point(4, 0),
+            fitz.Point(6, 0), fitz.Point(7, 0),
+        )]},
+        {"type": "s", "items": [(
+            "c", fitz.Point(0, 0), fitz.Point(3, 0),
+            fitz.Point(7, 0), fitz.Point(float("nan"), 0),
+        )]},
+    ]
+    before = deepcopy(native)
+    rowset = census_original_native_cubic_ink(
+        native, source_atoms=[((2, 0), (8, 0))],
+    )
+    row = rowset["source_native_cubic_ink_queries"][0]
+    assert row["original_indexed_cubic_full_span_count"] == 2
+    receipts = row["original_indexed_cubic_candidate_receipts"]
+    assert [r["original_native_curve_ref"] for r in receipts] == [
+        "d0i0", "d1i0",
+    ]
+    assert [r["original_stroked_cubic"] for r in receipts] == [True, False]
+    assert rowset["original_native_cubic_item_count"] == 5
+    assert rowset["invalid_native_cubic_source_ids"] == ["d4i0"]
+    assert rowset["all_original_native_cubic_items_examined"]
+    assert not rowset["complete_source_universe_including_raster_or_clip"]
+    assert not rowset["physical_wall_or_room_role_granted"]
+    assert rowset["metric_quantities_published"] == 0
+    assert native == before
+
+
+def test_curve_control_polygon_never_means_ink_fully_covers_query():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_cubic_ink,
+    )
+    native = [{"type": "s", "items": [(
+        "c", fitz.Point(3, 0), fitz.Point(0, 0),
+        fitz.Point(10, 0), fitz.Point(7, 0),
+    )]}]
+    r = census_original_native_cubic_ink(
+        native, source_atoms=[((2, 0), (8, 0))],
+    )
+    assert r["source_native_cubic_ink_queries"][0][
+        "original_indexed_cubic_full_span_count"
+    ] == 0
+
+
+def test_cubic_fullspan_reordered_original_paths_no_alias():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_cubic_ink,
+    )
+    strokes = [
+        {"type": "s", "items": [(
+            "c", fitz.Point(0, 0), fitz.Point(3, 0),
+            fitz.Point(7, 0), fitz.Point(10, 0),
+        )]},
+        {"type": "s", "items": [(
+            "c", fitz.Point(5, 1), fitz.Point(6, 2),
+            fitz.Point(7, 3), fitz.Point(9, 4),
+        )]},
+    ]
+    reports = [
+        census_original_native_cubic_ink(order, source_atoms=[((2, 0), (8, 0))])
+        for order in (strokes, list(reversed(strokes)))
+    ]
+    assert [r["source_native_cubic_ink_queries"][0][
+        "original_indexed_cubic_full_span_count"] for r in reports] == [1, 1]
+    assert [r["source_native_cubic_ink_queries"][0][
+        "original_indexed_cubic_candidate_receipts"][0]["original_native_curve_ref"]
+        for r in reports] == ["d0i0", "d1i0"]
+    assert all(r["diagnostic_only"] for r in reports)
+
+
+def test_cubic_source_query_gates_reject_bad_or_duplicate():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_cubic_ink,
+    )
+    with pytest.raises(ValueError, match="original_native_drawing_universe_unavailable"):
+        census_original_native_cubic_ink([], source_atoms=[((0, 0), (1, 0))])
+    with pytest.raises(ValueError, match="duplicate_original_producer_atom_query"):
+        census_original_native_cubic_ink(
+            drawings(), source_atoms=[((0, 0), (1, 0)), ((0, 0), (1, 0))]
+        )
+    with pytest.raises(ValueError, match="selected native wall edge invalid"):
+        census_original_native_cubic_ink(
+            drawings(), source_atoms=[((0, 0), (float("inf"), 0))]
+        )
