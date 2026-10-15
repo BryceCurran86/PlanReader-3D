@@ -41,6 +41,7 @@ def _endpoint_receipt(edge, nodes, *, label):
         "w2_graph_snapped_node_pdf_pts": list(node),
         "w2_edge_vs_graph_node_displacement_pt": round(math.dist(raw, node), 9),
         "w2_graph_node_degree": n.get("degree"),
+        "w2_graph_node_snap_input_sample_count": n.get("samples"),
         "w2_graph_node_merged_into_edge": n.get("merged_into_edge"),
     }
 
@@ -62,6 +63,31 @@ def trace_original_w2_graph_nodes(*, original_wall_scope, first_failures,
         raise ValueError("replayed_w4_assembly_duplicate_candidate")
     if set(assembly) != set(producer):
         raise ValueError("source_owned_w2_w3_w4_candidate_universe_drift")
+
+    node_active_edge_source_universe = {}
+    for source_edge in by_id.values():
+        for endpoint_name in ("a", "b"):
+            raw_point = (
+                [float(source_edge["x1"]), float(source_edge["y1"])]
+                if endpoint_name == "a" else
+                [float(source_edge["x2"]), float(source_edge["y2"])]
+            )
+            node_active_edge_source_universe.setdefault(
+                source_edge[endpoint_name], []
+            ).append({
+                "source_w2_edge_id": str(source_edge["id"]),
+                "source_graph_incident_endpoint": endpoint_name,
+                "original_preserved_w2_edge_endpoint_pdf_pts": raw_point,
+                "original_indexed_source_primitive_ids": sorted(
+                    str(p) for p in (
+                        source_edge.get("primitive_lineage") or {}
+                    ).get("source_primitive_ids", ())
+                ),
+            })
+    for source_rows in node_active_edge_source_universe.values():
+        source_rows.sort(key=lambda x: (
+            x["source_w2_edge_id"], x["source_graph_incident_endpoint"]
+        ))
 
     incidents = {}
     for item in junctions:
@@ -98,6 +124,13 @@ def trace_original_w2_graph_nodes(*, original_wall_scope, first_failures,
             for end in endpoints:
                 k=tuple(round(float(x),6) for x in end["w2_graph_snapped_node_pdf_pts"])
                 end["w3_at_snapped_node_candidates"] = incidents.get(k,[])
+                node_id=end["w2_graph_node_index"]
+                end["all_original_source_incident_w2_edges_at_same_graph_node"] = (
+                    node_active_edge_source_universe.get(node_id, [])
+                )
+                end["original_source_incidence_count"] = len(
+                    node_active_edge_source_universe.get(node_id, [])
+                )
             fragment_rows.append({
                 "source_owned_w2_fragment_id":str(frag.edge_id),
                 "source_w2_fragment_line_pdf_pts": list(geometry),
