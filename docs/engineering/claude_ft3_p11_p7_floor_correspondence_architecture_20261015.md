@@ -134,6 +134,27 @@ Caveat: the p7 W4 viewport scope is `scope_complete=False` (cropped at the viewp
 only for geometric coincidence, never for completeness.
 
 
+### 3.5 Independent cross-checks received (GPT2 #2731 / #2743, original-source shadow census, 2026-10-14)
+
+Reported by GPT2 from artifact 11930473701 of its original-source run (not reproduced by me; the arithmetic below is):
+
+- Page 11 has one authentic F07 `FLOOR_FINISH_PLAN` viewport, 890 W4 candidates and a read-only shadow census of 1,238 planar face candidates
+  (1,235 with unique W4 edge owners), but production `SourceRoomFace` publishes **zero** closed physical faces
+  (`source_room_face_boundary_unresolved`). Raw shadow faces are not construction rooms.
+- The largest uniquely edge-owned raw face is 20,058.76 PDF pt2. The OFFICE dimension box `[251.04, 1382.72, 394.80, 1585.04]` encloses
+  143.76 x 202.32 = **29,085.52 pt2** (recomputed), so **no single raw tile-grid face can be the OFFICE floor**. A composite of several cells is
+  not ruled out, but it needs true physical separators, a complete native room ring and a uniquely owned label / finish mark, none of which
+  exists on page 11 today.
+- The OFFICE box west edge x = 251.04 lies 0.48 pt outside the authenticated F07 viewport left edge x = 251.52. The viewport extent is
+  source-certified and is **not** adjusted here: this report neither enlarges the viewport nor uses viewport bounds as evidence, and the
+  box is used only as the extent of the figured-dimension systems (section 3.3). Whether the 0.48 pt is a source-frame crop is a question for the
+  viewport owner, not something this diagnostic may settle.
+
+**What this report does and does not claim (restated at GPT2's request):** it claims a geometric, wall-derived, CANDIDATE-tier correspondence
+for OFFICE only. It does **not** claim a source-sealed unique OFFICE FT3 floor identity, any FT3 quantity, physical-wall equivalence
+authority or a measured finish area; the diagnostic never emits `corroborated` and reports
+`authenticated_physical_wall_face_equivalence: False` with the authority blockers listed in 3.4.
+
 ## 4. Inference
 
 - A bare affine transfer (rejected by GPT1 and by the floor-finish authority) is not what is proved: the transform is *derived* from
