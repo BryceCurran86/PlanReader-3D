@@ -76,6 +76,21 @@ jobs:
                   'stroke_gaps': row['stroke_only_geometric_coverage']['source_query_gaps_pt']
               } for row in partial['source_native_linear_partial_queries']
           ])
+          raster=r['original_image_placement_shadow']
+          assert raster['status'] in (
+              'ORIGINAL_SOURCE_IMAGE_PLACEMENTS_SCANNED',
+              'ORIGINAL_SOURCE_IMAGE_PLACEMENT_PARTIAL',
+              'ORIGINAL_SOURCE_IMAGE_API_UNAVAILABLE',
+          )
+          assert not raster['physical_wall_or_raster_role_granted']
+          assert raster['diagnostic_only']
+          if raster['status']=='ORIGINAL_SOURCE_IMAGE_PLACEMENTS_SCANNED':
+              assert len(raster['query_rows'])==2
+              assert raster['source_image_universe_complete']
+          print('GPT2_ORIGINAL_FREEZER_IMAGE_PLACEMENTS',raster['status'],
+                raster.get('original_image_placement_count'),
+                [v['overlapping_original_image_placement_indices']
+                 for v in raster['query_rows']])
           cubic=r['original_native_cubic_ink_shadow']
           assert cubic['source_query_atom_count']==2
           assert cubic['all_original_native_cubic_items_examined']
