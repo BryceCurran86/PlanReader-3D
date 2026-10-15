@@ -18,6 +18,14 @@ The physical identity remains ABSTAIN for host with unchanged reasons; the error
 
 Original exact-head CI enforces original source SHA, all eight per-selector dispositions, before/after elected representative, 21→22 isolated physical objects, 15 hosts, 9 frames, 8 signed customer rows, 20,000 cap and deliberately FAILED strict old a68 canonical retention. The release/quantity/count/host/frame flags are all false. Synthetic tests verify that unproven/stale source selectors cannot be pinned, wrong entity identities are excluded, ambiguity and absence abstain, order is irrelevant and duplicate addresses fail.
 
+## Source member overlap: additional exact original first-failure evidence
+
+The **proposed new STACKER** physical opening `physical_opening_existence_993560b2bdf85cdd668047edd7043f81` and already-existing `a68d0b7d738b5de9a1588b4e680e1a8f` both own the SAME TWO exact source observation receipts:
+- `source_observation_119ef8ca51e38a54cfd660353d490774` (the prior A68 representative, subsequently displaced under the opt-in source policy).
+- `source_observation_460e69069e159690e0e18ca53dcbeb46`.
+
+The original artifact's only one new physical instance has **exactly one** collision against all 21 original physical openings. Source overlap does NOT prove that these are the same physical opening; equally it is not evidence of independent distinct physical identities. A proposed additive STACKER cannot be accepted as new independent physical identity without an original-source producer-issued partition/identity authority. This adds a second reason to keep #2776 blocked alongside the representative/canonical geometry mutation and absent structural host. The pair is reported as an explicit no-grant collision in the read-only selector matrix; no broad global no-overlap assumption was imposed on production detectors.
+
 ## Safest next stage
 
 Consume the actual changed selector decisions, identify first source predicate whose status changed, then review **a generic opening-local source evidence preservation policy** that never changes existing authenticated physical identities or source geometry. If that cannot be source-proven, keep entire #2776 release BLOCKED and work on the next independent real G17 host source candidate. Do not modify V1 signatures, use source-text similarity, or change frozen V2 evaluator.
