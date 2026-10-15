@@ -52,7 +52,17 @@ def original_frame_competitor_census(
     if (len(canonical) != len(b["canonical"]) or len(hosts) != len(b["hosts"])
             or len(frames) != len(b["frames"])):
         raise ValueError("duplicate opening receipt")
-    raw = report["baseline_source_audit"]["raw_registered_gaps"]
+    # The source replay contains identical physical gap geometry at both
+    # pre-augmentation and selected source snapshots.  Never silently alias
+    # those roots: use only original raw receipts in this exact sealed scope.
+    raw = [
+        gap for gap in report["baseline_source_audit"]["raw_registered_gaps"]
+        if gap["source_scope"]["snapshot_id"] == snapshot_id
+        and gap["source_scope"]["source_sha256"] == source_sha256
+        and gap["source_scope"]["document_id"] == scope["document_id"]
+        and gap["source_scope"]["revision_id"] == scope["revision_id"]
+        and gap["source_scope"]["page_id"] == scope["page_id"]
+    ]
     target_rows = []
     members = set()
     ybands = set()
@@ -72,7 +82,8 @@ def original_frame_competitor_census(
         best = max((n for n, _ in overlap), default=0)
         if best < 6:
             raise ValueError("insufficient original six-observation raster gap witness")
-        bands = {tuple(r["aperture_bbox_pt"][1::2]) for n, r in overlap if n == best}
+        selected_raw = [r for n, r in overlap if n == best]
+        bands = {tuple(r["aperture_bbox_pt"][1::2]) for r in selected_raw}
         if len(bands) != 1:
             raise ValueError("competing source-owned opening gap bands")
         band = next(iter(bands))
@@ -85,6 +96,8 @@ def original_frame_competitor_census(
             "host_wall_candidate_ids": sorted(wall_members),
             "original_gap_y_bounds_pt": list(band),
             "max_shared_raw_gap_observations": best,
+            "selected_source_root_only": snapshot_id,
+            "original_raw_candidate_ids": sorted(r["raw_candidate_id"] for r in selected_raw),
         })
     if len(ybands) != 1:
         raise ValueError("selected openings do not share source-owned horizontal stripe")
