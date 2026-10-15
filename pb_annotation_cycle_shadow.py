@@ -33,6 +33,40 @@ def _endpoint_key(x: float, y: float) -> Point:
     return (round(float(x), EXACT_ENDPOINT_DECIMALS), round(float(y), EXACT_ENDPOINT_DECIMALS))
 
 
+def _path_index(segment: Mapping[str, Any]) -> Optional[int]:
+    value = segment.get("path_index")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(float(value)):
+        return None
+    return int(value)
+
+
+def _usable_annotation_word(word: Mapping[str, Any]) -> bool:
+    text = word.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return False
+    try:
+        box = tuple(float(word[key]) for key in ("x0", "y0", "x1", "y1"))
+    except (KeyError, TypeError, ValueError):
+        return False
+    x0, y0, x1, y1 = box
+    return all(math.isfinite(value) for value in box) and x0 < x1 and y0 < y1
+
+
+def _eligible_block_line(segment: Mapping[str, Any], duplicate_ids: set[str]) -> bool:
+    if str(segment.get("kind") or "") != "line":
+        return False
+    sid = str(segment.get("id") or "")
+    if not sid or sid in duplicate_ids:
+        return False
+    try:
+        coords = tuple(float(segment[key]) for key in ("x1", "y1", "x2", "y2"))
+    except (KeyError, TypeError, ValueError):
+        return False
+    return all(math.isfinite(value) for value in coords) and _path_index(segment) is not None
+
+
 def _family(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
     stroke = segment.get("stroke")
     if isinstance(stroke, tuple):
@@ -300,7 +334,9 @@ def _prove_block(
         reasons.append("directed_angle_diversity_below_symbol_topology")
     if max_length > span_limit:
         reasons.append("cycle_edge_exceeds_existing_multi_angle_span")
-    if not all(path_counts.get(segment.get("path_index"), 0) == 1 for segment in members):
+    if any(_path_index(segment) is None for segment in members) or not all(
+        path_counts.get(segment.get("path_index"), 0) == 1 for segment in members
+    ):
         reasons.append("path_ancestry_not_singleton")
     if not all(str(segment.get("dashes") or "") in _SOLID_DASHES for segment in members):
         reasons.append("stroke_or_fill_not_a_bare_solid_mark")
@@ -357,7 +393,9 @@ def _prove_block(
     proven = not reasons
     return {
         "primitive_ids": ids,
-        "path_indexes": sorted({int(segment["path_index"]) for segment in members}),
+        "path_indexes": sorted(
+            {index for index in (_path_index(segment) for segment in members) if index is not None}
+        ),
         "contained_source_text": contained,
         "competing_continuation_primitive_ids": sorted(extensions),
         "max_edge_length_pt": round(max_length, 6),
@@ -425,6 +463,12 @@ def _unstroked_frames_around_proven_cycles(
     for segment in segments:
         if str(segment.get("kind") or "") != "rect_edge" or not segment.get("id"):
             continue
+        try:
+            coords = tuple(float(segment[key]) for key in ("x1", "y1", "x2", "y2"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(value) for value in coords):
+            continue
         if segment.get("stroke") is not None or segment.get("width") or segment.get("fill") is None:
             continue
         groups[segment.get("path_index")].append(segment)
@@ -465,16 +509,34 @@ def classify_exact_annotation_cycles(
     """Return source-proven annotation cycles. Unproven cycles are not quarantined."""
     if not math.isfinite(float(page_span)) or float(page_span) <= 0.0:
         raise ValueError("annotation cycle classification requires a positive page span")
-    by_id = {str(segment["id"]): segment for segment in segments if segment.get("id")}
+    words = [word for word in words if _usable_annotation_word(word)]
+    id_counts: Dict[str, int] = defaultdict(int)
+    for segment in segments:
+        sid = str(segment.get("id") or "")
+        if sid:
+            id_counts[sid] += 1
+    duplicate_ids = {sid for sid, count in id_counts.items() if count > 1}
+    by_id = {
+        str(segment["id"]): segment
+        for segment in segments
+        if _eligible_block_line(segment, duplicate_ids)
+    }
     path_counts: Dict[Any, int] = defaultdict(int)
     for segment in segments:
         path_counts[segment.get("path_index")] += 1
     families: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = defaultdict(list)
-    for segment in segments:
-        if str(segment.get("kind") or "") == "line" and segment.get("id"):
-            families[_family(segment)].append(segment)
+    for segment in by_id.values():
+        families[_family(segment)].append(segment)
     records = []
-    nearby = _nearby_segments(list(by_id.values()))
+    located = []
+    for segment in segments:
+        try:
+            coords = tuple(float(segment[key]) for key in ("x1", "y1", "x2", "y2"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if all(math.isfinite(value) for value in coords):
+            located.append(segment)
+    nearby = _nearby_segments(located)
     for family_segments in families.values():
         for block in _edge_blocks(family_segments):
             members = [by_id[sid] for sid in block]

@@ -462,3 +462,135 @@ def test_classification_does_not_mutate_segment_coordinates():
     _classify(segments)
     after = [(segment["id"], segment["x1"], segment["y1"], segment["x2"], segment["y2"]) for segment in segments]
     assert before == after
+
+
+def _receipt(text, geometry):
+    from types import SimpleNamespace
+    return SimpleNamespace(raw_text=text, geometry=geometry)
+
+
+def _withhold(segments, receipts):
+    from types import SimpleNamespace
+    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
+    return _without_proven_annotation_cycles(
+        segments, classification_segments=segments, text_receipts=receipts,
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN,
+        viewport=SimpleNamespace(bounding_box=VIEW),
+    )
+
+
+def test_blank_receipt_text_leaves_the_wall_input_unchanged():
+    ring = _ring()
+    assert [segment["id"] for segment in _withhold(ring, (_receipt("   ", (-1, -1, 1, 1)),))] == [
+        segment["id"] for segment in ring
+    ]
+
+
+def test_reversed_receipt_box_does_not_withhold_the_ring():
+    ring = _ring()
+    assert len(_withhold(ring, (_receipt("MARK", (1.0, 1.0, -1.0, -1.0)),))) == len(ring)
+
+
+def test_short_receipt_geometry_does_not_withhold_the_ring():
+    ring = _ring()
+    assert len(_withhold(ring, (_receipt("MARK", (0.0, 0.0, 1.0)),))) == len(ring)
+
+
+def test_non_finite_receipt_box_does_not_withhold_the_ring():
+    ring = _ring()
+    assert len(_withhold(ring, (_receipt("MARK", (0.0, 0.0, float("nan"), 1.0)),))) == len(ring)
+
+
+def test_duplicate_primitive_ids_are_not_quarantined():
+    ring = _ring()
+    copy = dict(ring[0])
+    result = classify_exact_annotation_cycles(
+        ring + [copy], [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert "mark0" not in result["quarantined_primitive_ids"]
+
+
+def test_missing_path_index_does_not_raise_or_quarantine():
+    ring = _ring()
+    for segment in ring:
+        segment["path_index"] = None
+    result = classify_exact_annotation_cycles(
+        ring, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_non_finite_coordinate_does_not_raise_or_quarantine():
+    ring = _ring()
+    ring[0]["x1"] = float("nan")
+    result = classify_exact_annotation_cycles(
+        ring, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert "mark0" not in result["quarantined_primitive_ids"]
+
+
+def test_word_order_does_not_change_the_quarantine():
+    first = _classify(_ring(), [_word(text="A"), _word(text="B", x0=-0.4, y0=-0.4, x1=0.4, y1=0.4)])
+    second = _classify(_ring(), [_word(text="B", x0=-0.4, y0=-0.4, x1=0.4, y1=0.4), _word(text="A")])
+    assert first["quarantined_primitive_ids"] == second["quarantined_primitive_ids"]
+
+
+def test_a_thicker_four_edge_loop_stays_when_the_thin_mark_is_withheld():
+    thick = [
+        _line("t0", -6.0, -6.0, 6.0, -6.0, path=11, width=2.0),
+        _line("t1", 6.0, -6.0, 6.0, 6.0, path=12, width=2.0),
+        _line("t2", 6.0, 6.0, -6.0, 6.0, path=13, width=2.0),
+        _line("t3", -6.0, 6.0, -6.0, -6.0, path=14, width=2.0),
+    ]
+    result = _classify(_ring() + thick)
+    quarantined = set(result["quarantined_primitive_ids"])
+    assert {f"mark{i}" for i in range(16)} <= quarantined
+    assert not quarantined.intersection({"t0", "t1", "t2", "t3"})
+
+
+def test_kept_wall_segments_keep_their_source_attributes():
+    room = _line("w0", 0.0, 0.0, 80.0, 0.0, path=7)
+    room["layer"] = "WALL"
+    room["clip"] = (0.0, 0.0, 100.0, 100.0)
+    kept = _withhold(
+        _ring() + [room],
+        (_receipt("MARK", (-1.0, -1.0, 1.0, 1.0)),),
+    )
+    assert len(kept) == 1
+    assert kept[0]["id"] == "w0"
+    assert kept[0]["width"] == 0.48
+    assert kept[0]["stroke"] == (0.0, 0.0, 0.0)
+    assert kept[0]["dashes"] == "[] 0"
+    assert kept[0]["layer"] == "WALL"
+    assert kept[0]["path_index"] == 7
+    assert kept[0]["clip"] == (0.0, 0.0, 100.0, 100.0)
+
+
+def test_direct_reversed_word_box_does_not_quarantine():
+    result = _classify(_ring(), [_word(x0=1.0, y0=1.0, x1=-1.0, y1=-1.0)])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_whitespace_word_does_not_quarantine():
+    result = _classify(_ring(), [_word(text="  ")])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_zero_area_word_box_does_not_quarantine():
+    result = _classify(_ring(), [_word(x0=-1.0, y0=0.0, x1=1.0, y1=0.0)])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_non_finite_word_box_does_not_quarantine():
+    result = _classify(_ring(), [_word(x1=float("inf"))])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_string_path_index_does_not_raise_or_quarantine():
+    ring = _ring()
+    for segment in ring:
+        segment["path_index"] = "1000"
+    result = classify_exact_annotation_cycles(
+        ring, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []

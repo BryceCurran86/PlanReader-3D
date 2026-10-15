@@ -3023,13 +3023,15 @@ def _annotation_words_from_receipts(receipts: Optional[Sequence[object]]) -> tup
     for receipt in receipts or ():
         text = getattr(receipt, "raw_text", "")
         geometry = getattr(receipt, "geometry", None)
-        if not isinstance(text, str) or not text or geometry is None:
+        if not isinstance(text, str) or not text.strip() or geometry is None:
             continue
         try:
             box = tuple(float(value) for value in geometry)
         except (TypeError, ValueError):
             continue
         if len(box) != 4 or not all(math.isfinite(value) for value in box):
+            continue
+        if not (box[0] < box[2] and box[1] < box[3]):
             continue
         words.append({
             "text": text, "x0": box[0], "y0": box[1], "x1": box[2], "y1": box[3],
