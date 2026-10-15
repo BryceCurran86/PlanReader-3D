@@ -3059,14 +3059,30 @@ def _without_proven_annotation_cycles(
     words = _annotation_words_from_receipts(text_receipts)
     if not words:
         return tuple(segments)
+    try:
+        width = float(page_width)
+        height = float(page_height)
+    except (TypeError, ValueError):
+        return tuple(segments)
+    span = min(width, height)
+    if not math.isfinite(width) or not math.isfinite(height) or span <= 0.0:
+        return tuple(segments)
     if viewport is not None and getattr(viewport, "bounding_box", None) is not None:
-        bbox = tuple(float(value) for value in viewport.bounding_box)
+        raw_box = viewport.bounding_box
     else:
-        bbox = (0.0, 0.0, float(page_width), float(page_height))
+        raw_box = (0.0, 0.0, width, height)
+    try:
+        bbox = tuple(float(value) for value in raw_box)
+    except (TypeError, ValueError):
+        return tuple(segments)
+    if len(bbox) != 4 or not all(math.isfinite(value) for value in bbox):
+        return tuple(segments)
+    if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+        return tuple(segments)
     classified = classify_exact_annotation_cycles(
         classification_segments,
         words,
-        page_span=min(float(page_width), float(page_height)),
+        page_span=span,
         viewport_bbox=bbox,
     )
     withheld = set(classified["quarantined_primitive_ids"])

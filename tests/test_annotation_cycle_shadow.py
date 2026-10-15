@@ -738,6 +738,10 @@ def test_integer_and_float_path_indexes_are_the_same_path():
     other = _line("other", 100.0, 100.0, 104.0, 100.0, path=1.0)
     result = _classify(ring + [other])
     assert result["quarantined_primitive_ids"] == []
+    fractional = _ring(prefix="frac")
+    fractional[0]["path_index"] = 1.9
+    kept = _classify(fractional)
+    assert kept["quarantined_primitive_ids"] == []
 
 
 def test_missing_dash_pattern_still_counts_as_solid():
@@ -746,6 +750,10 @@ def test_missing_dash_pattern_still_counts_as_solid():
         segment["dashes"] = None
     result = _classify(ring)
     assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+    flagged = _ring()
+    for segment in flagged:
+        segment["dashes"] = False
+    assert _classify(flagged)["quarantined_primitive_ids"] == []
 
 
 def test_list_and_tuple_strokes_form_one_family():
@@ -819,7 +827,7 @@ def test_a_tail_at_the_span_limit_does_not_block_the_ring():
 
 def test_a_rectangle_edge_sharing_the_path_blocks_the_ring():
     ring = _ring()
-    side = _rect_edge("side", 0.0, 0.0, 4.0, 0.0, path=ring[0]["path_index"])
+    side = _rect_edge("side", 0.0, 0.0, 4.0, 0.0, path=float(ring[0]["path_index"]))
     result = _classify(ring + [side])
     assert result["quarantined_primitive_ids"] == []
 
@@ -829,16 +837,31 @@ def test_a_non_finite_viewport_bound_does_not_own_the_ring():
         _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=(0.0, 0.0, float("nan"), 10.0),
     )
     assert result["quarantined_primitive_ids"] == []
+    short = classify_exact_annotation_cycles(
+        _ring(), [_word()], page_span=PAGE_SPAN, viewport_bbox=(0.0, 0.0, 10.0),
+    )
+    assert short["quarantined_primitive_ids"] == []
 
 
 def test_an_infinite_page_span_fails_closed():
     with pytest.raises(ValueError):
         classify_exact_annotation_cycles(_ring(), [_word()], page_span=float("inf"))
+    ring = _ring()
+    kept = _withhold(ring, (_receipt("MARK", (-1.0, -1.0, 1.0, 1.0)),))
+    # A caller with a real page span still withholds. An unreadable page size does not.
+    assert kept == ()
+    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
+    unchanged = _without_proven_annotation_cycles(
+        ring, classification_segments=ring,
+        text_receipts=(_receipt("MARK", (-1.0, -1.0, 1.0, 1.0)),),
+        page_width=float("inf"), page_height=PAGE_SPAN, viewport=None,
+    )
+    assert [segment["id"] for segment in unchanged] == [segment["id"] for segment in ring]
 
 
-def test_a_zero_width_hairline_ring_can_still_be_proven():
+def test_a_zero_width_hairline_ring_stays_in_the_wall_graph():
     ring = _ring()
     for segment in ring:
         segment["width"] = 0.0
     result = _classify(ring)
-    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+    assert result["quarantined_primitive_ids"] == []

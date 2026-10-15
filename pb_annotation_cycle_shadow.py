@@ -32,9 +32,20 @@ def _path_index(segment: Mapping[str, Any]) -> Optional[int]:
     value = segment.get("path_index")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    if not math.isfinite(float(value)):
+    number = float(value)
+    if not math.isfinite(number) or not number.is_integer():
         return None
-    return int(value)
+    return int(number)
+
+
+def _dash_key(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)) and not value:
+        return "[]"
+    return "pattern"
 
 
 def _usable_annotation_word(word: Mapping[str, Any]) -> bool:
@@ -77,7 +88,13 @@ def _eligible_block_line(segment: Mapping[str, Any], duplicate_ids: set[str]) ->
         coords = tuple(float(segment[key]) for key in ("x1", "y1", "x2", "y2"))
     except (KeyError, TypeError, ValueError):
         return False
-    return all(math.isfinite(value) for value in coords) and _path_index(segment) is not None and _numeric_width(segment) is not None
+    stroke = segment.get("stroke")
+    if stroke is not None and _colour(stroke) is None:
+        return False
+    if segment.get("fill") is not None:
+        return False
+    width = _numeric_width(segment)
+    return all(math.isfinite(value) for value in coords) and _path_index(segment) is not None and width is not None and width > 0.0
 
 
 def _family(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
@@ -86,8 +103,23 @@ def _family(segment: Mapping[str, Any]) -> Tuple[Any, ...]:
         _numeric_width(segment),
         _colour(segment.get("stroke")),
         _colour(segment.get("fill")),
-        str(segment.get("dashes") or ""),
+        _dash_key(segment.get("dashes")),
     )
+
+
+def _viewport_owns(points: Sequence[Point], viewport_bbox: Optional[Sequence[float]]) -> bool:
+    if viewport_bbox is None:
+        return False
+    try:
+        box = tuple(float(value) for value in viewport_bbox)
+    except (TypeError, ValueError):
+        return False
+    if len(box) != 4 or not all(math.isfinite(value) for value in box):
+        return False
+    x0, y0, x1, y1 = box
+    if x0 > x1 or y0 > y1:
+        return False
+    return all(x0 <= point[0] <= x1 and y0 <= point[1] <= y1 for point in points)
 
 
 def _directed_angle_deg(a: Point, b: Point) -> float:
@@ -339,7 +371,7 @@ def _prove_block(
         path_counts.get(_path_index(segment), 0) == 1 for segment in members
     ):
         reasons.append("path_ancestry_not_singleton")
-    if not all(str(segment.get("dashes") or "") in _SOLID_DASHES for segment in members):
+    if not all(_dash_key(segment.get("dashes")) in _SOLID_DASHES for segment in members):
         reasons.append("stroke_or_fill_not_a_bare_solid_mark")
     if not all(segment.get("fill") is None for segment in members):
         reasons.append("stroke_or_fill_not_a_bare_solid_mark")
@@ -371,7 +403,7 @@ def _prove_block(
                 sid = str(segment.get("id") or "")
                 if not sid or sid in seen or sid in block:
                     continue
-                if segment.get("stroke") is None or not segment.get("width"):
+                if _colour(segment.get("stroke")) is None or not (_numeric_width(segment) or 0.0) > 0.0:
                     continue
                 other_length = math.hypot(
                     float(segment["x2"]) - float(segment["x1"]),
@@ -384,13 +416,9 @@ def _prove_block(
                     extensions.append(sid)
         if extensions:
             reasons.append("competing_structural_continuation")
-        if viewport_bbox is None:
+        owned = _viewport_owns(points, viewport_bbox)
+        if not owned:
             reasons.append("viewport_partition_ownership_unproven")
-        else:
-            x0, y0, x1, y1 = (float(value) for value in viewport_bbox)
-            owned = all(x0 <= point[0] <= x1 and y0 <= point[1] <= y1 for point in points)
-            if not owned:
-                reasons.append("viewport_partition_ownership_unproven")
     proven = not reasons
     return {
         "primitive_ids": ids,
@@ -470,9 +498,14 @@ def _unstroked_frames_around_proven_cycles(
             continue
         if not all(math.isfinite(value) for value in coords):
             continue
-        if segment.get("stroke") is not None or segment.get("width") or segment.get("fill") is None:
+        if segment.get("stroke") is not None or segment.get("fill") is None:
             continue
-        groups[segment.get("path_index")].append(segment)
+        if segment.get("width") not in (None, 0, 0.0):
+            continue
+        index = _path_index(segment)
+        if index is None:
+            continue
+        groups[index].append(segment)
     found: List[str] = []
     for edges in groups.values():
         if len(edges) != 4:
@@ -508,7 +541,11 @@ def classify_exact_annotation_cycles(
     viewport_bbox: Optional[Sequence[float]] = None,
 ) -> Dict[str, Any]:
     """Return source-proven annotation cycles. Unproven cycles are not quarantined."""
-    if not math.isfinite(float(page_span)) or float(page_span) <= 0.0:
+    try:
+        span = float(page_span)
+    except (TypeError, ValueError) as error:
+        raise ValueError("annotation cycle classification requires a positive page span") from error
+    if not math.isfinite(span) or span <= 0.0:
         raise ValueError("annotation cycle classification requires a positive page span")
     words = [word for word in words if _usable_annotation_word(word)]
     id_counts: Dict[str, int] = defaultdict(int)
