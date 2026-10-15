@@ -176,3 +176,61 @@ def test_room_label_and_area_lines_do_not_cross_partition_or_replay_join():
         out["literal_area_candidates"][0]["source_partition_id"])
     assert out["literal_room_label_candidates"][0]["area_annotation_to_label_binding_granted"] is False
     assert_shadow_only(out)
+
+
+
+def test_duplicate_literal_bedroom_name_stays_two_unowned_source_candidates():
+    # Even independently trusted identical whole lines have different original
+    # source addresses. Do not collapse by label or choose nearest area word.
+    words = [
+        word("BED", 0, block=16), word("1", 1, block=16),
+        word("BED", 0, block=18), word("1", 1, block=18),
+        word("12.64", 0, block=20), word("m²", 1, block=20),
+    ]
+    report = run(words)
+    assert report["literal_room_label_candidate_count"] == 2
+    assert [row["literal_original_room_label"] for row in report["literal_room_label_candidates"]] == [
+        "BED 1", "BED 1",
+    ]
+    owners = [tuple(row["source_text_observation_ids"]) for row in report["literal_room_label_candidates"]]
+    assert len(set(owners)) == 2
+    assert report["literal_area_candidate_count"] == 1
+    assert all(
+        row["first_unclosed_gate"] == "source_room_face_and_exact_label_owner_unproven"
+        and row["area_annotation_to_label_binding_granted"] is False
+        for row in report["literal_room_label_candidates"]
+    )
+    assert_shadow_only(report)
+
+
+def test_split_room_label_across_plan_boundary_is_not_plan_owned():
+    # One word lies inside the authenticated plan; the other word crosses
+    # the exact edge. Word-centre or first-word containment would be unsafe.
+    tokens = [
+        word("BED", 0, block=27, bbox=(79.0, 10.0, 91.0, 18.0)),
+        word("2", 1, block=27, bbox=(96.0, 10.0, 104.0, 18.0)),
+    ]
+    report = run(tokens, (view(bbox=(0.0, 0.0, 100.0, 100.0)),))
+    assert report["literal_room_label_candidate_count"] == 1
+    line = report["literal_room_label_candidates"][0]
+    assert line["source_text_integrity_all_words"] is True
+    assert line["containing_source_floor_plan_viewport_ids"] == []
+    assert line["first_unclosed_gate"] == "source_room_label_plan_viewport_unavailable_or_ambiguous"
+    assert line["area_annotation_to_label_binding_granted"] is False
+    assert_shadow_only(report)
+
+
+def test_rotated_or_hidden_profile_cannot_force_positive_room_line_owner():
+    # Rotation/original clip requires producer source receipt proof; changing
+    # a bounding rectangle or glyph status must never manufacture a face.
+    tokens = [
+        word("BED", 0, block=32, bbox=(14.0, 20.0, 24.0, 30.0)),
+        word("3", 1, block=32, bbox=(24.0, 30.0, 34.0, 42.0),
+             trusted=False, reason=("source_clip_unresolved",)),
+    ]
+    report = run(tokens)
+    line = report["literal_room_label_candidates"][0]
+    assert line["first_unclosed_gate"] == "source_room_label_text_integrity_unavailable"
+    assert line["area_annotation_to_label_binding_granted"] is False
+    assert "source_clip_unresolved" in line["source_text_reason_codes"]
+    assert_shadow_only(report)
