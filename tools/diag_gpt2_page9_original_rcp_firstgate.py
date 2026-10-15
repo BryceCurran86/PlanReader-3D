@@ -181,6 +181,76 @@ def _frame_ownership_matrix(page, frames, anchors, calibration):
     }
 
 
+def _source_native_image_placements(page, anchors):
+    """Enumerate original image placements; bbox/title overlap is NOT role."""
+    import math
+
+    get = getattr(page, "get_image_info", None)
+    if not callable(get):
+        return {
+            "status": "SOURCE_IMAGE_API_UNAVAILABLE",
+            "image_universe_complete": False,
+            "source_image_placements": [],
+            "source_image_placement_is_rcp_role": False,
+        }
+    try:
+        images = get(xrefs=True)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return {
+            "status": "SOURCE_IMAGE_API_UNAVAILABLE",
+            "image_universe_complete": False,
+            "source_image_placements": [],
+            "source_image_placement_is_rcp_role": False,
+        }
+    if not isinstance(images, (tuple, list)) or len(images) > 10000:
+        raise ValueError("native_image_placement_universe_unavailable")
+    rows, invalid = [], []
+    for idx, info in enumerate(images):
+        try:
+            box = tuple(float(value) for value in info["bbox"])
+            xref = info["xref"]
+            w, h = int(info["width"]), int(info["height"])
+            if (
+                len(box) != 4
+                or not all(math.isfinite(v) for v in box)
+                or box[2] <= box[0] or box[3] <= box[1]
+                or type(xref) is not int or xref < 0
+                or w <= 0 or h <= 0
+            ):
+                raise ValueError("malformed_native_image")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            invalid.append(idx)
+            continue
+        overlaps = []
+        for aid, anchor in enumerate(anchors):
+            t = tuple(float(v) for v in anchor.bbox)
+            if (box[2] >= t[0] and box[0] <= t[2]
+                    and box[3] >= t[1] and box[1] <= t[3]):
+                overlaps.append({
+                    "original_title_anchor_index": aid,
+                    "original_title_text": str(anchor.text),
+                    "bbox_overlap_not_ownership": True,
+                })
+        rows.append({
+            "native_image_placement_index": idx,
+            "original_xref": xref,
+            "source_native_bbox_pdf_pts": list(box),
+            "source_image_pixel_dimensions": [w, h],
+            "overlapping_original_source_titles": overlaps,
+            "image_pixels_or_viewport_role_proven": False,
+        })
+    return {
+        "status": ("SOURCE_IMAGE_PLACEMENT_PARTIAL" if invalid
+                   else "SOURCE_IMAGE_PLACEMENTS_COMPLETE"),
+        "image_universe_complete": not invalid,
+        "source_image_placement_count": len(images),
+        "invalid_native_image_placement_indices": invalid,
+        "source_image_placements": rows,
+        "source_image_placement_is_rcp_role": False,
+        "diagnostic_only": True,
+    }
+
+
 PDF=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 SOURCE_SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 
@@ -198,6 +268,7 @@ def audit(source: bytes) -> dict:
         calibration=calibrate_viewport_layout(page)
         title_anchors=extract_view_title_anchors(page)
         source_frames=extract_vector_frames(page,calibration)
+        source_native_images=_source_native_image_placements(page,title_anchors)
         source_frame_ownership_matrix=_frame_ownership_matrix(
             page,source_frames,title_anchors,calibration,
         )
@@ -266,6 +337,7 @@ def audit(source: bytes) -> dict:
             "source_sha256":sha, "source_page_number":9,
             "source_page_rotation_degrees":int(page.rotation),
             "native_frame_count":len(source_frames),
+            "original_native_image_placement_census":source_native_images,
             "original_native_frame_ownership_matrix":source_frame_ownership_matrix,
             "title_frame_candidates":title_frame_candidates,
             "non_overlapping_source_viewports":bool(nonoverlap),
