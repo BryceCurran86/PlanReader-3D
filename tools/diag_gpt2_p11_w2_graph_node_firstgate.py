@@ -21,7 +21,10 @@ from pb_physical_wall_candidate_authority import (
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
 from pb_wall_room_topology_junction_classifier import classify_junctions
 from pb_wall_room_topology_wall_assembly import assemble_wall_candidates
-from pb_viewport_segmentation import segment_source_page_viewports
+from pb_viewport_segmentation import (
+    segment_source_page_viewports, segmented_viewport_producer_fingerprint,
+    _producer_fingerprint_payload, is_segment_page_viewports_product,
+)
 
 
 def _endpoint_receipt(edge, nodes, *, label):
@@ -165,6 +168,52 @@ def trace_original_w2_graph_nodes(*, original_wall_scope, first_failures,
     }
 
 
+def audit_exact_producer_f07_sibling_receipts(*, viewports, published,
+                                             source_page, original_w4_scope_id):
+    """Retain all independently resegmented source-stamped sibling details."""
+    auth = _authenticated_viewports_from_rows(viewports)
+    if auth is None:
+        raise ValueError("source_f07_original_sibling_source_seal_unavailable")
+    all_views, eligible = auth
+    if len({v.view_id for v in all_views}) != len(all_views):
+        raise ValueError("source_f07_duplicate_sibling_view_identity")
+    sibling = _viewport_sibling_set_fingerprint(all_views)
+    rows=[]
+    expected=[]
+    for view in sorted(all_views, key=lambda v: v.view_id):
+        if not is_segment_page_viewports_product(view):
+            raise ValueError("source_f07_mutated_after_producer_seal")
+        derived=(
+            _viewport_decision_scope_id(
+                published=published,page_id=str(source_page),viewport=view,
+                sibling_set_fingerprint=sibling,
+            ) if view in eligible else None
+        )
+        if derived == original_w4_scope_id:
+            expected.append(view.view_id)
+        rows.append({
+            "original_f07_sibling_view_id":view.view_id,
+            "original_f07_sibling_view_type":view.view_type,
+            "full_source_viewport_producer_payload":_producer_fingerprint_payload(view),
+            "full_source_viewport_fingerprint":
+                segmented_viewport_producer_fingerprint(view),
+            "recomputed_source_scope_id_if_eligible":derived,
+            "diagnostic_producer_seal_valid":True,
+        })
+    if len(expected)!=1:
+        raise ValueError("source_f07_independent_replay_scope_exact_parity_unavailable")
+    return {
+        "all_original_source_stamped_sibling_count":len(rows),
+        "all_original_source_f07_siblings":rows,
+        "all_siblings_source_fingerprint":sibling,
+        "source_scope_target_f07_view_id":expected[0],
+        "first_w4_scope_id":original_w4_scope_id,
+        "independent_f07_scope_id_replay_matches_original_w4":True,
+        "same_original_producer_cache_claimed":False,
+        "no_physical_room_role_granted":True,
+    }
+
+
 def replay_graph_for_original_source_scope(*, source, published, pdf_bytes,
                                            original_wall_scope, source_page:int,
                                            first_failures):
@@ -218,6 +267,10 @@ def replay_graph_for_original_source_scope(*, source, published, pdf_bytes,
         graph,junctions,relationships,
         viewport_id=original_wall_scope.decision_scope_id,
     )
+    f07_receipt=audit_exact_producer_f07_sibling_receipts(
+        viewports=siblings,published=published,source_page=source_page,
+        original_w4_scope_id=original_wall_scope.decision_scope_id,
+    )
     proof=trace_original_w2_graph_nodes(
         original_wall_scope=original_wall_scope,
         first_failures=first_failures,
@@ -227,5 +280,6 @@ def replay_graph_for_original_source_scope(*, source, published, pdf_bytes,
         "status":"original_w2_w3_graph_lineage_replay_exact_parity",
         "original_owned_plan_source_segment_count":len(owned),
         "original_w2_graph_input_segment_count":len(inputs),
+        "independently_replayed_f07_original_sibling_receipts":f07_receipt,
         **proof,
     }
