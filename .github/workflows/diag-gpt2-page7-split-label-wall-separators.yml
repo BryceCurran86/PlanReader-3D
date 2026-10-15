@@ -13,6 +13,8 @@ on:
       - "tests/test_gpt2_split_label_wall_separators.py"
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
+      - "tools/diag_gpt2_exact_w4_atomic_w2_ancestry.py"
+      - "tests/test_gpt2_exact_w4_atomic_w2_ancestry.py"
       - "tools/diag_gpt2_exact_w4_directed_cycles.py"
       - "tests/test_gpt2_exact_w4_directed_cycles.py"
       - "tools/diag_gpt2_competing_grid_label_paths.py"
@@ -58,6 +60,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_wall_topology_typed_negative_evidence.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_atomic_w2_ancestry.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_directed_cycles.py
           PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
@@ -313,6 +316,33 @@ jobs:
               "new_metric_quantity_claim":False,
               "benchmark_accuracy":None,
           },sort_keys=True))
+          from tools.diag_gpt2_exact_w4_atomic_w2_ancestry import (
+              inspect_original_w4_atomic_w2_ancestry,
+          )
+          freezer_selections=[
+              candidate for candidate in selectors
+              if candidate.decision_scope_id==freezer_source[0].decision_scope_id
+          ]
+          assert len(freezer_selections)==1, "Freezer W4 scope identity must be exact"
+          freezer_w4_scope=wall_authority.resolve_scope(freezer_selections[0])
+          freezer_w2_first_gates=[]
+          for crossing in w4_first_gate["indexed_original_w4_wall_owner_receipts"]:
+              for wall_id in sorted(set(crossing["original_indexed_w4_wall_candidate_ids"])):
+                  receipt=inspect_original_w4_atomic_w2_ancestry(
+                      freezer_w4_scope,
+                      original_w4_wall_id=wall_id,
+                      atomic_edge=crossing["original_exact_edge_pdf_pts"],
+                  )
+                  assert receipt["candidate_only_no_wall_or_room_authority"]
+                  assert not receipt["physical_room_closed_or_metric_quantity_published"]
+                  freezer_w2_first_gates.append(receipt)
+          print("GPT2_FREEZER_ORIGINAL_W4_W2_NATIVE_SOURCE_ANCESTRY",json.dumps({
+              "source_sha256":sha,
+              "freezer_label_record_id":freezer_labels[0]["source_label_record_id"],
+              "source_room_face_record_id":freezer_source[0].record_id,
+              "original_w4_crossing_w2_source_first_gates":freezer_w2_first_gates,
+              "new_metric_quantity_published":False,
+          },sort_keys=True))
           report_rows={}
           for target, candidates in native_rows.items():
               report_rows[target]=[]
@@ -542,6 +572,26 @@ jobs:
                   assert paths["diagnostic_only_no_wall_cut_or_room_publication"]
                   assert not paths["authenticated_physical_boundary_or_room_recovered"]
                   assert not paths["original_source_room_face_universe_proven_complete"]
+                  if first_gate.get("native_room_label") in ("FOOD SERVICE","POS COUNTER"):
+                      opposing=(
+                          "POS COUNTER" if first_gate["native_room_label"]=="FOOD SERVICE"
+                          else "FOOD SERVICE"
+                      )
+                      exact_paths=[
+                          route for route in paths["routes"]
+                          if route["competing_native_room_label"]==opposing
+                      ]
+                      first_gate["source_w4_w2_competing_label_parentage_diagnostic_only"]=[]
+                      for route in exact_paths[:1]:
+                          for hop in route["observed_route"][:8]:
+                              proof=inspect_original_w4_atomic_w2_ancestry(
+                                  wall_scope,
+                                  original_w4_wall_id=hop["original_w4_wall_id"],
+                                  atomic_edge=hop["original_atomic_edge_pdf_pts"],
+                              )
+                              assert proof["candidate_only_no_wall_or_room_authority"]
+                              assert not proof["physical_room_closed_or_metric_quantity_published"]
+                              first_gate["source_w4_w2_competing_label_parentage_diagnostic_only"].append(proof)
               assert all(
                   not row.get("physical_union_source_first_failure_diagnostic_only")
                   or (

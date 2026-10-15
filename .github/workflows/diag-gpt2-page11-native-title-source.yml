@@ -1,0 +1,45 @@
+name: DIAG GPT2 Original Maryborough Page11 Split Title Ownership
+on:
+  pull_request:
+    paths:
+      - "tools/diag_gpt2_page11_native_title_source.py"
+      - ".github/workflows/diag-gpt2-page11-native-title-source.yml"
+  workflow_dispatch:
+jobs:
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original SHA and independent viewport first-failure trace
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          timeout 540s python -u -m tools.diag_gpt2_page11_native_title_source --pdf "$PDF" --sha "$SHA" --page 11 --output original-page11-title.json
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          r=json.loads(Path('original-page11-title.json').read_text())
+          assert r['original_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert r['diagnostic_only_no_finish_or_quantity'] is True
+          assert r['page_no']==11
+          assert len(r['title_examples'])>0
+          PY
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-page11-title-first-gate
+          path: original-page11-title.json
+          retention-days: 30

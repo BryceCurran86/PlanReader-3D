@@ -1,0 +1,114 @@
+name: GPT MAX Producer-Owned G17 Wall Source Shadow
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_opening_local_g17_wall_shadow.py"
+      - "pb_g17_w4_equivalence_competitor_shadow.py"
+      - "pb_g17_dual_dpi_source_correspondence_shadow.py"
+      - "pb_raster_g17_source_shadow.py"
+      - "tests/test_opening_local_g17_wall_shadow.py"
+      - "tests/test_g17_w4_equivalence_competitor_shadow.py"
+      - "tests/test_g17_dual_dpi_source_correspondence_shadow.py"
+      - "tools/diag_gptmax_producer_owned_g17_wall_shadow.py"
+      - "tools/diag_gptmax_g17_source_only_flanks.py"
+      - "tools/diag_gptmax_g17_original_inclusive_source_shadow.py"
+      - "scripts/gptmax_raster_flank_paint_audit.py"
+      - ".github/workflows/test-gptmax-producer-g17-wall-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  producer-source-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Actual source producers, tampering, transforms and shared predicate retention
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_g17_dual_dpi_source_correspondence_shadow.py tests/test_g17_w4_equivalence_competitor_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_gptmax_original_g17_shadow_one_end_paint.py tests/test_gptmax_g17_source_only_flanks.py tests/test_gptmax_g17_source_owned_jamb_pair.py tests/test_gptmax_g17_original_w2_w4_source_shadow.py tests/test_gptmax_raster_flank_paint_audit.py
+          ruff check --select F821,F823 pb_g17_dual_dpi_source_correspondence_shadow.py tests/test_g17_dual_dpi_source_correspondence_shadow.py pb_g17_w4_equivalence_competitor_shadow.py tests/test_g17_w4_equivalence_competitor_shadow.py pb_opening_local_g17_wall_shadow.py pb_raster_g17_source_shadow.py tools/diag_gptmax_producer_owned_g17_wall_shadow.py tests/test_opening_local_g17_wall_shadow.py
+  original-source-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Immutable original Lot16 and exact published receipt retention
+        shell: bash
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --output artifacts/producer-source-shadow.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/producer-source-shadow.json').read_text())
+          assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['primitive_safety_cap']==20000
+          assert (r['original_physical_opening_count'],r['original_host_count'],r['original_frame_count'],r['original_w4_count'],r['original_area_count'])==(21,15,9,2094,8)
+          assert r['published_source_snapshot_unchanged'] is True
+          assert r['all_original_wall_host_frame_area_receipts_unchanged'] is True
+          assert r['new_physical_host_or_metric_granted'] is False
+          assert len(r['opening_local_source_shadows'])==6
+          c=r['original_144_300_correspondence_shadow']
+          assert c['original_source_sha256']==r['source_sha256']
+          assert (c['original_144_render_dpi'],c['original_g17_render_dpi'])==(144,300)
+          assert c['original_w4_candidates_examined']==r['original_w4_count']
+          assert len(c['openings'])==6
+          assert all(len(row['flanks'])==2 for row in c['openings'])
+          assert all(row['host_granted'] is False and row['metric_quantity_granted'] is False for row in c['openings'])
+          assert all(not c[k] for k in ('physical_wall_role_granted','cross_source_equivalence_granted',
+              'host_granted','metric_quantity_granted','complete_wall_universe_proven'))
+          assert sum(len(f['source_edges']) for row in c['openings'] for f in row['flanks'])==30
+          assert all(e['w4_cross_source_equivalence_proven'] is False
+              and e['structural_wall_role_proven'] is False
+              for row in c['openings'] for f in row['flanks'] for e in f['source_edges'])
+          for item in r['opening_local_source_shadows']:
+              comp=item['ordinary_w4_competitor_shadow']
+              assert comp['ordinary_w4_records_examined']==r['original_w4_count']
+              assert len(comp['flanks'])==2
+              assert comp['ordinary_w4_universe_complete_proven'] is False
+              assert comp['physical_wall_role_granted'] is False
+              assert comp['physical_wall_equivalence_granted'] is False
+              assert comp['host_binding_granted'] is False
+              assert comp['metric_quantity_granted'] is False
+              assert all(f['physical_wall_equivalence_granted'] is False for f in comp['flanks'])
+          assert all(len(s['flanks'])==2 for s in r['opening_local_source_shadows'])
+          assert sum(f['source_ink_supported'] for s in r['opening_local_source_shadows'] for f in s['flanks'])==10
+          for s in r['opening_local_source_shadows']:
+              assert s['scope_complete'] is False
+              assert s['physical_wall_role_granted'] is False
+              assert s['opening_host_granted'] is False
+              assert s['metric_quantity_granted'] is False
+              for f in s['flanks']:
+                  if not f['source_ink_supported']:
+                      assert not f['default_records'] and not f['exact_coordinate_records']
+                  else:
+                      assert len(f['exact_coordinate_records'])==3
+                  for w in f['exact_coordinate_records']:
+                      assert all(p.startswith('raster_opening_primitive:') for p in w['physical_identity']['source_primitive_ids'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-producer-owned-g17-wall-source-shadow
+          path: artifacts/producer-source-shadow.json
+          retention-days: 21

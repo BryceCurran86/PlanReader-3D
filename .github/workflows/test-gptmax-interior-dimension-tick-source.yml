@@ -66,7 +66,7 @@ jobs:
           sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           assert before["source_sha256"]==after["source_sha256"]==roles["source_sha256"]==sha
           assert before["primitive_safety_cap"]==after["primitive_safety_cap"]==20000
-          assert before["summary"]==after["summary"]=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
+          assert before["summary"]==after["summary"]=={"physical_existence_claims":21,"host_bindings":15,"host_frames":9}
           def keyed(rows):
               by_id={x["opening_identity_id"]:x for x in rows}
               assert len(by_id)==len(rows)
@@ -94,7 +94,7 @@ jobs:
           assert opposed, "authenticated opposing native dimension proof missing"
           assert roles["summary"]["positive_existence_claims"]==21
           print({"original_dimension_lookalike_typed_opposed":target,
-                 "hosts_retained":14,"frames_retained":9})
+                 "hosts_retained":15,"frames_retained":9})
           PY
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py

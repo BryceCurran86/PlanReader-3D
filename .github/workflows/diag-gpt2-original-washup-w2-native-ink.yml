@@ -1,0 +1,62 @@
+name: DIAG GPT2 Original WashUp W2 Native Ink
+on:
+  pull_request:
+    paths:
+      - "tools/diag_gpt2_native_w2_ink_source_role.py"
+      - "tests/test_gpt2_native_w2_ink_source_role.py"
+      - ".github/workflows/diag-gpt2-original-washup-w2-native-ink.yml"
+  workflow_dispatch:
+jobs:
+  original-native-w2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact native W2 source lineage unit proof
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_native_w2_ink_source_role.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Original immutable Maryborough page7 W2 native ink ownership
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          timeout 540s python -u -m tools.diag_gpt2_native_w2_ink_source_role \
+            --pdf "$PDF" --sha "$SHA" --page 7 \
+            --primitive d50048i0 \
+            --atomic-edge-json '[[226.319992,476.480103],[260.160004,476.480103]]' \
+            --output artifacts/gpt2-washup-original-source-ink.json
+      - name: Exact source and commercial no-promotion assertion
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gpt2-washup-original-source-ink.json").read_text())
+          assert r["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert r["original_pdf_page"]==7 and r["original_pdf_page_count"]==31
+          assert r["original_native_primitive_ref"]=="d50048i0"
+          assert r["original_path_index"]==50048 and r["original_item_index"]==0
+          assert r["native_stroke_fully_covers_atomic_wall_candidate"] is True
+          assert r["native_stroke_contains_candidate_only_not_wall_role"] is True
+          assert r["structural_wall_role_authenticated"] is False
+          assert r["source_room_face_closed_by_tool"] is False
+          assert r["quantity_or_metric_area_published"] is False
+          assert r["diagnostic_only"] is True
+          print(json.dumps(r,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-washup-w2-ink-first-gate
+          path: artifacts/gpt2-washup-original-source-ink.json
+          retention-days: 20

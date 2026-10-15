@@ -165,6 +165,23 @@ def _non_abstained(
     return tuple(retained)
 
 
+def _source_complexity_blocked(reason_codes: object) -> bool:
+    """Distinguish a safety-stopped source universe from an empty measured one.
+
+    These source-owned reason codes signal that the producer could not examine
+    the complete requested wall/room evidence scope. This is NOT a physical
+    nonexistence assertion and must never be reported as a completed empty
+    material/quantity universe.
+    """
+    if type(reason_codes) not in (tuple, list):
+        return False
+    return any(
+        type(reason) is str
+        and reason == "physical_wall_candidate_scope_complexity_exceeded"
+        for reason in reason_codes
+    )
+
+
 def _write_text_atomic(path: Path, encoded: str) -> None:
     """Atomically publish one complete artifact without following final symlinks."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -868,7 +885,14 @@ def _generate_project_handoff_locked(
         summary["status"] = "sealed"
     else:
         summary["combined_quantity_count"] = 0
-        summary["status"] = "no_sealable_quantities"
+        # ABSTAIN with a bounded-source complexity failure is not an empty
+        # successfully examined source universe. Keep an explicit, unsealed
+        # failure status and preserve the original reason for future recovery.
+        summary["status"] = (
+            "source_complexity_blocked"
+            if _source_complexity_blocked(summary["claim_reason_codes"])
+            else "no_sealable_quantities"
+        )
 
     if verified_partial_customer_rows is not None:
         customer_path = output_dir / "verified_customer_rows.json"
