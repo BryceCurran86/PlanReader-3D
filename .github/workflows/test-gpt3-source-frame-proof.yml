@@ -79,15 +79,15 @@ jobs:
           old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
           assert len(old_bindings) == len(baseline['opening_bindings'])
           assert len(new_bindings) == len(report['opening_bindings'])
-          assert set(new_bindings) <= set(old_bindings)
-          if not all(old_bindings[key] == row for key, row in new_bindings.items()):
+          assert set(old_bindings) <= set(new_bindings), 'authenticated opening identity removed'
+          if old_bindings != new_bindings:
               assert_unchanged_or_declared(baseline, report,
                                            message="original opening binding receipt changed")
           old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
           assert len(old_frames) == len(baseline['host_frames'])
           assert len(new_frames) == len(report['host_frames'])
           assert set(old_frames) <= set(new_frames)
-          if not all(new_frames[key] == row for key, row in old_frames.items() if row['record_id']):
+          if old_frames != new_frames:
               assert_unchanged_or_declared(baseline, report,
                                            message="original framed host receipt changed")
           print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
@@ -138,9 +138,12 @@ jobs:
           assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
           keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
           assert keyed(current['opening_bindings']) == keyed(baseline['opening_bindings'])
+          assert len(baseline['opening_bindings']) == len(keyed(baseline['opening_bindings']))
           assert len(current['opening_bindings']) == len(keyed(current['opening_bindings']))
           old_frames, new_frames = keyed(baseline['host_frames']), keyed(current['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          assert len(old_frames) == len(baseline['host_frames'])
+          assert len(new_frames) == len(current['host_frames'])
+          assert old_frames == new_frames, 'Maryborough original frame receipt changed'
           assert 'quantities' not in current
           print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'host_identity_parity': True, 'existing_frame_identity_parity': True}))
           PY
