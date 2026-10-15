@@ -57,9 +57,9 @@ def test_duplicate_source_key_nested_inside_evidence_or_customer_refused(
 ):
     path = tmp_path / "signed.json"
     path.write_text(signed_payload, encoding="utf-8")
-    with pytest.raises(ValueError, match="duplicate JSON key"):
+    with pytest.raises(ValueError, match="duplicate key"):
         four._read_json_without_duplicate_keys(path)
-    with pytest.raises(ValueError, match="duplicate JSON key"):
+    with pytest.raises(ValueError, match="duplicate key"):
         selected._json_object(path) if signed_payload.startswith("{") else selected._json_customer_rows(path)
 
 
