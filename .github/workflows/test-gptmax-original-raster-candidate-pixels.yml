@@ -1,0 +1,66 @@
+name: GPT MAX Original Unresolved Raster Candidate Pixels
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_original_raster_candidate_image_review.py"
+      - ".github/workflows/test-gptmax-original-raster-candidate-pixels.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  original-nine-raw-g17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Check shadow tool syntax / source separation
+        run: |
+          python -m compileall -q tools/diag_gptmax_original_raster_candidate_image_review.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_raster_candidate_image_review.py
+          PYTHONPATH=. python -m pytest -q tests/test_opening_candidate_source_group_witness.py tests/test_gptmax_raw_source_group_retention.py
+      - name: Original source SHA, nine exact raw candidate windows, all signed customer receipts retained
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_original_raster_candidate_image_review.py --pdf "$PDF" --page-id 3 --output-dir artifacts/gptmax-original-raw-context
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from hashlib import sha256
+          root=Path('artifacts/gptmax-original-raw-context')
+          report=json.loads((root/'manifest.json').read_text())
+          assert report['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert (report['original_raw_candidate_count'],report['original_raw_resolved_count'])==(30,21)
+          assert report['unchanged_signed_customer_quantity_count']==8
+          assert report['original_customer_receipts_unchanged']
+          assert report['source_candidate_universe_complete'] is False
+          assert report['physical_wall_host_count_quantity_granted'] is False
+          assert len(report['unresolved_raw_groups'])==9
+          assert len({r['raw_candidate_id'] for r in report['unresolved_raw_groups']})==9
+          for row in report['unresolved_raw_groups']:
+              assert len(row['source_observation_ids'])==6
+              assert not any(row[k] for k in ('opening_existence_granted',
+                  'physical_wall_equivalence_granted','host_granted','metric_quantity_granted'))
+              png=(root/row['context_png_name']).read_bytes()
+              assert sha256(png).hexdigest()==row['context_png_sha256'] and png[:8]==b'\x89PNG\r\n\x1a\n'
+          print(json.dumps({'original_source_sha':report['source_sha256'],
+              'raw_candidates':9,'original_customer_quantities_retained':8,
+              'source_visual_context_only':True}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-raw-g17-context
+          path: artifacts/gptmax-original-raw-context
+          retention-days: 14
