@@ -86,6 +86,62 @@ def _edge_biconnected_blocks(visited, selected):
     return output
 
 
+def _simple_cycles_containing_seed(visited, selected, seed, *, state_limit=20000,
+                                   cycle_limit=500):
+    """Bounded exact source-endpoint paths closing the selected native edge.
+
+    Does not elect a symbol or a wall. If boundedness is reached, fail closed
+    with INCOMPLETE and retain the already discovered source candidates.
+    """
+    exemplar = selected[seed]
+    first, last = _key(exemplar["a"]), _key(exemplar["b"])
+    graph = defaultdict(list)
+    for name in sorted(visited):
+        if name == seed:
+            continue
+        item = selected[name]
+        a, b = _key(item["a"]), _key(item["b"])
+        graph[a].append((b, name))
+        graph[b].append((a, name))
+    for rows in graph.values():
+        rows.sort(key=lambda x: (x[1], x[0]))
+
+    frontier = [(first, frozenset({first}), ())]
+    seen = set()
+    states = 0
+    truncated = False
+    while frontier:
+        if states >= state_limit or len(seen) >= cycle_limit:
+            truncated = True
+            break
+        vertex, nodes, edges = frontier.pop()
+        states += 1
+        for adjacent, edge_id in graph.get(vertex, ()):
+            if adjacent == last:
+                if len(edges) >= 1:
+                    cycle = frozenset((seed, edge_id, *edges))
+                    if len(cycle) >= 3:
+                        seen.add(cycle)
+                continue
+            if adjacent in nodes:
+                continue
+            frontier.append((adjacent, nodes | {adjacent}, (*edges, edge_id)))
+    records = [
+        {"source_edge_ids": sorted(cycle),
+         "source_edge_count": len(cycle),
+         "role_granted": False}
+        for cycle in seen
+    ]
+    records.sort(key=lambda d: (d["source_edge_count"], d["source_edge_ids"]))
+    return {
+        "status": ("INCOMPLETE_SAFETY_BOUND" if truncated else "COMPLETE_EXACT_SOURCE_PATH_CENSUS"),
+        "search_states": states,
+        "source_seed_cycle_count": len(records),
+        "source_seed_cycles": records,
+        "annotation_or_structural_role_granted": False,
+    }
+
+
 def inspect_native_component(page, seed: str):
     """Return candidate component and raw source receipts, not an authority grant."""
     segments = {}
@@ -135,6 +191,7 @@ def inspect_native_component(page, seed: str):
         degrees[_key(item["b"])] += 1
     closed_simple_cycle = len(visited) >= 3 and all(n == 2 for n in degrees.values()) and len(degrees) == len(visited)
     source_blocks = _edge_biconnected_blocks(visited, selected)
+    seed_cycle_census = _simple_cycles_containing_seed(visited, selected, seed)
     return {
         "status": "SOURCE_COMPONENT_CANDIDATE",
         "seed": seed,
@@ -146,6 +203,7 @@ def inspect_native_component(page, seed: str):
         "component_edge_count": len(visited),
         "exact_native_edge_blocks": source_blocks,
         "exact_simple_cycle_block_count": sum(b["complete_exact_cycle"] for b in source_blocks),
+        "seed_incident_exact_cycle_census": seed_cycle_census,
         "component_role_ambiguous": True,
         "endpoint_degrees": [{"point": list(p), "degree": n} for p, n in sorted(degrees.items())],
         "source_segments": [selected[k] for k in sorted(visited)],
