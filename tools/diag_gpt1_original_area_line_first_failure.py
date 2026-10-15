@@ -126,6 +126,53 @@ def inspect_source_area_lines(words, viewports, *, source_sha256, revision_id, s
             "canonical_floor_metric_authority_granted": False,
             "quantity_evidence_published": False,
         })
+    # Reuse the existing generic whole-line recognizer. A label is a source
+    # candidate even when no SourceRoomFace exists; never attach by proximity
+    # to a nearby area line, picture box or apparent wall.
+    from pb_source_room_label_authority import _normalized_room_line
+    label_candidates = []
+    for (part, block, line), tokens in sorted(by_line.items()):
+        ordered = sorted(tokens, key=lambda w: (w.word_no, w.observation_id))
+        raw = " ".join(w.text.strip() for w in ordered)
+        if _normalized_room_line(raw) is None:
+            continue
+        ordinals = [w.word_no for w in ordered]
+        ordinal_complete = len(set(ordinals)) == len(ordinals) and (
+            ordinals == list(range(ordinals[0], ordinals[-1] + 1)))
+        trusted = all(w.trusted is True for w in ordered)
+        boxes = [_bbox(w.bbox) for w in ordered]
+        bbox = (min(x[0] for x in boxes), min(x[1] for x in boxes),
+                max(x[2] for x in boxes), max(x[3] for x in boxes))
+        plan_ids = sorted(vid for vid, kind, box in scopes
+                          if kind == "floor_plan" and _contains(box, bbox))
+        competing_ids = sorted(vid for vid, kind, box in scopes
+                               if kind != "floor_plan" and _contains(box, bbox))
+        gate = (
+            "source_room_label_word_ordinal_conflict" if not ordinal_complete else
+            "source_room_label_text_integrity_unavailable" if not trusted else
+            "source_room_label_plan_viewport_unavailable_or_ambiguous"
+            if len(plan_ids) != 1 or competing_ids else
+            "source_room_face_and_exact_label_owner_unproven"
+        )
+        label_candidates.append({
+            "source_page_id": page_id,
+            "source_partition_id": part,
+            "block_no": block,
+            "line_no": line,
+            "source_word_numbers": ordinals,
+            "source_text_observation_ids": [w.observation_id for w in ordered],
+            "literal_original_room_label": raw,
+            "original_line_bbox_pdf_pts": list(bbox),
+            "source_text_integrity_all_words": trusted,
+            "source_text_reason_codes": sorted({str(reason)
+                for w in ordered for reason in (w.reason_codes or ())}),
+            "containing_source_floor_plan_viewport_ids": plan_ids,
+            "containing_competing_nonplan_viewport_ids": competing_ids,
+            "first_unclosed_gate": gate,
+            "source_physical_room_face_authenticated": False,
+            "area_annotation_to_label_binding_granted": False,
+            "quantity_evidence_published": False,
+        })
     return {
         "original_source_sha256": source_sha256,
         "source_revision_id": revision_id,
@@ -136,6 +183,9 @@ def inspect_source_area_lines(words, viewports, *, source_sha256, revision_id, s
         "literal_area_candidate_count": len(candidates),
         "first_failure_counts": dict(sorted(Counter(row["first_unclosed_gate"] for row in candidates).items())),
         "literal_area_candidates": candidates,
+        "literal_room_label_candidate_count": len(label_candidates),
+        "literal_room_label_candidates": label_candidates,
+        "label_first_failure_counts": dict(sorted(Counter(row["first_unclosed_gate"] for row in label_candidates).items())),
         "diagnostic_only": True,
         "published_quantities": [],
         "customer_rows": [],
