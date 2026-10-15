@@ -491,3 +491,26 @@ def test_native_long_line_must_not_correlate_underspecified_source_record():
     assert receipt["independent_original_pdf_source_status"] == "INDEXED_SOURCE_GEOMETRY_CONFLICT"
     assert not result["original_indexed_parent_sources_all_correlated"]
     assert not receipt["source_wall_or_annotation_role_granted"]
+
+
+
+def test_original_indexed_rectangle_side_retained_without_claiming_structural_ink():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    rect=fitz.Rect(0,0,10,5)
+    drawings=[{"type":"f","fill":(1.,1.,1.),"items":[("re",rect)]}]
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[{
+                "original_primitive_id":"d0i0e2",
+                "original_native_geometry":[0.,5.,10.,5.],
+                "original_native_page_coords_present":True,
+            }]}}]}]
+    got=verify(drawings,node)
+    assert got["original_indexed_parent_sources_all_correlated"]
+    receipt=got["original_indexed_parent_receipts"][0]
+    assert receipt["independent_original_pdf_source_status"]=="INDEXED_ORIGINAL_INK_EXACT_GEOMETRY"
+    assert receipt["independent_original_pdf_ink_evidence"]["native_element_kind"]=="re"
+    assert not got["source_structural_wall_role_granted"]
