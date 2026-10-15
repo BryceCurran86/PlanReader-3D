@@ -1,0 +1,75 @@
+name: DIAG GPT2 Original W4 Native Read-Order Identity Invariance
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_native_preflight_w4_identity_invariance.py
+      - tests/test_gpt2_native_preflight_w4_identity_invariance.py
+      - .github/workflows/diag-gpt2-native-w4-read-order-identity.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-w4-identity-read-order:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Exact ordering and source identity adversarial tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_native_preflight_w4_identity_invariance.py
+          ruff check --select F821,F823 tools/diag_gpt2_native_preflight_w4_identity_invariance.py tests/test_gpt2_native_preflight_w4_identity_invariance.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Compare no preflight, original native read, no preflight on same source
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-native-read-order-w4
+          git rev-parse HEAD > artifacts/gpt2-native-read-order-w4/head.txt
+          timeout 3400s python -u -m tools.diag_gpt2_native_preflight_w4_identity_invariance \
+            --pdf "$PDF" --sha "$SHA" --page 11 \
+            --output artifacts/gpt2-native-read-order-w4/read-order.json
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('artifacts/gpt2-native-read-order-w4/read-order.json')
+          d=json.loads(p.read_text())
+          assert d['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert d['new_commercial_quantities']==[]
+          assert d['physical_room_or_material_granted'] is False
+          assert d['frozen_benchmark_scored'] is False
+          assert all(d[k]['source_snapshot_unchanged'] for k in
+                    ('baseline','with_preflight_native_pdf_read','repeat_baseline'))
+          assert all(len(d[k]['scope_ids'])==1 for k in
+                    ('baseline','with_preflight_native_pdf_read','repeat_baseline'))
+          assert all(d[k]['w4_wall_counts']==[890] for k in
+                    ('baseline','with_preflight_native_pdf_read','repeat_baseline'))
+          assert all(d[k]['face_counts']==[1235] for k in
+                    ('baseline','with_preflight_native_pdf_read','repeat_baseline'))
+          print('GPT2_READ_ORDER_STABLE',d['source_authority_stable_after_diagnostic_read'])
+          print('GPT2_FIRST_READ_ORDER_DIFFERENCE',d['preflight_vs_baseline_first_exact_difference'])
+          print('GPT2_REPEAT_BASELINE_DIFFERENCE',d['repeat_baseline_first_exact_difference'])
+          # Genuine source first-difference is a diagnostic result, not a
+          # reason to fudge IDs or bypass room source authority.
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-native-read-order-w4-identities
+          path: artifacts/gpt2-native-read-order-w4
+          retention-days: 14
