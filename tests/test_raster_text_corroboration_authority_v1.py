@@ -37,6 +37,7 @@ from pb_portable_raster_ocr_authority import (
     WinOCRBackend,
 )
 from pb_raster_text_corroboration_authority import (
+    _glyph_reading_cover_from_centres,
     RASTER_TEXT_ALREADY_TRUSTED,
     RASTER_TEXT_BACKEND_ERROR,
     RASTER_TEXT_BACKEND_UNAVAILABLE,
@@ -76,6 +77,32 @@ DOC = "doc-raster-corroboration"
 
 OCR_AVAILABLE = RapidOCRBackend().is_available()
 needs_real_ocr = pytest.mark.skipif(not OCR_AVAILABLE, reason="RapidOCR is not installed")
+
+
+def test_source_glyph_owned_overlapping_fragments_retain_every_reading():
+    centres=tuple((5.+10*i,10.) for i in range(7))
+    rows=(OCRLine(confidence=None,text="Dra",bbox_px=(0.,0.,30.,20.)),
+          OCRLine(confidence=None,text="rawing",bbox_px=(10.,0.,70.,20.)))
+    cover=_glyph_reading_cover_from_centres("Drawing",centres,rows)
+    assert cover is not None and len(cover)==2
+    assert {r['source_glyph_indices'] for r in cover} == {(0,1,2),(1,2,3,4,5,6)}
+    assert _glyph_reading_cover_from_centres("Drawing",centres,tuple(reversed(rows))) == cover
+    assert _glyph_reading_cover_from_centres("Drawing",centres,rows[:1]) is None
+    assert _glyph_reading_cover_from_centres("Drawing",centres,
+        (*rows,OCRLine(confidence=None,text="Q",bbox_px=(0.,0.,10.,20.)))) is None
+    assert _glyph_reading_cover_from_centres("Drawing",centres,
+        (rows[0],OCRLine(confidence=None,text="rawing",bbox_px=(80.,0.,140.,20.)))) is None
+
+
+def test_source_glyph_owned_nested_detection_is_agreement_not_ranked_election():
+    centres=tuple((5.+10*i,10.) for i in range(10))
+    rows=(OCRLine(confidence=None,text="P",bbox_px=(0.,0.,10.,20.)),
+          OCRLine(confidence=None,text="PARTITIONS",bbox_px=(0.,0.,100.,20.)))
+    cover=_glyph_reading_cover_from_centres("PARTITIONS",centres,rows)
+    assert cover is not None and len(cover)==2
+    assert {r['source_glyph_indices'] for r in cover} == {(0,),tuple(range(10))}
+    assert _glyph_reading_cover_from_centres("PARTITIONS",centres,
+        (OCRLine(confidence=None,text="S",bbox_px=(0.,0.,10.,20.)),rows[1])) is None
 
 
 # ---------------------------------------------------------------------------
@@ -451,6 +478,41 @@ def test_unresolved_clip_state_can_be_discharged_only_by_exact_raster_proof(
         TEXT_GLYPH_MAPPING_UNVERIFIED,
     }
     assert [call["dpi"] for call in calls] == [300.0, 450.0]
+
+
+@pytest.mark.parametrize("reading,expected", [("150mm", EvidenceResolutionStatus.CORROBORATED),
+                                           ("160mm", EvidenceResolutionStatus.ABSTAINED),
+                                           (None, EvidenceResolutionStatus.ABSTAINED)])
+def test_clip_only_shadow_still_requires_exact_two_render_source_proof(reading, expected):
+    triangle = "q 10 100 m 250 100 l 10 190 l h W n 0 0 5 5 re f "
+    setup = _Setup(_pdf(triangle + "BT /F1 14 Tf 40 120 Td (150mm) Tj ET 0 0 5 5 re f Q"), _both(reading))
+    oid = setup.oid_of("150mm")
+    assert setup._receipts[oid].reason_codes == (TEXT_CLIP_STATE_UNRESOLVED,)
+    ordinary = setup.producer.publish(setup.selector(oid))
+    assert ordinary.status is EvidenceResolutionStatus.ABSTAINED
+    shadow = RasterTextCorroborationProducer.for_physical_plan_view_shadow_for_tests(
+        setup.svp, setup.backend)
+    result = shadow.publish(setup.selector(oid))
+    assert result.status is expected
+    if result.record is not None:
+        assert tuple(v.dpi for v in result.record.views) == RASTER_TEXT_CORROBORATION_DPIS
+        assert result.record.native_text_integrity_reason_codes == (TEXT_CLIP_STATE_UNRESOLVED,)
+    assert setup.text_authority.resolve_text(setup._observation_selector(oid)).status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_clip_only_shadow_cannot_bypass_explicit_clipping_or_trace_ambiguity(monkeypatch):
+    setup = _Setup(_glyph_unverified_pdf([("150mm",40,120)]), _both("150mm"))
+    original=setup.text_authority.resolve_text
+    selector=setup.selector(setup.oid_of("150mm"))
+    for reason in (TEXT_CLIPPED_BY_CLIP_REGION, TEXT_TRACE_AMBIGUOUS):
+        reasons=(TEXT_CLIP_STATE_UNRESOLVED,reason)
+        def changed(s):
+            r=original(s)
+            return replace(r,reason_codes=reasons,receipt=replace(r.receipt,reason_codes=reasons))
+        shadow=RasterTextCorroborationProducer.for_physical_plan_view_shadow_for_tests(
+            setup.svp,setup.backend)
+        monkeypatch.setattr(shadow._text_authority,"resolve_text",changed)
+        assert shadow.publish(selector).status is EvidenceResolutionStatus.ABSTAINED
 
 
 def test_explicit_clip_region_remains_a_hard_veto_before_raster_ocr(

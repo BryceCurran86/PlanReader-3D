@@ -70,7 +70,30 @@ jobs:
                            for v in viewports],
               })
           pdf.close()
-          assert report["proven_schedule_count"]>=2,report
+          # Source-positive p9 ceiling schedule must survive, but original
+          # p11 physical plan cannot be published as a table merely because
+          # two native orthogonal wall/grid regions appear table-like.
+          proven={
+              row["page"]: [
+                  v for v in row["views"]
+                  if v["type"]==DrawingViewType.SCHEDULE.value
+                  and v["status"]=="resolved" and v["bbox"] is not None
+              ]
+              for row in report["pages"]
+          }
+          assert len(proven[9])==1, report
+          assert len(proven[11])==0, report
+          assert report["proven_schedule_count"]==1, report
+          assert any(
+              v["type"]==DrawingViewType.REFLECTED_CEILING_PLAN.value
+              and v["status"]=="derived"
+              for v in next(row for row in report["pages"] if row["page"]==9)["views"]
+          ), report
+          assert not any(
+              v["type"]==DrawingViewType.FLOOR_FINISH_PLAN.value
+              and v["status"]=="resolved"
+              for v in next(row for row in report["pages"] if row["page"]==11)["views"]
+          ), report
           print(json.dumps(report,sort_keys=True,default=str))
           PY
       - uses: actions/upload-artifact@v4
