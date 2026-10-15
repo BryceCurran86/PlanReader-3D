@@ -450,9 +450,21 @@ def verify_original_indexed_split_parent_ink(drawings, selected_node_rows):
                             type(error).__name__
                         )
                     else:
+                        native = ink["native_source_edge_pdf_pts"]
+                        raw = [source_coords[:2], source_coords[2:]]
+                        # A shorter forged source-record geometry can be
+                        # fully contained in a true original line; that is
+                        # NOT an exact original parent geometry match.
+                        same = (
+                            (math.dist(native[0], raw[0]) <= 1e-4
+                             and math.dist(native[1], raw[1]) <= 1e-4)
+                            or
+                            (math.dist(native[0], raw[1]) <= 1e-4
+                             and math.dist(native[1], raw[0]) <= 1e-4)
+                        )
                         row["independent_original_pdf_source_status"] = (
-                            "INDEXED_ORIGINAL_INK_FULL_SOURCE_SPAN"
-                            if ink["native_stroke_fully_covers_atomic_wall_candidate"]
+                            "INDEXED_ORIGINAL_INK_EXACT_GEOMETRY"
+                            if same and ink["native_stroke_fully_covers_atomic_wall_candidate"]
                             else "INDEXED_SOURCE_GEOMETRY_CONFLICT"
                         )
                         row["independent_original_pdf_ink_evidence"] = {
@@ -475,7 +487,7 @@ def verify_original_indexed_split_parent_ink(drawings, selected_node_rows):
         "original_indexed_parent_receipts": report,
         "original_indexed_parent_sources_all_correlated": bool(report) and all(
             x["independent_original_pdf_source_status"]
-            == "INDEXED_ORIGINAL_INK_FULL_SOURCE_SPAN" for x in report
+            == "INDEXED_ORIGINAL_INK_EXACT_GEOMETRY" for x in report
         ),
         "source_structural_wall_role_granted": False,
         "room_or_metric_published": False,
