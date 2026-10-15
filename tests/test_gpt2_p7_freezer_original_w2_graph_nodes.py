@@ -357,3 +357,31 @@ def test_real_split_input_trace_reports_source_styles_without_electing_roles():
     assert receipt["original_indexed_source_ids"] == ["source_style_positive"]
     assert not receipt["physical_wall_or_annotation_role_granted"]
     assert repr(source) == before
+
+
+
+def test_source_graphic_receipts_reorder_preserves_original_style_candidates():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts as style,
+    )
+    records=[
+        {"id":"d10i0","stroke_present":True,"stroke":[.5,.5,.5]},
+        {"id":"d20i0","stroke_present":True,"stroke":[0.,0.,0.]},
+    ]
+    before=repr(records)
+    a=style({"source_primitive_ids":["d20i0","d10i0"],
+             "source_records":records})
+    b=style({"source_primitive_ids":["d10i0","d20i0"],
+             "source_records":list(reversed(records))})
+    assert a["status"] == b["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    assert a["original_indexed_source_ids"]==b["original_indexed_source_ids"]
+    assert {x["original_primitive_id"]: x["source_stroke"]
+            for x in a["source_style_records"]} == {
+        x["original_primitive_id"]: x["source_stroke"]
+        for x in b["source_style_records"]
+    }
+    a["source_style_records"][0]["source_stroke"][0] = 77
+    assert repr(records) == before
+    assert all(not x["style_is_not_structural_or_drafting_role"] is False
+               for x in b["source_style_records"])
+    assert not b["physical_wall_or_annotation_role_granted"]
