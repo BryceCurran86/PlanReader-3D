@@ -11,7 +11,10 @@ import pytest
 
 from pb_annotation_cycle_shadow import (
     _cycle_edges_cross,
+    _without_proven_annotation_cycles,
     classify_exact_annotation_cycles,
+    scope_segments_without_proven_annotation_cycles,
+    segments_without_proven_annotation_cycles,
     shadow_annotation_cycle_topology,
 )
 
@@ -217,10 +220,6 @@ def test_missing_page_span_fails_closed():
 
 
 def test_proven_cycle_is_removed_from_wall_input_and_a_room_is_not():
-    from types import SimpleNamespace
-    from pb_annotation_cycle_shadow import segments_without_proven_annotation_cycles
-    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
-
     ring = _ring()
     room = [
         _line("w0", 0, 0, 80, 0, path=1),
@@ -236,27 +235,78 @@ def test_proven_cycle_is_removed_from_wall_input_and_a_room_is_not():
         ring, [], page_span=PAGE_SPAN, viewport_bbox=VIEW,
     )
     assert [segment["id"] for segment in unchanged] == [segment["id"] for segment in ring]
-    receipt = SimpleNamespace(raw_text="MARK", geometry=(-1.0, -1.0, 1.0, 1.0))
-    withheld = _without_proven_annotation_cycles(
+    receipt = _receipt("MARK", (-1.0, -1.0, 1.0, 1.0))
+    withheld = scope_segments_without_proven_annotation_cycles(
         ring, classification_segments=ring, text_receipts=(receipt,),
-        page_width=PAGE_SPAN, page_height=PAGE_SPAN,
-        viewport=SimpleNamespace(bounding_box=VIEW),
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN, viewport_bbox=VIEW,
     )
     assert withheld == ()
 
 
 def test_leftover_chord_is_removed_when_the_cycle_is_proved_earlier():
-    from types import SimpleNamespace
-    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
-
     ring = _ring()
-    receipt = SimpleNamespace(raw_text="MARK", geometry=(-1.0, -1.0, 1.0, 1.0))
-    leftover = _without_proven_annotation_cycles(
+    receipt = _receipt("MARK", (-1.0, -1.0, 1.0, 1.0))
+    leftover = scope_segments_without_proven_annotation_cycles(
         ring[:1], classification_segments=ring, text_receipts=(receipt,),
-        page_width=PAGE_SPAN, page_height=PAGE_SPAN,
-        viewport=SimpleNamespace(bounding_box=VIEW),
+        page_width=PAGE_SPAN, page_height=PAGE_SPAN, viewport_bbox=VIEW,
     )
     assert leftover == ()
+
+
+def test_the_live_wall_authority_does_not_call_the_annotation_shadow():
+    import pb_physical_wall_candidate_authority as wall_mod
+
+    source = open(wall_mod.__file__, encoding="utf-8").read()
+    assert "pb_annotation_cycle_shadow" not in source
+    assert "annotation_cycles" not in source
+
+
+class TestNoQuantityOrLiveWiring:
+    """Production must not import or call the annotation-cycle shadow."""
+
+    def test_no_production_module_imports_annotation_cycle_shadow(self) -> None:
+        import ast
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        skip = {"tests", "benchmarks", "scripts", "tools", "node_modules"}
+        offenders = []
+        for path in sorted(root.rglob("*.py")):
+            rel = path.relative_to(root)
+            if rel.parts[0] in skip or any(part.startswith(".") for part in rel.parts):
+                continue
+            if path.name.startswith("tmp_"):
+                continue
+            if path.name == "pb_annotation_cycle_shadow.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+            imported = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.extend(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported.append(node.module)
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    imported.append(node.value)
+            if any(
+                name == "pb_annotation_cycle_shadow"
+                or name.startswith("pb_annotation_cycle_shadow.")
+                for name in imported
+            ):
+                offenders.append(path.name)
+        assert offenders == []
+
+    def test_shadow_does_not_construct_quantity_evidence(self) -> None:
+        import pb_annotation_cycle_shadow as mod
+
+        source = open(mod.__file__, encoding="utf-8").read()
+        assert "import QuantityEvidence" not in source
+        assert "QuantityEvidence(" not in source
+        assert not hasattr(mod, "QuantityEvidence")
+
+    def test_not_imported_by_live_extractor(self) -> None:
+        source = open("pb_planreader_pdf_extractor.py", encoding="utf-8").read()
+        assert "pb_annotation_cycle_shadow" not in source
 
 
 def test_chorded_component_is_not_removed_when_one_face_leaves_edges_out():
@@ -465,19 +515,66 @@ def test_classification_does_not_mutate_segment_coordinates():
     assert before == after
 
 
-def _receipt(text, geometry):
+def _receipt(text, geometry, *, trusted=False, reasons=None):
     from types import SimpleNamespace
-    return SimpleNamespace(raw_text=text, geometry=geometry)
+    from pb_pdf_text_integrity_authority import (
+        TEXT_CLIP_STATE_UNRESOLVED,
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+    )
+    if reasons is None:
+        reasons = () if trusted else (TEXT_GLYPH_MAPPING_UNVERIFIED, TEXT_CLIP_STATE_UNRESOLVED)
+    return SimpleNamespace(
+        raw_text=text, geometry=geometry, trusted=trusted, reason_codes=tuple(reasons),
+    )
 
 
 def _withhold(segments, receipts):
     from types import SimpleNamespace
-    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
     return _without_proven_annotation_cycles(
         segments, classification_segments=segments, text_receipts=receipts,
         page_width=PAGE_SPAN, page_height=PAGE_SPAN,
         viewport=SimpleNamespace(bounding_box=VIEW),
     )
+
+
+def test_a_trusted_receipt_proves_the_cycle():
+    ring = _ring()
+    assert _withhold(ring, (_receipt("MARK", (-1, -1, 1, 1), trusted=True),)) == ()
+
+
+@pytest.mark.parametrize("reason", [
+    "text_render_mode_untrusted",
+    "text_opacity_untrusted",
+    "text_optional_content_off",
+    "text_optional_content_unresolved",
+    "text_occluded_by_later_paint",
+    "text_clipped_by_clip_region",
+    "text_low_contrast_default_page",
+    "text_trace_unavailable",
+    "text_decode_mismatch",
+])
+def test_a_word_the_text_authority_cannot_show_proves_nothing(reason):
+    import pb_pdf_text_integrity_authority as text_authority
+    assert reason in {
+        value for name, value in vars(text_authority).items()
+        if name.startswith("TEXT_") and isinstance(value, str)
+    }
+    ring = _ring()
+    receipt = _receipt(
+        "MARK", (-1, -1, 1, 1),
+        reasons=(text_authority.TEXT_GLYPH_MAPPING_UNVERIFIED, reason),
+    )
+    assert [segment["id"] for segment in _withhold(ring, (receipt,))] == [
+        segment["id"] for segment in ring
+    ]
+
+
+def test_an_untrusted_receipt_without_reasons_proves_nothing():
+    ring = _ring()
+    receipt = _receipt("MARK", (-1, -1, 1, 1), trusted=False, reasons=())
+    assert [segment["id"] for segment in _withhold(ring, (receipt,))] == [
+        segment["id"] for segment in ring
+    ]
 
 
 def test_blank_receipt_text_leaves_the_wall_input_unchanged():
@@ -683,7 +780,6 @@ def test_quarantine_ids_are_a_subset_of_the_input_ids():
 
 
 def test_absent_viewport_uses_the_page_box_for_an_in_page_mark():
-    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
     ring = _ring(cx=100.0, cy=100.0)
     kept = _without_proven_annotation_cycles(
         ring, classification_segments=ring,
@@ -694,7 +790,6 @@ def test_absent_viewport_uses_the_page_box_for_an_in_page_mark():
 
 
 def test_absent_viewport_does_not_own_a_mark_outside_the_page():
-    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
     ring = _ring(cx=-100.0, cy=-100.0)
     kept = _without_proven_annotation_cycles(
         ring, classification_segments=ring,
@@ -851,7 +946,6 @@ def test_an_infinite_page_span_fails_closed():
     kept = _withhold(ring, (_receipt("MARK", (-1.0, -1.0, 1.0, 1.0)),))
     # A caller with a real page span still withholds. An unreadable page size does not.
     assert kept == ()
-    from pb_physical_wall_candidate_authority import _without_proven_annotation_cycles
     unchanged = _without_proven_annotation_cycles(
         ring, classification_segments=ring,
         text_receipts=(_receipt("MARK", (-1.0, -1.0, 1.0, 1.0)),),
@@ -981,6 +1075,25 @@ def test_reversed_rectangle_sides_are_withheld():
     assert frames == {"rev0", "rev1", "rev2", "rev3"}
 
 
+def test_a_rectangle_sharing_its_path_with_other_content_is_not_a_frame():
+    shared_path = _frame(87, -20.0, -20.0, 20.0, 20.0, "mix") + [
+        {**_line("mixline", 20.0, 20.0, 30.0, 20.0, path=87), "stroke": None, "width": 0.0, "fill": (1.0, 1.0, 1.0)},
+    ]
+    quarantined, frames = _frame_result(shared_path)
+    assert {f"mark{i}" for i in range(16)} <= quarantined
+    assert frames == set()
+    assert not quarantined.intersection({"mix0", "mix1", "mix2", "mix3", "mixline"})
+
+
+def test_rectangle_sides_from_two_path_items_are_not_a_frame():
+    split = _frame(88, -20.0, -20.0, 20.0, 20.0, "item")
+    split[2] = {**split[2], "item_index": 1}
+    split[3] = {**split[3], "item_index": 1}
+    quarantined, frames = _frame_result(split)
+    assert frames == set()
+    assert not quarantined.intersection({"item0", "item1", "item2", "item3"})
+
+
 def test_rectangle_input_order_does_not_change_the_frame():
     frame = _frame(84, -20.0, -20.0, 20.0, 20.0, "ord")
     forward, forward_frames = _frame_result(frame)
@@ -1030,6 +1143,15 @@ def test_a_near_contact_and_a_clean_square_stay_simple():
     assert not _cycle_edges_cross(near)
     assert not _cycle_edges_cross(square)
     assert not _cycle_edges_cross(list(reversed(square)))
+
+
+def test_a_corner_folded_back_along_its_neighbour_is_not_a_simple_boundary():
+    folded = ((0.0, 0.0), (1.0, 0.0), (2.0, 0.0))
+    for vertices in (folded, folded[1:] + folded[:1], folded[2:] + folded[:2]):
+        assert _cycle_edges_cross(vertices)
+        assert _cycle_edges_cross(list(reversed(vertices)))
+    turned = tuple((-y * 3.0 + 5.0, x * 3.0 - 7.0) for x, y in folded)
+    assert _cycle_edges_cross(turned)
 
 
 def test_collinear_nonadjacent_overlap_is_not_a_simple_boundary():

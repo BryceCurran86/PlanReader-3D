@@ -3018,82 +3018,6 @@ def _assemble_source_owned_w4_identities_or_unavailable(
     return walls, rekeyed_junctions, identities
 
 
-def _annotation_words_from_receipts(receipts: Optional[Sequence[object]]) -> tuple[dict, ...]:
-    words = []
-    for receipt in receipts or ():
-        text = getattr(receipt, "raw_text", "")
-        geometry = getattr(receipt, "geometry", None)
-        if not isinstance(text, str) or not text.strip() or geometry is None:
-            continue
-        try:
-            box = tuple(float(value) for value in geometry)
-        except (TypeError, ValueError):
-            continue
-        if len(box) != 4 or not all(math.isfinite(value) for value in box):
-            continue
-        if not (box[0] < box[2] and box[1] < box[3]):
-            continue
-        words.append({
-            "text": text, "x0": box[0], "y0": box[1], "x1": box[2], "y1": box[3],
-        })
-    return tuple(words)
-
-
-def _without_proven_annotation_cycles(
-    segments: Sequence[dict],
-    *,
-    classification_segments: Sequence[dict],
-    text_receipts: Optional[Sequence[object]],
-    page_width: float,
-    page_height: float,
-    viewport,
-) -> tuple:
-    """Keep every segment that is not on a fully proven annotation cycle.
-
-    The cycle is proved on the scope segments before the motif filter. A
-    bubble whose other chords were already removed can still identify the
-    chords that remain. Empty text receipts leave the wall input unchanged.
-    """
-    from pb_annotation_cycle_shadow import classify_exact_annotation_cycles
-
-    words = _annotation_words_from_receipts(text_receipts)
-    if not words:
-        return tuple(segments)
-    try:
-        width = float(page_width)
-        height = float(page_height)
-    except (TypeError, ValueError):
-        return tuple(segments)
-    span = min(width, height)
-    if not math.isfinite(width) or not math.isfinite(height) or span <= 0.0:
-        return tuple(segments)
-    if viewport is not None and getattr(viewport, "bounding_box", None) is not None:
-        raw_box = viewport.bounding_box
-    else:
-        raw_box = (0.0, 0.0, width, height)
-    try:
-        bbox = tuple(float(value) for value in raw_box)
-    except (TypeError, ValueError):
-        return tuple(segments)
-    if len(bbox) != 4 or not all(math.isfinite(value) for value in bbox):
-        return tuple(segments)
-    if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
-        return tuple(segments)
-    classified = classify_exact_annotation_cycles(
-        classification_segments,
-        words,
-        page_span=span,
-        viewport_bbox=bbox,
-    )
-    withheld = set(classified["quarantined_primitive_ids"])
-    if not withheld:
-        return tuple(segments)
-    return tuple(
-        segment for segment in segments
-        if str(segment.get("id") or "") not in withheld
-    )
-
-
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -3112,7 +3036,6 @@ def _assemble_scope_result(
     ambiguous_source_observation_ids: Sequence[str] = (),
     points_per_mm: Optional[float] = None,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
-    resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     excluded_boundary_primitives: Sequence[ExcludedBoundaryPrimitive] = (),
     authenticated_frame_edge_primitive_count: int = 0,
@@ -3137,14 +3060,6 @@ def _assemble_scope_result(
     graph_segments = _filter_proven_wall_strip_geometry(
         topology_segments,
         proven_wall_strips,
-    )
-    graph_segments = _without_proven_annotation_cycles(
-        graph_segments,
-        classification_segments=segments,
-        text_receipts=resolved_text_receipts,
-        page_width=page_width,
-        page_height=page_height,
-        viewport=viewport,
     )
     graph = build_wall_graph_for_viewport(graph_segments)
     try:
@@ -3442,7 +3357,6 @@ def _build_scope_result(
         source_bytes=source_bytes,
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
-        resolved_text_receipts=resolved_text_receipts,
         physical_opening_authority=physical_opening_authority,
     )
 
@@ -3520,7 +3434,6 @@ def _build_opening_local_supplemental_scope_result(
         source_bytes=source_bytes,
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
-        resolved_text_receipts=resolved_text_receipts,
         physical_opening_authority=physical_opening_authority,
     )
     if result.status is not EvidenceResolutionStatus.CORROBORATED:
@@ -3713,7 +3626,6 @@ def _build_authenticated_viewport_scope_results(
                 scope_boundary_observation_ids=boundary_observation_ids,
                 ambiguous_source_observation_ids=ambiguous_observation_ids,
                 resolved_visible_observations=resolved_visible_observations,
-                resolved_text_receipts=resolved_text_receipts,
                 physical_opening_authority=physical_opening_authority,
                 excluded_boundary_primitives=tuple(excluded_primitives),
                 authenticated_frame_edge_primitive_count=frame_edge_count,

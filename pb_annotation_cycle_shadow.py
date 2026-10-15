@@ -5,7 +5,11 @@ lies on a cycle walk around one source word, or when it is an unstroked
 filled rectangle framing that proven block. A ring that leaves part of the
 block uncovered is not removed. Stroke colour, stroke width, and nearness to
 text are never sufficient on their own. This module does not change the snap
-tolerance. A caller may drop the returned ids before building the wall graph.
+tolerance.
+
+The live wall authority does not call this module. Withholding the returned
+ids from live wall input rekeys W2 split edges, W3 junctions, W4 walls and
+sealed room quantities, so it needs a separate authority-promotion review.
 
 The length spans reused here are the existing motif spans. Each is one
 conjunct of the proof, not a standalone rejection.
@@ -14,8 +18,12 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
 from pb_physical_wall_candidate_authority import (
     _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION,
     _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION,
@@ -177,7 +185,11 @@ def _cycle_edges_cross(vertices: Sequence[Point]) -> bool:
             if adjacent:
                 shared = end if end == other_start or end == other_end else start
                 loose = [point for point in (start, end, other_start, other_end) if point != shared]
-                if any(_point_in_edge_interior(point, start, end) for point in loose):
+                if any(
+                    _point_in_edge_interior(point, start, end)
+                    or _point_in_edge_interior(point, other_start, other_end)
+                    for point in loose
+                ):
                     return True
                 continue
             if _edges_properly_cross(start, end, other_start, other_end):
@@ -411,7 +423,7 @@ def _prove_block(
     *,
     page_span: float,
     path_counts: Mapping[Any, int],
-    words: Sequence[Mapping[str, Any]],
+    words: Sequence[Tuple[Tuple[float, float, float, float], Mapping[str, Any]]],
     outside: Any,
     viewport_bbox: Optional[Sequence[float]],
 ) -> Dict[str, Any]:
@@ -419,6 +431,7 @@ def _prove_block(
 
     One source word must sit inside cycle walks that together use every edge.
     A ring that leaves part of the block uncovered does not quarantine the rest.
+    ``outside`` yields only segments that pass ``_competing_stroke``.
     """
     ids = sorted(block)
     angles = []
@@ -455,10 +468,15 @@ def _prove_block(
         for ids_walk, vertices in _smooth_cycles(members):
             if _cycle_edges_cross(vertices):
                 continue
-            for word in words:
+            left = min(point[0] for point in vertices)
+            right = max(point[0] for point in vertices)
+            low = min(point[1] for point in vertices)
+            high = max(point[1] for point in vertices)
+            for box, word in words:
+                if box[0] <= left or box[2] >= right or box[1] <= low or box[3] >= high:
+                    continue
                 if not _word_bbox_inside(word, vertices):
                     continue
-                box = (float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"]))
                 covered_by_word.setdefault(box, set()).update(ids_walk)
                 word_by_box[box] = word
         contained = [
@@ -474,15 +492,7 @@ def _prove_block(
             end = (float(member["x2"]), float(member["y2"]))
             for segment in outside(start, end):
                 sid = str(segment.get("id") or "")
-                if not sid or sid in seen or sid in block:
-                    continue
-                if _colour(segment.get("stroke")) is None or not (_numeric_width(segment) or 0.0) > 0.0:
-                    continue
-                other_length = math.hypot(
-                    float(segment["x2"]) - float(segment["x1"]),
-                    float(segment["y2"]) - float(segment["y1"]),
-                )
-                if other_length <= span_limit:
+                if sid in seen or sid in block:
                     continue
                 if _collinear_extension(start, end, segment):
                     seen.add(sid)
@@ -511,6 +521,18 @@ def _prove_block(
         "diagnostic_only": True,
     }
 
+
+
+def _competing_stroke(segment: Mapping[str, Any], span_limit: float) -> bool:
+    if not str(segment.get("id") or ""):
+        return False
+    if _colour(segment.get("stroke")) is None or not (_numeric_width(segment) or 0.0) > 0.0:
+        return False
+    length = math.hypot(
+        float(segment["x2"]) - float(segment["x1"]),
+        float(segment["y2"]) - float(segment["y1"]),
+    )
+    return length > span_limit
 
 
 def _nearby_segments(segments: Sequence[Mapping[str, Any]]):
@@ -613,9 +635,10 @@ def _unstroked_frames_around_proven_cycles(
 ) -> List[str]:
     """Return unstroked rectangle edges that frame a proven annotation cycle.
 
-    The rectangle must be four axis-aligned edges of one path, with fill and
-    no stroke. Each side stays within the existing orthogonal motif span, and
-    a proven cycle's source word box lies strictly inside. Colour is not used.
+    The rectangle must be the only content of one path: four axis-aligned
+    edges of one item, with fill and no stroke. Each side stays within the
+    existing orthogonal motif span, and a proven cycle's source word box lies
+    strictly inside. Colour is not used.
     """
     words = [
         {
@@ -629,6 +652,11 @@ def _unstroked_frames_around_proven_cycles(
     if not words:
         return []
     limit = float(page_span) * float(_REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION)
+    path_totals: Dict[int, int] = defaultdict(int)
+    for segment in segments:
+        index = _path_index(segment)
+        if index is not None:
+            path_totals[index] += 1
     groups: Dict[Any, List[Mapping[str, Any]]] = defaultdict(list)
     for segment in segments:
         if str(segment.get("kind") or "") != "rect_edge" or not segment.get("id"):
@@ -648,7 +676,11 @@ def _unstroked_frames_around_proven_cycles(
             continue
         groups[index].append(segment)
     found: List[str] = []
-    for edges in groups.values():
+    for index, edges in groups.items():
+        if path_totals[index] != len(edges):
+            continue
+        if len({repr(edge.get("item_index")) for edge in edges}) != 1:
+            continue
         if not _one_closed_rectangle(edges, limit):
             continue
         xs = [float(value) for edge in edges for value in (edge["x1"], edge["x2"])]
@@ -698,21 +730,26 @@ def classify_exact_annotation_cycles(
     for segment in by_id.values():
         families[_family(segment)].append(segment)
     records = []
-    located = []
+    span_limit = span * float(_REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION)
+    competitors = []
     for segment in segments:
         try:
             coords = tuple(float(segment[key]) for key in ("x1", "y1", "x2", "y2"))
         except (KeyError, TypeError, ValueError):
             continue
-        if all(math.isfinite(value) for value in coords):
-            located.append(segment)
-    nearby = _nearby_segments(located)
+        if all(math.isfinite(value) for value in coords) and _competing_stroke(segment, span_limit):
+            competitors.append(segment)
+    nearby = _nearby_segments(competitors)
+    word_boxes = [
+        ((float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"])), word)
+        for word in words
+    ]
     for family_segments in families.values():
         for block in _edge_blocks(family_segments):
             members = [by_id[sid] for sid in block]
             records.append(_prove_block(
                 block, members, page_span=float(page_span), path_counts=path_counts,
-                words=words, outside=nearby, viewport_bbox=viewport_bbox,
+                words=word_boxes, outside=nearby, viewport_bbox=viewport_bbox,
             ))
     records.sort(key=lambda record: (record["status"], record["primitive_ids"]))
     frames = _unstroked_frames_around_proven_cycles(
@@ -758,6 +795,127 @@ def segments_without_proven_annotation_cycles(
         segment for segment in segments
         if str(segment.get("id") or "") not in withheld
     )
+
+
+_UNTRUSTED_WORD_REASONS = frozenset({
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+    TEXT_CLIP_STATE_UNRESOLVED,
+})
+
+
+def annotation_words_from_text_receipts(
+    receipts: Optional[Sequence[object]],
+) -> Tuple[Dict[str, Any], ...]:
+    """Word boxes from producer text receipts that may prove an annotation cycle.
+
+    Decoded text is not used, so an unverified glyph mapping or an unresolved
+    clip state does not exclude a word. Any other integrity reason, such as an
+    invisible render mode, zero opacity, hidden optional content, a clip that
+    removes the word, or later paint covering it, does.
+    """
+    words = []
+    for receipt in receipts or ():
+        if not bool(getattr(receipt, "trusted", False)):
+            reasons = getattr(receipt, "reason_codes", ()) or ()
+            if not isinstance(reasons, (tuple, list)):
+                continue
+            if not reasons or not set(reasons) <= _UNTRUSTED_WORD_REASONS:
+                continue
+        text = getattr(receipt, "raw_text", "")
+        geometry = getattr(receipt, "geometry", None)
+        if not isinstance(text, str) or not text.strip() or geometry is None:
+            continue
+        try:
+            box = tuple(float(value) for value in geometry)
+        except (TypeError, ValueError):
+            continue
+        if len(box) != 4 or not all(math.isfinite(value) for value in box):
+            continue
+        if not (box[0] < box[2] and box[1] < box[3]):
+            continue
+        words.append({
+            "text": text, "x0": box[0], "y0": box[1], "x1": box[2], "y1": box[3],
+        })
+    return tuple(words)
+
+
+def scope_segments_without_proven_annotation_cycles(
+    segments: Sequence[Mapping[str, Any]],
+    *,
+    classification_segments: Sequence[Mapping[str, Any]],
+    text_receipts: Optional[Sequence[object]],
+    page_width: float,
+    page_height: float,
+    viewport_bbox: Optional[Sequence[float]] = None,
+) -> tuple:
+    """Replay one wall scope's graph input with proven annotation cycles withheld.
+
+    The cycle is proved on the scope segments before the motif filter, so a
+    bubble whose other chords were already removed still identifies the chords
+    that remain. No admissible word, an unreadable page size or a malformed
+    viewport leaves the input unchanged. No viewport means the page box.
+    """
+    words = annotation_words_from_text_receipts(text_receipts)
+    if not words:
+        return tuple(segments)
+    try:
+        width = float(page_width)
+        height = float(page_height)
+    except (TypeError, ValueError):
+        return tuple(segments)
+    span = min(width, height)
+    if not math.isfinite(width) or not math.isfinite(height) or span <= 0.0:
+        return tuple(segments)
+    raw_box = (0.0, 0.0, width, height) if viewport_bbox is None else viewport_bbox
+    try:
+        bbox = tuple(float(value) for value in raw_box)
+    except (TypeError, ValueError):
+        return tuple(segments)
+    if len(bbox) != 4 or not all(math.isfinite(value) for value in bbox):
+        return tuple(segments)
+    if bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+        return tuple(segments)
+    classified = classify_exact_annotation_cycles(
+        classification_segments, words, page_span=span, viewport_bbox=bbox,
+    )
+    withheld = set(classified["quarantined_primitive_ids"])
+    if not withheld:
+        return tuple(segments)
+    return tuple(
+        segment for segment in segments
+        if not isinstance(segment, Mapping) or str(segment.get("id") or "") not in withheld
+    )
+
+
+def without_proven_annotation_cycles_for_scope(
+    segments: Sequence[Mapping[str, Any]],
+    *,
+    classification_segments: Sequence[Mapping[str, Any]],
+    text_receipts: Optional[Sequence[object]],
+    page_width: float,
+    page_height: float,
+    viewport: Any = None,
+) -> tuple:
+    """Diagnostic replay using a viewport object. Not a live wall-authority call.
+
+    Production must not import this helper. A viewport without a bounding box
+    uses the page box, matching the former unwired production adapter.
+    """
+    bbox = None
+    if viewport is not None and getattr(viewport, "bounding_box", None) is not None:
+        bbox = viewport.bounding_box
+    return scope_segments_without_proven_annotation_cycles(
+        segments,
+        classification_segments=classification_segments,
+        text_receipts=text_receipts,
+        page_width=page_width,
+        page_height=page_height,
+        viewport_bbox=bbox,
+    )
+
+
+# Diagnostic alias kept for existing shadow tests. Not a production import.
+_without_proven_annotation_cycles = without_proven_annotation_cycles_for_scope
 
 
 def _lineage_ids(edge: Mapping[str, Any]) -> Tuple[str, ...]:

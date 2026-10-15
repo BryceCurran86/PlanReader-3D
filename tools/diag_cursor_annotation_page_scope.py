@@ -50,24 +50,7 @@ def _ring_valid(points) -> bool:
 
 
 def main() -> None:
-    import pb_physical_wall_candidate_authority as wall_mod
-    real = wall_mod._without_proven_annotation_cycles
-
-    def _counted(segments, **kwargs):
-        after = real(segments, **kwargs)
-        before_ids = [str(segment.get("id") or "") for segment in segments]
-        after_ids = {str(segment.get("id") or "") for segment in after}
-        dropped = [sid for sid in before_ids if sid not in after_ids]
-        print(
-            "WITHHELD", len(dropped),
-            "input", len(before_ids),
-            "d26362", "d26362i0" in dropped,
-            "ids", dropped[:8],
-            flush=True,
-        )
-        return after
-
-    wall_mod._without_proven_annotation_cycles = _counted
+    # Live withhold is unwired. This tool reports current production faces only.
     pdf_bytes = PDF.read_bytes()
     digest = hashlib.sha256(pdf_bytes).hexdigest()
     if digest != EXPECTED_SHA:

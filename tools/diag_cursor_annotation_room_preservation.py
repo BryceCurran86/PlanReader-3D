@@ -48,34 +48,7 @@ def _ring_valid(points) -> bool:
 
 
 def main() -> None:
-    import pb_physical_wall_candidate_authority as wall_mod
-    real = wall_mod._without_proven_annotation_cycles
-
-    def _counted(segments, **kwargs):
-        receipts = kwargs.get("text_receipts") or ()
-        interesting = []
-        for receipt in receipts:
-            text = str(getattr(receipt, "raw_text", "") or "")
-            if text in {"FT3", "BFC", "D14", "D01", "WASH", "UP"}:
-                interesting.append(text)
-        after = real(segments, **kwargs)
-        before_ids = [str(segment.get("id") or "") for segment in segments]
-        after_ids = {str(segment.get("id") or "") for segment in after}
-        dropped = [sid for sid in before_ids if sid not in after_ids]
-        viewport = kwargs.get("viewport")
-        bbox = getattr(viewport, "bounding_box", None) if viewport is not None else None
-        print(
-            "WITHHELD", len(dropped),
-            "input", len(before_ids),
-            "receipts", len(tuple(receipts)),
-            "sample_text", interesting[:8],
-            "bbox", bbox,
-            "ids", dropped[:12],
-            flush=True,
-        )
-        return after
-
-    wall_mod._without_proven_annotation_cycles = _counted
+    # Live withhold is unwired. This tool reports current production faces only.
     pdf_bytes = PDF.read_bytes()
     digest = hashlib.sha256(pdf_bytes).hexdigest()
     if digest != EXPECTED_SHA:
