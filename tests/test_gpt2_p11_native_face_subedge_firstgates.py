@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import fitz
 import pytest
 
-from tools.diag_gpt2_p11_native_face_subedge_firstgates import inspect_local_edges
+from tools.diag_gpt2_p11_native_face_subedge_firstgates import (
+    inspect_local_edges, _first_w2_w4_face_geometry_gate,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
 
 
@@ -19,10 +21,15 @@ def _source(lines):
     return drawings
 
 
-def _scope(*, fragments, excludes=(), viewport=(0, 0, 500, 500), tainted=True, grid=False):
+def _scope(*, fragments, excludes=(), viewport=(0, 0, 500, 500),
+           tainted=True, grid=False, w4_path=None):
     rec = SimpleNamespace(
         wall_candidate_id="wall-a",
-        wall_candidate=SimpleNamespace(face_a_segment_ids=("e0",), face_b_segment_ids=()),
+        wall_candidate=SimpleNamespace(
+            face_a_segment_ids=("e0",), face_b_segment_ids=(),
+            centerline_pts=(tuple(fragments[0][0][:2]), tuple(fragments[0][0][2:]))
+            if w4_path is None else w4_path,
+        ),
         source_edge_fragments=tuple(
             SimpleNamespace(
                 geometry=flat, source_primitive_ids=primitive_ids
@@ -84,6 +91,64 @@ def _marks(verified=True, *, extra=False):
 
 def _edges(out):
     return out["mark_local_subedges"][0]["original_owned_face_subedges"]
+
+
+@pytest.mark.parametrize("original,w2,w4,expected", [
+    (True, ((10,10),(60,10)), ((10,10),(60,10)),
+     "original_native_w2_w4_geometry_consistent_candidate_only"),
+    (True, ((10,10),(30,10)), ((10,10),(60,10)),
+     "surviving_w2_fragment_missing_native_span"),
+    (False, ((10,10),(60,10)), ((10,10),(20,20)),
+     "surviving_w2_span_has_no_indexed_original_native_support"),
+    (False, ((10,10),(30,10)), ((10,10),(60,10)),
+     "w4_candidate_path_has_no_surviving_w2_or_indexed_native_span"),
+    (False, ((10,10),(30,10)), ((10,10),(20,20)),
+     "planar_face_subedge_not_in_w4_w2_native_path"),
+])
+def test_source_w2_w4_boundary_first_stage_classification(original,w2,w4,expected):
+    fragment = SimpleNamespace(geometry=(*w2[0],*w2[1]))
+    report = _first_w2_w4_face_geometry_gate(
+        atom=((35,10),(40,10)), w4_centerline=w4,
+        w2_fragments=(fragment,),
+        native_covering_ids=("d0i0",) if original else (),
+        native_unavailable=False,
+    )
+    assert report["first_geometry_path_disagreement"] == expected
+    assert not report["room_authority_granted"]
+
+
+def test_original_source_unavailable_never_falls_back_to_w2_or_w4_paint():
+    segment = SimpleNamespace(geometry=(10,10,60,10))
+    result = _first_w2_w4_face_geometry_gate(
+        atom=((35,10),(40,10)), w4_centerline=((10,10),(60,10)),
+        w2_fragments=(segment,), native_covering_ids=(),
+        native_unavailable=True,
+    )
+    assert result["source_indexed_native_ink_spans_face_subedge"] is None
+    assert result["first_geometry_path_disagreement"] == "original_indexed_source_unavailable"
+
+
+def test_w4_exact_diagonal_deviation_from_original_native_grid_stays_negative():
+    # A skewed W4 centerline may enclose a W5 face; neither the surviving
+    # original W2 axis line nor original ink proves that diagonal.
+    source = _source([((10, 10), (10, 60))])
+    wall = _scope(
+        fragments=(((10,10,10,60),("d0i0",)),),
+        w4_path=((10,10),(10.25,59.8)),
+    )
+    result = inspect_local_edges(
+        wall=wall, witnesses=_witnesses(edge=((10,10),(10.25,59.8))),
+        marks=_marks(), drawings=source,
+    )
+    edge, = _edges(result)
+    gate=edge["first_original_w2_w4_planar_geometry_gate"]
+    assert gate["producer_w4_centerline_spans_face_subedge"] is True
+    assert gate["surviving_w2_geometry_spans_face_subedge"] is False
+    assert gate["source_indexed_native_ink_spans_face_subedge"] is False
+    assert gate["first_geometry_path_disagreement"] == (
+        "w4_candidate_path_has_no_surviving_w2_or_indexed_native_span"
+    )
+    assert not result["physical_room_published"]
 
 
 def test_direct_native_ink_and_existing_w2_full_span_preserved_without_room_grant():
