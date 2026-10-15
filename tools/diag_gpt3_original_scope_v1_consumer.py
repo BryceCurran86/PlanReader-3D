@@ -101,8 +101,13 @@ def _verified_join(
     producer = report.get("original_production_receipts")
     _require(isinstance(producer, Mapping), "original producer quantities unavailable")
     originals = _unique(producer.get("quantities", ()), "quantity_id")
+    # Check ALL physical source objects, including source-negative/hostless
+    # objects without measured quantity; do not let a duplicate disappear
+    # simply because it never reached the customer projection.
+    complete_opening_inventory = _unique(report.get("openings", ()), "physical_opening_id")
     observed = _unique(
-        [row for row in report.get("openings", ()) if row.get("quantity_id") is not None],
+        [row for row in complete_opening_inventory.values()
+         if row.get("quantity_id") is not None],
         "quantity_id",
     )
     sealed_by_id = {row.quantity_id: row for row in sealed.quantities}
