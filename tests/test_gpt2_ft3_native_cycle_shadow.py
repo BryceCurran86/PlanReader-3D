@@ -52,3 +52,49 @@ def test_seed_missing_abstains():
     r=inspect_native_component(Page([]),"d999i0")
     assert r["status"]=="SEED_NOT_FOUND"
     assert r["role_granted"] is False
+
+def test_sub_rounding_gap_is_not_an_exact_source_junction():
+    # Before the fix rounding to 4dp incorrectly closed this native gap.
+    ds = [
+        drawing((0, 0), (2, 0)),
+        drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)),
+        drawing((0, 2.00004), (0, 0)),
+    ]
+    before = repr(ds)
+    r = inspect_native_component(Page(ds), "d0i0")
+    assert r["component_edge_count"] == 3
+    assert not r["complete_exact_cycle"]
+    assert r["source_segments"] == [r["source_segments"][i] for i in range(3)]
+    assert repr(ds) == before
+
+
+def test_sub_rounding_source_edge_is_not_erased():
+    # Five real native edges, one tiny edge previously quantised to zero.
+    ds = [
+        drawing((0, 0), (2, 0)),
+        drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)),
+        drawing((0, 2), (0, 0.00003)),
+        drawing((0, 0.00003), (0, 0)),
+    ]
+    r = inspect_native_component(Page(ds), "d0i0")
+    assert r["component_edge_count"] == 5
+    assert r["complete_exact_cycle"]
+    assert {edge["id"] for edge in r["source_segments"]} == {
+        "d0i0", "d1i0", "d2i0", "d3i0", "d4i0"
+    }
+
+
+def test_shared_endpoint_branch_stays_ambiguous_and_preserves_all_edges():
+    ds = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2), (0, 0)),
+        drawing((2, 2), (3, 3)), drawing((3, 3), (4, 2)),
+        drawing((4, 2), (2, 2)),
+    ]
+    r = inspect_native_component(Page(ds), "d0i0")
+    assert r["component_edge_count"] == 7
+    assert not r["complete_exact_cycle"]
+    assert not r["role_granted"]
+    assert r["structural_role"] == "UNRESOLVED"
