@@ -1,0 +1,74 @@
+name: GPT MAX Original Producer Opening Scope Receipts
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_producer_opening_scope_receipts.py"
+      - "tests/test_gptmax_producer_opening_scope_receipts.py"
+      - ".github/workflows/test-gptmax-producer-opening-scope-receipts.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  original-producer-synthetic-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_producer_opening_scope_receipts.py tests/test_gpt3_source_scope_lineage_audit.py tests/test_live_opening_claim_source_closed_export.py
+          ruff check --select F821,F823 tools/diag_gptmax_producer_opening_scope_receipts.py tests/test_gptmax_producer_opening_scope_receipts.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-source-customer-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original PDF, issued source scopes and unchanged signed production
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_producer_opening_scope_receipts.py --pdf "$PDF" --page-id 3 --output artifacts/original-producer-opening-scopes.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-producer-opening-scopes.json').read_text())
+          rows=r['openings']
+          assert len(rows)==21
+          assert sum(x['host_record'] is not None for x in rows)==15
+          assert sum(x['frame_record'] is not None for x in rows)==9
+          assert sum(x['quantity_id'] is not None for x in rows)==8
+          assert r['all_original_source_host_frame_quantity_seal_customer_receipts_unchanged']
+          assert r['original_production_receipts']['customer_verification']['valid_quantity_count']==8
+          assert all(x['decision_scope_id']==x['host_record']['decision_scope_id'] for x in rows if x['host_record'])
+          assert all(not x['signed_scope_verified'] for x in rows)
+          assert not any(r[k] for k in ('signed_scope_verified','new_host_granted','new_quantity_granted','count_granted','benchmark_score_granted'))
+          assert not r['opening_universe_results']['3']['decision_scope_complete']
+          print({'original_openings':len(rows),'real_issued_host_scopes':15,'retained_signed_customer_rows':8,'signed_scope_verified':False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-producer-opening-scopes
+          path: artifacts/original-producer-opening-scopes.json
+          retention-days: 21
