@@ -327,3 +327,65 @@ def test_native_partial_ink_invalid_source_and_duplicate_queries_fail_closed():
         census_original_native_partial_linear_ink(
             drawings(), source_atoms=[((float("nan"), 0), (1, 0))]
         )
+
+
+
+def test_original_image_placements_are_not_raster_or_wall_evidence():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_image_placements,
+    )
+    class Page:
+        def get_image_info(self, *, xrefs):
+            assert xrefs is True
+            return [
+                {"bbox": (0, 0, 10, 10), "xref": 0,
+                 "width": 100, "height": 100},
+                {"bbox": (20, 20, 30, 30), "xref": 38,
+                 "width": 200, "height": 100},
+            ]
+    row = census_original_image_placements(
+        Page(), source_atoms=[((2, 2), (8, 8)), ((12, 12), (14, 14))]
+    )
+    assert row["status"] == "ORIGINAL_SOURCE_IMAGE_PLACEMENTS_SCANNED"
+    assert row["source_image_universe_complete"]
+    assert row["original_image_placement_count"] == 2
+    assert row["image_placements"][0]["original_image_xref"] == 0
+    assert [r["overlapping_original_image_placement_indices"]
+            for r in row["query_rows"]] == [[0], []]
+    assert all(q["bbox_overlap_only_not_pixel_or_wall_evidence"]
+               for q in row["query_rows"])
+    assert not row["physical_wall_or_raster_role_granted"]
+
+
+def test_image_source_malformed_bbox_is_partial_not_false_absence():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_image_placements,
+    )
+    class Page:
+        def get_image_info(self, *, xrefs):
+            return [
+                {"bbox": (0, 0, float("nan"), 10), "xref": 12,
+                 "width": 10, "height": 10},
+                {"bbox": (0, 0, 10, 10), "xref": 14,
+                 "width": 10, "height": 10},
+            ]
+    row = census_original_image_placements(
+        Page(), source_atoms=[((1, 1), (9, 9))]
+    )
+    assert row["status"] == "ORIGINAL_SOURCE_IMAGE_PLACEMENT_PARTIAL"
+    assert not row["source_image_universe_complete"]
+    assert row["original_invalid_image_placement_indices"] == [0]
+    assert row["query_rows"][0]["overlapping_original_image_placement_indices"] == [1]
+    assert not row["physical_wall_or_raster_role_granted"]
+
+
+def test_missing_image_api_remains_unknown_not_no_images():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_image_placements,
+    )
+    report = census_original_image_placements(
+        object(), source_atoms=[((1, 1), (9, 9))]
+    )
+    assert report["status"] == "ORIGINAL_SOURCE_IMAGE_API_UNAVAILABLE"
+    assert not report["source_image_universe_complete"]
+    assert not report["physical_wall_or_raster_role_granted"]
