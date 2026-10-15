@@ -63,9 +63,11 @@ def test_sub_rounding_gap_is_not_an_exact_source_junction():
     ]
     before = repr(ds)
     r = inspect_native_component(Page(ds), "d0i0")
-    assert r["component_edge_count"] == 3
+    assert r["component_edge_count"] == 4
     assert not r["complete_exact_cycle"]
-    assert r["source_segments"] == [r["source_segments"][i] for i in range(3)]
+    degrees = {tuple(entry["point"]): entry["degree"] for entry in r["endpoint_degrees"]}
+    assert degrees[(0.0, 2.0)] == 1
+    assert degrees[(0.0, 2.00004)] == 1
     assert repr(ds) == before
 
 
