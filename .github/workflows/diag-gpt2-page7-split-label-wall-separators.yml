@@ -335,6 +335,22 @@ jobs:
                   )
                   assert receipt["candidate_only_no_wall_or_room_authority"]
                   assert not receipt["physical_room_closed_or_metric_quantity_published"]
+                  # Source W4 path is producer-owned; a face-only diagonal must
+                  # NOT be misdiagnosed as W2 centroid movement.
+                  w4=receipt["w4_centerline_geometry_first_gate"]
+                  assert w4["status"] in (
+                      "original_w4_centerline_full_span_observed",
+                      "original_w4_centerline_partial_only",
+                      "original_w4_centerline_no_collinear_support",
+                  ), w4
+                  assert not w4["source_w4_path_match_is_structural_wall_role"]
+                  assert not w4["source_room_face_repaired"]
+                  assert receipt["first_unrepresented_geometry_stage_diagnostic_only"] in (
+                      "UNAVAILABLE",
+                      "W2_SOURCE_FRAGMENTS_TO_W4_CENTERLINE",
+                      "W4_CENTERLINE_TO_FACE_SUBEDGE",
+                      "BOTH_W2_SOURCE_AND_W4_GEOMETRY_OBSERVED_NOT_WALL_AUTHORITY",
+                  )
                   freezer_w2_first_gates.append(receipt)
           print("GPT2_FREEZER_ORIGINAL_W4_W2_NATIVE_SOURCE_ANCESTRY",json.dumps({
               "source_sha256":sha,
