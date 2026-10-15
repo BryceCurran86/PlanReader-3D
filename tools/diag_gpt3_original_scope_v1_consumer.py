@@ -297,24 +297,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    sealed_payload = _parse_evidence_json(args.sealed_run.read_text(encoding="utf-8"))
-    customer_rows = _parse_evidence_json(args.customer_rows.read_text(encoding="utf-8"))
-    output = verify_original_scope_to_v1_customer(
-        args.pdf.read_bytes(), page_ids=args.page_id,
-        decoded_page_ids=args.decoded_page_id, sealed_payload=sealed_payload,
-        customer_rows=customer_rows, expected_source_sha256=args.expected_source_sha256,
-        expected_snapshot_id=args.expected_snapshot_id, expected_project_id=args.project_id,
-    )
     # A diagnostic output is NEVER allowed to replace its source, signed V1
-    # customer inputs, frozen reference files or any existing report. Restrict
-    # generated receipt destinations to the local artifacts workspace and
-    # require an exclusive create, including protection against symlinks.
+    # customer inputs, frozen reference files or any existing report. Refuse
+    # alias paths BEFORE any expensive original-source replay.
     artifacts_root = Path("artifacts").resolve()
     output_path = args.output.resolve()
     if not output_path.is_relative_to(artifacts_root) or output_path == artifacts_root:
         raise ValueError("diagnostic output must be inside the artifacts workspace")
     if args.output.exists() or args.output.is_symlink():
         raise FileExistsError("diagnostic output already exists; never overwrite signed inputs")
+
+    source_before = args.pdf.read_bytes()
+    sealed_before = args.sealed_run.read_bytes()
+    customer_before = args.customer_rows.read_bytes()
+    sealed_payload = _parse_evidence_json(sealed_before.decode("utf-8"))
+    customer_rows = _parse_evidence_json(customer_before.decode("utf-8"))
+    output = verify_original_scope_to_v1_customer(
+        source_before, page_ids=args.page_id,
+        decoded_page_ids=args.decoded_page_id, sealed_payload=sealed_payload,
+        customer_rows=customer_rows, expected_source_sha256=args.expected_source_sha256,
+        expected_snapshot_id=args.expected_snapshot_id, expected_project_id=args.project_id,
+    )
+    # Fail closed if an original document or persisted V1/customer input was
+    # modified/replaced during the original PDF replay. Never emit a receipt
+    # from a stale in-memory version of changed on-disk evidence.
+    if (
+        args.pdf.read_bytes() != source_before
+        or args.sealed_run.read_bytes() != sealed_before
+        or args.customer_rows.read_bytes() != customer_before
+    ):
+        raise OriginalSourceScopeConsumerError(
+            "original source or persisted V1 customer evidence changed during replay"
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(output, sort_keys=True, indent=2) + "\n")
