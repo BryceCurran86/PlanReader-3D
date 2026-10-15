@@ -62,6 +62,18 @@ jobs:
           assert r['snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
           assert r['original_source_observation_count']==8 and len(r['per_observation'])==8
           assert r['changed_observation_decision_count']>=1
+          # Source overlap is NOT distinct physical-opening authority.
+          assert r['source_member_collision_count']==1
+          collision=r['new_physical_vs_original_source_member_collisions'][0]
+          assert collision['original_physical_opening_id']=='physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f'
+          assert collision['new_physical_opening_id']=='physical_opening_existence_993560b2bdf85cdd668047edd7043f81'
+          assert collision['shared_source_observation_ids']==[
+              'source_observation_119ef8ca51e38a54cfd660353d490774',
+              'source_observation_460e69069e159690e0e18ca53dcbeb46']
+          assert collision['shared_observation_count']==2
+          assert collision['independent_identity_proven'] is False
+          assert collision['source_member_partition_proven'] is False
+          assert collision['publication_granted'] is False
           old='source_observation_119ef8ca51e38a54cfd660353d490774'
           new='source_observation_39961957b3140d852383b76b25574113'
           assert r['old_representative']==old and r['shadow_representative']==new
