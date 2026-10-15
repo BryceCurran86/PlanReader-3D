@@ -37,15 +37,17 @@ def raw_and_w4_ancestry_audit(source: dict, hostless: dict,
     }
     if len(records) != len(wall["records"]):
         raise ValueError("duplicate W4 identity")
-    raw = {
-        g["raw_candidate_id"]: g
-        for g in source["baseline_source_audit"]["raw_registered_gaps"]
+    selected_raw = [
+        g for g in source["baseline_source_audit"]["raw_registered_gaps"]
         if g["source_scope"]["source_sha256"] == source_sha256
         and g["source_scope"]["snapshot_id"] == snapshot_id
         and g["source_scope"]["document_id"] == wall["document_id"]
         and g["source_scope"]["revision_id"] == wall["revision_id"]
         and g["source_scope"]["page_id"] == wall["page_id"]
-    }
+    ]
+    raw = {g["raw_candidate_id"]: g for g in selected_raw}
+    if len(selected_raw) != len(raw):
+        raise ValueError("duplicate original raw candidate id in selected root")
     if len(raw) != old["raw_candidate_count"]:
         raise ValueError("incomplete or duplicated original raw producer receipts")
     originals = tuple(old["unresolved_candidate_ids"])
@@ -85,10 +87,29 @@ def raw_and_w4_ancestry_audit(source: dict, hostless: dict,
         if len(owners) > 1
     ]
     six = hostless["cases"]
+    originals = {
+        c["physical_opening_id"]: c for c in source["baseline_receipts"]["canonical"]
+    }
+    source_hosts = {
+        h["opening_identity_id"]: h for h in source["baseline_receipts"]["hosts"]
+    }
+    if (len(originals) != len(source["baseline_receipts"]["canonical"])
+            or len(source_hosts) != len(source["baseline_receipts"]["hosts"])):
+        raise ValueError("duplicate original physical opening or host receipts")
     if len({c["physical_opening_id"] for c in six}) != len(six):
         raise ValueError("duplicate hostless physical opening")
     chain_results = []
     for c in sorted(six, key=lambda x: x["physical_opening_id"]):
+        physical_id = c["physical_opening_id"]
+        real = originals.get(physical_id)
+        real_host = source_hosts.get(physical_id)
+        if (real is None or real_host is None
+                or real["source_sha256"] != source_sha256
+                or real["snapshot_id"] != snapshot_id
+                or real_host["host_wall_id"] is not None
+                or real_host["record_id"] is not None
+                or "no_authenticated_host_wall_band" not in real_host["reason_codes"]):
+            raise ValueError("candidate not originally source-authenticated hostless")
         if (c["first_stage"] != "UNPROVEN_ORIGINAL_SOURCE_W4_STRUCTURAL_SIDE_MEMBERSHIP"
                 or c["host_granted"] or c["matched_source_observation_count"] < 6):
             raise ValueError("hostless input claims unearned W4 authority")
@@ -115,8 +136,10 @@ def raw_and_w4_ancestry_audit(source: dict, hostless: dict,
                             identity["source_primitive_ids"])):
                     raise ValueError("W4 source-edge/primitive identity conflict")
                 original = fragment["geometry"]
-                if len(original) != 4:
-                    raise ValueError("original source edge geometry missing")
+                if len(original) != 4 or not all(
+                        math.isfinite(float(value)) for value in
+                        (*start, *end, *original)):
+                    raise ValueError("original source edge geometry missing or nonfinite")
                 deltas.extend((
                     math.hypot(float(start[0]) - float(original[0]),
                                float(start[1]) - float(original[1])),
