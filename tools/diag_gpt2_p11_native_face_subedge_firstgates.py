@@ -221,10 +221,13 @@ def inspect_local_edges(*, wall, witnesses, marks, drawings):
     }
 
 
-def replay(pdf_bytes: bytes, *, source_page: int, code: str):
+def replay(pdf_bytes: bytes, *, source_page: int, code: str,
+           trace_original_w2_graph: bool = False):
     """Replay producer-authenticated marks, W4 and face witnesses in one revision."""
     if type(pdf_bytes) is not bytes or type(source_page) is not int or source_page < 1:
         raise ValueError("original_source_scope_unavailable")
+    if type(trace_original_w2_graph) is not bool:
+        raise ValueError("w2_original_graph_trace_must_be_explicit_boolean")
     if type(code) is not str or not code.isalnum() or not code.isupper():
         raise ValueError("original_material_code_invalid")
     sha = hashlib.sha256(pdf_bytes).hexdigest()
@@ -295,7 +298,27 @@ def replay(pdf_bytes: bytes, *, source_page: int, code: str):
             marks=plan_marks["mark_local_boundary_first_gates"],
             drawings=drawings,
         )
+        stage_a_w3 = None
+        if trace_original_w2_graph:
+            from tools.diag_gpt2_p11_w2_graph_node_firstgate import (
+                replay_graph_for_original_source_scope,
+            )
+            missing = [
+                edge
+                for mark in local["mark_local_subedges"]
+                for edge in mark["original_owned_face_subedges"]
+                if edge["first_original_w2_w4_planar_geometry_gate"][
+                    "first_geometry_path_disagreement"
+                ] == "w4_candidate_path_has_no_surviving_w2_or_indexed_native_span"
+            ]
+            stage_a_w3 = replay_graph_for_original_source_scope(
+                source=source, published=published, pdf_bytes=pdf_bytes,
+                original_wall_scope=wall, source_page=source_page,
+                first_failures=missing,
+            )
         results.append({
+            **({"original_w2_graph_node_and_w3_junction_first_gates": stage_a_w3}
+               if trace_original_w2_graph else {}),
             "document_id": wall.document_id,
             "revision_id": wall.revision_id, "snapshot_id": wall.snapshot_id,
             "source_sha256": wall.source_sha256, "page_id": wall.page_id,
@@ -324,12 +347,16 @@ def main():
     ap.add_argument("--sha", required=True)
     ap.add_argument("--page", type=int, required=True)
     ap.add_argument("--code", required=True)
+    ap.add_argument("--trace-original-w2-graph", action="store_true")
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
     original = args.pdf.read_bytes()
     if hashlib.sha256(original).hexdigest() != args.sha:
         raise ValueError("original_pdf_sha_check_failed")
-    report = replay(original, source_page=args.page, code=args.code)
+    report = replay(
+        original, source_page=args.page, code=args.code,
+        trace_original_w2_graph=args.trace_original_w2_graph,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n")
     print("GPT2_MARK_LOCAL_NATIVE_SUBEDGE_GATES", json.dumps({
