@@ -47,7 +47,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
       - name: Original Lot16 SHA/F07/text first gate - zero commercial grants
         env:
           PYTHONPATH: .
