@@ -22,6 +22,19 @@ from tools.diag_ft3_p11_p7_floor_correspondence import (
 )
 
 
+def indexed_original_native_primitives(
+    segments: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Mapping[str, Any]]:
+    """Never overwrite different PDF native primitives with the same address."""
+    out = {}
+    for segment in segments:
+        identity = segment.get("id")
+        if type(identity) is not str or not identity or identity in out:
+            raise ValueError("missing or duplicate original indexed PDF primitive")
+        out[identity] = segment
+    return out
+
+
 def source_fragments_on_documented_side(
     box: Sequence[float], side: str,
     originals: Mapping[str, Mapping[str, Any]],
@@ -158,7 +171,7 @@ def original_source_side_pair_census(
         raise ValueError("original source sha mismatch")
     evidence = _w4_non_grid_evidence(payload,sha)
     native = {
-        page:{row["id"]:row for row in _native_segments(payload,page)}
+        page:indexed_original_native_primitives(_native_segments(payload,page))
         for page in (SOURCE_PAGE,MARK_PAGE)
     }
     lines = {
