@@ -95,6 +95,138 @@ def census_original_native_linear_ink(drawings, *, source_atoms):
 
 
 
+
+def census_original_native_partial_linear_ink(drawings, *, source_atoms):
+    """Report *all* original indexed line/rect parts on queried atom spans.
+
+    Completeness is only for this native geometric subuniverse. Even a
+    zero-gap stroke-painted union does not authenticate wall/room roles.
+    """
+    import math
+
+    if not isinstance(drawings, (list, tuple)) or not drawings:
+        raise ValueError("original_native_drawing_universe_unavailable")
+    atoms = [_valid_edge(atom) for atom in source_atoms]
+    if not atoms:
+        raise ValueError("missing_original_producer_atom_queries")
+    if len(set(atoms)) != len(atoms):
+        raise ValueError("duplicate_original_producer_atom_query")
+    eps = 0.0001
+
+    def coverage(parts, length):
+        intervals = sorted(
+            (float(row["overlap_start_pt"]), float(row["overlap_end_pt"]))
+            for row in parts
+        )
+        gaps = []
+        reached = 0.
+        for lo, hi in intervals:
+            if lo > reached + eps:
+                gaps.append([reached, lo])
+            reached = max(reached, hi)
+        if reached < length - eps:
+            gaps.append([reached, length])
+        return {
+            "source_part_interval_count": len(intervals),
+            "source_query_gaps_pt": gaps,
+            "source_query_geometrically_covered_diagnostic_only": (
+                len(gaps) == 0
+            ),
+        }
+
+    original = []
+    invalid = set()
+    for path, drawing in enumerate(drawings):
+        for idx, item in enumerate(drawing.get("items") or ()):
+            if not item or item[0] not in ("l", "re"):
+                continue
+            shape = str(item[0])
+            sides = (None,) if shape == "l" else (0, 1, 2, 3)
+            for side in sides:
+                src_id = f"d{path}i{idx}" + (
+                    "" if side is None else f"e{side}"
+                )
+                try:
+                    if shape == "l":
+                        points = (
+                            (float(item[1].x), float(item[1].y)),
+                            (float(item[2].x), float(item[2].y)),
+                        )
+                    else:
+                        box = fitz.Rect(item[1])
+                        vertices = (
+                            (float(box.x0), float(box.y0)),
+                            (float(box.x1), float(box.y0)),
+                            (float(box.x1), float(box.y1)),
+                            (float(box.x0), float(box.y1)),
+                        )
+                        points = (vertices[side], vertices[(side + 1) % 4])
+                    a, b = _valid_edge(points)
+                except (IndexError, KeyError, AttributeError, TypeError, ValueError,
+                        OverflowError):
+                    invalid.add(src_id)
+                    continue
+                original.append((src_id, a, b, drawing))
+    reports = []
+    for start, stop in atoms:
+        vx = stop[0] - start[0]
+        vy = stop[1] - start[1]
+        length = math.hypot(vx, vy)
+        ux, uy = vx / length, vy / length
+        parts = []
+        for ref, p, q, drawing in original:
+            normal_p = abs((p[0] - start[0]) * uy - (p[1] - start[1]) * ux)
+            normal_q = abs((q[0] - start[0]) * uy - (q[1] - start[1]) * ux)
+            if max(normal_p, normal_q) > eps:
+                continue
+            t0 = (p[0] - start[0]) * ux + (p[1] - start[1]) * uy
+            t1 = (q[0] - start[0]) * ux + (q[1] - start[1]) * uy
+            lo, hi = max(0., min(t0, t1)), min(length, max(t0, t1))
+            if hi - lo <= eps:
+                continue
+            ink_kind = str(drawing.get("type") or "")
+            parts.append({
+                "original_native_primitive_ref": ref,
+                "native_source_edge_pdf_pts": [list(p), list(q)],
+                "overlap_start_pt": lo,
+                "overlap_end_pt": hi,
+                "native_drawing_kind": ink_kind,
+                "source_ink_stroked": ink_kind in ("s", "fs"),
+                "source_ink_fill_only": ink_kind == "f",
+                "native_stroke_color": drawing.get("color"),
+                "native_fill_color": drawing.get("fill"),
+                "native_layer": drawing.get("layer"),
+                "original_ink_segment_not_structural_role": True,
+            })
+            if len(parts) > 10000:
+                raise ValueError("original_native_partial_source_safety_bound")
+        parts.sort(key=lambda row: (
+            row["overlap_start_pt"], row["overlap_end_pt"],
+            row["original_native_primitive_ref"],
+        ))
+        stroke_parts = [p for p in parts if p["source_ink_stroked"]]
+        reports.append({
+            "original_source_candidate_atom_pdf_pts": [list(start), list(stop)],
+            "original_native_linear_partial_receipts": parts,
+            "all_native_paint_geometric_coverage": coverage(parts, length),
+            "stroke_only_geometric_coverage": coverage(stroke_parts, length),
+            "source_structural_wall_role_authenticated": False,
+            "source_room_ring_closed": False,
+            "metric_quantity_published": False,
+        })
+    return {
+        "source_query_atom_count": len(atoms),
+        "original_indexed_native_line_rect_primitive_count": len(original),
+        "original_invalid_native_line_rect_refs": sorted(invalid),
+        "all_original_native_line_rect_items_examined": True,
+        "complete_ink_universe_including_raster_clip_and_curves": False,
+        "source_native_linear_partial_queries": reports,
+        "source_structural_wall_role_authenticated": False,
+        "new_commercial_quantities": [],
+        "diagnostic_only": True,
+    }
+
+
 def census_original_native_cubic_ink(drawings, *, source_atoms):
     """Enumerate complete indexed cubic ink, not walls or room boundaries.
 
@@ -213,6 +345,9 @@ def replay_original_source(pdf_bytes: bytes,*, original_sha256: str,
         result["original_native_cubic_ink_shadow"]=census_original_native_cubic_ink(
             native_drawings,source_atoms=source_atoms
         )
+        result["original_native_linear_partial_ink_shadow"]=census_original_native_partial_linear_ink(
+            native_drawings,source_atoms=source_atoms
+        )
         result["original_pdf_page_count"]=doc.page_count
     result["original_source_sha256"]=actual
     result["original_page"]=page_no
@@ -244,6 +379,10 @@ def main():
         "indexed_exact_native_cubic_fullspan_counts":[
             row["original_indexed_cubic_full_span_count"]
             for row in report["original_native_cubic_ink_shadow"]["source_native_cubic_ink_queries"]
+        ],
+        "indexed_native_stroke_only_partial_gap_counts":[
+            len(row["stroke_only_geometric_coverage"]["source_query_gaps_pt"])
+            for row in report["original_native_linear_partial_ink_shadow"]["source_native_linear_partial_queries"]
         ],
         "new_commercial_quantities":[],
     },sort_keys=True))
