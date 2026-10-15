@@ -47,12 +47,16 @@ def _unique(rows: Sequence[Mapping[str, Any]], field: str) -> dict[str, Mapping[
 
 
 def _is_stale(record: Mapping[str, Any]) -> bool:
-    if record.get("is_stale") is True or record.get("is_superseded") is True:
-        return True
-    metadata = record.get("metadata")
-    return isinstance(metadata, Mapping) and (
-        metadata.get("is_stale") is True or metadata.get("is_superseded") is True
-    )
+    # A persisted producer boolean must really be False, not the truthy
+    # string "false", an integer 0/1, null, or a caller-normalized alias.
+    # An omitted legacy marker is not evidence of a stale source.
+    for scope in (record, record.get("metadata")):
+        if not isinstance(scope, Mapping):
+            continue
+        for marker in ("is_stale", "is_superseded"):
+            if marker in scope and scope[marker] is not False:
+                return True
+    return False
 
 
 def _verified_join(
