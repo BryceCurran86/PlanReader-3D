@@ -268,3 +268,26 @@ def test_synthetic_source_inventory_with_nondict_record_fails_closed(original):
     bad["original_production_receipts"]["quantities"].append("not-a-source-record")
     with pytest.raises(consumer.OriginalSourceScopeConsumerError):
         consumer._verified_join(bad, **_args(report))
+
+
+def test_duplicate_unmeasured_physical_source_identity_never_disappears_from_audit(original):
+    _, report = original
+    bad = deepcopy(report)
+    unmeasured_duplicate = deepcopy(bad["openings"][0])
+    unmeasured_duplicate["quantity_id"] = None
+    bad["openings"].append(unmeasured_duplicate)
+    with pytest.raises(consumer.OriginalSourceScopeConsumerError,
+                       match="reused original source identity"):
+        consumer._verified_join(bad, **_args(report))
+
+
+@pytest.mark.parametrize("untrusted_rows", [
+    "a string is not an original producer inventory",
+    {"quantity_id": "this is not a list"},
+])
+def test_imported_producer_quantity_inventory_requires_an_array(original, untrusted_rows):
+    _, report = original
+    bad = deepcopy(report)
+    bad["original_production_receipts"]["quantities"] = untrusted_rows
+    with pytest.raises(consumer.OriginalSourceScopeConsumerError):
+        consumer._verified_join(bad, **_args(report))
