@@ -104,3 +104,19 @@ def test_foreign_side_and_nonfinite_registration_fail_closed():
         source_fragments_on_documented_side(BOX,"fake",{}, {}, {})
     with pytest.raises(ValueError,match="non-finite source registration"):
         compare_indexed_original_side([],[],shift_along_side=float("inf"))
+
+
+
+def test_source_index_duplicate_ids_and_missing_source_addresses_abstain():
+    from tools.diag_gpt2_ft3_cross_sheet_native_wall_pairs import (
+        indexed_original_native_primitives,
+    )
+    one={"id":"d10i1", **seg(0,0,10,0)}
+    two={"id":"d20i1", **seg(0,5,10,5)}
+    assert sorted(indexed_original_native_primitives([two,one]))==["d10i1","d20i1"]
+    with pytest.raises(ValueError,match="duplicate original"):
+        indexed_original_native_primitives([one,{**one,"x2":42}])
+    with pytest.raises(ValueError,match="duplicate original"):
+        indexed_original_native_primitives([one,one])
+    with pytest.raises(ValueError,match="missing or duplicate"):
+        indexed_original_native_primitives([{"id":None,**seg(0,0,10,0)}])
