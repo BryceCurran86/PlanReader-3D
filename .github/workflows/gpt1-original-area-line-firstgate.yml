@@ -75,6 +75,18 @@ jobs:
           assert data['diagnostic_only'] is True
           assert data['published_quantities']==[] and data['customer_rows']==[]
           assert data['benchmark_scored'] is False
+          # Recognize authentic native bedroom labels independently of area
+          # words. Do not synthesize a room face or bind either by proximity.
+          labels={v['literal_original_room_label'] for v in data['literal_room_label_candidates']}
+          assert {'BED 1','BED 2','BED 3'}.issubset(labels), sorted(labels)
+          assert all(not v['source_physical_room_face_authenticated']
+                     and not v['area_annotation_to_label_binding_granted']
+                     and not v['quantity_evidence_published']
+                     for v in data['literal_room_label_candidates'])
+          assert data['first_failure_counts'].get(
+              'source_physical_room_face_and_exact_area_line_owner_unproven',0)==3
+          assert data['first_failure_counts'].get(
+              'source_floor_plan_viewport_unavailable_or_ambiguous',0)==4
           assert all(not row['source_physical_room_face_authenticated']
                      and not row['quantity_evidence_published']
                      and not row['room_area_measurement_authority_granted']
