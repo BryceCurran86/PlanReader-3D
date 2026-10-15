@@ -83,6 +83,22 @@ jobs:
                      and not v['area_annotation_to_label_binding_granted']
                      and not v['quantity_evidence_published']
                      for v in data['literal_room_label_candidates'])
+          # Competing native WIR words are DISTINCT original source events;
+          # neither can be silently dropped or used as its sibling's room.
+          wir=[v for v in data['literal_room_label_candidates']
+               if v['literal_original_room_label']=='WIR']
+          assert len(wir)==2
+          assert wir[0]['source_text_observation_ids'] != wir[1]['source_text_observation_ids']
+          plan_ids=set(data['source_plan_positive_viewport_ids'])
+          for title in ('BED 1','BED 2','BED 3'):
+              matching=[v for v in data['literal_room_label_candidates']
+                        if v['literal_original_room_label']==title]
+              assert len(matching)==1 and matching[0]['source_text_integrity_all_words']
+              assert set(matching[0]['containing_source_floor_plan_viewport_ids'])==plan_ids
+              assert matching[0]['first_unclosed_gate']=='source_room_face_and_exact_label_owner_unproven'
+          assert data['label_first_failure_counts'].get(
+              'source_room_label_text_integrity_unavailable',0)>=2
+
           assert data['first_failure_counts'].get(
               'source_physical_room_face_and_exact_area_line_owner_unproven',0)==3
           assert data['first_failure_counts'].get(
