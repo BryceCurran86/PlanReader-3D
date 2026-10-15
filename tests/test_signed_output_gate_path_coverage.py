@@ -36,13 +36,13 @@ SIGNED_OUTPUT_REPLAYS = {
 
 
 def pull_request_paths(workflow_text: str) -> list[str] | None:
-    """``on.pull_request.paths`` patterns, or ``None`` when the trigger is unfiltered / absent."""
+    """``on.pull_request.paths`` patterns, or ``None`` ONLY when an actual PR trigger has no paths filter."""
     block = re.search(r"^on:\s*\n((?:[ \t]+.*\n|\n)*)", workflow_text, re.M)
     if not block:
-        return None
+        raise ValueError("signed-output workflow is missing a readable on: trigger")
     pr = re.search(r"^  pull_request:[ \t]*\n((?:    .*\n|\n)*)", block.group(1), re.M)
     if not pr:
-        return None
+        raise ValueError("signed-output workflow is missing a pull_request trigger")
     lines = pr.group(1).splitlines()
     for index, line in enumerate(lines):
         if re.fullmatch(r"    paths:[ \t]*", line):
@@ -203,5 +203,22 @@ def test_workflow_paths_parser_reads_only_the_pull_request_filter():
     with pytest.raises(ValueError):
         pull_request_paths("on:\n  pull_request:\n    paths:\n      # nothing\n  workflow_dispatch:\n")
     assert pull_request_paths("on:\n  pull_request:\n    branches: [main]\n") is None
-    assert pull_request_paths("on:\n  push:\n    branches: [main]\n") is None
+    with pytest.raises(ValueError, match="missing a pull_request trigger"):
+        pull_request_paths("on:\n  push:\n    branches: [main]\n")
     assert has_paths_ignore("on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n")
+
+ 
+def test_missing_or_disguised_pull_request_trigger_fails_closed():
+    import pytest
+
+    for workflow in (
+        "name: Only push\\non:\\n  push:\\n    branches: [main]\\n",
+        "name: Manual only\\non:\\n  workflow_dispatch:\\n",
+        "name: Commented-out event\\n# pull_request:\\non:\\n  push:\\n",
+        "name: No trigger\\njobs:\\n  test:\\n    runs-on: ubuntu-latest\\n",
+    ):
+        with pytest.raises(ValueError, match="missing .*trigger"):
+            pull_request_paths(workflow)
+
+    # Genuinely unfiltered pull requests still run for every file change.
+    assert pull_request_paths("on:\\n  pull_request:\\n    branches: [main]\\n") is None
