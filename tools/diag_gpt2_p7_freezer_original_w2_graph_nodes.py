@@ -23,7 +23,7 @@ from pb_wall_room_topology_junction_classifier import classify_junctions
 
 
 def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_walls,
-                                selected_wall_ids):
+                                selected_wall_ids, junctions=()):
     """Require exact whole W4 candidate parity and every selected W2 lineage."""
     source_records = tuple(original_wall_scope.records)
     expected = {r.wall_candidate_id: r for r in source_records}
@@ -46,6 +46,19 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
     nodes = {node["id"]: node for node in graph["nodes"]}
     if len(edges) != len(active) or len(nodes) != len(graph["nodes"]):
         raise ValueError("original_w2_graph_duplicate_identity")
+    junction_by_position = {}
+    for j in junctions:
+        position = tuple(round(float(v), 6) for v in j.position_pt)
+        if len(position) != 2 or not all(math.isfinite(v) for v in position):
+            raise ValueError("original_w3_junction_position_invalid")
+        junction_by_position.setdefault(position, []).append({
+            "original_w3_node_identity": str(j.node_id),
+            "original_w3_junction_type": j.junction_type.value,
+            "original_w3_junction_status": j.status.value,
+            "original_w3_reason_codes": list(j.reason_codes),
+            "w3_incident_edge_ids": sorted(j.incident_wall_candidate_ids),
+            "source_structural_role_granted": False,
+        })
     rows = []
     for wall_id in wall_ids:
         producer = expected[wall_id]
@@ -96,6 +109,26 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
                     row["w2_source_edge_id"],
                     row["original_endpoint_pdf_pts"],
                 ))
+                # Rounded native-coordinate groups are read-only; they never
+                # change W2 source identity or the producer's 2.5pt snapping.
+                raw_groups = {}
+                for item in incidence:
+                    xy = item["original_endpoint_pdf_pts"]
+                    key = tuple(round(v, 6) for v in xy)
+                    raw_groups.setdefault(key, []).append(item)
+                coordinate_groups = [
+                    {
+                        "native_coordinate_6dp_report_only": list(key),
+                        "original_retained_source_edge_ids": [
+                            x["w2_source_edge_id"] for x in values
+                        ],
+                        "retained_incident_endpoint_count": len(values),
+                        "indexed_parent_source_ids": sorted({
+                            p for x in values for p in x["original_indexed_parent_ids"]
+                        }),
+                    }
+                    for key, values in sorted(raw_groups.items())
+                ]
                 endpoints.append({
                     "w2_graph_node_id": node_id,
                     "w2_source_edge_endpoint": label,
@@ -106,6 +139,15 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
                     ),
                     "source_snap_samples": node.get("samples"),
                     "source_node_degree": node.get("degree"),
+                    "retained_original_coordinate_groups": coordinate_groups,
+                    "retained_native_coordinate_cluster_count": len(coordinate_groups),
+                    "mixed_original_coordinates_at_snapped_node": len(coordinate_groups) > 1,
+                    "snap_samples_equal_retained_incidents": (
+                        len(incidence) == node.get("samples")
+                    ),
+                    "replayed_original_w3_junction_candidates": junction_by_position.get(
+                        tuple(round(v, 6) for v in snapped), []
+                    ),
                     "exact_node_incident_original_source_edges": incidence,
                 })
             snap_records.append({
@@ -202,7 +244,8 @@ def replay_original_page7_graph(*, source, published, source_bytes,
     walls, _junctions, _identities = assembled
     result = trace_exact_source_w2_nodes(
         original_wall_scope=original_wall_scope, graph=graph,
-        reconstructed_walls=walls, selected_wall_ids=original_w4_ids
+        reconstructed_walls=walls, selected_wall_ids=original_w4_ids,
+        junctions=junctions,
     )
     return {
         **result,
