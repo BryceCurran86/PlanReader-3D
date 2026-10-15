@@ -1,0 +1,90 @@
+name: TEST GPT3 Four-Project Signed Evidence Inventory
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/report_gpt3_four_project_evidence.py"
+      - "tools/gpt3_signed_v2_family_trade_integrity.py"
+      - "tools/run_gpt3_original_byte_gated_exact_project.py"
+      - "tests/test_gpt3_four_project_evidence.py"
+      - "tests/test_gpt3_original_byte_gated_exact_project.py"
+      - ".github/workflows/test-gpt3-four-project-evidence.yml"
+  workflow_dispatch:
+
+jobs:
+  fail-closed-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Test source/quantity/customer/frozen-score gates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_four_project_evidence.py tests/test_gpt3_original_byte_gated_exact_project.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Prove unavailable private sources do not become zero accuracy
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/gpt3-empty-source /tmp/gpt3-empty-seal /tmp/gpt3-empty-map /tmp/gpt3-empty-customer
+          set +e
+          PYTHONPATH=. python -m tools.report_gpt3_four_project_evidence \
+            --source-dir /tmp/gpt3-empty-source \
+            --sealed-dir /tmp/gpt3-empty-seal \
+            --identity-map-dir /tmp/gpt3-empty-map \
+            --customer-dir /tmp/gpt3-empty-customer \
+            --output /tmp/gpt3-evidence-ledger.json
+          code=$?
+          set -e
+          test "$code" -eq 2
+          python - <<'PY'
+          import json
+          p=json.load(open("/tmp/gpt3-evidence-ledger.json", encoding="utf-8"))
+          assert p["publication_status"]=="UNPUBLISHED"
+          assert p["frozen_denominator"]==120
+          assert p["coverage_accuracy"] is None
+          assert len(p["projects"])==4
+          assert all(x["publication_status"]=="UNAVAILABLE" for x in p["projects"])
+          PY
+
+      - name: Verify tracked ORIGINAL PDF package completeness without scoring
+        run: |
+          set -euo pipefail
+          set +e
+          PYTHONPATH=. python -m tools.report_gpt3_four_project_evidence \
+            --source-dir documents/sources \
+            --sealed-dir /tmp/gpt3-empty-seal \
+            --identity-map-dir /tmp/gpt3-empty-map \
+            --customer-dir /tmp/gpt3-empty-customer \
+            --output /tmp/gpt3-real-source-package-ledger.json
+          code=$?
+          set -e
+          test "$code" -eq 2
+          python - <<'PY'
+          import json
+          p=json.load(open("/tmp/gpt3-real-source-package-ledger.json", encoding="utf-8"))
+          by_id={entry["project_id"]: entry for entry in p["projects"]}
+          assert p["frozen_denominator"]==120
+          assert p["publication_status"]=="UNPUBLISHED"
+          assert p["coverage_accuracy"] is None
+          for project_id in ("au_qld_3laurel", "au_qld_maryborough_service_station"):
+              e=by_id[project_id]
+              assert e["source_sha_verified"] is True, e
+              assert e["publication_status"]=="UNAVAILABLE"
+              assert "signed_production_evidence_unavailable" in e["reason_codes"]
+          for project_id in ("au_qld_lot16_power", "au_qld_q5446_armstrong32_harlequin"):
+              e=by_id[project_id]
+              assert e["source_sha_verified"] is False, e
+              assert e["publication_status"]=="UNAVAILABLE"
+              assert "original_source_not_supplied_in_this_execution" in e["reason_codes"]
+          PY

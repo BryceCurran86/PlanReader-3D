@@ -59,6 +59,13 @@ _PROVENANCE_KEYS = (
     "row_count",
     "title_bbox",
     "duplicate_title_bboxes",
+    "document_id", "revision_id", "source_sha256", "snapshot_id",
+    "extent_method", "source_title_observation_ids",
+    "source_geometry_observation_ids", "source_dimension_text_observation_ids",
+    "source_room_label_observation_ids", "source_frame_bboxes", "source_plane_bboxes",
+    "source_text_corroboration_receipts",
+    "isolated_raster_support_receipts", "whole_sheet_plan_universe_proven",
+    "metric_authority_granted",
 )
 
 
@@ -283,6 +290,15 @@ def adapt_f07_viewport_to_migration(
             blocking_reasons=tuple(dict.fromkeys((F07_VIEWPORT_ADAPTER_UNAVAILABLE, *reasons))),
         )
     target = matches[0]
+    if target.provenance.get("source_owned_plan_view_proven") is True:
+        # This product already has an immutable source address. A caller's
+        # otherwise valid ProviderContext must not relabel that original view.
+        expected = {"document_id": context.document_id,
+                    "revision_id": context.current_revision_id,
+                    "source_sha256": context.source_sha256,
+                    "snapshot_id": context.evidence_snapshot_id}
+        if any(target.provenance.get(k) != v for k, v in expected.items()):
+            reasons.append(F07_VIEWPORT_SCOPE_MISMATCH)
 
     for viewport in rows:
         if int(viewport.page_number) != int(page_no):

@@ -75,7 +75,7 @@ jobs:
           # never substitute an aggregate count for the source receipts above.
           assert old['summary']==new['summary']
           assert new['summary']['physical_existence_claims']==len(new['opening_bindings'])>0
-          assert new['summary']['host_bindings']==14
+          assert new['summary']['host_bindings']==15
           assert new['summary']['host_frames']==9
           assert audit['source_reauthenticated'] is True
           assert audit['primitive_safety_cap']==20000

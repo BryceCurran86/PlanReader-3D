@@ -87,7 +87,10 @@ jobs:
           ROOT=artifacts/gpt3-1215-opening-local-retention
           mkdir -p "$ROOT"
           git fetch origin main
-          BASE="$(git merge-base origin/main HEAD)"
+          # The accepted 1215 source-host addition is historical: current main
+          # already has 15 authenticated hosts. Pin the original pre-1215
+          # 14-host source control; preserve the exact additive verifier.
+          BASE="e579030e37606dfdd1b0d0b302b3f29138631552"
           printf '%s\n' "$BASE" > "$ROOT/base_sha.txt"
           git worktree add --detach /tmp/gpt3-retention-main "$BASE"
           (

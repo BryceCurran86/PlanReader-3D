@@ -32,7 +32,9 @@ from pb_source_visibility_authority import (
 )
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
+    is_authoritative_derived_viewport,
     segment_page_viewports,
+    segment_source_page_viewports,
 )
 
 PHYSICAL_SCALE_SCHEMA_VERSION = "1.0.0"
@@ -847,8 +849,7 @@ class PhysicalScaleProducer:
             self._visible_segments_by_snapshot[snapshot_key] = cached
         return cached.get(str(selector.page_id), ())
 
-    @staticmethod
-    def _scope_bbox(selector: PhysicalScaleSelector, source_bytes: bytes):
+    def _scope_bbox(self, selector: PhysicalScaleSelector, source_bytes: bytes):
         page_index = int(selector.page_id) - 1
         if page_index < 0:
             return None, PHYSICAL_SCALE_SCOPE_UNAVAILABLE
@@ -878,9 +879,41 @@ class PhysicalScaleProducer:
                 if viewport.view_id == selector.viewport_id
                 and viewport.status == ViewportSegmentationStatus.RESOLVED.value
             )
-            if len(matches) != 1:
+            if len(matches) == 1:
+                return tuple(float(value) for value in matches[0].bounding_box), None
+            # A page-only derived box is NOT admissible for physical scale.
+            # Nor may a new view of the same ID silently overwrite an old,
+            # conflicting F.07 candidate.
+            if any(v.view_id == selector.viewport_id for v in viewports):
+                # Even an UNSUPPORTED native title/legend is an original
+                # competing address: never silently override it with a
+                # separately derived plan identity.
                 return None, PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE
-            return tuple(float(value) for value in matches[0].bounding_box), None
+            # Later source-authenticated F.07 drawing planes can carry a
+            # distinct, producer-sealed physical plan viewport. This fallback
+            # accepts only its immutable ID and source-own bounds; it does NOT
+            # provide a physical scale or reinterpret page-wide title text.
+            source_views = segment_source_page_viewports(
+                self._source,
+                revision_id=selector.revision_id,
+                page_id=selector.page_id,
+                physical_plan_view_shadow=True,
+            )
+            signed = tuple(
+                view for view in source_views
+                if view.view_id == selector.viewport_id
+                and view.view_type in ("floor_plan", "floor_finish_plan")
+                and is_authoritative_derived_viewport(view)
+                and view.bounding_box is not None
+            )
+            if len(signed) != 1:
+                return None, PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE
+            bounds = tuple(float(v) for v in signed[0].bounding_box)
+            if any(not math.isfinite(v) for v in bounds) or (
+                bounds[2] <= bounds[0] or bounds[3] <= bounds[1]
+            ):
+                return None, PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE
+            return bounds, None
         finally:
             pdf.close()
 
