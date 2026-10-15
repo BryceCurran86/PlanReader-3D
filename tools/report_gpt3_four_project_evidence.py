@@ -73,7 +73,18 @@ def _read_json_without_duplicate_keys(path: Path) -> Any:
     nesting must not reach the unchanged signed or frozen reconciliation.
     This reads only; it never changes producer signatures or source bytes.
     """
-    return _parse_evidence_json(path.read_text(encoding="utf-8"))
+    try:
+        return _parse_evidence_json(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        # Preserve the established signed-evidence duplicate-key error
+        # contract; the shared readiness parser uses different wording.
+        prefix = "duplicate JSON key: "
+        if str(exc).startswith(prefix):
+            raise ValueError(
+                "signed evidence JSON contains duplicate key: "
+                + str(exc)[len(prefix):]
+            ) from exc
+        raise
 
 
 def _json_object(path: Path) -> dict[str, Any]:
