@@ -290,6 +290,91 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
     }
 
 
+def audit_original_complete_link_counterfactual(*, scoped_inputs,
+                                                original_snap_input_census,
+                                                original_wall_scope):
+    """True original source-graph counterfactual; never changes live W2.
+
+    Retains EVERY original split input and its source ancestry. The alternative
+    node membership is a geometry diagnostic, not physical-wall evidence.
+    """
+    structural, _excluded = filter_structural_segments(scoped_inputs)
+    point_pairs = _segments_to_point_pairs(structural)
+    split_pairs = split_segments_at_intersections(point_pairs)
+    split = _point_pairs_to_segment_dicts(
+        split_pairs, source_segments=structural,
+    )
+    alternate_snapped = _snap_geometry_indexed(
+        split, tolerance_pt=DEFAULT_GAP_SNAP_TOLERANCE_PT,
+        include_endpoint_assignments=True,
+        complete_link_snap_shadow=True,
+    )
+    assignments = alternate_snapped["endpoint_snap_assignments"]
+    original_rows = original_snap_input_census["selected_original_node_rows"]
+    alternative_nodes = {v["id"]:v for v in alternate_snapped["nodes"]}
+    original_wall_paths = [
+        (r.wall_candidate_id,
+         tuple(tuple(v) for v in r.wall_candidate.centerline_pts))
+        for r in original_wall_scope.records
+    ]
+    alternative_full = build_wall_graph_for_viewport(
+        scoped_inputs, complete_link_snap_shadow=True,
+    )
+    report = []
+    for node in original_rows:
+        alternative_membership = {}
+        for item in node["all_original_split_endpoint_receipts"]:
+            source_fragment_id = item["original_split_segment_id"]
+            endpoint = item["original_split_endpoint"]
+            pair = assignments.get(source_fragment_id)
+            if pair is None:
+                raise ValueError("original_w2_counterfactual_split_fragment_missing")
+            counter_node = pair[0 if endpoint=="a" else 1]
+            alternative_membership.setdefault(counter_node, []).append(item)
+        if sum(map(len, alternative_membership.values())) != node[
+            "original_producer_snap_sample_count"
+        ]:
+            raise ValueError("counterfactual_original_sample_universe_drift")
+        report.append({
+            "original_w2_node_id": node["original_w2_node_id"],
+            "original_snap_sample_count": node["original_producer_snap_sample_count"],
+            "alternative_source_sample_count": sum(
+                map(len, alternative_membership.values())
+            ),
+            "alternate_w2_node_memberships": [
+                {
+                    "alternate_w2_node_id": idx,
+                    "alternate_position_pdf_pts": [
+                        alternative_nodes[idx]["x"],
+                        alternative_nodes[idx]["y"],
+                    ],
+                    "original_source_input_sample_count": len(items),
+                    "original_split_source_input_ids": sorted(
+                        f"{it['original_split_segment_id']}:{it['original_split_endpoint']}"
+                        for it in items
+                    ),
+                } for idx, items in sorted(alternative_membership.items())
+            ],
+            "physical_wall_or_node_role_granted": False,
+        })
+    return {
+        "status": "SOURCE_OWNED_COUNTERFACTUAL_GRAPH_COMPLETE",
+        "original_selected_w2_node_count": len(report),
+        "alternate_w2_node_count": len(alternate_snapped["nodes"]),
+        "alternate_merged_w2_node_count": len(alternative_full["nodes"]),
+        "alternate_w2_edge_count": len(alternative_full["edges"]),
+        "complete_link_snap_observations": alternate_snapped[
+            "complete_link_snap_shadow"
+        ],
+        "original_selected_w4_centerline_count": len(original_wall_paths),
+        "selected_source_node_counterfactuals": report,
+        "original_source_input_items_preserved": True,
+        "structural_or_annotation_roles_assigned": False,
+        "new_source_room_or_metric": False,
+        "diagnostic_only": True,
+    }
+
+
 def replay_original_page7_graph(*, source, published, source_bytes,
                                 original_wall_scope, original_w4_ids):
     if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
@@ -368,8 +453,14 @@ def replay_original_page7_graph(*, source, published, source_bytes,
         graph=graph, scoped_inputs=candidates,
         selected_node_ids=selected_node_ids,
     )
+    guarded = audit_original_complete_link_counterfactual(
+        scoped_inputs=candidates,
+        original_snap_input_census=snap_input_census,
+        original_wall_scope=original_wall_scope,
+    )
     return {
         **result,
+        "original_complete_link_snap_counterfactual": guarded,
         "original_all_split_input_snap_provenance": snap_input_census,
         "original_source_sha256": published.revision.source_sha256,
         "original_f07_view_id": selected.view_id,
