@@ -14,6 +14,7 @@ from pathlib import Path
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_composite_room_face_authority import _fully_grid_opposed_wall_evidence
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer, _segment_segment_distance,
 )
@@ -40,6 +41,7 @@ def inspect_local_edges(*, wall, witnesses, marks, drawings):
     native_excluded = tuple(wall.boundary_evaluation.excluded_boundary_primitives)
     contact_tolerance = wall.boundary_evaluation.contact_tolerance_pt
     taint_reasons = dict(wall.boundary_evaluation.boundary_taint_reason_codes)
+    producer_fully_grid_walls, source_grid_evidence = _fully_grid_opposed_wall_evidence(wall)
 
     originals = {row["face_id"]: row for row in witnesses}
     if len(originals) != len(tuple(witnesses)):
@@ -136,6 +138,8 @@ def inspect_local_edges(*, wall, witnesses, marks, drawings):
                     "other_shadow_face_ids_sharing_same_w4_subedge": sorted(
                         adjacent[(wid, atom)] - {face_id}
                     ),
+                    "producer_full_wall_grid_opposition": wid in producer_fully_grid_walls,
+                    "producer_grid_opposition_evidence_ids": list(source_grid_evidence.get(wid, ())),
                     "whole_w4_candidate_taint_reasons_retained": list(
                         taint_reasons.get(wid, ())
                     ),
@@ -150,6 +154,9 @@ def inspect_local_edges(*, wall, witnesses, marks, drawings):
                 "shadow_face_id": face_id,
                 "original_owned_face_subedges": inspected,
                 "native_text_authenticated": mark["native_text_or_raster_source_verified"],
+                "all_enclosing_w4_walls_typed_grid_opposed": all(
+                    edge["producer_full_wall_grid_opposition"] for edge in inspected
+                ),
                 "original_room_ring_authentication": False,
                 "room_finish_owner_authenticated": False,
                 "customer_quantity_published": False,
