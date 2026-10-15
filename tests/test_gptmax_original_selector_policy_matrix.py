@@ -4,6 +4,7 @@ from hashlib import sha256
 
 from tools.diag_gptmax_original_selector_policy_matrix import (
     summarize_source_selection,
+    audit_original_new_source_overlaps,
     original_selector_policy_matrix,
 )
 
@@ -66,3 +67,40 @@ def test_corrupt_source_or_scope_rejected_before_original_policy_replay(pdf,page
     with pytest.raises((ValueError,TypeError)):
         original_selector_policy_matrix(
             pdf,page_id=page,expected_sha256=sha,existing_physical_id=target)
+
+
+def test_new_opening_shared_two_exact_original_source_receipts_is_not_independent():
+    original = [{"physical_opening_id": "original", "source_observation_ids": ["a","b","c"]}]
+    shadow = original + [{"physical_opening_id": "new", "source_observation_ids": ["b","c","d"]}]
+    a = audit_original_new_source_overlaps(original, shadow)
+    assert a == [{
+        "new_physical_opening_id": "new",
+        "original_physical_opening_id": "original",
+        "shared_source_observation_ids": ["b","c"],
+        "shared_observation_count": 2,
+        "independent_identity_proven": False,
+        "source_member_partition_proven": False,
+        "publication_granted": False,
+    }]
+    assert audit_original_new_source_overlaps(original[::-1],shadow[::-1]) == a
+
+
+def test_disjoint_original_source_sets_do_not_imply_authoritative_separate_openings():
+    assert audit_original_new_source_overlaps(
+        [{"physical_opening_id":"old","source_observation_ids":["a"]}],
+        [{"physical_opening_id":"old","source_observation_ids":["a"]},
+         {"physical_opening_id":"new","source_observation_ids":["b"]}],
+    ) == []
+
+
+def test_duplicate_source_or_physical_identity_rejected():
+    original=[{"physical_opening_id":"old","source_observation_ids":["a","a"]}]
+    shadow=original+[{"physical_opening_id":"new","source_observation_ids":["a"]}]
+    with pytest.raises(ValueError,match="source membership"):
+        audit_original_new_source_overlaps(original,shadow)
+    duplicated=[
+        {"physical_opening_id":"old","source_observation_ids":["a"]},
+        {"physical_opening_id":"old","source_observation_ids":["b"]},
+    ]
+    with pytest.raises(ValueError,match="duplicate original"):
+        audit_original_new_source_overlaps(duplicated,duplicated)
