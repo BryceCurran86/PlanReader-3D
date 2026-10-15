@@ -1,0 +1,876 @@
+{
+ "GPT1 Original Cross-View Plan Grid Source Controls": [
+  0.0,
+  [
+   "tools.diag_gpt1_original_cross_view_grid",
+   "tools.diag_gpt1_source_grid_room_mark_candidates"
+  ],
+  "diag-gpt1-original-cross-view-grid.yml"
+ ],
+ "DIAG GPT1 Page11 Source-Owned Material Plan Marks": [
+  0.0,
+  [
+   "tools.diag_gpt1_page11_source_plan_ft3_mark_census"
+  ],
+  "diag-gpt1-original-material-plan-marks.yml"
+ ],
+ "DIAG GPT2 B01 Maryborough Residual RCP Frames": [
+  0.0,
+  [
+   "tools.diag_gpt2_page7_frame_border_strip"
+  ],
+  "diag-gpt2-b01-residual-rcp-frames.yml"
+ ],
+ "DIAG GPT2 B01 Maryborough Semantic Regions": [
+  0.0,
+  [],
+  "diag-gpt2-b01-semantic-regions.yml"
+ ],
+ "DIAG GPT2 Maryborough B02 Live RCP Occurrences": [
+  0.0,
+  [],
+  "diag-gpt2-b02-live-rcp-occurrences.yml"
+ ],
+ "DIAG GPT2 B02 RCP Text First Integrity Gate": [
+  0.0,
+  [],
+  "diag-gpt2-b02-rcp-text-first-gate.yml"
+ ],
+ "DIAG GPT2 B03 Maryborough Native Room Map": [
+  0.0,
+  [
+   "tools.diag_gpt2_maryborough_room_source_map"
+  ],
+  "diag-gpt2-b03-native-room-map.yml"
+ ],
+ "DIAG GPT2 B03 Page7 Physical Room First Gate": [
+  0.0,
+  [],
+  "diag-gpt2-b03-page7-room-topology.yml"
+ ],
+ "DIAG GPT2 Maryborough B03 Room First Gates": [
+  0.0,
+  [
+   "tools.diag_gpt2_room_measurement_gates"
+  ],
+  "diag-gpt2-maryborough-b03-room-gates.yml"
+ ],
+ "DIAG GPT2 Maryborough Source Figured Dimensions": [
+  0.0,
+  [
+   "tools.diag_gpt2_maryborough_dimension_first_witness"
+  ],
+  "diag-gpt2-maryborough-dimension-first-witness.yml"
+ ],
+ "GPT2 Original Maryborough Native Label Canonical Publisher First Gates": [
+  0.0,
+  [],
+  "diag-gpt2-maryborough-label-publisher-first-gates.yml"
+ ],
+ "DIAG GPT2 Material OCR Source Integrity": [
+  0.0,
+  [],
+  "diag-gpt2-material-ocr-source-integrity.yml"
+ ],
+ "DIAG GPT2 Material Schedule Scope Isolation": [
+  0.0,
+  [],
+  "diag-gpt2-material-schedule-scope-isolation.yml"
+ ],
+ "DIAG GPT2 Original FT3 Native Frame and Mark Ownership": [
+  0.0,
+  [
+   "tools.diag_gpt2_ft3_original_source_frame_scope"
+  ],
+  "diag-gpt2-original-ft3-native-frame-scope.yml"
+ ],
+ "DIAG GPT2 Original Source Native Parallel Wall Band": [
+  0.0,
+  [
+   "tools.diag_gpt2_native_parallel_wall_band_candidates"
+  ],
+  "diag-gpt2-original-source-native-parallel-wall-band.yml"
+ ],
+ "DIAG GPT2 Original WashUp W2 Native Ink": [
+  0.0,
+  [
+   "tools.diag_gpt2_native_w2_ink_source_role"
+  ],
+  "diag-gpt2-original-washup-w2-native-ink.yml"
+ ],
+ "DIAG GPT2 Original Maryborough Page11 Split Title Ownership": [
+  0.0,
+  [
+   "tools.diag_gpt2_page11_native_title_source"
+  ],
+  "diag-gpt2-page11-native-title-source.yml"
+ ],
+ "DIAG GPT2 Page7 Source Floor Finish Occurrences": [
+  0.0,
+  [],
+  "diag-gpt2-page7-floor-finish-occurrences.yml"
+ ],
+ "DIAG GPT2 Page7 Remaining Room Label Face First Gates": [
+  0.0,
+  [],
+  "diag-gpt2-page7-remaining-label-face-ownership.yml"
+ ],
+ "DIAG GPT2 Page7 Physical Room Figured Witness Candidates": [
+  0.0,
+  [],
+  "diag-gpt2-page7-room-figured-witnesses.yml"
+ ],
+ "DIAG GPT2 Page7 Source Frame Path Provenance": [
+  0.0,
+  [],
+  "diag-gpt2-page7-source-frame-paths.yml"
+ ],
+ "DIAG GPT2 Page7 Real Source Room Label Ownership": [
+  0.0,
+  [],
+  "diag-gpt2-page7-source-room-label-owners.yml"
+ ],
+ "DIAG GPT2 Page7 Split Labels Exact Wall Separators": [
+  0.0,
+  [],
+  "diag-gpt2-page7-split-label-wall-separators.yml"
+ ],
+ "DIAG GPT2 RCP Material Occurrence First Gates": [
+  0.0,
+  [],
+  "diag-gpt2-page9-rcp-material-occurrences.yml"
+ ],
+ "DIAG GPT2 Remaining Room Native Viewport Authority": [
+  0.0,
+  [],
+  "diag-gpt2-remaining-room-viewport-owners.yml"
+ ],
+ "DIAG GPT3 Full V2 Current Development Checkpoint": [
+  0.0,
+  [
+   "benchmarks.frozen_holdout.full_plan_v2.run_development_scoreboard"
+  ],
+  "diag-gpt3-full-v2-current-development-checkpoint.yml"
+ ],
+ "DIAG GPT3 Lot16 1215 Identity Readiness": [
+  0.0,
+  [
+   "tools.diag_gpt3_lot16_1215_identity_readiness",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "diag-gpt3-lot16-1215-identity-readiness.yml"
+ ],
+ "DIAG GPT3 Lot16 Internal 870 Identity Readiness": [
+  0.0,
+  [
+   "tools.diag_gpt3_lot16_internal_870_identity_readiness",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "diag-gpt3-lot16-internal-870-identity-readiness.yml"
+ ],
+ "DIAG GPT3 Maryborough FT3 Source First Gate": [
+  20.683333333333334,
+  [
+   "tools.diag_gpt3_maryborough_ft3_source_firstgate"
+  ],
+  "diag-gpt3-maryborough-ft3-source-firstgate.yml"
+ ],
+ "Lot16 Source Room Face Diagnostic": [
+  3.8833333333333333,
+  [],
+  "diag-lot16-room-face-scope.yml"
+ ],
+ "DIAG Original Native Font Clip Gates": [
+  0.0,
+  [],
+  "diag-native-font-clip-original-source.yml"
+ ],
+ "DIAG Original Embedded Unicode Cmap": [
+  0.0,
+  [],
+  "diag-original-embedded-unicode-cmap.yml"
+ ],
+ "DIAG Original Native Material Glyph Ancestry": [
+  0.0,
+  [
+   "tools.diag_source_native_glyph_ancestry"
+  ],
+  "diag-original-native-material-glyph-ancestry.yml"
+ ],
+ "GPT1 3Laurel original source-positive canonical floor and customer publication": [
+  1.7333333333333334,
+  [],
+  "gpt1-3laurel-original-floor-area.yml"
+ ],
+ "GPT1 3Laurel source-positive original opening production": [
+  1.4666666666666666,
+  [],
+  "gpt1-3laurel-source-positive-opening.yml"
+ ],
+ "GPT1 Ceiling Canonical Source SHA Integrity": [
+  0.0,
+  [],
+  "gpt1-ceiling-canonical-source-sha-integrity.yml"
+ ],
+ "GPT1 Original Lot16 Three-Family Quantity First Failures": [
+  0.0,
+  [
+   "tools.diag_lot16_room_face_scope"
+  ],
+  "gpt1-lot16-original-three-family-first-failure.yml"
+ ],
+ "GPT1 Q5446 original positively classified FIRM floor-area production": [
+  0.5666666666666667,
+  [],
+  "gpt1-q5446-source-positive-floor-area.yml"
+ ],
+ "GPT1 Source-Owned Physical Scale Plan View": [
+  0.0,
+  [],
+  "gpt1-source-owned-physical-scale-plan-view.yml"
+ ],
+ "TEST GPT3 Original Opening Customer Source Inventory": [
+  0.0,
+  [
+   "tools.run_gpt3_lot16_original_sealed_score_input"
+  ],
+  "gpt3-original-opening-customer-inventory.yml"
+ ],
+ "Full Plan V2 Public Checkout Transfer": [
+  0.0,
+  [],
+  "package-full-plan-v2-verified-checkout.yml"
+ ],
+ "SCORE GPT3 Lot16 1215 Opening-Local Supplemental Host": [
+  8.75,
+  [
+   "tools.diag_gpt3_lot16_1215_identity_readiness",
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.run_gpt3_guarded_pending_reconciliation",
+   "tools.run_gpt3_lot16_original_sealed_score_input"
+  ],
+  "score-gpt3-lot16-1215-opening-local.yml"
+ ],
+ "SCORE GPT3 Maryborough Exact 24 Baseline": [
+  0.0,
+  [
+   "benchmarks.frozen_holdout.full_plan_v2.run_exact_project_reconciliation"
+  ],
+  "score-gpt3-maryborough-exact-24.yml"
+ ],
+ "SCORE GPT3 Two Original Selected V2 Projects": [
+  0.7166666666666667,
+  [
+   "tools.report_gpt3_selected_two_project_original_evidence"
+  ],
+  "score-gpt3-selected-two-original-projects.yml"
+ ],
+ "GPT1 Original FT3 High-Resolution Native Line Proof": [
+  0.0,
+  [
+   "tools.diag_gpt1_native_material_line_highres_source"
+  ],
+  "test-gpt1-original-ft3-highres-source.yml"
+ ],
+ "GPT1 Original Unframed Plan Source Rail Gate": [
+  0.0,
+  [],
+  "test-gpt1-original-plan-long-rails.yml"
+ ],
+ "GPT1 Q01 CrossView Dimension Owner Source": [
+  0.0,
+  [
+   "tools.diag_gpt2_room_measurement_gates"
+  ],
+  "test-gpt1-q01-crossview-dimension-owner.yml"
+ ],
+ "TEST GPT2 B01 Real Native Vertical Schedule Titles": [
+  0.0,
+  [],
+  "test-gpt2-b01-real-vertical-titles.yml"
+ ],
+ "TEST GPT2 B02 Maryborough Grid Title Abstention": [
+  0.0,
+  [],
+  "test-gpt2-b02-real-grid-title.yml"
+ ],
+ "GPT2 Original Maryborough Canonical Room Label Word Provenance": [
+  0.0,
+  [],
+  "test-gpt2-canonical-room-label-word-provenance.yml"
+ ],
+ "TEST GPT2 Final Material RCP": [
+  0.0,
+  [],
+  "test-gpt2-final-material-rcp.yml"
+ ],
+ "TEST GPT2 Original Page11 Schedule Must Not Own Drawing Plan": [
+  0.0,
+  [],
+  "test-gpt2-original-page11-schedule-frame-ownership.yml"
+ ],
+ "GPT2 Original Maryborough Physical Room Area Owner Integrity": [
+  0.0,
+  [],
+  "test-gpt2-original-physical-room-area-owner.yml"
+ ],
+ "GPT2 Original Maryborough Raster Line to Canonical Room": [
+  0.0,
+  [],
+  "test-gpt2-original-raster-line-canonical-room.yml"
+ ],
+ "GPT2 Original Maryborough Source Area Receipt Mapping": [
+  0.0,
+  [],
+  "test-gpt2-original-source-area-receipt-mapping.yml"
+ ],
+ "TEST GPT2 Page7 Physical Room Faces After Source Frame": [
+  0.0,
+  [],
+  "test-gpt2-page7-physical-faces-after-frame.yml"
+ ],
+ "GPT2 Original Maryborough Source Label to Canonical First-Gate": [
+  0.0,
+  [],
+  "test-gpt2-positive-label-canonical-firstgate.yml"
+ ],
+ "TEST GPT2 Page7 Source Double Plan Border": [
+  0.0,
+  [
+   "tools.diag_gpt2_page7_double_border_first_gate"
+  ],
+  "test-gpt2-source-double-plan-border.yml"
+ ],
+ "GPT2 Original Maryborough Canonical Room Metric Handoff Integrity": [
+  0.0,
+  [],
+  "test-gpt2-source-room-handoff-integrity.yml"
+ ],
+ "TEST GPT3 1215 Opening-Local Source Retention": [
+  6.233333333333333,
+  [
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.verify_gpt3_additive_snapshot_host_retention"
+  ],
+  "test-gpt3-1215-opening-local-retention.yml"
+ ],
+ "TEST GPT3 1215 Fresh Paired Customer Retention": [
+  8.766666666666667,
+  [
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.run_gpt3_lot16_original_sealed_score_input"
+  ],
+  "test-gpt3-1215-paired-customer-retention.yml"
+ ],
+ "TEST GPT3 1215 Room Face Owned Retention": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.verify_gpt3_room_face_owned_retention"
+  ],
+  "test-gpt3-1215-room-face-owned-retention.yml"
+ ],
+ "TEST GPT3 Exact 1215 Source Declaration": [
+  0.0,
+  [
+   "tools.declared_additive_source_retention"
+  ],
+  "test-gpt3-exact-1215-source-declaration.yml"
+ ],
+ "TEST GPT3 Four-Project Signed Evidence Inventory": [
+  1.45,
+  [
+   "tools.report_gpt3_four_project_evidence"
+  ],
+  "test-gpt3-four-project-evidence.yml"
+ ],
+ "TEST GPT3 Lot16 Original Sealed Score Input": [
+  0.0,
+  [
+   "tools.diag_gpt3_lot16_unmapped_produced_items",
+   "tools.run_gpt3_lot16_original_sealed_score_input"
+  ],
+  "test-gpt3-lot16-original-sealed-score-input.yml"
+ ],
+ "TEST GPT3 Maryborough Original Floor Score Input": [
+  19.6,
+  [
+   "benchmarks.frozen_holdout.full_plan_v2.run_exact_project_reconciliation",
+   "tools.run_gpt3_maryborough_original_floor_score_input"
+  ],
+  "test-gpt3-maryborough-original-floor-score-input.yml"
+ ],
+ "GPT3 Original Lot16 Native Dimension Cache Source Parity": [
+  6.933333333333334,
+  [],
+  "test-gpt3-native-dimension-original-source-cache.yml"
+ ],
+ "GPT MAX Four Member Raster Source Discovery": [
+  10.733333333333334,
+  [
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gpt3-raster-source-discovery.yml"
+ ],
+ "GPT3 Source Frame Proof Retention": [
+  13.966666666666667,
+  [
+   "scripts.gptmax_source_opposition_retention",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gpt3-source-frame-proof.yml"
+ ],
+ "GPT MAX Lot16 Paired Original Signed Source": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.run_gpt3_lot16_original_sealed_score_input"
+  ],
+  "test-gptmax-1215-paired-signed-source.yml"
+ ],
+ "GPT MAX Lot16 1215 Raw Candidate Source Bijection": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.verify_gptmax_raw_source_group_retention"
+  ],
+  "test-gptmax-1215-raw-source-bijection.yml"
+ ],
+ "GPT MAX Original Cross-Flank Pixel Wall-Rail Alternatives": [
+  0.0,
+  [
+   "tools.diag_gptmax_cross_flank_rail_bands",
+   "tools.diag_gptmax_full_foreground_flank",
+   "tools.diag_gptmax_full_foreground_run_source",
+   "tools.diag_gptmax_raster_host_source_membership",
+   "tools.diag_gptmax_required_flank_source"
+  ],
+  "test-gptmax-cross-flank-rail-bands.yml"
+ ],
+ "GPT MAX Original Exact Endpoint Flank Shadow": [
+  0.0,
+  [
+   "scripts.gptmax_exact_endpoint_flank_shadow"
+  ],
+  "test-gptmax-exact-endpoint-flank-shadow.yml"
+ ],
+ "GPT MAX Original Exact Source Fragment Bundles": [
+  0.0,
+  [
+   "scripts.gptmax_exact_source_fragment_bundles"
+  ],
+  "test-gptmax-exact-source-fragment-bundles.yml"
+ ],
+ "GPT MAX Exact Split Parent Lineage Shadow": [
+  15.266666666666667,
+  [
+   "scripts.gptmax_exact_split_parent_lineage_shadow",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-exact-split-parent-lineage-shadow.yml"
+ ],
+ "GPT MAX Original Foreground Flank Stage Replay": [
+  0.0,
+  [
+   "scripts.gptmax_full_foreground_flank_stages",
+   "tools.diag_gptmax_full_foreground_run_source",
+   "tools.diag_gptmax_raster_host_source_membership",
+   "tools.diag_gptmax_required_flank_source"
+  ],
+  "test-gptmax-full-foreground-flank-stages.yml"
+ ],
+ "GPT MAX Complete Original Foreground Source Runs": [
+  0.0,
+  [
+   "tools.diag_gptmax_full_foreground_flank",
+   "tools.diag_gptmax_full_foreground_run_source",
+   "tools.diag_gptmax_raster_host_source_membership",
+   "tools.diag_gptmax_required_flank_source",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-full-foreground-source.yml"
+ ],
+ "GPT MAX Original G17 Pixel First Gate": [
+  0.0,
+  [
+   "tools.diag_gptmax_g17_detector_first_gate",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-g17-detector-first-gate.yml"
+ ],
+ "GPT MAX Original G17 Two-Flank W3 Jamb Source Review": [
+  0.0,
+  [
+   "tools.diag_gptmax_g17_original_inclusive_source_shadow",
+   "tools.diag_gptmax_g17_original_w2_w4_source_shadow",
+   "tools.diag_gptmax_g17_source_owned_jamb_pair",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-g17-jamb-pair-source.yml"
+ ],
+ "GPT MAX Original G17 Isolated W2 W3 W4 Source Geometry": [
+  0.0,
+  [
+   "tools.diag_gptmax_g17_original_inclusive_source_shadow",
+   "tools.diag_gptmax_g17_original_w2_w4_source_shadow",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-g17-original-w2-w4-shadow.yml"
+ ],
+ "GPT MAX Original G17 Drawing Wall Scope": [
+  9.833333333333334,
+  [
+   "tools.diag_gptmax_producer_owned_g17_wall_shadow"
+  ],
+  "test-gptmax-g17-plan-wall-scope.yml"
+ ],
+ "GPT MAX G17 Source-Only Retention Audit": [
+  0.0,
+  [
+   "tools.diag_gptmax_g17_source_only_flanks",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-g17-source-only-retention.yml"
+ ],
+ "GPT MAX Original Interior Dimension Chain Typed Opening Opposition": [
+  0.0,
+  [
+   "tools.diag_native_opening_source_roles",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-interior-dimension-tick-source.yml"
+ ],
+ "GPT MAX Original Maryborough Room Face First Owner Gate": [
+  0.0,
+  [
+   "tools.diag_gptmax_maryborough_room_first_owner_gate"
+  ],
+  "test-gptmax-maryborough-room-first-owner.yml"
+ ],
+ "GPT MAX Native Schedule Description Retention": [
+  32.06666666666666,
+  [
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-native-description-source.yml"
+ ],
+ "GPT MAX Original Table And Dimension Native Opening Opposition": [
+  8.3,
+  [
+   "scripts.gptmax_source_opposition_retention",
+   "tools.diag_native_opening_source_roles",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-native-neutral-fill-source.yml"
+ ],
+ "GPT MAX Original Lot16 Native Schedule Source Inventory": [
+  0.0,
+  [
+   "tools.diag_gptmax_native_source_opening_schedule_inventory"
+  ],
+  "test-gptmax-native-opening-schedule-source.yml"
+ ],
+ "GPT MAX Native Opening Source Roles": [
+  2.85,
+  [
+   "tools.diag_native_opening_source_roles"
+  ],
+  "test-gptmax-native-opening-source-roles.yml"
+ ],
+ "GPT MAX Source Native Opening Viewport Opposition": [
+  0.0,
+  [
+   "scripts.diag_gptmax_native_opening_viewport_scope",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-native-opening-viewport-scope.yml"
+ ],
+ "GPT MAX Original Native Text Paint Partition Audit": [
+  7.916666666666667,
+  [
+   "scripts.gptmax_native_dimension_source_partition",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-native-paint-partition-shadow.yml"
+ ],
+ "GPT MAX Original Native Interior Stub Source Audit": [
+  0.0,
+  [
+   "scripts.gptmax_native_stub_source_audit"
+  ],
+  "test-gptmax-native-stub-source-audit.yml"
+ ],
+ "GPT MAX Opening Candidate Authority": [
+  3.45,
+  [
+   "tools.diag_gptmax_physical_authority_handoff"
+  ],
+  "test-gptmax-opening-candidate-authority.yml"
+ ],
+ "GPT MAX Original Opening Identity Text Receipts": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-opening-identity-text-receipts.yml"
+ ],
+ "GPT MAX Opening Wall Face Preservation": [
+  27.05,
+  [
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-opening-wall-face-preservation.yml"
+ ],
+ "GPT MAX Original Candidate Per-Source Membership": [
+  14.766666666666667,
+  [
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-original-candidate-membership.yml"
+ ],
+ "GPT MAX Original G17 Shadow Inclusive Source Cells": [
+  0.0,
+  [
+   "tools.diag_gptmax_g17_original_inclusive_source_shadow",
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-original-g17-shadow-cells.yml"
+ ],
+ "GPT MAX Original Unhosted Raster G17 Source Ownership": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-original-unhosted-raster-flank.yml"
+ ],
+ "GPT MAX Page Opening Proof Cache": [
+  8.883333333333333,
+  [],
+  "test-gptmax-page-opening-proof-cache.yml"
+ ],
+ "GPT MAX Original Pixel Flank Read-Only Join": [
+  0.0,
+  [
+   "tools.diag_gptmax_pixel_host_flank_join",
+   "tools.diag_gptmax_raster_host_source_membership",
+   "tools.diag_gptmax_raster_positive_pixel_source",
+   "tools.diag_gptmax_required_flank_source"
+  ],
+  "test-gptmax-pixel-host-flank-join.yml"
+ ],
+ "GPT MAX Producer-Owned G17 Wall Source Shadow": [
+  6.983333333333333,
+  [
+   "tools.diag_gptmax_producer_owned_g17_wall_shadow"
+  ],
+  "test-gptmax-producer-g17-wall-shadow.yml"
+ ],
+ "GPT MAX Raster Aperture Identity Conflict": [
+  52.050000000000004,
+  [
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-raster-aperture-identity.yml"
+ ],
+ "GPT MAX Raster Connected Frame Source": [
+  29.183333333333337,
+  [
+   "scripts.gptmax_source_opposition_retention",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-raster-connected-frame-source.yml"
+ ],
+ "GPT MAX Original Raster Detector Dispositions": [
+  0.0,
+  [
+   "tools.diag_gptmax_raster_detector_dispositions",
+   "tools.diag_gptmax_raster_visible_components",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-raster-detector-dispositions.yml"
+ ],
+ "GPT MAX Raster Flank Source Ownership": [
+  0.0,
+  [
+   "tools.diag_gptmax_raster_flank_ownership",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-raster-flank-ownership.yml"
+ ],
+ "GPT MAX Original Raster Flank Paint Audit": [
+  0.0,
+  [
+   "scripts.gptmax_raster_flank_paint_audit",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-raster-flank-paint-audit.yml"
+ ],
+ "GPT MAX Raster Source W4 Ancestry Audit": [
+  0.0,
+  [
+   "tools.diag_gptmax_raster_host_source_membership",
+   "tools.diag_gptmax_required_flank_source",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-raster-host-source-membership.yml"
+ ],
+ "GPT MAX Raster Measurement Source Handoff": [
+  0.0,
+  [],
+  "test-gptmax-raster-measurement-source.yml"
+ ],
+ "GPT MAX Original Positive Pixel Source Shadow": [
+  0.0,
+  [
+   "tools.diag_gptmax_raster_positive_pixel_source",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-raster-positive-pixel-source.yml"
+ ],
+ "GPT MAX Original Raster Component Receipts": [
+  0.0,
+  [
+   "tools.diag_gptmax_raster_visible_components"
+  ],
+  "test-gptmax-raster-visible-components.yml"
+ ],
+ "GPT MAX Snap Collapsed Source Retention": [
+  0.0,
+  [],
+  "test-gptmax-snap-collapsed-source.yml"
+ ],
+ "GPT MAX Source Authority Stage Handoff": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages"
+  ],
+  "test-gptmax-source-authority-stages.yml"
+ ],
+ "GPT MAX Raster Source Band Host": [
+  0.0,
+  [
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-source-band-host-current.yml"
+ ],
+ "GPT MAX Exact Source First Failure Ledger": [
+  0.0,
+  [
+   "tools.diag_gptmax_source_authority_stages",
+   "tools.gptmax_source_first_failure_ledger"
+  ],
+  "test-gptmax-source-first-failure-ledger.yml"
+ ],
+ "GPT MAX Original Source Graphic State Shadow": [
+  0.0,
+  [
+   "scripts.gptmax_source_graphic_state_shadow"
+  ],
+  "test-gptmax-source-graphic-state-shadow.yml"
+ ],
+ "GPT MAX Source Infill and Actual Customer Retention": [
+  11.383333333333335,
+  [
+   "tools.verify_g17_original_customer_scope_retention"
+  ],
+  "test-gptmax-source-infill-opposition.yml"
+ ],
+ "GPT MAX Terminal Source Span Shadow": [
+  0.0,
+  [
+   "tools.diag_gptmax_terminal_source_span_shadow",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-terminal-source-span-shadow.yml"
+ ],
+ "GPT MAX W2 Short Source Fragment Retention": [
+  24.400000000000002,
+  [
+   "tools.diag_gptmax_w2_short_fragment_retention",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-w2-short-source-fragment.yml"
+ ],
+ "GPT MAX W2 Source Junction Forensics": [
+  0.0,
+  [
+   "tools.gptmax_w2_source_junction_forensics"
+  ],
+  "test-gptmax-w2-source-junction-forensics.yml"
+ ],
+ "GPT MAX Original W3 Snapped Pair Source Rail Audit": [
+  0.0,
+  [
+   "tools.diag_gptmax_raster_positive_pixel_source",
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-w3-snapped-rail-audit.yml"
+ ],
+ "GPT MAX W4 Source Collision Identity": [
+  0.0,
+  [
+   "tools.diag_opening_wall_face_preservation",
+   "tools.gptmax_compare_source_face_retention"
+  ],
+  "test-gptmax-w4-collision-source-identity.yml"
+ ],
+ "GPT MAX W4 Opening Face First Gate Audit": [
+  0.0,
+  [
+   "tools.diag_gptmax_w4_opening_face_first_gate"
+  ],
+  "test-gptmax-w4-opening-face-first-gate.yml"
+ ],
+ "GPT MAX Original Full Page Endpoint Index Shadow": [
+  16.35,
+  [
+   "scripts.gptmax_full_page_exact_endpoint_shadow",
+   "tools.diag_opening_wall_face_preservation"
+  ],
+  "test-gptmax-zero-endpoint-index-shadow.yml"
+ ],
+ "TEST Source Owned Physical Plan View": [
+  0.0,
+  [],
+  "test-source-owned-physical-plan-view.yml"
+ ],
+ "TEST Source Plan Material Occurrences": [
+  0.0,
+  [],
+  "test-source-plan-material-occurrences.yml"
+ ],
+ "TEST GPT2 Freezer Exact Backtrack Normalization": [
+  7.516666666666667,
+  [],
+  "test_gpt2_freezer_exact_backtrack_normalization.yml"
+ ],
+ "TEST ONLY GPT2 Maryborough Grid Component Completion": [
+  13.683333333333334,
+  [],
+  "test_gpt2_maryborough_grid_component_completion.yml"
+ ],
+ "TEST ONLY GPT1 Original Maryborough Source Stage Journal": [
+  4.666666666666667,
+  [
+   "tools.diag_source_closed_stage_journal"
+  ],
+  "test_only_gpt1_original_source_stage_journal.yml"
+ ],
+ "TEST ONLY GPT2 Maryborough Core Host Scope Proof": [
+  8.933333333333334,
+  [
+   "tools.run_source_closed_project_handoff"
+  ],
+  "test_only_gpt2_maryborough_core_host_scope.yml"
+ ]
+}
