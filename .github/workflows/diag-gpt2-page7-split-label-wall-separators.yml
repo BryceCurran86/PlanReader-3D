@@ -389,6 +389,20 @@ jobs:
                           for j in end["replayed_original_w3_junction_candidates"])
                       assert end["retained_native_coordinate_cluster_count"] >= 1
           assert freezer_graph_firstgate["new_commercial_quantities"]==[]
+          # Only assert a source-native diagnostic on the immutable original.
+          # A running-centroid snap radius is not a pairwise-diameter bound.
+          assert any(
+              end["diameter_exceeds_nominal_tolerance_diagnostic_only"]
+              for wall in freezer_graph_firstgate["selected_original_w4_node_rows"]
+              for frag in wall["w2_surviving_fragment_nodes"]
+              for end in frag["endpoints"]
+          )
+          assert any(
+              not end["snap_samples_equal_retained_incidents"]
+              for wall in freezer_graph_firstgate["selected_original_w4_node_rows"]
+              for frag in wall["w2_surviving_fragment_nodes"]
+              for end in frag["endpoints"]
+          )
           from pathlib import Path
           Path("artifacts/gpt2-page7-physical-faces/freezer_w2_graph_nodes.json").write_text(
               json.dumps(freezer_graph_firstgate,sort_keys=True,indent=2)+"\n"
@@ -409,6 +423,10 @@ jobs:
                               "snapped":node["w2_graph_snapped_node_pdf_pts"],
                               "displacement_pt":node["original_endpoint_vs_snapped_node_displacement_pt"],
                               "samples":node["source_snap_samples"],
+                              "retained_native_endpoint_cluster_diameter_pdf_pt":
+                                  node["source_native_retained_endpoint_diameter_pdf_pt"],
+                              "diameter_exceeds_centroid_snap_tolerance_diagnostic_only":
+                                  node["diameter_exceeds_nominal_tolerance_diagnostic_only"],
                               "original_incident_source_edge_count":len(
                                   node["exact_node_incident_original_source_edges"]
                               ),
