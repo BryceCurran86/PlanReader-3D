@@ -216,17 +216,55 @@ def compare_source_read_order(pdf_bytes: bytes, *, page_no: int) -> dict:
     }
 
 
+def single_source_capture(pdf_bytes: bytes, *, page_no: int) -> dict:
+    """One fresh interpreter's exact producer identities, for seed audits."""
+    captured = capture_original_source(pdf_bytes, page_no=page_no, preflight=False)
+    return {
+        "source_sha256": captured["source_sha256"],
+        "revision_id": captured["revision_id"],
+        "snapshot_id": captured["snapshot_id"],
+        "source_snapshot_unchanged": captured["source_snapshot_unchanged"],
+        "scopes": [
+            {
+                "document_id": row["document_id"],
+                "revision_id": row["revision_id"],
+                "snapshot_id": row["snapshot_id"],
+                "source_sha256": row["source_sha256"],
+                "decision_scope_id": row["decision_scope_id"],
+                "wall_count": len(row["walls"]),
+                "shadow_face_count": len(row["shadow_faces"]),
+                "complete_scope_digest": _digest(row),
+                "wall_ids_and_digests": [
+                    [wall["wall_id"], _digest(wall)] for wall in row["walls"]
+                ],
+                "face_ids_and_digests": [
+                    [face["face_id"], _digest(face)] for face in row["shadow_faces"]
+                ],
+            } for row in captured["scopes"]
+        ],
+        "physical_room_or_material_granted": False,
+        "new_commercial_quantities": [],
+        "frozen_benchmark_scored": False,
+        "diagnostic_only": True,
+    }
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--pdf", type=Path, required=True)
     p.add_argument("--sha", required=True)
     p.add_argument("--page", type=int, required=True)
+    p.add_argument("--single-capture", action="store_true")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
     original = args.pdf.read_bytes()
     if hashlib.sha256(original).hexdigest() != args.sha:
         raise ValueError("original_pdf_sha_mismatch")
-    result = compare_source_read_order(original, page_no=args.page)
+    result = (
+        single_source_capture(original, page_no=args.page)
+        if args.single_capture else
+        compare_source_read_order(original, page_no=args.page)
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print("GPT2_SOURCE_PREFLIGHT_READ_ORDER", json.dumps(result, sort_keys=True))
