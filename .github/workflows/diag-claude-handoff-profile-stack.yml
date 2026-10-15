@@ -1,0 +1,92 @@
+name: DIAG Claude Handoff Profile (rebased resource stack, 3Laurel and Q5446)
+
+# Measurement only. Samples the COMPLETE original-source handoff of the current resource-change stack (main + #2693 + #2694 +
+# #2705 + #2706 + #2695 with the staged GC regime) with py-spy and aggregates inclusive time per function and per pipeline stage
+# (source ingest, W2/W3/W4, raster, opening / room composition, quantity generation, sealing). No production file is changed
+# and no quantity or score is claimed; the handoff outputs are only checked for exit status.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/diag-claude-handoff-profile-stack.yml"
+      - "tools/diag_claude_profile_summary.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: 3laurel
+            project_id: au_qld_3laurel
+            pdf: "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"
+            sha: "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          - project: q5446
+            project_id: au_qld_q5446_armstrong32_harlequin
+            pdf: "documents/sources/Q5446_Standard_Plans_V1_20220320.pdf"
+            sha: "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt py-spy
+      - name: Verify immutable original source
+        env:
+          PDF: ${{ matrix.pdf }}
+          SHA: ${{ matrix.sha }}
+        run: printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+      - name: Build the stack tree (main plus the resource-change branches)
+        run: |
+          set -euo pipefail
+          git config user.name diag
+          git config user.email diag@example.invalid
+          git checkout -q --detach origin/main
+          for ref in claude/source-snapshot-shared-records-20261014 claude/handoff-redundant-source-proof-20261014 \
+                     claude/cheaper-authority-defensive-copies-20261014 claude/opening-label-page-text-filter-20261014 \
+                     claude/handoff-bulk-gc-regime-20261014; do
+            git merge -q --no-edit "origin/$ref"
+          done
+          git rev-parse HEAD
+          # keep the profile tool from the workflow's own commit
+          git checkout -q ${{ github.event.pull_request.head.sha || github.sha }} -- tools/diag_claude_profile_summary.py
+      - name: Sample the complete handoff
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+          PB_CYCLIC_GC_MODE: staged
+          PDF: ${{ matrix.pdf }}
+          PROJECT_ID: ${{ matrix.project_id }}
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts
+          sudo -E env "PATH=$PATH" py-spy record --rate 40 --format raw --subprocesses --nonblocking -o artifacts/profile.raw -- \
+            timeout -s INT 3400s python -u tools/run_source_closed_project_handoff.py \
+              --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all --output-dir artifacts/out \
+              > artifacts/stdout.txt 2> artifacts/stderr.txt
+          echo "exit=$?" | tee artifacts/exit_code.txt
+          ls -la artifacts
+      - name: Aggregate
+        if: always()
+        run: |
+          python tools/diag_claude_profile_summary.py artifacts/profile.raw > artifacts/profile_summary.md || true
+          cat artifacts/profile_summary.md | head -120
+          cp artifacts/profile_summary.md "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: profile-${{ matrix.project }}
+          path: |
+            artifacts/profile_summary.md
+            artifacts/exit_code.txt
+            artifacts/stderr.txt
+          retention-days: 14
