@@ -50,6 +50,10 @@ jobs:
           assert len({r['raw_candidate_id'] for r in report['unresolved_raw_groups']})==9
           for row in report['unresolved_raw_groups']:
               assert len(row['source_observation_ids'])==6
+              member_proofs=row['actual_producer_member_existence_decisions']
+              assert len(member_proofs)==6
+              assert {p['observation_id'] for p in member_proofs}==set(row['source_observation_ids'])
+              assert all(p['source_existence_status'] and not p['raw_group_to_opening_identity_granted'] for p in member_proofs)
               assert not any(row[k] for k in ('opening_existence_granted',
                   'physical_wall_equivalence_granted','host_granted','metric_quantity_granted'))
               png=(root/row['context_png_name']).read_bytes()
