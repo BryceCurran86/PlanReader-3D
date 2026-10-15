@@ -11,7 +11,8 @@ Immutable original architectural source SHA256: 10109b4b6e85e6e27af81f6399ce4b92
 | Structural host missing | 6 | Opening's own source-supported W2/W3/W4 physical host wall identity |
 | Structural host positive; whole-wall frame missing | 6 | Complete host component and competing source-fragment proof |
 | Host and frame positive; typed door/window filling missing | 3 | Independent filling kind; square-set opening does not count as door/window |
-| Host, frame and type positive; ordered width/height not proven | 6 | Independent physical width versus height axis ownership and metric evidence |
+| Host, frame and type positive; only one figured dimension authenticated | 1 | Second independently sourced figured dimension axis or applicable schedule proof |
+| Host, frame and type positive; figured pair but width/height roles unresolved | 5 | Independent physical width versus height axis ordering and metric evidence |
 | **Total** | **21** | **No new opening qualifies for oriented GPT1 quantity handoff** |
 
 **Original six source-hostless identities:** physical suffixes 33d277d4c6b6ce758b0594f9d47ce4d8; 81a45c3a33c2a4c0bfdf243aa45a780d; a68d0b7d738b5de9a1588b4e680e1a8f; b248972669988c108ebc90c6ca3908fd; ba7f75a2e5f68bcce87cd00ac1acf90b; f819752382d44a00d9f28feca4b00787.
@@ -38,7 +39,7 @@ In the original 21 canonical openings, width_record_id and height_record_id are 
 
 The independent diagnostic tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py creates ONE real default SourceVisibilityProducer for original PDF source, then reissues composition + physical-opening proof + exact host selector + exact complete frame + owned figured label for EACH of the 21 originals using existing tools/diag_gptmax_producer_opening_scope_receipts.py (_observe). It authenticates F07 inside that same source instance, verifies original source bytes/snapshot and all existing signed output before/after, checks exact host and frame identity, frame segment projection, unit/orthogonal axes, and distinguishes figured two-number area from source-owned width/height axis records.
 
-All 21 first-failure rows are source-traced. A portable report is **not a signed source authority or quantity**. A new candidate is only flagged for independent GPT1 inspection when it has its own original positive host, complete whole-wall frame, typed door/window role, two independently resolved ordered metric axes and no previously signed quantity. GPT1 must still reauthenticate, publish FIRM quantity, and hand to GPT3 for independent signature and frozen V2 reconciliation. Current producer passes **zero** new candidates.
+All 21 first-failure rows are source-traced, with the six fully framed typed openings split into one single-axis source label and five valid area-product pairs whose ordered axes are unproven. A portable report is **not a signed source authority or quantity**. A new candidate is only flagged for independent GPT1 inspection when it has its own original positive host, complete whole-wall frame, typed door/window role, two independently resolved ordered metric axes and no previously signed quantity. GPT1 must still reauthenticate, publish FIRM quantity, and hand to GPT3 for independent signature and frozen V2 reconciliation. Current producer passes **zero** new candidates.
 
 No original PDF, G17 detector, W2/W3/W4, F07 source producer, host/frame generator, quantity publisher, commercial signature, 20,000 safety cap, benchmark truth or evaluator is modified.
 
