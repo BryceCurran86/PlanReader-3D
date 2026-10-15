@@ -35,6 +35,20 @@ jobs:
           source = PDF.read_bytes()
           assert hashlib.sha256(source).hexdigest() == SOURCE_SHA
           result = audit(source)
+          image=result["original_native_image_placement_census"]
+          assert image["status"] in (
+              "SOURCE_IMAGE_PLACEMENTS_COMPLETE",
+              "SOURCE_IMAGE_PLACEMENT_PARTIAL",
+              "SOURCE_IMAGE_API_UNAVAILABLE",
+          )
+          assert not image["source_image_placement_is_rcp_role"]
+          assert image.get("diagnostic_only",True)
+          if image["status"] == "SOURCE_IMAGE_PLACEMENTS_COMPLETE":
+              assert image["image_universe_complete"]
+              assert image["source_image_placement_count"] == len(image["source_image_placements"])
+          print("P9_ORIGINAL_IMAGE_PLACEMENTS", image["status"],
+                image.get("source_image_placement_count"),
+                [r["native_image_placement_index"] for r in image["source_image_placements"]])
           matrix = result["original_native_frame_ownership_matrix"]
           assert result["native_frame_count"] == 8
           assert len(matrix["source_frames"]) == result["native_frame_count"]
