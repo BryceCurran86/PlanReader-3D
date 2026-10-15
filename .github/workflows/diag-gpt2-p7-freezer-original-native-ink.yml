@@ -1,0 +1,78 @@
+name: DIAG GPT2 Original Page7 W4 Crossing Native Ink Source
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_p7_original_native_crossing_ink.py
+      - tests/test_gpt2_p7_original_native_crossing_ink.py
+      - .github/workflows/diag-gpt2-p7-freezer-original-native-ink.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-page7-indexed-native-ink:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install exact tests/source PDF runtime
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Adversarial indexed original line/rect tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_p7_original_native_crossing_ink.py
+          ruff check --select F821,F823 tools/diag_gpt2_p7_original_native_crossing_ink.py tests/test_gpt2_p7_original_native_crossing_ink.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Exact Maryborough original p7 missing/colliding W4 crossing subedges
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-page7-freezer-ink
+          git rev-parse HEAD > artifacts/gpt2-page7-freezer-ink/head.txt
+          python -u -m tools.diag_gpt2_p7_original_native_crossing_ink \
+            --pdf "$PDF" --sha "$SHA" --page 7 \
+            --original-w4-edges-json '[[[591.359985,1272.800049],[588.23999,1272.686893]],[[588.23999,1272.800049],[588.23999,1272.686893]]]' \
+            --output artifacts/gpt2-page7-freezer-ink/original-crossing-ink.json
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          r=json.loads(Path('artifacts/gpt2-page7-freezer-ink/original-crossing-ink.json').read_text())
+          assert r['original_source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert r['original_page']==7
+          assert r['source_query_atom_count']==2
+          assert r['all_original_source_line_rect_items_examined']
+          assert r['complete_native_ink_universe_including_curves_raster'] is False
+          assert not r['source_role_or_room_authentication_granted']
+          assert r['new_commercial_quantities']==[]
+          assert not r['frozen_benchmark_scored']
+          for item in r['source_native_linear_ink_queries']:
+              count=item['original_indexed_linear_native_full_span_count']
+              assert count==len(item['original_indexed_native_linear_receipts'])
+              assert all(x['native_stroke_fully_covers_atomic_wall_candidate'] and
+                         x['source_room_face_closed_by_tool'] is False
+                         for x in item['original_indexed_native_linear_receipts'])
+          print('GPT2_P7_ORIGINAL_NATIVE_W4_FULLSPANS', [
+              {'source_atom':x['original_source_candidate_atom_pdf_pts'],
+               'indexed_full_native_source_ids':[v['original_native_primitive_ref'] for v in x['original_indexed_native_linear_receipts']]}
+              for x in r['source_native_linear_ink_queries']
+          ])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-page7-freezer-indexed-linear-ink
+          path: artifacts/gpt2-page7-freezer-ink
+          retention-days: 14
