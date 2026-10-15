@@ -191,3 +191,4 @@ class TestNoQuantityOrLiveWiring:
         source = open("pb_planreader_pdf_extractor.py", encoding="utf-8").read()
         assert "pb_source_join_readiness_shadow" not in source
         assert "pb_annotation_cycle_shadow" not in source
+        assert "pb_opening_quantity_first_fail_shadow" not in source
