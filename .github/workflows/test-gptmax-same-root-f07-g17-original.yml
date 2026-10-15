@@ -2,10 +2,11 @@ name: GPT MAX Original Same-Root F07 and G17 Authority
 on:
   pull_request:
     branches:
-      - main
+      - gptmax/original-same-root-f07-clean-main-20261015
     paths:
       - tools/diag_gptmax_same_root_f07_g17_original.py
       - tests/test_gptmax_same_root_f07_g17_original.py
+      - tests/test_gptmax_same_root_f07_g17_raw_overlay.py
       - .github/workflows/test-gptmax-same-root-f07-g17-original.yml
       - docs/engineering/gptmax_lot16_same_root_f07_g17_20261015.md
 permissions:
@@ -28,8 +29,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gptmax_same_root_f07_g17_original.py
-          ruff check --select F821,F823 tools/diag_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_original.py
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_raw_overlay.py
+          ruff check --select F821,F823 tools/diag_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_raw_overlay.py
   sha-pinned-single-original-live-source-replay:
     runs-on: ubuntu-latest
     timeout-minutes: 75
@@ -66,6 +67,18 @@ jobs:
           assert r['original_framed_count']==9
           assert r['original_signed_quantity_count']==r['original_customer_row_count']==8
           assert r['raw_candidate_count']==30 and r['raw_unresolved_count']==9
+          overlay=r['original_unresolved_raw_same_root_spatial_audit']
+          assert overlay['status']=='UNPUBLISHED_SAME_ROOT_F07_G17_RAW_GEOMETRY_AUDIT'
+          assert overlay['raw_unresolved_count']==9
+          assert len(overlay['source_view_spatial_classifications'])==9
+          assert sum(x['source_view_geometric_relation_only']=='GEOMETRICALLY_DISJOINT_SAME_ROOT_F07'
+                     for x in overlay['source_view_spatial_classifications'])==4
+          assert sum(x['source_view_geometric_relation_only']=='GEOMETRICALLY_INSIDE_SAME_ROOT_F07'
+                     for x in overlay['source_view_spatial_classifications'])==5
+          assert not overlay['physical_count_granted'] and not overlay['typed_nonplan_proven']
+          assert all(not x['source_owned_nonplan_role_proven']
+                 and not x['independent_physical_opening_proven']
+                 for x in overlay['source_view_spatial_classifications'])
           assert r['candidate_universe_complete'] is False
           assert all(not v for v in r['authority_grants'].values())
           # The original source actually PROVES a same-root, unique F07 plan.
