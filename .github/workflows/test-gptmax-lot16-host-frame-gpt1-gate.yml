@@ -70,7 +70,8 @@ jobs:
             'structural_host_unavailable':6,
             'whole_wall_frame_unavailable':6,
             'opening_filling_kind_unproven':3,
-            'width_height_axis_authority_unproven':6,
+            'source_figured_dimension_pair_unproven':1,
+            'width_height_axis_authority_unproven':5,
           }
           assert not r['gpt1_new_handoff_candidates']
           assert not r['signed_customer_publisher_activated']
