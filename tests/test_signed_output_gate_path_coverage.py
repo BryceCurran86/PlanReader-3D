@@ -205,7 +205,7 @@ def pull_request_trigger_reaches_main(workflow_text: str) -> None:
             continue
         key, rest = match.group(1), match.group(2)
         values = _trigger_values(lines, index, rest)
-        if key == "branches" and not any(path_matches(v, "main") for v in values):
+        if key == "branches" and not workflow_path_included(values, "main"):
             raise ValueError(f"pull_request.branches {values} does not include main")
         if key == "branches-ignore" and any(path_matches(v, "main") for v in values):
             raise ValueError("pull_request.branches-ignore excludes main")
@@ -396,6 +396,9 @@ def test_trigger_that_never_reaches_main_pull_requests_is_rejected():
     base = "on:\n  pull_request:\n{extra}    paths:\n      - 'pb_*.py'\n"
     for extra in (
         "    branches: [release]\n",
+        "    branches: ['**', '!main']\n",
+        "    branches: ['main', '!main']\n",
+        "    branches:\n      - '**'\n      - '!main'\n",
         "    branches:\n      - release\n      - 'hotfix/**'\n",
         "    branches-ignore: [main]\n",
         "    types: [closed]\n",
@@ -410,6 +413,7 @@ def test_trigger_that_never_reaches_main_pull_requests_is_rejected():
         "    branches:\n      - main\n",
         "    branches: ['**']\n",
         "    branches: [release, main]\n",
+        "    branches: ['**', '!main', main]\n",
         "    types: [opened, synchronize, reopened]\n",
         "    branches-ignore: [release]\n",
     ):
