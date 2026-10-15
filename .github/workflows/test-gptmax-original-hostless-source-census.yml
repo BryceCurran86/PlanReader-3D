@@ -6,6 +6,8 @@ on:
     paths:
       - tools/diag_gptmax_original_hostless_source_census.py
       - tests/test_gptmax_original_hostless_source_census.py
+      - docs/engineering/gptmax_original_hostless_source_census_20261015.md
+      - docs/engineering/gptmax_fifteen_original_source_authority_tasks_20261015.md
       - .github/workflows/test-gptmax-original-hostless-source-census.yml
 permissions:
   contents: read
