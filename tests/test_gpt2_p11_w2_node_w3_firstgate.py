@@ -155,3 +155,91 @@ def test_source_node_incident_mixed_original_parents_are_retained_not_fused():
         ["d1i0"], ["foreign"],
     ]
     assert not result["new_physical_wall_approved"]
+
+
+def test_original_f07_sibling_receipts_require_exact_producer_stamped_scope():
+    from pb_viewport_segmentation import (
+        SegmentedViewport, _stamp_segment_page_viewports_product,
+    )
+    from pb_physical_wall_candidate_authority import (
+        _viewport_decision_scope_id,_viewport_sibling_set_fingerprint,
+    )
+    from tools.diag_gpt2_p11_w2_graph_node_firstgate import (
+        audit_exact_producer_f07_sibling_receipts,
+    )
+    published=SimpleNamespace(
+        revision=SimpleNamespace(document_id="d", revision_id="r",
+                                 source_sha256="a"*64),
+        snapshot=SimpleNamespace(snapshot_id="s"),
+    )
+    plan=SegmentedViewport(
+        view_id="source-plan",page_number=11,view_type="floor_finish_plan",
+        label="ORIGINAL FLOOR FINISHES PLAN",title_bbox=(0.,0.,15.,20.),
+        bounding_box=(0.,0.,100.,100.),status="resolved",
+        boundary_source="vector_frame",confidence=1.,
+        provenance={"source_owned_plan_view_proven":True,"original":"d1i0"},
+    )
+    schedule=SegmentedViewport(
+        view_id="schedule",page_number=11,view_type="schedule",
+        label="SCHEDULE",title_bbox=(210.,0.,220.,20.),
+        bounding_box=(200.,0.,300.,100.),status="resolved",
+        boundary_source="vector_frame",confidence=1.,
+        notes=["source-native only"],
+    )
+    views=tuple(_stamp_segment_page_viewports_product((plan,schedule)))
+    scope=_viewport_decision_scope_id(
+        published=published,page_id="11",viewport=plan,
+        sibling_set_fingerprint=_viewport_sibling_set_fingerprint(views),
+    )
+    audited=audit_exact_producer_f07_sibling_receipts(
+        viewports=views,published=published,source_page=11,
+        original_w4_scope_id=scope,
+    )
+    assert audited["all_original_source_stamped_sibling_count"]==2
+    assert audited["source_scope_target_f07_view_id"]=="source-plan"
+    assert audited["first_w4_scope_id"]==scope
+    assert not audited["same_original_producer_cache_claimed"]
+    assert audited["no_physical_room_role_granted"]
+    assert all(x["diagnostic_producer_seal_valid"]
+               for x in audited["all_original_source_f07_siblings"])
+    with pytest.raises(ValueError,match="scope_exact_parity"):
+        audit_exact_producer_f07_sibling_receipts(
+            viewports=views,published=published,source_page=11,
+            original_w4_scope_id="scope-from-different-original-sibling",
+        )
+    schedule.notes.append("edited-after-source-producer")
+    with pytest.raises(ValueError,match="original_sibling_source_seal"):
+        audit_exact_producer_f07_sibling_receipts(
+            viewports=views,published=published,source_page=11,
+            original_w4_scope_id=scope,
+        )
+
+
+def test_duplicate_producer_sealed_f07_view_addresses_do_not_mint_scope():
+    from pb_viewport_segmentation import (
+        SegmentedViewport,_stamp_segment_page_viewports_product,
+    )
+    from tools.diag_gpt2_p11_w2_graph_node_firstgate import (
+        audit_exact_producer_f07_sibling_receipts,
+    )
+    a=SegmentedViewport(
+        view_id="duplicate",page_number=11,view_type="schedule",label="S",
+        title_bbox=(0.,0.,10.,10.),bounding_box=(0.,0.,50.,50.),
+        status="resolved",boundary_source="vector_frame",confidence=1.,
+    )
+    b=SegmentedViewport(
+        view_id="duplicate",page_number=11,view_type="legend",label="L",
+        title_bbox=(60.,0.,70.,10.),bounding_box=(60.,0.,110.,50.),
+        status="resolved",boundary_source="vector_frame",confidence=1.,
+    )
+    _stamp_segment_page_viewports_product((a,b))
+    published=SimpleNamespace(
+        revision=SimpleNamespace(document_id="d",revision_id="r",
+                                 source_sha256="a"*64),
+        snapshot=SimpleNamespace(snapshot_id="s"),
+    )
+    with pytest.raises(ValueError,match="duplicate_sibling_view_identity"):
+        audit_exact_producer_f07_sibling_receipts(
+            viewports=(a,b),published=published,source_page=11,
+            original_w4_scope_id="unknown",
+        )
