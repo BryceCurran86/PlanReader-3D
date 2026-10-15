@@ -14,16 +14,7 @@ from pathlib import Path
 
 import fitz
 
-from pb_physical_wall_candidate_authority import (
-    PhysicalWallCandidateProducer, _page_viewports_cache_key,
-    _authenticated_viewports_from_rows, _viewport_sibling_set_fingerprint,
-    _viewport_decision_scope_id,
-)
-from pb_viewport_segmentation import (
-    _producer_fingerprint_payload,
-    segmented_viewport_producer_fingerprint,
-    is_segment_page_viewports_product,
-)
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
     audit_source_room_face_owned_witnesses,
     build_source_room_face_authority,
@@ -103,50 +94,6 @@ def _digest(value):
     ).encode()).hexdigest()
 
 
-def audited_producer_f07_inventory(*, source, published, page_no: int) -> dict:
-    """Use cached source-sealed F07 siblings only; never fabricate a view."""
-    key = _page_viewports_cache_key(published=published, page_id=str(page_no))
-    cache = source._physical_wall_page_viewports_cache
-    if key not in cache:
-        return {"status": "producer_f07_cache_unavailable",
-                "all_source_owned_views": [], "shadow_only": True}
-    authentic = _authenticated_viewports_from_rows(cache[key])
-    if authentic is None:
-        return {"status": "producer_f07_view_set_unavailable",
-                "all_source_owned_views": [], "shadow_only": True}
-    all_views, eligible = authentic
-    if not all(is_segment_page_viewports_product(v) for v in all_views):
-        raise ValueError("unsealed_original_f07_view_in_scope")
-    sibling_digest = _viewport_sibling_set_fingerprint(all_views)
-    records = []
-    for view in sorted(all_views, key=lambda v: v.view_id):
-        payload = _producer_fingerprint_payload(view)
-        fingerprint = segmented_viewport_producer_fingerprint(view)
-        records.append({
-            "view_id": view.view_id,
-            "view_type": view.view_type,
-            "producer_payload": payload,
-            "producer_fingerprint": fingerprint,
-            "payload_sha256": _digest(payload),
-            "eligible_for_plan_wall_scope": any(x is view for x in eligible),
-            "expected_wall_scope_if_eligible": (
-                _viewport_decision_scope_id(
-                    published=published, page_id=str(page_no), viewport=view,
-                    sibling_set_fingerprint=sibling_digest,
-                )
-                if any(x is view for x in eligible) else None
-            ),
-            "producer_token_valid": True,
-        })
-    return {
-        "status": "original_producer_f07_sibling_inventory_captured",
-        "sibling_set_fingerprint": sibling_digest,
-        "all_producer_view_count": len(records),
-        "all_source_owned_views": records,
-        "shadow_only": True,
-    }
-
-
 def capture_original_source(pdf_bytes: bytes, *, page_no: int, preflight: bool):
     """One fully independent producer replay for one exact source byte string."""
     if type(pdf_bytes) is not bytes or type(page_no) is not int or page_no < 1:
@@ -182,9 +129,6 @@ def capture_original_source(pdf_bytes: bytes, *, page_no: int, preflight: bool):
         source_sha256=sha, snapshot_id=snapshot.snapshot.snapshot_id,
         page_id=str(page_no), view_type="floor_finish_plan",
     )
-    original_f07 = audited_producer_f07_inventory(
-        source=source, published=receipt, page_no=page_no
-    )
     scopes = []
     for selector in selectors:
         wall = authority.resolve_scope(selector)
@@ -198,7 +142,6 @@ def capture_original_source(pdf_bytes: bytes, *, page_no: int, preflight: bool):
         "revision_id": receipt.revision.revision_id,
         "snapshot_id": snapshot.snapshot.snapshot_id,
         "scopes": scopes,
-        "original_f07_source_view_sibling_inventory": original_f07,
         "preflight_drawing_receipt": preflight_receipt,
         "source_snapshot_unchanged": (
             source.published_snapshot_for_revision(receipt.revision.revision_id)
@@ -240,13 +183,10 @@ def compare_source_read_order(pdf_bytes: bytes, *, page_no: int) -> dict:
     baseline = capture_original_source(pdf_bytes, page_no=page_no, preflight=False)
     after_read = capture_original_source(pdf_bytes, page_no=page_no, preflight=True)
     repeat = capture_original_source(pdf_bytes, page_no=page_no, preflight=False)
-    fields = (
-        "source_sha256", "revision_id", "snapshot_id",
-        "original_f07_source_view_sibling_inventory", "scopes",
-    )
-    first = {k: baseline.get(k) for k in fields}
-    second = {k: after_read.get(k) for k in fields}
-    third = {k: repeat.get(k) for k in fields}
+    fields = ("source_sha256", "revision_id", "snapshot_id", "scopes")
+    first = {k: baseline[k] for k in fields}
+    second = {k: after_read[k] for k in fields}
+    third = {k: repeat[k] for k in fields}
     ab = first_difference(first, second)
     aa = first_difference(first, third)
     def summary(value):
@@ -255,9 +195,6 @@ def compare_source_read_order(pdf_bytes: bytes, *, page_no: int) -> dict:
             "revision_id": value["revision_id"],
             "snapshot_id": value["snapshot_id"],
             "source_snapshot_unchanged": value["source_snapshot_unchanged"],
-            "original_f07_source_view_sibling_inventory": value.get(
-                "original_f07_source_view_sibling_inventory"
-            ),
             "preflight_drawing_receipt": value["preflight_drawing_receipt"],
             "scope_ids": [x["decision_scope_id"] for x in value["scopes"]],
             "w4_wall_counts": [len(x["walls"]) for x in value["scopes"]],
@@ -287,9 +224,6 @@ def single_source_capture(pdf_bytes: bytes, *, page_no: int) -> dict:
         "revision_id": captured["revision_id"],
         "snapshot_id": captured["snapshot_id"],
         "source_snapshot_unchanged": captured["source_snapshot_unchanged"],
-        "original_f07_source_view_sibling_inventory": captured.get(
-            "original_f07_source_view_sibling_inventory"
-        ),
         "scopes": [
             {
                 "document_id": row["document_id"],
