@@ -99,23 +99,36 @@ def project_live_opening_customer_rows(
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
 
-    # Detect a recycled original source quantity ID before provisional or
-    # abstained entries are filtered away. Across opening area and count,
-    # the same ID can never authenticate two separate physical claims.
-    source_claims = tuple(
-        q for q in (*claim.opening_quantity_evidence,
-                    *claim.opening_count_quantity_evidence)
-        if isinstance(q, QuantityEvidence)
-        and q.family in {"opening_area", "opening_count"}
-    )
-    source_ids = tuple(q.quantity_id for q in source_claims)
-    if (
-        any(type(i) is not str or not i or i != i.strip() for i in source_ids)
-        or len(set(source_ids)) != len(source_ids)
+    # Validate every ORIGINAL area and count source record before eligibility
+    # selection. An invalid object, wrong-family record or duplicate source ID
+    # must not disappear merely because it was provisional or ABSTAINED.
+    # These producer-owned inventories are family-typed; a customer adapter
+    # never migrates a misplaced area record into a count or vice versa.
+    source_ids: set[str] = set()
+    for inventory, family in (
+        (claim.opening_quantity_evidence, "opening_area"),
+        (claim.opening_count_quantity_evidence, "opening_count"),
     ):
-        raise ValueError(
-            "opening customer quantity identities collide before commercial filtering"
-        )
+        for original in inventory:
+            if not isinstance(original, QuantityEvidence):
+                raise TypeError(
+                    "opening customer source inventory must contain QuantityEvidence"
+                )
+            if original.family != family:
+                raise ValueError(
+                    "opening customer source inventory contains a foreign quantity family"
+                )
+            original_id = original.quantity_id
+            if (
+                type(original_id) is not str
+                or not original_id
+                or original_id != original_id.strip()
+                or original_id in source_ids
+            ):
+                raise ValueError(
+                    "opening customer quantity identities collide before commercial filtering"
+                )
+            source_ids.add(original_id)
 
     area_quantities = _eligible_area_quantities(claim)
     count_quantities = _eligible_count_quantities(claim)

@@ -65,15 +65,35 @@ def _load_unchanged_frozen_modules():
 ) = _load_unchanged_frozen_modules()
 
 
+def _read_json_without_duplicate_keys(path: Path) -> Any:
+    """Never discard conflicting keys before signed source/customer validation.
+
+    Unlike default json.loads, this retains the immutable wire document's
+    original identity semantics: even a nested conflicting key must fail
+    rather than silently replacing the previous source/quantity claim.
+    """
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"signed evidence JSON contains duplicate key: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=unique_object
+    )
+
+
 def _json_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if type(value) is not dict:
         raise ValueError("signed evidence file must contain a JSON object")
     return value
 
 
 def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if type(value) is not list or any(type(row) is not dict for row in value):
         raise ValueError("customer projection must be a JSON array of objects")
     # Manual/customer-only rows are not allowed into this signed automated lane.

@@ -75,9 +75,8 @@ jobs:
           assert old['primitive_safety_cap']==new['primitive_safety_cap']==20000
           # Native annotation opposition has already been integrated on main.
           # Confirm authentic current source counts and identity-level retention.
-          from tools.declared_additive_source_retention import strict_or_declared
-          with strict_or_declared(old,new):
-              assert old['summary']==new['summary']=={"physical_existence_claims":21,"host_bindings":15,"host_frames":9}
+          from tools.declared_additive_source_retention import assert_unchanged_or_declared
+          assert old['summary']==new['summary']=={"physical_existence_claims":21,"host_bindings":15,"host_frames":9}
           def keyed(key,report):
               values=report[key]
               ids=[x['opening_identity_id'] for x in values]
@@ -86,9 +85,10 @@ jobs:
           oldbind,newbind=keyed('opening_bindings',old),keyed('opening_bindings',new)
           oldframe,newframe=keyed('host_frames',old),keyed('host_frames',new)
           assert len(oldbind)==len(newbind)==len(oldframe)==len(newframe)==21
-          with strict_or_declared(old,new):
-              assert oldbind==newbind, "original opening identity/source proof changed"
-              assert oldframe==newframe, "original opening frame/source proof changed"
+          if oldbind!=newbind:
+              assert_unchanged_or_declared(old,new,message="original opening identity/source proof changed")
+          if oldframe!=newframe:
+              assert_unchanged_or_declared(old,new,message="original opening frame/source proof changed")
           # Two independently source-opposed native annotation hypotheses
           # must remain absent, not be silently republished on later changes.
           historically_opposed={
