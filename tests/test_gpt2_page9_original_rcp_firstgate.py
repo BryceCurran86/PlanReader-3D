@@ -74,3 +74,96 @@ def test_gpt2_rcp_nearby_native_frame_unavailable_when_geometry_bad():
     assert _nearest_native_frames_to_title((0,0,10,10),(
         (1,1,float("nan"),5),(1,1,0,5),("bad",1,2,3)
     ))==[]
+
+
+
+def test_indexed_original_frame_receipts_include_every_candidate_shape():
+    from tools.diag_gpt2_page9_original_rcp_firstgate import _frame_source_receipts
+    from pb_viewport_segmentation import ViewportLayoutCalibration
+
+    class Point:
+        def __init__(self, x, y):
+            self.x, self.y = x, y
+
+    class Rect:
+        x0, y0, x1, y1 = 0., 0., 50., 80.
+
+    class Page:
+        def get_drawings(self):
+            return [
+                {"items": [("re", Rect())]},
+                {"items": [
+                    ("l", Point(0, 0), Point(50, 0)),
+                    ("l", Point(50, 0), Point(50, 80)),
+                    ("l", Point(50, 80), Point(0, 80)),
+                    ("l", Point(0, 80), Point(0, 0)),
+                ]},
+                {"items": [("re", Rect())]},
+                {"items": [("l", Point(200, 0), Point(250, 0))]},
+            ]
+
+    cal = ViewportLayoutCalibration(
+        median_word_height_pt=5.,
+        title_frame_gap_pt=10.,
+        minimum_frame_span_pt=20.,
+        title_separation_pt=10.,
+        page_width_pt=500.,
+        page_height_pt=500.,
+    )
+    original = Page()
+    first = _frame_source_receipts(original, (0., 0., 50., 80.), cal)
+    assert len(first) == 3
+    assert sorted(tuple(q["native_source_ids"]) for q in first) == [
+        ("d0i0",), ("d1i0", "d1i1", "d1i2", "d1i3"), ("d2i0",)
+    ]
+    assert all(q["candidate_source_match_not_authority"] for q in first)
+    assert _frame_source_receipts(original, (250., 0., 300., 80.), cal) == []
+
+
+def test_frame_title_competitors_remain_candidates_not_owner():
+    from types import SimpleNamespace
+    from tools.diag_gpt2_page9_original_rcp_firstgate import _frame_ownership_matrix
+    import pb_viewport_segmentation as seg
+
+    class Page:
+        rotation = 0
+        def get_drawings(self):
+            return []
+        def get_text(self, mode):
+            return {"blocks": []}
+
+    original = Page()
+    cal = seg.ViewportLayoutCalibration(5., 10., 20., 10., 500., 500.)
+    frame = (0., 0., 100., 100.)
+    anchors = (
+        SimpleNamespace(text="ONE PLAN", bbox=(10., 105., 30., 110.),
+                        direction=(1., 0.), view_type="reflected_ceiling_plan"),
+        SimpleNamespace(text="OTHER PLAN", bbox=(45., 105., 65., 110.),
+                        direction=(1., 0.), view_type="reflected_ceiling_plan"),
+    )
+    result = _frame_ownership_matrix(original, (frame,), anchors, cal)
+    assert result["diagnostic_only"]
+    assert not result["frame_candidate_matrix_grants_authority"]
+    row = result["source_frames"][0]
+    # Whether candidates pass actual producer geometric gates or not,
+    # the report never chooses one owner or mints a viewport.
+    assert row["no_source_role_or_viewport_granted"]
+    assert all(a["no_source_role_or_viewport_granted"] for a in result["source_titles"])
+    assert len(result["source_titles"]) == 2
+    assert row["native_frame_bbox_pdf_pts"] == list(frame)
+
+
+def test_native_and_display_frame_round_trip_at_right_angles():
+    import fitz
+    from pb_viewport_segmentation import _to_visual_bbox, _to_native_bbox
+    pdf = fitz.open()
+    page = pdf.new_page(width=300, height=400)
+    box = (25., 30., 180., 230.)
+    try:
+        for rotation in (0, 90, 180, 270):
+            page.set_rotation(rotation)
+            displayed = _to_visual_bbox(page, box)
+            native = _to_native_bbox(page, displayed)
+            assert native == pytest.approx(box, abs=1e-4)
+    finally:
+        pdf.close()
