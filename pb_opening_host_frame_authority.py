@@ -264,6 +264,7 @@ class OpeningHostFrameProducer:
         host_binding_authority: OpeningHostBindingAuthority,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
         *,
+        raster_split_frame_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -276,9 +277,13 @@ class OpeningHostFrameProducer:
             raise TypeError("host_binding_authority must be producer-owned")
         if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
             raise TypeError("physical_wall_candidate_authority must be producer-owned")
+        if type(raster_split_frame_shadow) is not bool:
+            raise TypeError("raster_split_frame_shadow must be a bool")
         self._opening = physical_opening_authority
         self._host = host_binding_authority
         self._walls = physical_wall_candidate_authority
+        # Opt-in diagnostic ONLY: never enabled in the default composition.
+        self._raster_split_frame_shadow = raster_split_frame_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
 
     @classmethod
@@ -288,11 +293,13 @@ class OpeningHostFrameProducer:
         physical_opening_authority: PhysicalOpeningAuthority,
         host_binding_authority: OpeningHostBindingAuthority,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+        raster_split_frame_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
             host_binding_authority,
             physical_wall_candidate_authority,
+            raster_split_frame_shadow=raster_split_frame_shadow,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -360,6 +367,24 @@ class OpeningHostFrameProducer:
             self._opening, opening, wall_scope.records, geometry,
             wall_scope.equivalence, wall_scope.source_observation_ids,
         )
+        # A source-proven split-centerline host is NOT a source-band host.
+        # An opt-in shadow may independently re-prove its original W4 split
+        # edge when the ordinary source-band census is complete and EMPTY.
+        # Never bypass a source-band CONFLICT, a positive competing band,
+        # a missing source receipt, or a host without this exact proof kind.
+        if (
+            self._raster_split_frame_shadow
+            and host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED
+                in binding.reason_codes
+            and proof.status is EvidenceResolutionStatus.CORROBORATED
+            and not proof.bands
+        ):
+            alternative = host_geometry._resolve_raster_split_centerline_host(
+                wall_scope.records, geometry, wall_scope.equivalence,
+            )
+            if (alternative.status is EvidenceResolutionStatus.CORROBORATED
+                    and len(alternative.bands) == 1):
+                proof = alternative
         if (
             proof.status is not EvidenceResolutionStatus.CORROBORATED
             or len(proof.bands) != 1
