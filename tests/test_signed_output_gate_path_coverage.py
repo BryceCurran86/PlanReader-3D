@@ -212,13 +212,13 @@ def test_missing_or_disguised_pull_request_trigger_fails_closed():
     import pytest
 
     for workflow in (
-        "name: Only push\\non:\\n  push:\\n    branches: [main]\\n",
-        "name: Manual only\\non:\\n  workflow_dispatch:\\n",
-        "name: Commented-out event\\n# pull_request:\\non:\\n  push:\\n",
-        "name: No trigger\\njobs:\\n  test:\\n    runs-on: ubuntu-latest\\n",
+        "name: Only push\non:\n  push:\n    branches: [main]\n",
+        "name: Manual only\non:\n  workflow_dispatch:\n",
+        "name: Commented-out event\n# pull_request:\non:\n  push:\n",
+        "name: No trigger\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
     ):
         with pytest.raises(ValueError, match="missing .*trigger"):
             pull_request_paths(workflow)
 
     # Genuinely unfiltered pull requests still run for every file change.
-    assert pull_request_paths("on:\\n  pull_request:\\n    branches: [main]\\n") is None
+    assert pull_request_paths("on:\n  pull_request:\n    branches: [main]\n") is None
