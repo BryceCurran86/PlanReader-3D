@@ -56,7 +56,7 @@ jobs:
           mkdir -p artifacts/gpt1-area-firstgate
           python tools/diag_gpt1_original_area_line_first_failure.py \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
-            --page 3 \
+            --page 3 --raster-supports \
             --sha "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844" \
             --output artifacts/gpt1-area-firstgate/lot16-page3.json
           python - <<'PY'
