@@ -22,6 +22,70 @@ def _key(p):
     # W2 retains its separate production snap authority and 2.5pt tolerance.
     return (float(p[0]), float(p[1]))
 
+def _edge_biconnected_blocks(visited, selected):
+    """Enumerate every exact native edge block, never choose a symbol role.
+
+    Blocks separate true cycles sharing a junction while preserving ambiguous
+    chords, parallel edges, spurs and all indexed source-line ownership.
+    """
+    graph = defaultdict(list)
+    for name in sorted(visited):
+        item = selected[name]
+        a, b = _key(item["a"]), _key(item["b"])
+        graph[a].append((b, name))
+        graph[b].append((a, name))
+
+    discovery, low, stack, blocks = {}, {}, [], []
+    clock = 0
+
+    def visit(vertex, parent_edge=None):
+        nonlocal clock
+        clock += 1
+        discovery[vertex] = low[vertex] = clock
+        for neighbour, edge_id in sorted(graph[vertex]):
+            if edge_id == parent_edge:
+                continue
+            if neighbour not in discovery:
+                stack.append(edge_id)
+                visit(neighbour, edge_id)
+                low[vertex] = min(low[vertex], low[neighbour])
+                if low[neighbour] >= discovery[vertex]:
+                    block = []
+                    while stack:
+                        member = stack.pop()
+                        block.append(member)
+                        if member == edge_id:
+                            break
+                    blocks.append(sorted(block))
+            elif discovery[neighbour] < discovery[vertex]:
+                stack.append(edge_id)
+                low[vertex] = min(low[vertex], discovery[neighbour])
+
+    for vertex in sorted(graph):
+        if vertex not in discovery:
+            visit(vertex)
+    output = []
+    for members in sorted(blocks):
+        local_degrees = defaultdict(int)
+        for member in members:
+            item = selected[member]
+            local_degrees[_key(item["a"])] += 1
+            local_degrees[_key(item["b"])] += 1
+        simple = (
+            len(members) >= 3 and len(local_degrees) == len(members)
+            and all(degree == 2 for degree in local_degrees.values())
+        )
+        output.append({
+            "source_edge_ids": members,
+            "source_edge_count": len(members),
+            "complete_exact_cycle": simple,
+            "no_role_granted": True,
+        })
+    # Integrity: no indexed member is silently lost or double-counted.
+    assert sorted(edge for block in output for edge in block["source_edge_ids"]) == sorted(visited)
+    return output
+
+
 def inspect_native_component(page, seed: str):
     """Return candidate component and raw source receipts, not an authority grant."""
     segments = {}
@@ -70,6 +134,7 @@ def inspect_native_component(page, seed: str):
         degrees[_key(item["a"])] += 1
         degrees[_key(item["b"])] += 1
     closed_simple_cycle = len(visited) >= 3 and all(n == 2 for n in degrees.values()) and len(degrees) == len(visited)
+    source_blocks = _edge_biconnected_blocks(visited, selected)
     return {
         "status": "SOURCE_COMPONENT_CANDIDATE",
         "seed": seed,
@@ -79,6 +144,9 @@ def inspect_native_component(page, seed: str):
         "complete_exact_cycle": closed_simple_cycle,
         "component_edges": sorted(visited),
         "component_edge_count": len(visited),
+        "exact_native_edge_blocks": source_blocks,
+        "exact_simple_cycle_block_count": sum(b["complete_exact_cycle"] for b in source_blocks),
+        "component_role_ambiguous": True,
         "endpoint_degrees": [{"point": list(p), "degree": n} for p, n in sorted(degrees.items())],
         "source_segments": [selected[k] for k in sorted(visited)],
         "all_original_seed_endpoint_owners": {
