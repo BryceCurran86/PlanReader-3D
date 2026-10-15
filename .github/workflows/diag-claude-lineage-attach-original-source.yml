@@ -10,6 +10,8 @@ on:
     paths:
       - ".github/workflows/diag-claude-lineage-attach-original-source.yml"
       - "tools/diag_claude_variant_compare.py"
+      - "pb_wall_room_topology_primitive_lineage.py"
+      - "tests/test_lineage_attach_prefilter_equivalence.py"
   workflow_dispatch:
 
 permissions:
