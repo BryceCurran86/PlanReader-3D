@@ -1,0 +1,94 @@
+name: GPT MAX Lot16 Host Frame Dimensions GPT1 Gate
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py
+      - tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
+      - docs/engineering/gptmax_lot16_host_frame_dimensions_20261015.md
+      - .github/workflows/test-gptmax-lot16-host-frame-gpt1-gate.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  source-integrity-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
+          ruff check --select F821,F823 tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
+
+  immutable-original-production-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Replay original Lot16 original SHA and live source-gated host/frame/dimensions
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py \
+            --pdf "$PDF" --page-id 3 \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output artifacts/gptmax-original-lot16-host-frame-dimension-gate.json
+      - name: Verify all 21 own-host/own-frame records and refuse unowned dimensions
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/gptmax-original-lot16-host-frame-dimension-gate.json').read_text())
+          assert r['status']=='UNPUBLISHED_SOURCE_REPROVED_OPENING_GPT1_QUEUE'
+          assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
+          assert r['same_root_f07']['status']=='SOURCE_VIEW_CANDIDATE_SAME_ROOT_ONLY'
+          assert r['same_root_f07']['selected_view_id']=='source_plan_view_67db409f1a44214bbf0766ac'
+          assert r['original_physical_opening_count']==21
+          assert r['original_authenticated_hosts']==15
+          assert r['original_complete_host_frames']==9
+          assert r['original_signed_area_quantities']==8
+          assert r['source_snapshot_and_original_sealed_receipts_unchanged']
+          assert r['first_gate_counts']=={
+            'structural_host_unavailable':6,
+            'whole_wall_frame_unavailable':6,
+            'opening_filling_kind_unproven':3,
+            'width_height_axis_authority_unproven':6,
+          }
+          assert not r['gpt1_new_handoff_candidates']
+          assert not r['signed_customer_publisher_activated']
+          assert not r['signed_source_lineage_handoff_granted']
+          assert not r['global_opening_count_granted']
+          assert len({x['physical_opening_id'] for x in r['opening_decisions']})==21
+          assert sum(bool(x['authenticated_frame_record_id']) for x in r['opening_decisions'])==9
+          assert sum(bool(x['authenticated_host_record_id']) for x in r['opening_decisions'])==15
+          assert all(not x['new_gpt1_candidate_handoff']
+              and not x['measurement_published']
+              and not x['customer_seal_granted']
+              and not x['opening_count_granted']
+              and not x['axis_order_authenticated'] for x in r['opening_decisions'])
+          print('21 genuine source reproofs: 6 host, 6 frame, 3 semantic, 6 metric-axis gates; zero new GPT1 output')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-lot16-original-host-frame-dimension-first-gates
+          path: artifacts/gptmax-original-lot16-host-frame-dimension-gate.json
+          retention-days: 21
