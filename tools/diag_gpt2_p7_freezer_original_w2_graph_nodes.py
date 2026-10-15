@@ -18,7 +18,9 @@ from pb_physical_wall_candidate_authority import (
     _proven_filled_wall_strips, _filter_proven_wall_strip_geometry,
     _assemble_source_owned_w4_identities_or_unavailable,
 )
-from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+from pb_wall_room_topology_stage_a import (
+    build_wall_graph_for_viewport, DEFAULT_GAP_SNAP_TOLERANCE_PT,
+)
 from pb_wall_room_topology_junction_classifier import classify_junctions
 
 
@@ -129,6 +131,14 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
                     }
                     for key, values in sorted(raw_groups.items())
                 ]
+                source_native_coords = [
+                    tuple(row["native_coordinate_6dp_report_only"])
+                    for row in coordinate_groups
+                ]
+                retained_diameter = max(
+                    (math.dist(a, b) for a in source_native_coords
+                     for b in source_native_coords), default=0.
+                )
                 endpoints.append({
                     "w2_graph_node_id": node_id,
                     "w2_source_edge_endpoint": label,
@@ -142,6 +152,12 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
                     "retained_original_coordinate_groups": coordinate_groups,
                     "retained_native_coordinate_cluster_count": len(coordinate_groups),
                     "mixed_original_coordinates_at_snapped_node": len(coordinate_groups) > 1,
+                    "source_native_retained_endpoint_diameter_pdf_pt": retained_diameter,
+                    "producer_nominal_gap_snap_tolerance_pdf_pt": DEFAULT_GAP_SNAP_TOLERANCE_PT,
+                    "diameter_exceeds_nominal_tolerance_diagnostic_only": (
+                        retained_diameter > DEFAULT_GAP_SNAP_TOLERANCE_PT
+                    ),
+                    "centroid_snap_cluster_membership_not_reversed_or_changed": True,
                     "snap_samples_equal_retained_incidents": (
                         len(incidence) == node.get("samples")
                     ),
