@@ -10,6 +10,7 @@ from copy import deepcopy
 import pytest
 
 from pb_annotation_cycle_shadow import (
+    _cycle_edges_cross,
     classify_exact_annotation_cycles,
     shadow_annotation_cycle_topology,
 )
@@ -901,6 +902,161 @@ def test_axis_aligned_edges_that_do_not_close_are_not_a_frame():
 
 def test_non_mapping_inputs_do_not_raise():
     result = classify_exact_annotation_cycles(
-        [None, *_ring()], ["MARK", _word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        [None, "stroke", {"kind": "line"}, *_ring()],
+        ["MARK", None, _word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
     )
     assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+    assert result["diagnostic_only"]
+    assert not result["structural_wall_role_authenticated"]
+    assert not result["quantity_or_metric_area_published"]
+
+
+def _transform_segment(segment, transform):
+    copy = dict(segment)
+    copy["x1"], copy["y1"] = transform(segment["x1"], segment["y1"])
+    copy["x2"], copy["y2"] = transform(segment["x2"], segment["y2"])
+    return copy
+
+
+def _word_through(transform, word=None):
+    source = _word() if word is None else word
+    corners = (
+        (source["x0"], source["y0"]), (source["x1"], source["y0"]),
+        (source["x1"], source["y1"]), (source["x0"], source["y1"]),
+    )
+    moved = [transform(x, y) for x, y in corners]
+    xs = [point[0] for point in moved]
+    ys = [point[1] for point in moved]
+    return _word(text=source["text"], x0=min(xs), y0=min(ys), x1=max(xs), y1=max(ys))
+
+
+def _frame_result(frame, transform=lambda x, y: (x, y)):
+    ring = [_transform_segment(segment, transform) for segment in _ring()]
+    moved = [_transform_segment(segment, transform) for segment in frame]
+    result = classify_exact_annotation_cycles(
+        ring + moved, [_word_through(transform)], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    return set(result["quarantined_primitive_ids"]), set(result["frame_primitive_ids"])
+
+
+def test_duplicate_opposite_sides_are_not_a_rectangular_frame():
+    false_frame = [
+        _rect_edge("b0", -20.0, -20.0, 20.0, -20.0, path=80),
+        _rect_edge("b1", -20.0, -20.0, 20.0, -20.0, path=80),
+        _rect_edge("t0", -20.0, 20.0, 20.0, 20.0, path=80),
+        _rect_edge("t1", 20.0, 20.0, -20.0, 20.0, path=80),
+    ]
+    quarantined, frames = _frame_result(false_frame)
+    assert {f"mark{i}" for i in range(16)} <= quarantined
+    assert not quarantined.intersection({"b0", "b1", "t0", "t1"})
+    assert frames == set()
+
+
+def test_disconnected_axis_aligned_edges_are_not_a_frame():
+    pieces = [
+        _rect_edge("d0", 0.0, 0.0, 10.0, 0.0, path=81),
+        _rect_edge("d1", 40.0, 0.0, 50.0, 0.0, path=81),
+        _rect_edge("d2", 0.0, 10.0, 0.0, 20.0, path=81),
+        _rect_edge("d3", 40.0, 10.0, 40.0, 20.0, path=81),
+    ]
+    quarantined, frames = _frame_result(pieces)
+    assert not quarantined.intersection({"d0", "d1", "d2", "d3"})
+    assert frames == set()
+
+
+def test_a_rectangle_missing_one_side_is_not_a_frame():
+    partial = _frame(82, -20.0, -20.0, 20.0, 20.0, "part")[:3]
+    quarantined, frames = _frame_result(partial)
+    assert not quarantined.intersection({"part0", "part1", "part2"})
+    assert frames == set()
+
+
+def test_reversed_rectangle_sides_are_withheld():
+    frame = _frame(83, -20.0, -20.0, 20.0, 20.0, "rev")
+    for edge in frame:
+        edge["x1"], edge["y1"], edge["x2"], edge["y2"] = edge["x2"], edge["y2"], edge["x1"], edge["y1"]
+    quarantined, frames = _frame_result(frame)
+    assert {"rev0", "rev1", "rev2", "rev3"} <= quarantined
+    assert frames == {"rev0", "rev1", "rev2", "rev3"}
+
+
+def test_rectangle_input_order_does_not_change_the_frame():
+    frame = _frame(84, -20.0, -20.0, 20.0, 20.0, "ord")
+    forward, forward_frames = _frame_result(frame)
+    backward, backward_frames = _frame_result(list(reversed(frame)))
+    assert forward == backward
+    assert forward_frames == backward_frames == {"ord0", "ord1", "ord2", "ord3"}
+
+
+def test_translated_rectangle_frame_is_withheld():
+    frame = _frame(85, -20.0, -20.0, 20.0, 20.0, "mov")
+    quarantined, frames = _frame_result(frame, lambda x, y: (x + 30.0, y - 15.0))
+    assert {"mov0", "mov1", "mov2", "mov3"} <= quarantined
+    assert frames == {"mov0", "mov1", "mov2", "mov3"}
+
+
+def test_quarter_turn_rectangle_frames_are_withheld():
+    frame = _frame(86, -20.0, -12.0, 20.0, 12.0, "rot")
+    quarter, quarter_frames = _frame_result(frame, lambda x, y: (-y, x))
+    three, three_frames = _frame_result(frame, lambda x, y: (y, -x))
+    assert quarter_frames == three_frames == {"rot0", "rot1", "rot2", "rot3"}
+    assert quarter_frames <= quarter
+    assert three_frames <= three
+
+
+_CONTACT = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (2.0, 0.0), (0.0, 4.0))
+
+
+def _mapped_contact(transform):
+    return [transform(x, y) for x, y in _CONTACT]
+
+
+def test_interior_edge_contact_is_not_a_simple_boundary():
+    assert _cycle_edges_cross(_CONTACT)
+    assert _cycle_edges_cross(list(reversed(_CONTACT)))
+    assert _cycle_edges_cross(_mapped_contact(lambda x, y: (x + 9.0, y - 3.0)))
+    assert _cycle_edges_cross(_mapped_contact(lambda x, y: (-y, x)))
+    assert _cycle_edges_cross(_mapped_contact(lambda x, y: (y, -x)))
+    assert _cycle_edges_cross(_mapped_contact(lambda x, y: (x * 2.0, y * 2.0)))
+    rotated_start = _CONTACT[2:] + _CONTACT[:2]
+    assert _cycle_edges_cross(rotated_start)
+    assert _cycle_edges_cross(_CONTACT) is _cycle_edges_cross(tuple(_CONTACT))
+
+
+def test_a_near_contact_and_a_clean_square_stay_simple():
+    near = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (2.0, 1e-4), (0.0, 4.0))
+    square = ((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0))
+    assert not _cycle_edges_cross(near)
+    assert not _cycle_edges_cross(square)
+    assert not _cycle_edges_cross(list(reversed(square)))
+
+
+def test_collinear_nonadjacent_overlap_is_not_a_simple_boundary():
+    overlap = (
+        (0.0, 0.0), (4.0, 0.0), (4.0, 1.0), (3.0, 0.0), (1.0, 0.0), (1.0, 2.0), (0.0, 2.0),
+    )
+    assert _cycle_edges_cross(overlap)
+
+
+def test_interior_contact_does_not_quarantine_an_otherwise_closed_mark():
+    count = 12
+    radius = 6.0
+    points = [
+        (radius * math.cos(2.0 * math.pi * index / count),
+         radius * math.sin(2.0 * math.pi * index / count))
+        for index in range(count)
+    ]
+    start, end = points[0], points[1]
+    touched = list(points)
+    touched[6] = ((start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0)
+
+    def polygon(vertices, prefix):
+        segments = []
+        for index, (left, right) in enumerate(zip(vertices, vertices[1:] + vertices[:1])):
+            segments.append(_line(f"{prefix}{index}", left[0], left[1], right[0], right[1], path=400 + index))
+        return segments
+
+    contact = _classify(polygon(touched, "hit"))
+    assert contact["quarantined_primitive_ids"] == []
+    assert _cycle_edges_cross(touched)

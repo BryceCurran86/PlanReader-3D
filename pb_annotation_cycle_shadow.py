@@ -124,25 +124,71 @@ def _viewport_owns(points: Sequence[Point], viewport_bbox: Optional[Sequence[flo
     return all(x0 <= point[0] <= x1 and y0 <= point[1] <= y1 for point in points)
 
 
+def _orient(p: Point, q: Point, r: Point) -> float:
+    return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+
 def _edges_properly_cross(a: Point, b: Point, c: Point, d: Point) -> bool:
-    def orient(p: Point, q: Point, r: Point) -> float:
-        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
-    return orient(a, b, c) * orient(a, b, d) < 0.0 and orient(c, d, a) * orient(c, d, b) < 0.0
+    return _orient(a, b, c) * _orient(a, b, d) < 0.0 and _orient(c, d, a) * _orient(c, d, b) < 0.0
+
+
+def _point_in_edge_interior(point: Point, start: Point, end: Point) -> bool:
+    if point == start or point == end or start == end:
+        return False
+    if _orient(start, end, point) != 0.0:
+        return False
+    if start[0] != end[0]:
+        return min(start[0], end[0]) < point[0] < max(start[0], end[0])
+    return min(start[1], end[1]) < point[1] < max(start[1], end[1])
+
+
+def _collinear_overlap(a: Point, b: Point, c: Point, d: Point) -> bool:
+    if a == b or c == d:
+        return False
+    if _orient(a, b, c) != 0.0 or _orient(a, b, d) != 0.0:
+        return False
+    if abs(a[0] - b[0]) >= abs(a[1] - b[1]):
+        left = max(min(a[0], b[0]), min(c[0], d[0]))
+        right = min(max(a[0], b[0]), max(c[0], d[0]))
+    else:
+        left = max(min(a[1], b[1]), min(c[1], d[1]))
+        right = min(max(a[1], b[1]), max(c[1], d[1]))
+    return right - left > 0.0
 
 
 def _cycle_edges_cross(vertices: Sequence[Point]) -> bool:
+    """Reject a walk that is not a simple closed boundary.
+
+    Adjacent edges may share their endpoint. A nonadjacent edge may not
+    cross, touch an interior point, or overlap.
+    """
     count = len(vertices)
-    if count < 4:
-        return False
+    if count < 3 or len(set(vertices)) != count:
+        return True
     for left in range(count):
-        a = vertices[left]
-        b = vertices[(left + 1) % count]
+        start = vertices[left]
+        end = vertices[(left + 1) % count]
+        if start == end:
+            return True
         for right in range(left + 1, count):
-            if right == left or (right + 1) % count == left or (left + 1) % count == right:
+            other_start = vertices[right]
+            other_end = vertices[(right + 1) % count]
+            adjacent = (left + 1) % count == right or (right + 1) % count == left
+            if adjacent:
+                shared = end if end == other_start or end == other_end else start
+                loose = [point for point in (start, end, other_start, other_end) if point != shared]
+                if any(_point_in_edge_interior(point, start, end) for point in loose):
+                    return True
                 continue
-            c = vertices[right]
-            d = vertices[(right + 1) % count]
-            if _edges_properly_cross(a, b, c, d):
+            if _edges_properly_cross(start, end, other_start, other_end):
+                return True
+            touches = (
+                _point_in_edge_interior(start, other_start, other_end)
+                or _point_in_edge_interior(end, other_start, other_end)
+                or _point_in_edge_interior(other_start, start, end)
+                or _point_in_edge_interior(other_end, start, end)
+            )
+            if touches or _collinear_overlap(start, end, other_start, other_end):
                 return True
     return False
 
@@ -491,6 +537,74 @@ def _nearby_segments(segments: Sequence[Mapping[str, Any]]):
     return nearby
 
 
+def _undirected_edge(start: Point, end: Point) -> Tuple[Point, Point]:
+    return (start, end) if start <= end else (end, start)
+
+
+def _rectangle_side(start: Point, end: Point, bounds: Tuple[float, float, float, float]) -> Optional[str]:
+    min_x, min_y, max_x, max_y = bounds
+    x1, y1 = start
+    x2, y2 = end
+    if y1 == y2 == min_y and {x1, x2} == {min_x, max_x}:
+        return "bottom"
+    if y1 == y2 == max_y and {x1, x2} == {min_x, max_x}:
+        return "top"
+    if x1 == x2 == min_x and {y1, y2} == {min_y, max_y}:
+        return "left"
+    if x1 == x2 == max_x and {y1, y2} == {min_y, max_y}:
+        return "right"
+    return None
+
+
+def _one_closed_rectangle(edges: Sequence[Mapping[str, Any]], limit: float) -> bool:
+    """Four distinct sides, one per rectangle edge, joined at the original corners."""
+    if len(edges) != 4:
+        return False
+    parsed: List[Tuple[Point, Point, str]] = []
+    undirected = set()
+    for edge in edges:
+        start = (float(edge["x1"]), float(edge["y1"]))
+        end = (float(edge["x2"]), float(edge["y2"]))
+        if start == end:
+            return False
+        if start[0] != end[0] and start[1] != end[1]:
+            return False
+        if math.hypot(end[0] - start[0], end[1] - start[1]) > limit:
+            return False
+        key = _undirected_edge(start, end)
+        if key in undirected:
+            return False
+        undirected.add(key)
+        parsed.append((start, end, str(edge.get("id") or "")))
+    if len(undirected) != 4:
+        return False
+    xs = [value for start, end, _sid in parsed for value in (start[0], end[0])]
+    ys = [value for start, end, _sid in parsed for value in (start[1], end[1])]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    if min_x == max_x or min_y == max_y:
+        return False
+    bounds = (min_x, min_y, max_x, max_y)
+    sides: Dict[str, Tuple[Point, Point]] = {}
+    for start, end, _sid in parsed:
+        side = _rectangle_side(start, end, bounds)
+        if side is None or side in sides:
+            return False
+        sides[side] = (start, end)
+    if set(sides) != {"top", "bottom", "left", "right"}:
+        return False
+    corners = {
+        (min_x, min_y): 0, (max_x, min_y): 0,
+        (max_x, max_y): 0, (min_x, max_y): 0,
+    }
+    for start, end in sides.values():
+        if start not in corners or end not in corners:
+            return False
+        corners[start] += 1
+        corners[end] += 1
+    return all(count == 2 for count in corners.values())
+
+
 def _unstroked_frames_around_proven_cycles(
     segments: Sequence[Mapping[str, Any]],
     records: Sequence[Mapping[str, Any]],
@@ -535,37 +649,10 @@ def _unstroked_frames_around_proven_cycles(
         groups[index].append(segment)
     found: List[str] = []
     for edges in groups.values():
-        if len(edges) != 4:
+        if not _one_closed_rectangle(edges, limit):
             continue
-        xs: List[float] = []
-        ys: List[float] = []
-        short_axis_aligned = True
-        for edge in edges:
-            x1, y1 = float(edge["x1"]), float(edge["y1"])
-            x2, y2 = float(edge["x2"]), float(edge["y2"])
-            axis_aligned = abs(x1 - x2) <= 1e-4 or abs(y1 - y2) <= 1e-4
-            if not axis_aligned or math.hypot(x2 - x1, y2 - y1) > limit:
-                short_axis_aligned = False
-                break
-            xs.extend((x1, x2))
-            ys.extend((y1, y2))
-        if not short_axis_aligned or max(xs) - min(xs) <= 1e-4 or max(ys) - min(ys) <= 1e-4:
-            continue
-        corners = {
-            (min(xs), min(ys)), (max(xs), min(ys)),
-            (max(xs), max(ys)), (min(xs), max(ys)),
-        }
-        used: List[Point] = []
-        closed_rectangle = True
-        for edge in edges:
-            start = (float(edge["x1"]), float(edge["y1"]))
-            end = (float(edge["x2"]), float(edge["y2"]))
-            if start not in corners or end not in corners or start == end:
-                closed_rectangle = False
-                break
-            used.extend((start, end))
-        if not closed_rectangle or any(used.count(corner) != 2 for corner in corners):
-            continue
+        xs = [float(value) for edge in edges for value in (edge["x1"], edge["x2"])]
+        ys = [float(value) for edge in edges for value in (edge["y1"], edge["y2"])]
         polygon = (
             (min(xs), min(ys)), (max(xs), min(ys)),
             (max(xs), max(ys)), (min(xs), max(ys)),
