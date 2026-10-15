@@ -50,7 +50,6 @@ def test_original_pdf_replay_binds_existing_v1_quantity_and_customer(original):
     assert row["decision_scope_id"] == positive["host_record"]["decision_scope_id"]
     assert row["snapshot_id"] == report["snapshot_id"]
     assert row["measurement_record_id"] == positive["quantity_measurement_record_id"]
-    assert row["v1_sealed_run_fingerprint"] if "v1_sealed_run_fingerprint" in row else True
     assert result["v1_sealed_run_fingerprint"] == _args(report)["sealed_payload"]["fingerprint"]
 
 
@@ -115,10 +114,11 @@ def test_mismatched_host_record_cannot_be_spliced_into_old_quantity(original, ho
 def test_stale_and_superseded_producer_records_are_not_eligible(original):
     _, report = original
     for marker in ("is_stale", "is_superseded"):
-        bad = deepcopy(report)
-        next(x for x in bad["openings"] if x["quantity_id"])["host_record"][marker] = True
-        with pytest.raises(consumer.OriginalSourceScopeConsumerError, match="superseded"):
-            consumer._verified_join(bad, **_args(report))
+        for invalid in (True, "false", 0, None):
+            bad = deepcopy(report)
+            next(x for x in bad["openings"] if x["quantity_id"])["host_record"][marker] = invalid
+            with pytest.raises(consumer.OriginalSourceScopeConsumerError, match="superseded"):
+                consumer._verified_join(bad, **_args(report))
 
 
 def test_missing_original_quantity_and_duplicated_source_inventory_fail(original):
