@@ -1,0 +1,104 @@
+name: GPT MAX Original Frame Competitor Census
+on:
+  pull_request:
+    branches:
+      - gptmax/original-paired-wall-faces-shadow-20261015
+    paths:
+      - tools/diag_gptmax_original_frame_competitors.py
+      - tests/test_gptmax_original_frame_competitors.py
+      - .github/workflows/test-gptmax-original-frame-competitors.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  synthetic-fail-closed-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_frame_competitors.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_frame_competitors.py tests/test_gptmax_original_frame_competitors.py
+
+  original-source-identity-and-receipt-census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Reissue real original positive and negative evidence, unchanged
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_paired_outer_faces_quantity_shadow.py \
+            --pdf "$PDF" --page-id 3 --output artifacts/original-paired-wall-faces-shadow.json
+      - name: Resolve exact original hosted-but-unframed competing fragments
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_original_frame_competitors.py \
+            --source-report artifacts/original-paired-wall-faces-shadow.json \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --snapshot source_snapshot_3fcb6bc5c44b51d930e9600080501d27 \
+            --physical-id physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8 \
+            --physical-id physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b \
+            --physical-id physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096 \
+            --output artifacts/original-frame-competitor-census.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('artifacts/original-frame-competitor-census.json').read_text())
+          assert p['status']=='UNPUBLISHED_ORIGINAL_SOURCE_FRAME_COMPETITOR_DIAGNOSTIC'
+          assert p['decision_scope_id']=='wall-source:page-3'
+          assert p['producer_wall_candidate_count']==2094
+          assert p['producer_equivalence_pair_count']==41164
+          assert len(p['target_hosted_unframed_openings'])==3
+          assert len(p['connected_host_candidate_ids'])==4
+          assert p['unproven_noncomponent_fragment_count']==5
+          assert all(not v for v in p['authority_grants'].values())
+          expected={
+            'wall_a5598661c0fa52c5b81e',
+            'wall_cb4b89ac477d3f26fddf',
+            'wall_cbd5120133f33920fefa',
+            'wall_834b98f11c6b792ad73b',
+            'wall_c5e00d5a5edcc70f20bf',
+          }
+          blocked=p['unproven_noncomponent_fragments']
+          assert {x['wall_candidate_id'] for x in blocked}==expected
+          assert all(len(x['member_relations'])==4 and
+            all(pair['producer_relation']=='UNRECORDED' for pair in x['member_relations'])
+            for x in blocked)
+          baseline=json.loads(Path('artifacts/original-paired-wall-faces-shadow.json').read_text())
+          b=baseline['baseline_receipts']
+          assert len(b['canonical'])==21 and len(b['quantities'])==len(b['customer_rows'])==8
+          assert sum(bool(x['host_wall_id']) for x in b['hosts'])==15
+          assert sum(bool(x['record_id']) for x in b['frames'])==9
+          assert baseline['candidate_receipts']['quantities']==b['quantities']
+          assert baseline['candidate_receipts']['customer_rows']==b['customer_rows']
+          assert baseline['candidate_receipts']['sealed_run']==b['sealed_run']
+          assert not baseline['original_receipts_retained']
+          assert not baseline['production_activation_granted'] and not baseline['count_granted']
+          assert baseline['primitive_safety_cap']==20000
+          print('Original five unclassified fragments witnessed; no production grants')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-frame-competitor-census
+          path: artifacts/original-frame-competitor-census.json
+          retention-days: 21
