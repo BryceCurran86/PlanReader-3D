@@ -410,7 +410,7 @@ def test_independent_original_indexed_parent_ink_matches_producer_source_geometr
     assert result["distinct_producer_source_parent_record_count"]==1
     assert result["original_indexed_parent_receipts"][0][
         "independent_original_pdf_source_status"] == (
-        "INDEXED_ORIGINAL_INK_FULL_SOURCE_SPAN"
+        "INDEXED_ORIGINAL_INK_EXACT_GEOMETRY"
     )
     assert not result["source_structural_wall_role_granted"]
     assert repr(originals)==before
@@ -469,3 +469,25 @@ def test_original_split_ink_reversal_does_not_invent_second_physical_wall():
         "independent_original_pdf_ink_evidence"][
         "original_native_paint_metadata_candidate_only"]["native_fill_color"] == [1.,1.,1.]
     assert not result["source_structural_wall_role_granted"]
+
+
+
+def test_native_long_line_must_not_correlate_underspecified_source_record():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    drawings=[{"type":"s","items":[("l",fitz.Point(0,0),fitz.Point(20,0))]}]
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[{
+                "original_primitive_id":"d0i0",
+                "original_native_geometry":[5.,0.,15.,0.],
+                "original_native_page_coords_present":True,
+            }]
+        }}]}]
+    result=verify(drawings,node)
+    receipt=result["original_indexed_parent_receipts"][0]
+    assert receipt["independent_original_pdf_source_status"] == "INDEXED_SOURCE_GEOMETRY_CONFLICT"
+    assert not result["original_indexed_parent_sources_all_correlated"]
+    assert not receipt["source_wall_or_annotation_role_granted"]
