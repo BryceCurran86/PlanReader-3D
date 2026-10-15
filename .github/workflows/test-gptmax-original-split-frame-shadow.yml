@@ -1,0 +1,86 @@
+name: GPT MAX Original Split-Centreline Frame Shadow
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - pb_opening_host_frame_authority.py
+      - tests/test_gptmax_raster_split_frame_shadow.py
+      - tools/diag_gptmax_source_split_frame_shadow.py
+      - docs/engineering/gptmax_split_centerline_frame_shadow_20261015.md
+      - .github/workflows/test-gptmax-original-split-frame-shadow.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  own-source-fragment-negative-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=.:tests python -m pytest -q tests/test_gptmax_raster_split_frame_shadow.py tests/test_raster_connected_host_frame.py
+          ruff check --select F821,F823 pb_opening_host_frame_authority.py tests/test_gptmax_raster_split_frame_shadow.py tools/diag_gptmax_source_split_frame_shadow.py
+  original-sha-pinned-split-host-frame-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original source proof and shadow-only frame graph
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_source_split_frame_shadow.py \
+            --pdf "$PDF" --page-id 3 \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output artifacts/gptmax-original-split-frame-shadow.json
+      - name: Original host and eight customer body invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/gptmax-original-split-frame-shadow.json').read_text())
+          assert r['status']=='UNPUBLISHED_ORIGINAL_SPLIT_FRAME_SHADOW'
+          assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
+          assert r['baseline_physical_count']==21
+          assert r['baseline_authenticated_host_count']==15
+          assert r['baseline_complete_frame_count']==9
+          assert r['baseline_signed_opening_area_count']==8
+          assert len(r['opening_rows'])==21
+          assert r['shadow_complete_frame_count']>=9
+          assert r['source_snapshot_signed_customer_retained']
+          assert not r['customer_seal_activation_granted']
+          assert not r['gpt1_metric_axis_handoff_granted']
+          assert not r['global_opening_count_granted']
+          assert all(not x['new_customer_quantity_granted'] for x in r['opening_rows'])
+          selected=[x for x in r['opening_rows']
+                    if x['physical_opening_id']=='physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176']
+          assert len(selected)==1
+          assert 'raster_split_centerline_host_resolved' in selected[0]['original_host_reason_codes']
+          assert selected[0]['original_frame_record_id'] is None
+          print('Original split host frame gate:',selected[0]['shadow_frame_reason_codes'])
+          print('Additional frame hypotheses, not quantities:',r['new_frame_hypothesis_ids'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-source-owned-original-split-frame-shadow
+          path: artifacts/gptmax-original-split-frame-shadow.json
+          retention-days: 21
