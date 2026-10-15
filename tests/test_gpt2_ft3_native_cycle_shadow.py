@@ -98,5 +98,63 @@ def test_shared_endpoint_branch_stays_ambiguous_and_preserves_all_edges():
     r = inspect_native_component(Page(ds), "d0i0")
     assert r["component_edge_count"] == 7
     assert not r["complete_exact_cycle"]
+    assert sorted(b["source_edge_count"] for b in r["exact_native_edge_blocks"]) == [3, 4]
+    assert all(b["complete_exact_cycle"] for b in r["exact_native_edge_blocks"])
+    assert r["exact_simple_cycle_block_count"] == 2
+    assert r["component_role_ambiguous"]
     assert not r["role_granted"]
     assert r["structural_role"] == "UNRESOLVED"
+
+
+def test_chorded_native_loop_is_one_ambiguous_block_not_guessed_triangles():
+    ds = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2), (0, 0)),
+        drawing((0, 0), (2, 2)),
+    ]
+    r = inspect_native_component(Page(ds), "d0i0")
+    assert r["component_edge_count"] == 5
+    assert not r["complete_exact_cycle"]
+    assert len(r["exact_native_edge_blocks"]) == 1
+    assert r["exact_native_edge_blocks"][0]["source_edge_count"] == 5
+    assert not r["exact_native_edge_blocks"][0]["complete_exact_cycle"]
+    assert r["exact_simple_cycle_block_count"] == 0
+    assert not r["role_granted"]
+
+
+def test_native_source_spur_is_not_deleted_from_cycle_component():
+    ds = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2), (0, 0)),
+        drawing((2, 0), (3, 0)),
+    ]
+    r = inspect_native_component(Page(ds), "d0i0")
+    assert r["component_edge_count"] == 5
+    assert sorted(b["source_edge_count"] for b in r["exact_native_edge_blocks"]) == [1, 4]
+    assert r["exact_simple_cycle_block_count"] == 1
+    assert {edge for block in r["exact_native_edge_blocks"]
+            for edge in block["source_edge_ids"]} == {
+                "d0i0", "d1i0", "d2i0", "d3i0", "d4i0"
+            }
+    assert not r["role_granted"]
+
+
+def test_reordering_native_lines_preserves_cycle_evidence_not_role():
+    first = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2), (0, 0)),
+        drawing((2, 2), (3, 3)), drawing((3, 3), (4, 2)),
+        drawing((4, 2), (2, 2)),
+    ]
+    second = list(reversed(first))
+    before = (repr(first), repr(second))
+    reports = [
+        inspect_native_component(Page(drawings), "d0i0")
+        for drawings in (first, second)
+    ]
+    for result in reports:
+        assert result["exact_simple_cycle_block_count"] == 2
+        assert sorted(b["source_edge_count"] for b in result["exact_native_edge_blocks"]) == [3, 4]
+        assert not result["role_granted"]
+        assert result["component_role_ambiguous"]
+    assert before == (repr(first), repr(second))
