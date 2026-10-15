@@ -127,3 +127,52 @@ def test_same_area_value_in_two_source_blocks_keeps_both():
 def test_unbounded_invalid_view_has_no_plan_owner():
     out = run([word("12.64", 0), word("m²", 1)], (view(bbox=None),))
     assert out["literal_area_candidates"][0]["first_unclosed_gate"] == "source_floor_plan_viewport_unavailable_or_ambiguous"
+
+
+def test_source_room_labels_are_independent_corroborated_candidates_not_area_owners():
+    # Existing generic room-label language is used, not text proximity to m².
+    words = [
+        word("BED", 0, block=16), word("1", 1, block=16),
+        word("12.64", 0, block=17), word("m²", 1, block=17),
+    ]
+    out = run(words)
+    assert out["literal_area_candidate_count"] == 1
+    assert out["literal_room_label_candidate_count"] == 1
+    label = out["literal_room_label_candidates"][0]
+    assert label["literal_original_room_label"] == "BED 1"
+    assert label["source_text_integrity_all_words"] is True
+    assert label["first_unclosed_gate"] == "source_room_face_and_exact_label_owner_unproven"
+    assert label["area_annotation_to_label_binding_granted"] is False
+    assert out["literal_area_candidates"][0]["source_physical_room_face_authenticated"] is False
+    assert_shadow_only(out)
+
+
+def test_untrusted_or_nonplan_original_room_label_remains_unowned():
+    words = [word("BED", 0, block=16), word("2", 1, block=16, trusted=False)]
+    for views, reason in (
+        ((view(),), "source_room_label_text_integrity_unavailable"),
+        ((view("legend", "legend"),), "source_room_label_text_integrity_unavailable"),
+    ):
+        out = run(words, views)
+        assert out["literal_room_label_candidate_count"] == 1
+        assert out["literal_room_label_candidates"][0]["first_unclosed_gate"] == reason
+        assert_shadow_only(out)
+    fully_trusted = [word("BED", 0, block=16), word("2", 1, block=16)]
+    out = run(fully_trusted, (view("legend", "legend"),))
+    assert out["literal_room_label_candidates"][0]["first_unclosed_gate"] == (
+        "source_room_label_plan_viewport_unavailable_or_ambiguous")
+    assert out["published_quantities"] == []
+
+
+def test_room_label_and_area_lines_do_not_cross_partition_or_replay_join():
+    data = [word("BED", 0, block=6, part="partition-A"),
+            word("3", 1, block=6, part="partition-A"),
+            word("11.70", 0, block=4, part="partition-B"),
+            word("m²", 1, block=4, part="partition-B")]
+    out = run(data)
+    assert out["literal_room_label_candidate_count"] == 1
+    assert out["literal_area_candidate_count"] == 1
+    assert out["literal_room_label_candidates"][0]["source_partition_id"] != (
+        out["literal_area_candidates"][0]["source_partition_id"])
+    assert out["literal_room_label_candidates"][0]["area_annotation_to_label_binding_granted"] is False
+    assert_shadow_only(out)
