@@ -304,3 +304,161 @@ def test_unstroked_frame_around_a_proven_cycle_is_withheld():
     assert set(result["frame_primitive_ids"]) == {"frame0", "frame1", "frame2", "frame3"}
     assert {"frame0", "frame1", "frame2", "frame3"} <= quarantined
     assert not quarantined.intersection({"far0", "stroke0", "huge0"})
+
+
+def _classify(segments, words=None, *, page_span=PAGE_SPAN, viewport=VIEW):
+    return classify_exact_annotation_cycles(
+        segments, [_word()] if words is None else words,
+        page_span=page_span, viewport_bbox=viewport,
+    )
+
+
+def _shift(segments, dx, dy):
+    moved = []
+    for segment in segments:
+        copy = dict(segment)
+        copy["x1"] += dx
+        copy["y1"] += dy
+        copy["x2"] += dx
+        copy["y2"] += dy
+        moved.append(copy)
+    return moved
+
+
+def test_translation_preserves_the_quarantine():
+    moved = _shift(_ring(), 40.0, -25.0)
+    result = _classify(moved, [_word(x0=39.0, y0=-26.0, x1=41.0, y1=-24.0)])
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_rotation_preserves_the_quarantine():
+    rotated = []
+    for segment in _ring():
+        copy = dict(segment)
+        copy["x1"], copy["y1"] = -segment["y1"], segment["x1"]
+        copy["x2"], copy["y2"] = -segment["y2"], segment["x2"]
+        rotated.append(copy)
+    result = _classify(rotated)
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_uniform_scale_preserves_the_quarantine():
+    scaled = []
+    for segment in _ring():
+        copy = dict(segment)
+        for key in ("x1", "y1", "x2", "y2"):
+            copy[key] = segment[key] * 3.0
+        scaled.append(copy)
+    result = _classify(
+        scaled, [_word(x0=-3.0, y0=-3.0, x1=3.0, y1=3.0)],
+        page_span=PAGE_SPAN * 3.0,
+        viewport=(-1500.0, -1500.0, 1500.0, 1500.0),
+    )
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_splitting_one_edge_into_singleton_pieces_keeps_the_block():
+    ring = _ring()
+    edge = ring[0]
+    mid_x = (edge["x1"] + edge["x2"]) / 2.0
+    mid_y = (edge["y1"] + edge["y2"]) / 2.0
+    pieces = [
+        _line("mark0a", edge["x1"], edge["y1"], mid_x, mid_y, path=5000),
+        _line("mark0b", mid_x, mid_y, edge["x2"], edge["y2"], path=5001),
+    ]
+    result = _classify(pieces + ring[1:])
+    assert "mark0" not in result["quarantined_primitive_ids"]
+    assert {"mark0a", "mark0b"} <= set(result["quarantined_primitive_ids"])
+
+
+def test_unrelated_distant_line_is_not_quarantined():
+    extra = _line("far", 400.0, 400.0, 460.0, 400.0, path=8)
+    result = _classify(_ring() + [extra])
+    assert "far" not in result["quarantined_primitive_ids"]
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+
+
+def test_growing_the_viewport_does_not_change_an_owned_cycle():
+    tight = _classify(_ring(), viewport=(-12.0, -12.0, 12.0, 12.0))
+    wide = _classify(_ring(), viewport=(-400.0, -400.0, 400.0, 400.0))
+    assert tight["quarantined_primitive_ids"] == wide["quarantined_primitive_ids"]
+
+
+def test_replay_is_deterministic():
+    first = _classify(_ring())
+    second = _classify(_ring())
+    assert first["quarantined_primitive_ids"] == second["quarantined_primitive_ids"]
+    assert [row["status"] for row in first["cycles"]] == [row["status"] for row in second["cycles"]]
+
+
+def test_hatch_lattice_longer_than_the_span_is_preserved():
+    lines = []
+    for index in range(6):
+        lines.append(_line(f"h{index}", 0.0, index * 8.0, 40.0, index * 8.0, path=index))
+        lines.append(_line(f"v{index}", index * 8.0, 0.0, index * 8.0, 40.0, path=20 + index))
+    result = _classify(lines, [_word(x0=10.0, y0=10.0, x1=12.0, y1=12.0)])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_disconnected_dimension_ticks_are_preserved():
+    ticks = [
+        _line(f"tick{index}", 10.0 * index, 0.0, 10.0 * index, 2.0, path=index)
+        for index in range(8)
+    ]
+    result = _classify(ticks, [_word(x0=1.0, y0=-0.5, x1=2.0, y1=0.5)])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_four_edge_title_frame_is_preserved():
+    frame = [
+        _line("f0", 0.0, 0.0, 80.0, 0.0, path=1),
+        _line("f1", 80.0, 0.0, 80.0, 40.0, path=2),
+        _line("f2", 80.0, 40.0, 0.0, 40.0, path=3),
+        _line("f3", 0.0, 40.0, 0.0, 0.0, path=4),
+    ]
+    result = _classify(frame, [_word(x0=30.0, y0=15.0, x1=34.0, y1=19.0)])
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_small_furniture_loop_is_preserved():
+    square = [
+        _line("s0", -3.0, -3.0, 3.0, -3.0, path=1),
+        _line("s1", 3.0, -3.0, 3.0, 3.0, path=2),
+        _line("s2", 3.0, 3.0, -3.0, 3.0, path=3),
+        _line("s3", -3.0, 3.0, -3.0, -3.0, path=4),
+    ]
+    result = _classify(square)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_dashed_glazing_loop_is_preserved():
+    ring = _ring()
+    for segment in ring:
+        segment["dashes"] = "[2 2] 0"
+    result = _classify(ring)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_two_words_inside_one_block_do_not_split_it():
+    result = _classify(_ring(), [_word(text="A"), _word(text="B", x0=-0.4, y0=-0.4, x1=0.4, y1=0.4)])
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}
+    texts = {
+        item["text"]
+        for row in result["cycles"]
+        if row["status"] == "source_proven_annotation_cycle"
+        for item in row["contained_source_text"]
+    }
+    assert texts == {"A", "B"}
+
+
+def test_quarantine_ids_stay_sorted():
+    result = _classify(list(reversed(_ring())))
+    assert result["quarantined_primitive_ids"] == sorted(result["quarantined_primitive_ids"])
+
+
+def test_classification_does_not_mutate_segment_coordinates():
+    segments = _ring()
+    before = [(segment["id"], segment["x1"], segment["y1"], segment["x2"], segment["y2"]) for segment in segments]
+    _classify(segments)
+    after = [(segment["id"], segment["x1"], segment["y1"], segment["x2"], segment["y2"]) for segment in segments]
+    assert before == after
