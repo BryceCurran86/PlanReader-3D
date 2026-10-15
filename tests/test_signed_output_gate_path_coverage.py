@@ -155,6 +155,74 @@ def uncovered(closure: set[str], patterns: list[str] | None) -> list[str]:
     return sorted(path for path in closure if not workflow_path_included(patterns, path))
 
 
+_ALLOWED_STEP_CONDITIONS = ("always()", "success()", "failure()", "!cancelled()")
+
+
+def _pull_request_block(workflow_text: str) -> list[str]:
+    block = re.search(r"^on:\s*\n((?:[ \t]+.*\n|\n)*)", workflow_text, re.M)
+    if not block:
+        raise ValueError("signed-output workflow is missing a readable on: trigger")
+    pr = re.search(r"^  pull_request:[ \t]*\n((?:    .*\n|\n)*)", block.group(1), re.M)
+    if not pr:
+        raise ValueError("signed-output workflow is missing a pull_request trigger")
+    return pr.group(1).splitlines()
+
+
+def _trigger_values(lines: list[str], index: int, rest: str) -> list[str]:
+    """Values of ``branches`` / ``types``: an inline ``[a, b]`` list or a block list under the key."""
+    rest = rest.split(" #")[0].strip()
+    if rest.startswith("[") and rest.endswith("]"):
+        return [v.strip().strip("'\"") for v in rest[1:-1].split(",") if v.strip()]
+    if rest:
+        raise ValueError(f"unsupported pull_request trigger value: {rest!r}")
+    values: list[str] = []
+    for line in lines[index + 1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        item = re.fullmatch(r"      -[ \t]*(.+?)[ \t]*(?:#.*)?", line)
+        if item is None:
+            break
+        values.append(item.group(1).strip().strip("'\""))
+    if not values:
+        raise ValueError("pull_request trigger key present but no value could be read")
+    return values
+
+
+def pull_request_trigger_reaches_main(workflow_text: str) -> None:
+    """The PR trigger must fire for pull requests to ``main`` on push, reopen and open.
+
+    ``paths`` coverage proves WHICH files trigger the replay, not that it triggers at all: a ``branches`` filter that excludes
+    ``main`` or a ``types`` filter without ``opened`` / ``synchronize`` would let every production change merge unreplayed.
+    """
+    lines = _pull_request_block(workflow_text)
+    for index, line in enumerate(lines):
+        match = re.fullmatch(r"    (branches|branches-ignore|types):(.*)", line)
+        if match is None:
+            continue
+        key, rest = match.group(1), match.group(2)
+        values = _trigger_values(lines, index, rest)
+        if key == "branches" and not any(path_matches(v, "main") for v in values):
+            raise ValueError(f"pull_request.branches {values} does not include main")
+        if key == "branches-ignore" and any(path_matches(v, "main") for v in values):
+            raise ValueError("pull_request.branches-ignore excludes main")
+        if key == "types" and not {"opened", "synchronize"} <= set(values):
+            raise ValueError(f"pull_request.types {values} must include opened and synchronize")
+
+
+def replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow_text: str) -> None:
+    """No job-level ``if`` / ``continue-on-error``, no ``continue-on-error: true`` anywhere, step conditions only always()-style."""
+    for number, line in enumerate(workflow_text.splitlines(), 1):
+        stripped = line.strip()
+        if re.match(r"^    (if|continue-on-error):", line):
+            raise ValueError(f"line {number}: job-level {stripped.split(':')[0]} can disable or neutralise the replay")
+        if re.match(r"^\s*continue-on-error:[ \t]*(?!false\b)\S", line):
+            raise ValueError(f"line {number}: continue-on-error makes the replay non-blocking")
+        step_if = re.match(r"^\s{6,}if:\s*(.*?)\s*(?:#.*)?$", line)
+        if step_if and step_if.group(1) not in _ALLOWED_STEP_CONDITIONS:
+            raise ValueError(f"line {number}: step condition {step_if.group(1)!r} can skip the replay")
+
+
 # ---------------------------------------------------------------------------------------------------------------------------
 # the real repository gates
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -310,3 +378,63 @@ def test_import_closure_follows_relative_python_package_imports(tmp_path):
                                 "tools/nested/child.py", "tools/shared.py"]) == [
         "pb_added.py"
     ]
+
+
+def test_signed_output_replays_trigger_on_main_pull_requests_and_cannot_be_disabled():
+    for project, (workflow, _entries) in SIGNED_OUTPUT_REPLAYS.items():
+        text = (ROOT / workflow).read_text(encoding="utf-8")
+        pull_request_trigger_reaches_main(text)
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(text)
+
+
+def test_trigger_that_never_reaches_main_pull_requests_is_rejected():
+    import pytest
+
+    base = "on:\n  pull_request:\n{extra}    paths:\n      - 'pb_*.py'\n"
+    for extra in (
+        "    branches: [release]\n",
+        "    branches:\n      - release\n      - 'hotfix/**'\n",
+        "    branches-ignore: [main]\n",
+        "    types: [closed]\n",
+        "    types: [labeled, synchronize]\n",
+        "    branches: ${{ vars.BRANCHES }}\n",
+    ):
+        with pytest.raises(ValueError):
+            pull_request_trigger_reaches_main(base.format(extra=extra))
+    for extra in (
+        "",
+        "    branches: [main]\n",
+        "    branches:\n      - main\n",
+        "    branches: ['**']\n",
+        "    branches: [release, main]\n",
+        "    types: [opened, synchronize, reopened]\n",
+        "    branches-ignore: [release]\n",
+    ):
+        pull_request_trigger_reaches_main(base.format(extra=extra))  # must not raise
+
+
+def test_a_disabled_or_non_blocking_replay_job_is_rejected():
+    import pytest
+
+    head = "name: X\non:\n  pull_request:\njobs:\n  replay:\n"
+    for body in (
+        "    if: false\n    runs-on: ubuntu-latest\n",
+        "    if: github.event_name == 'workflow_dispatch'\n    runs-on: ubuntu-latest\n",
+        "    continue-on-error: true\n    runs-on: ubuntu-latest\n",
+        "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n        continue-on-error: true\n",
+        "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n        if: ${{ false }}\n",
+    ):
+        with pytest.raises(ValueError):
+            replay_jobs_cannot_be_disabled_or_made_non_blocking(head + body)
+    ok = head + (
+        "    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n      - run: echo ok\n"
+        "      - uses: actions/upload-artifact@v4\n        if: always()\n"
+    )
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(ok)  # must not raise
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(
+        head + "    runs-on: x\n    steps:\n      - run: y\n        continue-on-error: false\n"
+    )  # an explicit false is harmless
+    with pytest.raises(ValueError):  # ... but any other value, including an expression, is not
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(
+            head + "    runs-on: x\n    steps:\n      - run: y\n        continue-on-error: ${{ true }}\n"
+        )
