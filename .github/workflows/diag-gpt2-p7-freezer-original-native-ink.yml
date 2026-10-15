@@ -58,6 +58,24 @@ jobs:
           assert not r['source_role_or_room_authentication_granted']
           assert r['new_commercial_quantities']==[]
           assert not r['frozen_benchmark_scored']
+          partial=r['original_native_linear_partial_ink_shadow']
+          assert partial['source_query_atom_count']==2
+          assert partial['all_original_native_line_rect_items_examined']
+          assert not partial['complete_ink_universe_including_raster_clip_and_curves']
+          assert not partial['source_structural_wall_role_authenticated']
+          assert partial['new_commercial_quantities']==[]
+          assert len(partial['source_native_linear_partial_queries'])==2
+          for row in partial['source_native_linear_partial_queries']:
+              assert not row['source_structural_wall_role_authenticated']
+              assert not row['source_room_ring_closed']
+              assert row['metric_quantity_published'] is False
+          print('GPT2_FREEZER_SOURCE_PARTIAL_NATIVE_INTERVALS', [
+              {
+                  'parts': len(row['original_native_linear_partial_receipts']),
+                  'paint_gaps': row['all_native_paint_geometric_coverage']['source_query_gaps_pt'],
+                  'stroke_gaps': row['stroke_only_geometric_coverage']['source_query_gaps_pt']
+              } for row in partial['source_native_linear_partial_queries']
+          ])
           cubic=r['original_native_cubic_ink_shadow']
           assert cubic['source_query_atom_count']==2
           assert cubic['all_original_native_cubic_items_examined']
