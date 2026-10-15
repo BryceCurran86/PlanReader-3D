@@ -272,3 +272,88 @@ def test_original_all_split_input_rejects_foreign_selected_nodes_and_sample_drif
     graph["nodes"][0]["samples"] += 1
     with pytest.raises(ValueError,match="original_snap_node_centroid_or_sample_drift"):
         inspect(graph=graph,scoped_inputs=inputs,selected_node_ids=(0,))
+
+
+
+def test_original_source_graphic_style_preserves_all_competing_parent_records():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts,
+    )
+    source = {
+        "source_primitive_ids": ["d2i0", "d1i0"],
+        "source_records": [
+            {"id": "d1i0", "kind": "line", "kind_present": True,
+             "stroke_present": True, "stroke": (0.,0.,0.),
+             "width_present": True, "width": .48,
+             "fill_present": False, "layer_present": True, "layer": "WALL",
+             "page_coords_present": True,
+             "x1": 0., "y1": 0., "x2": 1., "y2": 0.},
+            {"id": "d2i0", "kind": "line", "kind_present": True,
+             "stroke_present": False, "fill_present": True,
+             "fill": (1.,1.,1.), "width_present": False,
+             "page_coords_present": True,
+             "x1": 0., "y1": 0., "x2": 1., "y2": 0.},
+        ],
+    }
+    initial = repr(source)
+    result = _indexed_original_source_style_receipts(source)
+    assert result["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    assert result["original_indexed_source_ids"] == ["d1i0", "d2i0"]
+    assert not result["source_record_ids_missing_from_inventory"]
+    assert len(result["source_style_records"]) == 2
+    assert result["source_style_records"][0]["source_stroke_present"]
+    assert not result["source_style_records"][1]["source_stroke_present"]
+    assert result["source_style_records"][1]["source_fill"] == (1.,1.,1.)
+    assert not result["physical_wall_or_annotation_role_granted"]
+    assert repr(source) == initial
+
+
+def test_original_source_graphic_style_conflicts_and_foreign_parent_fail_closed():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts as style,
+    )
+    records = [
+        {"id": "d1i0", "width_present": True, "width": .24},
+        {"id": "d1i0", "width_present": True, "width": .48},
+    ]
+    result = style({"source_primitive_ids": ["d1i0"], "source_records": records})
+    assert result["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_CONFLICT"
+    assert result["competing_record_id_conflicts"] == ["d1i0"]
+    assert len(result["source_style_records"]) == 2
+    result = style({"source_primitive_ids": ["foreign"], "source_records": records})
+    assert result["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_INCOMPLETE"
+    assert result["source_record_ids_missing_from_inventory"] == ["foreign"]
+    assert result["unindexed_source_record_ids"] == ["d1i0"]
+    assert not result["physical_wall_or_annotation_role_granted"]
+
+
+def test_missing_original_graphics_is_unknown_not_absent_paint():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts as style,
+    )
+    for raw in (None, {}, {"source_primitive_ids": ["d1i0"],
+                            "source_records": [{"id": None}]}):
+        result = style(raw)
+        assert result["status"] != "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+        assert not result["physical_wall_or_annotation_role_granted"]
+
+
+def test_real_split_input_trace_reports_source_styles_without_electing_roles():
+    from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        inspect_all_original_snap_inputs_for_selected_nodes as inspect,
+    )
+    source = [_original_stage_a_source(0.,0.,10.,0.,"source_style_positive")]
+    graph = build_wall_graph_for_viewport(source)
+    before = repr(source)
+    report = inspect(graph=graph,scoped_inputs=source,selected_node_ids=(0,))
+    node = report["selected_original_node_rows"][0]
+    assert node["all_input_samples_independently_recovered"]
+    assert node["original_split_inputs_without_complete_style_receipts"] == []
+    receipt = node["all_original_split_endpoint_receipts"][0][
+        "original_split_input_graphic_style_receipt"
+    ]
+    assert receipt["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    assert receipt["original_indexed_source_ids"] == ["source_style_positive"]
+    assert not receipt["physical_wall_or_annotation_role_granted"]
+    assert repr(source) == before
