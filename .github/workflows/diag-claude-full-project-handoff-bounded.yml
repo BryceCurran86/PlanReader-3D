@@ -5,7 +5,8 @@ name: DIAG Claude Full Project Handoff Bounded (3Laurel and Q5446)
 # from job to job, so every code variant for one project runs SEQUENTIALLY ON THE SAME RUNNER, bracketed by two runs of
 # the unchanged baseline to expose drift: "base" is the current tip of main and every other variant is main with the
 # named resource-change branches merged in (A shared records #2693, B single whole-source read and opening lookup #2694,
-# C cyclic GC regime #2695, E cheaper defensive copies, F opening-label page filter #2705). CPU time (user+sys), wall time and the sampled peak RSS are recorded per run,
+# C cyclic GC regime #2695, E cheaper defensive copies, F opening-label page filter #2705; all rebased on current main) plus GPT1
+# #2738 (fetched PR head) alone and on top of the stack, so its runtime/memory effect and any output change are measured. CPU time (user+sys), wall time and the sampled peak RSS are recorded per run,
 # and the deterministic handoff outputs of every variant are compared byte for byte with base. No production file is
 # changed by this workflow and no quantity or score is claimed; a resource change that altered any output fails.
 on:
@@ -70,15 +71,14 @@ jobs:
           C=claude/handoff-bulk-gc-regime-20261014
           E=claude/cheaper-authority-defensive-copies-20261014
           F=claude/opening-label-page-text-filter-20261014
+          # GPT1 #2738 (same-source F.07 plan scope fallback) is fetched as origin/pr2738 and merged like a branch.
+          git fetch -q origin pull/2738/head:refs/remotes/origin/pr2738
           # name | branches merged into main | PB_CYCLIC_GC_MODE
           VARIANTS=(
             "base||default"
-            "A|$A|default"
-            "AE|$A $E|default"
-            "F|$F|default"
-            "ABEF|$A $B $E $F|default"
-            "ABEF_staged|$A $B $E $F $C|staged"
-            "ABEF_disabled|$A $B $E $F $C|disabled"
+            "P2738|pr2738|default"
+            "STACK_staged|$A $B $E $F $C|staged"
+            "STACK_staged_P2738|$A $B $E $F $C pr2738|staged"
             "base2||default"
           )
           mkdir -p artifacts
@@ -147,7 +147,7 @@ jobs:
           from pathlib import Path
 
           root = Path("artifacts")
-          VARIANTS = ("base", "A", "AE", "F", "ABEF", "ABEF_staged", "ABEF_disabled", "base2")
+          VARIANTS = ("base", "P2738", "STACK_staged", "STACK_staged_P2738", "base2")
 
           def parse_time(text):
               def get(pattern):
