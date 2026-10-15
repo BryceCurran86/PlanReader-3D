@@ -886,8 +886,22 @@ def _raster_frame_line_groups(
 def _raster_wall_face_continues(
     line_mask: np.ndarray,
     pair: _RasterBandPair,
+    *, paired_original_faces_shadow: bool = False,
 ) -> bool:
-    for row in (pair.row0, pair.row1):
+    if type(paired_original_faces_shadow) is not bool:
+        raise ValueError("paired original faces shadow must be explicit boolean")
+    rows = (pair.row0, pair.row1)
+    if (paired_original_faces_shadow and pair.a[1] == pair.b[1]
+            and pair.a[3] == pair.b[3]
+            and pair.a[1] <= pair.row0 <= pair.row1 <= pair.a[3]
+            and (pair.thickness_a == pair.a[3]-pair.a[1]+1
+                 or pair.thickness_b == pair.b[3]-pair.b[1]+1)):
+        # Endpoint occupancy may narrow the common interior by a source pixel.
+        # Only exactly matching ORIGINAL band bounds can supply their shared
+        # outer faces, with at least one whole source endpoint interval intact.
+        # Two narrowed ends may be real shoulders/recesses; keep their negative.
+        rows = (pair.a[1], pair.a[3])
+    for row in rows:
         if (
             0 <= row < line_mask.shape[0]
             and float(
@@ -1099,6 +1113,7 @@ class PhysicalOpeningAuthority:
         *,
         _source_visibility_producer=None,
         _source_visibility_producer_seal: object = None,
+        _raster_paired_outer_faces_shadow_override: Optional[bool] = None,
     ) -> None:
         if type(source_observation_authority) is SourceObservationAuthority:
             self._source_observation_authority: Optional[SourceObservationAuthority] = (
@@ -1122,6 +1137,13 @@ class PhysicalOpeningAuthority:
                 "PhysicalOpeningAuthority.from_source_visibility_producer()"
             )
         self._source_visibility_producer = _source_visibility_producer
+        self._raster_source_policy_at_creation = getattr(
+            _source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+        if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
+            raise ValueError("raster paired outer faces override must be explicit boolean")
+        self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
+            if _raster_paired_outer_faces_shadow_override is None else _raster_paired_outer_faces_shadow_override)
+        self._raster_outer_face_comparison_cache: dict[tuple, tuple[dict, ...]] = {}
         self._visible_viewport_scope_cache: dict[
             tuple[str, str, str, str, str],
             tuple[
@@ -1232,6 +1254,7 @@ class PhysicalOpeningAuthority:
             "_raster_gap_candidate_audit_cache",
             "_raster_swing_ambiguous_support_cache",
             "_raster_existence_cache",
+            "_raster_outer_face_comparison_cache",
         )
         for name in keys_at_snapshot:
             cache = getattr(self, name)
@@ -1248,7 +1271,7 @@ class PhysicalOpeningAuthority:
         self._raster_candidate_gap_box_cache.clear()
 
     @classmethod
-    def from_source_visibility_producer(cls, source_visibility_producer):
+    def from_source_visibility_producer(cls, source_visibility_producer, *, raster_paired_outer_faces_shadow: Optional[bool] = None):
         """Build the live viewport-scoped authority from its producer-owned source root."""
         from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -1258,6 +1281,7 @@ class PhysicalOpeningAuthority:
             source_visibility_producer.authority(),
             _source_visibility_producer=source_visibility_producer,
             _source_visibility_producer_seal=_VIEWPORT_SCOPED_PRODUCER_SEAL,
+            _raster_paired_outer_faces_shadow_override=raster_paired_outer_faces_shadow,
         )
 
     def source_visibility_authority(self) -> Optional[SourceVisibilityAuthority]:
@@ -1523,6 +1547,10 @@ class PhysicalOpeningAuthority:
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
     ) -> tuple[CandidateSemanticOpening, ...]:
+        if (self._source_visibility_producer is not None
+                and self._raster_source_policy_at_creation != getattr(
+                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)):
+            raise RuntimeError("original raster source policy changed after authority creation")
         cache_key = self._visible_page_candidate_key(seed)
         cached = self._raster_framed_candidate_cache.get(cache_key)
         if cached is not None:
@@ -1808,6 +1836,7 @@ class PhysicalOpeningAuthority:
         ambiguous_support_ids: set[str] = set()
         framed_gap_boxes: set[tuple[float, float, float, float]] = set()
         gap_audit: dict[str, tuple[str, frozenset[str], tuple[float, ...]]] = {}
+        face_comparisons = []
         for axis in ("horizontal", "vertical"):
             along_scale, cross_scale = _raster_axis_registration_scales(
                 axis,
@@ -1881,10 +1910,20 @@ class PhysicalOpeningAuthority:
                     dpi=dpi,
                     cross_scale=cross_scale,
                 )
-                face_continues = (
+                legacy_face_continues = (
                     bool(groups)
                     and _raster_wall_face_continues(work_line, pair)
                 )
+                face_continues = legacy_face_continues
+                if self._raster_paired_outer_faces_shadow and groups:
+                    face_continues = _raster_wall_face_continues(work_line, pair,
+                        paired_original_faces_shadow=True)
+                    face_comparisons.append(dict(raw_candidate_id=gap_id,
+                        original_gap_box_pt=gap_box_pt, original_source_observation_ids=tuple(sorted(gap_support)),
+                        source_band_a=pair.a,source_band_b=pair.b,
+                        common_endpoint_rows=(pair.row0,pair.row1),frame_line_groups=groups,
+                        original_common_row_continuity=legacy_face_continues,
+                        paired_original_outer_face_continuity=face_continues))
                 frames = (
                     frame_support(pair, axis, groups)
                     if groups and not face_continues
@@ -2028,6 +2067,7 @@ class PhysicalOpeningAuthority:
             ambiguous_support_ids
         )
         self._raster_framed_candidate_cache[cache_key] = result
+        self._raster_outer_face_comparison_cache[cache_key] = tuple(face_comparisons)
         return result
 
     def _viewport_scoped_raster_candidates_for(
@@ -3790,6 +3830,9 @@ class PhysicalOpeningAuthority:
         ))
 
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        if (self._source_visibility_producer is not None and self._raster_source_policy_at_creation != getattr(
+                self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)):
+            raise RuntimeError("original raster source policy changed after authority creation")
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")
 

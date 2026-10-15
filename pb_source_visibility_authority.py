@@ -755,7 +755,11 @@ class SourceVisibilityProducer:
     exposed. Ordinary consumers receive read-only producer-owned authorities.
     """
 
-    def __init__(self, *, producer_method: str, producer_version: str) -> None:
+    def __init__(self, *, producer_method: str, producer_version: str,
+                 raster_paired_outer_faces_shadow: bool = False) -> None:
+        if type(raster_paired_outer_faces_shadow) is not bool:
+            raise ValueError("raster paired outer faces shadow must be explicit boolean")
+        self._raster_paired_outer_faces_shadow = raster_paired_outer_faces_shadow
         self._producer = SourceObservationProducer(
             producer_method=producer_method,
             producer_version=producer_version,
@@ -775,6 +779,7 @@ class SourceVisibilityProducer:
         # producer's store/receipt maps, so later producer-owned augmentation is
         # visible without rebuilding opening candidate caches.
         self._physical_opening_authority_cache = None
+        self._physical_source_capture_authority_cache = None
         # Scoped original-page proof; never persistent source permission.
         self._native_dimension_proof_batch = None
         # Physical scale is likewise source-owned and selector-keyed. Reuse one
@@ -1089,8 +1094,10 @@ class SourceVisibilityProducer:
         except BaseException:
             # A failed transaction cannot leave stale positive opening/page
             # proofs available to a later caller after damaged source evidence.
-            physical = self._physical_opening_authority_cache
-            if physical is not None:
+            for physical in (self._physical_opening_authority_cache,
+                             self._physical_source_capture_authority_cache):
+                if physical is None:
+                    continue
                 # The failure can occur after candidate and negative
                 # snapshot evidence have been cached. Evict every affected
                 # source-dependent memo, not just positive page proofs.
@@ -1272,6 +1279,8 @@ class SourceVisibilityProducer:
             self._physical_opening_authority_cache = (
                 PhysicalOpeningAuthority.from_source_visibility_producer(self)
             )
+        if getattr(self._physical_opening_authority_cache, "_raster_paired_outer_faces_shadow", False) != self._raster_paired_outer_faces_shadow:
+            raise RuntimeError("original raster source policy changed after authority creation")
         return self._physical_opening_authority_cache
 
     def physical_scale_producer(self):
@@ -2161,6 +2170,15 @@ class SourceVisibilityProducer:
     def _proven_raster_opening_flank_boxes(self, published, page_id):
         """Nominate source capture only; never supply a host or completeness."""
         physical = self.physical_opening_authority()
+        if self._raster_paired_outer_faces_shadow:
+            # An isolated physical-source hypothesis cannot expand ordinary
+            # source capture, reissue snapshots or inherit a new wall universe.
+            # Reuse the original capture policy over the SAME actual source.
+            if self._physical_source_capture_authority_cache is None:
+                from pb_physical_opening_authority import PhysicalOpeningAuthority
+                self._physical_source_capture_authority_cache = PhysicalOpeningAuthority.from_source_visibility_producer(
+                    self, raster_paired_outer_faces_shadow=False)
+            physical = self._physical_source_capture_authority_cache
         visibility = self.authority()
         # The existing source compiler reauthenticates the *complete* isolated
         # snapshot in one batch. A seed addresses that inventory; it does not
