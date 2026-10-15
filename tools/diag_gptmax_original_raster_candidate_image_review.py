@@ -52,6 +52,7 @@ def original_raw_g17_context_report(source_bytes: bytes, *, page_id: str, output
     all_g17=pub.raster_opening_primitive_observation_ids
     visibility=source.authority()
     candidates=[]
+    selectors_by_source_id={}
     for oid in all_g17:
         selector=ObservationSelector(pub.revision.document_id,revision_id,digest,
             pub.snapshot.snapshot_id,oid)
@@ -61,6 +62,7 @@ def original_raw_g17_context_report(source_bytes: bytes, *, page_id: str, output
             raise RuntimeError('original G17 complete source inventory failed')
         if proof.observation.page_id == page_id:
             candidates.append(selector)
+            selectors_by_source_id[oid]=selector
     if not candidates:
         raise RuntimeError('requested original source page has no G17 observation')
     groups=physical.audited_unresolved_source_candidate_groups(candidates[0],family='raster')
@@ -78,6 +80,23 @@ def original_raw_g17_context_report(source_bytes: bytes, *, page_id: str, output
         output_dir.mkdir(parents=True,exist_ok=True)
         rows=[]
         for index,group in enumerate(sorted(groups,key=lambda row:row['candidate_id'])):
+            # Independently ask the real current producer about *each* exact
+            # original member. A source member may belong to another already
+            # proven opening; that NEVER resolves this raw candidate group.
+            member_existence=[]
+            for observation_id in group['source_observation_ids']:
+                address=selectors_by_source_id.get(observation_id)
+                if address is None:
+                    raise RuntimeError('original raw gap source member outside selected page')
+                proof=physical.prove_existence(address)
+                member_existence.append(dict(
+                    observation_id=observation_id,
+                    source_existence_status=proof.status.value,
+                    source_existence_reason_codes=list(proof.reason_codes),
+                    independently_proven_opening_id=(
+                        proof.existence_record.record_id if proof.existence_record is not None else None),
+                    candidate_id=(proof.candidate.candidate_id if proof.candidate is not None else None),
+                    raw_group_to_opening_identity_granted=False))
             coords=group['aperture_bbox_pt']
             if (not isinstance(coords,list) or len(coords)!=4
                     or not all(type(x) in (float,int) and math.isfinite(x) for x in coords)):
@@ -97,6 +116,7 @@ def original_raw_g17_context_report(source_bytes: bytes, *, page_id: str, output
             (output_dir/name).write_bytes(png)
             rows.append(dict(raw_candidate_id=group['candidate_id'],
                 source_observation_ids=group['source_observation_ids'],
+                actual_producer_member_existence_decisions=member_existence,
                 source_raw_aperture_bbox_pt=coords,
                 displayed_context_pdf_bbox_pt=[crop.x0,crop.y0,crop.x1,crop.y1],
                 context_png_name=name,context_png_sha256=sha256(png).hexdigest(),
