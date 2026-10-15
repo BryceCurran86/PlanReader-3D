@@ -328,6 +328,104 @@ def census_original_native_cubic_ink(drawings, *, source_atoms):
     }
 
 
+
+def census_original_image_placements(page, *, source_atoms):
+    """Source-native PDF image placement census, not raster wall detection."""
+    import math
+
+    atoms = [_valid_edge(atom) for atom in source_atoms]
+    if not atoms or len(atoms) != len(set(atoms)):
+        raise ValueError("missing_or_duplicate_original_producer_atom_queries")
+    getter = getattr(page, "get_image_info", None)
+    if not callable(getter):
+        return {
+            "status": "ORIGINAL_SOURCE_IMAGE_API_UNAVAILABLE",
+            "source_image_universe_complete": False,
+            "image_placements": [],
+            "query_rows": [],
+            "physical_wall_or_raster_role_granted": False,
+            "diagnostic_only": True,
+        }
+    try:
+        raw = getter(xrefs=True)
+    except (TypeError, ValueError, RuntimeError, AttributeError):
+        return {
+            "status": "ORIGINAL_SOURCE_IMAGE_API_UNAVAILABLE",
+            "source_image_universe_complete": False,
+            "image_placements": [],
+            "query_rows": [],
+            "physical_wall_or_raster_role_granted": False,
+            "diagnostic_only": True,
+        }
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("original_source_image_api_invalid")
+    placed = []
+    invalid_indices = []
+    for idx, value in enumerate(raw):
+        if not isinstance(value, dict):
+            invalid_indices.append(idx)
+            continue
+        try:
+            bbox = tuple(float(v) for v in value["bbox"])
+            if (
+                len(bbox) != 4
+                or not all(math.isfinite(v) for v in bbox)
+                or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]
+            ):
+                raise ValueError("invalid_bbox")
+            xref = value.get("xref")
+            if type(xref) is not int or xref < 0:
+                raise ValueError("invalid_xref")
+            w, h = int(value["width"]), int(value["height"])
+            if w <= 0 or h <= 0:
+                raise ValueError("invalid_image_dims")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            invalid_indices.append(idx)
+            continue
+        placed.append({
+            "source_image_placement_index": idx,
+            "original_image_xref": xref,
+            "original_native_bbox_pdf_pts": list(bbox),
+            "original_image_pixel_dimensions": [w, h],
+            "source_image_bbox_only_not_raster_wall": True,
+        })
+    rows = []
+    for atom in atoms:
+        ax0 = min(atom[0][0], atom[1][0])
+        ax1 = max(atom[0][0], atom[1][0])
+        ay0 = min(atom[0][1], atom[1][1])
+        ay1 = max(atom[0][1], atom[1][1])
+        maybe = [
+            item["source_image_placement_index"]
+            for item in placed
+            if (
+                item["original_native_bbox_pdf_pts"][2] >= ax0
+                and item["original_native_bbox_pdf_pts"][0] <= ax1
+                and item["original_native_bbox_pdf_pts"][3] >= ay0
+                and item["original_native_bbox_pdf_pts"][1] <= ay1
+            )
+        ]
+        rows.append({
+            "original_source_candidate_atom_pdf_pts": [list(p) for p in atom],
+            "overlapping_original_image_placement_indices": maybe,
+            "bbox_overlap_only_not_pixel_or_wall_evidence": True,
+        })
+    return {
+        "status": (
+            "ORIGINAL_SOURCE_IMAGE_PLACEMENT_PARTIAL"
+            if invalid_indices else "ORIGINAL_SOURCE_IMAGE_PLACEMENTS_SCANNED"
+        ),
+        "source_image_universe_complete": not bool(invalid_indices),
+        "original_image_placement_count": len(raw),
+        "original_invalid_image_placement_indices": invalid_indices,
+        "image_placements": placed,
+        "query_rows": rows,
+        "does_not_assess_clips_shadings_or_raster_ink": True,
+        "physical_wall_or_raster_role_granted": False,
+        "diagnostic_only": True,
+    }
+
+
 def replay_original_source(pdf_bytes: bytes,*, original_sha256: str,
                            page_no: int, source_atoms):
     if type(pdf_bytes) is not bytes or type(page_no) is not int or page_no<1:
@@ -347,6 +445,9 @@ def replay_original_source(pdf_bytes: bytes,*, original_sha256: str,
         )
         result["original_native_linear_partial_ink_shadow"]=census_original_native_partial_linear_ink(
             native_drawings,source_atoms=source_atoms
+        )
+        result["original_image_placement_shadow"]=census_original_image_placements(
+            doc[page_no-1],source_atoms=source_atoms
         )
         result["original_pdf_page_count"]=doc.page_count
     result["original_source_sha256"]=actual
@@ -384,6 +485,8 @@ def main():
             len(row["stroke_only_geometric_coverage"]["source_query_gaps_pt"])
             for row in report["original_native_linear_partial_ink_shadow"]["source_native_linear_partial_queries"]
         ],
+        "original_image_placement_count":report["original_image_placement_shadow"].get("original_image_placement_count"),
+        "original_image_placement_status":report["original_image_placement_shadow"]["status"],
         "new_commercial_quantities":[],
     },sort_keys=True))
 
