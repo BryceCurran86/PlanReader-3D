@@ -4,6 +4,13 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # every module the replayed production chain can import must re-run the signed-output replay
+      - "pb_*.py"
+      - "tools/run_source_closed_project_handoff.py"
+      - "tools/diag_gptmax_raster_unhosted_flank_source.py"
+      - "tools/diag_gptmax_source_authority_stages.py"
+      - "tools/diag_lot16_room_face_scope.py"
+      - "tools/run_gpt3_lot16_original_sealed_score_input.py"
       - "pb_raster_unchanged_band_segments.py"
       - "pb_source_visibility_authority.py"
       - "pb_physical_wall_candidate_authority.py"
@@ -162,6 +169,11 @@ jobs:
           ))
           rows=json.loads((prod/"verified_customer_rows.json").read_text())
           verified=verify_sealed_customer_output(sealed, rows)
+          # Pin the original signed production receipt, not just quantity totals:
+          # a value-preserving rekey or altered evidence ancestry must fail.
+          assert sealed.fingerprint=="ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb", (
+              "original Lot16 V1 sealed receipt changed", sealed.fingerprint
+          )
           target_rows=[
               q for q in sealed.quantities
               if tuple(q.object_identity_refs)==(target,)
