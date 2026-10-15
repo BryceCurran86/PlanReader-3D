@@ -105,3 +105,65 @@ def test_invalid_original_f07_geometry_fails_closed():
     v=view();v["selected_bbox_pt"]=[20,10,float("inf"),90]
     with pytest.raises(ValueError,match="F07"):
         go(v=v)
+
+
+def test_original_owned_physical_support_overlap_never_counts_as_same_or_distinct():
+    originals = (
+        {"physical_opening_id":"physical_old", "source_observation_ids":["shared", "parent"]},
+        {"physical_opening_id":"physical_other", "source_observation_ids":["unrelated"]},
+    )
+    groups=raw()
+    r=audited_same_root_raw_view_overlay(
+        original_unresolved_groups=groups,
+        closure_ids=tuple(g["candidate_id"] for g in groups),
+        view_result=view(),
+        physical_source_support_receipts=originals,
+    )
+    assert r["source_owned_physical_support_receipt_count"]==2
+    assert r["physical_source_support_receipts_available"]
+    assert r["overlap_pair_count"]==2
+    assert [(row["raw_candidate_id"], [
+        x["existing_physical_opening_id"] for x in row["existing_source_owned_physical_support_collisions"]
+    ]) for row in r["source_view_spatial_classifications"]] == [
+        ("r1",["physical_old"]), ("r2",["physical_old"]), ("r3",[])]
+    for row in r["source_view_spatial_classifications"]:
+        for overlap in row["existing_source_owned_physical_support_collisions"]:
+            assert overlap["shared_source_observation_ids"] == ["shared"]
+            assert not overlap["physical_equivalence_or_distinctness_proven"]
+            assert not overlap["raw_candidate_closed"]
+    assert not r["physical_count_granted"] and not r["typed_nonplan_proven"]
+
+
+def test_original_source_owner_collisions_stable_under_source_receipt_order():
+    originals=(
+        {"physical_opening_id":"z", "source_observation_ids":["shared", "irrelevant"]},
+        {"physical_opening_id":"a", "source_observation_ids":["a"]},
+    )
+    base=audited_same_root_raw_view_overlay(
+        original_unresolved_groups=raw(),closure_ids=("r1","r2","r3"),
+        view_result=view(),physical_source_support_receipts=originals)
+    swapped=audited_same_root_raw_view_overlay(
+        original_unresolved_groups=raw()[::-1],closure_ids=("r3","r2","r1"),
+        view_result=view(),physical_source_support_receipts=originals[::-1])
+    assert base==swapped
+
+
+def test_absent_source_owner_receipts_are_unknown_not_negative():
+    r=go()
+    assert not r["physical_source_support_receipts_available"]
+    assert r["overlap_pair_count"]==0
+    assert not r["physical_count_granted"]
+
+
+@pytest.mark.parametrize("owners",[
+    ({"physical_opening_id":"old","source_observation_ids":["a","a"]},),
+    ({"physical_opening_id":"old","source_observation_ids":[]},),
+    ({"physical_opening_id":"old","source_observation_ids":["a"]},
+     {"physical_opening_id":"old","source_observation_ids":["b"]}),
+])
+def test_corrupt_source_owned_existing_physical_support_fails_closed(owners):
+    with pytest.raises(ValueError,match="original F07 physical"):
+        audited_same_root_raw_view_overlay(
+            original_unresolved_groups=raw(),
+            closure_ids=("r1","r2","r3"),view_result=view(),
+            physical_source_support_receipts=owners)
