@@ -1,0 +1,247 @@
+name: GPT MAX Structural Reference Revision Audit
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/lot16-original-structural-source-20261015
+    paths:
+      - tools/diag_gptmax_structural_reference_revision.py
+      - tests/test_gptmax_structural_reference_revision.py
+      - .github/workflows/test-gptmax-structural-reference-revision.yml
+      - "documents/sources/4. Structural Engineering - Lot 16 Power.pdf"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  synthetic-native-evidence-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pymupdf pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_structural_reference_revision.py
+          ruff check --select F821,F823 tools/diag_gptmax_structural_reference_revision.py tests/test_gptmax_structural_reference_revision.py
+  original-sha-pinned-native-only-abstain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pymupdf
+      - name: Verify unchanged original source bytes and record exact first source blocker
+        run: |
+          set -euo pipefail
+          ARCH='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          STRUCT='documents/sources/4. Structural Engineering - Lot 16 Power.pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$ARCH" | sha256sum -c
+          printf '%s  %s\n' 'b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6' "$STRUCT" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_structural_reference_revision.py \
+            --structural-pdf "$STRUCT" --architectural-pdf "$ARCH" \
+            --structural-certificate-page 11 --architectural-plan-page 3 \
+            --output artifacts/original-lot16-structural-reference-revision.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-lot16-structural-reference-revision.json').read_text())
+          assert r['status']=='UNPUBLISHED_NATIVE_TEXT_DIAGNOSTIC'
+          assert r['structural_referenced_architectural_issue_dates']==['2026-01-22']
+          assert r['architectural_sheet_native_date_candidates']==['2026-07-28']
+          assert 'structural_reference_architectural_issue_dates_differ' in r['reason_codes']
+          assert not r['source_text_integrity_verified']
+          assert not any(v for k,v in r.items() if k.endswith('_granted'))
+          print('Original source date mismatch retained as diagnostic; source/quantity authority ABSTAIN')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-structural-reference-revision
+          path: artifacts/original-lot16-structural-reference-revision.json
+          retention-days: 21
+
+  original-native-source-text-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Independently issue real source producer word receipts on both original PDFs
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from hashlib import sha256
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          scans = [
+            ("structural_certificate", "documents/sources/4. Structural Engineering - Lot 16 Power.pdf", "11",
+             "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6"),
+            ("architectural_floor_plan", "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf", "3",
+             "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"),
+          ]
+          results = {}
+          key_words = ("architectur", "drawings", "issued", "22/01/26", "28/07/26", "date:", "rev.")
+          for role,path,page_id,required_sha in scans:
+              source_bytes = Path(path).read_bytes()
+              assert sha256(source_bytes).hexdigest() == required_sha
+              producer = SourceVisibilityProducer(
+                  producer_method="live-physical-net-wall",
+                  producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+              )
+              published = producer.ingest_native_pdf_bytes(
+                  document_id="live-source:"+required_sha[:32],
+                  source_bytes=source_bytes,
+                  source_locator="memory://original-native-word-audit.pdf",
+                  page_ids=(page_id,),
+              )
+              assert producer.published_snapshot_for_revision(published.revision.revision_id) == published
+              receipts = []
+              for observation_id in published.text_observation_ids:
+                  selector = ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=required_sha,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+                  resolved = producer.text_integrity_authority().resolve_text(selector)
+                  raw_text = resolved.receipt.raw_text if resolved.receipt else ""
+                  if any(token in raw_text.lower() for token in key_words):
+                      receipts.append({
+                          "selector": asdict(selector),
+                          "text_integrity_result": asdict(resolved),
+                      })
+              results[role] = {
+                  "sha256": required_sha,
+                  "published_revision_id": published.revision.revision_id,
+                  "published_snapshot_id": published.snapshot.snapshot_id,
+                  "page_id": page_id,
+                  "total_original_native_text_observations": len(published.text_observation_ids),
+                  "candidate_source_receipts": receipts,
+              }
+          assert results["structural_certificate"]["sha256"] != results["architectural_floor_plan"]["sha256"]
+          assert results["structural_certificate"]["published_snapshot_id"] != results["architectural_floor_plan"]["published_snapshot_id"]
+          out = {
+              "status": "UNPUBLISHED_TWO_SOURCE_WORD_INTEGRITY_AUDIT",
+              "sources": results,
+              "cross_file_revision_or_wall_equivalence_granted": False,
+              "height_or_quantity_granted": False,
+          }
+          Path("artifacts").mkdir(exist_ok=True)
+          Path("artifacts/original-structural-reference-word-receipts.json").write_text(
+              json.dumps(out, indent=2, sort_keys=True)
+          )
+          print({key: {"native_text_count": value["total_original_native_text_observations"],
+                       "relevant_candidate_receipts": len(value["candidate_source_receipts"])}
+                 for key,value in results.items()})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-structural-reference-producer-word-receipts
+          path: artifacts/original-structural-reference-word-receipts.json
+          retention-days: 21
+
+  original-july-date-postclip-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Investigate both exact original untrusted DATE words with existing dual-render source mechanism
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from hashlib import sha256
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_raster_text_corroboration_authority import (
+              RasterTextCorroborationProducer, RasterTextCorroborationSelector,
+          )
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          path=Path('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf')
+          data=path.read_bytes()
+          digest=sha256(data).hexdigest()
+          assert digest=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          source=SourceVisibilityProducer(
+              producer_method='live-physical-net-wall',
+              producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id='live-source:'+digest[:32],
+              source_bytes=data,source_locator='memory://july-date-postclip-shadow.pdf',
+              page_ids=('3',),
+          )
+          original_pub=pub
+          shadow=RasterTextCorroborationProducer.for_physical_plan_view_shadow(source)
+          candidates=[]
+          for obs_id in pub.text_observation_ids:
+              selector=ObservationSelector(
+                  document_id=pub.revision.document_id,revision_id=pub.revision.revision_id,
+                  source_sha256=digest,snapshot_id=pub.snapshot.snapshot_id,observation_id=obs_id,
+              )
+              native=source.text_integrity_authority().resolve_text(selector)
+              if native.receipt is None or native.receipt.raw_text!='28/07/26':
+                  continue
+              raster_selector=RasterTextCorroborationSelector(
+                  document_id=selector.document_id,revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,snapshot_id=selector.snapshot_id,
+                  observation_id=selector.observation_id,
+              )
+              result=shadow.publish(raster_selector)
+              assert source.text_integrity_authority().resolve_text(selector)==native
+              candidates.append({
+                  'native_observation_selector':asdict(selector),
+                  'native_text_result':asdict(native),
+                  'isolated_postclip_raster_result':asdict(result),
+              })
+          assert len(candidates)==2
+          assert all(c['native_text_result']['reason_codes']==['text_clip_state_unresolved']
+                     or c['native_text_result']['reason_codes']==('text_clip_state_unresolved',)
+                     for c in candidates)
+          assert source.published_snapshot_for_revision(pub.revision.revision_id)==original_pub
+          assert sha256(source._producer._store.source_bytes_by_revision[pub.revision.revision_id]).hexdigest()==digest
+          out={
+              'status':'UNPUBLISHED_ORIGINAL_POSTCLIP_TEXT_SHADOW',
+              'source_sha256':digest,'source_snapshot':pub.snapshot.snapshot_id,
+              'original_date_word_candidates':candidates,
+              'original_native_integrity_promoted':False,
+              'cross_file_revision_applicability_granted':False,
+              'cross_file_wall_identity_granted':False,
+              'quantity_granted':False,
+          }
+          Path('artifacts').mkdir(exist_ok=True)
+          Path('artifacts/original-july-date-postclip-shadow.json').write_text(json.dumps(out,indent=2,sort_keys=True,default=str))
+          print({'source_sha':digest,'date_observation_count':len(candidates),
+                 'isolated_raster_results':[c['isolated_postclip_raster_result']['status'] for c in candidates],
+                 'cross_file_revision_applicability_granted':False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-july-date-postclip-shadow
+          path: artifacts/original-july-date-postclip-shadow.json
+          retention-days: 21
