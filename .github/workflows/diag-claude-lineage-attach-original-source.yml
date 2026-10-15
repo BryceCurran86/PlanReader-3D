@@ -1,0 +1,137 @@
+name: DIAG Claude W2 lineage attach on complete original-source handoffs (3Laurel and Q5446)
+
+# Measurement only. Runs the COMPLETE original-source handoff of two projects with and without the W2 lineage-attach throughput
+# change (branch claude/lineage-attach-prefilter-20261015), sequentially on the SAME runner: unchanged main, main + the change,
+# the rebased resource stack (#2693 #2694 #2695 #2705 #2706 with the staged GC regime) and the stack + the change. CPU time (user+sys),
+# wall time and sampled peak RSS are recorded per run, and every handoff output file of every variant is compared byte for byte with
+# unchanged main; a variant that exits non-zero or changes any output fails. No quantity or score is claimed.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/diag-claude-lineage-attach-original-source.yml"
+      - "tools/diag_claude_variant_compare.py"
+      - "pb_wall_room_topology_primitive_lineage.py"
+      - "tests/test_lineage_attach_prefilter_equivalence.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: 3laurel
+            project_id: au_qld_3laurel
+            pdf: "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"
+            sha: "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          - project: q5446
+            project_id: au_qld_q5446_armstrong32_harlequin
+            pdf: "documents/sources/Q5446_Standard_Plans_V1_20220320.pdf"
+            sha: "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install original-source dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify immutable original source
+        env:
+          PDF: ${{ matrix.pdf }}
+          SHA: ${{ matrix.sha }}
+        run: printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+      - name: Complete original-source handoff per variant, sequentially on this runner
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+          PDF: ${{ matrix.pdf }}
+          PROJECT_ID: ${{ matrix.project_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -uo pipefail
+          git config user.name diag
+          git config user.email diag@example.invalid
+          A=claude/source-snapshot-shared-records-20261014
+          B=claude/handoff-redundant-source-proof-20261014
+          C=claude/handoff-bulk-gc-regime-20261014
+          E=claude/cheaper-authority-defensive-copies-20261014
+          F=claude/opening-label-page-text-filter-20261014
+          # the change under test is this PR's own head commit, merged like a branch
+          git fetch -q origin "$HEAD_SHA" || true
+          git branch -f lineage_change "$HEAD_SHA"
+          # name | refs merged into main | PB_CYCLIC_GC_MODE
+          VARIANTS=(
+            "base||default"
+            "LINEAGE|lineage_change|default"
+            "STACK_staged|$A $B $E $F $C|staged"
+            "STACK_staged_LINEAGE|$A $B $E $F $C lineage_change|staged"
+          )
+          mkdir -p artifacts
+          for spec in "${VARIANTS[@]}"; do
+            IFS='|' read -r name refs mode <<< "$spec"
+            echo "=================== variant $name (merge: ${refs:-none}, gc mode: $mode)"
+            git checkout -q --detach origin/main
+            git reset -q --hard
+            git clean -fdq -e artifacts
+            for ref in $refs; do
+              if [ "$ref" = "lineage_change" ]; then target="lineage_change"; else target="origin/$ref"; fi
+              git merge -q --no-edit "$target" || { echo "MERGE FAILED for $ref"; exit 1; }
+            done
+            dir="artifacts/$name"
+            mkdir -p "$dir"
+            git rev-parse HEAD > "$dir/code_sha.txt"
+            echo "$mode" > "$dir/gc_mode.txt"
+            ( while true; do
+                pid=$(pgrep -f '^python -u tools/run_source_closed_project_handoff.py' | head -1 || true)
+                if [ -n "$pid" ]; then
+                  echo "$(date +%s) $(awk '/VmRSS/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)" >> "$dir/rss_kb_timeline.txt"
+                fi
+                sleep 5
+              done ) &
+            SAMPLER=$!
+            set +e
+            PB_CYCLIC_GC_MODE="$mode" /usr/bin/time -v -o "$dir/time_v.txt" \
+              timeout -s INT 3500s python -u tools/run_source_closed_project_handoff.py \
+                --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all \
+                --output-dir "$dir/out" > "$dir/handoff_stdout.txt" 2> "$dir/handoff_stderr.txt"
+            code=$?
+            set -e
+            kill "$SAMPLER" 2>/dev/null || true
+            wait "$SAMPLER" 2>/dev/null || true
+            echo "handoff_exit_code=$code" | tee "$dir/exit_code.txt"
+            grep -E "User time|System time|Elapsed \(wall|Maximum resident" "$dir/time_v.txt" || true
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-handoff-${{ matrix.project }}
+          path: artifacts
+          retention-days: 14
+
+  compare:
+    name: Compare every variant with unchanged main (outputs byte-identical; resources reported)
+    needs: full-handoff
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: full-handoff-*
+          path: artifacts
+      - name: Compare
+        run: |
+          python tools/diag_claude_variant_compare.py artifacts base,LINEAGE,STACK_staged,STACK_staged_LINEAGE 3laurel q5446 | tee compare.md
+          cp compare.md "$GITHUB_STEP_SUMMARY"
