@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
@@ -477,6 +478,10 @@ def fabricated_live_fields() -> Dict[str, Any]:
 # only discard candidates the exact predicate would also reject.  The exact predicate still makes every ownership decision.
 _PREFILTER_MARGIN_PT = 4.0 * _CONTAINMENT_TOL_PT
 _PREFILTER_MIN_CANDIDATES = 16
+# 16x float overflow headroom for differences, dot/cross and squared length.
+# Inputs outside this range are never discarded by the optional box filter:
+# legacy _point_on_segment remains the sole parent authority, even on overflow.
+_PREFILTER_SAFE_ABS_PT = math.sqrt(sys.float_info.max) / 16.0
 
 
 class _BoxPrefilter:
@@ -498,6 +503,12 @@ class _BoxPrefilter:
         ]
         x1, y1, x2, y2 = columns
         finite = np.isfinite(x1) & np.isfinite(y1) & np.isfinite(x2) & np.isfinite(y2)
+        # A finite endpoint can still overflow the unchanged exact predicate's
+        # subtraction, hypot, cross, dot or squared-length arithmetic. Those
+        # parents must stay candidates, NEVER be AABB-pruned.
+        safe = _PREFILTER_SAFE_ABS_PT
+        finite &= (np.abs(x1) <= safe) & (np.abs(y1) <= safe)
+        finite &= (np.abs(x2) <= safe) & (np.abs(y2) <= safe)
         margin = _PREFILTER_MARGIN_PT
         # a source with a non-finite coordinate is never discarded; the exact predicate decides
         self._bounds = (
@@ -542,13 +553,15 @@ def _containment_grid_candidate_indexes(
 
 
 def _fragment_box(pair: SegmentPair) -> Optional[Tuple[float, float, float, float]]:
-    """(lo_x, hi_x, lo_y, hi_y) of a fragment, or ``None`` when any coordinate is not a finite number."""
+    """Fragment AABB only when exact containment arithmetic has safe float headroom."""
     try:
         x1, y1 = float(pair[0][0]), float(pair[0][1])
         x2, y2 = float(pair[1][0]), float(pair[1][1])
     except (TypeError, ValueError):
         return None
-    if not (math.isfinite(x1) and math.isfinite(y1) and math.isfinite(x2) and math.isfinite(y2)):
+    if not all(math.isfinite(v) and abs(v) <= _PREFILTER_SAFE_ABS_PT for v in (x1, y1, x2, y2)):
+        # Even finite 1e308 endpoints can cause legacy cross/dot overflow and
+        # permit parents outside a finite AABB; do not prune them.
         return None
     return (min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2))
 
