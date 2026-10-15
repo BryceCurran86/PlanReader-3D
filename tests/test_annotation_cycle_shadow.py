@@ -865,3 +865,42 @@ def test_a_zero_width_hairline_ring_stays_in_the_wall_graph():
         segment["width"] = 0.0
     result = _classify(ring)
     assert result["quarantined_primitive_ids"] == []
+
+
+def test_a_self_crossing_cycle_is_not_quarantined():
+    count = 8
+    radius = 5.0
+    points = [
+        (radius * math.cos(2.0 * math.pi * index / count),
+         radius * math.sin(2.0 * math.pi * index / count))
+        for index in range(count)
+    ]
+    segments = []
+    for index, start in enumerate(points):
+        end = points[(index + 3) % count]
+        segments.append(_line(f"s{index}", start[0], start[1], end[0], end[1], path=100 + index))
+    result = _classify(segments)
+    assert result["quarantined_primitive_ids"] == []
+
+
+def test_axis_aligned_edges_that_do_not_close_are_not_a_frame():
+    ring = _ring()
+    incomplete = [
+        _rect_edge("p0", -30.0, -30.0, 30.0, -30.0, path=70),
+        _rect_edge("p1", -30.0, 30.0, 30.0, 30.0, path=70),
+        _rect_edge("p2", -30.0, -30.0, -30.0, 0.0, path=70),
+        _rect_edge("p3", 30.0, -30.0, 30.0, 30.0, path=70),
+    ]
+    result = classify_exact_annotation_cycles(
+        ring + incomplete, [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    quarantined = set(result["quarantined_primitive_ids"])
+    assert {f"mark{i}" for i in range(16)} <= quarantined
+    assert not quarantined.intersection({"p0", "p1", "p2", "p3"})
+
+
+def test_non_mapping_inputs_do_not_raise():
+    result = classify_exact_annotation_cycles(
+        [None, *_ring()], ["MARK", _word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert set(result["quarantined_primitive_ids"]) == {f"mark{i}" for i in range(16)}

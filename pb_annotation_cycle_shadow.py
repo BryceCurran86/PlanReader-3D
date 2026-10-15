@@ -49,6 +49,8 @@ def _dash_key(value: Any) -> str:
 
 
 def _usable_annotation_word(word: Mapping[str, Any]) -> bool:
+    if not isinstance(word, Mapping):
+        return False
     text = word.get("text")
     if not isinstance(text, str) or not text.strip():
         return False
@@ -120,6 +122,29 @@ def _viewport_owns(points: Sequence[Point], viewport_bbox: Optional[Sequence[flo
     if x0 > x1 or y0 > y1:
         return False
     return all(x0 <= point[0] <= x1 and y0 <= point[1] <= y1 for point in points)
+
+
+def _edges_properly_cross(a: Point, b: Point, c: Point, d: Point) -> bool:
+    def orient(p: Point, q: Point, r: Point) -> float:
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    return orient(a, b, c) * orient(a, b, d) < 0.0 and orient(c, d, a) * orient(c, d, b) < 0.0
+
+
+def _cycle_edges_cross(vertices: Sequence[Point]) -> bool:
+    count = len(vertices)
+    if count < 4:
+        return False
+    for left in range(count):
+        a = vertices[left]
+        b = vertices[(left + 1) % count]
+        for right in range(left + 1, count):
+            if right == left or (right + 1) % count == left or (left + 1) % count == right:
+                continue
+            c = vertices[right]
+            d = vertices[(right + 1) % count]
+            if _edges_properly_cross(a, b, c, d):
+                return True
+    return False
 
 
 def _directed_angle_deg(a: Point, b: Point) -> float:
@@ -382,6 +407,8 @@ def _prove_block(
         covered_by_word: Dict[Tuple[float, float, float, float], set[str]] = {}
         word_by_box = {}
         for ids_walk, vertices in _smooth_cycles(members):
+            if _cycle_edges_cross(vertices):
+                continue
             for word in words:
                 if not _word_bbox_inside(word, vertices):
                     continue
@@ -522,7 +549,22 @@ def _unstroked_frames_around_proven_cycles(
                 break
             xs.extend((x1, x2))
             ys.extend((y1, y2))
-        if not short_axis_aligned:
+        if not short_axis_aligned or max(xs) - min(xs) <= 1e-4 or max(ys) - min(ys) <= 1e-4:
+            continue
+        corners = {
+            (min(xs), min(ys)), (max(xs), min(ys)),
+            (max(xs), max(ys)), (min(xs), max(ys)),
+        }
+        used: List[Point] = []
+        closed_rectangle = True
+        for edge in edges:
+            start = (float(edge["x1"]), float(edge["y1"]))
+            end = (float(edge["x2"]), float(edge["y2"]))
+            if start not in corners or end not in corners or start == end:
+                closed_rectangle = False
+                break
+            used.extend((start, end))
+        if not closed_rectangle or any(used.count(corner) != 2 for corner in corners):
             continue
         polygon = (
             (min(xs), min(ys)), (max(xs), min(ys)),
@@ -547,6 +589,7 @@ def classify_exact_annotation_cycles(
         raise ValueError("annotation cycle classification requires a positive page span") from error
     if not math.isfinite(span) or span <= 0.0:
         raise ValueError("annotation cycle classification requires a positive page span")
+    segments = [segment for segment in segments if isinstance(segment, Mapping)]
     words = [word for word in words if _usable_annotation_word(word)]
     id_counts: Dict[str, int] = defaultdict(int)
     for segment in segments:
