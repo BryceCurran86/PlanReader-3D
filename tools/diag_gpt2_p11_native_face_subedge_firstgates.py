@@ -180,10 +180,9 @@ def replay(pdf_bytes: bytes, *, source_page: int, code: str):
     if type(code) is not str or not code.isalnum() or not code.isupper():
         raise ValueError("original_material_code_invalid")
     sha = hashlib.sha256(pdf_bytes).hexdigest()
-    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
-        if source_page > pdf.page_count:
-            raise ValueError("original_source_page_missing")
-        drawings = pdf.load_page(source_page - 1).get_drawings()
+    # Keep independent original native-path inspection AFTER the producer
+    # has frozen its SourceVisibility + W4/face input universe. This prevents
+    # a diagnostic read from contaminating the production-source witness.
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall", producer_version="1"
     )
@@ -203,6 +202,10 @@ def replay(pdf_bytes: bytes, *, source_page: int, code: str):
         source_sha256=sha, snapshot_id=snapshot.snapshot.snapshot_id,
         page_id=str(source_page), view_type="floor_finish_plan",
     )
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+        if source_page > pdf.page_count:
+            raise ValueError("original_source_page_missing")
+        drawings = pdf.load_page(source_page - 1).get_drawings()
     words = _trusted_words_by_page(source, published).get(str(source_page), ())
     raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
     marks = []
