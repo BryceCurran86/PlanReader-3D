@@ -130,7 +130,7 @@ def test_frame_title_competitors_remain_candidates_not_owner():
         def get_drawings(self):
             return []
         def get_text(self, mode):
-            return {"blocks": []}
+            return {"blocks": []} if mode == "dict" else []
 
     original = Page()
     cal = seg.ViewportLayoutCalibration(5., 10., 20., 10., 500., 500.)
