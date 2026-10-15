@@ -423,15 +423,19 @@ def test_original_scope_workflow_triggers_on_local_import_closure():
 def test_original_scope_replay_cannot_be_disabled_or_evade_original_inputs():
     """Use the independently adversarially tested signed-output workflow gate."""
     from pathlib import Path
-    from tests.test_signed_output_gate_path_coverage import (
-        has_paths_ignore,
-        pull_request_paths,
-        pull_request_trigger_reaches_main,
-        replay_jobs_cannot_be_disabled_or_made_non_blocking,
-        workflow_path_included,
-    )
+    from runpy import run_path
 
     root = Path(__file__).resolve().parents[1]
+    # The repository tests directory is not a Python package on all CI runners.
+    # Load the already-tested fail-closed checker by its exact checked-out path.
+    checker = run_path(str(root / "tests/test_signed_output_gate_path_coverage.py"))
+    has_paths_ignore = checker["has_paths_ignore"]
+    pull_request_paths = checker["pull_request_paths"]
+    pull_request_trigger_reaches_main = checker["pull_request_trigger_reaches_main"]
+    replay_jobs_cannot_be_disabled_or_made_non_blocking = checker[
+        "replay_jobs_cannot_be_disabled_or_made_non_blocking"
+    ]
+    workflow_path_included = checker["workflow_path_included"]
     workflow = (root / ".github/workflows/test-gpt3-original-scope-v1-consumer.yml").read_text()
     pull_request_trigger_reaches_main(workflow)
     replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow)
