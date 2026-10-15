@@ -159,3 +159,89 @@ jobs:
           name: gptmax-original-structural-reference-producer-word-receipts
           path: artifacts/original-structural-reference-word-receipts.json
           retention-days: 21
+
+  original-july-date-postclip-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Investigate both exact original untrusted DATE words with existing dual-render source mechanism
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from hashlib import sha256
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_raster_text_corroboration_authority import (
+              RasterTextCorroborationProducer, RasterTextCorroborationSelector,
+          )
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          path=Path('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf')
+          data=path.read_bytes()
+          digest=sha256(data).hexdigest()
+          assert digest=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          source=SourceVisibilityProducer(
+              producer_method='live-physical-net-wall',
+              producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id='live-source:'+digest[:32],
+              source_bytes=data,source_locator='memory://july-date-postclip-shadow.pdf',
+              page_ids=('3',),
+          )
+          original_pub=pub
+          shadow=RasterTextCorroborationProducer.for_physical_plan_view_shadow(source)
+          candidates=[]
+          for obs_id in pub.text_observation_ids:
+              selector=ObservationSelector(
+                  document_id=pub.revision.document_id,revision_id=pub.revision.revision_id,
+                  source_sha256=digest,snapshot_id=pub.snapshot.snapshot_id,observation_id=obs_id,
+              )
+              native=source.text_integrity_authority().resolve_text(selector)
+              if native.receipt is None or native.receipt.raw_text!='28/07/26':
+                  continue
+              raster_selector=RasterTextCorroborationSelector(
+                  document_id=selector.document_id,revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,snapshot_id=selector.snapshot_id,
+                  observation_id=selector.observation_id,
+              )
+              result=shadow.publish(raster_selector)
+              assert source.text_integrity_authority().resolve_text(selector)==native
+              candidates.append({
+                  'native_observation_selector':asdict(selector),
+                  'native_text_result':asdict(native),
+                  'isolated_postclip_raster_result':asdict(result),
+              })
+          assert len(candidates)==2
+          assert all(c['native_text_result']['reason_codes']==['text_clip_state_unresolved']
+                     or c['native_text_result']['reason_codes']==('text_clip_state_unresolved',)
+                     for c in candidates)
+          assert source.published_snapshot_for_revision(pub.revision.revision_id)==original_pub
+          assert sha256(source._producer._store.source_bytes_by_revision[pub.revision.revision_id]).hexdigest()==digest
+          out={
+              'status':'UNPUBLISHED_ORIGINAL_POSTCLIP_TEXT_SHADOW',
+              'source_sha256':digest,'source_snapshot':pub.snapshot.snapshot_id,
+              'original_date_word_candidates':candidates,
+              'original_native_integrity_promoted':False,
+              'cross_file_revision_applicability_granted':False,
+              'cross_file_wall_identity_granted':False,
+              'quantity_granted':False,
+          }
+          Path('artifacts').mkdir(exist_ok=True)
+          Path('artifacts/original-july-date-postclip-shadow.json').write_text(json.dumps(out,indent=2,sort_keys=True,default=str))
+          print({'source_sha':digest,'date_observation_count':len(candidates),
+                 'isolated_raster_results':[c['isolated_postclip_raster_result']['status'] for c in candidates],
+                 'cross_file_revision_applicability_granted':False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-july-date-postclip-shadow
+          path: artifacts/original-july-date-postclip-shadow.json
+          retention-days: 21
