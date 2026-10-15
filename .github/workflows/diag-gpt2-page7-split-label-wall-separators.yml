@@ -61,6 +61,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_atomic_w2_ancestry.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_p7_freezer_original_w2_graph_nodes.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_directed_cycles.py
           PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
@@ -358,6 +359,55 @@ jobs:
               "source_room_face_record_id":freezer_source[0].record_id,
               "original_w4_crossing_w2_source_first_gates":freezer_w2_first_gates,
               "new_metric_quantity_published":False,
+          },sort_keys=True))
+          from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+              replay_original_page7_graph,
+          )
+          original_w4_ids=sorted({
+              row["original_w4_wall_id"] for row in freezer_w2_first_gates
+          })
+          freezer_graph_firstgate=replay_original_page7_graph(
+              source=producer,published=live,source_bytes=payload,
+              original_wall_scope=freezer_w4_scope,
+              original_w4_ids=original_w4_ids,
+          )
+          assert freezer_graph_firstgate["status"] == (
+              "EXACT_ORIGINAL_W2_W4_REPLAY_NODES_OBSERVED"
+          )
+          assert freezer_graph_firstgate["original_source_sha256"] == sha
+          assert freezer_graph_firstgate["original_source_owned_viewport_scope_verified"]
+          assert len(freezer_graph_firstgate["selected_original_w4_node_rows"])==len(original_w4_ids)
+          assert not freezer_graph_firstgate["source_structural_role_granted"]
+          assert not freezer_graph_firstgate["room_or_metric_published"]
+          assert freezer_graph_firstgate["new_commercial_quantities"]==[]
+          from pathlib import Path
+          Path("artifacts/gpt2-page7-physical-faces/freezer_w2_graph_nodes.json").write_text(
+              json.dumps(freezer_graph_firstgate,sort_keys=True,indent=2)+"\\n"
+          )
+          print("GPT2_ORIGINAL_FREEZER_RAW_W2_SNAPPED_NODE_GATE",json.dumps({
+              "original_sha256":sha,
+              "reconstructed_w4_count":freezer_graph_firstgate["original_w4_candidate_count"],
+              "reconstructed_w2_graph_node_count":freezer_graph_firstgate["original_reconstructed_w2_node_count"],
+              "source_parity_verified":True,
+              "original_w4_nodes":[{
+                  "w4_wall_id":row["original_source_w4_wall_id"],
+                  "original_source_parent_edges":[{
+                      "w2_id":frag["original_surviving_w2_edge_id"],
+                      "original_primitive_ids":frag["original_indexed_parent_ids"],
+                      "original_endpoint_to_snapped_node":[
+                          {
+                              "raw":node["original_source_endpoint_pdf_pts"],
+                              "snapped":node["w2_graph_snapped_node_pdf_pts"],
+                              "displacement_pt":node["original_endpoint_vs_snapped_node_displacement_pt"],
+                              "samples":node["source_snap_samples"],
+                              "original_incident_source_edge_count":len(
+                                  node["exact_node_incident_original_source_edges"]
+                              ),
+                          } for node in frag["endpoints"]
+                      ]
+                  } for frag in row["w2_surviving_fragment_nodes"]]
+              } for row in freezer_graph_firstgate["selected_original_w4_node_rows"]],
+              "new_source_wall_role":False,"new_firm":False
           },sort_keys=True))
           report_rows={}
           for target, candidates in native_rows.items():
