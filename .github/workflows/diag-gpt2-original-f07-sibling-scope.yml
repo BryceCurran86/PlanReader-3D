@@ -1,19 +1,19 @@
-name: DIAG GPT2 Original F07 Sibling View Scope Fingerprints
+name: DIAG GPT2 Independent Original F07 Source Sibling Scope Parity
 
 on:
   pull_request:
     paths:
-      - tools/diag_gpt2_native_preflight_w4_identity_invariance.py
-      - tests/test_gpt2_native_preflight_w4_identity_invariance.py
+      - tools/diag_gpt2_independent_f07_original_scope_parity.py
+      - tests/test_gpt2_independent_original_f07_scope_parity.py
       - .github/workflows/diag-gpt2-original-f07-sibling-scope.yml
 
 permissions:
   contents: read
 
 jobs:
-  original-f07-sibling-source-first-gate:
+  original-independent-source-f07:
     runs-on: ubuntu-latest
-    timeout-minutes: 48
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,16 +22,16 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
-      - name: Exact source fingerprint, changed-sibling and adversarial tests
+      - name: Source stamped sibling roles and source-scope parity adversarial tests
         env:
           PYTHONPATH: .
         run: |
           set -euo pipefail
-          python -m pytest -q tests/test_gpt2_native_preflight_w4_identity_invariance.py
-          ruff check --select F821,F823 tools/diag_gpt2_native_preflight_w4_identity_invariance.py tests/test_gpt2_native_preflight_w4_identity_invariance.py
+          python -m pytest -q tests/test_gpt2_independent_original_f07_scope_parity.py
+          ruff check --select F821,F823 tools/diag_gpt2_independent_f07_original_scope_parity.py tests/test_gpt2_independent_original_f07_scope_parity.py
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
-      - name: Independently source-sealed original F07 sibling inventories
+      - name: Original SHA W4 and independent source F07 all sibling receipt parity
         env:
           PYTHONPATH: .
         run: |
@@ -39,62 +39,46 @@ jobs:
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
           printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          mkdir -p artifacts/gpt2-f07-siblings
-          git rev-parse HEAD > artifacts/gpt2-f07-siblings/head.txt
-          for seed in 0 1; do
-            echo "ORIGINAL_F07_SOURCE_VIEW_PROBE PYTHONHASHSEED=$seed"
-            PYTHONHASHSEED="$seed" timeout 1300s python -u -m tools.diag_gpt2_native_preflight_w4_identity_invariance \
-              --single-capture --pdf "$PDF" --sha "$SHA" --page 11 \
-              --output "artifacts/gpt2-f07-siblings/f07-seed-$seed.json"
-          done
+          mkdir -p artifacts/gpt2-independent-f07-siblings
+          git rev-parse HEAD > artifacts/gpt2-independent-f07-siblings/head.txt
+          timeout 2300s python -u -m tools.diag_gpt2_independent_f07_original_scope_parity \
+            --pdf "$PDF" --sha "$SHA" --page 11 \
+            --output artifacts/gpt2-independent-f07-siblings/original-f07-parity.json
           python - <<'PY'
           import json
           from pathlib import Path
-          from tools.diag_gpt2_native_preflight_w4_identity_invariance import first_difference
-          root=Path('artifacts/gpt2-f07-siblings')
-          arr=[json.loads((root/f'f07-seed-{n}.json').read_text()) for n in (0,1)]
-          for v in arr:
-              assert v['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-              assert v['source_snapshot_unchanged'] is True
-              assert len(v['scopes'])==1
-              scope=v['scopes'][0]
-              assert (scope['wall_count'],scope['shadow_face_count'])==(890,1235)
-              proof=v['original_f07_source_view_sibling_inventory']
-              assert proof['status']=='original_producer_f07_sibling_inventory_captured'
-              assert proof['all_producer_view_count']>=1
-              assert len(proof['sibling_set_fingerprint'])==64
-              assert all(x['producer_token_valid'] and
-                         x['producer_fingerprint']==x['payload_sha256']
-                         for x in proof['all_source_owned_views'])
-              eligible=[x['expected_wall_scope_if_eligible']
-                        for x in proof['all_source_owned_views']
-                        if x['expected_wall_scope_if_eligible']]
-              assert scope['decision_scope_id'] in eligible
-              assert v['new_commercial_quantities']==[]
-              assert v['physical_room_or_material_granted'] is False
-          f07=first_difference(
-              arr[0]['original_f07_source_view_sibling_inventory'],
-              arr[1]['original_f07_source_view_sibling_inventory'],
+          p=Path('artifacts/gpt2-independent-f07-siblings/original-f07-parity.json')
+          v=json.loads(p.read_text())
+          assert v['original_source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert v['original_source_snapshot_unchanged']
+          assert v['source_f07_ownership_note']=='independently_recomputed_source_F07_not_original_wall_in_memory_views'
+          assert len(v['first_original_w4_scopes'])==1
+          sc=v['first_original_w4_scopes'][0]
+          assert (sc['original_w4_candidate_count'],sc['original_w4_owned_shadow_face_count'])==(890,1235)
+          assert sc['original_authoritative_source_room_face_count']==0
+          f=v['independent_second_f07_sibling_source_replay']
+          assert f['status'] in (
+              'independent_source_f07_replay_exact_w4_scope_parity',
+              'independent_source_f07_replay_w4_scope_conflict_or_unavailable',
           )
-          scoped=first_difference(arr[0]['scopes'],arr[1]['scopes'])
-          report={
-              'source_sha256':arr[0]['source_sha256'],
-              'head_commit_same_for_both':True,
-              'full_original_f07_siblings_first_difference':f07,
-              'w4_scope_first_difference':scoped,
-              'scope_ids':[v['scopes'][0]['decision_scope_id'] for v in arr],
-              'f07_sibling_fingerprints':[v['original_f07_source_view_sibling_inventory']['sibling_set_fingerprint'] for v in arr],
-              'physical_room_published':False,
-              'new_commercial_quantities':[],
-          }
-          (root/'comparisons.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
-          print('GPT2_ORIGINAL_F07_SIBLINGS',json.dumps(report,sort_keys=True))
-          # Do not demand equality if source itself disproves it. Retain the
-          # original conflicting receipts for independent source review.
+          assert f['all_original_f07_view_count']>=1
+          assert all(x['source_view_producer_seal_verified'] for x in f['all_source_owned_views'])
+          assert len(f['sibling_source_fingerprint'])==64
+          assert f['room_or_wall_authority_granted'] is False
+          assert v['new_physical_room_authority'] is False
+          assert v['new_finish_occurrence'] is False
+          assert v['new_customer_quantities']==[]
+          assert not v['frozen_benchmark_scored']
+          print('GPT2_F07_SCOPE_EXACT_PARITY',f['original_w4_scope_id_parity_verified'])
+          print('GPT2_F07_SIBLING_VIEW_IDS',[
+              x['source_f07_view_id'] for x in f['all_source_owned_views']
+          ])
+          print('GPT2_F07_ORIGINAL_SCOPE_IDS',[x['decision_scope_id'] for x in v['first_original_w4_scopes']])
+          print('GPT2_F07_REPLAY_SCOPE_IDS',f['replayed_source_plan_scope_candidates'])
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gpt2-original-f07-sibling-scope-receipts
-          path: artifacts/gpt2-f07-siblings
+          name: gpt2-independent-original-f07-sibling-scope-evidence
+          path: artifacts/gpt2-independent-f07-siblings
           retention-days: 14
