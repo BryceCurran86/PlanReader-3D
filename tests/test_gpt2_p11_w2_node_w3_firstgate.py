@@ -243,3 +243,52 @@ def test_duplicate_producer_sealed_f07_view_addresses_do_not_mint_scope():
             viewports=(a,b),published=published,source_page=11,
             original_w4_scope_id="unknown",
         )
+
+
+def test_displaced_original_w2_source_role_keeps_competing_drawn_primitive(monkeypatch):
+    from tools import diag_gpt2_p11_w2_graph_node_firstgate as diag
+    monkeypatch.setattr(
+        diag, "is_structural_candidate_segment",
+        lambda raw: (True, ("source_candidate_only",)),
+    )
+    graph_rows=[{
+        "source_negative_face_subedge_pdf_pts":[[10.2,0.1],[20.,0.]],
+        "w2_surviving_fragments":[{
+            "w2_graph_node_endpoints":[{
+                "w2_graph_node_index":42,
+                "w2_graph_snapped_node_pdf_pts":[10.2,0.1],
+                "w2_graph_node_snap_input_sample_count":5,
+                "all_original_source_incident_w2_edges_at_same_graph_node":[
+                    {"source_w2_edge_id":"split-1",
+                     "original_indexed_source_primitive_ids":["d1i0"]},
+                    {"source_w2_edge_id":"split-2",
+                     "original_indexed_source_primitive_ids":["d2i0"]},
+                ]
+            }]
+        }]
+    }]
+    raw=[{"id":"d1i0","source_observation_id":"o1","x1":0.,"y1":0.,
+          "x2":10.,"y2":0.,"kind":"line","layer":"physical"},
+         {"id":"d2i0","source_observation_id":"o2","x1":10.4,"y1":-0.2,
+          "x2":20.,"y2":0.,"kind":"line","layer":"unknown"}]
+    report=diag.audit_original_incident_source_roles(
+        graph_rows=graph_rows,
+        original_owned_segments=raw,
+        w2_graph_input_segments=raw,
+    )
+    case,=report["displaced_w2_original_source_node_role_cases"]
+    assert case["graph_node_index"]==42
+    assert case["snap_input_sample_count"]==5
+    assert {x["source_native_primitive_id"]
+            for x in case["original_indexed_source_candidate_roles"]}=={"d1i0","d2i0"}
+    assert all(not x["physical_wall_role_source_proven"]
+               for x in case["original_indexed_source_candidate_roles"])
+    assert report["new_structural_wall_approved"] is False
+    graph_rows[0]["w2_surviving_fragments"][0]["w2_graph_node_endpoints"][0][
+        "all_original_source_incident_w2_edges_at_same_graph_node"
+    ].append({"source_w2_edge_id":"missing","original_indexed_source_primitive_ids":["d3i0"]})
+    with pytest.raises(ValueError,match="primitive_not_in_source_view"):
+        diag.audit_original_incident_source_roles(
+            graph_rows=graph_rows,original_owned_segments=raw,
+            w2_graph_input_segments=raw,
+        )
