@@ -6,6 +6,7 @@ import fitz
 import pytest
 
 from tools.diag_gpt2_p11_native_face_subedge_firstgates import inspect_local_edges
+from pb_migration_contracts import EvidenceResolutionStatus
 
 
 def _source(lines):
@@ -18,9 +19,11 @@ def _source(lines):
     return drawings
 
 
-def _scope(*, fragments, excludes=(), viewport=(0, 0, 500, 500), tainted=True):
+def _scope(*, fragments, excludes=(), viewport=(0, 0, 500, 500), tainted=True, grid=False):
     rec = SimpleNamespace(
-        wall_candidate_id="wall-a", source_edge_fragments=tuple(
+        wall_candidate_id="wall-a",
+        wall_candidate=SimpleNamespace(face_a_segment_ids=("e0",), face_b_segment_ids=()),
+        source_edge_fragments=tuple(
             SimpleNamespace(
                 geometry=flat, source_primitive_ids=primitive_ids
             ) for flat, primitive_ids in fragments
@@ -37,6 +40,14 @@ def _scope(*, fragments, excludes=(), viewport=(0, 0, 500, 500), tainted=True):
     )
     return SimpleNamespace(
         records=(rec,), boundary_evaluation=boundary,
+        typed_semantic_evidence_atoms=(
+            SimpleNamespace(
+                kind='grid', status=EvidenceResolutionStatus.CANDIDATE,
+                metadata={'polarity':'opposing','target_edge_id':'e0'},
+                evidence_id='source-original-grid-atom',
+                reason_codes=('source_lineage_dense_orthogonal_lattice',),
+            ),
+        ) if grid else (),
         viewport_bbox=viewport,
     )
 
@@ -95,6 +106,21 @@ def test_direct_native_ink_and_existing_w2_full_span_preserved_without_room_gran
     assert not edge["structural_wall_role_granted"]
     assert not report["physical_room_published"] and not report["metric_quantity_published"]
     assert wall == original_wall and original_marks == _marks()
+
+
+def test_producer_source_lineage_grid_opposition_is_carried_without_room_promotion():
+    drawings = _source([((10, 10), (60, 10))])
+    wall = _scope(fragments=(((10, 10, 60, 10), ("d0i0",)),), grid=True)
+    result = inspect_local_edges(
+        wall=wall, witnesses=_witnesses(), marks=_marks(),
+        drawings=drawings,
+    )
+    subedge, = _edges(result)
+    assert subedge["indexed_native_ink_status"] == "one_or_more_original_native_items_span"
+    assert subedge["producer_full_wall_grid_opposition"] is True
+    assert subedge["producer_grid_opposition_evidence_ids"] == ["source-original-grid-atom"]
+    assert result["mark_local_subedges"][0]["all_enclosing_w4_walls_typed_grid_opposed"]
+    assert not result["physical_room_published"]
 
 
 def test_source_ink_crosses_true_w2_gap_but_not_published():
