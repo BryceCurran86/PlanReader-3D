@@ -22,6 +22,7 @@ from pb_quantity_takeoff_adapter import (
     compute_commercial_projection_fingerprint,
 )
 
+from pb_strict_evidence_json import parse_strict_evidence_json
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     SealedSourceClosedQuantity,
@@ -69,11 +70,9 @@ def _string_tuple(values: Any) -> tuple[str, ...]:
 
 
 def _strict_customer_notes(notes: str) -> Mapping[str, Any]:
-    """Parse persisted automated provenance using the existing strict JSON gate."""
-    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
-
+    """Parse persisted automated provenance with the import-safe strict JSON reader."""
     try:
-        payload = _parse_evidence_json(notes)
+        payload = parse_strict_evidence_json(notes)
     except (json.JSONDecodeError, RecursionError, ValueError) as exc:
         # Preserve the established duplicate-provenance diagnostic for callers.
         detail = str(exc)
