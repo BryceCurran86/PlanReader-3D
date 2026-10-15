@@ -1,0 +1,142 @@
+name: GPT1 Original Cross-View Plan Grid Source Controls
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_grid_registration_shadow.py"
+      - "tools/diag_gpt1_original_cross_view_grid.py"
+      - "tests/test_gpt1_source_grid_registration_shadow.py"
+      - "tools/diag_gpt1_source_grid_room_mark_candidates.py"
+      - ".github/workflows/diag-gpt1-original-cross-view-grid.yml"
+  workflow_dispatch:
+
+jobs:
+  original-grid-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact head identity
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pinned deps
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original frozen benchmark integrity and adversarial source tests
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt1_source_grid_registration_shadow.py
+      - name: Original two authentic plan pages source geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt1-original-cross-view-grid
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/producer_head_sha.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          timeout 600s env PYTHONPATH=. python -u -m tools.diag_gpt1_original_cross_view_grid \
+            --pdf "$PDF" --sha256 "$SHA" --first-page 7 --second-page 11 \
+            --output "$OUT/native_grid_candidate.json" | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path("artifacts/gpt1-original-cross-view-grid/native_grid_candidate.json").read_text())
+          assert data["original_source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert data["source_pages_1_based"]==[7,11]
+          assert data["diagnostic_only"] is True
+          for key in ("source_grid_line_witness_verified","source_word_raster_corroborated",
+                      "source_plan_viewport_owned","cross_view_physical_room_equivalence_verified",
+                      "source_finish_occurrence_owned","source_floor_area_quantity_created",
+                      "commercial_projection_allowed"):
+              assert data[key] is False, key
+          assert data["source_native_text_grid_candidate"] is True, data["first_unclosed_gate"]
+          assert data["letter_grid_control_count"]>=3
+          assert data["number_grid_control_count"]>=4
+          assert data["source_native_vector_grid_candidate"] is True, data.get("first_grid_vector_gate")
+          assert len(data["native_vector_grid_letter_lineage"])>=3
+          assert len(data["native_vector_grid_number_lineage"])>=4
+          assert data["first_unclosed_gate"]=="source_grid_producer_and_room_physical_equivalence_unverified"
+          assert len(data["native_vector_grid_translation_candidate_pdf_pts"])==2
+          for row in data["native_vector_grid_letter_lineage"]+data["native_vector_grid_number_lineage"]:
+              assert len(row["first_original_path_item_addresses"])>=12
+              assert len(row["second_original_path_item_addresses"])>=12
+          print("ORIGINAL_GRID_NATIVE_TEXT_AND_NATIVE_VECTOR_CANDIDATES_NO_PHYSICAL_OR_QUANTITY_AUTHORITY")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-cross-view-grid-native-evidence
+          path: artifacts/gpt1-original-cross-view-grid/
+          retention-days: 30
+
+  original-room-mark-registration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact producer head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install original source toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original SHA->native grid->actual W4 source room->FT3 mark geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt1-original-crossview-room-mark
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          timeout 3500s env PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 python -u -m tools.diag_gpt1_source_grid_room_mark_candidates \
+            --pdf "$PDF" --sha256 "$SHA" --room-page 7 --material-page 11 \
+            --code FT3 --output "$OUT/original_room_mark_registration.json" \
+            2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gpt1-original-crossview-room-mark/original_room_mark_registration.json").read_text())
+          assert r["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert r["diagnostic_only"] is True
+          assert r["original_grid_native_vector_candidate"] is True
+          assert r["material_code"]=="FT3"
+          assert len(r["native_material_marks"])==6
+          assert len(r["source_room_candidates"])>0
+          assert r["physical_room_crossview_equivalence_proven"] is False
+          assert r["material_occurrence_source_trusted"] is False
+          assert r["page_material_role_proven"] is False
+          assert r["original_room_wall_equivalence_proven"] is False
+          assert r["published_floor_finish_quantities"]==0
+          assert r["commercial_projection_allowed"] is False
+          assert all(
+              not x["material_occurrence_owned"]
+              and not x["crossview_structural_wall_equivalence_proven"]
+              and not x["customer_quantity_issued"]
+              for x in r["source_region_geometric_candidates"]
+          )
+          print("ORIGINAL_CROSSVIEW_ROOM_FT3_CANDIDATES_ONLY_NO_CONSTRUCTION_QUANTITY")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-crossview-room-ft3-shadow
+          path: artifacts/gpt1-original-crossview-room-mark/
+          retention-days: 30

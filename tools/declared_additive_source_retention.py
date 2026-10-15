@@ -1164,18 +1164,17 @@ def strict_or_declared(
     *,
     normalize: Callable[[Any], Any] | None = None,
 ) -> Iterator[None]:
-    """Wrap a gate's own strict assertions.
+    """Legacy assertion scope; always propagate every assertion failure.
 
-    The block runs unchanged.  If one of its ``assert`` statements fails, the
-    failure is excused only when this exact event is declared and fully proven;
-    otherwise the original ``AssertionError`` propagates.  A declared but
-    violated event raises ``ValueError`` instead of being excused.
+    A source-retention declaration certifies a specific physical source event,
+    not arbitrary assertions in a caller's scope.  Silently swallowing a failed
+    assertion here also excused independent checks (counts, source coverage,
+    canonical identities, and wall collision controls).  For an explicitly
+    permitted receipt difference use ``assert_unchanged_or_declared`` on that
+    one comparison, keeping unrelated gate assertions outside it.  This
+    compatibility context manager never waives a failure.
     """
-    try:
-        yield
-    except AssertionError:
-        if not declared_event_approved(baseline, candidate, normalize=normalize):
-            raise
+    yield
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -239,3 +239,171 @@ def test_frozen_manifest_mutation_during_scoring_demotes_source_receipt(tmp_path
     assert result["publication_status"] == "UNPUBLISHED"
     assert result["project_evaluation"] is None
     assert result["reason_codes"] == ["source_or_signed_artifact_changed_during_reconciliation"]
+
+
+@pytest.mark.parametrize(
+    "family,trade,semantic_key",
+    [
+        ("floor_area", "tiling", "floor_area:physical-floor"),
+        ("floor_area", "ceilings", "floor_area:physical-floor"),
+        ("opening_area", "doors", "window_area:physical-opening"),
+    ],
+)
+def test_project_only_frozen_scorer_refuses_signed_source_trade_reclassification(
+    tmp_path, monkeypatch, family, trade, semantic_key,
+):
+    manifest, original, sealed, identity, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    raw_manifest["verified_takeoff_items"] = [{
+        "item_id": "target", "trade_category": trade,
+        "denominator_eligible": True,
+    }]
+    manifest.write_text(json.dumps(raw_manifest), encoding="utf-8")
+    sealed.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "quantities": [{
+            "family": family,
+            "semantic_key": semantic_key,
+            "object_identity_refs": ["physical-source-id"],
+        }],
+    }), encoding="utf-8")
+    identity.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "bindings": [{
+            "benchmark_item_id": "target",
+            "production_family": family,
+            "production_object_identity_refs": ["physical-source-id"],
+        }],
+    }), encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("bad source family must never reach frozen project evaluator")
+
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", forbidden)
+    with pytest.raises(ValueError, match="reclassified|opening kind"):
+        _report(manifest, original, sealed, identity)
+
+
+def test_project_only_accepts_source_owned_floor_finish_before_frozen_scoring(
+    tmp_path, monkeypatch,
+):
+    manifest, original, sealed, identity, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    raw_manifest["verified_takeoff_items"] = [{
+        "item_id": "source-owned-finish", "trade_category": "tiling",
+        "denominator_eligible": True,
+    }]
+    manifest.write_text(json.dumps(raw_manifest), encoding="utf-8")
+    sealed.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "quantities": [{
+            "family": "floor_finish_area",
+            "semantic_key": "tiled_floor_surface:physical-floor",
+            "object_identity_refs": ["physical-floor"],
+        }],
+    }), encoding="utf-8")
+    identity.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "bindings": [{
+            "benchmark_item_id": "source-owned-finish",
+            "production_family": "floor_finish_area",
+            "production_object_identity_refs": ["physical-floor"],
+        }],
+    }), encoding="utf-8")
+    observed = []
+    def exact_report(*_args):
+        observed.append(True)
+        return {
+            "project_id": "source-project", "source_sha_verified": True,
+            "reconciliation_complete": True,
+        }
+
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", exact_report)
+    report = _report(manifest, original, sealed, identity)
+    assert observed == [True]
+    assert report["reconciliation_complete"] is True
+    assert report["score_claim"] is False
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["sealed", "identity"],
+)
+def test_duplicate_signed_source_key_never_invokes_frozen_project_scorer(
+    tmp_path, monkeypatch, source
+):
+    manifest, original, sealed, identity, source_sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED"
+    )
+    target = sealed if source == "sealed" else identity
+    target.write_text(
+        '{"source_sha256s":["' + source_sha + '"],'
+        '"source_sha256s":["' + ("0" * 64) + '"]}',
+        encoding="utf-8",
+    )
+
+    def cannot_evaluate(*_args, **_kwargs):
+        raise AssertionError("duplicate on-disk signed key reached frozen scorer")
+
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", cannot_evaluate)
+    report = _report(manifest, original, sealed, identity)
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["project_evaluation"] is None
+    assert report["reason_codes"] == ["sealed_or_identity_source_artifact_unavailable"]
+
+
+def test_duplicate_nested_signed_source_key_never_invokes_evaluator(
+    tmp_path, monkeypatch
+):
+    manifest, original, sealed, identity, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED"
+    )
+    sealed.write_text(
+        '{"source_sha256s":["' + sha + '"], "quantities":['
+        '{"quantity_id":"first","quantity_id":"forged"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        module, "_unchanged_frozen_exact_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("duplicate nested receipt reached scorer")
+        ),
+    )
+    report = _report(manifest, original, sealed, identity)
+    assert report["reconciliation_complete"] is False
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["project_evaluation"] is None
+
+
+def test_duplicate_frozen_manifest_key_fails_before_original_pdf_claim(
+    tmp_path, monkeypatch
+):
+    manifest, original, sealed, identity, _sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED"
+    )
+    raw = manifest.read_text(encoding="utf-8")
+    # A second project ID must not be chosen by last-write-wins while
+    # discovering canonical project scope.
+    manifest.write_text(
+        raw.replace('"project_id": "source-project"',
+                    '"project_id": "source-project", "project_id": "different"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="duplicate key"):
+        _report(manifest, original, sealed, identity)
+
+
+def test_project_only_strict_json_accepts_normal_nested_original_source_receipt(
+    tmp_path, monkeypatch
+):
+    manifest, original, sealed, identity, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED"
+    )
+    assert module._strict_original_json_object(manifest)["project_id"] == "source-project"
+    assert module._strict_original_json_object(sealed)["source_sha256s"] == [sha]
+    assert module._strict_original_json_object(identity)["source_sha256s"] == [sha]
+    assert not module._strict_original_json_object(sealed).get("quantities")
