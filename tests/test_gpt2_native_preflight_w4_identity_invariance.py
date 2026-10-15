@@ -168,3 +168,83 @@ def test_per_interpreter_digests_detect_primitive_and_face_source_drift(monkeypa
     assert original["scopes"][0]["wall_ids_and_digests"] != changed["scopes"][0]["wall_ids_and_digests"]
     assert original["scopes"][0]["complete_scope_digest"] != changed["scopes"][0]["complete_scope_digest"]
     assert original["scopes"][0]["face_ids_and_digests"] == changed["scopes"][0]["face_ids_and_digests"]
+
+
+def test_original_f07_siblings_change_scope_fingerprint_without_w4_wall_change():
+    from types import SimpleNamespace
+    from pb_viewport_segmentation import (
+        SegmentedViewport, _stamp_segment_page_viewports_product,
+    )
+    from pb_physical_wall_candidate_authority import _page_viewports_cache_key
+    def pair(other_note):
+        view = SegmentedViewport(
+            view_id="same-view-id", page_number=11, view_type="floor_finish_plan",
+            label="FLOOR FINISHES PLAN", title_bbox=(0., 0., 10., 10.),
+            bounding_box=(0., 0., 100., 100.), status="resolved",
+            boundary_source="vector_frame", confidence=1.0,
+            provenance={"native_path": "d1i0"},
+        )
+        sibling = SegmentedViewport(
+            view_id="same-sibling-id", page_number=11, view_type="schedule",
+            label="FINISH SCHEDULE", title_bbox=(201., 0., 211., 10.),
+            bounding_box=(200., 0., 300., 100.), status="resolved",
+            boundary_source="vector_frame", confidence=1.0,
+            notes=[other_note], provenance={"native_path": "d7i0"},
+        )
+        return tuple(_stamp_segment_page_viewports_product((view, sibling)))
+    published = SimpleNamespace(
+        revision=SimpleNamespace(
+            document_id="source-original-doc", revision_id="R",
+            source_sha256="a" * 64,
+        ),
+        snapshot=SimpleNamespace(snapshot_id="S"),
+    )
+    def snapshot(note):
+        source=SimpleNamespace(_physical_wall_page_viewports_cache={
+            _page_viewports_cache_key(published=published, page_id="11"):pair(note)
+        })
+        return diagnostic.audited_producer_f07_inventory(
+            source=source, published=published, page_no=11,
+        )
+    first, second = snapshot("a"), snapshot("b")
+    assert first["status"] == "original_producer_f07_sibling_inventory_captured"
+    assert first["all_producer_view_count"] == 2
+    assert all(v["producer_token_valid"] for v in first["all_source_owned_views"])
+    assert first["all_source_owned_views"][0]["view_id"] == "same-sibling-id"
+    # Same targeted plan view, DIFFERENT sibling source-note provenance:
+    assert first["all_source_owned_views"][1]["producer_fingerprint"] == (
+        second["all_source_owned_views"][1]["producer_fingerprint"]
+    )
+    assert first["sibling_set_fingerprint"] != second["sibling_set_fingerprint"]
+    a = first["all_source_owned_views"][1]["expected_wall_scope_if_eligible"]
+    b = second["all_source_owned_views"][1]["expected_wall_scope_if_eligible"]
+    assert a != b and a.startswith("wall-source:viewport:11:")
+    assert diagnostic.first_difference(first, second) is not None
+
+
+def test_unavailable_or_mutated_f07_producer_cache_cannot_mint_scope_receipt():
+    from types import SimpleNamespace
+    from pb_physical_wall_candidate_authority import _page_viewports_cache_key
+    from pb_viewport_segmentation import SegmentedViewport
+    published = SimpleNamespace(
+        revision=SimpleNamespace(
+            document_id="d", revision_id="r", source_sha256="b"*64
+        ), snapshot=SimpleNamespace(snapshot_id="s"),
+    )
+    missing = diagnostic.audited_producer_f07_inventory(
+        source=SimpleNamespace(_physical_wall_page_viewports_cache={}),
+        published=published, page_no=11,
+    )
+    assert missing["status"] == "producer_f07_cache_unavailable"
+    spoof = SegmentedViewport(
+        view_id="v", page_number=11, view_type="floor_finish_plan",
+        label="PLAN", title_bbox=(0.,0.,10.,10.), bounding_box=(0.,0.,50.,50.),
+        status="resolved",boundary_source="vector_frame",confidence=1.0,
+    )
+    bad = diagnostic.audited_producer_f07_inventory(
+        source=SimpleNamespace(_physical_wall_page_viewports_cache={
+            _page_viewports_cache_key(published=published,page_id="11"):(spoof,)
+        }), published=published, page_no=11,
+    )
+    assert bad["status"] == "producer_f07_view_set_unavailable"
+    assert bad["all_source_owned_views"] == []
