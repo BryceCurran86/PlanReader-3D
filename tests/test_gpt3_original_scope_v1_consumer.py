@@ -364,3 +364,57 @@ def test_forbidden_diagnostic_destination_is_rejected_before_replay(
         consumer.main(args + [
             "--output", str(tmp_path / "benchmarks/frozen_holdout/forbidden.json")
         ])
+
+
+def test_original_scope_workflow_triggers_on_local_import_closure():
+    """No source/consumer producer import may silently skip this original PDF replay."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/test-gpt3-original-scope-v1-consumer.yml").read_text()
+    assert "  pull_request:\n" in workflow
+    trigger = workflow.split("  pull_request:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
+    assert "    branches: [main]\n" in trigger
+    assert "    paths:\n" in trigger
+    allowed = {
+        line.strip()[2:].strip("'\"")
+        for line in trigger.splitlines()
+        if line.startswith("      - ")
+    }
+    entries = (
+        "tools/diag_gpt3_original_scope_v1_consumer.py",
+        "tools/diag_gptmax_producer_opening_scope_receipts.py",
+        "tools/run_gpt3_lot16_original_sealed_score_input.py",
+    )
+    pending, visited = list(entries), set()
+    while pending:
+        rel = pending.pop()
+        if rel in visited:
+            continue
+        visited.add(rel)
+        tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                modules = [node.module] if node.module else []
+            else:
+                continue
+            for name in modules:
+                if name.startswith(("tools.", "scripts.")):
+                    candidate = name.replace(".", "/") + ".py"
+                    if (root / candidate).is_file() and candidate not in visited:
+                        pending.append(candidate)
+    # These original-source entry points can also be called by the replayed
+    # producer's pb_* composition chain; missing them must not skip a check.
+    required = visited | {
+        "tools/run_source_closed_project_handoff.py",
+        "tools/diag_gptmax_source_authority_stages.py",
+        "tools/diag_gptmax_raster_unhosted_flank_source.py",
+    }
+    assert required <= allowed, (
+        "original V1 scope replay has uncovered local producer imports: "
+        + repr(sorted(required - allowed))
+    )
+    assert "pb_*.py" in allowed  # all root-level production authority modules
