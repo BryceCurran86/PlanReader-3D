@@ -53,7 +53,7 @@ def test_source_lines_outside_but_gap_inside_cannot_be_called_out_of_plan():
 
 def test_geometry_at_exact_boundary_retained_as_inside_not_nearest():
     assert _line_scope(line(10, 50, 100, 50), PLAN) == "inside"
-    assert _line_scope(line(9.999, 50, 100, 50), PLAN) == "crossing_or_contesting"
+    assert _line_scope(line(9.999, 50, 100, 50), PLAN) == "crossing"
     assert _line_scope(line(0, 50, 9, 50), PLAN) == "outside"
 
 
