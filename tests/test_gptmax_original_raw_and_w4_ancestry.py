@@ -44,11 +44,22 @@ def inputs():
     }
     source = {
         "source_sha256": SHA, "snapshot_id": ROOT,
-        "baseline_receipts": {"walls": [{
-            **scope, "scope_complete": True,
-            "decision_scope_id": SCOPE,
-            "records": [w4],
-        }]},
+        "baseline_receipts": {
+            "walls": [{
+                **scope, "scope_complete": True,
+                "decision_scope_id": SCOPE,
+                "records": [w4],
+            }],
+            "canonical": [{
+                "physical_opening_id": "physical_one",
+                "source_sha256": SHA, "snapshot_id": ROOT,
+            }],
+            "hosts": [{
+                "opening_identity_id": "physical_one",
+                "host_wall_id": None, "record_id": None,
+                "reason_codes": ["no_authenticated_host_wall_band"],
+            }],
+        },
         "baseline_source_audit": {
             "raw_registered_gaps": [r1, r2],
             "raster_candidate_closure": {
@@ -141,6 +152,9 @@ def test_duplicate_prior_snapshot_raw_is_not_aliased():
     lambda a, b: a["baseline_source_audit"]["raster_candidate_closure"].update(candidate_universe_complete=True),
     lambda a, b: a["candidate_source_audit"]["raster_candidate_closure"].update(unresolved_candidate_ids=["stale"]),
     lambda a, b: b["cases"][0].update(host_granted=True),
+    lambda a, b: a["baseline_receipts"]["hosts"][0].update(host_wall_id="fictional"),
+    lambda a, b: a["baseline_receipts"]["canonical"][0].update(snapshot_id="foreign"),
+    lambda a, b: a["baseline_receipts"]["walls"][0]["records"][0]["source_edge_fragments"][0].update(geometry=[float("nan"), 0, 2, 0]),
     lambda a, b: b["cases"][0]["source_w4_endpoint_shortlist"].append({"wall_candidate_id": "foreign"}),
 ])
 def test_corrupt_or_unearned_original_provenance_fails_closed(change):
@@ -156,3 +170,18 @@ def test_stable_under_original_raw_order_and_host_w4_shortlist_order():
     a["baseline_source_audit"]["raw_registered_gaps"].reverse()
     a["baseline_source_audit"]["raster_candidate_closure"]["unresolved_candidate_ids"].reverse()
     assert audit(a, b) == expected
+
+
+def test_duplicate_original_raw_receipt_is_not_overwritten_by_dict():
+    a, b = inputs()
+    a["baseline_source_audit"]["raw_registered_gaps"].append(
+        deepcopy(a["baseline_source_audit"]["raw_registered_gaps"][0]))
+    with pytest.raises(ValueError, match="duplicate original raw candidate"):
+        audit(a, b)
+
+
+def test_forged_diagnostic_hostless_physical_id_is_not_source_authority():
+    a, b = inputs()
+    b["cases"][0]["physical_opening_id"] = "not_an_original_opening"
+    with pytest.raises(ValueError, match="originally source-authenticated hostless"):
+        audit(a, b)
