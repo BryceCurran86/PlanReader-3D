@@ -1,0 +1,73 @@
+name: GPT MAX Structural Reference Revision Audit
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/lot16-original-structural-source-20261015
+    paths:
+      - tools/diag_gptmax_structural_reference_revision.py
+      - tests/test_gptmax_structural_reference_revision.py
+      - .github/workflows/test-gptmax-structural-reference-revision.yml
+      - "documents/sources/4. Structural Engineering - Lot 16 Power.pdf"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  synthetic-native-evidence-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pymupdf pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_structural_reference_revision.py
+          ruff check --select F821,F823 tools/diag_gptmax_structural_reference_revision.py tests/test_gptmax_structural_reference_revision.py
+  original-sha-pinned-native-only-abstain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pymupdf
+      - name: Verify unchanged original source bytes and record exact first source blocker
+        run: |
+          set -euo pipefail
+          ARCH='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          STRUCT='documents/sources/4. Structural Engineering - Lot 16 Power.pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$ARCH" | sha256sum -c
+          printf '%s  %s\n' 'b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6' "$STRUCT" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_structural_reference_revision.py \
+            --structural-pdf "$STRUCT" --architectural-pdf "$ARCH" \
+            --structural-certificate-page 11 --architectural-plan-page 3 \
+            --output artifacts/original-lot16-structural-reference-revision.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-lot16-structural-reference-revision.json').read_text())
+          assert r['status']=='UNPUBLISHED_NATIVE_TEXT_DIAGNOSTIC'
+          assert r['structural_referenced_architectural_issue_dates']==['2026-01-22']
+          assert r['architectural_sheet_native_date_candidates']==['2026-07-28']
+          assert 'structural_reference_architectural_issue_dates_differ' in r['reason_codes']
+          assert not r['source_text_integrity_verified']
+          assert not any(v for k,v in r.items() if k.endswith('_granted'))
+          print('Original source date mismatch retained as diagnostic; source/quantity authority ABSTAIN')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-structural-reference-revision
+          path: artifacts/original-lot16-structural-reference-revision.json
+          retention-days: 21
