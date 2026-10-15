@@ -143,7 +143,7 @@ def inspect_source_area_lines(words, viewports, *, source_sha256, revision_id, s
     }
 
 
-def replay(source_bytes: bytes, *, page_number: int):
+def replay(source_bytes: bytes, *, page_number: int, raster_supports: bool = False):
     """Get text integrity and F.07 view receipts from one immutable source root."""
     if type(source_bytes) is not bytes or type(page_number) is not int or page_number < 1:
         raise ValueError("original_pdf_bytes_and_positive_page_required")
@@ -164,6 +164,10 @@ def replay(source_bytes: bytes, *, page_number: int):
         page_ids=(str(page_number),),
     )
     revision_id = original.revision.revision_id
+    if raster_supports:
+        original = source.augment_with_raster_opening_primitives(
+            revision_id, page_ids=(str(page_number),)
+        )
     before = source.published_snapshot_for_revision(revision_id)
     if before is None or before != original or before.revision.source_sha256 != sha:
         raise ValueError("original_source_snapshot_unauthenticated")
@@ -172,7 +176,9 @@ def replay(source_bytes: bytes, *, page_number: int):
         source, revision_id=revision_id, page_id=str(page_number),
         physical_plan_view_shadow=True,
     ))
-    if not validate_non_overlapping_viewports(raw_views):
+    nonoverlap = validate_non_overlapping_viewports(raw_views)
+    all_reported_views = raw_views
+    if not nonoverlap:
         # Do not pick first/smallest when two drawing views overlap.
         raw_views = ()
     safe_views = tuple(v for v in raw_views if
@@ -189,6 +195,12 @@ def replay(source_bytes: bytes, *, page_number: int):
     )
     if source.published_snapshot_for_revision(revision_id) != before:
         raise RuntimeError("original_source_snapshot_mutated_by_shadow")
+    output["source_viewport_nonoverlap"] = bool(nonoverlap)
+    output["source_raw_viewport_census_diagnostic_only"] = [
+        {"view_id": v.view_id, "view_type": v.view_type, "status": v.status,
+         "has_bbox": v.bounding_box is not None}
+        for v in all_reported_views
+    ]
     output["source_original_snapshot_unchanged"] = True
     output["source_plan_positive_viewport_ids"] = sorted(v.view_id for v in safe_views)
     output["foreign_or_ambiguous_viewport_used"] = False
@@ -200,12 +212,13 @@ def main():
     parser.add_argument("--pdf", required=True, type=Path)
     parser.add_argument("--page", required=True, type=int)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--raster-supports", action="store_true")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     original = args.pdf.read_bytes()
     if hashlib.sha256(original).hexdigest() != args.sha:
         raise ValueError("original_source_sha_mismatch")
-    result = replay(original, page_number=args.page)
+    result = replay(original, page_number=args.page, raster_supports=args.raster_supports)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
