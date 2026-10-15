@@ -7,12 +7,16 @@ again from the same actual producer. No authority or customer path imports this.
 """
 from __future__ import annotations
 
+from hashlib import sha256
+import math
 from math import isfinite
 
-from pb_g17_plan_wall_scope_shadow import build_g17_plan_wall_scope_shadow
+from pb_g17_raw_endpoint_ink_shadow import audit_original_raw_endpoint_ink
+
+from pb_g17_plan_wall_scope_shadow import _rgb, build_g17_plan_wall_scope_shadow
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
-from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_visibility_authority import RASTER_OPENING_PRIMITIVE_RENDER_DPI, SourceVisibilityProducer
 
 
 def _rect(value):
@@ -100,6 +104,28 @@ def audit_original_g17_raw_plan_view_scope(
     if set(members) != set(source_rows):
         raise RuntimeError("original G17 source and F07 observation inventories disagree")
     bbox = _rect(viewport_bbox) if scope_id and viewport_bbox else None
+    original_image = original_full = None
+    render_sha = page_parent_id = None
+    dpi = RASTER_OPENING_PRIMITIVE_RENDER_DPI
+    if bbox is not None:
+        original_root = dict(
+            document_id=published.revision.document_id,
+            revision_id=revision_id, source_sha256=original_sha,
+            snapshot_id=published.snapshot.snapshot_id, page_id=page_id,
+        )
+        image_png, parent, image_frame = source._producer.render_native_page_png(
+            **original_root, dpi=float(dpi), include_native_frame=True, images_only=True
+        )
+        full_png, full_parent, full_frame = source._producer.render_native_page_png(
+            **original_root, dpi=float(dpi), include_native_frame=True
+        )
+        if parent != full_parent or image_frame != full_frame or image_frame.rotation != 0:
+            raise RuntimeError("original raw endpoint raster parent/frame mismatch")
+        original_image, original_full = _rgb(image_png), _rgb(full_png)
+        if original_image.shape != original_full.shape:
+            raise RuntimeError("original raw endpoint frames disagree")
+        render_sha = sha256(image_png).hexdigest()
+        page_parent_id = parent.observation_id
     dispositions = []
     for group in sorted(groups, key=lambda g: g["candidate_id"]):
         ids = tuple(group["source_observation_ids"])
@@ -107,6 +133,7 @@ def audit_original_g17_raw_plan_view_scope(
             raise RuntimeError("original candidate source member identities incomplete")
         source_lines = []
         paint_flags = []
+        endpoint_source_witnesses = []
         for oid in ids:
             entry = members.get(oid)
             row = source_rows.get(oid)
@@ -119,7 +146,34 @@ def audit_original_g17_raw_plan_view_scope(
                     or actual.snapshot_id != published.snapshot.snapshot_id):
                 raise RuntimeError("raw G17 member differs from actual producer source receipt")
             source_lines.append(tuple(actual.geometry))
-            paint_flags.append(bool(row["source_paint"]["original_solid_and_unchanged"]))
+            full_line_positive = bool(row["source_paint"]["original_solid_and_unchanged"])
+            paint_flags.append(full_line_positive)
+            # Source-only and read-only: never replace the original source-line
+            # negative, and never project an endpoint witness onto W2/W3/W4.
+            if (original_image is not None and row.get("drawing_disposition") == "inside"
+                    and row["inside_original_image_regions"] and not full_line_positive):
+                receipt = source._raster_opening_primitive_receipts.get(
+                    (published.snapshot.snapshot_id, oid)
+                )
+                if (receipt is None or receipt.dpi != dpi
+                        or receipt.render_sha256 != render_sha
+                        or receipt.page_parent_observation_id != page_parent_id
+                        or len(receipt.pixel_geometry) != 4
+                        or any(not math.isclose(float(p), float(g) * dpi / 72.,
+                                                rel_tol=0, abs_tol=1e-6)
+                               for p, g in zip(receipt.pixel_geometry, actual.geometry))):
+                    raise RuntimeError("original raw endpoint source pixel receipt unproven")
+                ink = audit_original_raw_endpoint_ink(
+                    original_image, original_full, receipt.pixel_geometry, dpi=dpi
+                )
+                if ink["original_whole_source_line_solid_unchanged"] != full_line_positive:
+                    raise RuntimeError("original raw endpoint paint contradicts original source")
+                endpoint_source_witnesses.append(dict(
+                    original_source_observation_id=oid, original_source_primitive_id=
+                    row["source_primitive_id"], original_full_line_negative_preserved=True,
+                    original_image_region_owned=True, original_pixel_receipt_verified=True,
+                    original_endpoint_ink=ink,
+                ))
             if bbox is not None and row.get("drawing_disposition") != _line_scope(actual.geometry, bbox):
                 # The F07-owned observer and direct geometry must agree; no favourable classification.
                 raise RuntimeError("original F07/G17 source segment scope contradicts")
@@ -132,6 +186,8 @@ def audit_original_g17_raw_plan_view_scope(
                 _line_scope(line, bbox) for line in source_lines) if bbox is not None else (),
             original_whole_segment_ink_positive_count=sum(paint_flags),
             original_whole_segment_count=len(source_lines),
+            original_source_negative_endpoint_paint_witnesses=endpoint_source_witnesses,
+            endpoint_source_evidence_is_not_physical_wall_role=True,
             exact_original_aperture_bbox_pt=tuple(group["aperture_bbox_pt"]),
             authenticated_floor_plan_membership=location,
             physical_nonexistence_proven=False,
