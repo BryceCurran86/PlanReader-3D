@@ -825,6 +825,8 @@ def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
     calibration: ViewportLayoutCalibration,
+    *,
+    allow_line_grid_only: bool = True,
 ) -> bool:
     """Return True only for positive repeated table-grid structure.
 
@@ -916,6 +918,11 @@ def _frame_looks_like_table(
             continue
         return True
 
+    # Closed repeated source cells establish stronger schedule evidence than
+    # linear strokes: ordinary construction plan/wall grids can look like a
+    # table without containing any independently source-closed table cells.
+    if not allow_line_grid_only:
+        return False
     return _frame_looks_like_line_grid_table(frame, page, calibration)
 
 
@@ -1721,13 +1728,74 @@ def _frame_resolved_viewports(
             anchors=anchors,
         )
         if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
+            # A schedule/legend title OUTSIDE a candidate drawing frame
+            # cannot turn a large physical plan into a schedule. Require a
+            # genuinely source-positive repeated table grid for such external
+            # title-to-frame bindings. A title actually enclosed by its native
+            # source frame retains the existing binding contract.
             table_candidates = [
                 frame
                 for frame in candidates
                 if _frame_looks_like_table(frame, page, calibration)
             ]
+            margin = calibration.median_word_height_pt * 0.25
+            enclosed_candidates = [
+                frame for frame in candidates
+                if _bbox_contains(frame, anchor.bbox, margin=margin)
+            ]
             if table_candidates:
-                candidates = table_candidates
+                external_table_candidates = [
+                    frame for frame in table_candidates
+                    if not _bbox_contains(frame, anchor.bbox, margin=margin)
+                ]
+                if external_table_candidates:
+                    # External semantic titles require positive repeated
+                    # source-CLOSED table cell layout, rather than only
+                    # intersecting orthogonal strokes. Authentic building
+                    # floor/wall grids can satisfy the line-grid predicate,
+                    # and the title by itself does not own those plan lines.
+                    # Only candidate frames with separately proven positive
+                    # native table-cell geometry may be spatially bound.
+                    true_cell_tables = [
+                        frame for frame in external_table_candidates
+                        if _frame_looks_like_table(
+                            frame, page, calibration,
+                            allow_line_grid_only=False,
+                        )
+                    ]
+                    # Genuine line-only CAD schedule grids must still work
+                    # when they are the SOLE positive line-grid source frame
+                    # available to the title. Two such independent native
+                    # frames constitute an unresolved semantic ownership
+                    # conflict (Maryborough page 11), not permission to
+                    # choose the physically closest plan grid.
+                    if true_cell_tables:
+                        external_source_owned = true_cell_tables
+                    else:
+                        positive_line_frames = [
+                            frame for frame in frames
+                            if _frame_looks_like_line_grid_table(
+                                frame, page, calibration
+                            )
+                            and not _rejected_ownership_frame(
+                                page, frame, calibration, fragments,
+                                view_type=anchor.view_type,
+                            )
+                        ]
+                        external_source_owned = (
+                            [
+                                positive_line_frames[0]
+                            ] if len(positive_line_frames) == 1
+                            and positive_line_frames[0] in external_table_candidates
+                            else []
+                        )
+                    candidates = list(dict.fromkeys([
+                        *enclosed_candidates, *external_source_owned
+                    ]))
+                else:
+                    candidates = table_candidates
+            else:
+                candidates = enclosed_candidates
         usable = [
             frame for frame in candidates
             if not _rejected_ownership_frame(
@@ -1798,6 +1866,7 @@ _SINGLE_FLOOR_FINISH_PARTITION_MODE = "single_floor_finish_plan_printable_area"
 _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE = "single_floor_finish_plan_sheet_frame"
 _SINGLE_REFLECTED_CEILING_PARTITION_MODE = "single_reflected_ceiling_printable_area"
 _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE = "single_reflected_ceiling_sheet_frame"
+_SOURCE_OWNED_PHYSICAL_PLAN_MODE = "source_owned_physical_plan_component"
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
@@ -1811,6 +1880,18 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
     ):
         return False
     mode = provenance.get("partition_mode")
+    if mode == _SOURCE_OWNED_PHYSICAL_PLAN_MODE:
+        return bool(
+            is_segment_page_viewports_product(viewport)
+            and provenance.get("source_owned_plan_view_proven") is True
+            and provenance.get("explicit_sheet_title_bound") is True
+            and provenance.get("unique_source_component") is True
+            and provenance.get("orthogonal_source_witnesses") is True
+            and provenance.get("source_geometry_observation_ids")
+            and len(provenance.get("source_room_label_observation_ids", ())) >= 2
+            and all(provenance.get(k) for k in
+                    ("document_id", "revision_id", "source_sha256", "snapshot_id"))
+        )
     if mode == _AUTHORITATIVE_DERIVED_PARTITION_MODE:
         return provenance.get("grid_validated") is True
     if mode == _ROTATED_SEMANTIC_FRAME_BAND_MODE:
@@ -2768,6 +2849,23 @@ def _derived_partitions(
             provenance={"partition_axis": "x" if axis == 0 else "y", "title_bbox": anchor.bbox},
         ))
     return out
+
+
+def segment_source_page_viewports(
+    source_visibility_producer, *, revision_id: str, page_id: str,
+    physical_plan_view_shadow: bool = False,
+) -> list[SegmentedViewport]:
+    """Read original producer bytes; opt in to source-owned physical plan proof.
+
+    The reader preserves the published snapshot and ordinary F.07 behavior.
+    A bounded view supplies no scale, physical-room identity or quantity.
+    """
+    from pb_source_plan_view_authority import source_owned_plan_viewports
+
+    return source_owned_plan_viewports(
+        source_visibility_producer, revision_id=revision_id, page_id=page_id,
+        physical_plan_view_shadow=physical_plan_view_shadow,
+    )
 
 
 def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:

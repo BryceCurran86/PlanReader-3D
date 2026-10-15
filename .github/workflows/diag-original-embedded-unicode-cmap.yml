@@ -1,0 +1,109 @@
+name: DIAG Original Embedded Unicode Cmap
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_embedded_cmap_glyph_shadow.py
+      - tools/diag_native_text_font_clip_gates.py
+      - tests/test_gptmax_embedded_unicode_cmap_shadow.py
+      - docs/engineering/gptmax_embedded_font_unicode_cmap_20261015.md
+      - .github/workflows/diag-original-embedded-unicode-cmap.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt fonttools==4.60.2 ruff
+      - name: Source negative tests, no-code substitution, unchanged frozen truth
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gptmax_embedded_unicode_cmap_shadow.py tests/test_gptmax_native_text_font_clip_gates.py
+          ruff check --select F821,F823 tools/diag_embedded_cmap_glyph_shadow.py tests/test_gptmax_embedded_unicode_cmap_shadow.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt fonttools==4.60.2
+      - name: Immutable Maryborough font Unicode cmap vs native trace evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts/font-unicode-cmap
+          git rev-parse HEAD > artifacts/font-unicode-cmap/producer_head_sha.txt
+          python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.diag_embedded_cmap_glyph_shadow import inspect_original_embedded_cmap
+          data=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          result=inspect_original_embedded_cmap(
+              data,
+              expected_sha256="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+              page_number=11,code="FT3",
+          )
+          Path("artifacts/font-unicode-cmap/source_unicode_cmap.json").write_text(json.dumps(result,indent=2,sort_keys=True))
+          assert result["candidate_blocks"]
+          block=[b for b in result["candidate_blocks"] if b["block_no"]==262]
+          assert len(block)==1 and len(block[0]["source_words"])==24
+          assert result["native_font_metadata_only"] and not result["independent_raster_literal_proven"]
+          assert not result["source_material_definition_authenticated"]
+          assert not result["physical_room_and_floor_identity_granted"]
+          assert not result["commercial_quantity_published"]
+          disputes=[w for w in block[0]["source_words"] if w["text"] in ("-","“DURA","GREY”")]
+          assert len(disputes)==3
+          sample=[]
+          for w in disputes:
+              for run in w["runs"]:
+                  sample.append({
+                      "word":w["text"],
+                      "font_xref":run["font_xref"],
+                      "font_unicode_cmap_status":run["font_unicode_cmap_status"],
+                      "glyphs":[{
+                          "unicode":g["unicode"],
+                          "trace_id":g["trace_glyph_id"],
+                          "cmap_candidates":g["font_unicode_cmap_candidates"],
+                          "consistent":g["unicode_cmap_trace_id_consistent"],
+                      } for g in run["glyph_results"]],
+                  })
+          fonts=[{"xref":f["xref"],"program_length":f["font_program_length"],
+                  "program_sha256":f["font_program_sha256"],
+                  "status":f["unicode_cmap"]["status"],
+                  "tables":[(t["platform_id"],t["encoding_id"],len(t["entries"]))
+                            for t in f["unicode_cmap"]["subtables"]]}
+                 for f in result["source_fonts"]]
+          print(json.dumps({"source_sha256":result["source_sha256"],
+                            "candidate_block_count":len(result["candidate_blocks"]),
+                            "original_font_inventory":fonts,
+                            "three_missing_literally_proven_words":sample,
+                            "commercial_quantity_published":False},sort_keys=True),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-embedded-font-unicode-cmap
+          path: artifacts/font-unicode-cmap/
+          retention-days: 30
