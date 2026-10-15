@@ -1267,3 +1267,38 @@ def test_gpt2_two_source_faces_cannot_publish_one_physical_room_floor_twice():
         owners, disputed = _unique_documented_area_owner_receipts((), records)
         assert owners == {"unrelated-source-face": independent}
         assert disputed == ("first-source-face", "second-source-face")
+
+
+
+def test_source_owned_finish_plan_shadow_is_explicit_and_keeps_default_receipts(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+    assert len(original.quantities) == 1
+    guarded = CrossViewFloorFinishProducer.for_source_owned_plan_view_shadow(
+        source=source, room_areas=room_areas, floors=floors, page_ids=("3",)
+    ).publish()
+    # The default synthetic schedule page does not contain an independently
+    # F07-authenticated physical floor-finish drawing with certified marks.
+    assert guarded.records == ()
+    assert guarded.quantities == ()
+    assert original.quantities[0].family == "floor_finish_area"
+    assert CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish().quantities == original.quantities
+
+
+@pytest.mark.parametrize("pages", [
+    (), ("0",), ("01",), ("7", "7x"), ("+7",),
+    "7", ("-1",), ("7.0",),
+])
+def test_source_owned_plan_finish_rejects_invalid_page_scopes(pages) -> None:
+    with pytest.raises(ValueError, match="canonical page IDs"):
+        CrossViewFloorFinishProducer.for_source_owned_plan_view_shadow(
+            source=None, room_areas=None, floors=None,
+            page_ids=pages,
+        )
