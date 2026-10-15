@@ -1,0 +1,87 @@
+name: GPT1 Original Area Line First Failure Shadow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt1_original_area_line_first_failure.py"
+      - "tests/test_gpt1_original_area_line_first_failure.py"
+      - ".github/workflows/gpt1-original-area-line-firstgate.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-original-area-firstgate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source text adversarial cases, V2 truth and provider isolation
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt1_original_area_line_first_failure.py
+          ruff check --select F821,F823 tools/diag_gpt1_original_area_line_first_failure.py tests/test_gpt1_original_area_line_first_failure.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original Lot16 SHA/F07/text first gate - zero commercial grants
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-area-firstgate
+          python tools/diag_gpt1_original_area_line_first_failure.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page 3 \
+            --sha "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844" \
+            --output artifacts/gpt1-area-firstgate/lot16-page3.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('artifacts/gpt1-area-firstgate/lot16-page3.json').read_text())
+          assert data['original_source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert data['source_original_snapshot_unchanged'] is True
+          assert data['diagnostic_only'] is True
+          assert data['published_quantities']==[] and data['customer_rows']==[]
+          assert data['benchmark_scored'] is False
+          assert all(not row['source_physical_room_face_authenticated']
+                     and not row['quantity_evidence_published']
+                     and not row['room_area_measurement_authority_granted']
+                     for row in data['literal_area_candidates'])
+          # Missing glyphs/room ownership are expected negative source results,
+          # never a reason to synthesize a positive commercial quantity.
+          print(json.dumps({'candidate_count':data['literal_area_candidate_count'],
+                            'first_failure_counts':data['first_failure_counts'],
+                            'new_quantity_count':0},sort_keys=True),flush=True)
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-lot16-native-area-firstgate
+          path: artifacts/gpt1-area-firstgate/
+          retention-days: 14
