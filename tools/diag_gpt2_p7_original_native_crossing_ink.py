@@ -31,6 +31,7 @@ def census_original_native_linear_ink(drawings, *, source_atoms):
         raise ValueError("missing_original_producer_atom_queries")
     unsupported=0
     searchable=0
+    degenerate_original_linear_refs=set()
     reports=[]
     for atom in atoms:
         matches=[]
@@ -44,7 +45,16 @@ def census_original_native_linear_ink(drawings, *, source_atoms):
                     primitive_id=f"d{path}i{index}"
                     if side is not None:
                         primitive_id+=f"e{side}"
-                    receipt=read_native_ink_receipt(drawings,primitive_id,atom)
+                    try:
+                        receipt=read_native_ink_receipt(drawings,primitive_id,atom)
+                    except ValueError as exc:
+                        # Original PDF can contain zero-area rectangles and
+                        # same-endpoint lines. Retain exact rejected source ID,
+                        # without treating it as a missing real ink witness.
+                        if str(exc)!="selected native wall edge invalid":
+                            raise
+                        degenerate_original_linear_refs.add(primitive_id)
+                        continue
                     searchable+=1
                     if receipt["native_stroke_fully_covers_atomic_wall_candidate"]:
                         matches.append(receipt)
@@ -67,6 +77,12 @@ def census_original_native_linear_ink(drawings, *, source_atoms):
         "source_query_atom_count":len(atoms),
         "original_native_indexed_drawing_path_count":len(drawings),
         "original_linear_rect_source_primitive_checks":searchable,
+        "original_indexed_degenerate_linear_source_ids":sorted(
+            degenerate_original_linear_refs
+        ),
+        "original_indexed_degenerate_linear_source_count":len(
+            degenerate_original_linear_refs
+        ),
         "other_native_element_count_not_assessed":unsupported,
         "source_native_linear_ink_queries":reports,
         "all_original_source_line_rect_items_examined":True,
