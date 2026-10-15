@@ -49,7 +49,11 @@ jobs:
           assert 'd26362i0' in p['component_edges']
           assert p['publication']=='READ_ONLY_NO_AUTHORITY'
           assert not p['role_granted'] and not p['room_granted'] and not p['quantity_granted']
+          assert sum(b['source_edge_count'] for b in p['exact_native_edge_blocks']) == p['component_edge_count']
+          assert p['component_role_ambiguous'] and not p['role_granted']
           print('ORIGINAL_FT3_CYCLE_CENSUS',p['component_edge_count'],p['complete_exact_cycle'])
+          print('ORIGINAL_FT3_EXACT_BLOCKS', sorted(b['source_edge_count'] for b in p['exact_native_edge_blocks']),
+                'closed', p['exact_simple_cycle_block_count'])
           PY
       - uses: actions/upload-artifact@v4
         if: always()
