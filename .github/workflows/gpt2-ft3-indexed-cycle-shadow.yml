@@ -54,6 +54,15 @@ jobs:
           print('ORIGINAL_FT3_CYCLE_CENSUS',p['component_edge_count'],p['complete_exact_cycle'])
           print('ORIGINAL_FT3_EXACT_BLOCKS', sorted(b['source_edge_count'] for b in p['exact_native_edge_blocks']),
                 'closed', p['exact_simple_cycle_block_count'])
+          seed=p['seed_incident_exact_cycle_census']
+          assert seed['status'] in ('COMPLETE_EXACT_SOURCE_PATH_CENSUS','INCOMPLETE_SAFETY_BOUND')
+          assert not seed['annotation_or_structural_role_granted']
+          assert seed['source_seed_cycle_count']==len(seed['source_seed_cycles'])
+          assert all('d26362i0' in c['source_edge_ids'] and c['source_edge_count'] >= 3
+                     for c in seed['source_seed_cycles'])
+          print('ORIGINAL_FT3_SEED_EXACT_CYCLES',seed['status'],
+                'count',seed['source_seed_cycle_count'],
+                'lengths',[v['source_edge_count'] for v in seed['source_seed_cycles']])
           PY
       - uses: actions/upload-artifact@v4
         if: always()
