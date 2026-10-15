@@ -1045,6 +1045,18 @@ class CrossViewFloorFinishProducer:
                 continue
             if len(candidates) == 1:
                 occurrence, definition = candidates[0]
+                # The explicit source-owned F07 shadow authenticates the
+                # finish DRAWING, not cross-sheet PHYSICAL room equivalence.
+                # A p11 mark inside p11 figured dimensions cannot silently
+                # become a p7 physical-floor material without an independent
+                # source wall/room correspondence producer. Preserve the
+                # ordinary existing consumer unmodified.
+                if (
+                    self._physical_plan_page_ids
+                    and _clean(occurrence.page_id) != _clean(floor.page_id)
+                ):
+                    unresolved.add(floor.canonical_floor_id)
+                    continue
             else:
                 # A native text block can span several physical spaces. An
                 # identical room label on two pages and a code in its text
