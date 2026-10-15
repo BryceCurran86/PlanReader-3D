@@ -76,6 +76,28 @@ jobs:
           assert sum(x['source_view_geometric_relation_only']=='GEOMETRICALLY_INSIDE_SAME_ROOT_F07'
                      for x in overlay['source_view_spatial_classifications'])==5
           assert not overlay['physical_count_granted'] and not overlay['typed_nonplan_proven']
+          # All 21 original producer-proven F07 raster supports are reissued in
+          # the SAME live G17 snapshot; exactly three unresolved raw gaps share
+          # two authentic source members each with an existing physical opening.
+          assert overlay['physical_source_support_receipts_available']
+          assert overlay['source_owned_physical_support_receipt_count']==21
+          assert overlay['overlap_pair_count']==3
+          found={}
+          for row in overlay['source_view_spatial_classifications']:
+              for edge in row['existing_source_owned_physical_support_collisions']:
+                  assert edge['shared_observation_count']==2
+                  assert len(edge['shared_source_observation_ids'])==2
+                  assert not edge['physical_equivalence_or_distinctness_proven']
+                  assert not edge['raw_candidate_closed']
+                  found[row['raw_candidate_id']]=edge['existing_physical_opening_id']
+          assert found=={
+              'physical_opening_raw_candidate_8cb708bea5fd9afd9306d3b56da955ac':
+                  'physical_opening_existence_8ecb81b6524804c80710ec323050be6b',
+              'physical_opening_raw_candidate_aa5b9ba957042d616e355e1158df4ddd':
+                  'physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b',
+              'physical_opening_raw_candidate_b6abbd14148c48fe4458fa9aea7d4f51':
+                  'physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f',
+          }
           assert all(not x['source_owned_nonplan_role_proven']
                  and not x['independent_physical_opening_proven']
                  for x in overlay['source_view_spatial_classifications'])
