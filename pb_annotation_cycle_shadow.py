@@ -1021,3 +1021,125 @@ def shadow_annotation_cycle_topology(
         "quantity_or_metric_area_published": False,
         "diagnostic_only": True,
     }
+
+
+def wall_annotation_ancestry(
+    source_primitive_ids: Sequence[str],
+    quarantined_primitive_ids: Sequence[str],
+) -> str:
+    """Classify one minted wall's source lineage against proven annotation ids.
+
+    A wall with no lineage cannot be dropped. A wall whose every source
+    primitive is quarantined is annotation-only after identity minting. A
+    mixed ancestor set must be retained: dropping any shared primitive
+    remumbers ordinal W2/W3 ids for the surviving wall.
+    """
+    source = {str(sid) for sid in source_primitive_ids if sid}
+    quarantined = {str(sid) for sid in quarantined_primitive_ids if sid}
+    if not source:
+        return "no_source_lineage"
+    if source <= quarantined:
+        return "annotation_only"
+    if source & quarantined:
+        return "mixed_annotation_ancestry"
+    return "no_annotation_ancestry"
+
+
+def shadow_annotation_cycle_post_identity_report(
+    segments: Sequence[Mapping[str, Any]],
+    words: Sequence[Mapping[str, Any]],
+    *,
+    page_span: float,
+    viewport_bbox: Sequence[float],
+    document_id: str,
+    page_id: str,
+    viewport_id: str,
+) -> Dict[str, Any]:
+    """Mint W2/W3/W4 on the full primitive set, then flag annotation-only walls.
+
+    OBSERVED: live pre-snap withhold remumbers ordinal W2 split-edge ids and
+    W3 junction ids. Maryborough CI rekeyed COLD ROOM
+    ``floor_area_quantity_6b28b3abaedf519631ed`` to
+    ``floor_area_quantity_ed0dc95147b9485a6009`` while the physical floor id
+    and 43 wall evidence ids stayed. INFERENCE: room-face and quantity
+    identity consume those ordinal ids. PROPOSED: do not drop primitives
+    before snap; flag walls whose source lineage is entirely quarantined
+    after identities exist. BENCHMARK scores, project names, and expected
+    BOQ values must not set this filter. No quantity is published.
+    """
+    from pb_wall_room_topology_junction_classifier import classify_junctions
+    from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+    from pb_wall_room_topology_wall_assembly import assemble_wall_candidates
+
+    classification = classify_exact_annotation_cycles(
+        segments, words, page_span=page_span, viewport_bbox=viewport_bbox,
+    )
+    quarantined = tuple(classification["quarantined_primitive_ids"])
+    quarantined_set = set(quarantined)
+    baseline_input = [dict(segment) for segment in segments]
+    graph = build_wall_graph_for_viewport(baseline_input)
+    junctions, relationships = classify_junctions(
+        graph, document_id=document_id, page_id=page_id, viewport_id=viewport_id,
+    )
+    walls, _mapping = assemble_wall_candidates(
+        graph, junctions, relationships, viewport_id=viewport_id,
+    )
+    edge_lineage = {
+        str(edge["id"]): _lineage_ids(edge)
+        for edge in graph["edges"]
+        if not edge.get("_removed")
+    }
+    minted = []
+    for wall in walls:
+        source_ids = sorted({
+            sid
+            for edge_id in wall.face_a_segment_ids
+            for sid in edge_lineage.get(str(edge_id), ())
+        })
+        minted.append({
+            "candidate_id": wall.candidate_id,
+            "face_a_segment_ids": list(wall.face_a_segment_ids),
+            "source_primitive_ids": source_ids,
+            "ancestry": wall_annotation_ancestry(source_ids, quarantined),
+        })
+    minted.sort(key=lambda row: row["candidate_id"])
+    withheld_input = [
+        dict(segment) for segment in segments
+        if str(segment.get("id") or "") not in quarantined_set
+    ]
+    withheld_graph = build_wall_graph_for_viewport(withheld_input)
+    withheld_edges = sorted(
+        str(edge["id"])
+        for edge in withheld_graph["edges"]
+        if not edge.get("_removed")
+    )
+    baseline_edges = sorted(
+        str(edge["id"])
+        for edge in graph["edges"]
+        if not edge.get("_removed")
+    )
+    return {
+        "classification": classification,
+        "minted_walls": minted,
+        "annotation_only_wall_ids": [
+            row["candidate_id"] for row in minted if row["ancestry"] == "annotation_only"
+        ],
+        "mixed_annotation_wall_ids": [
+            row["candidate_id"]
+            for row in minted
+            if row["ancestry"] == "mixed_annotation_ancestry"
+        ],
+        "surviving_wall_ids": [
+            row["candidate_id"]
+            for row in minted
+            if row["ancestry"] in {
+                "no_annotation_ancestry",
+                "mixed_annotation_ancestry",
+                "no_source_lineage",
+            }
+        ],
+        "pre_snap_withhold_changes_ordinal_w2_edge_ids": withheld_edges != baseline_edges,
+        "structural_wall_role_authenticated": False,
+        "quantity_or_metric_area_published": False,
+        "diagnostic_only": True,
+    }

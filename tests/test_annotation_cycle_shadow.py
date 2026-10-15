@@ -15,7 +15,9 @@ from pb_annotation_cycle_shadow import (
     classify_exact_annotation_cycles,
     scope_segments_without_proven_annotation_cycles,
     segments_without_proven_annotation_cycles,
+    shadow_annotation_cycle_post_identity_report,
     shadow_annotation_cycle_topology,
+    wall_annotation_ancestry,
 )
 
 PAGE_SPAN = 2000.0
@@ -1182,3 +1184,94 @@ def test_interior_contact_does_not_quarantine_an_otherwise_closed_mark():
     contact = _classify(polygon(touched, "hit"))
     assert contact["quarantined_primitive_ids"] == []
     assert _cycle_edges_cross(touched)
+
+
+def test_wall_annotation_ancestry_retains_unknown_mixed_and_empty_lineage():
+    assert wall_annotation_ancestry((), ("mark0",)) == "no_source_lineage"
+    assert wall_annotation_ancestry(("mark0", "mark1"), ("mark0", "mark1")) == "annotation_only"
+    assert wall_annotation_ancestry(("mark0", "w0"), ("mark0",)) == "mixed_annotation_ancestry"
+    assert wall_annotation_ancestry(("w0", "w1"), ("mark0",)) == "no_annotation_ancestry"
+
+
+def test_post_identity_flags_the_mark_and_keeps_room_wall_ids():
+    ring = _ring()
+    room = [
+        _line("w0", 40, 40, 120, 40, path=1),
+        _line("w1", 120, 40, 120, 80, path=2),
+        _line("w2", 120, 80, 40, 80, path=3),
+        _line("w3", 40, 80, 40, 40, path=4),
+    ]
+    before = deepcopy(ring + room)
+    report = shadow_annotation_cycle_post_identity_report(
+        ring + room, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    room_only = shadow_annotation_cycle_post_identity_report(
+        room, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    assert report["diagnostic_only"]
+    assert report["quantity_or_metric_area_published"] is False
+    assert report["pre_snap_withhold_changes_ordinal_w2_edge_ids"]
+    surviving = set(report["surviving_wall_ids"])
+    assert surviving
+    assert surviving == set(room_only["surviving_wall_ids"])
+    assert set(report["annotation_only_wall_ids"]).isdisjoint(surviving)
+    replay = shadow_annotation_cycle_post_identity_report(
+        ring + room, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    assert [row["face_a_segment_ids"] for row in report["minted_walls"]] == [
+        row["face_a_segment_ids"] for row in replay["minted_walls"]
+    ]
+    assert before == ring + room
+
+
+def test_post_identity_is_order_and_replay_invariant():
+    ring = _ring()
+    room = [
+        _line("w0", 40, 40, 120, 40, path=1),
+        _line("w1", 120, 40, 120, 80, path=2),
+        _line("w2", 120, 80, 40, 80, path=3),
+        _line("w3", 40, 80, 40, 40, path=4),
+    ]
+    first = shadow_annotation_cycle_post_identity_report(
+        ring + room, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    reversed_input = list(reversed(ring + room))
+    second = shadow_annotation_cycle_post_identity_report(
+        reversed_input, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    replay = shadow_annotation_cycle_post_identity_report(
+        ring + room, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    assert first["surviving_wall_ids"] == second["surviving_wall_ids"] == replay["surviving_wall_ids"]
+    assert first["annotation_only_wall_ids"] == second["annotation_only_wall_ids"]
+    assert first["surviving_wall_ids"] == replay["surviving_wall_ids"]
+
+
+def test_post_identity_does_not_flag_a_room_when_the_mark_is_absent():
+    room = [
+        _line("w0", 40, 40, 120, 40, path=1),
+        _line("w1", 120, 40, 120, 80, path=2),
+        _line("w2", 120, 80, 40, 80, path=3),
+        _line("w3", 40, 80, 40, 40, path=4),
+    ]
+    report = shadow_annotation_cycle_post_identity_report(
+        room, [_word()],
+        page_span=PAGE_SPAN, viewport_bbox=VIEW,
+        document_id="synthetic", page_id="1", viewport_id="view-post",
+    )
+    assert report["annotation_only_wall_ids"] == []
+    assert report["mixed_annotation_wall_ids"] == []
+    assert report["surviving_wall_ids"]
+    assert report["pre_snap_withhold_changes_ordinal_w2_edge_ids"] is False
