@@ -25,6 +25,20 @@ def _context(source, composition, producer, bound):
     return scope,opening,binding,geometry
 
 
+def _tag_existing_host_result(monkeypatch, host_authority, binding, *, split=True):
+    """Mock source-produced classification, never an invented binding field."""
+    actual_resolve=host_authority.resolve
+    def resolved(selector):
+        result=actual_resolve(selector)
+        if (result.record is None or result.record.record_id != binding.record_id):
+            return result
+        code=host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED
+        reasons=tuple(x for x in result.reason_codes if x != code)
+        return replace(result,reason_codes=(
+            (*reasons,code) if split else reasons))
+    monkeypatch.setattr(host_authority,"resolve",resolved)
+
+
 def test_default_and_shadow_preserve_original_positive_connected_frames():
     source,composition,producer,bound=_fixture()
     expected=_publish(producer,bound)
@@ -39,8 +53,8 @@ def test_opt_in_source_split_edge_rechecks_own_exact_host_members(monkeypatch):
         producer._opening,opening,scope.records,geometry,
         scope.equivalence,scope.source_observation_ids)
     assert authentic.status is Status.CORROBORATED and len(authentic.bands)==1
-    provenance=replace(binding,reason_codes=(
-        *binding.reason_codes,host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED))
+    _tag_existing_host_result(monkeypatch,producer._host,binding)
+    provenance=binding
     monkeypatch.setattr(host_geometry,"_resolve_raster_source_band_host",
         lambda *args:host_geometry._HostBandResolution(Status.CORROBORATED,(),()))
     calls=[]
@@ -75,8 +89,8 @@ def test_no_source_integrity_or_competing_positive_witness_bypass(
         scope.equivalence,scope.source_observation_ids)
     source_proof=host_geometry._HostBandResolution(
         source_status, authentic.bands if source_bands else (), ())
-    reasoned=replace(binding,reason_codes=(
-        *binding.reason_codes,host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED))
+    _tag_existing_host_result(monkeypatch,producer._host,binding)
+    reasoned=binding
     monkeypatch.setattr(host_geometry,"_resolve_raster_source_band_host",lambda *args:source_proof)
     def forbidden(*args):
         raise AssertionError("unearned alternate host proof")
@@ -92,6 +106,7 @@ def test_no_source_integrity_or_competing_positive_witness_bypass(
 def test_no_shadow_without_original_source_host_reason(monkeypatch):
     source,composition,producer,bound=_fixture()
     scope,opening,binding,geometry=_context(source,composition,producer,bound)
+    _tag_existing_host_result(monkeypatch,producer._host,binding,split=False)
     monkeypatch.setattr(host_geometry,"_resolve_raster_source_band_host",lambda *args:
         host_geometry._HostBandResolution(Status.CORROBORATED,(),()))
     def forbidden(*args):
