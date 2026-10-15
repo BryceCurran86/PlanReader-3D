@@ -71,3 +71,91 @@ jobs:
           name: gptmax-original-structural-reference-revision
           path: artifacts/original-lot16-structural-reference-revision.json
           retention-days: 21
+
+  original-native-source-text-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Independently issue real source producer word receipts on both original PDFs
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from hashlib import sha256
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          scans = [
+            ("structural_certificate", "documents/sources/4. Structural Engineering - Lot 16 Power.pdf", "11",
+             "b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6"),
+            ("architectural_floor_plan", "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf", "3",
+             "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"),
+          ]
+          results = {}
+          key_words = ("architectur", "drawings", "issued", "22/01/26", "28/07/26", "date:", "rev.")
+          for role,path,page_id,required_sha in scans:
+              source_bytes = Path(path).read_bytes()
+              assert sha256(source_bytes).hexdigest() == required_sha
+              producer = SourceVisibilityProducer(
+                  producer_method="live-physical-net-wall",
+                  producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+              )
+              published = producer.ingest_native_pdf_bytes(
+                  document_id="live-source:"+required_sha[:32],
+                  source_bytes=source_bytes,
+                  source_locator="memory://original-native-word-audit.pdf",
+                  page_ids=(page_id,),
+              )
+              assert producer.published_snapshot_for_revision(published.revision.revision_id) == published
+              receipts = []
+              for observation_id in published.text_observation_ids:
+                  selector = ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=required_sha,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+                  resolved = producer.text_integrity_authority().resolve_text(selector)
+                  raw_text = resolved.receipt.raw_text if resolved.receipt else ""
+                  if any(token in raw_text.lower() for token in key_words):
+                      receipts.append({
+                          "selector": asdict(selector),
+                          "text_integrity_result": asdict(resolved),
+                      })
+              results[role] = {
+                  "sha256": required_sha,
+                  "published_revision_id": published.revision.revision_id,
+                  "published_snapshot_id": published.snapshot.snapshot_id,
+                  "page_id": page_id,
+                  "total_original_native_text_observations": len(published.text_observation_ids),
+                  "candidate_source_receipts": receipts,
+              }
+          assert results["structural_certificate"]["sha256"] != results["architectural_floor_plan"]["sha256"]
+          assert results["structural_certificate"]["published_snapshot_id"] != results["architectural_floor_plan"]["published_snapshot_id"]
+          out = {
+              "status": "UNPUBLISHED_TWO_SOURCE_WORD_INTEGRITY_AUDIT",
+              "sources": results,
+              "cross_file_revision_or_wall_equivalence_granted": False,
+              "height_or_quantity_granted": False,
+          }
+          Path("artifacts").mkdir(exist_ok=True)
+          Path("artifacts/original-structural-reference-word-receipts.json").write_text(
+              json.dumps(out, indent=2, sort_keys=True)
+          )
+          print({key: {"native_text_count": value["total_original_native_text_observations"],
+                       "relevant_candidate_receipts": len(value["candidate_source_receipts"])}
+                 for key,value in results.items()})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-structural-reference-producer-word-receipts
+          path: artifacts/original-structural-reference-word-receipts.json
+          retention-days: 21
