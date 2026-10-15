@@ -147,3 +147,62 @@ def test_exact_source_room_owner_pair_preserves_unscaled_documented_area():
     assert len(publish_live_canonical_room_area_quantities(
         _claim_with_canonical_room(source)
     )) == 1
+
+
+@pytest.mark.parametrize("bad", [
+    "", "fake-source-hash", "a" * 63, "a" * 65,
+    "g" * 64, " " + "a" * 63, "a" * 63 + " ", True, None, 23,
+])
+def test_copied_invalid_floor_source_sha_never_reissues_firm_source_area(bad):
+    # Both apparent original owners carry the same forged SHA, so simple
+    # metadata equality cannot be accepted as evidence of an original PDF.
+    source = _source_area()
+    forged = replace(
+        source,
+        metadata={**source.metadata, "source_sha256":bad},
+    )
+    floor = replace(_floor(), source_sha256=bad)
+    claim = replace(
+        _claim_with(forged),
+        canonical_floors=(floor,),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_canonical_room_area_quantities(claim) == ()
+
+
+@pytest.mark.parametrize("bad", [
+    "", "fake-room-sha", "a" * 63, "a" * 65, "g" * 64,
+    " a" + "a" * 62, True, None, 19,
+])
+def test_foreign_or_malformed_canonical_room_source_sha_abstains_without_crash(bad):
+    claim = _claim_with_canonical_room(_source_area())
+    original_floor = publish_live_floor_area_quantities(claim)
+    assert len(original_floor) == 1
+    foreign_room = replace(claim.canonical_rooms[0], source_sha256=bad)
+    changed = replace(claim, canonical_rooms=(foreign_room,))
+    # The valid floor claim is unrelated to an imported malformed canonical
+    # room receipt; only the canonical ROOM reissue must be withheld.
+    assert publish_live_floor_area_quantities(changed) == original_floor
+    assert publish_live_canonical_room_area_quantities(changed) == ()
+
+
+def test_valid_case_folded_sha_keeps_original_producer_firm_floor_and_room():
+    src = _source_area()
+    upper_sha = "A" * 64
+    same = replace(
+        src, metadata={**src.metadata, "source_sha256":upper_sha},
+    )
+    floor = replace(_floor(), source_sha256=upper_sha)
+    claim = replace(
+        _claim_with_canonical_room(same),
+        canonical_floors=(floor,),
+        canonical_rooms=(
+            replace(
+                _claim_with_canonical_room(same).canonical_rooms[0],
+                source_sha256=upper_sha,
+            ),
+        ),
+    )
+    assert len(publish_live_floor_area_quantities(claim)) == 1
+    assert len(publish_live_canonical_room_area_quantities(claim)) == 1
+    assert len(publish_live_floor_area_quantities(_claim_with(src))) == 1
