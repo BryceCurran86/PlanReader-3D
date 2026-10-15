@@ -462,7 +462,7 @@ def test_original_scope_replay_cannot_be_disabled_or_evade_original_inputs():
         pull_request_trigger_reaches_main(
             workflow.replace("    branches: [main]", "    branches: [release]")
         )
-    with pytest.raises(ValueError, match="non-blocking"):
+    with pytest.raises(ValueError, match="job-level"):
         replay_jobs_cannot_be_disabled_or_made_non_blocking(
             workflow.replace("    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest", 1)
         )
