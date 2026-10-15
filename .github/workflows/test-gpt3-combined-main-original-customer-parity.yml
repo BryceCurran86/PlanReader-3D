@@ -1,0 +1,61 @@
+name: GPT3 Combined Main Original Customer Parity
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/test-gpt3-combined-main-original-customer-parity.yml"
+      - "pb_*.py"
+      - "tools/run_gpt3_lot16_original_sealed_score_input.py"
+      - "tools/run_gpt3_maryborough_original_floor_score_input.py"
+  workflow_dispatch:
+jobs:
+  original-source-seals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reissue actual original signed Lot16 and Maryborough customer rows
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt3-combined-original
+          LOT='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          MARY='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          echo '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844  '"$LOT" | sha256sum --check
+          echo 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  '"$MARY" | sha256sum --check
+          python -u -m tools.run_gpt3_lot16_original_sealed_score_input --pdf "$LOT" --output-dir artifacts/gpt3-combined-original/lot16
+          python -u -m tools.run_gpt3_maryborough_original_floor_score_input --pdf "$MARY" --output-dir artifacts/gpt3-combined-original/maryborough
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          from pb_customer_output_verification import verify_sealed_customer_output
+          expected={"lot16":(8,[.54,.90,1.26,1.80,2.16,2.16,5.67,10.08]),"maryborough":(3,[9.05352,13.270425,25.37875])}
+          for name,(count,values) in expected.items():
+              root=Path("artifacts/gpt3-combined-original")/name
+              sealed=sealed_source_closed_run_from_dict(json.loads((root/"source_sealed_run.json").read_text()))
+              rows=json.loads((root/"verified_customer_rows.json").read_text())
+              checked=verify_sealed_customer_output(sealed,rows)
+              assert len(sealed.quantities)==len(rows)==checked.valid_quantity_count==checked.customer_row_count==count
+              assert sorted(round(q.value,8) for q in sealed.quantities)==values
+              assert len({q.quantity_id for q in sealed.quantities})==count
+              assert all(q.lineage_ok and not q.abstained for q in sealed.quantities)
+              assert set(checked.verified_quantity_ids)=={q.quantity_id for q in sealed.quantities}
+              print(name,count,sealed.fingerprint,"original source verified; official suite UNPUBLISHED")
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-combined-main-original-customer-parity
+          path: artifacts/gpt3-combined-original
+          retention-days: 30
