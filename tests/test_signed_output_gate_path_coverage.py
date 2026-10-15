@@ -45,10 +45,12 @@ def pull_request_paths(workflow_text: str) -> list[str] | None:
         raise ValueError("signed-output workflow is missing a pull_request trigger")
     lines = pr.group(1).splitlines()
     for index, line in enumerate(lines):
-        if re.fullmatch(r"    paths:[ \t]*", line):
+        if line.startswith("    paths:"):
+            if not re.fullmatch(r"    paths:[ \t]*", line):
+                raise ValueError("unsupported inline pull_request.paths filter")
             break
     else:
-        return None  # no ``paths`` key at all: the trigger is unfiltered
+        return None  # no ``paths`` key at all: the PRESENT PR trigger is unfiltered
     patterns: list[str] = []
     for line in lines[index + 1:]:
         stripped = line.strip()
@@ -81,8 +83,8 @@ def _module_file(name: str, root: Path) -> Path | None:
 def _imported_modules(path: Path) -> set[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeDecodeError):
-        return set()
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        raise ValueError(f"unreadable production import: {path}") from exc
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -101,6 +103,8 @@ def import_closure(entries: tuple[str, ...], root: Path) -> set[str]:
     while pending:
         path = pending.pop()
         rel = path.relative_to(root).as_posix()
+        if not path.is_file():
+            raise ValueError(f"missing production replay/import entry: {rel}")
         if rel in seen:
             continue
         seen.add(rel)
@@ -111,10 +115,28 @@ def import_closure(entries: tuple[str, ...], root: Path) -> set[str]:
     return seen
 
 
+def workflow_path_included(patterns: list[str], path: str) -> bool:
+    """Apply GitHub's ordered positive/negative ``paths`` globs.
+
+    A later ``!pattern`` excludes an earlier match, and a later positive
+    pattern may re-include it. Merely finding any matching positive glob
+    would incorrectly certify that the workflow runs for excluded files.
+    """
+    included = False
+    for pattern in patterns:
+        if not pattern or pattern == "!":
+            raise ValueError("invalid pull_request.paths pattern")
+        negative = pattern.startswith("!")
+        actual_pattern = pattern[1:] if negative else pattern
+        if path_matches(actual_pattern, path):
+            included = not negative
+    return included
+
+
 def uncovered(closure: set[str], patterns: list[str] | None) -> list[str]:
     if patterns is None:
         return []
-    return sorted(path for path in closure if not any(path_matches(p, path) for p in patterns))
+    return sorted(path for path in closure if not workflow_path_included(patterns, path))
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -222,3 +244,36 @@ def test_missing_or_disguised_pull_request_trigger_fails_closed():
 
     # Genuinely unfiltered pull requests still run for every file change.
     assert pull_request_paths("on:\n  pull_request:\n    branches: [main]\n") is None
+
+
+def test_negated_paths_filter_does_not_hide_missing_replay_coverage():
+    closure = {"pb_alpha.py", "pb_beta.py", "tools/run.py"}
+    filters = ["pb_*.py", "tools/run.py", "!pb_beta.py"]
+    assert uncovered(closure, filters) == ["pb_beta.py"]
+    assert uncovered(closure, filters + ["pb_beta.py"]) == []
+    # A trailing exclusion that names an imported source is blocking.
+    assert uncovered(closure, filters + ["pb_beta.py", "!pb_*.py"]) == [
+        "pb_alpha.py", "pb_beta.py"
+    ]
+
+
+def test_inline_workflow_path_filters_must_not_masquerade_as_unfiltered():
+    import pytest
+
+    for text in (
+        "on:\n  pull_request:\n    paths: ['unrelated.py']\n",
+        'on:\n  pull_request:\n    paths: []\n',
+    ):
+        with pytest.raises(ValueError, match="unsupported inline"):
+            pull_request_paths(text)
+
+
+def test_unreadable_import_closure_and_deleted_entry_fail_closed(tmp_path):
+    import pytest
+
+    _write(tmp_path, "tools/entry.py", "import pb_broken\n")
+    _write(tmp_path, "pb_broken.py", "this is not valid python !!!")
+    with pytest.raises(ValueError, match="unreadable production import"):
+        import_closure(("tools/entry.py",), tmp_path)
+    with pytest.raises(ValueError, match="missing production replay/import entry"):
+        import_closure(("tools/absent.py",), tmp_path)
