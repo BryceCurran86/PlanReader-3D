@@ -404,7 +404,7 @@ jobs:
           print("GPT2_FREEZER_COMPLETE_LINK_COUNTERFACTUAL",json.dumps({
               "original_selected_nodes":complete["original_selected_w2_node_count"],
               "alternate_nodes":complete["alternate_w2_node_count"],
-              "alternate_edges":complete["alternate_w2_edge_count"],
+              "alternate_premerge_edges":complete["alternate_premerge_w2_edge_count"],
               "source_complete_link_rejections":complete["complete_link_snap_observations"][
                   "running_centroid_eligible_joins_rejected"],
               "selected_node_memberships":complete["selected_source_node_counterfactuals"],
