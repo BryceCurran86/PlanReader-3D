@@ -35,7 +35,9 @@ def _require(condition: bool, explanation: str) -> None:
 
 def _unique(rows: Sequence[Mapping[str, Any]], field: str) -> dict[str, Mapping[str, Any]]:
     result: dict[str, Mapping[str, Any]] = {}
+    _require(type(rows) in (tuple, list), "producer source inventory must be an array")
     for row in rows:
+        _require(isinstance(row, Mapping), "producer inventory contains nonrecord source data")
         identity = row.get(field)
         _require(
             type(identity) is str and bool(identity) and identity == identity.strip()
@@ -157,11 +159,19 @@ def _verified_join(
             and host.get("decision_scope_id") == observed_row.get("decision_scope_id"),
             "foreign physical/host source root or selector",
         )
+        frame_selector = frame.get("selector") if isinstance(frame, Mapping) else None
         _require(
             (frame is None or (
                 isinstance(frame, Mapping)
+                and isinstance(frame_selector, Mapping)
+                and all(frame_selector.get(k) == v for k, v in root.items())
+                and frame_selector.get("page_id") == observed_row.get("page_id")
+                and frame_selector.get("decision_scope_id") == scope_id
+                and frame_selector.get("opening_identity_id") == physical_id
+                and frame.get("opening_identity_id") == physical_id
                 and frame.get("host_binding_record_id") == host_id
                 and frame.get("host_wall_id") == host.get("host_wall_id")
+                and type(frame.get("record_id")) is str and bool(frame.get("record_id"))
                 and not _is_stale(frame)
             ))
             and not any(_is_stale(x) for x in (host, physical, original)),
@@ -290,8 +300,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         customer_rows=customer_rows, expected_source_sha256=args.expected_source_sha256,
         expected_snapshot_id=args.expected_snapshot_id, expected_project_id=args.project_id,
     )
+    # A diagnostic output is NEVER allowed to replace its source, signed V1
+    # customer inputs, frozen reference files or any existing report. Restrict
+    # generated receipt destinations to the local artifacts workspace and
+    # require an exclusive create, including protection against symlinks.
+    artifacts_root = Path("artifacts").resolve()
+    output_path = args.output.resolve()
+    if not output_path.is_relative_to(artifacts_root) or output_path == artifacts_root:
+        raise ValueError("diagnostic output must be inside the artifacts workspace")
+    if args.output.exists() or args.output.is_symlink():
+        raise FileExistsError("diagnostic output already exists; never overwrite signed inputs")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(output, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    with args.output.open("x", encoding="utf-8") as stream:
+        stream.write(json.dumps(output, sort_keys=True, indent=2) + "\n")
     print(json.dumps({
         "status": output["status"],
         "existing_v1_customer_rows": output["source_owned_quantity_count"],
