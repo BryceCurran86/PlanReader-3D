@@ -382,7 +382,7 @@ jobs:
           assert freezer_graph_firstgate["new_commercial_quantities"]==[]
           from pathlib import Path
           Path("artifacts/gpt2-page7-physical-faces/freezer_w2_graph_nodes.json").write_text(
-              json.dumps(freezer_graph_firstgate,sort_keys=True,indent=2)+"\\n"
+              json.dumps(freezer_graph_firstgate,sort_keys=True,indent=2)+"\n"
           )
           print("GPT2_ORIGINAL_FREEZER_RAW_W2_SNAPPED_NODE_GATE",json.dumps({
               "original_sha256":sha,
