@@ -14,6 +14,7 @@ _V2_TRUTH_FILENAMES = {
     "verification_report.json",
     "unresolved_items.json",
 }
+_SOURCE_PDF_ROOT = "documents/sources/"
 _PRODUCTION_SUFFIXES = {".py", ".js", ".html"}
 _PRODUCTION_EXCLUDED_PREFIXES = (
     "tests/",
@@ -33,6 +34,20 @@ def is_v2_truth_file(path: str) -> bool:
     return PurePosixPath(normalized).name in _V2_TRUTH_FILENAMES
 
 
+def is_benchmark_defining_file(path: str) -> bool:
+    """Everything that defines or feeds the frozen benchmark: the named truth files, ANY other file in the V2 tree
+    (evaluators, reconcilers, identity maps, runners) and the original source PDFs.
+
+    ``is_v2_truth_file`` stays the narrow predicate for the six truth filenames; this wider one is what the separation gate uses, so
+    scorer code, tolerances or a source PDF cannot change in the same PR as production code.
+    """
+    normalized = _normalize(path)
+    if is_v2_truth_file(normalized) or normalized.startswith(_V2_ROOT):
+        return True
+    lowered = normalized.lower()
+    return lowered.startswith(_SOURCE_PDF_ROOT) and PurePosixPath(lowered).suffix == ".pdf"
+
+
 def is_production_code_file(path: str) -> bool:
     normalized = _normalize(path)
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
@@ -41,7 +56,7 @@ def is_production_code_file(path: str) -> bool:
 
 
 def find_separation_violation(changed_paths: Sequence[str]) -> tuple[list[str], list[str]]:
-    truth_files = sorted({p for p in changed_paths if is_v2_truth_file(p)})
+    truth_files = sorted({p for p in changed_paths if is_benchmark_defining_file(p)})
     production_files = sorted({p for p in changed_paths if is_production_code_file(p)})
     if truth_files and production_files:
         return truth_files, production_files
@@ -58,7 +73,7 @@ def check_paths(changed_paths: Sequence[str]) -> None:
                 "Full Plan V2 truth / production separation gate failed.",
                 "Source-closed V2 truth and production code must be changed in separate PRs.",
                 "",
-                "V2 truth files:",
+                "V2 truth / benchmark-defining / source-PDF files:",
                 *[f"  - {p}" for p in truth_files],
                 "",
                 "Production-code files:",
