@@ -167,3 +167,56 @@ def test_native_and_display_frame_round_trip_at_right_angles():
             assert native == pytest.approx(box, abs=1e-4)
     finally:
         pdf.close()
+
+
+
+def test_page9_original_source_native_images_are_not_rcp_geometry():
+    from types import SimpleNamespace
+    from tools.diag_gpt2_page9_original_rcp_firstgate import (
+        _source_native_image_placements,
+    )
+    class Page:
+        def get_image_info(self, *, xrefs):
+            assert xrefs
+            return [
+                {"bbox": (0., 0., 20., 20.), "width": 200, "height": 100, "xref": 0},
+                {"bbox": (40., 40., 70., 80.), "width": 20, "height": 30, "xref": 28},
+            ]
+    anchors = [SimpleNamespace(bbox=(5., 5., 10., 10.), text="REFLECTED CEILING PLAN")]
+    result = _source_native_image_placements(Page(), anchors)
+    assert result["status"] == "SOURCE_IMAGE_PLACEMENTS_COMPLETE"
+    assert result["source_image_placement_count"] == 2
+    assert result["image_universe_complete"]
+    assert result["source_image_placements"][0]["original_xref"] == 0
+    assert len(result["source_image_placements"][0]["overlapping_original_source_titles"]) == 1
+    assert not result["source_image_placements"][0]["image_pixels_or_viewport_role_proven"]
+    assert not result["source_image_placement_is_rcp_role"]
+
+
+def test_page9_original_image_placement_invalid_does_not_become_no_images():
+    from tools.diag_gpt2_page9_original_rcp_firstgate import (
+        _source_native_image_placements,
+    )
+    class Page:
+        def get_image_info(self, *, xrefs):
+            return [
+                {"bbox": (0., 0., float("nan"), 8.), "width": 12, "height": 8, "xref": 2},
+                {"bbox": (0., 0., 20., 30.), "width": 12, "height": 8, "xref": 0},
+            ]
+    result = _source_native_image_placements(Page(), [])
+    assert result["status"] == "SOURCE_IMAGE_PLACEMENT_PARTIAL"
+    assert not result["image_universe_complete"]
+    assert result["invalid_native_image_placement_indices"] == [0]
+    assert result["source_image_placement_count"] == 2
+    assert len(result["source_image_placements"]) == 1
+    assert not result["source_image_placement_is_rcp_role"]
+
+
+def test_page9_original_image_api_absence_is_unavailable_not_zero():
+    from tools.diag_gpt2_page9_original_rcp_firstgate import (
+        _source_native_image_placements,
+    )
+    result = _source_native_image_placements(object(), ())
+    assert result["status"] == "SOURCE_IMAGE_API_UNAVAILABLE"
+    assert not result["image_universe_complete"]
+    assert not result["source_image_placement_is_rcp_role"]
