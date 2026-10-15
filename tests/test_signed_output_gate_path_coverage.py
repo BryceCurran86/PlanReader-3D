@@ -155,7 +155,10 @@ def uncovered(closure: set[str], patterns: list[str] | None) -> list[str]:
     return sorted(path for path in closure if not workflow_path_included(patterns, path))
 
 
-_ALLOWED_STEP_CONDITIONS = ("always()", "success()", "failure()", "!cancelled()")
+# A replay step guarded by failure() never runs on ordinary successful
+# source execution and could leave the entire job green without customer proof.
+# Only unconditional-style continuation is acceptable for auxiliary steps.
+_ALLOWED_STEP_CONDITIONS = ("always()", "!cancelled()")
 
 
 def _pull_request_block(workflow_text: str) -> list[str]:
@@ -423,6 +426,7 @@ def test_a_disabled_or_non_blocking_replay_job_is_rejected():
         "    continue-on-error: true\n    runs-on: ubuntu-latest\n",
         "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n        continue-on-error: true\n",
         "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n        if: ${{ false }}\n",
+        "    runs-on: ubuntu-latest\n    steps:\n      - run: echo stale-replay\n        if: failure()\n",
     ):
         with pytest.raises(ValueError):
             replay_jobs_cannot_be_disabled_or_made_non_blocking(head + body)
