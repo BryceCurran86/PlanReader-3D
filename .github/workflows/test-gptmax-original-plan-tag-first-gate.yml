@@ -1,0 +1,60 @@
+name: GPT MAX Original Plan Tag First Gate
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_original_plan_tag_census_shadow.py"
+      - "tools/diag_gptmax_original_plan_tag_source.py"
+      - ".github/workflows/test-gptmax-original-plan-tag-first-gate.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  original-tag-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Check source code and existing authority isolation
+        run: |
+          ruff check --select F821,F823 pb_g17_original_plan_tag_census_shadow.py tools/diag_gptmax_original_plan_tag_source.py
+          PYTHONPATH=. python -m pytest -q tests/test_schedule_opening_instance_binding_authority_v2_regressions.py tests/test_raster_opening_label_ownership.py
+      - name: Original SHA-authenticated G17 text source and unchanged signed customer rows
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_original_plan_tag_source.py --pdf "$PDF" --page-id 3 --output artifacts/original-plan-tag-first-gate.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-plan-tag-first-gate.json').read_text())
+          assert r['original_wall_host_frame_area_seal_customer_unchanged']
+          assert r['baseline_customer_verification']['valid_quantity_count']==r['baseline_customer_rows']==8
+          c=r['census']
+          assert c['source_sha256']==r['source_sha256'] and c['snapshot_id']==r['snapshot_id']
+          assert c['source_decode_complete'] and c['physical_opening_count']==21
+          assert not any(c[k] for k in ('actual_source_leader_topology_proven','source_coverage_exhaustiveness_proven',
+              'opening_tag_binding_granted','source_schedule_binding_granted','physical_host_granted',
+              'metric_quantity_granted','original_source_authenticated_by_report'))
+          assert all(not t['unique_owner_granted'] and not t['schedule_binding_granted']
+              for t in c['tag_candidate_records'])
+          print(json.dumps({'source_sha256':r['source_sha256'],'plan_source_tags':c['source_text_tag_candidates'],
+              'unowned_external_source_tags':c['candidate_outside_all_apertures'],
+              'signed_customer_receipts_unchanged':True}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-plan-tag-source-census
+          path: artifacts/original-plan-tag-first-gate.json
+          retention-days: 21
