@@ -37,7 +37,7 @@ def _line_scope(geometry, bbox):
     if (max(x0, x1) < left or min(x0, x1) > right
             or max(y0, y1) < top or min(y0, y1) > bottom):
         return "outside"
-    return "crossing_or_contesting"
+    return "crossing"
 
 
 def _scope_for_group(source_lines, original_aperture_bbox, plan_bbox):
