@@ -379,6 +379,15 @@ jobs:
           assert len(freezer_graph_firstgate["selected_original_w4_node_rows"])==len(original_w4_ids)
           assert not freezer_graph_firstgate["source_structural_role_granted"]
           assert not freezer_graph_firstgate["room_or_metric_published"]
+          for wall in freezer_graph_firstgate["selected_original_w4_node_rows"]:
+              for fragment in wall["w2_surviving_fragment_nodes"]:
+                  for end in fragment["endpoints"]:
+                      assert len(end["retained_original_coordinate_groups"]) == (
+                          end["retained_native_coordinate_cluster_count"]
+                      )
+                      assert all(not j["source_structural_role_granted"]
+                          for j in end["replayed_original_w3_junction_candidates"])
+                      assert end["retained_native_coordinate_cluster_count"] >= 1
           assert freezer_graph_firstgate["new_commercial_quantities"]==[]
           from pathlib import Path
           Path("artifacts/gpt2-page7-physical-faces/freezer_w2_graph_nodes.json").write_text(
@@ -403,6 +412,14 @@ jobs:
                               "original_incident_source_edge_count":len(
                                   node["exact_node_incident_original_source_edges"]
                               ),
+                              "distinct_original_native_coordinate_clusters":
+                                  node["retained_native_coordinate_cluster_count"],
+                              "mixed_native_coordinates":
+                                  node["mixed_original_coordinates_at_snapped_node"],
+                              "retained_native_source_groups":
+                                  node["retained_original_coordinate_groups"],
+                              "w3_junction_candidate_roles":
+                                  node["replayed_original_w3_junction_candidates"],
                           } for node in frag["endpoints"]
                       ]
                   } for frag in row["w2_surviving_fragment_nodes"]]
