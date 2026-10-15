@@ -17,8 +17,10 @@ def _point(p):
     return (float(p.x), float(p.y))
 
 def _key(p):
-    # Diagnostic quantisation only; never input to W2 or source identity.
-    return (round(p[0], 4), round(p[1], 4))
+    # Source-native exact endpoint equality: never quantise a real source gap
+    # into an invented junction or erase a tiny genuine indexed line.
+    # W2 retains its separate production snap authority and 2.5pt tolerance.
+    return (float(p[0]), float(p[1]))
 
 def inspect_native_component(page, seed: str):
     """Return candidate component and raw source receipts, not an authority grant."""
