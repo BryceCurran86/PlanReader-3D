@@ -1,10 +1,11 @@
-"""Classify exact closed annotation stroke cycles and their unstroked frames.
+"""Classify exact annotation blocks and their unstroked frames.
 
-A primitive is quarantined only when a whole cycle proves every gate, or when
-it is an unstroked filled rectangle framing such a cycle. Stroke colour,
-stroke width, and nearness to text are never sufficient on their own. This
-module does not change the snap tolerance. A caller may drop the returned
-ids before building the wall graph.
+A primitive is quarantined only when every edge of its exact-endpoint block
+lies on a cycle walk around one source word, or when it is an unstroked
+filled rectangle framing that proven block. A ring that leaves part of the
+block uncovered is not removed. Stroke colour, stroke width, and nearness to
+text are never sufficient on their own. This module does not change the snap
+tolerance. A caller may drop the returned ids before building the wall graph.
 
 The length spans reused here are the existing motif spans. Each is one
 conjunct of the proof, not a standalone rejection.
@@ -199,17 +200,15 @@ def _smooth_cycles(segments: Sequence[Mapping[str, Any]]) -> List[Tuple[List[str
     return cycles
 
 
-def _simple_cycle_edge_blocks(
+def _edge_blocks(
     segments: Sequence[Mapping[str, Any]],
-) -> set[frozenset[str]]:
-    """Return edge sets that are exact simple-cycle blocks.
+) -> List[frozenset[str]]:
+    """Return exact-endpoint edge blocks of at least three edges.
 
-    A smallest-turn walk inside a larger connected mark is not its own block.
-    Only a block whose every vertex has degree two can later be quarantined.
-    Endpoint identity is the original float, with no snap and no rounding.
+    A walk inside a larger block is not quarantined by itself. Endpoint
+    identity is the original float, with no snap and no rounding.
     """
     graph: Dict[Point, List[Tuple[Point, str]]] = defaultdict(list)
-    selected: Dict[str, Tuple[Point, Point]] = {}
     for segment in segments:
         sid = str(segment.get("id") or "")
         if not sid:
@@ -218,7 +217,6 @@ def _simple_cycle_edge_blocks(
         end = (float(segment["x2"]), float(segment["y2"]))
         if start == end:
             continue
-        selected[sid] = (start, end)
         graph[start].append((end, sid))
         graph[end].append((start, sid))
     discovery: Dict[Point, int] = {}
@@ -266,88 +264,75 @@ def _simple_cycle_edge_blocks(
                     if member == parent_edge:
                         break
                 blocks.append(block)
-    simple: set[frozenset[str]] = set()
-    for members in blocks:
-        degrees: Dict[Point, int] = defaultdict(int)
-        for member in members:
-            start, end = selected[member]
-            degrees[start] += 1
-            degrees[end] += 1
-        if (
-            len(members) >= 3
-            and len(degrees) == len(members)
-            and all(degree == 2 for degree in degrees.values())
-        ):
-            simple.add(frozenset(members))
-    return simple
+    return [frozenset(members) for members in blocks if len(members) >= 3]
 
 
-def _cycle_record(
-    ids: Sequence[str],
-    polygon: Sequence[Point],
-    by_id: Mapping[str, Mapping[str, Any]],
+def _prove_block(
+    block: frozenset[str],
+    members: Sequence[Mapping[str, Any]],
     *,
     page_span: float,
     path_counts: Mapping[Any, int],
     words: Sequence[Mapping[str, Any]],
     outside: Any,
     viewport_bbox: Optional[Sequence[float]],
-    independent_block: bool,
 ) -> Dict[str, Any]:
-    members = [by_id[sid] for sid in ids]
-    ring = list(polygon)
-    angles = [
-        _directed_angle_deg(ring[index], ring[(index + 1) % len(ring)])
-        for index in range(len(ring))
-    ]
-    max_length = max(
-        math.dist(ring[index], ring[(index + 1) % len(ring)])
-        for index in range(len(ring))
-    )
-    path_ids = sorted({int(segment["path_index"]) for segment in members})
+    """Prove a whole edge block, or withhold nothing from it.
+
+    One source word must sit inside cycle walks that together use every edge.
+    A ring that leaves part of the block uncovered does not quarantine the rest.
+    """
+    ids = sorted(block)
+    angles = []
+    max_length = 0.0
+    points: List[Point] = []
+    for segment in members:
+        start = (float(segment["x1"]), float(segment["y1"]))
+        end = (float(segment["x2"]), float(segment["y2"]))
+        angles.append(_directed_angle_deg(start, end))
+        max_length = max(max_length, math.dist(start, end))
+        points.extend((start, end))
     span_limit = float(page_span) * float(_REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION)
-    singleton = all(
-        path_counts.get(segment.get("path_index"), 0) == 1 for segment in members
-    )
-    solid = all(str(segment.get("dashes") or "") in _SOLID_DASHES for segment in members)
-    unfilled = all(segment.get("fill") is None for segment in members)
     reasons = []
-    if len(ring) != len(ids):
-        reasons.append("cycle_walk_not_continuous")
     if len(ids) < MIN_CYCLE_EDGES:
         reasons.append("cycle_edge_count_below_symbol_topology")
     if len(set(angles)) < MIN_DISTINCT_DIRECTED_ANGLES:
         reasons.append("directed_angle_diversity_below_symbol_topology")
     if max_length > span_limit:
         reasons.append("cycle_edge_exceeds_existing_multi_angle_span")
-    if not singleton:
+    if not all(path_counts.get(segment.get("path_index"), 0) == 1 for segment in members):
         reasons.append("path_ancestry_not_singleton")
-    if not solid or not unfilled:
+    if not all(str(segment.get("dashes") or "") in _SOLID_DASHES for segment in members):
         reasons.append("stroke_or_fill_not_a_bare_solid_mark")
-    if not independent_block:
-        reasons.append("cycle_not_an_independent_exact_block")
+    if not all(segment.get("fill") is None for segment in members):
+        reasons.append("stroke_or_fill_not_a_bare_solid_mark")
     contained = []
-    extensions: list[str] = []
+    extensions: List[str] = []
     owned = False
     if not reasons:
-        if len(ring) >= 3:
-            contained = [
-                {
-                    "text": str(word.get("text") or ""),
-                    "bbox": [float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"])],
-                }
-                for word in words
-                if _word_bbox_inside(word, ring)
-            ]
+        covered_by_word: Dict[Tuple[float, float, float, float], set[str]] = {}
+        word_by_box = {}
+        for ids_walk, vertices in _smooth_cycles(members):
+            for word in words:
+                if not _word_bbox_inside(word, vertices):
+                    continue
+                box = (float(word["x0"]), float(word["y0"]), float(word["x1"]), float(word["y1"]))
+                covered_by_word.setdefault(box, set()).update(ids_walk)
+                word_by_box[box] = word
+        contained = [
+            {"text": str(word_by_box[box].get("text") or ""), "bbox": list(box)}
+            for box, covered in covered_by_word.items()
+            if covered == set(ids)
+        ]
         if not contained:
-            reasons.append("no_source_text_bbox_contained")
+            reasons.append("block_not_covered_by_one_source_word")
         seen: set[str] = set()
         for member in members:
-            start = _endpoint_key(float(member["x1"]), float(member["y1"]))
-            end = _endpoint_key(float(member["x2"]), float(member["y2"]))
+            start = (float(member["x1"]), float(member["y1"]))
+            end = (float(member["x2"]), float(member["y2"]))
             for segment in outside(start, end):
                 sid = str(segment.get("id") or "")
-                if not sid or sid in seen or sid in ids:
+                if not sid or sid in seen or sid in block:
                     continue
                 if segment.get("stroke") is None or not segment.get("width"):
                     continue
@@ -363,17 +348,16 @@ def _cycle_record(
         if extensions:
             reasons.append("competing_structural_continuation")
         if viewport_bbox is None:
-            owned = False
             reasons.append("viewport_partition_ownership_unproven")
         else:
             x0, y0, x1, y1 = (float(value) for value in viewport_bbox)
-            owned = all(x0 <= point[0] <= x1 and y0 <= point[1] <= y1 for point in ring)
+            owned = all(x0 <= point[0] <= x1 and y0 <= point[1] <= y1 for point in points)
             if not owned:
                 reasons.append("viewport_partition_ownership_unproven")
     proven = not reasons
     return {
-        "primitive_ids": list(ids),
-        "path_indexes": path_ids,
+        "primitive_ids": ids,
+        "path_indexes": sorted({int(segment["path_index"]) for segment in members}),
         "contained_source_text": contained,
         "competing_continuation_primitive_ids": sorted(extensions),
         "max_edge_length_pt": round(max_length, 6),
@@ -386,6 +370,7 @@ def _cycle_record(
         "quantity_or_metric_area_published": False,
         "diagnostic_only": True,
     }
+
 
 
 def _nearby_segments(segments: Sequence[Mapping[str, Any]]):
@@ -491,21 +476,12 @@ def classify_exact_annotation_cycles(
     records = []
     nearby = _nearby_segments(list(by_id.values()))
     for family_segments in families.values():
-        seen_cycles: set[frozenset[str]] = set()
-        simple_blocks = _simple_cycle_edge_blocks(family_segments)
-        for ids, vertices in _smooth_cycles(family_segments):
-            identity = frozenset(ids)
-            if identity in seen_cycles:
-                continue
-            seen_cycles.add(identity)
-            ordered = list(ids)
-            record = _cycle_record(
-                ordered, vertices, by_id, page_span=float(page_span), path_counts=path_counts,
+        for block in _edge_blocks(family_segments):
+            members = [by_id[sid] for sid in block]
+            records.append(_prove_block(
+                block, members, page_span=float(page_span), path_counts=path_counts,
                 words=words, outside=nearby, viewport_bbox=viewport_bbox,
-                independent_block=identity in simple_blocks,
-            )
-            record["primitive_ids"] = sorted(record["primitive_ids"])
-            records.append(record)
+            ))
     records.sort(key=lambda record: (record["status"], record["primitive_ids"]))
     frames = _unstroked_frames_around_proven_cycles(
         segments, records, page_span=float(page_span),

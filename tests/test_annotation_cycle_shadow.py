@@ -258,7 +258,7 @@ def test_leftover_chord_is_removed_when_the_cycle_is_proved_earlier():
     assert leftover == ()
 
 
-def test_chorded_component_is_not_an_independent_cycle_block():
+def test_chorded_component_is_not_removed_when_one_face_leaves_edges_out():
     ring = _ring()
     chord = _line(
         "chord", ring[0]["x1"], ring[0]["y1"], ring[4]["x1"], ring[4]["y1"], path=9,
@@ -268,7 +268,7 @@ def test_chorded_component_is_not_an_independent_cycle_block():
     )
     assert result["quarantined_primitive_ids"] == []
     assert any(
-        "cycle_not_an_independent_exact_block" in record["failed_gates"]
+        "block_not_covered_by_one_source_word" in record["failed_gates"]
         for record in result["cycles"]
     )
 
