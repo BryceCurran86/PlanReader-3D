@@ -367,18 +367,34 @@ class OpeningHostFrameProducer:
             self._opening, opening, wall_scope.records, geometry,
             wall_scope.equivalence, wall_scope.source_observation_ids,
         )
-        # A source-proven split-centerline host is NOT a source-band host.
-        # An opt-in shadow may independently re-prove its original W4 split
-        # edge when the ordinary source-band census is complete and EMPTY.
-        # Never bypass a source-band CONFLICT, a positive competing band,
-        # a missing source receipt, or a host without this exact proof kind.
-        if (
-            self._raster_split_frame_shadow
-            and host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED
-                in binding.reason_codes
-            and proof.status is EvidenceResolutionStatus.CORROBORATED
-            and not proof.bands
-        ):
+        # The source-owner reason codes belong to the PRODUCER'S
+        # OpeningHostBindingResult, never to its immutable binding record.
+        # Re-resolve the exact original selector rather than trusting caller
+        # metadata or weakening a source-band CONFLICT/ABSTAIN.
+        alternate_source_proven = False
+        if (self._raster_split_frame_shadow
+                and proof.status is EvidenceResolutionStatus.CORROBORATED
+                and not proof.bands):
+            selector = OpeningHostBindingSelector(
+                document_id=binding.document_id,
+                revision_id=binding.revision_id,
+                source_sha256=binding.source_sha256,
+                snapshot_id=binding.snapshot_id,
+                page_id=binding.page_id,
+                decision_scope_id=binding.decision_scope_id,
+                opening_identity_id=binding.opening_identity_id,
+            )
+            bound = self._host.resolve(selector)
+            alternate_source_proven = bool(
+                bound.status is EvidenceResolutionStatus.CORROBORATED
+                and bound.record is not None
+                and bound.record.record_id == binding.record_id
+                and tuple(bound.record.member_wall_candidate_ids)
+                    == tuple(binding.member_wall_candidate_ids)
+                and host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED
+                    in bound.reason_codes
+            )
+        if alternate_source_proven:
             alternative = host_geometry._resolve_raster_split_centerline_host(
                 wall_scope.records, geometry, wall_scope.equivalence,
             )
