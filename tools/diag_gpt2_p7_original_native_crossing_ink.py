@@ -94,6 +94,108 @@ def census_original_native_linear_ink(drawings, *, source_atoms):
     }
 
 
+
+def census_original_native_cubic_ink(drawings, *, source_atoms):
+    """Enumerate complete indexed cubic ink, not walls or room boundaries.
+
+    Only an exactly straight-equivalent cubic whose source-native endpoints
+    bracket both queried atom endpoints can be a candidate. No inference
+    from bounding boxes, chord-only comparisons or stroked appearance.
+    """
+    import math
+
+    if not isinstance(drawings, (list, tuple)) or not drawings:
+        raise ValueError("original_native_drawing_universe_unavailable")
+    atoms = [_valid_edge(value) for value in source_atoms]
+    if not atoms:
+        raise ValueError("missing_original_producer_atom_queries")
+    if len(set(atoms)) != len(atoms):
+        raise ValueError("duplicate_original_producer_atom_query")
+
+    # Source's existing exact primitive span check uses 0.0001 PDF pt.
+    # The same bound is applied to the FULL cubic control polygon.
+    eps = 0.0001
+    originals = []
+    malformed_ids = []
+    for path, drawing in enumerate(drawings):
+        for index, item in enumerate(drawing.get("items") or ()):
+            if not item or item[0] != "c":
+                continue
+            source_id = f"d{path}i{index}"
+            try:
+                if len(item) != 5:
+                    raise ValueError("unexpected_cubic_format")
+                points = tuple(
+                    (float(point.x), float(point.y)) for point in item[1:5]
+                )
+                if not all(math.isfinite(v) for point in points for v in point):
+                    raise ValueError("nonfinite_cubic_source")
+            except (AttributeError, ValueError, TypeError, OverflowError):
+                malformed_ids.append(source_id)
+                continue
+            originals.append((source_id, points, drawing))
+
+    rows = []
+    for atom in atoms:
+        start, stop = atom
+        dx = stop[0] - start[0]
+        dy = stop[1] - start[1]
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        matches = []
+        for source_id, points, drawing in originals:
+            along = tuple(
+                (point[0] - start[0]) * ux + (point[1] - start[1]) * uy
+                for point in points
+            )
+            normal = tuple(
+                abs((point[0] - start[0]) * uy - (point[1] - start[1]) * ux)
+                for point in points
+            )
+            # Bezier lies along the queried line *only* if all controls do;
+            # two actual endpoints must span the entire atom, not merely the
+            # control polygon's bounding box.
+            if (
+                max(normal) > eps
+                or min(along[0], along[3]) > eps
+                or max(along[0], along[3]) < length - eps
+                or abs(along[0] - along[3]) <= eps
+            ):
+                continue
+            kind = str(drawing.get("type", ""))
+            matches.append({
+                "original_native_curve_ref": source_id,
+                "native_control_points_pdf_pts": [list(p) for p in points],
+                "native_drawing_kind": kind,
+                "source_layer": drawing.get("layer"),
+                "source_stroke": drawing.get("color"),
+                "source_fill": drawing.get("fill"),
+                "original_stroked_cubic": kind in ("s", "fs"),
+                "strict_collinear_fullspan_candidate_not_wall": True,
+            })
+            if len(matches) > 10000:
+                raise ValueError("original_native_curve_candidate_safety_bound")
+        rows.append({
+            "queried_original_atom_pdf_pts": [list(p) for p in atom],
+            "original_indexed_cubic_full_span_count": len(matches),
+            "original_indexed_cubic_candidate_receipts": sorted(
+                matches, key=lambda q: q["original_native_curve_ref"]
+            ),
+            "physical_wall_or_room_role_granted": False,
+        })
+    return {
+        "source_query_atom_count": len(atoms),
+        "all_original_native_cubic_items_examined": True,
+        "original_native_cubic_item_count": len(originals) + len(malformed_ids),
+        "invalid_native_cubic_source_ids": sorted(malformed_ids),
+        "source_native_cubic_ink_queries": rows,
+        "complete_source_universe_including_raster_or_clip": False,
+        "physical_wall_or_room_role_granted": False,
+        "metric_quantities_published": 0,
+        "diagnostic_only": True,
+    }
+
+
 def replay_original_source(pdf_bytes: bytes,*, original_sha256: str,
                            page_no: int, source_atoms):
     if type(pdf_bytes) is not bytes or type(page_no) is not int or page_no<1:
@@ -104,8 +206,12 @@ def replay_original_source(pdf_bytes: bytes,*, original_sha256: str,
     with fitz.open(stream=pdf_bytes,filetype="pdf") as doc:
         if page_no>doc.page_count:
             raise ValueError("original_source_page_missing")
+        native_drawings=doc[page_no-1].get_drawings()
         result=census_original_native_linear_ink(
-            doc[page_no-1].get_drawings(),source_atoms=source_atoms
+            native_drawings,source_atoms=source_atoms
+        )
+        result["original_native_cubic_ink_shadow"]=census_original_native_cubic_ink(
+            native_drawings,source_atoms=source_atoms
         )
         result["original_pdf_page_count"]=doc.page_count
     result["original_source_sha256"]=actual
@@ -135,6 +241,10 @@ def main():
             for row in report["source_native_linear_ink_queries"]
         ],
         "source_structural_wall_role_authenticated":False,
+        "indexed_exact_native_cubic_fullspan_counts":[
+            row["original_indexed_cubic_full_span_count"]
+            for row in report["original_native_cubic_ink_shadow"]["source_native_cubic_ink_queries"]
+        ],
         "new_commercial_quantities":[],
     },sort_keys=True))
 
