@@ -1,0 +1,119 @@
+name: DIAG Claude CI test-suite parallelism (identical outcomes, wall time)
+
+# Measurement only. Runs the unmodified `pytest -q tests/` once serially (exactly what CI does) and once with
+# pytest-xdist (--dist loadfile) on the same tree, for both Python versions, then compares every test's outcome.
+# Nothing here changes production code, a test, a threshold or the real CI workflow; it only answers:
+#   1. does the parallel run report exactly the same set of tests with exactly the same outcomes?
+#   2. how much shorter is the job, on this runner shape?
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/diag-claude-ci-xdist-measure.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diag-claude-ci-xdist-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+        mode: [serial, xdist]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+          if [ "${{ matrix.mode }}" = "xdist" ]; then pip install "pytest-xdist>=3.6,<4"; fi
+      - name: Runner shape
+        run: |
+          nproc; free -m | head -2; python --version
+      - name: Run the suite
+        env:
+          PYTHONPATH: .
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts
+          start=$(date +%s)
+          if [ "${{ matrix.mode }}" = "xdist" ]; then
+            pytest -q tests/ -n auto --dist loadfile -p no:cacheprovider --junitxml=artifacts/junit.xml --durations=25 > artifacts/pytest.log 2>&1
+          else
+            pytest -q tests/ -p no:cacheprovider --junitxml=artifacts/junit.xml --durations=25 > artifacts/pytest.log 2>&1
+          fi
+          rc=$?
+          end=$(date +%s)
+          echo "pytest_exit=$rc seconds=$((end-start))" | tee artifacts/timing.txt
+          tail -40 artifacts/pytest.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xdist-${{ matrix.python-version }}-${{ matrix.mode }}
+          path: artifacts
+          retention-days: 14
+
+  compare:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+      - name: Compare every test outcome between the serial and parallel runs
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          def load(path):
+              out = {}
+              for case in ET.parse(path).getroot().iter("testcase"):
+                  key = f"{case.get('classname')}::{case.get('name')}"
+                  kind = "passed"
+                  for child in case:
+                      if child.tag in ("failure", "error"):
+                          kind = child.tag
+                      elif child.tag == "skipped":
+                          kind = "xfailed" if child.get("type") == "pytest.xfail" else "skipped"
+                  out[key] = kind
+              return out
+
+          bad = False
+          for version in ("3.13", "3.14"):
+              serial = load(Path(f"results/xdist-{version}-serial/junit.xml"))
+              para = load(Path(f"results/xdist-{version}-xdist/junit.xml"))
+              t_s = Path(f"results/xdist-{version}-serial/timing.txt").read_text().strip()
+              t_p = Path(f"results/xdist-{version}-xdist/timing.txt").read_text().strip()
+              only_s = sorted(set(serial) - set(para))
+              only_p = sorted(set(para) - set(serial))
+              diff = sorted(k for k in serial.keys() & para.keys() if serial[k] != para[k])
+              print(f"== Python {version}: serial {len(serial)} tests, parallel {len(para)} tests")
+              print(f"   serial   : {t_s}")
+              print(f"   parallel : {t_p}")
+              print(f"   only serial {len(only_s)}, only parallel {len(only_p)}, outcome differs {len(diff)}")
+              for k in only_s[:10]: print("   only-serial", k)
+              for k in only_p[:10]: print("   only-parallel", k)
+              for k in diff[:10]: print("   differs", k, serial[k], "->", para[k])
+              counts = {}
+              for v in serial.values(): counts[v] = counts.get(v, 0) + 1
+              print("   serial outcomes", counts)
+              if only_s or only_p or diff:
+                  bad = True
+          sys.exit(1 if bad else 0)
+          PY
