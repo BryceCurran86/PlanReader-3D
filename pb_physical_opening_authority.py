@@ -47,6 +47,7 @@ PHYSICAL_OPENING_EXISTENCE_UNRESOLVED = "physical_opening_existence_unresolved"
 PHYSICAL_OPENING_IDENTITY_UNRESOLVED = "physical_opening_identity_unresolved"
 PHYSICAL_OPENING_IDENTITIES_DISTINCT = "physical_opening_identities_distinct"
 PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH = "physical_opening_identity_scope_mismatch"
+PHYSICAL_OPENING_VIEWPORT_SCOPE_MISMATCH = "physical_opening_viewport_scope_mismatch"
 PHYSICAL_OPENING_IDENTITY_EXISTENCE_REQUIRED = "physical_opening_identity_existence_required"
 PHYSICAL_OPENING_IDENTITY_RESOLVED = "physical_opening_identity_resolved"
 PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT = "opening_support"
@@ -1647,13 +1648,30 @@ class PhysicalOpeningAuthority:
             )
 
         candidate = containing[0]
+        # The record's scope is the authenticated source observation's scope,
+        # never the candidate's claim. The visible-geometry path is page-scoped
+        # today (every supporting record has viewport_id None), and downstream
+        # void and count authorities select scale and view class from the
+        # record's viewport_id, so a candidate asserting a scope the source
+        # observation does not carry is contradictory evidence: it is neither
+        # adopted nor silently discarded.
+        if candidate.viewport_id != observation.viewport_id:
+            return PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.CONFLICT, proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(PHYSICAL_OPENING_VIEWPORT_SCOPE_MISMATCH,),
+                source_observation=source_result,
+            )
+        # One value feeds both the record_id payload and the record field so
+        # record_id is always recomputable from the record's own fields.
+        record_viewport_id = observation.viewport_id
         record_payload = {
             "document_id": candidate.document_id,
             "revision_id": candidate.revision_id,
             "source_sha256": candidate.source_sha256,
             "snapshot_id": candidate.snapshot_id,
             "page_id": candidate.page_id,
-            "viewport_id": candidate.viewport_id,
+            "viewport_id": record_viewport_id,
             "semantic_class": "opening",
             "structural_pattern": candidate.structural_pattern,
             "source_observation_ids": candidate.source_observation_ids,
@@ -1668,7 +1686,7 @@ class PhysicalOpeningAuthority:
             source_sha256=candidate.source_sha256,
             snapshot_id=candidate.snapshot_id,
             page_id=candidate.page_id,
-            viewport_id=None,
+            viewport_id=record_viewport_id,
             semantic_class="opening",
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
@@ -1800,6 +1818,7 @@ __all__ = [
     "PHYSICAL_OPENING_IDENTITY_RESOLVED",
     "PHYSICAL_OPENING_IDENTITY_SCOPE_MISMATCH",
     "PHYSICAL_OPENING_IDENTITY_UNRESOLVED",
+    "PHYSICAL_OPENING_VIEWPORT_SCOPE_MISMATCH",
     "PhysicalOpeningAuthority",
     "PhysicalOpeningCandidateClosureResult",
     "PhysicalOpeningCandidateStructureResult",
