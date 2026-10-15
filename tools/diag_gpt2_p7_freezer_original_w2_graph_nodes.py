@@ -198,6 +198,99 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
     }
 
 
+def _indexed_original_source_style_receipts(lineage):
+    """Audit original split-parent graphic state without electing physical ink.
+
+    Source-style conflicts are preserved as competing records; neither RGB
+    nor layer/width is a source-owned wall-role decision.
+    """
+    from copy import deepcopy
+
+    if not isinstance(lineage, dict):
+        return {
+            "status": "ORIGINAL_SPLIT_LINEAGE_UNAVAILABLE",
+            "original_indexed_source_ids": [],
+            "source_record_ids_missing_from_inventory": [],
+            "competing_record_id_conflicts": [],
+            "source_style_records": [],
+            "physical_wall_or_annotation_role_granted": False,
+        }
+    ids = lineage.get("source_primitive_ids")
+    records = lineage.get("source_records")
+    if not isinstance(ids, (tuple, list)) or not isinstance(records, (tuple, list)):
+        return {
+            "status": "ORIGINAL_SPLIT_LINEAGE_UNAVAILABLE",
+            "original_indexed_source_ids": [],
+            "source_record_ids_missing_from_inventory": [],
+            "competing_record_id_conflicts": [],
+            "source_style_records": [],
+            "physical_wall_or_annotation_role_granted": False,
+        }
+    original_ids = sorted({str(v) for v in ids if isinstance(v, str) and v})
+    observed = []
+    malformed = []
+    for n, rec in enumerate(records):
+        if not isinstance(rec, dict) or not isinstance(rec.get("id"), str) or not rec["id"]:
+            malformed.append(n)
+            continue
+        # All fields come from the original source producer's signed split
+        # ancestry, rather than from the post-split fabricated live sentinels.
+        evidence = {
+            "original_primitive_id": rec["id"],
+            "native_path_index": rec.get("path_index"),
+            "native_item_index": rec.get("item_index"),
+            "native_edge_index": rec.get("edge_index"),
+            "original_native_kind": rec.get("kind"),
+            "source_kind_present": bool(rec.get("kind_present")),
+            "source_stroke_present": bool(rec.get("stroke_present")),
+            "source_stroke": deepcopy(rec.get("stroke")),
+            "source_fill_present": bool(rec.get("fill_present")),
+            "source_fill": deepcopy(rec.get("fill")),
+            "source_width_present": bool(rec.get("width_present")),
+            "source_width": rec.get("width"),
+            "source_layer_present": bool(rec.get("layer_present")),
+            "source_layer": rec.get("layer"),
+            "source_dashes_present": bool(rec.get("dashes_present")),
+            "source_dashes": rec.get("dashes"),
+            "source_clip_known": rec.get("clip_known"),
+            "source_clip_present": bool(rec.get("clip_present")),
+            "original_native_page_coords_present": bool(rec.get("page_coords_present")),
+            "original_native_geometry": [
+                deepcopy(rec.get(key)) for key in ("x1", "y1", "x2", "y2")
+            ],
+            "style_is_not_structural_or_drafting_role": True,
+        }
+        observed.append(evidence)
+    found_ids = {item["original_primitive_id"] for item in observed}
+    by_id = {}
+    for row in observed:
+        by_id.setdefault(row["original_primitive_id"], []).append(row)
+    conflicts = sorted(
+        k for k, values in by_id.items()
+        if len(values) > 1 and any(v != values[0] for v in values[1:])
+    )
+    missing = sorted(set(original_ids) - found_ids)
+    extra = sorted(found_ids - set(original_ids))
+    # Same-content duplicate source records are retained, not dereferenced to
+    # a single invented original wall or source-role owner.
+    status = (
+        "ORIGINAL_SPLIT_SOURCE_STYLE_INCOMPLETE"
+        if missing or extra or malformed or not original_ids else
+        "ORIGINAL_SPLIT_SOURCE_STYLE_CONFLICT"
+        if conflicts else "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    )
+    return {
+        "status": status,
+        "original_indexed_source_ids": original_ids,
+        "source_record_ids_missing_from_inventory": missing,
+        "unindexed_source_record_ids": extra,
+        "malformed_original_source_record_ordinals": malformed,
+        "competing_record_id_conflicts": conflicts,
+        "source_style_records": observed,
+        "physical_wall_or_annotation_role_granted": False,
+    }
+
+
 def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
                                                      selected_node_ids):
     """Replay W2's exact splitter and running-centroid assignments, no edits.
@@ -239,8 +332,12 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
         ):
             if target not in assigned:
                 continue
+            style = _indexed_original_source_style_receipts(
+                item.get("primitive_lineage")
+            )
             assigned[target].append({
                 "original_split_segment_id": item["id"],
+                "original_split_input_graphic_style_receipt": style,
                 "original_split_endpoint": endpoint,
                 "original_native_split_endpoint_pdf_pts": coords,
                 "original_source_primitive_ids": list(
@@ -273,6 +370,12 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
         } for key, recs in sorted(groups.items())]
         rows.append({
             "original_w2_node_id": node_id,
+            "original_split_inputs_without_complete_style_receipts": [
+                f"{rec['original_split_segment_id']}:{rec['original_split_endpoint']}"
+                for rec in receipts
+                if rec["original_split_input_graphic_style_receipt"]["status"]
+                    != "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+            ],
             "original_snapped_position_pdf_pts": [node["x"], node["y"]],
             "original_producer_snap_sample_count": node["samples"],
             "all_input_samples_independently_recovered": True,
