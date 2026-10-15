@@ -1,0 +1,126 @@
+name: GPT MAX Original Structural Source Ingress
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "documents/sources/4. Structural Engineering - Lot 16 Power.pdf"
+      - .github/workflows/test-gptmax-original-structural-source.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  original-bytes-and-native-producer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Authenticate original bytes and actual page10 producer receipts
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from dataclasses import asdict
+          from hashlib import sha256
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          path=Path('documents/sources/4. Structural Engineering - Lot 16 Power.pdf')
+          b=path.read_bytes();h=sha256(b).hexdigest()
+          assert h=='b40259589dd39a46e45d25e145cfa789d9a9415b50613ebc4fee01dceab6b3d6' and len(b)==3590638
+          with fitz.open(stream=b,filetype='pdf') as pdf:
+              assert len(pdf)==11
+          s=SourceVisibilityProducer(producer_method='live-physical-net-wall',producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION)
+          p=s.ingest_native_pdf_bytes(document_id='live-source:'+h[:32],source_bytes=b,source_locator='memory://original-structural.pdf',page_ids=('10',))
+          rows=[]
+          for oid in p.text_observation_ids:
+              a=ObservationSelector(document_id=p.revision.document_id,revision_id=p.revision.revision_id,source_sha256=h,snapshot_id=p.snapshot.snapshot_id,observation_id=oid)
+              t=s.text_integrity_authority().resolve_text(a)
+              if t.receipt and t.receipt.raw_text in ['GROUND','FLOOR','WALL','BRACING','PLAN','1:100','28/01/26']:
+                  rows.append({'selector':asdict(a),'text_result':asdict(t)})
+          assert rows
+          assert s.published_snapshot_for_revision(p.revision.revision_id)==p
+          assert sha256(s._producer._store.source_bytes_by_revision[p.revision.revision_id]).hexdigest()==h
+          r={'source_sha256':h,'bytes':len(b),'pdf_page_count':11,'published':asdict(p),'original_native_title_receipts':rows,'cross_file_identity_granted':False,'quantity_granted':False,'count_granted':False}
+          Path('artifacts').mkdir(exist_ok=True)
+          Path('artifacts/original-structural-native-ingress.json').write_text(json.dumps(r,indent=2,sort_keys=True))
+          print({'original_source_sha256':h,'original_bytes':len(b),'pdf_pages':11,'actual_snapshot':p.snapshot.snapshot_id,'quantity_granted':False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-structural-native-ingress
+          path: artifacts/original-structural-native-ingress.json
+          retention-days: 21
+  original-architectural-receipts-retained:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Reproduce exact PR-base and head original architectural customer chains
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cat > /tmp/lot16-original-architecture-retention.py <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          import json,sys
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_raster_opening_source_primitives import MAX_PRIMITIVES
+          from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
+          b=Path('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf').read_bytes();h=sha256(b).hexdigest()
+          assert h=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          s=SourceVisibilityProducer(producer_method='live-physical-net-wall',producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION)
+          p=s.ingest_native_pdf_bytes(document_id='live-source:'+h[:32],source_bytes=b,source_locator='memory://original-architecture.pdf',page_ids=('3',))
+          c=compose_live_wall_opening_authority(source_visibility_producer=s,revision_id=p.revision.revision_id,page_ids=('3',))
+          v=compose_live_physical_opening_voids(source_visibility_producer=s,wall_opening_composition=c)
+          p=s.published_snapshot_for_revision(p.revision.revision_id)
+          r=_retention(c,v,verify_customer_rows=True)
+          assert MAX_PRIMITIVES==20000 and p.snapshot.snapshot_id=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
+          assert len(r['canonical'])==21 and sum(bool(h['record_id']) for h in r['hosts'])==15
+          assert sum(bool(f['record_id']) for f in r['frames'])==9
+          assert len(r['quantities'])==len(r['customer_rows'])==r['customer_verification']['valid_quantity_count']==8
+          assert sorted(q['value'] for q in r['quantities'])==[.54,.9,1.26,1.8,1.8,2.16,2.16,10.08]
+          Path(sys.argv[1]).write_text(json.dumps(r,indent=2,sort_keys=True))
+          PY
+          git worktree add --detach /tmp/lot16-structural-source-base "$BASE_SHA"
+          (
+            cd /tmp/lot16-structural-source-base
+            PYTHONPATH=. python -u /tmp/lot16-original-architecture-retention.py "$GITHUB_WORKSPACE/artifacts/base-architectural-receipts.json"
+          )
+          PYTHONPATH=. python -u /tmp/lot16-original-architecture-retention.py "$GITHUB_WORKSPACE/artifacts/head-architectural-receipts.json"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('artifacts/base-architectural-receipts.json').read_text())
+          b=json.loads(Path('artifacts/head-architectural-receipts.json').read_text())
+          assert a==b
+          print('All original wall/host/frame/canonical/quantity/seal/customer receipts exactly retained')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-structural-architectural-retention
+          path: artifacts/*-architectural-receipts.json
+          retention-days: 21
