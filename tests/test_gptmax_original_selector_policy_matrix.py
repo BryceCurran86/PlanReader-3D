@@ -1,5 +1,6 @@
 """A previously published ABSTAIN representative cannot be force-reused."""
 import pytest
+from hashlib import sha256
 
 from tools.diag_gptmax_original_selector_policy_matrix import (
     summarize_source_selection,
@@ -55,11 +56,11 @@ def test_duplicate_source_selector_fail_closed():
 
 
 @pytest.mark.parametrize("pdf,page,sha,target",[
-    (b"", "3", "a"*64, PHYSICAL),
-    (b"immutable", "0", "a"*64, PHYSICAL),
-    (b"immutable", "03", "a"*64, PHYSICAL),
+    (b"", "3", sha256(b"").hexdigest(), PHYSICAL),
+    (b"immutable", "0", sha256(b"immutable").hexdigest(), PHYSICAL),
+    (b"immutable", "03", sha256(b"immutable").hexdigest(), PHYSICAL),
     (b"immutable", "3", "a"*64, PHYSICAL),
-    (b"immutable", "3", "a"*64, "wrong"),
+    (b"immutable", "3", sha256(b"immutable").hexdigest(), "wrong"),
 ])
 def test_corrupt_source_or_scope_rejected_before_original_policy_replay(pdf,page,sha,target):
     with pytest.raises((ValueError,TypeError)):
