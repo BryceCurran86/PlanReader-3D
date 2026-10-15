@@ -170,3 +170,37 @@ def test_existing_unowned_legacy_w4_selector_does_not_borrow_f07_fallback(monkey
         source=source, scope_rooms=(room,), page_id="1",
         snapshot_id=published.snapshot.snapshot_id,
     ) is None
+
+
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_rotated_source_plan_scope_requires_actual_rotated_source_ownership(rotation):
+    # The F07 source producer already authenticates 90-degree native ink.
+    # A 270-degree lookalike is NOT authenticated by the original producer:
+    # the scale transport must retain that negative rather than invent a view.
+    data = _sheet(rotation=rotation)
+    source, published = _source(data)
+    prior = source.published_snapshot_for_revision(published.revision.revision_id)
+    original = ((120., 120.), (150., 120.), (150., 150.), (120., 150.))
+    if rotation == 90:
+        polygon = tuple((y, 850. - x) for x, y in original)
+    else:
+        polygon = tuple((500. - y, x) for x, y in original)
+    room = _room(data, published, polygon_pdf_pts=polygon)
+    views = segment_source_page_viewports(
+        source, revision_id=published.revision.revision_id,
+        page_id="1", physical_plan_view_shadow=True,
+    )
+    signed = tuple(v for v in views if is_authoritative_derived_viewport(v))
+    result = unique_plan(
+        source=source, scope_rooms=(room,), page_id="1",
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+    if rotation == 90:
+        assert len(signed) == 1
+        assert result is not None
+        assert result[0] == signed[0].view_id
+        assert result[1] == pytest.approx((50., 500., 350., 800.))
+    else:
+        assert signed == ()
+        assert result is None
+    assert source.published_snapshot_for_revision(published.revision.revision_id) == prior
