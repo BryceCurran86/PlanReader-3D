@@ -285,3 +285,100 @@ def test_confidential_original_pdf_must_not_be_present_even_unindexed(tmp_path):
     (root / "private-original-plan.pdf").write_bytes(b"%PDF-synthetic-private-not-for-public")
     with pytest.raises(ValueError, match="private original PDF"):
         audit.verify_owner_four_job_receipts(root)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        ("source-at-start-project", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(project_id="another-project")),
+        ("source-at-start-sha", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(source_sha256_at_start="f"*64)),
+        ("source-at-start-page-count", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(source_page_count=12)),
+        ("source-at-start-page-omission", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x["execution_page_numbers"].pop()),
+        ("source-at-start-boolean-page", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x["execution_page_numbers"].__setitem__(0, True)),
+        ("source-at-start-sealed-claim", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(sealed_run_file="forged-original-seal")),
+        ("source-at-start-complete-coverage", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(complete_source_coverage_proven=True)),
+        ("source-at-start-fake-score", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(benchmark_score_granted=True)),
+        ("source-at-start-topology-change", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(topology_mode="different-source-scope")),
+        ("source-at-start-family-change", "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+         lambda x: x.update(family_group="opening_area_only")),
+        ("production-original-pages-short", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["execution_pages"].pop()),
+        ("production-semantic-pages-short", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["semantic_execution_pages"].pop()),
+        ("production-reordered-pages", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["execution_pages"].reverse()),
+        ("production-topology-page-invalid", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["topology_pages"].append(99)),
+        ("production-support-page-invalid", "au_qld_maryborough_service_station/outputs/production_summary.json",
+         lambda x: x["room_area_support_pages"].append(33)),
+        ("production-wall-page-conflicting", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["canonical_wall_source_pages"].append(42)),
+        ("production-duplicate-topology", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["topology_pages"].append(x["topology_pages"][0])),
+        ("production-partial-page-unknown", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(source_positive_partial_page=-1)),
+        ("production-boolean-page", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["topology_pages"].__setitem__(0, True)),
+        ("production-negative-wall-count", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(unresolved_wall_candidate_count=-1)),
+        ("production-bool-canonical-count", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["canonical_counts"].update(walls=True)),
+        ("production-false-firm-canonical-wall", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(canonical_wall_status="firm")),
+        ("production-false-approved-claim", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(claim_status="approved")),
+        ("production-duplicate-source-reason", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["claim_reason_codes"].append(x["claim_reason_codes"][0])),
+        ("production-blank-source-reason", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["canonical_wall_reason_codes"].append("")),
+        ("production-wrong-topology-mode", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(topology_mode="unscoped-all-pages")),
+        ("production-source-name-forgery", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(source_path=x["source_path"].replace(
+             "1. Construction Plans - Lot 16 Power (REV E).pdf",
+             "another-project.pdf"))),
+        ("production-source-cross-project", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(source_path=x["source_path"].replace(
+             "\\au_qld_lot16_power\\", "\\au_qld_maryborough_service_station\\"))),
+        ("production-combined-wrong-project", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(combined_run_file=x["combined_run_file"].replace(
+             "\\project_outputs\\au_qld_lot16_power\\",
+             "\\project_outputs\\au_qld_3laurel\\"))),
+        ("production-family-wrong-project", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["family_run_files"].update(opening_area=x[
+             "family_run_files"]["opening_area"].replace(
+                 "\\project_outputs\\au_qld_lot16_power\\",
+                 "\\project_outputs\\au_qld_3laurel\\"))),
+        ("production-family-foreign-kind", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x["family_run_files"].update(opening_area=x[
+             "family_run_files"]["opening_area"].replace(
+                 "opening_area.sealed.json", "opening_count.sealed.json"))),
+    ],
+    ids=lambda value: value[0] if type(value) is tuple else None,
+)
+def test_source_at_start_and_scope_binding_reject_even_rehashed_forgery(
+    tmp_path, mutation,
+):
+    _, relative, change = mutation
+    _expect_semantic_conflict(tmp_path, relative, change)
+
+
+def test_clean_scope_guards_preserve_owner_maryborough_memory_abstention():
+    audit_result = audit.verify_owner_four_job_receipts(_ROOT)
+    by_id = {row["project_id"]: row for row in audit_result["projects"]}
+    assert by_id["au_qld_maryborough_service_station"][
+        "earliest_verified_project_execution_gate"
+    ] == "owner_process_stopped:MEMORY_LIMIT"
+    assert by_id["au_qld_q5446_armstrong32_harlequin"][
+        "earliest_verified_project_execution_gate"
+    ] == "source_producer_unsealed:source_complexity_blocked"
+    assert audit_result["official_four_project_coverage_accuracy"] is None
