@@ -1,0 +1,73 @@
+name: GPT MAX Original Shared G17 Dual End Piers
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_g17_shared_dual_end_piers.py
+      - tests/test_gptmax_g17_shared_dual_end_piers.py
+      - docs/engineering/gptmax_shared_g17_dual_end_source_20261017.md
+      - .github/workflows/test-gptmax-original-shared-g17-dual-end-piers.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_g17_shared_dual_end_piers.py
+      - tests/test_gptmax_g17_shared_dual_end_piers.py
+      - docs/engineering/gptmax_shared_g17_dual_end_source_20261017.md
+      - .github/workflows/test-gptmax-original-shared-g17-dual-end-piers.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: '1'
+jobs:
+  original-source-positive-join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original exact source parents / dual-end competitors
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_g17_shared_dual_end_piers.py
+          ruff check --select F821,F823 tools/diag_gptmax_g17_shared_dual_end_piers.py tests/test_gptmax_g17_shared_dual_end_piers.py
+      - name: Original Lot16 original PDF source SHA and real producer scope
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA=10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_shared_dual_end_piers.py \
+            --pdf "$PDF" --sha256 "$SHA" \
+            --output artifacts/gptmax-original-shared-dual-ends.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gptmax-original-shared-dual-ends.json").read_text())
+          assert r["status"]=="original_g17_two_opening_shared_faces_dual_end_source_only"
+          assert r["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert r["source_snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
+          assert r["decision_scope_id"]=="wall-source:page-3"
+          assert (r["old_physical_count"],r["old_host_count"],r["old_frame_count"],
+                  r["old_signed_area_count"],r["old_customer_verified_count"])==(21,15,9,8,8)
+          assert len(r["source_sharing_pairs"])==8
+          assert r["original_source_snapshot_and_customer_receipts_unchanged"]
+          assert all(not r[k] for k in ("new_source_derived_W4_host_granted",
+                     "cross_resolution_equivalence_granted","metric_width_height_granted",
+                     "opening_count_granted"))
+          closed=[p for p in r["source_sharing_pairs"] if p["source_closed_pier_candidate"]]
+          for pair in closed:
+              assert len(pair["source_closed_source_observation_ids"])==4
+              assert not pair["physical_structural_wall_role_granted"]
+              assert not pair["wall_host_granted"]
+          assert closed, "No positively source-owned dual-ended original pier"
+          print("Original dual-ended shared source candidates:",len(closed))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-shared-g17-dual-ended-pier-evidence
+          path: artifacts/gptmax-original-shared-dual-ends.json
+          retention-days: 21
