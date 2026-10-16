@@ -35,9 +35,9 @@ jobs:
         python-version: ["3.13", "3.14"]
     timeout-minutes: 25
     steps:
+      # Use GitHub's pull_request merge commit, not a potentially stale PR head.
+      # On push events the default checkout uses the exact pushed commit.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -50,7 +50,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python -m pytest -q tests/test_lot16_signed_eight_row_fixture.py tests/test_gpt3_sealed_fixture_guard.py
+          python -m pytest -q tests/test_lot16_signed_eight_row_fixture.py tests/test_gpt3_sealed_fixture_guard.py tests/test_gpt3_guard_workflow_merge_checkout.py
           ruff check --select F821,F823 tools/diag_gpt3_sealed_fixture_guard.py tests/test_gpt3_sealed_fixture_guard.py
       - name: Assert shadow verdict never grants V2/commercial authority
         env:
