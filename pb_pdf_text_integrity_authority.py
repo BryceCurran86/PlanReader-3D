@@ -1347,7 +1347,24 @@ def _text_clip_reasons(
                 from tools.diag_original_pdf_active_clip_operator_authority import (
                     source_page_all_native_text_unclipped,
                 )
-                if source_page_all_native_text_unclipped(page):
+                # The source is immutable after producer ingestion, but
+                # the read-only source check must also resist mutable test
+                # handles: key its memo to the actual content bytes, not just
+                # page number. This avoids rescanning tens of thousands of
+                # original CAD paths for every one of the page's text words.
+                import hashlib
+                try:
+                    source_digest = hashlib.sha256(
+                        bytes(page.read_contents() or b"")
+                    ).hexdigest()
+                    xobjects = tuple(page.get_xobjects() or ())
+                except Exception:
+                    return (TEXT_CLIP_STATE_UNRESOLVED,)
+                cache = _page_cache(page)
+                key = ("raw_no_active_clip", source_digest, xobjects)
+                if key not in cache:
+                    cache[key] = bool(source_page_all_native_text_unclipped(page))
+                if cache[key]:
                     return ()
             return (TEXT_CLIP_STATE_UNRESOLVED,)
         bbox = _rect_tuple(subject_bbox)
