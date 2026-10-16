@@ -101,6 +101,106 @@ def source_fragments_on_documented_side(
     return found
 
 
+
+def original_source_side_contact_rivals(
+    box: Sequence[float], side: str,
+    originals: Mapping[str, Mapping[str, Any]],
+    native_owners: Mapping[str, Sequence[str]],
+    grid_opposition: Mapping[str, bool],
+) -> list[dict[str, Any]]:
+    """Preserve crossed/oblique/endpoint source ink withheld from line coverage.
+
+    The collinear-side census is correct for positive interval coverage, but
+    a physical original diagonal crossing that side cannot disappear from the
+    source universe. Keep these as typed rivals, NEVER as length coverage or
+    wall authority. No tolerance expansion of the source box or W2 snapping.
+    """
+    if (
+        type(box) not in (tuple, list) or len(box) != 4
+        or any(type(v) not in (int, float) or not math.isfinite(v) for v in box)
+        or box[2] <= box[0] or box[3] <= box[1]
+    ):
+        raise ValueError("unresolved native figured box")
+    x0, y0, x1, y1 = map(float, box)
+    positions = {
+        "x0": ("V", x0, y0, y1),
+        "x1": ("V", x1, y0, y1),
+        "y0": ("H", y0, x0, x1),
+        "y1": ("H", y1, x0, x1),
+    }
+    if side not in positions:
+        raise ValueError("unknown figured side")
+    axis, fixed, low, high = positions[side]
+    found = []
+    for native_id, segment in sorted(originals.items()):
+        if (
+            type(native_id) is not str or not native_id
+            or not isinstance(segment, Mapping)
+            or any(
+                key not in segment
+                or type(segment[key]) not in (int, float)
+                or not math.isfinite(segment[key])
+                for key in ("x1","y1","x2","y2")
+            )
+        ):
+            raise ValueError("invalid indexed original PDF source segment")
+        a, b, c, d = (float(segment[k]) for k in ("x1","y1","x2","y2"))
+        if axis=="V":
+            perpendicular=(a,c)
+            along=(b,d)
+        else:
+            perpendicular=(b,d)
+            along=(a,c)
+        p0, p1=perpendicular
+        t0, t1=along
+        # Exact source-backed positive collinear spans are already retained
+        # by source_fragments_on_documented_side. Do not duplicate them here.
+        if abs(p0-p1)<=AXIS_TOL and abs(p0-fixed)<=COORD_TOL:
+            continue
+        if abs(p0-fixed)<=COORD_TOL and abs(p1-fixed)<=COORD_TOL:
+            # Nearly collinear but not within original parallel test: preserve
+            # as a role-conflicting native graphic, not a structural span.
+            contact_kind="near_collinear_not_coverage"
+            low_overlap=max(low,min(t0,t1))
+            high_overlap=min(high,max(t0,t1))
+            if high_overlap < low_overlap:
+                continue
+            t=low_overlap
+        else:
+            denom=p1-p0
+            if denom==0:
+                continue
+            alpha=(fixed-p0)/denom
+            if not 0 <= alpha <= 1:
+                continue
+            t=t0+alpha*(t1-t0)
+            if t < low-COORD_TOL or t > high+COORD_TOL:
+                continue
+            is_endpoint=alpha==0 or alpha==1
+            contact_kind=(
+                "original_endpoint_contact"
+                if is_endpoint else
+                "original_diagonal_crossing"
+                if abs(t1-t0)>AXIS_TOL else
+                "original_transverse_crossing"
+            )
+        owners=sorted(set(native_owners.get(native_id, ())))
+        found.append({
+            "native_primitive_id":native_id,
+            "source_contact_pdf_pts":t,
+            "original_contact_kind":contact_kind,
+            "source_segment_pdf_pts":[a,b,c,d],
+            "exact_original_w4_candidate_ids":owners,
+            "source_w4_candidate_count":len(owners),
+            "typed_grid_opposed_owner_ids":[
+                owner for owner in owners if grid_opposition.get(owner,False)
+            ],
+            "source_wall_role_granted":False,
+            "source_interval_coverage_granted":False,
+        })
+    return found
+
+
 def compare_indexed_original_side(
     support: Sequence[Mapping[str, Any]],
     target: Sequence[Mapping[str, Any]],
@@ -427,6 +527,17 @@ def audit_registration_candidate_sides(
         )
         row["target_side_name"] = target_side
         row["source_to_target_along_affine"] = [slope, offset]
+        row["support_original_noninterval_source_contacts"] = (
+            original_source_side_contact_rivals(
+                box, side, native_support, owners_support, grid_support
+            )
+        )
+        row["target_original_noninterval_source_contacts"] = (
+            original_source_side_contact_rivals(
+                target_box, target_side,
+                native_target, owners_target, grid_target,
+            )
+        )
         sides[side] = row
     return {
         "registration_hypothesis":dict(candidate),
