@@ -154,8 +154,8 @@ def test_original_a502_both_3570_and_2200_native_end_tick_source_pairs():
     with fitz.open(stream=raw,filetype="pdf") as pdf:
         p=pdf[25]
         expected={
-            "3570":("d12615i0",["d12624i0","d12619i0"]),
-            "2200":("d12656i0",["d12665i0","d12660i0"]),
+            "3570":("d12615i0",["d12623i0","d12624i0","d12618i0","d12619i0"]),
+            "2200":("d12656i0",["d12664i0","d12665i0","d12659i0","d12660i0"]),
         }
         for word in p.get_text("words"):
             if word[4] not in expected:
