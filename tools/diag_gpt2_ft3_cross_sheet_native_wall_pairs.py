@@ -604,6 +604,22 @@ def original_source_side_pair_census(
                 before,after,
                 shift_along_side=translation[1] if side[0]=="x" else translation[0],
             )
+            # Keep native crossing/oblique contacts in the legacy best-case
+            # report as well. They never increase line interval coverage.
+            sides[side]["support_original_noninterval_source_contacts"] = (
+                original_source_side_contact_rivals(
+                    box,side,native[MARK_PAGE],
+                    evidence[str(MARK_PAGE)]["primitive_owners"],
+                    evidence[str(MARK_PAGE)]["grid_flags"],
+                )
+            )
+            sides[side]["target_original_noninterval_source_contacts"] = (
+                original_source_side_contact_rivals(
+                    target_box,side,native[SOURCE_PAGE],
+                    evidence[str(SOURCE_PAGE)]["primitive_owners"],
+                    evidence[str(SOURCE_PAGE)]["grid_flags"],
+                )
+            )
         alternatives = [
             audit_registration_candidate_sides(
                 box, candidate,
