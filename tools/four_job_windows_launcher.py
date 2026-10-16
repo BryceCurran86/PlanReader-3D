@@ -224,33 +224,108 @@ def git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False)
 
 
+def _full_commit(ref: str) -> bool:
+    return len(ref) == 40 and all(character in "0123456789abcdefABCDEF" for character in ref)
+
+
+def refresh_failure(session: Path, ref: str, status: str) -> None:
+    """Record that the requested snapshot was not obtained. No producer runs after this."""
+    output_report(session / "SNAPSHOT_REFRESH.json", {
+        "requested_ref": ref,
+        "status": status,
+        "repo_head_used": None,
+        "preflight_started": False,
+        "production_started": False,
+        "official_four_project_coverage_accuracy": None,
+        "official_four_project_precision_adjusted_accuracy": None,
+        "full_suite_publication_status": "UNPUBLISHED",
+    })
+
+
 def refresh_snapshot(repo: Path, runs: Path, session: Path, ref: str) -> str | None:
-    """Clone on first use; afterwards fetch ``ref`` and check it out detached. Returns HEAD or None."""
+    """Clone on first use; afterwards fetch ``ref`` and check it out detached.
+
+    A failed fetch or a checkout that is not the requested commit returns None.
+    The previous snapshot is never reused in that case.
+    """
     if not repo.exists():
         note("Step 2: obtaining a private local copy of the public PlanReader code (no upload)")
         rc, _, _ = run_logged(["git", "clone", "--depth", "1", "--branch", "main", REPO_URL, str(repo)], runs,
                               session / "git_clone.log", timeout_s=900)
         if rc != 0:
             note(f"Unable to clone repository. See {session / 'git_clone.log'}; check Git and internet access.")
+            refresh_failure(session, ref, "CLONE_FAILED")
             return None
     elif not (repo / ".git").exists():
         note(f"Expected Git repository but found unrelated directory: {repo}. No files changed.")
+        refresh_failure(session, ref, "SNAPSHOT_NOT_A_REPOSITORY")
         return None
     note(f"Step 2: refreshing the dedicated snapshot to {ref}")
     log = session / "git_refresh.log"
-    # A shallow v1 snapshot is fetched at the requested ref only; nothing outside the snapshot changes.
+    # A shallow snapshot is fetched at the requested ref only; nothing outside the snapshot changes.
     fetch = git(["fetch", "--depth", "1", "origin", ref], repo)
     log.write_text(fetch.stdout + fetch.stderr, encoding="utf-8")
     if fetch.returncode != 0:
-        note(f"Could not fetch {ref}; see {log}. Using the snapshot as it is.")
-    else:
-        checkout = git(["checkout", "--detach", "FETCH_HEAD"], repo)
-        with log.open("a", encoding="utf-8") as fh:
-            fh.write(checkout.stdout + checkout.stderr)
-        if checkout.returncode != 0:
-            note(f"Could not check out {ref}; see {log}.")
-            return None
-    return git(["rev-parse", "HEAD"], repo).stdout.strip()
+        note(f"Could not fetch {ref}; see {log}. No preflight or production will start.")
+        refresh_failure(session, ref, "FETCH_FAILED")
+        return None
+    checkout = git(["checkout", "--detach", "FETCH_HEAD"], repo)
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(checkout.stdout + checkout.stderr)
+    if checkout.returncode != 0:
+        note(f"Could not check out {ref}; see {log}. No preflight or production will start.")
+        refresh_failure(session, ref, "CHECKOUT_FAILED")
+        return None
+    parsed = git(["rev-parse", "HEAD"], repo)
+    head = parsed.stdout.strip()
+    if parsed.returncode != 0 or len(head) != 40:
+        note(f"Could not read the snapshot HEAD after checking out {ref}. No extraction will start.")
+        refresh_failure(session, ref, "HEAD_UNREADABLE")
+        return None
+    if _full_commit(ref) and head.lower() != ref.lower():
+        note(f"Checked out {head}, which is not the requested commit {ref}. No extraction will start.")
+        refresh_failure(session, ref, "PINNED_COMMIT_MISMATCH")
+        return None
+    output_report(session / "SNAPSHOT_REFRESH.json", {
+        "requested_ref": ref,
+        "status": "CHECKED_OUT",
+        "repo_head_used": head,
+        "preflight_started": False,
+        "production_started": False,
+        "official_four_project_coverage_accuracy": None,
+        "full_suite_publication_status": "UNPUBLISHED",
+    })
+    return head
+
+
+def handoff_bootstrap(out: Path, pdf: Path, project: str, stack_dump_min: int) -> str:
+    """Python source that starts one handoff. Paths are data, not syntax."""
+    dump = repr(str(out / "stack_dumps.txt"))
+    pdf_literal = repr(str(pdf))
+    out_literal = repr(str(out))
+    project_literal = repr(project)
+    seconds = max(1, int(stack_dump_min)) * 60
+    return (
+        "import faulthandler, sys, runpy\n"
+        f"f = open({dump}, 'a', encoding='utf-8')\n"
+        f"faulthandler.dump_traceback_later({seconds}, repeat=True, file=f)\n"
+        "sys.argv = ['run_source_closed_project_handoff', '--pdf', "
+        f"{pdf_literal}, '--project-id', {project_literal},\n"
+        f"            '--family-group', 'all', '--output-dir', {out_literal}]\n"
+        "runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)\n"
+    )
+
+
+def timeout_stack_tail(out: Path, limit: int = 40) -> str:
+    """Last lines of the faulthandler dump, or a stated absence. Not a stage guess."""
+    path = out / "stack_dumps.txt"
+    if not path.is_file():
+        return "no stack dump was written"
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if not text:
+        return "stack dump file was empty"
+    lines = text.splitlines()
+    return "\n".join(lines[-limit:])
 
 
 def share_safe(status: dict, home: str) -> dict:
@@ -393,14 +468,7 @@ def main() -> int:
             continue
         out = session / "project_outputs" / project
         out.mkdir(parents=True, exist_ok=True)
-        bootstrap = (
-            "import faulthandler, sys, runpy\n"
-            f"f = open(r'{out}/stack_dumps.txt', 'a')\n"
-            f"faulthandler.dump_traceback_later({max(1, opts.stack_dump_min) * 60}, repeat=True, file=f)\n"
-            f"sys.argv = ['run_source_closed_project_handoff', '--pdf', r'{pdf}', '--project-id', '{project}',\n"
-            f"            '--family-group', 'all', '--output-dir', r'{out}']\n"
-            "runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)\n"
-        )
+        bootstrap = handoff_bootstrap(out, pdf, project, opts.stack_dump_min)
         note(f"  Starting {project} (max {opts.timeout_min} minutes; log in the logs folder)")
         started = time.monotonic()
         rc, status, usage = run_logged([str(python), "-u", "-c", bootstrap], repo,
@@ -408,7 +476,7 @@ def main() -> int:
                                        timeout_s=opts.timeout_min * 60, track_memory=True,
                                        max_private_mb=int(opts.max_private_gb * 1024),
                                        min_free_commit_mb=int(opts.min_free_commit_gb * 1024))
-        summary["project_handoffs"].append({
+        handoff = {
             "project_id": project, "status": status, "exit_code": rc,
             "elapsed_s": round(time.monotonic() - started, 1),
             "peak_working_set_mb_sampled": round(usage["peak_working_set_kb"] / 1024, 1),
@@ -416,7 +484,10 @@ def main() -> int:
             "min_system_free_commit_mb_sampled": (None if usage["min_system_free_commit_kb"] is None
                                                   else round(usage["min_system_free_commit_kb"] / 1024, 1)),
             "single_document_handoff_only": True, "output_folder": str(out),
-        })
+        }
+        if status in {"TIMEOUT", "MEMORY_LIMIT", "SYSTEM_MEMORY_GUARD", "PROCESS_FAILED"}:
+            handoff["stack_dump_tail"] = timeout_stack_tail(out)
+        summary["project_handoffs"].append(handoff)
         note(f"  {project}: {status}")
         # Written after every project so an interrupted run keeps what already finished.
         output_report(session / "BENCHMARK_DIAGNOSTIC_STATUS.json", summary)

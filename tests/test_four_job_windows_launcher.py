@@ -145,6 +145,160 @@ def test_the_ocr_extras_command_installs_only_the_two_optional_packages_into_the
     assert not any(part.startswith("-r") or part == "requirements.txt" for part in command)
 
 
+class _GitResult:
+    def __init__(self, code: int, out: str = "", err: str = ""):
+        self.returncode = code
+        self.stdout = out
+        self.stderr = err
+
+
+def test_stale_checkout_is_not_reused_when_the_requested_ref_cannot_be_fetched(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    session = tmp_path / "session"
+    session.mkdir()
+    calls = []
+
+    def fake_git(args, cwd):
+        calls.append(list(args))
+        return _GitResult(1, err="offline")
+
+    monkeypatch.setattr(launcher, "git", fake_git)
+    assert launcher.refresh_snapshot(repo, tmp_path, session, "main") is None
+    assert calls == [["fetch", "--depth", "1", "origin", "main"]]
+    written = json.loads((session / "SNAPSHOT_REFRESH.json").read_text(encoding="utf-8"))
+    assert written["status"] == "FETCH_FAILED"
+    assert written["repo_head_used"] is None
+    assert written["preflight_started"] is False and written["production_started"] is False
+    assert written["official_four_project_coverage_accuracy"] is None
+
+
+def test_main_does_not_start_preflight_after_a_failed_snapshot_fetch(tmp_path, monkeypatch):
+    kit = _kit(tmp_path / "kit")
+    home = tmp_path / "home"
+    repo = home / "Documents" / "PlanReader_Private_V2_Run" / "repo_readonly_snapshot"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.chdir(kit)
+    monkeypatch.setattr(sys, "argv", ["four_job_windows_launcher.py"])
+    monkeypatch.setattr(launcher.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(launcher.shutil, "which", lambda _name: "git")
+    producer_calls = []
+
+    def fake_git(args, cwd):
+        return _GitResult(1, err="offline")
+
+    def forbidden(*_args, **_kwargs):
+        producer_calls.append("run")
+        raise AssertionError("preflight or production started after a failed fetch")
+
+    monkeypatch.setattr(launcher, "git", fake_git)
+    monkeypatch.setattr(launcher, "run_logged", forbidden)
+    assert launcher.main() == 4
+    assert producer_calls == []
+
+
+def test_pinned_commit_mismatch_does_not_return_a_different_head(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    session = tmp_path / "session"
+    session.mkdir()
+    requested = "a" * 40
+    other = "b" * 40
+
+    def fake_git(args, cwd):
+        if args[0] == "fetch":
+            return _GitResult(0)
+        if args[0] == "checkout":
+            return _GitResult(0)
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return _GitResult(0, out=other + "\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(launcher, "git", fake_git)
+    assert launcher.refresh_snapshot(repo, tmp_path, session, requested) is None
+    written = json.loads((session / "SNAPSHOT_REFRESH.json").read_text(encoding="utf-8"))
+    assert written["status"] == "PINNED_COMMIT_MISMATCH"
+
+
+def test_successful_refresh_returns_the_checked_out_head(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    session = tmp_path / "session"
+    session.mkdir()
+    head = "c" * 40
+    calls = []
+
+    def fake_git(args, cwd):
+        calls.append(list(args))
+        if args[0] == "fetch":
+            return _GitResult(0)
+        if args[0] == "checkout":
+            return _GitResult(0)
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return _GitResult(0, out=head + "\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(launcher, "git", fake_git)
+    assert launcher.refresh_snapshot(repo, tmp_path, session, "main") == head
+    assert ["checkout", "--detach", "FETCH_HEAD"] in calls
+    written = json.loads((session / "SNAPSHOT_REFRESH.json").read_text(encoding="utf-8"))
+    assert written["status"] == "CHECKED_OUT" and written["repo_head_used"] == head
+
+
+def test_handoff_bootstrap_keeps_an_apostrophe_in_a_windows_path_as_data():
+    out = Path("C:/Users/O'Brien/Run")
+    pdf = Path("C:/Users/O'Brien/plan's.pdf")
+    code = launcher.handoff_bootstrap(out, pdf, launcher.PROJECTS[1], 10)
+    compile(code, "<bootstrap>", "exec")
+    captured = {}
+
+    class _File:
+        def write(self, _text):
+            return 0
+
+    def fake_open(path, mode="a", encoding="utf-8"):
+        captured["opened"] = path
+        return _File()
+
+    import types
+    faulthandler = types.ModuleType("faulthandler")
+    faulthandler.dump_traceback_later = lambda *args, **kwargs: captured.setdefault("dump", True)
+    runpy = types.ModuleType("runpy")
+
+    def run_module(name, run_name, alter_sys):
+        captured["argv"] = list(sys.argv)
+        captured["module"] = name
+
+    runpy.run_module = run_module
+    previous = {name: sys.modules.get(name) for name in ("faulthandler", "runpy")}
+    sys.modules["faulthandler"] = faulthandler
+    sys.modules["runpy"] = runpy
+    import builtins
+    real_open = builtins.open
+    builtins.open = fake_open
+    try:
+        exec(code, {"__name__": "__main__"})
+    finally:
+        builtins.open = real_open
+        for name, module in previous.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+    assert captured["opened"] == str(out / "stack_dumps.txt")
+    assert captured["argv"][captured["argv"].index("--pdf") + 1] == str(pdf)
+    assert captured["argv"][captured["argv"].index("--output-dir") + 1] == str(out)
+    assert captured["module"] == "tools.run_source_closed_project_handoff"
+
+
+def test_timeout_status_keeps_the_stack_dump_tail_without_inventing_a_stage(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "stack_dumps.txt").write_text("frame one\nframe two\n", encoding="utf-8")
+    assert launcher.timeout_stack_tail(out) == "frame one\nframe two"
+    assert launcher.timeout_stack_tail(tmp_path / "missing") == "no stack dump was written"
+
+
 def test_with_ocr_is_off_by_default_and_the_limits_have_safe_defaults():
     parser = launcher.build_parser()
     defaults = parser.parse_args([])
