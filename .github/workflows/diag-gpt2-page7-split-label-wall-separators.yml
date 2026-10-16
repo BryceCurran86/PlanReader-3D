@@ -61,6 +61,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_atomic_w2_ancestry.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_p7_freezer_original_w2_graph_nodes.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_directed_cycles.py
           PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
@@ -335,6 +336,22 @@ jobs:
                   )
                   assert receipt["candidate_only_no_wall_or_room_authority"]
                   assert not receipt["physical_room_closed_or_metric_quantity_published"]
+                  # Source W4 path is producer-owned; a face-only diagonal must
+                  # NOT be misdiagnosed as W2 centroid movement.
+                  w4=receipt["w4_centerline_geometry_first_gate"]
+                  assert w4["status"] in (
+                      "original_w4_centerline_full_span_observed",
+                      "original_w4_centerline_partial_only",
+                      "original_w4_centerline_no_collinear_support",
+                  ), w4
+                  assert not w4["source_w4_path_match_is_structural_wall_role"]
+                  assert not w4["source_room_face_repaired"]
+                  assert receipt["first_unrepresented_geometry_stage_diagnostic_only"] in (
+                      "UNAVAILABLE",
+                      "W2_SOURCE_FRAGMENTS_TO_W4_CENTERLINE",
+                      "W4_CENTERLINE_TO_FACE_SUBEDGE",
+                      "BOTH_W2_SOURCE_AND_W4_GEOMETRY_OBSERVED_NOT_WALL_AUTHORITY",
+                  )
                   freezer_w2_first_gates.append(receipt)
           print("GPT2_FREEZER_ORIGINAL_W4_W2_NATIVE_SOURCE_ANCESTRY",json.dumps({
               "source_sha256":sha,
@@ -342,6 +359,110 @@ jobs:
               "source_room_face_record_id":freezer_source[0].record_id,
               "original_w4_crossing_w2_source_first_gates":freezer_w2_first_gates,
               "new_metric_quantity_published":False,
+          },sort_keys=True))
+          from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+              replay_original_page7_graph,
+          )
+          original_w4_ids=sorted({
+              row["original_w4_wall_id"] for row in freezer_w2_first_gates
+          })
+          freezer_graph_firstgate=replay_original_page7_graph(
+              source=producer,published=live,source_bytes=payload,
+              original_wall_scope=freezer_w4_scope,
+              original_w4_ids=original_w4_ids,
+          )
+          assert freezer_graph_firstgate["status"] == (
+              "EXACT_ORIGINAL_W2_W4_REPLAY_NODES_OBSERVED"
+          )
+          assert freezer_graph_firstgate["original_source_sha256"] == sha
+          assert freezer_graph_firstgate["original_source_owned_viewport_scope_verified"]
+          assert len(freezer_graph_firstgate["selected_original_w4_node_rows"])==len(original_w4_ids)
+          assert not freezer_graph_firstgate["source_structural_role_granted"]
+          assert not freezer_graph_firstgate["room_or_metric_published"]
+          for wall in freezer_graph_firstgate["selected_original_w4_node_rows"]:
+              for fragment in wall["w2_surviving_fragment_nodes"]:
+                  for end in fragment["endpoints"]:
+                      assert len(end["retained_original_coordinate_groups"]) == (
+                          end["retained_native_coordinate_cluster_count"]
+                      )
+                      assert all(not j["source_structural_role_granted"]
+                          for j in end["replayed_original_w3_junction_candidates"])
+                      assert end["retained_native_coordinate_cluster_count"] >= 1
+          assert freezer_graph_firstgate["new_commercial_quantities"]==[]
+          snap_inputs=freezer_graph_firstgate["original_all_split_input_snap_provenance"]
+          assert snap_inputs["status"]=="ORIGINAL_W2_ALL_SPLIT_ENDPOINT_INPUTS_REPLAY_VERIFIED"
+          assert not snap_inputs["new_firm_or_physical_room"]
+          assert all(
+              sum(group["original_split_input_sample_count"]
+                  for group in node["original_split_input_coordinate_groups"])
+                == node["original_producer_snap_sample_count"]
+              == len(node["all_original_split_endpoint_receipts"])
+              for node in snap_inputs["selected_original_node_rows"]
+          )
+          assert any(node["original_producer_snap_sample_count"]==20
+              for node in snap_inputs["selected_original_node_rows"])
+          print("GPT2_FREEZER_ALL_20_ORIGINAL_SNAP_INPUTS",json.dumps([
+              {
+                  "node_id": node["original_w2_node_id"],
+                  "sample_count": node["original_producer_snap_sample_count"],
+                  "native_coordinate_groups": node["original_split_input_coordinate_groups"],
+                  "source_identity_only":True,
+              } for node in snap_inputs["selected_original_node_rows"]
+          ],sort_keys=True))
+          # Only assert a source-native diagnostic on the immutable original.
+          # A running-centroid snap radius is not a pairwise-diameter bound.
+          assert any(
+              end["diameter_exceeds_nominal_tolerance_diagnostic_only"]
+              for wall in freezer_graph_firstgate["selected_original_w4_node_rows"]
+              for frag in wall["w2_surviving_fragment_nodes"]
+              for end in frag["endpoints"]
+          )
+          assert any(
+              not end["snap_samples_equal_retained_incidents"]
+              for wall in freezer_graph_firstgate["selected_original_w4_node_rows"]
+              for frag in wall["w2_surviving_fragment_nodes"]
+              for end in frag["endpoints"]
+          )
+          from pathlib import Path
+          Path("artifacts/gpt2-page7-physical-faces/freezer_w2_graph_nodes.json").write_text(
+              json.dumps(freezer_graph_firstgate,sort_keys=True,indent=2)+"\n"
+          )
+          print("GPT2_ORIGINAL_FREEZER_RAW_W2_SNAPPED_NODE_GATE",json.dumps({
+              "original_sha256":sha,
+              "reconstructed_w4_count":freezer_graph_firstgate["original_w4_candidate_count"],
+              "reconstructed_w2_graph_node_count":freezer_graph_firstgate["original_reconstructed_w2_node_count"],
+              "source_parity_verified":True,
+              "original_w4_nodes":[{
+                  "w4_wall_id":row["original_source_w4_wall_id"],
+                  "original_source_parent_edges":[{
+                      "w2_id":frag["original_surviving_w2_edge_id"],
+                      "original_primitive_ids":frag["original_indexed_parent_ids"],
+                      "original_endpoint_to_snapped_node":[
+                          {
+                              "raw":node["original_source_endpoint_pdf_pts"],
+                              "snapped":node["w2_graph_snapped_node_pdf_pts"],
+                              "displacement_pt":node["original_endpoint_vs_snapped_node_displacement_pt"],
+                              "samples":node["source_snap_samples"],
+                              "retained_native_endpoint_cluster_diameter_pdf_pt":
+                                  node["source_native_retained_endpoint_diameter_pdf_pt"],
+                              "diameter_exceeds_centroid_snap_tolerance_diagnostic_only":
+                                  node["diameter_exceeds_nominal_tolerance_diagnostic_only"],
+                              "original_incident_source_edge_count":len(
+                                  node["exact_node_incident_original_source_edges"]
+                              ),
+                              "distinct_original_native_coordinate_clusters":
+                                  node["retained_native_coordinate_cluster_count"],
+                              "mixed_native_coordinates":
+                                  node["mixed_original_coordinates_at_snapped_node"],
+                              "retained_native_source_groups":
+                                  node["retained_original_coordinate_groups"],
+                              "w3_junction_candidate_roles":
+                                  node["replayed_original_w3_junction_candidates"],
+                          } for node in frag["endpoints"]
+                      ]
+                  } for frag in row["w2_surviving_fragment_nodes"]]
+              } for row in freezer_graph_firstgate["selected_original_w4_node_rows"]],
+              "new_source_wall_role":False,"new_firm":False
           },sort_keys=True))
           report_rows={}
           for target, candidates in native_rows.items():
