@@ -45,6 +45,7 @@ def test_native_fixture_870_does_not_get_assigned_as_d13_width():
     ])
     assert len(rows)==1
     assert rows[0]["source_width_word_literal_untrusted"]=="920"
+    assert rows[0]["source_door_kind_candidate"]=="other_source_single_swing"
 
 
 def test_misleading_missing_height_or_multiple_row_ids_abstains():
@@ -66,13 +67,31 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
         result=audit(doc[27],other_plan_pages=(doc[6],doc[25],doc[26]))
         by_code={row["schedule_door_code_literal_untrusted"]:row
                  for row in result["all_original_schedule_row_candidates"]}
-        expected={"D11":("820","2040"),"D12":("820","2040"),
-                  "D13":("920","2040")}
+        expected={
+            "D03":("920","2040"),
+            "D04":("600","1700"),
+            "D05":("600","1700"),
+            "D06":("600","1700"),
+            "D07":("920","2040"),
+            "D08":("920","2040"),
+            "D09":("920","2040"),
+            "D10":("920","2040"),
+            "D11":("820","2040"),
+            "D12":("820","2040"),
+            "D13":("920","2040"),
+        }
         for code,(width,height) in expected.items():
             assert code in by_code
             assert (by_code[code]["source_width_word_literal_untrusted"],
                     by_code[code]["source_height_word_literal_untrusted"]) == (width,height)
             assert not by_code[code]["schedule_row_semantics_source_verified"]
+            expected_kind=(
+                "partition_system_single_swing" if code in ("D04","D05","D06")
+                else "solid_core_single_swing"
+            )
+            assert by_code[code]["source_door_kind_candidate"]==expected_kind
+            assert by_code[code]["source_height_derived_from_explicit_row_not_default"]
+            assert not by_code[code]["source_door_height_units_authenticated"]
         comparison={r["original_door_label_literal_not_trusted"]:r
                     for r in result["original_plan_tag_and_schedule_comparisons"]}
         for code in expected:
