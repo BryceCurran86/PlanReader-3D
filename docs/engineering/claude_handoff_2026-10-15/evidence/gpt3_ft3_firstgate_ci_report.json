@@ -1,0 +1,404 @@
+{
+  "benchmark_accuracy": null,
+  "benchmark_identity_assigned": false,
+  "customer_quantity_published": false,
+  "decoded_source_pages": [
+    "7",
+    "9",
+    "11"
+  ],
+  "definitions": {
+    "FT2": {
+      "description": null,
+      "reason_codes": [
+        "source_material_viewport_unauthenticated",
+        "text_trace_unavailable",
+        "text_glyph_mapping_unverified",
+        "text_clip_state_unresolved",
+        "text_crosses_viewport_boundary"
+      ],
+      "record_id": null,
+      "semantic_finish": null,
+      "source_definition_ids": [],
+      "source_page_ids": [],
+      "source_viewport_ids": [],
+      "status": "abstained"
+    },
+    "FT3": {
+      "description": "AMBER TILES LIVERPOOL FLOOR TILE - 600x600 \u201cDURA GREY\u201d MIN. R12 SLIP RATING. GROUT: GREY EPOXY. 100mm ALUMINIUM SKIRTING -ARMOURSPRAY BLACK SATIN: 9109024S",
+      "reason_codes": [
+        "source_material_definition_resolved"
+      ],
+      "record_id": "source_material_definition_fd13d3252a54de859e78027fc6e01dfa",
+      "semantic_finish": "tile",
+      "source_definition_ids": [
+        "source_material_definition_evidence_1fd0b2b37b966b56f9a4e4ff1eebf147"
+      ],
+      "source_page_ids": [
+        "11"
+      ],
+      "source_viewport_ids": [],
+      "status": "corroborated"
+    }
+  },
+  "diagnostic_only": true,
+  "first_unclosed_gate": "FLOOR_MATERIAL_OCCURRENCE_SCOPE_UNRESOLVED",
+  "floor_finish_quantity_published": false,
+  "floor_occurrence_scope": {
+    "ft2_ft3_occurrences": [],
+    "material_occurrence_count": 0,
+    "reason_codes": [
+      "source_material_viewport_unauthenticated",
+      "text_glyph_mapping_unverified",
+      "text_clip_state_unresolved",
+      "text_trace_unavailable"
+    ],
+    "scope_complete": false,
+    "status": "abstained"
+  },
+  "floor_page_id": "7",
+  "floor_viewport_bbox": [
+    49.68000030517578,
+    424.6400146484375,
+    1345.919921875,
+    2316.56005859375
+  ],
+  "floor_viewport_id": "view_p7_2",
+  "original_page11_native_schedule_word_first_gates_diagnostic_only": {
+    "diagnostic_only": true,
+    "native_internal_finish_schedule_title_blocks_diagnostic_only": [
+      {
+        "native_page_id": "11",
+        "native_source_text_preview_diagnostic_only": "INTERNAL FINISHES SCHEDULE",
+        "original_native_block_no": 257,
+        "original_native_word_count": 3,
+        "original_source_partition_id": "page:11",
+        "original_word_observation_ids": [
+          "source_observation_de01fc3bac76be09aa5d2a136dc764f5",
+          "source_observation_53e6d41344237b93a1a7b0f8df584e8d",
+          "source_observation_e0f43ac84f1681dcd6ecfb1ee39988ab"
+        ],
+        "source_floor_finish_occurrence_published": false,
+        "source_integrity_trusted_word_count": 0,
+        "source_integrity_untrusted_word_count": 3,
+        "source_text_block_definition_authenticated_by_this_report": false,
+        "untrusted_source_first_reasons": {
+          "text_clip_state_unresolved": 3,
+          "text_glyph_mapping_unverified": 3
+        }
+      }
+    ],
+    "native_material_code_first_gates_diagnostic_only": {
+      "FT2": {
+        "first_unclosed_gate": "multiple_original_native_material_code_blocks",
+        "native_row_blocks_diagnostic_only": [
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 19,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_fc8fb7544a7c69cb9e0af1de12a0e693"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 29,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_385eaa5fad9d1b8a7bba581e18df0e9a"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 30,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_c79c294d8ea7a0502b9f652fc707d61f"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 36,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_b5e2e6b6b9c69fc06dc5b08ced14df42"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 54,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_5517acbd135f255d51d0eef7f00f8e2a"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 55,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_10f7bace5c4a6938e59ad9e8e3e8c539"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 56,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_0441b25cb797c2f1024f15abf57f3119"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2",
+            "original_native_block_no": 57,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_dec1df793e53fb303a6d20f779fed9e2"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT2 AMBER TILES LIVERPOOL FLOOR TILE \u2013 800X400 \u2018STOCKTON WHITE\u2019. PRODUCT CODE: AAC84ACD0DR. R10 SLIP RATING. GROUT: GREY.",
+            "original_native_block_no": 261,
+            "original_native_word_count": 18,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_86737f25b6455c1dfa246b11e4b3f7f7",
+              "source_observation_3abf6ccf59aae72a2ef711421902f81c",
+              "source_observation_f2b7dbf932f466e07193aa6e95452142",
+              "source_observation_934e5f26cc9c1e9893d6ad3ecc62edf0",
+              "source_observation_c875b20d82168ad7e315ccfb27a8f948",
+              "source_observation_125d4dabf5365c779d3160972d490f5b",
+              "source_observation_81474b37d7bbea245467277adc8ab93a",
+              "source_observation_12d95517e23dfaae05c5a64d67c28a82",
+              "source_observation_6ac160214397c78a0798dedd6e3765e7",
+              "source_observation_950b879938ad15839ab6a8ded6616cee",
+              "source_observation_0217f2a21cf4463b581936415cb0d1f9",
+              "source_observation_a244b7b1019d0d114d7daef36eee59c3",
+              "source_observation_098f4eab08cf0a3f4c9023b497d2fe05",
+              "source_observation_94b6dfdea7c1c6930d70f557af1b0396",
+              "source_observation_68e951989bb8ae00344408e294cb712b",
+              "source_observation_ebcfe0d8989ae9e762d2c339d177be13",
+              "source_observation_76c3c48c9301b1420b74a563f8e23405",
+              "source_observation_b42a086234185129350197389cc067ee"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 18,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 18,
+              "text_glyph_mapping_unverified": 18
+            }
+          }
+        ],
+        "new_material_definition_authenticated": false,
+        "new_material_occurrence_published": false
+      },
+      "FT3": {
+        "first_unclosed_gate": "multiple_original_native_material_code_blocks",
+        "native_row_blocks_diagnostic_only": [
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT3 FT3 FT3",
+            "original_native_block_no": 112,
+            "original_native_word_count": 3,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_313f36bc842216ffb8f635871e7235d6",
+              "source_observation_16b235306a422cbcb6b15f096fcb7ddf",
+              "source_observation_7306fc4bb15dac11177eda136d1f09a5"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 3,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 3,
+              "text_glyph_mapping_unverified": 3
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT3",
+            "original_native_block_no": 113,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_61621f35beb361444a8f8ba4c3c67676"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT3",
+            "original_native_block_no": 114,
+            "original_native_word_count": 1,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_9e8f53c1dce041aca3dd17ed865bc806"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 1,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 1,
+              "text_glyph_mapping_unverified": 1
+            }
+          },
+          {
+            "native_page_id": "11",
+            "native_source_text_preview_diagnostic_only": "FT3 AMBER TILES LIVERPOOL FLOOR TILE - 600X600 \u201cDURA GREY\u201d MIN. R12 SLIP RATING. GROUT: GREY EPOXY. 100MM ALUMINIUM SKIRTING -ARMOURSPRAY BLACK SATIN: 9109024S",
+            "original_native_block_no": 262,
+            "original_native_word_count": 24,
+            "original_source_partition_id": "page:11",
+            "original_word_observation_ids": [
+              "source_observation_9c5ca9daa525dca23d9f3019af7b4f6e",
+              "source_observation_f161b5e494cbfbebd9f5ed10dcb8fe42",
+              "source_observation_d9d7aa0894c408999469c4d7bdc90068",
+              "source_observation_6cde6deee46b2e3b437a9a142b03afec",
+              "source_observation_e97fa13a765015a21a26516ce2adede6",
+              "source_observation_ada3042509cf4d8878887498e620c2a6",
+              "source_observation_05c5edcdcf7706b48c6c116961588f7a",
+              "source_observation_8d57cdca275d3cc7c18a7e5c6feab86b",
+              "source_observation_62f5b16b628ea89bd719790ba112a6c3",
+              "source_observation_4763f22fac7e57944f5c44f1a07abf50",
+              "source_observation_2476e80a44ec87366f4c21494e8ef457",
+              "source_observation_ed85abcb83b7d6d5a5c71243f7ad516f",
+              "source_observation_831b07e275c27a00d1a0e2e69760f6de",
+              "source_observation_6d51ca40fd8c7c801538240b5892a9d2",
+              "source_observation_2dd936d0a6d497ac39bff4451d2e77e6",
+              "source_observation_9f99c6a47466164731ba6f0389812b85",
+              "source_observation_8222b126d8716555294832107e361326",
+              "source_observation_3a22e873ae7a178ab975913460eb08fc",
+              "source_observation_73c67be9def9fcf1d76d56e543694a5d",
+              "source_observation_e5f002c8c2ad93125a969343b0eec2a6",
+              "source_observation_1798a78c8f4188309f848760a02409fa",
+              "source_observation_85b1ed6231f955f6d836fd9d4ae1e5c6",
+              "source_observation_935d48322790cb0b06b7d5b5afdabb38",
+              "source_observation_89efc66a928ff3ccfea4d5a4d30df069"
+            ],
+            "source_floor_finish_occurrence_published": false,
+            "source_integrity_trusted_word_count": 0,
+            "source_integrity_untrusted_word_count": 24,
+            "source_text_block_definition_authenticated_by_this_report": false,
+            "untrusted_source_first_reasons": {
+              "text_clip_state_unresolved": 24,
+              "text_glyph_mapping_unverified": 24
+            }
+          }
+        ],
+        "new_material_definition_authenticated": false,
+        "new_material_occurrence_published": false
+      }
+    },
+    "native_schedule_definition_authenticated_by_this_report": false,
+    "new_material_occurrences_published": false,
+    "source_page_id": "11"
+  },
+  "original_page7_local_ft3_line_first_gates_diagnostic_only": {
+    "candidate_lines": [],
+    "diagnostic_only": true,
+    "new_floor_finish_quantity_published": false,
+    "new_material_occurrence_published": false,
+    "trusted_exact_ft3_lines": [],
+    "viewport_text_scope_complete": false,
+    "viewport_text_scope_reason_codes": [
+      "source_material_viewport_unauthenticated",
+      "text_glyph_mapping_unverified",
+      "text_clip_state_unresolved",
+      "text_trace_unavailable"
+    ]
+  },
+  "project_id": "au_qld_maryborough_service_station",
+  "source_page_count": 31,
+  "source_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+}
