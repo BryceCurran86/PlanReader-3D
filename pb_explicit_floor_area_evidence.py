@@ -158,8 +158,8 @@ _COMPONENT_AREA_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 _COMPONENT_AREA_VALUE_RE = re.compile(
-    r"^(?P<value>\d{1,6}(?:\\.\d{1,3})?)\s*"
-    r"(?P<unit>m(?:2|²)|sq\\.?\s*m|sqm)$",
+    r"^(?P<value>\d{1,6}(?:\.\d{1,3})?)\s*"
+    r"(?P<unit>m(?:2|²)|sq\.?\s*m|sqm)$",
     re.IGNORECASE,
 )
 _COMPONENT_AGGREGATE_PREFIXES = ("TOTAL", "SUBTOTAL", "GRAND TOTAL")
