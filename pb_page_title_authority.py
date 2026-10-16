@@ -344,15 +344,19 @@ def _split_native_sheet_revision_values(
             for part in selected.get(index, (cell,))]
 
 
-def page_cells(pdf_page: Any) -> List[Cell]:
-    """Bind native composite labels/values to actual printed field columns."""
-    spans = page_spans(pdf_page)
+def _cells_from_native_source_spans(spans: Sequence[Dict[str, Any]]) -> List[Cell]:
+    """One native-source field-grouping path for page and document readers."""
     cells = [
         piece
         for cell in cells_from_spans(spans)
         for piece in split_label_runs(cell)
     ]
     return _split_native_sheet_revision_values(cells, spans)
+
+
+def page_cells(pdf_page: Any) -> List[Cell]:
+    """Bind native composite labels/values to actual printed field columns."""
+    return _cells_from_native_source_spans(page_spans(pdf_page))
 
 
 def _visual_size(pdf_page: Any) -> Tuple[float, float]:
@@ -1333,7 +1337,11 @@ def analyse_page(pdf_page: Any, page_no: int, *, spans: Optional[Sequence[Dict[s
     sheets have shown where its title blocks are. Text pages are never OCR'd.
     """
     width, height = _visual_size(pdf_page)
-    cells = cells_from_spans(spans if spans is not None else page_spans(pdf_page))
+    # Always use the same native-source label/value preparation as
+    # page_cells(). Injected spans are still exclusively caller-supplied
+    # native source observations and cannot be replaced by page words.
+    source_spans = spans if spans is not None else page_spans(pdf_page)
+    cells = _cells_from_native_source_spans(source_spans)
     native = analyse_cells(cells, width, height, page_no, "native")
     if allow_ocr and (ocr_engine is not None or ocr_available()):
         native.recovery = _recovery_plan(pdf_page, native, cells, width, height, ocr_engine)
