@@ -137,3 +137,58 @@ def audit_original_rotated_text_first_gates(
         "new_physical_floor_finish_occurrences":0,
         "new_customer_quantities":0,
     }
+
+
+
+def main() -> int:
+    """Write exact source FT3 first-gate receipts, never export trusted words."""
+    import argparse
+    import json
+    from pathlib import Path
+
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pdf",type=Path,required=True)
+    parser.add_argument("--source-sha256",required=True)
+    parser.add_argument("--page",type=int,required=True)
+    parser.add_argument("--literal",required=True)
+    parser.add_argument("--json",type=Path,required=True)
+    args=parser.parse_args()
+    source=args.pdf.read_bytes()
+    digest=hashlib.sha256(source).hexdigest()
+    if digest!=args.source_sha256:
+        raise ValueError("original_source_sha_mismatch")
+    with fitz.open(stream=source,filetype="pdf") as document:
+        if args.page<1 or args.page>len(document):
+            raise ValueError("original_source_page_out_of_range")
+        raw_words=document[args.page-1].get_text("words")
+        addresses=tuple(
+            (int(w[5]),int(w[6]),int(w[7]))
+            for w in raw_words
+            if len(w)>=8 and str(w[4])==args.literal
+        )
+    if not addresses:
+        raise ValueError("no_source_raw_words_match_literal")
+    report=audit_original_rotated_text_first_gates(
+        source,expected_sha256=digest,page_number=args.page,
+        native_word_addresses=addresses,
+    )
+    report["raw_source_literal_used_for_diagnostic_only"]=args.literal
+    args.json.parent.mkdir(parents=True,exist_ok=True)
+    args.json.write_text(
+        json.dumps(report,sort_keys=True,indent=2)+"\n",encoding="utf-8"
+    )
+    for row in report["native_word_first_gate_rows"]:
+        print(json.dumps({
+            "original_native_address":row["native_source_word_address"],
+            "original_source_literal_untrusted":row.get("original_source_word_literal_not_authentic"),
+            "rotation_source_reasons":row.get("existing_rotated_classification",{}).get("existing_text_integrity_reason_codes",[]),
+            "normalized_reasons":row.get("existing_zero_rotation_classification",{}).get("existing_text_integrity_reason_codes",[]),
+            "reasons_removed_by_zero_rotation":row.get("reason_codes_absent_only_after_rotation_zero",[]),
+            "reasons_added_by_zero_rotation":row.get("reason_codes_appearing_only_after_rotation_zero",[]),
+            "original_text_trust_not_granted":True,
+        },sort_keys=True))
+    return 0
+
+
+if __name__=="__main__":
+    raise SystemExit(main())
