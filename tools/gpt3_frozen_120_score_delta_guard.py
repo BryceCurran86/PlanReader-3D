@@ -154,6 +154,24 @@ def _validate_input_ledger(
             or adjusted < 0 or adjusted > value
         ):
             raise ValueError("advertised published score is not consistent with item states")
+        # The unchanged V2 evaluator computes precision as within /
+        # (120 + integer unsupported_extra). Reject a plausible-looking decimal
+        # that no integer number of unsupported extras could have produced.
+        if within == 0:
+            if adjusted != 0:
+                raise ValueError("zero correct targets cannot yield positive precision")
+        else:
+            if adjusted <= 0:
+                raise ValueError("positive correct targets require positive precision")
+            extras_as_float = (within / adjusted) - 120
+            extras = round(extras_as_float)
+            if (
+                extras < 0
+                or not math.isclose(extras_as_float, extras, abs_tol=1e-8, rel_tol=0)
+                or not math.isclose(adjusted, within / (120 + extras),
+                                    abs_tol=1e-12, rel_tol=0)
+            ):
+                raise ValueError("precision adjusted score lacks integer unsupported-extra basis")
     return by_key
 
 
