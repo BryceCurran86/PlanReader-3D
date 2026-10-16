@@ -407,10 +407,92 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
     return result
 
 
+def _source_embedded_symbol_byte_glyph_reasons(
+    page: object,
+    span: Mapping[str, object],
+    font: Sequence[object],
+) -> tuple[str, ...]:
+    """Fail-closed original source-byte→Unicode→embedded-symbol-GID proof.
+
+    Validated ToUnicode cannot independently prove source glyph identity.
+    For a genuine embedded TrueType symbol font, use the original PDF font
+    object, its exact one-byte ToUnicode source and both original Macintosh
+    and Windows symbol subtables. Both must agree on one positive glyph ID
+    per independently recovered character byte and match the renderer trace.
+    Never treat a Unicode-only match or replacement font as glyph authority.
+    This source pathway is opt-in and does not change clip/paint checks.
+    """
+    if len(font) < 3 or str(font[2] or "") != "TrueType":
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+    try:
+        xref = int(font[0])
+        document = page.parent
+        if xref <= 0 or document is None:
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+
+    source_cache = _page_runtime_cache(page).setdefault(
+        "original_source_symbol_font_tables_by_xref", {},
+    )
+    if not isinstance(source_cache, dict):
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+    if xref not in source_cache:
+        try:
+            # Helpers are independent original-source readers, not a font
+            # replacement/normalization. The fontTools dependency is optional:
+            # an unavailable or malformed program must always abstain.
+            from tools.diag_pdf_symbol_byte_glyph_shadow import (
+                _source_truetype_symbol_subtables,
+                _unique_source_tounicode,
+            )
+            tounicode, to_status = _unique_source_tounicode(document, xref)
+            embedded = document.extract_font(xref)
+            program = embedded[3] if len(embedded) >= 4 else b""
+            symbols, symbol_status = _source_truetype_symbol_subtables(program)
+            if (to_status == "parsed_one_byte_bfrange_candidates"
+                    and symbol_status == "unique_symbol_gid_candidates"
+                    and tounicode and symbols):
+                source_cache[xref] = (tounicode, symbols)
+            else:
+                source_cache[xref] = None
+        except Exception:
+            source_cache[xref] = None
+
+    tables = source_cache[xref]
+    if tables is None:
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+    unicode_by_byte, glyph_by_byte = tables
+    chars = span.get("chars") or ()
+    if not chars:
+        return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+    for char in chars:
+        try:
+            cp, gid = int(char[0]), int(char[1])
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        # Continuation/ligature mappings cannot be independently tied to
+        # a single unambiguous source byte by this limited source reader.
+        if gid <= 0:
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        matching_bytes = [code for code, reported in unicode_by_byte.items()
+                          if reported == cp]
+        if len(matching_bytes) != 1:
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        expected = glyph_by_byte.get(matching_bytes[0])
+        if expected is None or expected <= 0:
+            return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        if expected != gid:
+            return (TEXT_GLYPH_UNICODE_MISMATCH,)
+    return ()
+
+
 def _glyph_unicode_consistency_reasons(
     page: object,
     span: Mapping[str, object],
     font: Sequence[object],
+    *,
+    source_symbol_font_chain_shadow: bool = False,
 ) -> tuple[str, ...]:
     """Verify trace Unicode against the glyph ids actually rendered.
 
@@ -420,6 +502,8 @@ def _glyph_unicode_consistency_reasons(
     the decoded Unicode.  Unknown mappings abstain rather than guessing.
     """
 
+    if source_symbol_font_chain_shadow:
+        return _source_embedded_symbol_byte_glyph_reasons(page, span, font)
     font_view = _font_for_glyph_validation(page, font)
     if font_view is None:
         return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
@@ -458,6 +542,8 @@ def _decode_status(
     page: object,
     span: Mapping[str, object],
     raw_text: str,
+    *,
+    source_symbol_font_chain_shadow: bool = False,
 ) -> tuple[str, tuple[str, ...], Optional[int], str, str]:
     font, reasons = _font_binding(page, span)
     if font is None:
@@ -506,7 +592,10 @@ def _decode_status(
                 subtype,
                 base_font,
             )
-        glyph_reasons = _glyph_unicode_consistency_reasons(page, span, font)
+        glyph_reasons = _glyph_unicode_consistency_reasons(
+            page, span, font,
+            source_symbol_font_chain_shadow=source_symbol_font_chain_shadow,
+        )
         if glyph_reasons:
             decode_status = (
                 "tounicode_glyph_mismatch"
@@ -1960,6 +2049,8 @@ def _visibility_status(
 def classify_native_word_integrity(
     page: object,
     word: Mapping[str, object],
+    *,
+    source_symbol_font_chain_shadow: bool = False,
 ) -> NativeTextIntegrityDecision:
     """Classify one raw native word using producer-owned PDF state.
 
@@ -1970,6 +2061,8 @@ def classify_native_word_integrity(
     span independently passes every check.
     """
 
+    if type(source_symbol_font_chain_shadow) is not bool:
+        raise ValueError("symbol_source_glyph_shadow_requires_explicit_bool")
     raw_text = str(word.get("text") or "")
     reasons: list[str] = []
     spans, trace_text, trace_reasons = _matching_trace_spans(page, word)
@@ -2000,7 +2093,11 @@ def classify_native_word_integrity(
     first_seqno: Optional[int] = None
     for index, span in enumerate(spans):
         span_text = _trace_text(span) if chain else raw_text
-        span_decode, decode_reasons, xref, subtype, base_font = _decode_status(page, span, span_text)
+        span_decode, decode_reasons, xref, subtype, base_font = _decode_status(
+            page, span, span_text,
+            **({"source_symbol_font_chain_shadow": True}
+               if source_symbol_font_chain_shadow else {}),
+        )
         reasons.extend(decode_reasons)
         subject = (span.get("bbox") or word_bbox) if chain else word_bbox
         _span_visibility, visibility_reasons, seqno = _visibility_status(
