@@ -611,7 +611,9 @@ def classify_structural_wall_ink(
                         continue
                     gap_pairs[(k, k2)] = (r, r2, gap, thickness[r])
     # Short gaps are accepted on one face. A wider gap is accepted only when the partner face of the same wall is
-    # interrupted over the same interval (two collinear walls on opposite sides of a room do not do that).
+    # interrupted over the same interval: either its own gap ends line up with this one (to a point tolerance), or its
+    # line is free of solid wall runs over the interval and has a face on each side of it (a jamb symbol or an end cap
+    # can overhang a face end, so alignment to a point is not required).
     def _partner_gap_exists(key: Tuple[int, int]) -> bool:
         r, r2, gap, thick = gap_pairs[key]
         _, ex, ey, ux, uy = face_ends[key[0]]
@@ -630,11 +632,54 @@ def classify_structural_wall_ink(
                         return True
         return False
 
+    run_dirs: List[Tuple[float, float, float, float, float, float]] = []
+    for other in runs:
+        oa = _angle(other.p)
+        run_dirs.append((math.cos(oa), math.sin(oa), other.p[0], other.p[1], other.p[2], other.p[3]))
+
+    def _partner_line_interrupted(key: Tuple[int, int]) -> bool:
+        """The partner face line (one reading of the wall thickness to either side) carries no solid wall run over the gap
+        interval and has a face ending on each side of it. A jamb symbol may overhang a face end, so ends are matched
+        within the face-gap bound and the interval is shortened by it instead of by a point tolerance."""
+        r, r2, gap, thick = gap_pairs[key]
+        _, ex, ey, ux, uy = face_ends[key[0]]
+        nx, ny = -uy, ux
+        tol = max(MIN_FACE_OFFSET_PT, 0.25 * thick)
+        shrink = min(MAX_FACE_GAP_PT, 0.25 * gap)
+        lo, hi = shrink, gap - shrink
+        for sign in (1.0, -1.0):
+            target = sign * thick
+            left = right = blocked = False
+            for q in range(len(runs)):
+                if q == r or q == r2:
+                    continue
+                oux, ouy, ax, ay, bx, by = run_dirs[q]
+                if abs(oux * ux + ouy * uy) < math.cos(ANGLE_TOL_RAD):
+                    continue
+                o1 = (ax - ex) * nx + (ay - ey) * ny
+                o2 = (bx - ex) * nx + (by - ey) * ny
+                if abs(o1 - target) > tol or abs(o2 - target) > tol:
+                    continue
+                t1 = (ax - ex) * ux + (ay - ey) * uy
+                t2 = (bx - ex) * ux + (by - ey) * uy
+                a, b = (t1, t2) if t1 <= t2 else (t2, t1)
+                if min(b, hi) - max(a, lo) > 0.0:
+                    blocked = True
+                    break
+                if a < lo and b >= -MAX_FACE_GAP_PT:
+                    left = True
+                if b > hi and a <= gap + MAX_FACE_GAP_PT:
+                    right = True
+            if not blocked and left and right:
+                return True
+        return False
+
     valid_gap_pairs: Dict[Tuple[int, int], Tuple[int, int, float, float]] = {}
     can_match = len(gap_pairs) <= MAX_GAP_CANDIDATES_FOR_PARTNER_MATCH
     for key in sorted(gap_pairs):
         r, r2, gap, thick = gap_pairs[key]
-        if gap <= MAX_OPENING_GAP_FACTOR * thick or (can_match and _partner_gap_exists(key)):
+        if gap <= MAX_OPENING_GAP_FACTOR * thick or (
+                can_match and (_partner_gap_exists(key) or _partner_line_interrupted(key))):
             valid_gap_pairs[key] = gap_pairs[key]
     gap_pairs = valid_gap_pairs
     for key in sorted(gap_pairs):

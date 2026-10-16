@@ -5,6 +5,12 @@ filters a candidate, or changes a quantity. Claude integration lane, 2026-10-16.
 `tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (37),
 `tests/test_structural_wall_ink_overlay_tool.py` (2).
 
+> **Update 2026-10-17.** The wide-gap rule (§2) now also accepts a partner face whose line is clear over the gap interval and has a face ending on each side of it, so a jamb symbol that
+> overhangs one face end no longer hides an opening (the aligned-ends rule is kept; no candidate was dropped on any page). The counts below were measured before that change; after it:
+> 3Laurel p3 849 -> 860 candidates and 354 -> 369 gap candidates; Q5446 p1 177 -> 189 and 53 -> 87; Q5446 p2 222 and 46 -> 68; Maryborough p7 320 -> 339 and 180 -> 222; Lot16 p3 unchanged (0).
+> `tests/test_structural_wall_ink_shadow.py` now has 45 tests. Attached partition ink, room-region evidence and the room-region overlay are in
+> `../structural_room_region_shadow_20261017/README.md`.
+
 ## 1. Why (observed repository behaviour)
 `docs/engineering/3laurel_p3_wall_universe_architecture_report_v1.md` §9.6 named the first impossible gate for 3Laurel page 3:
 **no authority separates structural wall geometry from finish, joinery, fixture and annotation geometry.** Production keeps every drawn

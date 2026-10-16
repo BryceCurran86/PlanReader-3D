@@ -387,6 +387,99 @@ def test_a_wide_gap_needs_the_partner_face_to_be_interrupted_too():
     assert not [g for g in run(one_face).opening_gaps if abs(g.gap_length_pt - wide) < 0.01]
 
 
+def _overhang_building(wide=100.0, left_overhang=4.0, right_overhang=0.0, t=2.6):
+    """A top wall interrupted by an opening ``wide`` apart; the lower face of the left piece stops ``left_overhang`` short
+    of the upper face (a jamb symbol or an end cap), so the two faces' gap ends do not line up to a point."""
+    segs = [seg("a1", 100, 100, 215, 100), seg("a2", 215 + wide, 100, 400, 100),
+            seg("c1", 100, 100 + t, 215 - left_overhang, 100 + t), seg("c2", 215 + wide + right_overhang, 100 + t, 400, 100 + t)]
+    segs += strip("bot", 100, 300 - t, 400, 300) + strip("left", 100, 100 + t, 100 + t, 300 - t)
+    segs += strip("right", 400 - t, 100 + t, 400, 300 - t)
+    return segs
+
+
+def _gaps_of_length(report, length):
+    return [g for g in report.opening_gaps if abs(g.gap_length_pt - length) < 0.01]
+
+
+def test_a_wide_opening_is_found_when_a_jamb_symbol_makes_the_partner_face_ends_overhang():
+    t = 2.6
+    wide = 100.0                                                             # 38 thicknesses: needs the partner face
+    exact = run(_overhang_building(left_overhang=0.0))
+    assert _gaps_of_length(exact, wide)                                      # aligned ends: accepted as before
+    overhung = run(_overhang_building(left_overhang=4.0, right_overhang=3.0))
+    got = _gaps_of_length(overhung, wide)
+    assert got, "an overhang of a jamb symbol must not hide the opening"
+    assert all(abs(g.thickness_pt - t) < 0.01 for g in got)
+    assert {g.source_primitive_id_a for g in got} <= {"a1", "c1"} and {g.source_primitive_id_b for g in got} <= {"a2", "c2"}
+    # both faces report it, each against the other: the upper face's 100 pt and the lower face's 107 pt
+    assert _gaps_of_length(overhung, 107.0)
+
+
+def test_a_partner_face_ending_further_than_the_face_gap_bound_does_not_make_the_wide_opening():
+    far = run(_overhang_building(left_overhang=ink.MAX_FACE_GAP_PT + 4.0))
+    assert not _gaps_of_length(far, 100.0)
+
+
+def test_the_bound_applies_to_the_far_side_of_the_opening_as_well():
+    assert _gaps_of_length(run(_overhang_building(left_overhang=0.0, right_overhang=ink.MAX_FACE_GAP_PT - 2.0)), 100.0)
+    assert not _gaps_of_length(run(_overhang_building(left_overhang=0.0, right_overhang=ink.MAX_FACE_GAP_PT + 4.0)), 100.0)
+
+
+def test_partner_faces_may_also_run_a_symbol_length_into_the_opening():
+    # the lower faces run 4 pt and 3 pt INTO the opening (an end cap or a door frame): still the same wall, interrupted
+    got = _gaps_of_length(run(_overhang_building(left_overhang=-4.0, right_overhang=-3.0)), 100.0)
+    assert got and {g.source_primitive_id_a for g in got} <= {"a1", "c1"}
+    # but a partner face that fills most of the opening is a wall through the opening, not an interruption of it
+    through = _overhang_building(left_overhang=-70.0, right_overhang=-20.0)
+    assert not _gaps_of_length(run(through), 100.0)
+    # 20 pt (7.7 thicknesses) into the opening is already more than a jamb symbol: refused
+    assert not _gaps_of_length(run(_overhang_building(left_overhang=-20.0)), 100.0)
+
+
+def test_a_parallel_line_beside_the_partner_face_does_not_block_the_opening():
+    # a fixture line 3 pt inside the room, running across the whole opening, is not on the partner face's line
+    got = _gaps_of_length(run(_overhang_building(left_overhang=4.0) + [seg("fixture", 150, 105.6, 360, 105.6)]), 100.0)
+    assert got and {g.source_primitive_id_a for g in got} <= {"a1", "c1"}
+
+
+def test_a_wide_opening_is_refused_when_solid_wall_ink_runs_through_the_partner_line():
+    t = 2.6
+    segs = [seg("a1", 100, 100, 215, 100), seg("a2", 315, 100, 400, 100),
+            seg("c1", 100, 100 + t, 400, 100 + t)]                           # the other face runs straight through
+    segs += strip("bot", 100, 300 - t, 400, 300) + strip("left", 100, 100 + t, 100 + t, 300 - t)
+    segs += strip("right", 400 - t, 100 + t, 400, 300 - t)
+    assert not _gaps_of_length(run(segs), 100.0)
+
+
+def test_the_overhang_opening_rule_is_deterministic_order_and_translation_invariant():
+    base = _overhang_building(left_overhang=4.0)
+    expected = run(base).opening_gaps
+    shuffled = list(base)
+    random.Random(11).shuffle(shuffled)
+    assert run(shuffled).opening_gaps == expected
+    moved = [dict(s, x1=s["x1"] + 13.0, x2=s["x2"] + 13.0, y1=s["y1"] - 7.0, y2=s["y2"] - 7.0) for s in base]
+    got = run(moved).opening_gaps
+    assert [(round(g.end_a[0] - 13.0, 3), round(g.end_a[1] + 7.0, 3), g.gap_length_pt) for g in got] == [
+        (g.end_a[0], g.end_a[1], g.gap_length_pt) for g in expected]
+
+
+def test_the_overhang_opening_rule_is_invariant_to_a_quarter_turn_splitting_and_unrelated_content():
+    base = _overhang_building(left_overhang=4.0, right_overhang=3.0)
+    expected = sorted(g.gap_length_pt for g in run(base).opening_gaps)
+    assert 100.0 in expected and 107.0 in expected
+    turned = [dict(s, x1=-s["y1"] + 700.0, y1=s["x1"], x2=-s["y2"] + 700.0, y2=s["x2"]) for s in base]
+    assert sorted(g.gap_length_pt for g in run(turned, page=(PAGE[1] + 200, PAGE[0])).opening_gaps) == expected
+    split = []
+    for s in base:
+        mx, my = (s["x1"] + s["x2"]) / 2, (s["y1"] + s["y2"]) / 2
+        split.append(dict(s, id=s["id"] + ".1", x2=mx, y2=my))
+        split.append(dict(s, id=s["id"] + ".2", x1=mx, y1=my))
+    assert sorted(g.gap_length_pt for g in run(split).opening_gaps) == expected
+    far = [dict(s, id="far." + s["id"], x1=s["x1"] + 1000.0, x2=s["x2"] + 1000.0) for s in _overhang_building(left_overhang=0.0)]
+    got = run(base + far, page=(2200.0, PAGE[1])).opening_gaps
+    assert sorted(g.gap_length_pt for g in got if g.end_a[0] < 900.0) == expected
+
+
 def test_collinear_walls_far_apart_are_not_one_interrupted_wall():
     t = 2.6
     segs = strip("w1", 100, 100, 160, 100 + t) + strip("w2", 160 + 300.0, 100, 700, 100 + t)   # 115 thicknesses apart
