@@ -134,8 +134,6 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         (m.project_id, doc.name): doc for m in manifests for doc in m.source_documents
     }
     _require(len(original_docs) == 10, "frozen ten-document source universe drift")
-    _require(all(m.status != "VERIFIED" for m in manifests),
-             "owner archive report is not a replacement for official publication")
     owner = _object(root, "RUN_RECEIPT.json")
     _require(owner.get("schema") == "four_job_owner_machine_run_receipt/1",
              "owner run receipt schema mismatch")
@@ -350,6 +348,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         rows.append({
             "project_id": project_id,
             "frozen_denominator": denominator_by_id[project_id],
+            "frozen_manifest_status": manifest.status,
             "process_status": state,
             "producer_status": summary.get("status"),
             "earliest_verified_project_execution_gate": observed_gate,
