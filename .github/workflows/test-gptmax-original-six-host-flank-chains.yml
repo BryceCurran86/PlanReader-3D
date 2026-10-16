@@ -82,6 +82,21 @@ jobs:
           archived={r['physical_opening_id'] for r in ledger['case_evidence']
                     if r['host_binding']['status']=='abstained'}
           assert missing==archived and len(missing)==6
+          # Hash is from independently downloaded original #2807 producer
+          # receipt artifact 11978503687, NOT frozen benchmark truth.
+          # Compare the WHOLE physical->host->W4-membership->frame inventory,
+          # so stable 21/15/9 totals cannot hide a 1215 or other ID rekey.
+          from hashlib import sha256
+          inventory={r['opening_identity_id']:{
+              'host':r['record_id'],
+              'members':sorted(r.get('member_wall_candidate_ids',[]))}
+              for r in source['opening_bindings']}
+          for frame in source['host_frames']:
+              inventory[frame['opening_identity_id']]['frame']=frame['record_id']
+          digest=sha256(json.dumps(inventory,sort_keys=True,
+              ensure_ascii=True,separators=(',',':')).encode()).hexdigest()
+          assert digest=='e0be3f277686ad3e4abedfe586ade0469fa244b52045dfb5b9a0dbfb0b694e27', (
+              'existing original physical/host/W4/frame identity inventory changed')
           by_identity={r['opening_identity_id']:r for r in source['opening_bindings']}
           sg=by_identity['physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9']
           adjacent=by_identity['physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f']
