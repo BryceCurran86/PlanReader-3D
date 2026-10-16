@@ -6,9 +6,11 @@ Original Lot16 SHA256
 snapshot `source_snapshot_3fcb6bc5c44b51d930e9600080501d27`.
 
 Traced `compose_live_wall_opening_authority` →
-`OpeningHostBindingProducer.resolve` →
-`_proven_raster_opening_flank_boxes`. No measurement seam. `#273`
-ranking was not consulted.
+`OpeningHostBindingProducer.publish`. Selector lookup is
+`OpeningHostBindingAuthority.resolve`.
+`_proven_raster_opening_flank_boxes` belongs to
+`SourceVisibilityProducer` and runs during source augmentation, before
+host publish. No measurement seam. `#273` ranking was not consulted.
 
 ## Observed repository behavior
 

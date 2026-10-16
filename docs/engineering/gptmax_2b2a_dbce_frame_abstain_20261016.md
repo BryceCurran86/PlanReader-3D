@@ -7,10 +7,15 @@ supporting physical-view evidence, not host membership.
 
 ## Observed repository behavior
 
-Traced `compose_live_wall_opening_authority` → `OpeningHostBindingProducer.resolve`
-→ `_resolve_raster_source_band_host_from_records` →
-`_proven_raster_opening_flank_boxes` → `OpeningHostFrameProducer._scope_bindings`.
-No measurement seam was crossed. `#273` ranking was not consulted.
+Traced `compose_live_wall_opening_authority` →
+`OpeningHostBindingProducer.publish` →
+`_resolve_raster_source_band_host_from_records`. Selector lookup is
+`OpeningHostBindingAuthority.resolve`.
+`_proven_raster_opening_flank_boxes` belongs to
+`SourceVisibilityProducer` and runs during source augmentation, not as a
+binding-producer method. The neighbour check is
+`OpeningHostFrameProducer._scope_bindings`. No measurement seam was
+crossed. `#273` ranking was not consulted.
 
 ### `physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9` (1215 SGW)
 
