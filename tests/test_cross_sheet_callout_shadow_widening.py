@@ -142,3 +142,36 @@ def test_inline_prose_does_not_become_shadow_callout():
         word("A-302", 61, 30, pos=3),
     ])
     assert find_callout_references(split, page_num=1, shadow_extended=True) == []
+
+
+def test_shadow_geometry_translation_scale_and_unrelated_content():
+    base = [word("5", 12, 12, line=0), word("A-302", 4, 24, line=1)]
+    original = find_callout_references(Page(base), page_num=1, shadow_extended=True)
+    assert len(original) == 1
+
+    def moved(w):
+        return (
+            w[0] * 2 + 100, w[1] * 2 + 80,
+            w[2] * 2 + 100, w[3] * 2 + 80,
+            *w[4:],
+        )
+
+    distant = word("UNRELATED", 900, 900, block=99)
+    altered = Page([moved(base[0]), moved(base[1]), distant])
+    references = find_callout_references(altered, page_num=1, shadow_extended=True)
+    assert [(r.mark, r.referenced_sheet_code) for r in references] == [("5", "A-302")]
+    assert find_callout_references(altered, page_num=1) == []
+
+
+def test_widened_callout_near_geometry_requires_explicit_opt_in():
+    page = Page([word("5/A-302", 10, 20)])
+    geometry = (0.0, 0.0, 60.0, 50.0)
+    assert find_callout_near_geometry(
+        page, page_num=1, geometry_bbox=geometry, proximity_pt=50
+    ) is None
+    result = find_callout_near_geometry(
+        page, page_num=1, geometry_bbox=geometry,
+        proximity_pt=50, shadow_extended=True
+    )
+    assert result is not None
+    assert result.referenced_sheet_code == "A-302"
