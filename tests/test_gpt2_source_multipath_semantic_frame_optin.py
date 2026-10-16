@@ -42,6 +42,9 @@ def test_original_a120_correct_line_built_schedule_with_both_optins():
         assert _by_id(source)["view_p9_5"].status!="resolved"
         assert _by_id(source)["view_p9_5"].status!="derived"
         assert not _by_id(source)["view_p9_5"].bounding_box
+        assert _by_id(source)["view_p9_5"].status=="ambiguous"
+        assert _by_id(source)["view_p9_5"].provenance.get("independent_plan_extent_unproven") is True
+        assert not v.is_authoritative_derived_viewport(_by_id(source)["view_p9_5"])
     assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()==SHA
 
 
@@ -89,4 +92,7 @@ def test_flags_are_exact_bool_not_numeric_truthiness():
     with pytest.raises(ValueError,match="explicit_bool"):
         v.segment_page_viewports(p,page_number=1,
             source_connected_table_cell_shadow="true")
+    with pytest.raises(ValueError,match="source_multipath_requires_connected_source_cell_guard"):
+        v.segment_page_viewports(p,page_number=1,
+            source_native_multipath_semantic_frame_shadow=True)
     doc.close()
