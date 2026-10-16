@@ -1,0 +1,33 @@
+name: TEST GPT3 Original Four-Job Owner Receipt Integrity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/gpt3_owner_four_job_receipt_integrity.py"
+      - "tests/test_gpt3_owner_four_job_receipt_integrity.py"
+      - ".github/workflows/test-gpt3-owner-four-job-receipt-integrity.yml"
+  workflow_dispatch:
+
+jobs:
+  owner-share-safe-source-receipts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original owner derived artifact SHA and source-stage integrity
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_owner_four_job_receipt_integrity.py
+      - name: Keep official Full Plan V2 and provider truth isolated
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
