@@ -41,3 +41,22 @@ def test_unheaded_text_only_cannot_prove_authoritative_view():
 def test_explicit_schedule_title_remains_supported():
     assert classify_sheet_role("DOOR SCHEDULE")[0] == "DOOR_WINDOW_SCHEDULE"
     assert classify_sheet_role("FINISH SCHEDULE")[0] == "FINISH_SCHEDULE"
+
+
+def test_workspace_registry_uses_page_label_before_page_type():
+    import sqlite3
+    from pb_sheet_classification_v172 import SheetClassificationRegistry
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE pages (id INTEGER, workspace_id INTEGER, page_label TEXT, page_type TEXT)")
+    db.execute(
+        "INSERT INTO pages VALUES (?, ?, ?, ?)",
+        (1, 42, "GROUND FLOOR PLAN", "See reflected ceiling plan"),
+    )
+    try:
+        records = SheetClassificationRegistry.derive_for_workspace(db, 42).records
+        assert len(records) == 1
+        assert records[0].canonical_role == "FLOOR_PLAN"
+        assert records[0].primary_takeoff_target == "WALL_FLOOR"
+    finally:
+        db.close()
