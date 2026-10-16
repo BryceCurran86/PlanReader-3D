@@ -60,6 +60,29 @@ def test_native_production_source_p24_to_p27_all_own_sheet_numbers():
         # be parsed before sheet identity can distinguish A501 from the
         # A502 callout on the same source page.
         expected = {24: "A500", 25: "A501", 26: "A502", 27: "A503"}
+        from pb_page_title_authority import (
+            _bind, _collect_below, sheet_number_shape,
+        )
+        for page_number in expected:
+            cells = page_cells(doc[page_number - 1])
+            labels = [p for c in cells if (p := parse_label(c)) is not None]
+            print("TITLE_TRACE", page_number, "number_labels", [
+                (p.cell.text, p.cell.x0, p.cell.y0, p.cell.x1, p.cell.y1)
+                for p in labels if p.field == "sheet_number"
+            ])
+            print("VALUE_TRACE", page_number, [
+                (c.text, c.x0, c.y0, c.x1, c.y1)
+                for c in cells if c.y0 > 1588 and c.x0 > 2040
+            ])
+            for label in labels:
+                if label.field == "sheet_number":
+                    print("BIND_TRACE", page_number,
+                        _bind(label, cells, [p.cell for p in labels],
+                              float(doc[page_number-1].rect.width),
+                              float(doc[page_number-1].rect.height),
+                              sheet_number_shape, 1, single=True))
+            print("ANALYSIS_TRACE", page_number,
+                  analyses[page_number-1].sheet_numbers)
         for page_num, sheet_number in expected.items():
             assert resolved[page_num - 1].sheet_number == sheet_number, (
                 page_num, analyses[page_num - 1].sheet_numbers,
