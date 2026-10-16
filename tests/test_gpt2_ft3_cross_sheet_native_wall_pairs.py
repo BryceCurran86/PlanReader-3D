@@ -323,3 +323,96 @@ def test_invalid_indexed_original_source_segment_abstains(bad):
         source_fragments_on_documented_side(
             BOX,"x0",{"p":bad}, {}, {},
         )
+
+
+from tools.diag_gpt2_ft3_cross_sheet_native_wall_pairs import (
+    original_source_side_contact_rivals,
+)
+
+def test_original_side_contact_rivals_keep_diagonal_transverse_endpoint_and_grid():
+    box=(10.,20.,34.,50.)
+    original={
+        "collinear":seg(10,20,10,50),
+        "diagonal":seg(5,24,15,44),
+        "transverse":seg(4,36,17,36),
+        "endpoint":seg(10,33,20,33),
+        "foreign":seg(3,10,5,15),
+    }
+    owners={
+        "collinear":["wall0"],
+        "diagonal":["wall2","wall3"],
+        "transverse":["grid"],
+        "endpoint":["wall1"],
+    }
+    grid={"grid":True}
+    snapshot=deepcopy((original,owners,grid))
+    records=original_source_side_contact_rivals(
+        box,"x0",original,owners,grid,
+    )
+    assert (original,owners,grid)==snapshot
+    kinds={row["native_primitive_id"]:row["original_contact_kind"]
+           for row in records}
+    assert kinds=={
+        "diagonal":"original_diagonal_crossing",
+        "transverse":"original_transverse_crossing",
+        "endpoint":"original_endpoint_contact",
+    }
+    matched={row["native_primitive_id"]:row for row in records}
+    assert matched["diagonal"]["source_w4_candidate_count"]==2
+    assert matched["transverse"]["typed_grid_opposed_owner_ids"]==["grid"]
+    assert all(not x["source_interval_coverage_granted"]
+               and not x["source_wall_role_granted"] for x in records)
+
+
+@pytest.mark.parametrize("side,original,expected",[
+    ("x0",seg(5,35,15,35),"original_transverse_crossing"),
+    ("x1",seg(30,35,40,35),"original_transverse_crossing"),
+    ("y0",seg(15,15,15,30),"original_transverse_crossing"),
+    ("y1",seg(15,45,15,60),"original_transverse_crossing"),
+])
+def test_all_documented_side_crossings_are_source_rivals(side,original,expected):
+    r=original_source_side_contact_rivals(
+        (10.,20.,34.,50.),side,{"native":original},{},{}
+    )
+    assert len(r)==1
+    assert r[0]["original_contact_kind"]==expected
+    assert r[0]["source_w4_candidate_count"]==0
+    assert not r[0]["source_wall_role_granted"]
+
+
+def test_original_contact_reversed_segment_input_and_foreign_ink_invariant():
+    box=(10.,20.,34.,50.)
+    segs={"a":seg(5,24,15,44), "unrelated":seg(100,300,150,400)}
+    before=deepcopy(segs)
+    first=original_source_side_contact_rivals(box,"x0",segs,{}, {})
+    reverse={k:{**v,"x1":v["x2"],"y1":v["y2"],"x2":v["x1"],"y2":v["y1"]}
+             for k,v in segs.items()}
+    second=original_source_side_contact_rivals(box,"x0",reverse,{}, {})
+    assert segs==before
+    assert len(first)==len(second)==1
+    assert first[0]["source_contact_pdf_pts"]==pytest.approx(
+        second[0]["source_contact_pdf_pts"]
+    )
+    assert first[0]["original_contact_kind"]==second[0]["original_contact_kind"]
+
+
+@pytest.mark.parametrize("bad",[
+    seg(float("nan"),20,10,40),
+    seg(10,20,10,float("inf")),
+    {"x1":0,"y1":0,"x2":3},
+    seg("0",20,10,40),
+])
+def test_corrupt_native_contact_source_fails_closed(bad):
+    with pytest.raises(ValueError,match="invalid indexed original PDF source segment"):
+        original_source_side_contact_rivals(
+            (10.,20.,34.,50.),"x0",{"native":bad},{},{}
+        )
+
+
+def test_valid_original_contact_cannot_be_counted_as_positive_collinear_ink():
+    box=(10.,20.,34.,50.)
+    ink={"cross":seg(4,30,16,30)}
+    assert source_fragments_on_documented_side(box,"x0",ink,{}, {})==[]
+    rival=original_source_side_contact_rivals(box,"x0",ink,{}, {})
+    assert len(rival)==1
+    assert not rival[0]["source_interval_coverage_granted"]
