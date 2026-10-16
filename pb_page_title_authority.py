@@ -317,7 +317,7 @@ def _split_native_sheet_revision_values(
             rev_words = [
                 row for row in original
                 if re.fullmatch(r"[A-Z0-9]{1,3}", row[0], re.I)
-                and row[1] >= revision.x0 - revision.size
+                and revision.x0 - revision.size <= row[1] <= revision.x1 + 4 * revision.size
                 and abs(row[2] - revision.y1) <= 4 * revision.size
             ]
             if len(num_words) != 1 or len(rev_words) != 1:
