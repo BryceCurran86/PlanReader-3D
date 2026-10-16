@@ -72,7 +72,7 @@ def test_reverse_native_strokes_remain_equal_when_matching_exact_endpoints():
     doc.new_page(width=300,height=300)
     q=doc[1]
     q.draw_line((98,120),(98,50))
-    r=audit(p,q,native_candidate_bbox_a=(0,0,300,300),
+    r=audit(doc[0],q,native_candidate_bbox_a=(0,0,300,300),
             native_candidate_bbox_b=(0,0,300,300))
     assert any(g["original_source_translation_pdf_pts"]==[78.,0.]
                for g in r["all_competing_translation_groups"])
@@ -88,7 +88,7 @@ def test_repeated_ink_origins_keep_both_competing_source_parents():
     doc.new_page(width=300,height=300)
     q=doc[1]
     q.draw_line((98,50),(98,120))
-    r=audit(p,q,native_candidate_bbox_a=(0,0,300,300),
+    r=audit(doc[0],q,native_candidate_bbox_a=(0,0,300,300),
             native_candidate_bbox_b=(0,0,300,300))
     group=next(g for g in r["all_competing_translation_groups"]
                if g["original_source_translation_pdf_pts"]==[78.,0.])
@@ -106,7 +106,7 @@ def test_mismatched_stroke_style_or_length_is_not_crosssheet_match():
     doc.new_page(width=300,height=300)
     q=doc[1]
     q.draw_line((98,50),(98,120),color=(.5,.5,.5),width=.24)
-    r=audit(p,q,native_candidate_bbox_a=(0,0,300,300),
+    r=audit(doc[0],q,native_candidate_bbox_a=(0,0,300,300),
             native_candidate_bbox_b=(0,0,300,300))
     assert r["all_competing_translation_groups"]==[]
     doc.close()
@@ -122,10 +122,10 @@ def test_bbox_and_pair_caps_fail_closed_without_partial_election():
     q=doc[1]
     for y in (20,40,60):
         q.draw_line((98,y),(198,y))
-    r=audit(p,q,native_candidate_bbox_a=(0,0,300,300),
+    r=audit(doc[0],q,native_candidate_bbox_a=(0,0,300,300),
             native_candidate_bbox_b=(0,0,300,300),max_selected_lines=1)
     assert r["status"]=="original_source_scope_cap_exceeded"
-    r=audit(p,q,native_candidate_bbox_a=(0,0,300,300),
+    r=audit(doc[0],q,native_candidate_bbox_a=(0,0,300,300),
             native_candidate_bbox_b=(0,0,300,300),max_matched_pairs=1)
     assert r["status"]=="original_source_pair_scope_cap_exceeded"
     with pytest.raises(ValueError):
