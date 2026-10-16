@@ -2,6 +2,7 @@ name: GPT MAX Original A68 Source Selector Policy Matrix
 on:
   pull_request:
     branches:
+      - main
       - gptmax/original-paired-wall-faces-shadow-20261015
     paths:
       - tools/diag_gptmax_original_selector_policy_matrix.py
