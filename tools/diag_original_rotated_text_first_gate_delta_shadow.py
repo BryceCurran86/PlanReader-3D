@@ -175,7 +175,7 @@ def main() -> int:
     report["raw_source_literal_used_for_diagnostic_only"]=args.literal
     args.json.parent.mkdir(parents=True,exist_ok=True)
     args.json.write_text(
-        json.dumps(report,sort_keys=True,indent=2)+"\\n",encoding="utf-8"
+        json.dumps(report,sort_keys=True,indent=2)+"\n",encoding="utf-8"
     )
     for row in report["native_word_first_gate_rows"]:
         print(json.dumps({
