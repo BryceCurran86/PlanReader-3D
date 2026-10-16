@@ -37,38 +37,42 @@ class SheetClassificationRecord:
 
 def classify_sheet_role(title: str, text_content: str = "") -> Tuple[str, float, str, str]:
     """Classify sheet role, confidence, discipline, and primary takeoff target from title block & page text."""
-    combined = f"{title} {text_content}".lower()
+    # Title-block authority precedes incidental references in notes and legends.
+    # Never let a cross-reference to an RCP/schedule/elevation relabel a named
+    # floor plan. Text-only classification remains provisional and preserves the
+    # existing public return contract for older importers.
+    title_text = str(title or "").lower()
+    page_text = str(text_content or "").lower()
 
-    # 0. Render / 3D Perspectives
-    if any(k in combined for k in ["artist impression", "3d elevation", "3d view", "perspective", "render", "visualisation"]):
-        return ("RENDER_3D_VIEW", 0.95, "ARCHITECTURAL", "NONE")
+    def classify_explicit(source: str) -> Tuple[str, float, str, str] | None:
+        if any(k in source for k in ("artist impression", "3d elevation", "3d view", "perspective", "render", "visualisation")):
+            return ("RENDER_3D_VIEW", 0.95, "ARCHITECTURAL", "NONE")
+        if any(k in source for k in ("reflected ceiling", "rcp", "ceiling plan")):
+            return ("REFLECTED_CEILING_PLAN", 0.95, "ARCHITECTURAL", "CEILING")
+        if any(k in source for k in ("door schedule", "window schedule", "door & window", "opening schedule")):
+            return ("DOOR_WINDOW_SCHEDULE", 0.95, "ARCHITECTURAL", "OPENINGS")
+        if any(k in source for k in ("finish schedule", "finishes schedule", "paint schedule", "room finish")):
+            return ("FINISH_SCHEDULE", 0.95, "INTERIOR", "FINISHES")
+        if any(k in source for k in ("cover sheet", "title sheet", "locality plan", "drawing index", "legend & notes", "abbreviations")):
+            return ("COVER_INDEX_LEGEND", 0.95, "GENERAL", "NONE")
+        if any(k in source for k in ("elevation", "facade", "section")):
+            return ("ELEVATION", 0.90, "ARCHITECTURAL", "ELEVATION_SURFACE")
+        if any(k in source for k in ("floor plan", "ground plan", "level 1", "level 2", "level 3", "basement plan", "layout plan")):
+            return ("FLOOR_PLAN", 0.90, "ARCHITECTURAL", "WALL_FLOOR")
+        return None
 
-    # 1. Reflected Ceiling Plan
-    if any(k in combined for k in ["reflected ceiling", "rcp", "ceiling plan"]):
-        return ("REFLECTED_CEILING_PLAN", 0.95, "ARCHITECTURAL", "CEILING")
-
-    # 2. Schedules
-    if any(k in combined for k in ["door schedule", "window schedule", "door & window", "opening schedule"]):
-        return ("DOOR_WINDOW_SCHEDULE", 0.95, "ARCHITECTURAL", "OPENINGS")
-    if any(k in combined for k in ["finish schedule", "finishes schedule", "paint schedule", "room finish"]):
-        return ("FINISH_SCHEDULE", 0.95, "INTERIOR", "FINISHES")
-
-    # 3. Cover / Legend / Index
-    if any(k in combined for k in ["cover sheet", "title sheet", "locality plan", "drawing index", "legend & notes", "abbreviations"]):
-        return ("COVER_INDEX_LEGEND", 0.95, "GENERAL", "NONE")
-
-    # 4. Elevation / Section
-    if any(k in combined for k in ["elevation", "facade", "external elevation", "internal elevation", "section"]):
-        return ("ELEVATION", 0.90, "ARCHITECTURAL", "ELEVATION_SURFACE")
-
-    # 5. Floor Plan
-    if any(k in combined for k in ["floor plan", "ground plan", "level 1", "level 2", "level 3", "basement plan", "layout plan"]):
-        return ("FLOOR_PLAN", 0.90, "ARCHITECTURAL", "WALL_FLOOR")
-
-    # General fallback
-    if "plan" in combined:
-        return ("FLOOR_PLAN", 0.70, "ARCHITECTURAL", "WALL_FLOOR")
-
+    title_role = classify_explicit(title_text)
+    if title_role is not None:
+        return title_role
+    if "plan" in title_text:
+        # A generic plan title does not establish which physical view it is.
+        return ("OTHER_GENERAL", 0.50, "GENERAL", "NONE")
+    # Body references alone can be misleading; never elevate text-only evidence
+    # to authoritative (>=0.90) source view classification.
+    text_role = classify_explicit(page_text)
+    if text_role is not None:
+        role, _confidence, discipline, target = text_role
+        return (role, 0.70, discipline, target)
     return ("OTHER_GENERAL", 0.50, "GENERAL", "NONE")
 
 
