@@ -14,6 +14,7 @@ so callers never have to guess why a value was accepted, warned, or blocked.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 import math
 import numbers
 import re
@@ -69,7 +70,7 @@ def parse_figured_dimension_mm(raw: Optional[str]) -> float:
 
 def _validate_direct_figured_mm(value: float) -> float:
     """A direct figured value must be a real number, never bool or coerced text."""
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+    if isinstance(value, bool) or not isinstance(value, (numbers.Real, Decimal)):
         raise DimensionParseError("Figured dimension must be real numeric millimetres (not bool)")
     try:
         number = float(value)
@@ -133,7 +134,7 @@ def resolve_measurement_authority(
     """
     # An invalid comparison tolerance must not turn conflicting dimensions FIRM.
     if (isinstance(max_delta_ratio, bool)
-            or not isinstance(max_delta_ratio, numbers.Real)
+            or not isinstance(max_delta_ratio, (numbers.Real, Decimal))
             or (_finite_positive_numeric(max_delta_ratio) is None and max_delta_ratio != 0)):
         return MeasurementAuthorityResult(
             value_m=None,
