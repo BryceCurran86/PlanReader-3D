@@ -82,7 +82,18 @@ jobs:
           archived={r['physical_opening_id'] for r in ledger['case_evidence']
                     if r['host_binding']['status']=='abstained'}
           assert missing==archived and len(missing)==6
-          print('Original same snapshot, 21/15/9 and six missing IDs verified')
+          by_identity={r['opening_identity_id']:r for r in source['opening_bindings']}
+          sg=by_identity['physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9']
+          adjacent=by_identity['physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f']
+          assert sg['record_id']=='opening_host_binding_v3_10c009b43a96cf4e143b95e944e92521'
+          assert sg['member_wall_candidate_ids']==[
+              'wall_ad5e43e87149682d9900',
+              'wall_f92ac8eb34b0048e144b',
+          ]
+          assert adjacent['record_id'] is None
+          assert not adjacent['member_wall_candidate_ids']
+          assert adjacent['opening_identity_id'] != sg['opening_identity_id']
+          print('Original same snapshot, 21/15/9 and six missing IDs verified; 1215 host not borrowed')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
