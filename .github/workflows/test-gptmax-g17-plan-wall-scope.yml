@@ -4,6 +4,9 @@ on:
     branches: [main]
     paths:
       - "pb_g17_plan_wall_scope_shadow.py"
+      - "pb_wall_room_topology_collinear_partition_shadow.py"
+      - "tests/test_w2_exact_collinear_partition_shadow.py"
+      - "tests/test_g17_exact_partition_source_shadow.py"
       - "tests/test_g17_plan_wall_scope_shadow.py"
       - "tools/diag_gptmax_producer_owned_g17_wall_shadow.py"
       - ".github/workflows/test-gptmax-g17-plan-wall-scope.yml"
@@ -31,6 +34,7 @@ jobs:
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_g17_plan_wall_scope_shadow.py tests/test_gptmax_w4_identity_abstention_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_g17_dual_dpi_source_correspondence_shadow.py tests/test_source_owned_physical_plan_view.py tests/test_g17_w4_equivalence_competitor_shadow.py
           PYTHONPATH=. python -m pytest -q tests/test_w2_overlap_preservation_shadow.py tests/test_w2_immutable_exact_endpoint_shadow.py tests/test_g17_source_incidence_preservation_shadow.py tests/test_wall_room_topology_zero_snap_index_shadow.py
+          PYTHONPATH=. python -m pytest -q tests/test_w2_exact_collinear_partition_shadow.py tests/test_g17_exact_partition_source_shadow.py
           ruff check --select F821,F823 pb_g17_plan_wall_scope_shadow.py tests/test_g17_plan_wall_scope_shadow.py tools/diag_gptmax_producer_owned_g17_wall_shadow.py
   original-source-retention:
     runs-on: ubuntu-latest
@@ -50,7 +54,7 @@ jobs:
           PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --plan-wall-scope --preserve-overlapping-spans-shadow --immutable-exact-endpoints-shadow --output artifacts/original-g17-plan-wall-scope.json
+          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --plan-wall-scope --preserve-overlapping-spans-shadow --immutable-exact-endpoints-shadow --partition-exact-collinear-overlaps-shadow --output artifacts/original-g17-plan-wall-scope.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -105,6 +109,15 @@ jobs:
           lower=[j for j in p['immutable_endpoint_exact_w2_w3_w4']['w3_junctions'] if abs(j['position_pt'][0]-737.76)<1e-7 and abs(j['position_pt'][1]-429.36)<1e-7]
           assert len(lower)==1 and lower[0]['status']=='abstained'
           assert 'degenerate_angle_group_size_over_two' in lower[0]['reason_codes']
+          partitioned=p['partitioned_exact_w2_w3_w4']
+          assert not missing_intervals(partitioned)
+          assert not partitioned['w4_identity_unavailable']
+          lower_partitioned=[j for j in partitioned['w3_junctions'] if abs(j['position_pt'][0]-737.76)<1e-7 and abs(j['position_pt'][1]-429.36)<1e-7]
+          assert len(lower_partitioned)==1 and lower_partitioned[0]['junction_type']=='t_junction'
+          assert lower_partitioned[0]['status']=='candidate'
+          # Every partitioned candidate still has original primitive ancestry.
+          known={s['source_primitive_id'] for s in p['source_primitive_dispositions']}
+          assert all(e['source_primitive_ids'] and set(e['source_primitive_ids'])<=known for e in partitioned['w2_edges'])
           print({'source_intervals_lost_before':len(original_missing),'source_intervals_lost_after':0,'lower_actual_overlap_remains_abstained':True})
           for name in ('default_w2_w3_w4','exact_coordinate_w2_w3_w4'):
               g=p[name]
