@@ -1874,16 +1874,36 @@ class SourceVisibilityProducer:
         revision_id: str,
         *,
         page_ids: Sequence[str] | None = None,
+    ) -> PublishedVisibleSourceSnapshot:
+        """Production entry: historical exact source API and identity policy."""
+        return self._augment_with_raster_visible_segments_source_impl(
+            revision_id, page_ids=page_ids,
+        )
+
+    def augment_with_unmeasured_g17_flanks_source_shadow(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+    ) -> PublishedVisibleSourceSnapshot:
+        """Source-owned *opt-in* alternative, not a customer/public count seam.
+
+        The source producer alone reads the original G17 ink and does not
+        accept caller pixels, geometric observations or measurements.
+        """
+        return self._augment_with_raster_visible_segments_source_impl(
+            revision_id, page_ids=page_ids,
+            include_unmeasured_ink_closed_flanks_shadow=True,
+        )
+
+    def _augment_with_raster_visible_segments_source_impl(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
         include_unmeasured_ink_closed_flanks_shadow: bool = False,
     ) -> PublishedVisibleSourceSnapshot:
-        """Add source-bound raster visible segments where native visibility is absent.
-
-        Callers may optionally address source pages, but cannot supply pixels,
-        line segments, DPI, detector thresholds, marks, counts, or expected
-        quantities. Rendering, detection, geometry, and lineage remain
-        producer-owned.
-        """
-
+        """Original raster-visible source capture; shadow gate only if explicit."""
         if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
             raise TypeError("unmeasured G17 flank capture must be an explicit boolean")
         published = self._published_by_revision.get(str(revision_id))

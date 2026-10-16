@@ -197,10 +197,14 @@ def compose_live_wall_opening_authority(
         page_ids=selected_pages,
     )
 
-    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+    wall_factory = (
+        PhysicalWallCandidateProducer.from_source_visibility_unmeasured_g17_flanks_shadow
+        if include_unmeasured_ink_closed_flanks_shadow
+        else PhysicalWallCandidateProducer.from_source_visibility_producer
+    )
+    wall_producer = wall_factory(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
-        include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
     )
     supplemental_wall_producer = (
         PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer(

@@ -3784,17 +3784,31 @@ class PhysicalWallCandidateProducer:
         source_visibility_producer,
         *,
         page_ids: Optional[Sequence[str]] = None,
-        include_unmeasured_ink_closed_flanks_shadow: bool = False,
     ):
-        if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
-            raise TypeError("unmeasured G17 capture shadow must be an explicit boolean")
+        """Historical source producer interface; no additional caller inputs."""
         return cls._from_source_visibility_producer(
             source_visibility_producer,
             page_ids=page_ids,
             include_authenticated_viewports=False,
             include_page_scopes=True,
             supplemental_only=False,
-            include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
+        )
+
+    @classmethod
+    def from_source_visibility_unmeasured_g17_flanks_shadow(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Separate source-owned opt-in capture without altering production API."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+            supplemental_only=False,
+            include_unmeasured_ink_closed_flanks_shadow=True,
         )
 
     @classmethod
@@ -3854,9 +3868,13 @@ class PhysicalWallCandidateProducer:
             if not physical_plan_view_shadow:
                 # Default production never sets the shadow flag. The opt-in
                 # still relies on the original source producer, not user ink.
-                source_visibility_producer.augment_with_raster_visible_segments(
+                source_capture = (
+                    source_visibility_producer.augment_with_unmeasured_g17_flanks_source_shadow
+                    if include_unmeasured_ink_closed_flanks_shadow
+                    else source_visibility_producer.augment_with_raster_visible_segments
+                )
+                source_capture(
                     revision_id,
-                    include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
                     page_ids=(
                         tuple(
                             sorted(
