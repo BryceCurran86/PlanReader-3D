@@ -62,6 +62,7 @@ def build_live_floor_finish_area_source_traces(
     quantity_owner_by_floor: dict[str, str] = {}
     quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
     floor_owner_by_occurrence: dict[str, str] = {}
+    floor_owner_by_original_observation: dict[str, str] = {}
     # Original quantity identity is a producer-owned family invariant, not
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
@@ -196,9 +197,27 @@ def build_live_floor_finish_area_source_traces(
 
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
-        occurrence_evidence_id = _clean(
-            metadata.get("finish_occurrence_evidence_id")
+        # Source issuer identifiers are opaque original strings. Casting
+        # boolean/numeric metadata tokens to text fabricates receipt IDs.
+        issuer_fields = (
+            "finish_occurrence_record_id",
+            "finish_definition_record_id",
+            "finish_occurrence_evidence_id",
+            "support_snapshot_id",
+            "support_page_id",
+            "support_viewport_id",
         )
+        if any(
+            type(metadata.get(name)) is not str
+            or not metadata[name]
+            or metadata[name] != metadata[name].strip()
+            for name in issuer_fields
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish source issuer identity is malformed: "
+                f"{quantity.quantity_id}"
+            )
+        occurrence_evidence_id = metadata["finish_occurrence_evidence_id"]
         # Occurrence record and source receipt are different producer IDs.
         # Require the exact source occurrence witness actually retained in
         # both QuantityEvidence and its canonical floor; a metadata-only
@@ -223,6 +242,17 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish source occurrence has competing physical floors: "
                 f"{occurrence_id}"
             )
+        # Producer IDs and original observation IDs are independent. A
+        # rekeyed occurrence cannot turn one original material mark into
+        # two separately measured physical floor-finish quantities.
+        prior_observation_floor = floor_owner_by_original_observation.get(
+            occurrence_evidence_id
+        )
+        if prior_observation_floor is not None and prior_observation_floor != floor_id:
+            raise SourceClosedRunConflictError(
+                "floor-finish original observation has competing physical floors: "
+                f"{occurrence_evidence_id}"
+            )
         # Resolve the most specific failed authority first: a repeated
         # canonical floor is a direct conflict before considering competing
         # canonical aliases of the same physical surface.
@@ -245,6 +275,7 @@ def build_live_floor_finish_area_source_traces(
                 f"{physical_floor_id}"
             )
         floor_owner_by_occurrence[occurrence_id] = floor_id
+        floor_owner_by_original_observation[occurrence_evidence_id] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
         quantity_owner_by_physical_floor[physical_floor_id] = (
             floor_id, quantity.quantity_id
