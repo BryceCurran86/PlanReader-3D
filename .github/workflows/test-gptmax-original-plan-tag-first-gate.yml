@@ -5,6 +5,7 @@ on:
     paths:
       - "pb_g17_original_plan_tag_census_shadow.py"
       - "tools/diag_gptmax_original_plan_tag_source.py"
+      - "tests/test_g17_original_plan_tag_census_shadow.py"
       - ".github/workflows/test-gptmax-original-plan-tag-first-gate.yml"
 permissions:
   contents: read
@@ -25,8 +26,8 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
       - name: Check source code and existing authority isolation
         run: |
-          ruff check --select F821,F823 pb_g17_original_plan_tag_census_shadow.py tools/diag_gptmax_original_plan_tag_source.py
-          PYTHONPATH=. python -m pytest -q tests/test_schedule_opening_instance_binding_authority_v2_regressions.py tests/test_raster_opening_label_ownership.py
+          ruff check --select F821,F823 pb_g17_original_plan_tag_census_shadow.py tools/diag_gptmax_original_plan_tag_source.py tests/test_g17_original_plan_tag_census_shadow.py
+          PYTHONPATH=. python -m pytest -q tests/test_g17_original_plan_tag_census_shadow.py tests/test_schedule_opening_instance_binding_authority_v2_regressions.py tests/test_raster_opening_label_ownership.py
       - name: Original SHA-authenticated G17 text source and unchanged signed customer rows
         run: |
           set -euo pipefail
