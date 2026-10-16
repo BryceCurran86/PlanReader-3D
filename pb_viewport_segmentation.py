@@ -2965,10 +2965,43 @@ def segment_source_page_viewports(
     )
 
 
+def _native_multipath_semantic_frame_candidates_shadow(
+    page: Any, anchors: Sequence[_TitleAnchor],
+) -> list[tuple[float, float, float, float]]:
+    """Default-unwired native line-built CAD table candidates only.
+
+    Native source grid reconstruction is a candidate *universe*, not a
+    selector. Only a source-closed component with exactly ONE classified
+    semantic title geometrically contained can join existing F.07 frame
+    rivals. All existing candidate frames remain. No nearby caption, room
+    label, project ID, quantity or inferred missing segment can elect it.
+    """
+    from tools.diag_native_multipath_cad_grid_source_shadow import (
+        audit_native_multipath_orthogonal_grid_components,
+    )
+    evidence = audit_native_multipath_orthogonal_grid_components(page)
+    if not evidence.get("source_line_universe_complete"):
+        return []
+    new = []
+    for grid in evidence["candidate_native_grids"]:
+        frame = tuple(grid["native_component_witness"]["native_bbox_pdf_pts"])
+        titles = [
+            a for a in anchors
+            if a.view_type in _SEMANTIC_TABLE_VIEW_TYPES
+            and _bbox_contains(frame, a.bbox)
+        ]
+        if len(titles) == 1:
+            new.append(frame)
+    return sorted(set(new))
+
+
 def segment_page_viewports(
     page: Any, *, page_number: int,
     source_connected_table_cell_shadow: bool = False,
+    source_native_multipath_semantic_frame_shadow: bool = False,
 ) -> list[SegmentedViewport]:
+    if type(source_native_multipath_semantic_frame_shadow) is not bool:
+        raise ValueError("source_multipath_frame_shadow_requires_explicit_bool")
     if type(source_connected_table_cell_shadow) is not bool:
         raise ValueError("source_table_shadow_requires_explicit_bool")
     try:
@@ -3006,6 +3039,14 @@ def segment_page_viewports(
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
+    if source_native_multipath_semantic_frame_shadow:
+        # Keep every source-original frame rival. A real external CAD
+        # schedule can be drawn as independently issued line paths.
+        for candidate in _native_multipath_semantic_frame_candidates_shadow(
+            page, anchors,
+        ):
+            if candidate not in frames:
+                frames.append(candidate)
     framed, consumed = _frame_resolved_viewports(
         page,
         anchors,
