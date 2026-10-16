@@ -625,39 +625,84 @@ def _unique_documented_area_owner_receipts(
 def _quarantine_reused_floor_finish_occurrences(
     records: Sequence[CrossViewFloorFinishRecord],
 ) -> tuple[tuple[CrossViewFloorFinishRecord, ...], tuple[str, ...]]:
-    """Fail closed when one authenticated occurrence claims multiple floors.
+    """Withhold contested original material marks before any FIRM quantity.
 
-    The source material occurrence is a single producer-owned physical receipt.
-    It cannot independently authorize the finish area of different room floors.
-    Preserve unrelated occurrences; quarantine every contested floor rather
-    than selecting a first/last binding based on input order.
+    A producer occurrence ID and its original text/ink evidence ID are
+    independent owner identities. Two rekeyed occurrence IDs cannot turn ONE
+    original mark into finishes on two distinct physical floor surfaces.
+    Keep unrelated measured floors when the source evidence is genuinely
+    independent; never select the first or last competing record.
     """
-    owners: dict[str, set[tuple[str, str]]] = {}
+    occurrence_owners: dict[str, set[tuple[str, str]]] = {}
+    original_mark_owners: dict[str, set[tuple[str, str]]] = {}
+    invalid_floor_ids: set[str] = set()
+
+    def valid(value: object) -> bool:
+        return (
+            type(value) is str
+            and bool(value)
+            and value == value.strip()
+        )
+
     for record in records:
-        occurrence_id = _clean(record.occurrence_record_id)
-        if occurrence_id:
-            owners.setdefault(occurrence_id, set()).add(
-                (record.canonical_floor_id, record.physical_floor_surface_id)
-            )
-    disputed = {
-        occurrence_id
-        for occurrence_id, identities in owners.items()
-        if len(identities) > 1
+        floor_id = record.canonical_floor_id
+        physical_id = record.physical_floor_surface_id
+        occurrence_id = record.occurrence_record_id
+        original_mark_id = record.occurrence_evidence_id
+        if (
+            not valid(floor_id)
+            or not valid(physical_id)
+            or not valid(occurrence_id)
+            or not valid(original_mark_id)
+        ):
+            if valid(floor_id):
+                invalid_floor_ids.add(floor_id)
+            continue
+        physical_owner = (floor_id, physical_id)
+        occurrence_owners.setdefault(occurrence_id, set()).add(physical_owner)
+        original_mark_owners.setdefault(original_mark_id, set()).add(
+            physical_owner
+        )
+
+    disputed_occurrences = {
+        original_id
+        for original_id, owners in occurrence_owners.items()
+        if len(owners) > 1
     }
-    if not disputed:
-        return tuple(records), ()
+    disputed_original_marks = {
+        original_id
+        for original_id, owners in original_mark_owners.items()
+        if len(owners) > 1
+    }
     surviving = tuple(
         record
         for record in records
-        if _clean(record.occurrence_record_id) not in disputed
+        if (
+            valid(record.canonical_floor_id)
+            and valid(record.physical_floor_surface_id)
+            and valid(record.occurrence_record_id)
+            and valid(record.occurrence_evidence_id)
+            and record.canonical_floor_id not in invalid_floor_ids
+            and record.occurrence_record_id not in disputed_occurrences
+            and record.occurrence_evidence_id not in disputed_original_marks
+        )
     )
     unresolved = tuple(sorted({
         record.canonical_floor_id
         for record in records
-        if _clean(record.occurrence_record_id) in disputed
+        if (
+            valid(record.canonical_floor_id)
+            and (
+                record.canonical_floor_id in invalid_floor_ids
+                or not valid(record.physical_floor_surface_id)
+                or not valid(record.occurrence_record_id)
+                or not valid(record.occurrence_evidence_id)
+                or record.occurrence_record_id in disputed_occurrences
+                or record.occurrence_evidence_id in disputed_original_marks
+            )
+        )
     }))
     return surviving, unresolved
-
 
 class CrossViewFloorFinishProducer:
     def __init__(
