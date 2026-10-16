@@ -1,0 +1,67 @@
+name: GPT MAX Original Native Cross-View Marks
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_cross_view_native_marks.py
+      - tests/test_gptmax_cross_view_native_marks.py
+      - docs/engineering/gptmax_native_cross_view_mark_audit_20261016.md
+      - .github/workflows/test-gptmax-native-cross-view-marks.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_cross_view_native_marks.py
+      - tests/test_gptmax_cross_view_native_marks.py
+      - docs/engineering/gptmax_native_cross_view_mark_audit_20261016.md
+      - .github/workflows/test-gptmax-native-cross-view-marks.yml
+permissions:
+  contents: read
+jobs:
+  pinned-source-and-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pymupdf pytest ruff
+      - name: Native source negatives and lint
+        run: |
+          python -m pytest -q tests/test_gptmax_cross_view_native_marks.py
+          ruff check --select F821,F823 tools/diag_gptmax_cross_view_native_marks.py tests/test_gptmax_cross_view_native_marks.py
+      - name: Original PDF only, source SHA pinned
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          python tools/diag_gptmax_cross_view_native_marks.py \
+            --pdf "$PDF" \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --page-ids 3 5 --phrase '2127 STACKER' \
+            --datum-tokens FSL JL 68560 70660 2100 2590 \
+            --output artifacts/gptmax-original-native-cross-view-marks.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/gptmax-original-native-cross-view-marks.json').read_text())
+          assert r['status']=='UNBOUND_NATIVE_CROSS_VIEW_MARK_CENSUS'
+          assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['requested_source_page_indices']==[3,5]
+          assert not any(r[k] for k in (
+              'page_viewport_identity_proven','cross_sheet_physical_identity_proven',
+              'opening_kind_proven','opening_host_proven','ordered_width_height_proven',
+              'datum_to_opening_alignment_proven','opening_count_proven','firm_quantity_granted'))
+          assert all(p['mark_occurrences'] for p in r['pages']), 'native mark unresolved'
+          assert any(p['datum_token_occurrences']['2100']
+                     for p in r['pages'] if p['source_page_index_zero_based']==5)
+          print('Unbound original native mark evidence:',r['occurrence_count'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-native-cross-view-marks
+          path: artifacts/gptmax-original-native-cross-view-marks.json
+          retention-days: 21
