@@ -15,7 +15,7 @@ def render_source(cells: int, *, changed=False) -> tuple[bytes, bytes]:
     # Two rows of original dark painted cells with an end cap. The original
     # unchanged-terminal detector reauthenticates end closure from the bitmap.
     src = np.full((64, 90, 3), 255, dtype=np.uint8)
-    src[28:35, 24:24+cells] = 0
+    src[28:37, 24:24+cells] = 0
     full = src.copy()
     if changed:
         full[31, 24+cells//2] = 255
