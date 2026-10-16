@@ -132,20 +132,6 @@ def trace_native_endpoint_tick_candidates_shadow(page: Any, dimension_candidate:
     It cannot identify a particular structural wall face, room or other
     PDF sheet, and it cannot certify the figured dimension value.
     """
-    segment = _rect((
-        min(dimension_candidate["native_segment_pdf_pts"][0],
-            dimension_candidate["native_segment_pdf_pts"][2]),
-        min(dimension_candidate["native_segment_pdf_pts"][1],
-            dimension_candidate["native_segment_pdf_pts"][3]),
-        max(dimension_candidate["native_segment_pdf_pts"][0],
-            dimension_candidate["native_segment_pdf_pts"][2]),
-        max(dimension_candidate["native_segment_pdf_pts"][1],
-            dimension_candidate["native_segment_pdf_pts"][3]),
-    ))
-    # Axis-aligned segments have a zero-width rectangle. Use the exact
-    # finite source endpoints from the candidate; don't normalize an
-    # annotation stroke into a synthetic rectangle.
-    del segment
     vals = dimension_candidate.get("native_segment_pdf_pts", ())
     if len(vals) != 4 or not all(
         isinstance(x, (int, float)) and math.isfinite(x) for x in vals
