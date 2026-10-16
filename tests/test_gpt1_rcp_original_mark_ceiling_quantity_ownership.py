@@ -49,8 +49,13 @@ def _two_room_args(*, same_mark: bool):
         quantity_id="room-area-qty-2",
         semantic_key="room_area:source-room-2",
         input_entity_ids=("source-room-2",),
+        value=7.0,
         evidence_ids=("face-2", "room-geometry-evidence-2"),
-        metadata={**first_bridge.quantities[0].metadata, "room_label": "OTHER ROOM"},
+        metadata={
+            **first_bridge.quantities[0].metadata,
+            "room_label": "OTHER ROOM",
+            "figured_dimension_ids": ["second-room-dim-h", "second-room-dim-v"],
+        },
     )
     second_bridge = replace(
         first_bridge,
@@ -108,6 +113,7 @@ def test_two_independent_original_marks_publish_two_distinct_ceiling_areas(rever
     )
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.quantities) == len(result.canonical_ceilings) == 2
+    assert {q.value for q in result.quantities} == {9.05352, 7.0}
     assert {r.physical_room_id for r in result.records} == {
         "physical-room-1", "physical-room-2"
     }
