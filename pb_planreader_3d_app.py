@@ -1254,7 +1254,17 @@ def create_standalone_workspace(job_no: str, job_name: str, builder: str, addres
 
 
 def classify_page(text: str, file_name: str, page_no: int) -> tuple[str, str]:
-    lower = f"{file_name} {text}".lower()
+    """Index label from this page's own text.
+
+    ``file_name`` stays in the signature for existing callers and is not
+    evidence. A filename, a PDF page index, or the first sheet-like token in
+    an index listing is not this page's drawing type or sheet number. Sheet
+    identity remains with ``pb_page_title_authority.resolve_document``. A
+    neutral ``Page N`` label is the only label this function may emit, so a
+    later title-block sheet number is not blocked by a scraped code.
+    """
+    del file_name
+    lower = (text or "").lower()
     page_type = "Other"
     patterns = [
         ("Title / Drawing Register", ["drawing register", "drawing schedule", "title sheet"]),
@@ -1275,9 +1285,7 @@ def classify_page(text: str, file_name: str, page_no: int) -> tuple[str, str]:
         if any(word in lower for word in words):
             page_type = candidate
             break
-    drawing_match = re.search(r"\b([A-Z]{1,3}\d{2,4}(?:[-/.][A-Z0-9]+)?)\b", text)
-    label = drawing_match.group(1) if drawing_match else f"Page {page_no}"
-    return page_type, label
+    return page_type, f"Page {int(page_no)}"
 
 
 def placeholder_image(title: str, body: str, target: Path) -> tuple[int, int]:
