@@ -89,9 +89,17 @@ def test_original_maryborough_p9_preserves_missing_sales_grid_and_rivals():
         assert len(result["raw_word_candidates"]) == 37
         assert result["raw_words_outside_count"] == 18
         assert len(result["source_crossing_primitive_candidates"]) == 73
-        by_address = {tuple(r["original_source_word_address"]):r for r in result["raw_word_candidates"]}
-        assert by_address[(114,1,0)]["candidate_location"] == "outside_supplied_viewport"
-        assert by_address[(10,1,0)]["candidate_location"] == "fully_within_supplied_viewport"
+        # Native block/line ordinals legitimately differ by MuPDF version.
+        # Geometry is only a source-replay witness, never a production owner.
+        sales = [r for r in result["raw_word_candidates"]
+                 if r["original_raw_literal_untrusted"] == "GRID"
+                 and 983.0 < r["source_word_bbox_pdf_pts"][0] < 985.0]
+        office = [r for r in result["raw_word_candidates"]
+                  if r["original_raw_literal_untrusted"] == "GRID"
+                  and 391.0 < r["source_word_bbox_pdf_pts"][0] < 392.0]
+        assert len(sales) == len(office) == 1
+        assert sales[0]["candidate_location"] == "outside_supplied_viewport"
+        assert office[0]["candidate_location"] == "fully_within_supplied_viewport"
         assert any(r["original_source_primitive_id"] == "d9755i0"
                    for r in result["source_crossing_primitive_candidates"])
         assert all(not r["original_ink_role_authenticated"]
