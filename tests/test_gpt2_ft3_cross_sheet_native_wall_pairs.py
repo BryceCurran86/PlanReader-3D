@@ -309,3 +309,17 @@ def test_reverse_affine_overlap_and_out_of_span_strictness():
         compare_side_under_affine(support,target,slope=0,offset=1)
     with pytest.raises(ValueError,match="noninvertible"):
         compare_side_under_affine(support,target,slope=float("nan"),offset=1)
+
+
+@pytest.mark.parametrize("bad",[
+    {"id":"p","x1":float("nan"),"y1":20,"x2":10,"y2":30},
+    {"id":"p","x1":float("inf"),"y1":20,"x2":10,"y2":30},
+    {"id":"p","x1":10,"y1":20,"x2":"10","y2":30},
+    {"id":"p","x1":True,"y1":20,"x2":10,"y2":30},
+    {"id":"p","x1":10,"y1":20,"x2":10},
+])
+def test_invalid_indexed_original_source_segment_abstains(bad):
+    with pytest.raises(ValueError,match="invalid indexed original PDF source segment"):
+        source_fragments_on_documented_side(
+            BOX,"x0",{"p":bad}, {}, {},
+        )
