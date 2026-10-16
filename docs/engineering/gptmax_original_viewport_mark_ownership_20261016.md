@@ -28,3 +28,29 @@ The lower view of original elevation sheet may own both `2127 STACKER` and the l
 Check whether index 4's `2127 STACKER` and lower `2100` have the same **positively authenticated** F.07 elevation-subview membership. If not, abstain and audit vector-frame ownership. If yes, F.13 must prove the figure's OWN endpoints and opening-frame top/base; a separate credible horizontal dimension and instance-specific p3↔p5 identity must still be established. No blanket `2100` door height.
 
 Source PDFs, historical signed receipts, original 21/15/9/8, default 2.5 pt snap, 4 pt structural rule, 20,000 raster cap, commercial output and frozen Full Plan V2 are unchanged. Expected benchmark values played no role.
+
+## Added first-failing original vector-frame diagnosis
+
+tools/diag_gptmax_f07_native_frame_gate.py adds an entirely read-only
+original-page source census using the existing F.07 calibration, title
+anchors, native drawing paths, native re/qu/l primitives, extracted
+vector frames and original title-to-frame filtering. It does not
+assemble separate unclosed strokes, replace a title partition with an
+invented frame, change the physical opening ledger, or use project/benchmark
+values for decision-making.
+
+It records every existing title-associated candidate and existing F.07
+rejection, plus raw original path indexes/opcodes, title bboxes, counts at each
+filter and retained competing frame boxes. A candidate count is NOT an
+authenticated frame or opening; the report has explicit false grant fields
+for source correspondence, height, width, host, area and count.
+
+Seven focused synthetic tests cover empty frames, one native candidate
+without grant, competing candidates, original F.07 rejection,
+source-index/opcode provenance, input order and repeated title ambiguity.
+A SHA-pinned original Lot16 PDF page-index-4 workflow creates
+an independent JSON diagnosis alongside the original text/viewport artifact.
+
+This evidence distinguishes source-native closed vector frames from a genuinely
+unframed multi-elevation drawing. Do not globally relax F.07 or F.13's
+RESOLVED gate based on this shadow.
