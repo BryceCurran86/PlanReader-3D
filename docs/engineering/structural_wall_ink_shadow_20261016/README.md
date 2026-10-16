@@ -1,5 +1,7 @@
 # Structural wall-ink evidence (shadow): what the original plans show and what the pipeline ignores
 
+> **Public-source confidentiality update (2026-10-17):** The ten original-drawing PNG/JSON overlay artifacts previously merged under this folder were removed from the current branch tree for privacy. The original architectural PDF drawings and any raster-backed, polygon-coordinate or otherwise reconstructable source-derived overlays must remain in an owner-private workspace unless public redistribution is explicitly authorised. The old public Git commits containing them remain in Git history; current-HEAD removal is not history erasure. Recreate overlays only locally with original source permission. The aggregate counts and synthetic tests below do **not** authenticate a physical room or publish a construction quantity.
+
 Status: **shadow-only evidence module and read-only overlay tool.** Nothing here is called by a live path, raises an authority,
 filters a candidate, or changes a quantity. Claude integration lane, 2026-10-16. Code: `pb_structural_wall_ink_shadow.py`,
 `tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (37),
@@ -52,7 +54,7 @@ door-frame pieces are runs too, which is what the flag is for). Counts (runs / t
 Maryborough p7 515 / 220; Lot16 p3 98 / 0. In the Q5446 p1 overlay the purple boxes sit on the room names (GARAGE, ENTRY, LIVING, GUEST, MEALS, FAMILY, KITCHEN, W.I.P ...).
 A pairing bug found by a test on the way: a short face failed to find a much longer partner because candidates were indexed by midpoint; faces are now indexed by every cell they cover (regression test fails on the earlier version).
 
-## 3. What the original plans show (overlays in `overlays/`: red = candidate, blue = paired but unproven, purple = repeated small paths, orange = frame)
+## 3. Aggregate original-source diagnostic counts (private overlays are not committed)
 | page (original PDF) | native segments | candidates | negatives | unproven | opening-gap candidates | wall representation seen |
 |---|---:|---:|---:|---:|---:|---|
 | 3Laurel p3 floor plan | 9,977 | 849 | 1,018 | 8,110 | 354 | black filled strips + 0.71 pt outlines |
