@@ -220,39 +220,44 @@ class DrawingViewClassifier:
         r"\b(?:adjacent\s*building|existing\s*building|future\s*extension|phase\s*2|block\s*b)\b",
     )
 
+    _REFERENCE_LINE_RE = re.compile(
+        r"^(?:refer|see|matchline|keynote)\b", re.IGNORECASE
+    )
+    _VIEW_RULES = (
+        ("_ADJACENT_PATTERNS", DrawingViewType.ADJACENT_SCOPE),
+        ("_SCHEDULE_PATTERNS", DrawingViewType.SCHEDULE),
+        ("_LEGEND_PATTERNS", DrawingViewType.LEGEND),
+        ("_SPECIFICATION_PATTERNS", DrawingViewType.SPECIFICATION),
+        ("_REPEATED_PATTERNS", DrawingViewType.REPEATED_OR_REFERENCE),
+        ("_FLOOR_FINISH_PLAN_PATTERNS", DrawingViewType.FLOOR_FINISH_PLAN),
+        ("_REFLECTED_CEILING_PATTERNS", DrawingViewType.REFLECTED_CEILING_PLAN),
+        ("_ROOF_PATTERNS", DrawingViewType.ROOF_PLAN),
+        ("_PLAN_PATTERNS", DrawingViewType.FLOOR_PLAN),
+        ("_ELEVATION_PATTERNS", DrawingViewType.ELEVATION),
+        ("_SECTION_PATTERNS", DrawingViewType.SECTION),
+        ("_DETAIL_PATTERNS", DrawingViewType.DETAIL),
+    )
+
     @classmethod
     def classify_text(cls, text: str) -> DrawingViewType:
-        norm = text.lower()
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._ADJACENT_PATTERNS):
-            return DrawingViewType.ADJACENT_SCOPE
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._SCHEDULE_PATTERNS):
-            return DrawingViewType.SCHEDULE
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._LEGEND_PATTERNS):
-            return DrawingViewType.LEGEND
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._SPECIFICATION_PATTERNS):
-            return DrawingViewType.SPECIFICATION
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._REPEATED_PATTERNS):
-            return DrawingViewType.REPEATED_OR_REFERENCE
-        if any(
-            re.search(p, norm, re.IGNORECASE)
-            for p in cls._FLOOR_FINISH_PLAN_PATTERNS
-        ):
-            return DrawingViewType.FLOOR_FINISH_PLAN
-        if any(
-            re.search(p, norm, re.IGNORECASE)
-            for p in cls._REFLECTED_CEILING_PATTERNS
-        ):
-            return DrawingViewType.REFLECTED_CEILING_PLAN
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._ROOF_PATTERNS):
-            return DrawingViewType.ROOF_PLAN
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._PLAN_PATTERNS):
-            return DrawingViewType.FLOOR_PLAN
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._ELEVATION_PATTERNS):
-            return DrawingViewType.ELEVATION
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._SECTION_PATTERNS):
-            return DrawingViewType.SECTION
-        if any(re.search(p, norm, re.IGNORECASE) for p in cls._DETAIL_PATTERNS):
-            return DrawingViewType.DETAIL
+        """Return the one view named by the text.
+
+        Two named views abstain. A line that only refers to another drawing
+        does not vote.
+        """
+        found: list[DrawingViewType] = []
+        for raw_line in str(text or "").splitlines():
+            line = " ".join(raw_line.split())
+            if not line or cls._REFERENCE_LINE_RE.match(line):
+                continue
+            for pattern_name, view_type in cls._VIEW_RULES:
+                if view_type in found:
+                    continue
+                patterns = getattr(cls, pattern_name)
+                if any(re.search(pattern, line, re.IGNORECASE) for pattern in patterns):
+                    found.append(view_type)
+        if len(found) == 1:
+            return found[0]
         return DrawingViewType.UNKNOWN
 
     @classmethod
