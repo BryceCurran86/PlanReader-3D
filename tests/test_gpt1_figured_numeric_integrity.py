@@ -29,6 +29,7 @@ def _quantity(*, evidence_ids=("dimension_source_1",)):
         semantic_key="independent_span",
         value=6.5,
         unit="m",
+        input_entity_ids=("span_entity_1",),
         evidence_ids=evidence_ids,
         authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
         status="firm",
