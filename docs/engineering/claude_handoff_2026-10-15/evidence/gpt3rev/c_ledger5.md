@@ -13,7 +13,7 @@ Replays dispatched on **`main` `cfc86cb8`**: Lot16 run 38826189304 and Maryborou
 | #2770 -> #2771 GPT MAX | `97d0e3bb` -> `7fa63407` | `40d8e849` | 27 / 27 | merge #2770 first; **#2805 conflicts with #2771** (6 stage-A hunks; union resolution proven, 121 tests) |
 | #2805 GPT2 | `37cd1a91` | `fbaaa518` (stacked) | 8 pass | opt-in W2 `complete_link_snap_shadow`; default path byte-identical to PR base on Lot16 and Maryborough; reviewed |
 | #2806 GPT2 | `4d4bca64` | `980b0b18` | 17 pass / 2 skipped | shadow-only classmethod seam; default expressions untouched; 67 tests; reviewed |
-| #2809 -> #2813 GPT MAX (cursor) | `61fcb385` -> `51234a81` | `main` -> stacked | 31 / 24 pass | **#2809 APPROVE-RECOMMENDATION** (flag-off path unchanged by construction; signed replays green). **#2813 NOT yet**: motif census depends on `0.03 x page_span` (viewport-expansion changes the result: span 100 -> 0, >= 150 -> 8 motif walls) and classifies 8 identical collinear genuine pieces as a motif; signed replays did not run (base is not `main`) - retarget after #2809 |
+| #2809 -> #2813 GPT MAX (cursor) | `61fcb385` -> `84b060c8` | `main` -> stacked | 31 pass / 2 pass + 21 pending | **#2809 APPROVE-RECOMMENDATION** (flag-off path unchanged by construction; signed replays green). **#2813 closer, not yet**: the invariance asks are fixed at `84b060c8` (census now uses the family's own occupancy; 63 tests pass); still open: pin/document the spacing boundary (equal collinear stubs spaced >= ~4.6x their length count as motif), skipped-fragment reason codes, signed replays (base is not `main`) - retarget after #2809 |
 | #2802 -> #2811 cursor | `d87c4a36` -> `ca1ecde6` | `main` -> stacked | 11 pass / 0 (no workflows: base is a branch) | shadow-only, no production importer, 149 tests pass incl. merged with main; APPROVE-RECOMMENDATION, retarget #2811 to `main` after #2802 |
 | #2776 -> #2791 -> #2792 -> #2795 -> #2797 / #2803 GPT MAX (shadow stack) | `08e4fc7f` `cfab294f` `ce21ae5c` `4604e471` `565dc727` `34221eee` | stacked | 48 / 3 / 3 / 3 / 3 / 3 | **not promotable** (strict retention failure on hostless existence id); **new: their new workflows list only the parent stack branch under `pull_request.branches`, so they would never run on `main` after merge** (#2814 test catches it); do not cite #2797's F07-G17 correspondence (different snapshot; #2804 supersedes) |
 | #2804 GPT MAX | `f35a8a5c` | `gptmax/original-same-root-f07-clean-main-20261015` (= merged #2801) | 3 pass | content OK (18 tests, merged with main); **merge-blocking: it replaces `- main` with its stacking branch in the existing workflow** |
@@ -29,7 +29,7 @@ Replays dispatched on **`main` `cfc86cb8`**: Lot16 run 38826189304 and Maryborou
 
 ## BLOCKED (owner -> required proof)
 - **B1 (all merges):** repository owner.
-- **#2813 GPT MAX (cursor):** viewport-expansion invariance test, look-alike negative (>= 8 identical collinear genuine fragments), source evidence that the skipped pieces are dimension ticks, retarget to `main` for the signed replays.
+- **#2813 GPT MAX (cursor):** explicit sparse look-alike test (28 pt at pitch >= 130 is a motif today) and skipped-fragment reason codes, per-tick source evidence before any promotion, retarget to `main` for the signed replays.
 - **#2804 / #2795 / #2797 / #2803 / #2791 / #2792 GPT MAX:** put `main` in `pull_request.branches`. **#2799:** close.
 - **#2748 GPT MAX:** rebase onto #2771 after #2770 with the parameter-union resolution. **#2754 GPT MAX:** synthetic tests.
 - **#2680 GPT3:** latest-head signed / frozen verdict (`a4c3116c`, stale base `057b05dd`, merge-tree clean).
@@ -42,7 +42,7 @@ Conflicting with main: #2649, #1953, #1744, #1481, #1339, #1593, #1844, #1864, #
 
 ## New findings this round (measured)
 - **Dead-trigger risk in stacked PRs (#2814):** 6 distinct workflow files (`frame-competitors`, `hostless-source-census`, `nine-raw-six-w4`, `f07-g17-scope-join`, `a68-selector-matrix`, `same-root-f07-g17-original`) carried by #2791 #2792 #2795 #2797 #2799 #2803 #2804 limit `pull_request.branches` to a parent stack branch. Merged, they stop running on `main`. #2804 even removes the existing `main` entry.
-- **#2813 drafting-motif census:** not viewport-expansion invariant; population-statistical, not per-tick evidence (probe in the PR comment).
+- **#2813 drafting-motif census:** was not viewport-expansion invariant at `51234a81` (span 100 -> 0 motif walls, >= 150 -> 8); fixed at `84b060c8`; residual: a spacing-ratio rule, not per-tick evidence (probes in the PR comments).
 - **#2812 time bomb:** the pinned artifact expires 2026-11-13T21:06:46Z.
 - **#2799 superseded** by merged #2801; **#2797's F07-G17 correspondence is superseded** by #2804.
 - Standing: CI duplication (28 heavy workflows = 402 runner-minutes per production change; 10 run the byte-identical Lot16 page-3 command; analysis in #2789), xdist unsafe (SQLite tests share state), `AGENTS.md` still cites the deleted `scripts/check_benchmark_gold_separation.py`.
