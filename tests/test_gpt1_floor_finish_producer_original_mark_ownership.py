@@ -71,10 +71,8 @@ def test_issuer_identity_malformed_before_quantity_production(monkeypatch, field
     invalid = replace(authentic, **{field: bad})
     kept, unresolved = _quarantine_reused_floor_finish_occurrences((invalid,))
     assert kept == ()
-    if field == "canonical_floor_id" and (bad == "" or type(bad) is not str):
-        assert unresolved == ()
-    else:
-        assert unresolved == (authentic.canonical_floor_id,) if field != "canonical_floor_id" else ()
+    expected = () if field == "canonical_floor_id" else (authentic.canonical_floor_id,)
+    assert unresolved == expected
 
 
 def test_repeated_source_producer_check_does_not_mutate_source_evidence(monkeypatch):
