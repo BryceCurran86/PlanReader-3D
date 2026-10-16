@@ -96,11 +96,12 @@ def _infill_edge_opening_ids(edge,infill_intervals):
 
 
 def _graph(segments, *, root, scope_id, tolerance, infill_intervals=(), preserve_overlapping_spans_shadow=False,
-           immutable_exact_endpoints_shadow=False):
+           immutable_exact_endpoints_shadow=False, partition_exact_collinear_overlaps_shadow=False):
     graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=tolerance,
         exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True,
         **({"preserve_overlapping_spans_shadow": True} if preserve_overlapping_spans_shadow else {}),
-        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}))
+        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
+        **({"partition_exact_collinear_overlaps_shadow": True} if partition_exact_collinear_overlaps_shadow else {}))
     junctions, relationships = classify_junctions(graph,
         document_id=root["document_id"], page_id=root["page_id"], viewport_id=scope_id)
     deduped, removed = deduplicate_coincident_edges(graph)
@@ -156,7 +157,8 @@ def _graph(segments, *, root, scope_id, tolerance, infill_intervals=(), preserve
 
 def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str,
                                      preserve_overlapping_spans_shadow: bool = False,
-                                     immutable_exact_endpoints_shadow: bool = False) -> dict:
+                                     immutable_exact_endpoints_shadow: bool = False,
+                                     partition_exact_collinear_overlaps_shadow: bool = False) -> dict:
     """Only original producer and source addresses; never caller evidence bodies."""
     if type(source) is not SourceVisibilityProducer:
         raise TypeError("actual SourceVisibilityProducer required")
@@ -164,6 +166,10 @@ def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str,
         raise ValueError("overlap preservation shadow must be explicit boolean")
     if type(immutable_exact_endpoints_shadow) is not bool:
         raise ValueError("immutable exact endpoint shadow must be explicit boolean")
+    if type(partition_exact_collinear_overlaps_shadow) is not bool:
+        raise ValueError("exact collinear partition shadow must be explicit boolean")
+    if partition_exact_collinear_overlaps_shadow and not (preserve_overlapping_spans_shadow and immutable_exact_endpoints_shadow):
+        raise ValueError("exact collinear partition shadow requires exact source-incidence policies")
     if (type(page_id) is not str or not page_id.isdecimal()
             or int(page_id) < 1 or str(int(page_id)) != page_id):
         raise ValueError("canonical_original_page_address_required")
@@ -286,6 +292,15 @@ def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str,
                 root=root,scope_id=immutable_scope,tolerance=0.,
                 preserve_overlapping_spans_shadow=preserve_overlapping_spans_shadow,
                 immutable_exact_endpoints_shadow=True)
+        if partition_exact_collinear_overlaps_shadow:
+            partition_scope = stable_contract_id("g17-original-plan-wall-shadow", dict(root,
+                viewport_ownership_id=plan.ownership_id, snap_tolerance_pt=0.,
+                preserve_overlapping_spans_shadow=True, immutable_exact_endpoints_shadow=True,
+                partition_exact_collinear_overlaps_shadow=True))
+            report["partitioned_exact_w2_w3_w4"] = _graph(segments,
+                root=root,scope_id=partition_scope,tolerance=0.,
+                preserve_overlapping_spans_shadow=True,immutable_exact_endpoints_shadow=True,
+                partition_exact_collinear_overlaps_shadow=True)
     opening = source.physical_opening_authority()
     physical = {}
     proof_addresses = {}
