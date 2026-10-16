@@ -30,6 +30,7 @@ def _two_independent_floors(*, share_original_observation: bool = False):
         physical_floor_surface_id="floor-2",
         room_entity_id="room-2",
         source_room_face_record_id="face-2",
+        metric_area_quantity_id="room-area-2",
         evidence_ids=("ev-room-2", "ev-area-2", "ev-occ-2", "ev-def-2"),
     )
     second_evidence = (
