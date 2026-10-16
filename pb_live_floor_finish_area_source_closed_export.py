@@ -52,7 +52,15 @@ def _original_floor_polygon_is_simple(
             return False
         from shapely.geometry import Polygon
 
-        shape = Polygon(points)
+        # An exact repeated closing coordinate is the only duplicate
+        # allowed in a physical perimeter. Duplicate *interior* vertices
+        # imply a collapsed/backtracked source edge, not a closed face.
+        ring = tuple(tuple(point) for point in points)
+        if ring[0] == ring[-1]:
+            ring = ring[:-1]
+        if len(ring) < 3 or len(set(ring)) != len(ring):
+            return False
+        shape = Polygon(ring)
         return bool(
             shape.is_valid
             and shape.exterior.is_simple
