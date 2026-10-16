@@ -10,6 +10,8 @@ on:
       - "benchmarks/frozen_holdout/full_plan_v2/development_scoreboard.py"
       - "benchmarks/frozen_holdout/full_plan_v2/sealed_reconciliation.py"
       - "docs/engineering/lot16_original_identity_reconciliation_20261012/**"
+      - "docs/engineering/lot16_original_signed_eight_row_20261015/**"
+      - "tests/test_lot16_signed_eight_row_fixture.py"
       - "tools/report_gpt3_selected_two_project_original_evidence.py"
       - "pb_source_closed_run_export.py"
       - "pb_customer_output_verification.py"
@@ -20,7 +22,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: gpt3-full-v2-current-development-${{ github.event.pull_request.number || github.ref }}
@@ -41,31 +42,22 @@ jobs:
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
       - name: Replay SHA-pinned eight-quantity original Lot16 evidence through the four-project development scoreboard
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           ROOT=artifacts/gpt3-full-v2-current-development
+          FIXTURE=docs/engineering/lot16_original_signed_eight_row_20261015
           SEALED="$ROOT/sealed"
           MAPS="$ROOT/identity-maps"
           mkdir -p "$SEALED" "$MAPS"
 
           # The October 12 committed package is the older seven-row seal.
-          # Reuse the independently verified ORIGINAL eight-row artifact from
-          # the source-positive GitHub run; never invent an eighth quantity.
-          curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11929406140/zip" \
-            -o "$ROOT/verified-original-eight.zip"
-          printf '%s  %s\n' \
-            '950e1074d270e6b1d4558b165e5345cf49b2ac0c962a3cc8edf420f11f67bd91' \
-            "$ROOT/verified-original-eight.zip" | sha256sum --check
-          mkdir -p "$ROOT/original"
-          unzip -q "$ROOT/verified-original-eight.zip" -d "$ROOT/original"
-          test "$(cat "$ROOT/original/producer_head_sha.txt")" = \
+          # The ORIGINAL eight-row signed output (source-positive GitHub run
+          # 38636511093, producer head 4e5aedf0) is committed as a hash-pinned
+          # fixture, so this check no longer depends on an expiring Actions
+          # artifact. Never invent an eighth quantity.
+          (cd "$FIXTURE" && sha256sum --check SHA256SUMS)
+          test "$(cat "$FIXTURE/producer_head_sha.txt")" = \
             '4e5aedf085cf63f92dac0935132b1e1c1dbaa178'
 
           python - <<'PY'
@@ -74,7 +66,7 @@ jobs:
           from pb_source_closed_run_export import sealed_source_closed_run_from_dict
           from pb_customer_output_verification import verify_sealed_customer_output
 
-          root=Path("artifacts/gpt3-full-v2-current-development/original")
+          root=Path("docs/engineering/lot16_original_signed_eight_row_20261015")
           sealed=sealed_source_closed_run_from_dict(json.loads(
               (root/"production/source_sealed_run.json").read_text()
           ))
@@ -95,9 +87,9 @@ jobs:
           assert sealed.fingerprint==exact["sealed_run_fingerprint"]
           print("EIGHT ORIGINAL SIGNED SOURCE QUANTITIES AND CUSTOMER ROWS VERIFIED")
           PY
-          cp "$ROOT/original/production/source_sealed_run.json" \
+          cp "$FIXTURE/production/source_sealed_run.json" \
             "$SEALED/au_qld_lot16_power.json"
-          cp "$ROOT/original/identity_map_with_1215.json" \
+          cp "$FIXTURE/identity_map_with_1215.json" \
             "$MAPS/au_qld_lot16_power.identity_map.json"
 
           set +e
