@@ -212,11 +212,18 @@ class CrossViewCeilingQuantityResult:
 
     @property
     def quantities(self) -> tuple[QuantityEvidence, ...]:
-        return tuple(record.quantity for record in self.records)
+        # Convenience projections share the canonical-identity conflict gate:
+        # a duplicated ceiling ID must not leak two FIRM rows.
+        return tuple(
+            record.quantity for record in self.records_by_ceiling_id.values()
+        )
 
     @property
     def canonical_ceilings(self) -> tuple[LiveCanonicalCeilingSurfaceObject, ...]:
-        return tuple(record.canonical_ceiling for record in self.records)
+        return tuple(
+            record.canonical_ceiling
+            for record in self.records_by_ceiling_id.values()
+        )
 
     @property
     def records_by_ceiling_id(
