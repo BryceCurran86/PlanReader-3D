@@ -2,6 +2,7 @@ name: GPT MAX Original Same-Root F07 and G17 Authority
 on:
   pull_request:
     branches:
+      - main
       - gptmax/original-same-root-f07-clean-main-20261015
     paths:
       - tools/diag_gptmax_same_root_f07_g17_original.py
