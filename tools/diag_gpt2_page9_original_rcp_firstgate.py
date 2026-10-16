@@ -30,7 +30,7 @@ def _title_identity(label, anchor) -> bool:
     )
 
 
-def _nearest_native_frames_to_title(title_bbox, frames, *, limit=4):
+def _nearest_native_frames_to_title(title_bbox, frames, *, limit=None):
     """Rank original vector frames by source-native distance, never ownership.
 
     Exact native geometry only. No guessed offsets, title-to-frame binding,
@@ -61,10 +61,16 @@ def _nearest_native_frames_to_title(title_bbox, frames, *, limit=4):
             "title_to_frame_native_distance_pdf_pts":round(distance,6),
             "original_vector_frame_not_title_owned":True,
         })
-    return sorted(result,key=lambda row:(
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError("nonpositive original frame census limit")
+    # All original native frames matter to a physical title's candidate
+    # universe. The ordinary path previously showed four nearest frames and
+    # silently omitted other original sources. No frame is elected here.
+    ordered=sorted(result,key=lambda row:(
         row["title_to_frame_native_distance_pdf_pts"],
         row["frame_bbox_native_pdf_pts"],
-    ))[:limit]
+    ))
+    return ordered if limit is None else ordered[:limit]
 
 
 def _frame_source_receipts(page, frame, calibration):
@@ -122,6 +128,46 @@ def _frame_source_receipts(page, frame, calibration):
     ))
 
 
+
+def _original_title_frame_relation(title, frame):
+    """Classify exact source-native bboxes, without inferring drawing roles."""
+    import math
+    def check(value):
+        if (
+            type(value) not in (tuple,list) or len(value)!=4
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in value)
+            or value[2]<=value[0] or value[3]<=value[1]
+        ):
+            raise ValueError("invalid original title/frame geometry")
+        return tuple(float(v) for v in value)
+    a,b=check(title),check(frame)
+    within=(b[0]<=a[0] and b[1]<=a[1]
+            and a[2]<=b[2] and a[3]<=b[3])
+    frame_in_title=(a[0]<=b[0] and a[1]<=b[1]
+                    and b[2]<=a[2] and b[3]<=a[3])
+    ix=min(a[2],b[2])-max(a[0],b[0])
+    iy=min(a[3],b[3])-max(a[1],b[1])
+    if within and (a[0]==b[0] or a[1]==b[1]
+                   or a[2]==b[2] or a[3]==b[3]):
+        relation="frame_contains_title_on_boundary"
+    elif within:
+        relation="frame_strictly_contains_title"
+    elif frame_in_title:
+        relation="title_contains_original_frame"
+    elif ix>0 and iy>0:
+        relation="partial_native_overlap"
+    elif ix>=0 and iy>=0:
+        relation="boundary_contact_only"
+    else:
+        relation="source_geometries_disjoint"
+    return {
+        "original_native_geometric_relation":relation,
+        "frame_geometrically_contains_title":within,
+        "title_frame_structural_ownership_proven":False,
+        "title_owns_physical_viewport":False,
+    }
+
+
 def _frame_ownership_matrix(page, frames, anchors, calibration):
     """Expose native/display geometry, all title rivals and typed negatives."""
     from pb_viewport_segmentation import (
@@ -135,6 +181,15 @@ def _frame_ownership_matrix(page, frames, anchors, calibration):
             page, anchor, frames, calibration, anchors=anchors,
         )
         all_candidates.append(set(candidates))
+        frame_relations = []
+        for fid, frame in enumerate(frames):
+            source_receipts = _frame_source_receipts(page, frame, calibration)
+            frame_relations.append({
+                "original_frame_ordinal":fid,
+                "native_frame_bbox_pdf_pts":list(frame),
+                "indexed_original_native_frame_source_receipts":source_receipts,
+                **_original_title_frame_relation(anchor.bbox, frame),
+            })
         by_title.append({
             "source_anchor_ordinal": idx,
             "reported_view_id": f"view_p9_{idx+1}",
@@ -144,6 +199,9 @@ def _frame_ownership_matrix(page, frames, anchors, calibration):
             "native_direction": list(anchor.direction),
             "view_type": str(anchor.view_type),
             "geometric_frame_candidate_count": len(candidates),
+            "all_original_native_frame_relations":frame_relations,
+            "all_original_native_frames_evaluated":len(frame_relations)==len(frames),
+            "original_frame_relationships_grant_role":False,
             "no_source_role_or_viewport_granted": True,
         })
     frame_rows = []
