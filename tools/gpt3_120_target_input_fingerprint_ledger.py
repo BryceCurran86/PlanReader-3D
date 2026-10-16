@@ -44,6 +44,54 @@ def _frozen_input_digests(manifests: tuple) -> dict[str, str]:
     }
 
 
+def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
+    """Exclude elapsed time, machine memory and session folders from input ID.
+
+    Original SHA/preflight receipts, actually sealed production artifacts and
+    stable per-project disposition ARE relevant. Logs, performance samples
+    and output-folder paths are not a new source/producer/scoring combination.
+    """
+    if receipt is None:
+        return None
+    stable_files = []
+    files = receipt.get("files")
+    if not isinstance(files, list):
+        raise ValueError("owner receipt file-digest universe is missing")
+    for file_row in files:
+        if not isinstance(file_row, dict):
+            raise ValueError("malformed owner receipt artifact")
+        path = file_row.get("file")
+        if type(path) is not str:
+            raise ValueError("invalid owner receipt artifact path")
+        keep = (
+            path == "SOURCE_SHA_VERIFICATION.json"
+            or path.endswith("/source_package_preflight.json")
+            or path.endswith(".sealed.json")
+            or (
+                path.count("/")==2
+                and "/outputs/" in path
+                and path.rsplit("/", 1)[-1].startswith("au_qld_")
+                and path.endswith(".json")
+            )
+        )
+        if not keep:
+            continue
+        sha = file_row.get("share_safe_sha256")
+        if type(sha) is not str or re.fullmatch(r"[0-9a-f]{64}", sha) is None:
+            raise ValueError("owner source/sealed artifact lacks valid digest")
+        stable_files.append((path, sha))
+    if len({row[0] for row in stable_files}) != len(stable_files):
+        raise ValueError("duplicate source/sealed artifact in owner receipt")
+    return {
+        "repo_head": receipt.get("repo_head"),
+        "handoff_results": sorted(
+            (row["project_id"], row["status"], row.get("exit_code"))
+            for row in receipt["project_handoffs"]
+        ),
+        "source_preflight_and_sealed_artifact_hashes": sorted(stable_files),
+    }
+
+
 def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
     """Copy post-evaluator item states ONLY from a complete published suite."""
     if report.get("publication_status") != "PUBLISHED":
@@ -203,7 +251,7 @@ def build_120_target_ledger(
         "frozen_file_sha256s": frozen_shas,
         "source_sha256s_by_project": source_shas,
         "reported_reconciliation": report,
-        "owner_execution_receipt": owner_receipt,
+        "owner_execution_receipt": _stable_owner_evidence(owner_receipt),
     }
     digest = _digest_bytes(json.dumps(
         identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
