@@ -18,6 +18,9 @@ SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 
 
 def test_original_ft3_dash_and_both_quotes_source_byte_ttf_gid_proof():
+    # General CI does not install this optional diagnostic dependency.
+    # The dedicated original-SHA source workflow installs it and MUST execute.
+    pytest.importorskip('fontTools')
     source=ORIGINAL.read_bytes()
     assert hashlib.sha256(source).hexdigest()==SHA
     # Original native text-block ordinal differs between supported MuPDF
@@ -98,6 +101,24 @@ def test_truncated_or_fontless_tables_abstain():
     assert _source_truetype_symbol_subtables(b"")[1]=="embedded_font_program_unavailable"
     assert _source_truetype_symbol_subtables(b"garbled font binary")[0]=={}
 
+
+
+
+def test_missing_fonttools_fails_closed_without_claiming_glyph_authority(monkeypatch):
+    import builtins
+    original_import=builtins.__import__
+    def reject_optional_dependency(name, *args, **kwargs):
+        if name.startswith('fontTools'):
+            raise ImportError('optional source diagnostic dependency absent')
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', reject_optional_dependency)
+    assert _source_truetype_symbol_subtables(b'nonempty-original-font-bytes') == (
+        {}, 'fonttools_unavailable'
+    )
+    # An empty/corrupt source cannot be misclassified as dependency failure.
+    assert _source_truetype_symbol_subtables(b'') == (
+        {}, 'embedded_font_program_unavailable'
+    )
 
 class MockDoc:
     def __init__(self, payload):
