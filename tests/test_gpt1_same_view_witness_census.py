@@ -179,3 +179,93 @@ def test_source_face_selector_permutation_cannot_change_receipts():
     right = _report(source, rooms, (second, first))
     assert left == right
     assert [row["source_room_face_record_id"] for row in left["rows"]] == sorted((first, second))
+
+
+@pytest.mark.parametrize(
+    "kind",
+    (
+        "empty_observations",
+        "foreign_observation",
+        "repeated_observation",
+        "blank_observation",
+        "padded_observation",
+        "nonstring_observation",
+        "missing_receipt",
+        "extra_receipt",
+    ),
+)
+def test_hostile_trusted_native_label_receipts_never_enter_metric_pair_census(kind):
+    # A malformed copy of a source line must not become original native
+    # observation ownership just because its human-readable text matches.
+    source, rooms = _source_and_rooms()
+    room = rooms.rooms[0]
+    native = _trusted_lines_for_page(
+        source, revision_id=room.revision_id, page_id=room.page_id,
+        candidate_labels=(room.room_label,),
+    )
+    assert len(native) == 1
+    original = native[0]
+    owned = replace(rooms, rooms=(replace(
+        room, room_label_evidence_ids=original.observation_ids,
+    ),))
+    from tools import diag_gpt1_same_view_witness_census as census
+    changed = {
+        "empty_observations": lambda: replace(original, observation_ids=()),
+        "foreign_observation": lambda: replace(original, observation_ids=("foreign-obs",)),
+        "repeated_observation": lambda: replace(
+            original, observation_ids=(*original.observation_ids, *original.observation_ids),
+        ),
+        "blank_observation": lambda: replace(original, observation_ids=("",)),
+        "padded_observation": lambda: replace(original, observation_ids=(" " + original.observation_ids[0],)),
+        "nonstring_observation": lambda: replace(original, observation_ids=(123,)),
+        "missing_receipt": lambda: replace(original, receipt_ids=()),
+        "extra_receipt": lambda: replace(original, receipt_ids=(*original.receipt_ids, "foreign-receipt")),
+    }[kind]()
+    with patch.object(
+        LiveCanonicalRoomComposition, "room_face_authority_binding_for",
+        return_value=_mock_room_face_binding(owned.rooms[0]),
+    ), patch.object(census, "_trusted_lines_for_page", return_value=(changed,)), patch.object(
+        census, "_trusted_native_dimensions_for_page",
+        side_effect=AssertionError("unowned text must not reach figured dimensions"),
+    ):
+        row = _report(source, owned)["rows"][0]
+    assert row["status"] == "ABSTAINED"
+    assert row["reason"] == "original_room_label_observations_unowned"
+    assert row["quantity_published"] is False
+    assert "horizontal_dimensions" not in row
+    assert "vertical_dimensions" not in row
+
+
+def test_source_label_line_source_ambiguity_abstains_even_with_one_owned_line():
+    source, rooms = _source_and_rooms()
+    room = rooms.rooms[0]
+    native = _trusted_lines_for_page(
+        source, revision_id=room.revision_id, page_id=room.page_id,
+        candidate_labels=(room.room_label,),
+    )
+    assert len(native) == 1
+    owned = replace(rooms, rooms=(replace(
+        room, room_label_evidence_ids=native[0].observation_ids,
+    ),))
+    from tools import diag_gpt1_same_view_witness_census as census
+    with patch.object(
+        LiveCanonicalRoomComposition, "room_face_authority_binding_for",
+        return_value=_mock_room_face_binding(owned.rooms[0]),
+    ), patch.object(census, "_trusted_lines_for_page", return_value=(native[0], native[0])), patch.object(
+        census, "_trusted_native_dimensions_for_page",
+        side_effect=AssertionError("ambiguous text cannot enter figured dimensions"),
+    ):
+        row = _report(source, owned)["rows"][0]
+    assert row["reason"] == "original_trusted_label_line_not_unique"
+    assert row["trusted_label_line_count"] == 2
+    assert row["status"] == "ABSTAINED"
+
+
+def test_room_source_binding_precedes_any_unauthorized_label_lookup():
+    source, rooms = _source_and_rooms()
+    from tools import diag_gpt1_same_view_witness_census as census
+    with patch.object(census, "_trusted_lines_for_page",
+                      side_effect=AssertionError("unsealed room must not read label text")):
+        row = _report(source, rooms)["rows"][0]
+    assert row["reason"] == "original_room_face_authority_binding_unavailable"
+    assert row["status"] == "ABSTAINED"
