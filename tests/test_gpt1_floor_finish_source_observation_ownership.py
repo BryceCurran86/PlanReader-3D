@@ -103,10 +103,13 @@ def test_noncanonical_or_nonstr_source_issuer_ids_are_not_cast_to_valid_text(fie
     original = claim.floor_finish_quantity_evidence[0]
     quantity = replace(original, metadata={**dict(original.metadata), field: invalid})
     altered = replace(claim, floor_finish_quantity_evidence=(quantity,))
-    with pytest.raises(
-        SourceClosedRunConflictError,
-        match="source issuer identity is malformed",
-    ):
+    # Blank original IDs retain the established first failing source gate
+    # (missing occurrence/definition, missing evidence, or missing support).
+    # Typed/whitespace corruption is the newly enforced issuer contract.
+    reason = (
+        None if invalid == "" else "source issuer identity is malformed"
+    )
+    with pytest.raises(SourceClosedRunConflictError, match=reason):
         _trace(altered)
 
 
