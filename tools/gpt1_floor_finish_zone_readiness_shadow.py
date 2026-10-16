@@ -116,10 +116,18 @@ def check_page_view_ownership(edges: Sequence[Mapping], floor: Mapping,
     for owner in (floor, projection, *zones):
         if not isinstance(owner, Mapping) or any(not _id(owner.get(k)) for k in ("page_id", "viewport_id")):
             return ("source_viewport_missing",)
+    if type(edges) not in (tuple, list) or any(
+        not isinstance(e, Mapping) or not _id(e.get("id")) for e in edges
+    ):
+        return ("source_edge_inventory_invalid",)
     index = {e["id"]: e for e in edges}
+    if len(index) != len(edges):
+        return ("source_edge_inventory_duplicate",)
     for owner in (floor, projection, *zones):
         edge_ids = owner.get("edge_ids")
-        if type(edge_ids) not in (tuple, list) or any(not _id(i) for i in edge_ids):
+        if (type(edge_ids) not in (tuple, list) or not edge_ids
+                or any(not _id(i) for i in edge_ids)
+                or len(set(edge_ids)) != len(edge_ids)):
             return ("source_edge_list_invalid",)
         for eid in edge_ids:
             edge = index.get(eid)
@@ -138,6 +146,8 @@ def check_explicit_correspondence(floor: Mapping, projection: Mapping,
     Even a passing set is UNAUTHENTICATED: we do not verify PDF content, wall
     structural role, or whether the source issuer actually signed the receipt.
     """
+    if not isinstance(floor, Mapping) or not isinstance(projection, Mapping):
+        return ("cross_sheet_correspondence_unavailable",)
     a, b = floor.get("edge_ids", ()), projection.get("edge_ids", ())
     if (type(a) not in (tuple, list) or type(b) not in (tuple, list)
             or type(pairings) not in (tuple, list) or not a or not b or not pairings):
@@ -172,8 +182,10 @@ def check_closed_source_loop(edge_ids: Sequence[str], edges: Mapping[str, Mappin
         row = edges.get(eid)
         if row is None:
             return ("source_loop_edge_missing",)
+        if not isinstance(row, Mapping):
+            return ("source_loop_edge_invalid",)
         p, q = _point(row.get("p0")), _point(row.get("p1"))
-        if p is None or q is None or p == q:
+        if p is None or q is None or p == q or not _positive_finite_length(p, q):
             return ("source_loop_edge_invalid",)
         adjacency[p].append(q); adjacency[q].append(p)
     if any(len(links) != 2 for links in adjacency.values()):
@@ -252,13 +264,22 @@ def check_zones_nonoverlapping(zones: Sequence[Mapping], edges: Mapping[str, Map
 
 def check_finish_occurrence_ownership(zones: Sequence[Mapping]) -> tuple[str, ...]:
     """09: occurrence cannot be silently assigned to two different zones."""
-    zone_ids, occurrences = [], []
+    zone_ids, occurrences, observation_ids = [], [], []
     for z in zones:
         keys = ("zone_id", "occurrence_record_id", "definition_record_id", "occurrence_evidence_id")
         if not isinstance(z, Mapping) or any(not _id(z.get(k)) for k in keys):
             return ("finish_occurrence_or_definition_unavailable",)
-        zone_ids.append(z["zone_id"]); occurrences.append(z["occurrence_record_id"])
-    if len(set(zone_ids)) != len(zone_ids) or len(set(occurrences)) != len(occurrences):
+        if z.get("material_role") != "floor_finish":
+            return ("finish_occurrence_role_unverified",)
+        if (z.get("occurrence_page_id") != z.get("page_id")
+                or z.get("occurrence_viewport_id") != z.get("viewport_id")):
+            return ("finish_occurrence_viewport_conflict",)
+        zone_ids.append(z["zone_id"])
+        occurrences.append(z["occurrence_record_id"])
+        observation_ids.append(z["occurrence_evidence_id"])
+    if (len(set(zone_ids)) != len(zone_ids)
+            or len(set(occurrences)) != len(occurrences)
+            or len(set(observation_ids)) != len(observation_ids)):
         return ("finish_occurrence_multiple_owners",)
     return ()
 
