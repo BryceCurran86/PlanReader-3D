@@ -6,6 +6,7 @@ issue source-based promotions, or mutate customer/signed output.
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 import pytest
 
@@ -149,3 +150,37 @@ def test_m5_compatible_original_figured_record_retains_its_evidence_id():
     assert bound.method == "figured_dimension"
     assert bound.figured_dimension_ids == ("dimension_source_1",)
     assert bound.metadata["figured_mm"] == 6500.0
+
+
+@pytest.mark.parametrize("numeric", [Fraction(13, 2), Fraction(3570, 1)])
+def test_real_numeric_scalar_dimensions_preserve_valid_firm_measurements(numeric):
+    result = resolve_measurement_authority(figured_mm=numeric)
+    assert result.authority_status == AuthorityStatus.FIRM.value
+    assert result.value_m == round(float(numeric) / 1000.0, 4)
+    scaled = resolve_measurement_authority(scaled_mm=numeric, scale_reliable=True)
+    assert scaled.authority_status == AuthorityStatus.PROVISIONAL.value
+
+
+def test_numpy_real_scalar_supported_without_bool_false_positive():
+    np = pytest.importorskip("numpy")
+    for numeric in (np.float64(6500.0), np.float32(6500.0), np.int64(6500)):
+        figured = resolve_measurement_authority(figured_mm=numeric)
+        scaled = resolve_measurement_authority(scaled_mm=numeric, scale_reliable=True)
+        verified = resolve_measurement_authority(
+            figured_mm=6500.0, scaled_mm=numeric, max_delta_ratio=np.float64(0.05)
+        )
+        assert figured.authority_status == AuthorityStatus.FIRM.value
+        assert figured.value_m == 6.5
+        assert scaled.authority_status == AuthorityStatus.PROVISIONAL.value
+        assert verified.authority_status == AuthorityStatus.FIRM.value
+
+
+def test_tolerance_boundary_retains_original_rounded_delta_verdict_and_notes():
+    # Previously accepted value: the published 2dp delta is exactly 5 percent.
+    at_edge = resolve_measurement_authority(figured_mm=6500.0, scaled_mm=6174.996)
+    over_edge = resolve_measurement_authority(figured_mm=6500.0, scaled_mm=6174.994)
+    assert at_edge.authority_status == AuthorityStatus.FIRM.value
+    assert at_edge.scaled_delta_mm == 325.0
+    assert at_edge.notes == "Figured dimension precedence applied (scaled delta: 325.0mm)"
+    assert over_edge.authority_status == AuthorityStatus.REVIEW_REQUIRED.value
+    assert over_edge.scaled_delta_mm == 325.01
