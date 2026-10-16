@@ -113,6 +113,25 @@ class OpeningGapCandidate:
 
 
 @dataclass(frozen=True)
+class GlyphSizedRun:
+    """A run of at least three glyph-sized paths on one baseline: outlined lettering, numerals or dimension ticks.
+
+    This is the source-native ink and ancestry of such a run (box, baseline, path and primitive ids), not its text:
+    reading it needs a separately approved source-positive reader or a human hint. ``touches_wall_network`` is True when
+    some piece of the run touches a building-scale wall network (a door frame, a post), so a reviewer can tell lettering
+    apart from jambs.
+    """
+
+    bbox: Tuple[float, float, float, float]
+    path_count: int
+    segment_count: int
+    baseline_y_pt: float
+    glyph_height_pt: float
+    touches_wall_network: bool
+    source_primitive_ids: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class InkClassRow:
     ink_class: Tuple[Any, ...]
     segment_count: int
@@ -128,6 +147,7 @@ class StructuralWallInkReport:
     darkest_ink_color: Optional[Tuple[float, ...]]
     reason_codes: Tuple[str, ...]
     opening_gaps: Tuple[OpeningGapCandidate, ...] = ()
+    glyph_runs: Tuple[GlyphSizedRun, ...] = ()
     schema_version: str = STRUCTURAL_WALL_INK_SCHEMA_VERSION
     shadow_only: bool = True
     live_effect: bool = False
@@ -403,6 +423,7 @@ def classify_structural_wall_ink(
                 small.append((key, x0, y0, x1, y1))
     small.sort(key=lambda r: (r[4], r[1], repr(r[0])))   # by baseline (bottom edge), then x
     glyph_keys: set = set()
+    run_groups: List[List[int]] = []
     if small:
         guf = _UnionFind(range(len(small)))
         tol_max = GLYPH_BASELINE_TOL_FRACTION * max(glyph_max, 1.0)
@@ -423,6 +444,7 @@ def classify_structural_wall_ink(
             groups[guf.find(a)].append(a)
         for members in groups.values():
             if len(members) >= GLYPH_MIN_RUN:
+                run_groups.append(sorted(members))
                 for a in members:
                     glyph_keys.add(small[a][0])
     # Glyph-sized runs are withheld from the network search, but they are judged AFTER it: a run that touches a
@@ -820,6 +842,22 @@ def classify_structural_wall_ink(
                 else:
                     set_label(m, NOT_WALL_INK, REASON_OUTLINED_GLYPH_RUN)
 
+    glyph_runs_found: List[GlyphSizedRun] = []
+    for members in run_groups:
+        boxes = [small[a] for a in members]
+        member_segments = sorted({m for a in members for m in paths[small[a][0]]})
+        heights = sorted(b[4] - b[2] for b in boxes)
+        bottoms = sorted(b[4] for b in boxes)
+        glyph_runs_found.append(GlyphSizedRun(
+            bbox=(round(min(b[1] for b in boxes), 4), round(min(b[2] for b in boxes), 4),
+                  round(max(b[3] for b in boxes), 4), round(max(b[4] for b in boxes), 4)),
+            path_count=len(members), segment_count=len(member_segments),
+            baseline_y_pt=round(bottoms[len(bottoms) // 2], 4), glyph_height_pt=round(heights[len(heights) // 2], 4),
+            touches_wall_network=any(REASON_GLYPH_RUN_ATTACHED in reasons[m] for m in member_segments),
+            source_primitive_ids=tuple(sorted(ids[m] for m in member_segments)),
+        ))
+    glyph_runs_found.sort(key=lambda g: (g.bbox[1], g.bbox[0], g.source_primitive_ids[:1]))
+
     decisions = tuple(
         StructuralInkDecision(ids[i], label.get(i, UNPROVEN), tuple(sorted(set(reasons[i]))) or (REASON_NO_GRAPHIC_STATE,),
                               cls_of.get(i), net_of.get(i))
@@ -836,7 +874,8 @@ def classify_structural_wall_ink(
     class_table = tuple(
         InkClassRow(k, int(v[0]), round(v[1], 3), int(v[2])) for k, v in sorted(table.items(), key=lambda kv: (-kv[1][1], repr(kv[0])))
     )
-    return StructuralWallInkReport(decisions, class_table, network_id, darkest_color, (), tuple(gaps_found))
+    return StructuralWallInkReport(decisions, class_table, network_id, darkest_color, (), tuple(gaps_found),
+                                   tuple(glyph_runs_found))
 
 
 def _make_run(members: List[int], pts: Mapping[int, Tuple[float, float, float, float]],

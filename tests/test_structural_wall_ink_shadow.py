@@ -408,3 +408,38 @@ def test_a_short_face_finds_a_much_longer_partner_from_either_side():
     report = run(segs)
     assert REASON_NO_PARTNER not in reasons(report)["short"]
     assert REASON_NO_PARTNER not in reasons(report)["long"]
+
+
+# ---------------------------------------------------------------- glyph-sized runs (label ink with ancestry)
+def test_a_word_of_outlined_glyphs_is_one_run_with_its_ancestry_and_a_second_line_is_another():
+    line1 = list(itertools.chain.from_iterable(_letter(f"A{i}", 500 + 7 * i, 520) for i in range(5)))
+    line2 = list(itertools.chain.from_iterable(_letter(f"B{i}", 500 + 7 * i, 560) for i in range(4)))
+    report = run(building() + line1 + line2)
+    runs = report.glyph_runs
+    assert len(runs) == 2
+    first, second = sorted(runs, key=lambda r: r.bbox[1])
+    assert first.path_count == 5 and second.path_count == 4
+    assert first.segment_count == 15 and second.segment_count == 12
+    assert first.source_primitive_ids == tuple(sorted(s["id"] for s in line1))
+    assert abs(first.glyph_height_pt - 8.0) < 0.01 and abs(first.baseline_y_pt - 520.0) < 0.01
+    assert first.bbox == (500.0, 512.0, 532.0, 520.0)
+    assert first.touches_wall_network is False
+
+
+def test_a_run_standing_on_a_wall_says_so_and_is_not_text_by_itself():
+    posts = list(itertools.chain.from_iterable(_box(f"post{i}", 150 + 14 * i, 102.6, 156 + 14 * i, 108.6) for i in range(3)))
+    report = run(building() + posts)
+    assert len(report.glyph_runs) == 1 and report.glyph_runs[0].touches_wall_network is True
+
+
+def test_glyph_runs_are_invariant_to_translation_and_input_order_and_are_deterministic():
+    word = list(itertools.chain.from_iterable(_letter(f"A{i}", 500 + 7 * i, 520) for i in range(5)))
+    base = run(building() + word).glyph_runs
+    moved = [dict(s, x1=s["x1"] + 11.0, x2=s["x2"] + 11.0, y1=s["y1"] + 5.0, y2=s["y2"] + 5.0) for s in building() + word]
+    got = run(moved).glyph_runs
+    assert [(g.path_count, g.segment_count, g.source_primitive_ids) for g in got] == [
+        (g.path_count, g.segment_count, g.source_primitive_ids) for g in base]
+    assert got[0].bbox == (base[0].bbox[0] + 11.0, base[0].bbox[1] + 5.0, base[0].bbox[2] + 11.0, base[0].bbox[3] + 5.0)
+    shuffled = list(building() + word)
+    random.Random(5).shuffle(shuffled)
+    assert run(shuffled).glyph_runs == base

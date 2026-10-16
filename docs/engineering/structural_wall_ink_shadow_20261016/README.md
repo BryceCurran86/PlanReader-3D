@@ -2,7 +2,7 @@
 
 Status: **shadow-only evidence module and read-only overlay tool.** Nothing here is called by a live path, raises an authority,
 filters a candidate, or changes a quantity. Claude integration lane, 2026-10-16. Code: `pb_structural_wall_ink_shadow.py`,
-`tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (34),
+`tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (37),
 `tests/test_structural_wall_ink_overlay_tool.py` (2).
 
 ## 1. Why (observed repository behaviour)
@@ -39,6 +39,11 @@ thicker than 8 pt stay `UNPROVEN`; fixtures that touch a wall network are not se
 Opening-gap evidence (`StructuralWallInkReport.opening_gaps`): two facing ends of one wall face line, equal thickness, with a gap of up to 12 wall
 thicknesses on one face, or up to 80 thicknesses when the partner face of the same wall is interrupted over the same interval (two collinear walls on opposite
 sides of a room do not do that). It is evidence of an interruption in the wall body only; the kind, host, frame and size of whatever occupies the gap are not claimed.
+Glyph-sized runs (`StructuralWallInkReport.glyph_runs`): every run of at least three glyph-sized paths on one baseline, with its box, baseline, glyph height, path and segment
+counts, a `touches_wall_network` flag, and the **sorted source primitive ids of every piece** (ancestry). This is the label ink of Q5446's outlined lettering with its vector
+ancestry preserved, not its text: reading it needs a separately approved source-positive reader or a human hint, and a run is not text by itself (dimension ticks and
+door-frame pieces are runs too, which is what the flag is for). Counts (runs / touching a wall network): 3Laurel p3 409 / 260; Q5446 p1 956 / 106, p2 742 / 115;
+Maryborough p7 515 / 220; Lot16 p3 98 / 0. In the Q5446 p1 overlay the purple boxes sit on the room names (GARAGE, ENTRY, LIVING, GUEST, MEALS, FAMILY, KITCHEN, W.I.P ...).
 A pairing bug found by a test on the way: a short face failed to find a much longer partner because candidates were indexed by midpoint; faces are now indexed by every cell they cover (regression test fails on the earlier version).
 
 ## 3. What the original plans show (overlays in `overlays/`: red = candidate, blue = paired but unproven, purple = repeated small paths, orange = frame)
@@ -71,6 +76,14 @@ No quantity, count or score is affected by anything in this folder.
 Segments per page that would remain if the typed negatives were withheld from wall topology (after the production motif filter; the cap and the live path are untouched):
 p1 8,794; p2 6,668; p3 5,023; p4 3,991; p5 4,352; p6 4,276; p7 6,183; p8 6,187; p9 4,376; p10 2,997 (production today: p1 41,932 ... p9 20,129, nine pages over the cap).
 Withholding is an authority-promotion decision and needs its own review; this table is the diagnostic only.
+
+## 5b. Room closure: measured, not solved
+With the candidate network plus the opening-gap chords, a closed-face check (polygonize and raster free-space) gives, on 3Laurel p3, about 14 enclosed regions
+including the two alfresco rooms (face area 10.47 m2 and 13.17 m2 if the printed 1:100 is applied, as an inspection only; the printed legend says 10.50 and 13.60),
+a bath and the WIP, but the bedrooms, living areas and the garage merge: the partitions end at joinery drawn in thinner ink (wardrobe fronts), which this
+evidence deliberately does not call wall. On Q5446 p1 the interior is connected to the outside even with 30 pt of dilation, because the envelope has open sides (porch, alfresco, garage
+door) and window gaps without typed ends. So the first failing stage for room closure is the wall network's ends at openings and joinery, not the lettering and not the
+printed names. No room, area or label is claimed.
 
 ## 6. Reproduce
 `python -m tools.diag_structural_wall_ink_overlay --pdf <original pdf> --page <1-based> --png out.png --json out.json`. The tool reads the PDF and writes only the two output files.

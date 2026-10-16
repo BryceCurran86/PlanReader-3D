@@ -49,6 +49,8 @@ def run(pdf: Path, page_number: int, png: Path | None, summary_path: Path | None
         "reason_counts": dict(reasons),
         "network_count": report.network_count,
         "opening_gap_candidates": len(report.opening_gaps),
+        "glyph_sized_runs": len(report.glyph_runs),
+        "glyph_sized_runs_touching_wall_network": sum(1 for g in report.glyph_runs if g.touches_wall_network),
         "darkest_ink_color": report.darkest_ink_color,
         "ink_class_table": [
             {"ink_class": list(r.ink_class), "segments": r.segment_count, "length_pt": r.total_length_pt,
@@ -92,6 +94,10 @@ def run(pdf: Path, page_number: int, png: Path | None, summary_path: Path | None
             a = fitz.Point(*gap.end_a) * to_view
             b = fitz.Point(*gap.end_b) * to_view
             draw.line([(a.x * zoom, a.y * zoom), (b.x * zoom, b.y * zoom)], fill=(0, 190, 190), width=3)
+        for run_ in report.glyph_runs:
+            x0, y0, x1, y1 = run_.bbox
+            corners = [fitz.Point(x, y) * to_view for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+            draw.polygon([(c.x * zoom, c.y * zoom) for c in corners], outline=(160, 0, 200) if not run_.touches_wall_network else (0, 160, 60))
         image.save(str(png))
     return summary
 
