@@ -99,6 +99,15 @@ def test_real_archived_four_job_owner_receipts_are_rehashed_read_only():
     assert by_id["au_qld_maryborough_service_station"]["process_status"] == "MEMORY_LIMIT"
     assert by_id["au_qld_maryborough_service_station"]["derived_sealed_quantity_count"] == 0
     assert by_id["au_qld_lot16_power"]["derived_sealed_quantity_count"] == 8
+    assert by_id["au_qld_maryborough_service_station"][
+        "earliest_verified_project_execution_gate"
+    ] == "owner_process_stopped:MEMORY_LIMIT"
+    assert by_id["au_qld_3laurel"]["earliest_verified_project_execution_gate"] == (
+        "source_producer_unsealed:no_sealable_quantities"
+    )
+    assert by_id["au_qld_q5446_armstrong32_harlequin"][
+        "earliest_verified_project_execution_gate"
+    ] == "source_producer_unsealed:source_complexity_blocked"
     assert by_id["au_qld_lot16_power"]["signed_run_verified_against_derived_bytes"]
     assert all(p["official_project_score"] is None for p in observed["projects"])
 
@@ -269,3 +278,10 @@ def test_cli_writes_unpublished_outside_receipt_directory_and_cannot_overwrite(t
             "--receipt-root", str(_ROOT),
             "--output", str(_ROOT / "RUN_RECEIPT.json"),
         ])
+
+
+def test_confidential_original_pdf_must_not_be_present_even_unindexed(tmp_path):
+    root = _copy(tmp_path)
+    (root / "private-original-plan.pdf").write_bytes(b"%PDF-synthetic-private-not-for-public")
+    with pytest.raises(ValueError, match="private original PDF"):
+        audit.verify_owner_four_job_receipts(root)
