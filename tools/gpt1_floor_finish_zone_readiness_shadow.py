@@ -222,13 +222,29 @@ def _ring(edge_ids: Sequence[str], edges: Mapping[str, Mapping]):
     return vertices
 
 
+def _safe_polygon(vertices):
+    """Reject invalid or overflowed original-point candidates before GEOS."""
+    if not isinstance(vertices, (list, tuple)) or len(vertices) < 4:
+        return None
+    try:
+        xs, ys = zip(*vertices)
+        extent = (max(xs) - min(xs)) * (max(ys) - min(ys))
+        if not math.isfinite(extent) or extent <= 0:
+            return None
+        result = Polygon(vertices)
+        if result.is_empty or not result.is_valid or not math.isfinite(result.area) or result.area <= 0:
+            return None
+        return result
+    except (TypeError, ValueError, OverflowError, GEOSException):
+        return None
+
+
 def check_simple_source_polygon(edge_ids: Sequence[str], edges: Mapping[str, Mapping]) -> tuple[str, ...]:
     """06: reject zero-area, overlapping, doubled-back or crossed ink rings."""
     vertices = _ring(edge_ids, edges)
     if vertices is None:
         return ("source_polygon_unclosed",)
-    polygon = Polygon(vertices)
-    if polygon.is_empty or polygon.area <= 0 or not polygon.is_valid:
+    if _safe_polygon(vertices) is None:
         return ("source_polygon_self_crossing_or_degenerate",)
     return ()
 
@@ -237,12 +253,20 @@ def check_zones_inside_floor(projection: Mapping, zones: Sequence[Mapping],
                              edges: Mapping[str, Mapping]) -> tuple[str, ...]:
     """07: zone material surface must be contained in its source-drawn floor."""
     f = _ring(projection.get("edge_ids", ()), edges)
-    if f is None or not Polygon(f).is_valid:
+    floor = _safe_polygon(f)
+    if floor is None:
         return ("source_floor_projection_unresolved",)
-    floor = Polygon(f)
     for z in zones:
-        ring = _ring(z.get("edge_ids", ()), edges)
-        if ring is None or not Polygon(ring).is_valid or not floor.covers(Polygon(ring)):
+        if not isinstance(z, Mapping):
+            return ("finish_zone_outside_floor",)
+        poly = _safe_polygon(_ring(z.get("edge_ids", ()), edges))
+        if poly is None:
+            return ("finish_zone_outside_floor",)
+        try:
+            inside = floor.covers(poly)
+        except (ValueError, GEOSException):
+            return ("finish_zone_outside_floor",)
+        if not inside:
             return ("finish_zone_outside_floor",)
     return ()
 
@@ -251,13 +275,21 @@ def check_zones_nonoverlapping(zones: Sequence[Mapping], edges: Mapping[str, Map
     """08: shared real boundaries okay, positive interior overlap is not."""
     polygons = []
     for z in zones:
-        ring = _ring(z.get("edge_ids", ()), edges)
-        if ring is None or not Polygon(ring).is_valid:
+        if not isinstance(z, Mapping):
             return ("finish_zone_polygon_unresolved",)
-        polygons.append(Polygon(ring))
+        poly = _safe_polygon(_ring(z.get("edge_ids", ()), edges))
+        if poly is None:
+            return ("finish_zone_polygon_unresolved",)
+        polygons.append(poly)
     for i, left in enumerate(polygons):
         for right in polygons[i + 1:]:
-            if left.intersection(right).area > 0:
+            try:
+                intersection_area = left.intersection(right).area
+            except (ValueError, GEOSException):
+                return ("finish_zone_intersection_unresolved",)
+            if not math.isfinite(intersection_area):
+                return ("finish_zone_intersection_unresolved",)
+            if intersection_area > 0:
                 return ("finish_zone_interiors_overlap",)
     return ()
 
@@ -315,15 +347,23 @@ def check_metric_partition(floor: Mapping, projection: Mapping,
     r = _ring(projection.get("edge_ids", ()), edges)
     if r is None:
         return ("source_floor_projection_unresolved",)
-    floor_poly = Polygon(r)
+    floor_poly = _safe_polygon(r)
+    if floor_poly is None:
+        return ("source_floor_projection_unresolved",)
     covered = None
     for z in zones:
-        zring = _ring(z["edge_ids"], edges)
-        if zring is None or not Polygon(zring).is_valid:
+        p = _safe_polygon(_ring(z["edge_ids"], edges))
+        if p is None:
             return ("source_finish_partition_invalid_zone",)
-        p = Polygon(zring)
-        covered = p if covered is None else covered.union(p)
-    if covered is None or not covered.equals(floor_poly):
+        try:
+            covered = p if covered is None else covered.union(p)
+        except (ValueError, GEOSException):
+            return ("source_finish_partition_invalid_zone",)
+    try:
+        exact_cover = covered is not None and covered.equals(floor_poly)
+    except (ValueError, GEOSException):
+        exact_cover = False
+    if not exact_cover:
         return ("source_finish_partition_gap_or_excess",)
     return ()
 
