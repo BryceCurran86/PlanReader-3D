@@ -18,6 +18,9 @@ from typing import Any
 
 from pb_customer_output_verification import (
     CustomerOutputVerificationError,
+    _customer_quantity_id,
+    _has_machine_quantity_receipt,
+    _strict_customer_notes,
     verify_sealed_customer_output,
 )
 from pb_source_closed_run_export import (
@@ -48,26 +51,51 @@ def _positive_finite_metric(value: Any) -> bool:
     return n.is_finite() and n > 0
 
 
-def _automated_customer_rows(customer_rows: Any) -> tuple[list[Mapping], bool]:
-    if (not isinstance(customer_rows, Sequence)
-            or isinstance(customer_rows, (str, bytes, bytearray))):
+def _automated_customer_rows(
+    customer_rows: Any,
+) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]:
+    """Use the *existing* V1 customer's canonical machine-ID contract.
+
+    The customer verifier permits a machine quantity ID in direct provenance
+    or persisted commercial_takeoff notes when the display column was
+    omitted. A manual estimator can write "quantity" in ordinary notes.
+    This shadow check must preserve both cases, while rejecting malformed
+    machine receipts and duplicate structured notes instead of making the
+    earlier G07 stage appear green by skipping such a row.
+    """
+    if not isinstance(customer_rows, Sequence) or isinstance(
+        customer_rows, (str, bytes, bytearray)
+    ):
         return [], False
-    rows = []
+    rows: list[tuple[str, Mapping[str, Any]]] = []
     for row in customer_rows:
         if not isinstance(row, Mapping):
             return [], False
-        # A manual row is outside automatic quantity reconciliation. A
-        # provenance-bearing automated row may NEVER hide without an ID.
-        if not _good_id(row.get("quantity_id")):
-            if row.get("commercial_projection_provenance") is not None:
+        try:
+            quantity_id = _customer_quantity_id(row)
+        except CustomerOutputVerificationError:
+            return [], False
+        if not quantity_id:
+            if (
+                row.get("commercial_projection_provenance") is not None
+                or _has_machine_quantity_receipt(row.get("source_reference"))
+            ):
                 return [], False
-            source_ref = row.get("source_reference")
-            if isinstance(source_ref, str) and "quantity" in source_ref.lower():
-                return [], False
+            notes = row.get("notes")
+            if isinstance(notes, str) and notes.strip():
+                try:
+                    notes_receipt = _strict_customer_notes(notes)
+                except CustomerOutputVerificationError as exc:
+                    # The production verifier treats malformed human notes as
+                    # manual, except for duplicate projection-provenance keys.
+                    if "duplicate provenance key" in str(exc):
+                        return [], False
+                    continue
+                if str(notes_receipt.get("adapter", "")).strip() == "commercial_takeoff":
+                    return [], False
             continue
-        rows.append(row)
+        rows.append((quantity_id, row))
     return rows, True
-
 
 def _cross_semantic_claim_count(run: Any) -> int:
     indexed: dict[tuple[str, str], set[str]] = defaultdict(set)
@@ -170,7 +198,7 @@ def inspect_ten_customer_release_gates(
     )
 
     automated, customer_well_formed = _automated_customer_rows(customer_rows)
-    auto_ids = [row["quantity_id"] for row in automated] if customer_well_formed else []
+    auto_ids = [quantity_id for quantity_id, _ in automated] if customer_well_formed else []
     expected_ids = {row.quantity_id for row in usable}
     customer_universe_ok = (
         run is not None and customer_well_formed
@@ -196,10 +224,10 @@ def inspect_ten_customer_release_gates(
     # At most this diagnostic can show inclusion review is not outstanding;
     # G10 still blocks source-scope commercial/benchmark promotion.
     inclusion_review_complete = (
-        bool(automated) and all(
+        verified is not None and bool(automated) and all(
             row.get("inclusion_status") == "APPROVED"
             and str(row.get("status", "")).strip().lower() != "to review"
-            for row in automated
+            for _, row in automated
         )
     )
     gates["G09_producer_execution_and_customer_inclusion"] = _gate(
