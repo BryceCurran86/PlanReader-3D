@@ -2,6 +2,7 @@ name: GPT MAX Original Frame Competitor Census
 on:
   pull_request:
     branches:
+      - main
       - gptmax/original-paired-wall-faces-shadow-20261015
     paths:
       - tools/diag_gptmax_original_frame_competitors.py
