@@ -880,7 +880,10 @@ def repeated_raster_drafting_motif_wall_ids(
     deletes primitives, never rekeys split IDs, never binds a dimension
     annotation, and never classifies a unique short return, a unique aligned
     competitor, or a repeated family of genuine wall-length fragments as a
-    motif.
+    motif. The census never writes PhysicalEquivalenceClass. Eight 28 pt
+    pieces at pitch 130 remain a motif under the occupancy rule; that is a
+    typed unsigned residual. Default production must not treat repetition
+    or a missing identity relation as DISTINCT_PHYSICAL_WALLS.
     """
     families: dict[tuple[float, float], list[tuple[str, float, float, tuple[float, float], tuple[float, float]]]] = {}
     for record in records:

@@ -969,6 +969,10 @@ class OpeningHostFrameProducer:
                 }
             )
         )
+        # Skipped motif wall ids are decision provenance only. They must
+        # not enter this payload: opening_host_whole_wall_frame_v1 and
+        # opening_host_frame_v2 stay identical to the frame that would
+        # publish if those leftovers were never in wall_scope.
         frame_payload = {
             "document_id": binding.document_id,
             "revision_id": binding.revision_id,

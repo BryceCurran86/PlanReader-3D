@@ -11,7 +11,9 @@ on:
       - tools/diag_gptmax_source_split_frame_shadow.py
       - docs/engineering/gptmax_split_centerline_frame_shadow_20261015.md
       - docs/engineering/gptmax_aligned_fragment_motif_distinct_20261016.md
+      - docs/engineering/gptmax_870_shadow_frame_gpt1_bundles_20261016.md
       - .github/workflows/test-gptmax-original-split-frame-shadow.yml
+  workflow_dispatch:
 permissions:
   contents: read
 env:
@@ -26,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -40,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -74,6 +76,11 @@ jobs:
           assert not r['gpt1_metric_axis_handoff_granted']
           assert not r['global_opening_count_granted']
           assert all(not x['new_customer_quantity_granted'] for x in r['opening_rows'])
+          bundles=r['gpt1_shadow_frame_source_bundles']
+          assert [x['physical_opening_id'] for x in bundles]==r['new_frame_hypothesis_ids']
+          assert all(not x['firm_quantity_granted'] for x in bundles)
+          assert all(not x['gpt1_metric_axis_handoff_granted'] for x in bundles)
+          assert all(x['skip_receipts_are_decision_provenance_not_frame_identity'] for x in bundles)
           selected=[x for x in r['opening_rows']
                     if x['physical_opening_id']=='physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176']
           assert len(selected)==1

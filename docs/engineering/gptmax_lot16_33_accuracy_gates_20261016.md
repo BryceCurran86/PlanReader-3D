@@ -49,11 +49,27 @@ already mint eight signed areas are a different seam
 (`OpeningLabelDimensionProducer`) and must not be converted to millimetres
 here. No gap width, nearest text, or schedule row is authorized.
 
+## Readiness (corrected 2026-10-16)
+
+#2809 remains OPEN on `main` (`61fcb385`). #2813 stays stacked on that
+parent until #2809 merges. Do not retarget the child early. The
+split-centreline workflow keeps `on.pull_request.branches: [main]`;
+`workflow_dispatch` is additive so exact-head original-source can run on
+the stacked SHA without changing that trigger. W4 run `38829635307`
+job `116745178857` failed installing dependencies before geometry; rerun
+that job. Do not change geometry to repair an install failure.
+
+The three 870 frames are unpublished shadow hypotheses, not FIRM
+quantities. Default production stays 21 / 15 / 9 / 8. Sparse 28 pt at
+pitch 130 stays a typed unsigned motif residual under occupancy; it does
+not grant production DISTINCT.
+
 ## Proposed change
 
 None in default production. The three 870 shadow frames stay opt-in
 `raster_split_frame_shadow=True`. GPT1 still owns typed opening + metric
-axes. GPT3 still owns signed customer output.
+axes. GPT3 still owns signed customer output. MAX owns overlapping
+#2807 dimension-before-GPT1 work; this stack does not edit that branch.
 
 ## Benchmark observations that must not influence implementation
 

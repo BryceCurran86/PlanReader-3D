@@ -11,6 +11,7 @@ from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRA
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from pb_opening_host_frame_authority import OpeningHostFrameProducer
+from pb_opening_kind_authority import resolve_opening_kind
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -112,10 +113,77 @@ def original_split_frame_shadow(pdf: bytes, *, page_id: str, expected_sha256: st
         "source_snapshot_signed_customer_retained":True,
         "opening_rows":rows,
         "new_frame_hypothesis_ids":[x["physical_opening_id"] for x in rows if x["is_additional_complete_shadow_frame"]],
+        "gpt1_shadow_frame_source_bundles":_gpt1_shadow_frame_source_bundles(
+            src=src,comp=comp,published=published,expected_sha256=expected_sha256,
+            rows=rows,reversed_rows=reversed_rows),
         "customer_seal_activation_granted":False,
         "gpt1_metric_axis_handoff_granted":False,
         "global_opening_count_granted":False,
     }
+
+
+def _gpt1_shadow_frame_source_bundles(*, src, comp, published, expected_sha256, rows, reversed_rows):
+    """Complete unpublished source bundles for additional shadow frames.
+
+    Shadow frames are reported separately from FIRM quantities. Typed-kind
+    and metric-axis blockers stay on the bundle; they do not mint width,
+    kind, or customer rows here.
+    """
+    width_authority = src.opening_dimension_authority()
+    skip_prefix = "opening_host_frame_aligned_motif_fragments_skipped:"
+    bundles = []
+    for row in rows:
+        if not row["is_additional_complete_shadow_frame"]:
+            continue
+        evidence = next(item[1] for item in reversed_rows if item[0] == row["physical_opening_id"])
+        trace = next(
+            item for item in comp.opening_bindings
+            if item.opening_identity_id == row["physical_opening_id"]
+        )
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=expected_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=trace.representative_observation_id,
+        )
+        existence = comp.physical_opening_authority.prove_existence(selector).existence_record
+        kind = resolve_opening_kind(
+            structural_pattern=None if existence is None else existence.structural_pattern,
+        )
+        width = width_authority.resolve_width(selector)
+        bundles.append({
+            "physical_opening_id": row["physical_opening_id"],
+            "firm_quantity_granted": False,
+            "customer_seal_activation_granted": False,
+            "gpt1_metric_axis_handoff_granted": False,
+            "host_binding_record_id": None if evidence is None else evidence["host_binding_record_id"],
+            "host_wall_id": None if evidence is None else evidence["host_wall_id"],
+            "member_wall_ids": [] if evidence is None else list(evidence["whole_wall_candidate_ids"]),
+            "shadow_frame_record_id": row["shadow_frame_record_id"],
+            "whole_wall_frame_id": None if evidence is None else evidence["whole_wall_frame_id"],
+            "source_observation_ids": [] if evidence is None else list(evidence["source_observation_ids"]),
+            "origin_pt": None if evidence is None else list(evidence["origin_pt"]),
+            "u0_pt": None if evidence is None else evidence["u0_pt"],
+            "u1_pt": None if evidence is None else evidence["u1_pt"],
+            "wall_thickness_pt": None if evidence is None else evidence["wall_thickness_pt"],
+            "skipped_motif_wall_ids": [
+                code.split(":", 1)[1]
+                for code in row["shadow_frame_reason_codes"]
+                if code.startswith(skip_prefix)
+            ],
+            "skip_receipts_are_decision_provenance_not_frame_identity": True,
+            "typed_kind_status": kind.status.value,
+            "typed_kind": kind.opening_kind,
+            "typed_kind_reasons": list(kind.reason_codes),
+            "typed_kind_structural_pattern": None if existence is None else existence.structural_pattern,
+            "metric_axis_width_status": width.status.value,
+            "metric_axis_width_mm": width.value_mm,
+            "metric_axis_width_reasons": [code for code in width.reason_codes if code],
+            "original_host_reason_codes": list(row["original_host_reason_codes"]),
+            "shadow_frame_reason_codes": list(row["shadow_frame_reason_codes"]),
+        })
+    return bundles
 
 
 def main() -> None:
