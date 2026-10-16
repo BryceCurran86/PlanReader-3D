@@ -1,0 +1,39 @@
+name: TEST GPT2 Original A600 Door Row Identity
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_native_door_schedule_row_identity_shadow.py
+      - tests/test_gpt2_native_a600_door_schedule_row_identity.py
+      - .github/workflows/test-gpt2-native-a600-door-row.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-source-a600-door-identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original A600 schedule and competing plan tag check
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_native_a600_door_schedule_row_identity.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
