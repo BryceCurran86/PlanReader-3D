@@ -121,12 +121,27 @@ def bind_commercial_measurement_authority(
         figured_mm=figured_mm,
         scale_reliable=not wants_scaled,
     )
-    if result.authority_status == AuthorityStatus.BLOCKED.value and not figured_text and figured_mm is None:
-        if quantity.authority == MeasurementAuthorityType.PDF_SCALED.value:
-            raise MeasurementAuthorityBindingError(result.notes)
-
-    ids = figured_dimension_ids or tuple(quantity.evidence_ids[:1]) or ("figured_bound",)
-    if quantity.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value or figured_text or figured_mm is not None:
+    figured_requested = (
+        quantity.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        or figured_text is not None
+        or figured_mm is not None
+    )
+    if figured_requested:
+        # A measurement token is not a source proof: malformed, conflicting, or
+        # absent figured evidence must not receive a synthetic "figured_bound" ID.
+        if (
+            result.authority_status != AuthorityStatus.FIRM.value
+            or result.figured_mm is None
+            or result.value_m is None
+        ):
+            raise MeasurementAuthorityBindingError(
+                "figured dimension is not a FIRM resolved measurement: " + result.notes
+            )
+        ids = figured_dimension_ids or tuple(quantity.evidence_ids[:1])
+        if not ids:
+            raise MeasurementAuthorityBindingError(
+                "figured dimension requires original evidence identifiers"
+            )
         return CommercialMeasurementAuthority(
             method="figured_dimension",
             figured_dimension_ids=ids,
