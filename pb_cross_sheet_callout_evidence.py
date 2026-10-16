@@ -86,6 +86,31 @@ def _adjacent_callout_words(mark_word: Sequence[Any], sheet_word: Sequence[Any])
     return bool(same_line or stacked)
 
 
+def _shadow_pair_is_isolated(words: Sequence[Sequence[Any]], start: int, count: int) -> bool:
+    """Reject inline prose and table-like rows around a printed callout.
+
+    This only applies to the new shadow forms, not the legacy production
+    reader. Each edge must be isolated on its row; stacked bubbles can still
+    have a vertical mark/sheet pair.
+    """
+    def inline_neighbour(left: Sequence[Any], right: Sequence[Any]) -> bool:
+        a = _word_bbox(left)
+        b = _word_bbox(right)
+        acy = _bbox_center(a)[1]
+        bcy = _bbox_center(b)[1]
+        height = max(a[3] - a[1], b[3] - b[1], 0.5)
+        return (
+            abs(acy - bcy) <= 0.6 * height
+            and -1 <= b[0] - a[2] <= 2 * height
+        )
+
+    if start > 0 and inline_neighbour(words[start - 1], words[start]):
+        return False
+    if start + count < len(words) and inline_neighbour(words[start + count - 1], words[start + count]):
+        return False
+    return True
+
+
 def _combined_bbox(words: Sequence[Sequence[Any]]) -> Tuple[float, float, float, float]:
     rects = [_word_bbox(word) for word in words]
     return (
@@ -125,7 +150,7 @@ def find_callout_references(
             seen.add(key)
             out.append(CalloutReferenceEvidence(mark, sheet, bbox, page_num))
 
-    for word in words:
+    for idx, word in enumerate(words):
         text = str(word[4]).strip()
         match = _CALLOUT_RE.match(text)
         if match is not None:
@@ -134,7 +159,7 @@ def find_callout_references(
             match = _SHADOW_CALLOUT_RE.fullmatch(text)
             if match:
                 code = _shadow_sheet_code(match.group("sheet"))
-                if code is not None:
+                if code is not None and _shadow_pair_is_isolated(words, idx, 1):
                     append(match.group("mark"), code, (word,))
 
     if not shadow_extended:
@@ -166,7 +191,9 @@ def find_callout_references(
             sheet_word = nxt
             members = (word, sheet_word)
         code = _shadow_sheet_code(str(sheet_word[4]).strip())
-        if code is None or not _adjacent_callout_words(word, sheet_word) and len(members) == 2:
+        if code is None or not _shadow_pair_is_isolated(words, i, len(members)):
+            continue
+        if len(members) == 2 and not _adjacent_callout_words(word, sheet_word):
             continue
         append(mark, code, members)
     return out
