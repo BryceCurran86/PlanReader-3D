@@ -102,6 +102,11 @@ def original_content_has_unclipped_text_blocks(
     for op in ops:
         if op in (b"BI",b"ID",b"EI",b"BX",b"EX"):
             return False,{"reason":"unsupported_graphics_or_inline_image_operator"}
+        # Valid PDF graphics-state and clip operators cannot execute inside
+        # a BT/ET text object. Reject malformed ancestry rather than
+        # accidentally treating an invalid Q as permission to unclip text.
+        if open_text and op in (b"q",b"Q",b"W",b"W*"):
+            return False,{"reason":"malformed_graphics_operator_inside_text"}
         if op==b"q":
             if len(graphic_stack)>=1024:
                 return False,{"reason":"unbounded_graphics_state_nesting"}
