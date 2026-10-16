@@ -30,9 +30,10 @@ def test_original_all_five_physical_ft3_words_are_source_text_only_not_area():
     )
     assert len(receipts)==5
     assert {a for a,d in receipts}==set(addresses)
-    assert all(d.raw_text=="FT3" and d.trusted for a,d in receipts)
-    assert all(not d.reason_codes and d.visibility_status=="proven_visible"
-               for a,d in receipts)
+    assert all(d.raw_text=="FT3" and not d.trusted for a,d in receipts)
+    assert all(TEXT_CLIP_STATE_UNRESOLVED in d.reason_codes for a,d in receipts)
+    # Identical native geometry under a page rotation is expected and does
+    # not independently validate active PDF clips or the material issuer.
     # Integrity of native text does not itself bind a finish occurrence to
     # a room or issue any material definition/area/customer quantity.
     assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()==SOURCE_SHA
@@ -107,7 +108,9 @@ def test_synthetic_base14_rotated_source_decisions_preserve_true_visibility(rota
         raw,expected_original_source_sha256=hashlib.sha256(raw).hexdigest(),
         original_page_number=1,original_native_word_addresses=addresses)
     assert len(receipts)==len(addresses)
-    assert all(r.raw_text and r.trusted for _,r in receipts)
+    assert all(r.raw_text for _,r in receipts)
+    assert all(not r.trusted or not r.reason_codes for _,r in receipts)
+    # No synthetic test may compel trusted text from page rotation alone.
 
 
 def test_renderer_native_paint_parity_conflict_cannot_issue_any_decision(monkeypatch):
