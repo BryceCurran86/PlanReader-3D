@@ -302,3 +302,12 @@ def test_gpt2_source_native_title_relation_matrix_never_grants_rcp():
     assert all(not row["title_owns_physical_viewport"]
                for t in report["source_titles"]
                for row in t["all_original_native_frame_relations"])
+
+
+def test_gpt2_pymupdf_rect_original_geometry_retained():
+    import fitz
+    result=_original_title_frame_relation(
+        fitz.Rect(10,10,20,20),fitz.Rect(0,0,30,30)
+    )
+    assert result["original_native_geometric_relation"]=="frame_strictly_contains_title"
+    assert not result["title_owns_physical_viewport"]
