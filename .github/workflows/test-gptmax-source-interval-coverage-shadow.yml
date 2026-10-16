@@ -1,0 +1,29 @@
+name: GPT MAX Source Interval Coverage Shadow
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_source_interval_coverage_shadow.py"
+      - "tests/test_g17_source_interval_coverage_shadow.py"
+      - ".github/workflows/test-gptmax-source-interval-coverage-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  exact-source-span-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install pytest ruff
+      - name: Original-span, ancestry and competitor tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_g17_source_interval_coverage_shadow.py
+          ruff check --select F821,F823 pb_g17_source_interval_coverage_shadow.py tests/test_g17_source_interval_coverage_shadow.py
