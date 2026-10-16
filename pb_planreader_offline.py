@@ -108,16 +108,12 @@ import pandas as pd
 
 # Common dimension formats
 DIMENSION_PATTERNS = [
-    # Millimeters: 1200, 2400, 350
-    (r"\b(\d{2,5})\b", "mm"),
-    # Meters: 3.5m, 12.0m
-    (r"\b(\d+\.?\d*)\s*m\b", "m"),
-    # Feet-inches: 10'-6"
+    # Specific forms before a bare number, so 1:100 is a scale and not 100 mm.
     (r"\b(\d+)['']\s*-?\s*(\d+)['\"]", "ft-in"),
-    # Scale ratios: 1:100, 1:50
     (r"1\s*[:/]\s*(\d{2,4})", "scale"),
-    # Metric with units: 1200mm, 3.5m
+    (r"\b(\d+\.?\d*)\s*m\b", "m"),
     (r"\b(\d+\.?\d*)\s*(mm|m|cm)\b", "metric"),
+    (r"\b(\d{2,5})\b", "mm"),
 ]
 
 # Room/area keywords

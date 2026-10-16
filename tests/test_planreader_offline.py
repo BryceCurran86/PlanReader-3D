@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 # Ensure repo root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pb_planreader_offline import detect_scale
+from pb_planreader_offline import detect_dimensions, detect_scale
 from pb_planreader_shared import (
     SCALE_RE,
     classify_page,
@@ -36,6 +36,26 @@ class TestDetectScaleAbstains(unittest.TestCase):
     def test_two_different_ratios_abstain(self):
         result = detect_scale(None, [{"text": "1:100"}, {"text": "1:50"}])
         self.assertIsNone(result)
+
+
+def _dimension_word(text: str) -> dict:
+    return {"text": text, "x0": 0, "y0": 0, "x1": 20, "y1": 8}
+
+
+class TestPrintedScaleIsNotALength(unittest.TestCase):
+    def test_scale_token_stays_a_scale(self):
+        found = detect_dimensions(None, [_dimension_word("1:100")])
+        self.assertEqual([(item["value"], item["unit"]) for item in found], [(100.0, "scale")])
+
+    def test_bare_length_stays_millimetres(self):
+        found = detect_dimensions(None, [_dimension_word("3600")])
+        self.assertEqual([(item["value"], item["unit"]) for item in found], [(3600.0, "mm")])
+
+    def test_explicit_millimetres_and_metres(self):
+        millimetres = detect_dimensions(None, [_dimension_word("1200mm")])
+        metres = detect_dimensions(None, [_dimension_word("3.5m")])
+        self.assertEqual(millimetres[0]["value"], 1200.0)
+        self.assertEqual(metres[0]["value"], 3500.0)
 
 
 class TestDimensionValueM(unittest.TestCase):
