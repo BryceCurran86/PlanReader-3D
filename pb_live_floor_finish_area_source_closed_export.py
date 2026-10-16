@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from pb_geometry_takeoff_model import AuthorityStatus
+from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
@@ -154,6 +155,17 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"physical floor identity is missing: {floor_id}"
             )
+        # A source-backed floor finish must consume one original documented
+        # metric-area quantity, not only a copied numeric floor field.
+        area_receipt_id = floor.metric_area_quantity_id
+        if (
+            type(area_receipt_id) is not str
+            or not area_receipt_id
+            or area_receipt_id != area_receipt_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-finish source metric area receipt is missing: {floor_id}"
+            )
 
         if (
             type(quantity.value) not in (int, float)
@@ -212,6 +224,16 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish source SHA mismatch: {quantity.quantity_id}"
             )
+        # Matching invented source strings are still not original hashes.
+        # Reuse the same syntactic source-SHA guard as canonical floor area;
+        # the original SourceVisibilityProducer must separately verify bytes.
+        if (
+            not _valid_original_source_sha(floor.source_sha256)
+            or not _valid_original_source_sha(metadata.get("source_sha256"))
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-finish source SHA is malformed: {quantity.quantity_id}"
+            )
         if _clean(metadata.get("revision_id")) != _clean(floor.revision_id):
             raise SourceClosedRunConflictError(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
@@ -230,6 +252,17 @@ def build_live_floor_finish_area_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        # A semantic role is not a material finish *occurrence* without
+        # its exact authenticated source dictionary code and finish family.
+        if any(
+            type(metadata.get(key)) is not str
+            or not metadata[key]
+            or metadata[key] != metadata[key].strip()
+            for key in ("finish_code", "semantic_finish")
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-finish source material identity is malformed: {quantity.quantity_id}"
+            )
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
         occurrence_evidence_id = _clean(
