@@ -66,12 +66,12 @@ def _unique_source_tounicode(doc, font_xref: int):
 
 def _source_truetype_symbol_subtables(program: bytes):
     """Keep all genuinely encoded table candidates; reject conflicting GIDs."""
+    if not isinstance(program,bytes) or not program:
+        return {}, "embedded_font_program_unavailable"
     try:
         from fontTools.ttLib import TTFont
     except ImportError:
         return {}, "fonttools_unavailable"
-    if not isinstance(program,bytes) or not program:
-        return {}, "embedded_font_program_unavailable"
     try:
         font=TTFont(BytesIO(program),recalcBBoxes=False,lazy=False)
         try:
