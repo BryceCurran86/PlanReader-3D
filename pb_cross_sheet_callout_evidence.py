@@ -106,6 +106,15 @@ def find_callout_references(
     This reader never proves a target sheet's identity or an element match.
     """
     words = list(page.get_text("words"))
+    if shadow_extended:
+        # Text extractor enumeration may vary, but owned word-order fields
+        # and geometry are stable. Never re-order the production default.
+        words.sort(key=lambda w: (
+            int(w[5]) if len(w) > 5 else 0,
+            int(w[6]) if len(w) > 6 else 0,
+            int(w[7]) if len(w) > 7 else 0,
+            float(w[1]), float(w[0]),
+        ))
     out: List[CalloutReferenceEvidence] = []
     seen: set[tuple[str, str, Tuple[float, float, float, float]]] = set()
 
