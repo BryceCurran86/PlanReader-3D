@@ -26,7 +26,7 @@ def test_original_a120_black_native_top_double_wall_is_exact_contiguous_source()
         assert abs(a["source_parallel_face_separation_pdf_pts"]-8.64)<.001
         assert a["source_shared_opposed_intervals_pdf_pts"]==[[266.64,1222.08]]
         assert a["source_complete_opposed_intervals_without_added_ink"]
-        assert a["source_shared_opposed_length_pdf_pt"]==955.44
+        assert abs(a["source_shared_opposed_length_pdf_pt"]-955.44)<1e-6
         assert len(a["original_candidate_rows"])==4
         assert not a["original_structural_wall_role_authenticated"]
         assert not a["ceiling_plan_metric_area_authority_granted"]
@@ -54,7 +54,11 @@ def test_original_bottom_window_gaps_are_not_cleared_by_other_wall_segments():
         a=audit(d[8],
                 native_side_a=("d9783i0","d9782i0","d9781i0","d9780i0"),
                 native_side_b=("d1798i0","d9776i0"))
-        assert a["status"]=="source_face_ordinate_nonunique_or_same" or a["source_shared_opposed_length_pdf_pt"]==0
+        assert a["status"]=="source_parallel_ink_separation_not_wall_scale"
+        assert not a["source_wall_aspect_ratio_candidate_only"]
+        assert a["source_shared_opposed_length_pdf_pt"]>0
+        assert a["source_parallel_face_separation_pdf_pts"]>1000
+        assert a["new_wall_authority"]==0
 
 
 def test_synthetic_collinear_source_gap_can_not_be_closed_by_stroke_width():
