@@ -1,0 +1,78 @@
+name: GPT MAX Original Raw G17 Floor Plan Scope
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_raw_floor_plan_scope_shadow.py"
+      - "tests/test_g17_raw_floor_plan_scope_shadow.py"
+      - "tools/verify_gptmax_original_raw_floor_plan_scope.py"
+      - ".github/workflows/test-gptmax-original-raw-floor-plan-scope.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  scope-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original segment extent, crossing and ownership negatives
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_g17_raw_floor_plan_scope_shadow.py
+          ruff check --select F821,F823 pb_g17_raw_floor_plan_scope_shadow.py tests/test_g17_raw_floor_plan_scope_shadow.py tools/verify_gptmax_original_raw_floor_plan_scope.py
+  immutable-original-source-and-customer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Verify original immutable source SHA and independent producer receipts
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/verify_gptmax_original_raw_floor_plan_scope.py --pdf "$PDF" --page-id 3 --output artifacts/original-raw-plan-scope.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('artifacts/original-raw-plan-scope.json').read_text())
+          assert report['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert report['original_signed_customer_row_count']==8
+          assert report['original_production_wall_host_frame_canonical_quantity_seal_customer_unchanged']
+          audit=report['original_source_raw_floor_plan_audit']
+          assert audit['authenticated_floor_plan_viewport_ownership_id']
+          assert audit['original_page_raw_candidate_count']==30
+          assert audit['original_page_resolved_candidate_count']==21
+          assert audit['original_page_unresolved_count']==len(audit['raw_groups'])==9
+          assert sum(g['authenticated_floor_plan_membership']=='inside_this_authenticated_floor_plan' for g in audit['raw_groups'])==5
+          assert sum(g['authenticated_floor_plan_membership']=='outside_this_authenticated_floor_plan_other_role_unproven' for g in audit['raw_groups'])==4
+          assert len({g['raw_candidate_id'] for g in audit['raw_groups']})==9
+          assert all(g['source_observation_ids'] and not g['opening_count_granted'] for g in audit['raw_groups'])
+          assert not any(report[k] for k in ('new_physical_host_granted','new_quantity_granted','opening_count_granted'))
+          assert not any(audit[k] for k in ('physical_wall_role_granted','opening_host_granted','opening_count_granted','metric_quantity_granted'))
+          assert not audit['original_page_candidate_universe_complete']
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-raw-floor-plan-scope
+          path: artifacts/original-raw-plan-scope.json
+          if-no-files-found: error

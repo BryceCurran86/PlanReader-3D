@@ -1,0 +1,172 @@
+[
+ {
+  "mark": "M1 OFFICE",
+  "p11_faces": [
+   {
+    "face": "9a4aa0",
+    "published": true,
+    "area_pt2": 1161.4,
+    "overlapping_p7_faces_by_iou": [
+     [
+      "b864e7",
+      0.993,
+      1153.3,
+      true
+     ],
+     [
+      "8b523a",
+      0.0035,
+      1161.4,
+      true
+     ]
+    ],
+    "n_p7_overlaps": 2,
+    "n_iou_ge_0.98": 1
+   }
+  ],
+  "p7_faces_at_T0": [
+   {
+    "face": "b864e7",
+    "published": true,
+    "area_pt2": 1153.3
+   }
+  ]
+ },
+ {
+  "mark": "M2 DRY STORE",
+  "p11_faces": [
+   {
+    "face": "6e7c2b",
+    "published": true,
+    "area_pt2": 1153.3,
+    "overlapping_p7_faces_by_iou": [
+     [
+      "6f514e",
+      0.993,
+      1145.1,
+      true
+     ],
+     [
+      "65b35b",
+      0.0003,
+      23241.1,
+      true
+     ]
+    ],
+    "n_p7_overlaps": 2,
+    "n_iou_ge_0.98": 1
+   }
+  ],
+  "p7_faces_at_T0": [
+   {
+    "face": "6f514e",
+    "published": true,
+    "area_pt2": 1145.1
+   }
+  ]
+ },
+ {
+  "mark": "M3 WASH UP",
+  "p11_faces": [
+   {
+    "face": "e9565f",
+    "published": true,
+    "area_pt2": 1153.3,
+    "overlapping_p7_faces_by_iou": [
+     [
+      "02a7f4",
+      0.7893,
+      915.2,
+      true
+     ],
+     [
+      "63f0ca",
+      0.2018,
+      232.7,
+      false
+     ],
+     [
+      "9ab052",
+      0.0017,
+      185.7,
+      false
+     ],
+     [
+      "39c853",
+      0.0003,
+      18222.0,
+      true
+     ]
+    ],
+    "n_p7_overlaps": 4,
+    "n_iou_ge_0.98": 0
+   }
+  ],
+  "p7_faces_at_T0": [
+   {
+    "face": "02a7f4",
+    "published": true,
+    "area_pt2": 915.2
+   }
+  ]
+ },
+ {
+  "mark": "M4 FOOD PREP",
+  "p11_faces": [
+   {
+    "face": "0b3993",
+    "published": true,
+    "area_pt2": 1136.2,
+    "overlapping_p7_faces_by_iou": [
+     [
+      "383204",
+      0.9922,
+      1145.1,
+      true
+     ]
+    ],
+    "n_p7_overlaps": 1,
+    "n_iou_ge_0.98": 1
+   }
+  ],
+  "p7_faces_at_T0": [
+   {
+    "face": "383204",
+    "published": true,
+    "area_pt2": 1145.1
+   }
+  ]
+ },
+ {
+  "mark": "M5 FOOD SERVICE",
+  "p11_faces": [
+   {
+    "face": "6197ff",
+    "published": true,
+    "area_pt2": 1145.1,
+    "overlapping_p7_faces_by_iou": [
+     [
+      "b11064",
+      0.0163,
+      70255.1,
+      true
+     ]
+    ],
+    "n_p7_overlaps": 1,
+    "n_iou_ge_0.98": 0
+   }
+  ],
+  "p7_faces_at_T0": [
+   {
+    "face": "b11064",
+    "published": true,
+    "area_pt2": 70255.1
+   }
+  ]
+ },
+ {
+  "mark": "sched",
+  "p11_faces": [],
+  "p7_faces_at_T0": []
+ }
+]

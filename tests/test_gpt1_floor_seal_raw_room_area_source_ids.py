@@ -41,7 +41,7 @@ def test_canonical_floor_publisher_can_abstain_but_final_seal_rejects_reused_sou
         _traces(claim)
     with pytest.raises(SourceClosedRunConflictError, match="duplicate original room-area source ID"):
         seal_live_floor_area_run(claim, workspace_id=1, project_id="source-owned-floor")
-    with pytest.raises(SourceClosedRunConflictError, match="duplicate original room-area source ID"):
+    with pytest.raises(SourceClosedRunConflictError, match="duplicate or invalid original room-area source ID"):
         project_live_floor_area_customer_rows(
             claim, workspace_id=1, project_id="source-owned-floor"
         )
@@ -96,3 +96,43 @@ def test_unmodified_firm_source_still_seals_as_one_physical_floor():
     )
     assert len(sealed.quantities) == 1
     assert sealed.quantities[0].value == 8.64
+
+
+
+def test_floor_customer_empty_selection_cannot_hide_two_abstained_source_receipts():
+    source = _source_area()
+    absent = replace(
+        source, value=None, abstained=True, status="provisional",
+        blocking_reasons=("source_metric_unavailable",),
+    )
+    claim = _claim(absent, absent)
+    assert publish_live_floor_area_quantities(claim) == ()
+    with pytest.raises(SourceClosedRunConflictError, match="duplicate or invalid original room-area source ID"):
+        project_live_floor_area_customer_rows(
+            claim, workspace_id=1, project_id="source-owned-floor"
+        )
+    legitimate = _claim(absent)
+    assert project_live_floor_area_customer_rows(
+        legitimate, workspace_id=1, project_id="source-owned-floor"
+    ) == ()
+
+
+@pytest.mark.parametrize("invalid", ("foreign_family", "untyped_object", "padded_id"))
+def test_floor_customer_empty_selection_cannot_hide_foreign_source_inventory(invalid):
+    absent = replace(
+        _source_area(), value=None, abstained=True, status="provisional",
+        blocking_reasons=("original_room_unresolved",),
+    )
+    if invalid == "foreign_family":
+        raw = replace(absent, family="ceiling_lining")
+    elif invalid == "untyped_object":
+        raw = object()
+    else:
+        raw = replace(absent)
+        object.__setattr__(raw, "quantity_id", " original-room-area ")
+    claim = _claim(raw)
+    error = TypeError if invalid == "untyped_object" else SourceClosedRunConflictError
+    with pytest.raises(error):
+        project_live_floor_area_customer_rows(
+            claim, workspace_id=1, project_id="source-owned-floor"
+        )

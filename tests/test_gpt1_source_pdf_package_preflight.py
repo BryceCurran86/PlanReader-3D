@@ -187,3 +187,61 @@ def test_nonfinite_manifest_json_claim_fails_before_any_source_promotion(
     manifest.write_text(original[:-1] + f', "supplementary_value": {untrusted}' + "}")
     with pytest.raises(ValueError, match="nonfinite source manifest"):
         check_source_pdf_package(manifest, tmp_path)
+
+
+def _run_cli(monkeypatch, capsys, manifest, root, output):
+    from tools import diag_gpt1_source_pdf_package_preflight as cli
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["preflight", "--manifest", str(manifest), "--source-root", str(root),
+         "--output", str(output)],
+    )
+    code = 0
+    try:
+        cli.main()
+    except SystemExit as exc:
+        code = exc.code
+    capsys.readouterr()
+    return code
+
+
+def test_cli_creates_missing_nested_output_directory(tmp_path, monkeypatch, capsys):
+    # A launcher passes <session>/preflight/<project>.json and only creates
+    # log parents; the CLI must not fail with FileNotFoundError before it
+    # has reported anything about the source package.
+    a = _pdf(tmp_path / "architecture.pdf")
+    manifest = _manifest(tmp_path, [a])
+    output = tmp_path / "session" / "preflight" / "project.json"
+    assert not output.parent.exists()
+    assert _run_cli(monkeypatch, capsys, manifest, tmp_path, output) == 0
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert written["actual_source_package_runtime_complete"] is True
+    assert written["verified_source_document_count"] == 1
+
+
+def test_cli_still_fails_closed_and_writes_report_for_missing_pdf(
+    tmp_path, monkeypatch, capsys
+):
+    a = _pdf(tmp_path / "architecture.pdf")
+    b = _pdf(tmp_path / "structure.pdf")
+    (tmp_path / b["name"]).unlink()
+    manifest = _manifest(tmp_path, [a, b])
+    output = tmp_path / "nested" / "deeper" / "project.json"
+    assert _run_cli(monkeypatch, capsys, manifest, tmp_path, output) == 2
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert written["actual_source_package_runtime_complete"] is False
+    assert {d["name"]: d["status"] for d in written["source_documents"]} == {
+        "architecture.pdf": "VERIFIED",
+        "structure.pdf": "MISSING",
+    }
+
+
+def test_cli_with_existing_output_directory_is_unchanged(tmp_path, monkeypatch, capsys):
+    a = _pdf(tmp_path / "architecture.pdf")
+    manifest = _manifest(tmp_path, [a])
+    out_dir = tmp_path / "already"
+    out_dir.mkdir()
+    output = out_dir / "project.json"
+    assert _run_cli(monkeypatch, capsys, manifest, tmp_path, output) == 0
+    assert output.exists()

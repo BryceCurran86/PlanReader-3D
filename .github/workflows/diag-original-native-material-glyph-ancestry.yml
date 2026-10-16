@@ -1,0 +1,75 @@
+name: DIAG Original Native Material Glyph Ancestry
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_source_native_glyph_ancestry.py
+      - tests/test_gptmax_source_native_glyph_ancestry.py
+      - docs/engineering/gptmax_original_material_glyph_ancestry_20261015.md
+      - .github/workflows/diag-original-native-material-glyph-ancestry.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Complete candidate-retention negatives and immutable benchmark gate
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_source_native_glyph_ancestry.py
+          ruff check --select F821,F823 tools/diag_source_native_glyph_ancestry.py tests/test_gptmax_source_native_glyph_ancestry.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original immutable Maryborough source glyph ancestry only
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts/source-glyph-ancestry
+          git rev-parse HEAD > artifacts/source-glyph-ancestry/producer_head_sha.txt
+          python -u tools/diag_source_native_glyph_ancestry.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --page 11 --code FT3 \
+            --source-sha b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007 \
+            --output artifacts/source-glyph-ancestry/maryborough_original_native_glyphs.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("artifacts/source-glyph-ancestry/maryborough_original_native_glyphs.json").read_text())
+          assert report["candidate_block_count"]>=1
+          assert any(w["text"]=="FT3" for b in report["candidate_blocks"] for w in b["words"])
+          for flag in ("independent_raster_literal_proven","material_definition_authenticated",
+                       "source_finish_occurrence_authenticated","physical_floor_ownership_authenticated",
+                       "commercial_quantity_published"):
+              assert report[flag] is False
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-native-material-glyph-ancestry
+          path: artifacts/source-glyph-ancestry/
+          retention-days: 30

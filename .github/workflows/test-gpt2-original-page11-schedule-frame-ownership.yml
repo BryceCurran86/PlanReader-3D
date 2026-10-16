@@ -1,0 +1,114 @@
+name: TEST GPT2 Original Page11 Schedule Must Not Own Drawing Plan
+on:
+  pull_request:
+    paths:
+      - "pb_viewport_segmentation.py"
+      - "tests/test_gpt2_external_schedule_frame_provenance.py"
+      - ".github/workflows/test-gpt2-original-page11-schedule-frame-ownership.yml"
+  workflow_dispatch:
+jobs:
+  source-schedule-frame-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Strict external semantic-table source frame negatives
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt2_external_schedule_frame_provenance.py
+          python -m pytest -q tests/benchmarks/test_mutation_viewport_segmentation.py
+      - name: Original Maryborough source SHA page11 physical plan vs schedule
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import hashlib, fitz, json
+          from pathlib import Path
+          from pb_viewport_segmentation import (
+              segment_page_viewports, extract_vector_frames,
+              extract_view_title_anchors, calibrate_viewport_layout,
+              _frame_looks_like_table, _frame_looks_like_line_grid_table,
+              _page_rectangle_primitives, _title_field_owned_regions,
+          )
+          p=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert hashlib.sha256(p.read_bytes()).hexdigest()==sha
+          with fitz.open(p) as doc:
+              assert doc.page_count==31
+              page=doc[10]
+              assert page.rotation==90
+              cal=calibrate_viewport_layout(page)
+              frames=extract_vector_frames(page,cal)
+              table_evidence=[
+                  (list(frame), bool(_frame_looks_like_table(frame,page,cal)))
+                  for frame in frames
+              ]
+              anchors=extract_view_title_anchors(page)
+              result=segment_page_viewports(page,page_number=11)
+              # Compare the accepted p9 semantic-table ownership to the
+              # page11 false schedule without changing source authority.
+              from pb_viewport_segmentation import (
+                  _frame_candidates_for_title, _rejected_ownership_frame,
+                  _text_fragments,
+              )
+              other=doc[8]
+              other_cal=calibrate_viewport_layout(other)
+              other_frames=extract_vector_frames(other,other_cal)
+              other_anchors=extract_view_title_anchors(other)
+              other_title_evidence=[
+                  {"text":a.text,"type":a.view_type,"bbox":a.bbox,"direction":a.direction,
+                   "frame_candidates":[list(f) for f in _frame_candidates_for_title(other,a,other_frames,other_cal,anchors=other_anchors)]}
+                  for a in other_anchors if a.view_type=="schedule"
+              ]
+              print("GPT2_P9_VS_P11_ORIGINAL_SOURCE_SEMANTIC_FRAMES",json.dumps({
+                  "p9_title_rows":other_title_evidence,
+                  "p9_source_frames":[{"frame":list(f),
+                      "positive_table":bool(_frame_looks_like_table(f,other,other_cal)),
+                      "closed_cell_table":bool(_frame_looks_like_table(f,other,other_cal,allow_line_grid_only=False)),
+                      "line_grid":bool(_frame_looks_like_line_grid_table(f,other,other_cal)),
+                      "candidate_not_owned":bool(_rejected_ownership_frame(other,f,other_cal,_text_fragments(other),view_type="schedule"))}
+                      for f in other_frames],
+                  "p11_source_frames":[{"frame":list(f),
+                      "positive_table":bool(_frame_looks_like_table(f,page,cal)),
+                      "closed_cell_table":bool(_frame_looks_like_table(f,page,cal,allow_line_grid_only=False)),
+                      "line_grid":bool(_frame_looks_like_line_grid_table(f,page,cal)),
+                      "candidate_not_owned":bool(_rejected_ownership_frame(page,f,cal,_text_fragments(page),view_type="schedule"))}
+                      for f in frames],
+              },sort_keys=True),flush=True)
+              print("GPT2_SOURCE_PAGE11_TABLE_FRAME_DIAGNOSTICS",json.dumps({
+                  "source_sha256":sha,
+                  "frames":table_evidence,
+                  "line_grid_by_frame":[(list(frame),bool(_frame_looks_like_line_grid_table(frame,page,cal))) for frame in frames],
+                  "rectangle_source_primitives":len(_page_rectangle_primitives(page)),
+                  "anchors":[{"text":a.text,"bbox":a.bbox,"direction":a.direction} for a in anchors],
+                  "actual_viewports":[{"label":v.label,"type":v.view_type,"status":v.status,"bbox":v.bounding_box} for v in result],
+              },sort_keys=True),flush=True)
+              assert len(_title_field_owned_regions(page))>=1
+              assert not any(a.view_type=="floor_finish_plan" for a in anchors), (
+                  "the original native split page title is sheet metadata, not independently proven plan viewport"
+              )
+              assert not any(v.view_type=="schedule" and v.status=="resolved"
+                             and v.bounding_box is not None for v in result), (
+                  "an external title must not turn physical plan into a verified schedule"
+              )
+              assert not any(v.view_type=="floor_finish_plan"
+                             and v.status=="resolved" for v in result), (
+                  "a source-missing plan owner must never be manufactured"
+              )
+              print("GPT2_ORIGINAL_P11_SOURCE_SCHEDULE_FRAME_GUARD",json.dumps({
+                  "source_sha256":sha,
+                  "table_evidence_by_source_frame":table_evidence,
+                  "viewports":[{"label":v.label,"status":v.status,
+                               "type":v.view_type,"bbox":v.bounding_box} for v in result],
+                  "new_finish_quantity":None,
+              },sort_keys=True))
+          PY
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py

@@ -1,0 +1,152 @@
+name: SCORE GPT3 Two Original Selected V2 Projects
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/report_gpt3_selected_two_project_original_evidence.py"
+      - "tools/report_gpt3_four_project_evidence.py"
+      - "tests/test_gpt3_strict_signed_json_ingress.py"
+      - "tests/test_gpt3_selected_two_project_original_evidence.py"
+      - ".github/workflows/score-gpt3-selected-two-original-projects.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Selected project nonpublication and duplicate-source negative tests
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt3_selected_two_project_original_evidence.py tests/test_gpt3_four_project_evidence.py tests/test_gpt3_original_byte_gated_exact_project.py tests/test_gpt3_strict_signed_json_ingress.py
+          ruff check --select F821,F823 tools/report_gpt3_selected_two_project_original_evidence.py tests/test_gpt3_selected_two_project_original_evidence.py tools/report_gpt3_four_project_evidence.py tests/test_gpt3_strict_signed_json_ingress.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
+  original-two-project-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Download unchanged prior SOURCE-SHA signed original independent artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-selected-source-v2
+          mkdir -p "$ROOT/lot16" "$ROOT/maryborough"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11929406140/zip" -o "$ROOT/lot16-source.zip"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11928069961/zip" -o "$ROOT/maryborough-source.zip"
+          printf '%s  %s\n' \
+            '950e1074d270e6b1d4558b165e5345cf49b2ac0c962a3cc8edf420f11f67bd91' "$ROOT/lot16-source.zip" \
+            'df0b3e42bf3b2b3aace43f155b7feec087dbfa5e55559ec7f16714577ef5e7b0' "$ROOT/maryborough-source.zip" | sha256sum --check
+          unzip -q "$ROOT/lot16-source.zip" -d "$ROOT/lot16"
+          unzip -q "$ROOT/maryborough-source.zip" -d "$ROOT/maryborough"
+          test "$(cat "$ROOT/lot16/producer_head_sha.txt")" = '4e5aedf085cf63f92dac0935132b1e1c1dbaa178'
+          test "$(cat "$ROOT/maryborough/source/producer_head_sha.txt")" = '2eccc537d2ce04987bdcc70761ca56e4ad2ded0f'
+
+      - name: Reverify original PDF bytes, both seals and customer rows with unchanged evaluator
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-selected-source-v2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-selected-source-v2")
+          projects=(
+              {
+                  "name":"lot16",
+                  "manifest":"benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json",
+                  "original_files":["documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"],
+                  "sealed":str(root/"lot16/production/source_sealed_run.json"),
+                  "customer":str(root/"lot16/production/verified_customer_rows.json"),
+                  "identity_map":str(root/"lot16/identity_map_with_1215.json"),
+                  "exact_report":str(root/"lot16/exact_project_report.json"),
+              },
+              {
+                  "name":"maryborough",
+                  "manifest":"benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json",
+                  "original_files":["documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"],
+                  "sealed":str(root/"maryborough/source/production/source_sealed_run.json"),
+                  "customer":str(root/"maryborough/source/production/verified_customer_rows.json"),
+                  "identity_map":str(root/"maryborough/identity_map.json"),
+                  "exact_report":str(root/"maryborough/exact_project_report.json"),
+              },
+          )
+          for project in projects:
+              name=project.pop("name")
+              (root/(name+"-entry.json")).write_text(
+                  json.dumps(project,sort_keys=True,indent=2)+"\n"
+              )
+          PY
+          python -m tools.report_gpt3_selected_two_project_original_evidence \
+            --entry "$ROOT/lot16-entry.json" --entry "$ROOT/maryborough-entry.json" \
+            --output "$ROOT/selected_two_project_development_ONLY.json"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-selected-source-v2")
+          result=json.loads((root/"selected_two_project_development_ONLY.json").read_text())
+          assert result["publication_status"]=="SELECTED_PROJECT_DEVELOPMENT_ONLY"
+          assert result["selected_project_count"]==2
+          assert result["selected_denominator"]==51
+          assert result["matched_within_tolerance"]==8
+          assert result["matched_outside_tolerance"]==0
+          assert result["missed"]==43
+          assert result["partial"]==0 and result["unresolved"]==0
+          assert result["unsupported_extra"]==3
+          assert result["lineage_conflicts"]==0
+          assert abs(result["selected_coverage_accuracy"]-(8/51))<1e-12
+          assert result["official_four_project_suite_result"] is None
+          assert result["official_four_project_accuracy"] is None
+          assert result["full_four_project_publication_allowed"] is False
+          assert all(p["original_source_sha_verified"] and p["customer_bijection_verified"]
+                     and p["reconciliation_complete"] for p in result["projects"])
+          assert sorted(p["denominator"] for p in result["projects"])==[24,27]
+          assert sorted(p["matched_within_tolerance"] for p in result["projects"])==[0,8]
+          assert all(len(p["source_sha256s"])==1 for p in result["projects"])
+          by_id={p["project_id"]:p for p in result["projects"]}
+          # The real Lot16 original architectural page-3 producer never
+          # claimed to ingest the unrelated frozen structural PDF. The
+          # complete two-PDF source package remains unproven on this run.
+          assert by_id["au_qld_lot16_power"]["original_source_document_universe_complete"] is False
+          assert by_id["au_qld_maryborough_service_station"]["original_source_document_universe_complete"] is True
+          print("TWO_VERIFIED_SELECTED_PROJECTS",json.dumps({
+              "denominator":51,"matched_within":8,"missed":43,
+              "unsupported_extra_genuine_source_rows":3,
+              "development_only":True,"full_suite_unpublished":True,
+          },sort_keys=True))
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-two-original-source-projects-development-only
+          path: artifacts/gpt3-selected-source-v2/
+          retention-days: 30

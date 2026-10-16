@@ -1,0 +1,86 @@
+name: DIAG Claude FT3 Page 11 to Page 7 Floor Correspondence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_ft3_p11_p7_floor_correspondence.py"
+      - "tests/test_diag_ft3_p11_p7_floor_correspondence.py"
+      - ".github/workflows/diag-claude-ft3-p11-p7-floor-correspondence.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: claude-ft3-p11-p7-correspondence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: PYTHONPATH=. python -m pytest -q tests/test_diag_ft3_p11_p7_floor_correspondence.py
+      - run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original FT3 page-11 to page-7 floor correspondence (diagnostic only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/claude-ft3-p11-p7-floor-correspondence
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/producer_head_sha.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          /usr/bin/time -v timeout 3000s python -u -m tools.diag_ft3_p11_p7_floor_correspondence \
+            --pdf "$PDF" \
+            --output "$OUT/report.json" 2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/claude-ft3-p11-p7-floor-correspondence/report.json").read_text())
+          assert report["source_sha256"] == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert report["diagnostic_only"] is True
+          for key in ("customer_quantity_published", "benchmark_identity_assigned", "commercial_projection_allowed", "scale_or_metric_authority_granted"):
+              assert report[key] is False, key
+          assert report["published_material_occurrences"] == 0
+          assert report["published_floor_finish_quantities"] == 0
+          print("REGISTRATION", json.dumps(report["registration"]["best"], sort_keys=True), "unique", report["registration"]["unique"],
+                "over_competitor", report["registration"]["best_over_strongest_competitor"], "over_null", report["registration"]["best_over_null_max"])
+          for f in report["measured_floors"]:
+              print("FLOOR", f["room_label"], json.dumps({k: f["correspondence"].get(k) for k in ("status", "reason_codes", "finish_codes_in_box")}, sort_keys=True))
+          print("GEOMETRIC_CANDIDATE_OWNER_FLOORS", json.dumps(report.get("geometric_candidate_owner_floors"), sort_keys=True))
+          for f in report["measured_floors"]:
+              assert f["correspondence"].get("authenticated_physical_wall_face_equivalence", False) is False
+              assert f["correspondence"]["status"] != "corroborated"
+          for m in report["plan_marks"]:
+              if "binding" in m:
+                  print("MARK", m["code"], m["center"], json.dumps(m["binding"], sort_keys=True))
+          print("FIRST_UNCLOSED_GATE", report.get("first_unclosed_gate"))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-ft3-p11-p7-floor-correspondence
+          path: artifacts/claude-ft3-p11-p7-floor-correspondence
+          retention-days: 30

@@ -74,7 +74,13 @@ def _trusted_native_lines(source: SourceVisibilityProducer, opening):
         return ()
     integrity = source.text_integrity_authority()
     grouped = {}
-    for observation_id in published.text_observation_ids:
+    # Only words whose receipt is on the opening's page can become a line (the
+    # check below discards every other word after resolving it), so do not
+    # re-authenticate the words of every other page once per opening.
+    page_text_ids = integrity.observation_ids_with_receipt_page(
+        opening.snapshot_id, published.text_observation_ids, opening.page_id
+    )
+    for observation_id in page_text_ids:
         resolved = integrity.resolve_text(ObservationSelector(
             document_id=opening.document_id,
             revision_id=opening.revision_id,

@@ -22,6 +22,7 @@ from pb_quantity_takeoff_adapter import (
     compute_commercial_projection_fingerprint,
 )
 
+from pb_strict_evidence_json import parse_strict_evidence_json
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     SealedSourceClosedQuantity,
@@ -69,20 +70,17 @@ def _string_tuple(values: Any) -> tuple[str, ...]:
 
 
 def _strict_customer_notes(notes: str) -> Mapping[str, Any]:
-    """Parse automated notes without last-write-wins or corrupted lineage."""
-    def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise CustomerOutputVerificationError(
-                    f"customer row notes contain duplicate provenance key: {key}"
-                )
-            result[key] = value
-        return result
-
+    """Parse persisted automated provenance with the import-safe strict JSON reader."""
     try:
-        payload = json.loads(notes, object_pairs_hook=unique_keys)
+        payload = parse_strict_evidence_json(notes)
     except (json.JSONDecodeError, RecursionError, ValueError) as exc:
+        # Preserve the established duplicate-provenance diagnostic for callers.
+        detail = str(exc)
+        if detail.startswith("duplicate JSON key: "):
+            raise CustomerOutputVerificationError(
+                "customer row notes contain duplicate provenance key: "
+                + detail.removeprefix("duplicate JSON key: ")
+            ) from exc
         raise CustomerOutputVerificationError(
             "customer row notes contain invalid projection provenance JSON"
         ) from exc

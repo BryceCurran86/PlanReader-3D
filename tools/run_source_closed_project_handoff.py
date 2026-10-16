@@ -11,7 +11,9 @@ quantities, tolerances, denominator eligibility, identity maps, or scoring.
 from __future__ import annotations
 
 import argparse
+import contextlib
 from dataclasses import replace
+import gc
 import hashlib
 import json
 import math
@@ -163,6 +165,23 @@ def _non_abstained(
             continue
         retained.append(quantity)
     return tuple(retained)
+
+
+def _source_complexity_blocked(reason_codes: object) -> bool:
+    """Distinguish a safety-stopped source universe from an empty measured one.
+
+    These source-owned reason codes signal that the producer could not examine
+    the complete requested wall/room evidence scope. This is NOT a physical
+    nonexistence assertion and must never be reported as a completed empty
+    material/quantity universe.
+    """
+    if type(reason_codes) not in (tuple, list):
+        return False
+    return any(
+        type(reason) is str
+        and reason == "physical_wall_candidate_scope_complexity_exceeded"
+        for reason in reason_codes
+    )
 
 
 def _write_text_atomic(path: Path, encoded: str) -> None:
@@ -437,6 +456,7 @@ def _generate_project_handoff_locked(
             room_area_support_pages=execution_room_support_pages,
             surface_semantic_pages=semantic_execution_pages,
         )
+        _gc_stage_boundary()
     except Exception as exc:
         summary["status"] = "production_failed"
         summary["production_error_type"] = type(exc).__name__
@@ -594,6 +614,7 @@ def _generate_project_handoff_locked(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
         )
+        _gc_stage_boundary()
         published_new_ids = {
             _clean(quantity.quantity_id)
             for quantity in new_ceiling_quantities
@@ -868,7 +889,14 @@ def _generate_project_handoff_locked(
         summary["status"] = "sealed"
     else:
         summary["combined_quantity_count"] = 0
-        summary["status"] = "no_sealable_quantities"
+        # ABSTAIN with a bounded-source complexity failure is not an empty
+        # successfully examined source universe. Keep an explicit, unsealed
+        # failure status and preserve the original reason for future recovery.
+        summary["status"] = (
+            "source_complexity_blocked"
+            if _source_complexity_blocked(summary["claim_reason_codes"])
+            else "no_sealable_quantities"
+        )
 
     if verified_partial_customer_rows is not None:
         customer_path = output_dir / "verified_customer_rows.json"
@@ -879,6 +907,54 @@ def _generate_project_handoff_locked(
     _write_json(output_dir / "production_summary.json", summary)
     return summary
 
+
+
+_CYCLIC_GC_MODES = ("default", "disabled", "staged")
+_ACTIVE_CYCLIC_GC_MODE = "default"
+
+
+def _cyclic_gc_mode() -> str:
+    """PB_CYCLIC_GC_MODE: staged (the default), disabled, or default (collector untouched)."""
+    if os.environ.get("PB_KEEP_CYCLIC_GC") == "1":
+        return "default"
+    mode = os.environ.get("PB_CYCLIC_GC_MODE", "").strip().lower()
+    return mode if mode in _CYCLIC_GC_MODES else "staged"
+
+
+def _gc_stage_boundary() -> None:
+    """Under the staged regime, reclaim the cyclic garbage of the stage that just finished."""
+    if _ACTIVE_CYCLIC_GC_MODE == "staged":
+        gc.collect()
+
+
+@contextlib.contextmanager
+def _bulk_source_gc_regime():
+    """Pause the cyclic garbage collector while one source run builds its record stores.
+
+    A complete project run keeps millions of small acyclic objects alive (observation
+    records, store keys, cached verification tuples) and allocates millions more. With
+    the collector enabled every young and full collection re-traverses them: 22% of a
+    Q5446 pages 1-3 run (25 full collections, 22 s of 146 s) and 9% of a 3Laurel page 3
+    run, without affecting any result. Reference counting still frees acyclic garbage
+    immediately. Modes (PB_CYCLIC_GC_MODE): staged (the default) pauses the collector for the
+    run and collects once after each major stage so cyclic garbage cannot pile up across
+    stages; disabled pauses it for the whole run (same CPU saving, but ~1 GB more peak
+    memory in the complete 3Laurel handoff); default leaves the collector alone
+    (PB_KEEP_CYCLIC_GC=1 is the same). The collector is re-enabled on exit, also on error.
+    """
+    global _ACTIVE_CYCLIC_GC_MODE
+    mode = _cyclic_gc_mode()
+    if mode == "default" or not gc.isenabled():
+        yield
+        return
+    previous_mode = _ACTIVE_CYCLIC_GC_MODE
+    _ACTIVE_CYCLIC_GC_MODE = mode
+    gc.disable()
+    try:
+        yield
+    finally:
+        _ACTIVE_CYCLIC_GC_MODE = previous_mode
+        gc.enable()
 
 
 def generate_project_handoff(
@@ -907,14 +983,15 @@ def generate_project_handoff(
         lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
     )
     try:
-        return _generate_project_handoff_locked(
-            pdf_path=pdf_path,
-            project_id=project_id,
-            workspace_id=workspace_id,
-            output_dir=output_dir,
-            family_group=family_group,
-            source_plan_page_index=source_plan_page_index,
-        )
+        with _bulk_source_gc_regime():
+            return _generate_project_handoff_locked(
+                pdf_path=pdf_path,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                output_dir=output_dir,
+                family_group=family_group,
+                source_plan_page_index=source_plan_page_index,
+            )
     finally:
         os.close(descriptor)
         lock_path.unlink(missing_ok=True)

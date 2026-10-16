@@ -216,6 +216,12 @@ def build_gross_wall_area_quantity(
         blockers.append("wall_length_not_firm")
     if wall_height.status != AuthorityStatus.FIRM.value:
         blockers.append("wall_height_not_firm")
+    # QuantityEvidence only forbids the converse (an abstained quantity without blockers). A value-bearing parent that
+    # still lists blocking reasons is contradictory imported or replayed evidence and must not be published as FIRM area.
+    if not wall_length.abstained and wall_length.blocking_reasons:
+        blockers.append("wall_length_source_blocked")
+    if not wall_height.abstained and wall_height.blocking_reasons:
+        blockers.append("wall_height_source_blocked")
 
     if wall_length.authority not in {
         MeasurementAuthorityType.PDF_SCALED.value,

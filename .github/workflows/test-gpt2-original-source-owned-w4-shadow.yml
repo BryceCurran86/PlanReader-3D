@@ -1,0 +1,123 @@
+name: TEST GPT2 Original Source-Owned Physical Plan W4 Shadow
+
+on:
+  pull_request:
+    paths:
+      - pb_physical_wall_candidate_authority.py
+      - tests/test_gpt2_source_owned_physical_w4_shadow.py
+      - .github/workflows/test-gpt2-original-source-owned-w4-shadow.yml
+
+permissions:
+  contents: read
+
+jobs:
+  focused-original-maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The F.07 source text gate uses independent fixed-scale RapidOCR
+      # corroboration. These optional packages are intentionally absent
+      # from lean production requirements; original-source CI must install
+      # the same real backend as the already-positive #2716 source proof.
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Verify real installed independent visual OCR backend
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from pb_portable_raster_ocr_authority import (
+              RapidOCRBackend, select_production_ocr_backend
+          )
+          assert RapidOCRBackend().is_available(), "real original OCR backend unavailable"
+          backend, receipt = select_production_ocr_backend()
+          assert isinstance(backend, RapidOCRBackend), (backend.name, receipt)
+          print("SOURCE_OCR_BACKEND", backend.name, backend.version, receipt)
+          PY
+      - name: Source-owned positive and competing-plan abstention
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_owned_physical_w4_shadow.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Exact immutable original page-11 view to W4 shadow
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. timeout 1100s python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_viewport_segmentation import segment_source_page_viewports
+          pdf=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
+          content=pdf.read_bytes()
+          sha=hashlib.sha256(content).hexdigest()
+          assert sha=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          # Reproduce the same genuine live source root used by the
+          # independently SHA-verified F.07 plan-view proof (#2716).
+          # Do not rekey its words into a different revision/snapshot.
+          source=SourceVisibilityProducer(
+              producer_method='live-physical-net-wall', producer_version='1'
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f'live-source:{sha[:32]}',source_bytes=content,
+              source_locator='memory://original-source-view.pdf',page_ids=('11',),
+          )
+          source_before=source.published_snapshot_for_revision(
+              published.revision.revision_id
+          )
+          views_before=segment_source_page_viewports(
+              source,revision_id=published.revision.revision_id,
+              page_id='11',physical_plan_view_shadow=True,
+          )
+          prior_owners=[v for v in views_before
+                        if v.view_type=='floor_finish_plan'
+                        and (v.provenance or {}).get('source_owned_plan_view_proven') is True]
+          assert len(prior_owners)==1,{
+              'first_gate':'original_source_plan_view_unavailable_before_w4',
+              'prior_view_types':[v.view_type for v in views_before],
+              'source_revision':published.revision.revision_id,
+          }
+          factory=PhysicalWallCandidateProducer.from_source_owned_plan_view_shadow(
+              source,page_ids=('11',)
+          )
+          snapshot=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert snapshot==source_before,'source_owned_w4_mutated_source_snapshot'
+          views=segment_source_page_viewports(
+              source,revision_id=published.revision.revision_id,
+              page_id='11',physical_plan_view_shadow=True,
+          )
+          owners=[v for v in views if v.view_type=='floor_finish_plan'
+                  and (v.provenance or {}).get('source_owned_plan_view_proven') is True]
+          authority=factory.authority()
+          selectors=authority.selectors_for_authenticated_viewports(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=snapshot.snapshot.snapshot_id,page_id='11',
+              view_type='floor_finish_plan'
+          )
+          receipts=[authority.resolve_scope(s) for s in selectors]
+          assert len(owners)==1 and len(receipts)==1, {
+              'source_owned_positive_views':len(owners),
+              'sealed_source_w4_scopes':len(receipts),
+              'revision':published.revision.revision_id,
+              'snapshot':published.snapshot.snapshot_id,
+              'all_source_view_types':[v.view_type for v in views],
+          }
+          assert receipts[0].source_sha256==sha and receipts[0].scope_kind=='viewport'
+          assert receipts[0].viewport_id==owners[0].view_id
+          print(json.dumps({
+              'sha_verified':True,
+              'source_plan_owners':len(owners),
+              'source_owned_w4_scopes':len(receipts),
+              'source_w4_candidate_count':len(receipts[0].records),
+              'physical_metric_room_claim_granted':False,
+              'ft3_floor_finish_quantity_granted':False,
+          },sort_keys=True))
+          PY

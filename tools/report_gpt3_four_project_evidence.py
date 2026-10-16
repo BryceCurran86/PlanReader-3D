@@ -18,8 +18,11 @@ import importlib
 import importlib.util
 import sys
 
-from scripts.report_full_plan_v2_readiness import _write_readiness_report
+from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
 from pb_customer_output_verification import verify_sealed_customer_output
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from tools.run_gpt3_original_byte_gated_exact_project import (
     FROZEN_ROOT,
@@ -62,15 +65,37 @@ def _load_unchanged_frozen_modules():
 ) = _load_unchanged_frozen_modules()
 
 
+def _read_json_without_duplicate_keys(path: Path) -> Any:
+    """Reject malformed signed evidence before source/customer verification.
+
+    Reuse the existing strict readiness JSON parser: nested duplicate keys,
+    NaN/Infinity, numeric overflow, oversized integers, and pathological
+    nesting must not reach the unchanged signed or frozen reconciliation.
+    This reads only; it never changes producer signatures or source bytes.
+    """
+    try:
+        return _parse_evidence_json(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        # Preserve the established signed-evidence duplicate-key error
+        # contract; the shared readiness parser uses different wording.
+        prefix = "duplicate JSON key: "
+        if str(exc).startswith(prefix):
+            raise ValueError(
+                "signed evidence JSON contains duplicate key: "
+                + str(exc)[len(prefix):]
+            ) from exc
+        raise
+
+
 def _json_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if type(value) is not dict:
         raise ValueError("signed evidence file must contain a JSON object")
     return value
 
 
 def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if type(value) is not list or any(type(row) is not dict for row in value):
         raise ValueError("customer projection must be a JSON array of objects")
     # Manual/customer-only rows are not allowed into this signed automated lane.
@@ -135,6 +160,17 @@ def _enforce_cross_project_quantity_uniqueness(
             raise ValueError("cross-project signed quantity identity collision")
     for quantity_id in candidate_ids:
         seen[quantity_id] = project_id
+
+
+def _enforce_mapped_production_family_trade(
+    manifest: Any, sealed: Any, mapping: Any,
+) -> None:
+    """Share exactly the same commercial-semantic veto as project-only score."""
+    require_signed_v2_family_trade_integrity(
+        verified_items=manifest.verified_items,
+        sealed_quantities=sealed.quantities,
+        identity_bindings=mapping.bindings,
+    )
 
 
 def _resolve_original_paths(
@@ -265,6 +301,7 @@ def build_four_project_evidence_ledger(
             customer_rows = _json_customer_rows(customer_path)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
+            _enforce_mapped_production_family_trade(manifest, sealed, mapping)
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )

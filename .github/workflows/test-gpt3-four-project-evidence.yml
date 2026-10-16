@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - "tools/report_gpt3_four_project_evidence.py"
+      - "tools/gpt3_signed_v2_family_trade_integrity.py"
+      - "tools/run_gpt3_original_byte_gated_exact_project.py"
       - "tests/test_gpt3_four_project_evidence.py"
+      - "tests/test_gpt3_original_byte_gated_exact_project.py"
       - ".github/workflows/test-gpt3-four-project-evidence.yml"
   workflow_dispatch:
 
@@ -28,7 +31,7 @@ jobs:
       - name: Test source/quantity/customer/frozen-score gates
         run: |
           set -euo pipefail
-          PYTHONPATH=. python -m pytest -q tests/test_gpt3_four_project_evidence.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_four_project_evidence.py tests/test_gpt3_original_byte_gated_exact_project.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
       - name: Prove unavailable private sources do not become zero accuracy
         run: |
