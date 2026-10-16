@@ -63,6 +63,15 @@ def _expected_inputs_and_targets() -> tuple[dict, dict, dict]:
     return targets, source_sha, file_hashes
 
 
+def _official_source_universe_verified() -> bool:
+    """A provisional frozen manifest cannot yield a published V2 result."""
+    manifests = load_suite_manifests(FROZEN_ROOT)
+    return (
+        len(manifests) == 4
+        and all(m.status == "VERIFIED" and m.source_package_complete for m in manifests)
+    )
+
+
 def _validate_input_ledger(
     ledger: Mapping[str, Any],
     *,
@@ -114,6 +123,8 @@ def _validate_input_ledger(
         ):
             raise ValueError("unpublished run must never assert scored targets")
     else:
+        if not _official_source_universe_verified():
+            raise ValueError("published score forbidden while frozen source manifests remain INCOMPLETE")
         if (
             head is None
             or ledger.get("evaluated_target_count") != 120
@@ -127,6 +138,10 @@ def _validate_input_ledger(
             ) and (type(row.get("produced_quantity_id")) is not str
                     or not row["produced_quantity_id"]):
                 raise ValueError("matched target requires exact produced quantity identity")
+            if row["evaluation_state"] in ("MISSED", "PARTIAL") and (
+                row.get("produced_quantity_id") is not None
+            ):
+                raise ValueError("missing/partial target cannot claim exact produced identity")
         within = sum(row["evaluation_state"] == _WIN for row in rows)
         expected = within / 120
         value = ledger.get("official_coverage_accuracy")
@@ -152,6 +167,8 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
         after, targets=targets, source_sha=sources, frozen_sha=frozen,
     )
     same_input = before["input_fingerprint"] == after["input_fingerprint"]
+    if same_input and before.get("producer_head") != after.get("producer_head"):
+        raise ValueError("same scoring fingerprint cannot change producer commit")
     if same_input and (
         before["publication_status"] != after["publication_status"]
         or any(
