@@ -268,7 +268,23 @@ def spans_from_text_dict(payload: Dict[str, Any], pdf_page: Any = None) -> List[
 
 
 def page_cells(pdf_page: Any) -> List[Cell]:
-    return cells_from_spans(page_spans(pdf_page))
+    """Split multiple *printed field labels* in one native text run.
+
+    CAD title blocks sometimes encode `Job Number - Drawing Number` as one
+    original vector-font span, so parsing only its first prefix treats the
+    entire run as a JOB field and leaves the genuine Drawing Number unbound.
+    Use the same existing label-only splitter as native/OCR: it never creates
+    a label that was not literally printed, and downstream _bind, competing
+    sheet-number conflicts and sibling-layout proof stay unchanged.
+
+    In particular this does NOT pick any arbitrary A502 token on a page:
+    the actual DRAWING NUMBER sublabel must still bind its own source value.
+    """
+    return [
+        piece
+        for cell in cells_from_spans(page_spans(pdf_page))
+        for piece in split_label_runs(cell)
+    ]
 
 
 def _visual_size(pdf_page: Any) -> Tuple[float, float]:
