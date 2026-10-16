@@ -1,0 +1,23 @@
+{
+  "benchmark_score_granted": false,
+  "complete_source_coverage_proven": false,
+  "execution_page_numbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "family_group": "all",
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "sealed_run_file": null,
+  "source_page_count": 10,
+  "source_sha256_at_start": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+  "status": "SOURCE_INPUT_RECORDED_UNSEALED",
+  "topology_mode": "live_authority_all_pages_fallback"
+}

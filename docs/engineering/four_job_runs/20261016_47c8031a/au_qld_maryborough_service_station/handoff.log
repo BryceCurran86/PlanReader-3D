@@ -1,0 +1,8 @@
+COMMAND: <HOME>\Documents\PlanReader_Private_V2_Run\.venv\Scripts\python.exe -u -c import faulthandler, sys, runpy
+f = open(r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_maryborough_service_station/stack_dumps.txt', 'a')
+faulthandler.dump_traceback_later(600, repeat=True, file=f)
+sys.argv = ['run_source_closed_project_handoff', '--pdf', r'<HOME>\Downloads\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\sources\au_qld_maryborough_service_station\Arch_Combined_Maryborough_Service_Station.pdf', '--project-id', 'au_qld_maryborough_service_station',
+            '--family-group', 'all', '--output-dir', r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_maryborough_service_station']
+runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)
+
+2026-10-16 17:41:28.496 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.

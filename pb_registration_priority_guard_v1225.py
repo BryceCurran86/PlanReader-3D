@@ -7,7 +7,7 @@ multiple lines that merely say REFER/SEE ELEVATION or SECTION.
 from __future__ import annotations
 
 import re
-from typing import Any, Tuple
+from typing import Any, List, Tuple
 
 import pb_page_registration_v1225 as registration
 
@@ -37,33 +37,62 @@ def _is_reference_line(line: str) -> bool:
     return any(token in low[:24] for token in ("refer to ", "see drawing", "see elevation", "see section"))
 
 
+def _line_heading_types(line: str) -> List[Tuple[str, str]]:
+    """Heading types on one line. A shorter phrase inside a longer one does not count."""
+    matched: List[Tuple[str, str]] = []
+    for page_type, phrases in _HEADING_RULES:
+        for phrase in phrases:
+            if phrase == "rcp":
+                present = re.search(r"\brcp\b", line) is not None
+            else:
+                present = phrase in line
+            if present:
+                matched.append((page_type, phrase))
+    return [
+        (page_type, phrase)
+        for page_type, phrase in matched
+        if not any(phrase != other and phrase in other for _page_type, other in matched)
+    ]
+
+
 def strong_heading_type(text: Any) -> Tuple[str, str]:
-    """Return a sheet type only from concise, non-reference heading lines."""
-    lines = [str(line).strip() for line in str(text or "").splitlines() if str(line).strip()]
-    # PyMuPDF reading order can place the title block near the end, so inspect the
-    # whole page but only accept concise heading-like lines.
-    for line in lines:
+    """Return a sheet type only when every concise heading line agrees.
+
+    Two different heading types abstain. Reading order is not a winner.
+    """
+    found: List[Tuple[str, str]] = []
+    for raw in str(text or "").splitlines():
+        line = str(raw).strip()
         low = _norm_line(line)
-        if len(low) > 120 or _is_reference_line(low):
+        if not low or len(low) > 120 or _is_reference_line(low):
             continue
-        for page_type, phrases in _HEADING_RULES:
-            for phrase in phrases:
-                if phrase == "rcp":
-                    if re.search(r"\brcp\b", low):
-                        return page_type, line
-                elif phrase in low:
-                    return page_type, line
-    return "", ""
+        types = {page_type for page_type, _phrase in _line_heading_types(low)}
+        if len(types) > 1:
+            return "", ""
+        if len(types) == 1:
+            found.append((next(iter(types)), line))
+    names = {page_type for page_type, _line in found}
+    if len(names) != 1:
+        return "", ""
+    page_type = next(iter(names))
+    heading = next(line for found_type, line in found if found_type == page_type)
+    return page_type, heading
 
 
 def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = ""):
     base_type, confidence, evidence = _BASE_WEIGHTED_PAGE_TYPE(full_text, file_name, title_block)
+    # A title block that names two sheet types has already abstained. Do not
+    # replace that with the first heading found in the page body.
+    if evidence == "competing title block headings":
+        return base_type, confidence, evidence
     # Native title-block evidence remains strongest and already receives a large
-    # score in the base classifier. Only improve the fallback when a concise
-    # heading can be found.
+    # score in the base classifier. Only improve the fallback when the concise
+    # headings agree.
     title_type, title_line = strong_heading_type(title_block)
     if title_type:
         return title_type, max(int(confidence), 94), f"title block heading: {title_line}"
+    if evidence == "competing page headings":
+        return base_type, confidence, evidence
     heading_type, heading_line = strong_heading_type(full_text)
     if heading_type:
         return heading_type, max(int(confidence) if heading_type == base_type else 0, 84), f"page heading: {heading_line}"
@@ -72,8 +101,7 @@ def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "
 
 def classify_page(text: str, file_name: str, page_no: int):
     page_type, _confidence, _evidence = weighted_page_type(text, file_name, "")
-    code = registration._candidate_code(text)
-    return page_type, code or f"Page {int(page_no)}"
+    return page_type, f"Page {int(page_no)}"
 
 
 def apply(app: Any) -> None:

@@ -1,0 +1,25 @@
+COMMAND: <HOME>\Documents\PlanReader_Private_V2_Run\.venv\Scripts\python.exe -m tools.diag_gpt1_source_pdf_package_preflight --manifest <HOME>\Documents\PlanReader_Private_V2_Run\repo_readonly_snapshot\benchmarks\frozen_holdout\full_plan_v2\projects\au_qld_maryborough_service_station\source_manifest.json --source-root <HOME>\Downloads\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\sources\au_qld_maryborough_service_station --output <HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\preflight\au_qld_maryborough_service_station.json
+{
+  "actual_source_package_runtime_complete": true,
+  "benchmark_score_granted": false,
+  "commercial_quantity_publication_granted": false,
+  "expected_source_document_count": 1,
+  "manifest_declares_source_package_complete": true,
+  "project_id": "au_qld_maryborough_service_station",
+  "rcp_or_metric_or_finish_authority_granted": false,
+  "source_documents": [
+    {
+      "actual_page_count": 31,
+      "actual_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+      "actual_size_bytes": 5709675,
+      "expected_page_count": 31,
+      "expected_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+      "expected_size_bytes": 5709675,
+      "name": "Arch_Combined_Maryborough_Service_Station.pdf",
+      "role": "architectural_drawings",
+      "status": "VERIFIED"
+    }
+  ],
+  "verified_source_document_count": 1
+}
+

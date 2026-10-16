@@ -1,0 +1,205 @@
+name: VERIFY Option A Original 3Laurel and Lot16 Same-Snapshot Sources
+on:
+  pull_request:
+    paths:
+      - "pb_live_canonical_wall_composition.py"
+      - "tools/verify_option_a_original_wall_source.py"
+      - ".github/workflows/verify-option-a-original-wall-source.yml"
+  workflow_dispatch:
+
+jobs:
+  original-same-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [3laurel, lot16]
+    steps:
+      - name: Exact PR head only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove checked-out commit
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned source producer dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify exact frozen evaluator unchanged
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Original project SAME source snapshot pre/post collision proof
+        env:
+          PROJECT: ${{ matrix.project }}
+          ORT_DISABLE_TELEMETRY: "1"
+        run: |
+          mkdir -p artifacts/option-a
+          timeout 2200s env PYTHONPATH=. python -u tools/verify_option_a_original_wall_source.py \
+            --project "$PROJECT" --output "artifacts/option-a/$PROJECT-same-source-snapshot.json"
+      - name: Original source readout
+        if: success()
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          python - <<'PY'
+          import os, json
+          from pathlib import Path
+          r=json.loads(Path(f"artifacts/option-a/{os.environ['PROJECT']}-same-source-snapshot.json").read_text())
+          assert r["same_source_snapshot_before_after"] is True
+          assert r["commercial_wall_quantities_created"] is False
+          assert r["benchmark_score_granted"] is False
+          if r["project"]=="3laurel":
+              assert r["original_source_sha256"]=="014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+              assert r["original_w4_member_record_count"]==1559
+              assert r["boundary_clean_w4_count"]==1445
+              assert r["boundary_tainted_w4_count"]==114
+              assert r["before_canonical_wall_count"]==0
+              assert r["after_canonical_wall_count"]==1445
+              assert r["collision_candidate_count"]==2
+              assert r["unresolved_member_count"]==1559
+              assert r["before_status"]=="conflict"
+              assert r["after_status"]=="candidate"
+          else:
+              assert r["original_source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+              assert r["original_w4_member_record_count"]==2094
+              assert r["lot16_exact_canonical_wall_state_unchanged"] is True
+          print(json.dumps(r,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: option-a-${{ matrix.project }}-same-original-snapshot
+          path: artifacts/option-a/
+          retention-days: 14
+
+  original-3laurel-customer-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Exact source head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original source scoped 3Laurel core claim and customer output
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf'
+          SHA='014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          timeout 1800s python -u tools/run_source_closed_project_handoff.py \
+            --pdf "$PDF" --project-id au_qld_3laurel --family-group core \
+            --source-plan-page-index 2 --output-dir artifacts/option-a-original-core
+      - name: Baseline handoff at the merge-base (before Option A) on the same original page
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf'
+          SHA='014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e'
+          git fetch --no-tags origin main
+          BASE="$(git merge-base HEAD origin/main)"
+          echo "merge-base=$BASE head=$(git rev-parse HEAD)"
+          test "$BASE" != "$(git rev-parse HEAD)"
+          git worktree add --detach "$RUNNER_TEMP/option-a-base" "$BASE"
+          printf '%s  %s\n' "$SHA" "$RUNNER_TEMP/option-a-base/$PDF" | sha256sum --check
+          cd "$RUNNER_TEMP/option-a-base"
+          timeout 1800s python -u tools/run_source_closed_project_handoff.py \
+            --pdf "$PDF" --project-id au_qld_3laurel --family-group core \
+            --source-plan-page-index 2 \
+            --output-dir "$GITHUB_WORKSPACE/artifacts/option-a-baseline-core"
+      - name: Before/after summary may differ only in canonical wall candidates
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path("artifacts/option-a-baseline-core/production_summary.json").read_text())
+          after=json.loads(Path("artifacts/option-a-original-core/production_summary.json").read_text())
+          assert before["source_sha256"]==after["source_sha256"]
+          wall_keys={"canonical_wall_status","canonical_wall_reason_codes"}
+          differing=sorted(
+              key for key in set(before)|set(after)
+              if key not in wall_keys and key!="canonical_counts"
+              and before.get(key)!=after.get(key)
+          )
+          assert not differing, ("non-wall summary fields changed", differing)
+          b_counts=dict(before["canonical_counts"])
+          a_counts=dict(after["canonical_counts"])
+          assert {k:v for k,v in b_counts.items() if k!="walls"}=={k:v for k,v in a_counts.items() if k!="walls"}, (b_counts, a_counts)
+          assert a_counts["walls"]>=b_counts["walls"]
+          # No candidate may become newly resolved by this change.
+          assert after["unresolved_wall_candidate_count"]>=before["unresolved_wall_candidate_count"]
+          print("OPTION_A_BEFORE_AFTER_SUMMARY",json.dumps({
+              "merge_base_wall_status":before.get("canonical_wall_status"),
+              "merge_base_walls":b_counts["walls"],
+              "head_wall_status":after.get("canonical_wall_status"),
+              "head_walls":a_counts["walls"],
+              "non_wall_fields_identical":True,
+              "claim_status":after["claim_status"],
+              "combined_quantity_count":after["combined_quantity_count"],
+          },sort_keys=True))
+          PY
+      - name: Check no new commercial wall/opening quantities
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("artifacts/option-a-original-core/production_summary.json")
+          s=json.loads(p.read_text())
+          assert s["source_sha256"]=="014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          assert s["source_positive_partial_page"]==3
+          assert s["execution_pages"]==[3] and s["family_group"]=="core"
+          assert s["canonical_wall_status"]=="candidate"
+          assert "live_canonical_wall_id_collision_candidate" in s["canonical_wall_reason_codes"]
+          assert s["canonical_counts"]["walls"]>0
+          assert s["unresolved_wall_candidate_count"]>=s["canonical_counts"]["walls"]
+          assert s["claim_status"]=="abstained"
+          assert s["status"]=="no_sealable_quantities"
+          assert s["combined_quantity_count"]==0
+          assert s["verified_customer_row_count"]==0
+          assert s["customer_rows_verified"] is False
+          assert s["combined_run_file"] is None
+          assert s["benchmark_score_granted"] is False
+          assert s["frozen_v2_reconciliation_complete"] is False
+          print("ORIGINAL_OPTION_A_CUSTOMER_SHADOW",json.dumps({
+              "source_sha256":s["source_sha256"],
+              "claim_status":s["claim_status"],
+              "canonical_wall_status":s["canonical_wall_status"],
+              "canonical_wall_reasons":s["canonical_wall_reason_codes"],
+              "candidate_walls":s["canonical_counts"]["walls"],
+              "unresolved_w4":s["unresolved_wall_candidate_count"],
+              "new_commercial_quantities":s["combined_quantity_count"],
+              "new_customer_rows":s["verified_customer_row_count"],
+              "frozen_v2_score_granted":s["benchmark_score_granted"],
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: option-a-original-3laurel-commercial-shadow
+          path: artifacts/option-a-original-core/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: option-a-original-3laurel-baseline-core
+          path: artifacts/option-a-baseline-core/
+          retention-days: 14

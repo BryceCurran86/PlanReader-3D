@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -566,6 +566,7 @@ def _canonical_line(record: SourceObservationRecord) -> tuple[tuple[float, float
 def _physical_opening_geometry_identity(
     candidate: CandidateSemanticOpening,
     records: Sequence[SourceObservationRecord],
+    records_by_observation_id: Mapping[str, SourceObservationRecord] | None = None,
 ) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...]:
     """Return the producer-independent physical geometry key for one opening.
 
@@ -573,14 +574,27 @@ def _physical_opening_geometry_identity(
     Positive physical-opening candidates are supported by source-visible line
     geometry; every declared support observation must therefore resolve to one
     finite line before a stable physical identity can be published.
+
+    ``records_by_observation_id`` is an optional lookup over exactly ``records``
+    in which every ``str(observation_id)`` occurs once (see
+    PhysicalOpeningAuthority._visible_records_by_observation_id). It selects the
+    same support records as scanning ``records`` without walking the whole
+    snapshot once per candidate.
     """
 
     support_ids = {str(value) for value in candidate.source_observation_ids}
-    support_records = tuple(
-        record
-        for record in records
-        if str(record.observation_id) in support_ids
-    )
+    if records_by_observation_id is None:
+        support_records = tuple(
+            record
+            for record in records
+            if str(record.observation_id) in support_ids
+        )
+    else:
+        support_records = tuple(
+            records_by_observation_id[support_id]
+            for support_id in support_ids
+            if support_id in records_by_observation_id
+        )
     if {str(record.observation_id) for record in support_records} != support_ids:
         return ()
     geometry = tuple(
@@ -1175,6 +1189,16 @@ class PhysicalOpeningAuthority:
                 tuple[SourceObservationAuthorityResult, ...],
             ],
         ] = {}
+        # Lookup over the exact cached records tuple above (bound to that tuple
+        # by identity), so per-candidate geometry identity does not rescan the
+        # whole snapshot. None when an observation id repeats: callers scan.
+        self._visible_snapshot_record_index_cache: dict[
+            tuple[str, str, str, str],
+            tuple[
+                tuple[SourceObservationRecord, ...],
+                dict[str, SourceObservationRecord] | None,
+            ],
+        ] = {}
         self._raster_primitive_snapshot_cache: dict[
             tuple[str, str, str, str],
             tuple[
@@ -1227,6 +1251,7 @@ class PhysicalOpeningAuthority:
             "_wall_source_opening_page_proof_cache",
             "_visible_source_result_cache",
             "_visible_snapshot_cache",
+            "_visible_snapshot_record_index_cache",
             "_raster_primitive_snapshot_cache",
             "_raster_framed_candidate_cache",
             "_raster_gap_candidate_audit_cache",
@@ -1459,6 +1484,38 @@ class PhysicalOpeningAuthority:
         resolved = (tuple(records), tuple(failures))
         self._visible_snapshot_cache[cache_key] = resolved
         return resolved
+
+    def _visible_records_by_observation_id(
+        self,
+        seed: SourceObservationAuthorityResult,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> dict[str, SourceObservationRecord] | None:
+        """Lookup over exactly ``records``, or None if an observation id repeats.
+
+        The index is bound to the records tuple object it was built from, so a
+        replaced or invalidated snapshot cache can never serve a stale lookup.
+        """
+        snapshot = seed.snapshot
+        if snapshot is None:
+            return None
+        cache_key = (
+            snapshot.document_id,
+            snapshot.revision_id,
+            snapshot.source_sha256,
+            snapshot.snapshot_id,
+        )
+        cached = self._visible_snapshot_record_index_cache.get(cache_key)
+        if cached is not None and cached[0] is records:
+            return cached[1]
+        index: dict[str, SourceObservationRecord] | None = {}
+        for record in records:
+            observation_id = str(record.observation_id)
+            if observation_id in index:
+                index = None
+                break
+            index[observation_id] = record
+        self._visible_snapshot_record_index_cache[cache_key] = (records, index)
+        return index
 
     def _raster_primitive_snapshot_records(
         self,
@@ -3969,7 +4026,11 @@ class PhysicalOpeningAuthority:
                     reason_codes=(opposition_reason,),
                     source_observation=source_result, candidate=candidate,
                     opposing_evidence_atoms=opposing))
-        physical_geometry = _physical_opening_geometry_identity(candidate, records)
+        physical_geometry = _physical_opening_geometry_identity(
+            candidate,
+            records,
+            self._visible_records_by_observation_id(source_result, records),
+        )
         if not physical_geometry:
             return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,

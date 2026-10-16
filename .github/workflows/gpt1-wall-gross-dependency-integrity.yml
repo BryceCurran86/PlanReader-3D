@@ -1,0 +1,36 @@
+name: GPT1 Wall Gross Source Dependency Integrity
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/gpt1-wall-gross-dependency-integrity.yml"
+      - "tests/test_gpt1_wall_gross_dependency_shadow_integrity.py"
+  workflow_dispatch:
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test requirements
+        run: |
+          python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: GPT1 source-owner tests and frozen-gold isolation
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt1_wall_gross_dependency_shadow_integrity.py tests/test_wall_gross_area_quantity.py
+          python -m compileall -q tests/test_gpt1_wall_gross_dependency_shadow_integrity.py
+          ruff check --select F821,F823 tests/test_gpt1_wall_gross_dependency_shadow_integrity.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py

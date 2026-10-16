@@ -18,8 +18,11 @@ import importlib
 import importlib.util
 import sys
 
-from scripts.report_full_plan_v2_readiness import _write_readiness_report
-from pb_customer_output_verification import verify_sealed_customer_output
+from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
+from pb_customer_output_verification import (
+    _customer_quantity_id,
+    verify_sealed_customer_output,
+)
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
@@ -66,23 +69,25 @@ def _load_unchanged_frozen_modules():
 
 
 def _read_json_without_duplicate_keys(path: Path) -> Any:
-    """Never discard conflicting keys before signed source/customer validation.
+    """Reject malformed signed evidence before source/customer verification.
 
-    Unlike default json.loads, this retains the immutable wire document's
-    original identity semantics: even a nested conflicting key must fail
-    rather than silently replacing the previous source/quantity claim.
+    Reuse the existing strict readiness JSON parser: nested duplicate keys,
+    NaN/Infinity, numeric overflow, oversized integers, and pathological
+    nesting must not reach the unchanged signed or frozen reconciliation.
+    This reads only; it never changes producer signatures or source bytes.
     """
-    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"signed evidence JSON contains duplicate key: {key}")
-            result[key] = value
-        return result
-
-    return json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=unique_object
-    )
+    try:
+        return _parse_evidence_json(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        # Preserve the established signed-evidence duplicate-key error
+        # contract; the shared readiness parser uses different wording.
+        prefix = "duplicate JSON key: "
+        if str(exc).startswith(prefix):
+            raise ValueError(
+                "signed evidence JSON contains duplicate key: "
+                + str(exc)[len(prefix):]
+            ) from exc
+        raise
 
 
 def _json_object(path: Path) -> dict[str, Any]:
@@ -96,8 +101,11 @@ def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
     value = _read_json_without_duplicate_keys(path)
     if type(value) is not list or any(type(row) is not dict for row in value):
         raise ValueError("customer projection must be a JSON array of objects")
-    # Manual/customer-only rows are not allowed into this signed automated lane.
-    if any(type(row.get("quantity_id")) is not str or not row["quantity_id"] for row in value):
+    # Use the already authoritative V1 identity reader. Persisted commercial
+    # rows may carry the quantity ID in structured provenance or strict notes
+    # rather than in a top-level optional column. Full provenance validity is
+    # checked independently by verify_sealed_customer_output below.
+    if any(not _customer_quantity_id(row) for row in value):
         raise ValueError("automated customer row lacks canonical quantity identity")
     return value
 
@@ -128,7 +136,9 @@ def _verify_customer_counts(sealed: Any, verified: Any, customer_rows: list[dict
     }
     if valid & abstained or len(valid) + len(abstained) != len(sealed.quantities):
         raise ValueError("duplicate or conflicting signed quantity identities")
-    customer_ids = [row["quantity_id"] for row in customer_rows]
+    # Match the identity source actually accepted by the V1 verifier; a
+    # top-level-only lookup would reject valid database-row projections.
+    customer_ids = [_customer_quantity_id(row) for row in customer_rows]
     if (
         verified.project_id != sealed.project_id
         or verified.sealed_quantity_count != len(sealed.quantities)

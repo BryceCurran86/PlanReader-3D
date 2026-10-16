@@ -1,0 +1,213 @@
+{
+  "commercial_projection_allowed": false,
+  "diagnostic_only": true,
+  "first_unclosed_gate": "original_crossview_native_region_overlap_unproven",
+  "grid_native_vector_delta_pdf_pts": [
+    78.0,
+    0.0
+  ],
+  "material_code": "FT3",
+  "material_occurrence_source_trusted": false,
+  "native_material_marks": [
+    {
+      "native_bbox_pdf_pts": [
+        321.156677,
+        1429.585815,
+        334.402191,
+        1445.359375
+      ],
+      "native_source_address": [
+        112,
+        0,
+        0
+      ],
+      "source_word_text_only_not_raster_authority": "FT3"
+    },
+    {
+      "native_bbox_pdf_pts": [
+        317.796661,
+        1014.38562,
+        331.042175,
+        1030.159058
+      ],
+      "native_source_address": [
+        112,
+        1,
+        0
+      ],
+      "source_word_text_only_not_raster_authority": "FT3"
+    },
+    {
+      "native_bbox_pdf_pts": [
+        309.636658,
+        615.025391,
+        322.882172,
+        630.798828
+      ],
+      "native_source_address": [
+        112,
+        2,
+        0
+      ],
+      "source_word_text_only_not_raster_authority": "FT3"
+    },
+    {
+      "native_bbox_pdf_pts": [
+        580.116882,
+        634.945312,
+        593.362366,
+        650.71875
+      ],
+      "native_source_address": [
+        113,
+        0,
+        0
+      ],
+      "source_word_text_only_not_raster_authority": "FT3"
+    },
+    {
+      "native_bbox_pdf_pts": [
+        730.356995,
+        500.065155,
+        743.602478,
+        515.838623
+      ],
+      "native_source_address": [
+        114,
+        0,
+        0
+      ],
+      "source_word_text_only_not_raster_authority": "FT3"
+    },
+    {
+      "native_bbox_pdf_pts": [
+        1376.526489,
+        2197.929199,
+        1390.252808,
+        2213.36084
+      ],
+      "native_source_address": [
+        262,
+        0,
+        0
+      ],
+      "source_word_text_only_not_raster_authority": "FT3"
+    }
+  ],
+  "original_grid_native_vector_candidate": true,
+  "original_material_mark_page": 11,
+  "original_room_wall_equivalence_proven": false,
+  "original_source_room_page": 7,
+  "page_material_role_proven": false,
+  "physical_room_crossview_equivalence_proven": false,
+  "published_floor_finish_quantities": 0,
+  "source_region_geometric_candidates": [],
+  "source_room_candidates": [
+    {
+      "canonical_room_id": "live_physical_room_1807f9a27fa6ee477e5b48894d9a3aec",
+      "native_geometry_area_page_pts2": 1161.4496376012685,
+      "native_source_room_bbox_pdf_pts": [
+        668.399963,
+        1088.719971,
+        702.47998,
+        1122.800049
+      ],
+      "native_source_room_label": "SALES",
+      "physical_room_id": "live_physical_room_1807f9a27fa6ee477e5b48894d9a3aec",
+      "source_bounding_wall_count": 4,
+      "source_room_record_id": "source_room_face_record_42bef3e350b3cc042f17107fe610f0d8",
+      "source_wall_relationships_complete": false
+    },
+    {
+      "canonical_room_id": "live_physical_room_5c63d335f387637ebdae8ab93a51f7b4",
+      "native_geometry_area_page_pts2": 67798.24444182785,
+      "native_source_room_bbox_pdf_pts": [
+        359.519997,
+        811.040039,
+        588.23999,
+        1274.72004
+      ],
+      "native_source_room_label": "COLD ROOM",
+      "physical_room_id": "live_physical_room_5c63d335f387637ebdae8ab93a51f7b4",
+      "source_bounding_wall_count": 43,
+      "source_room_record_id": "source_room_face_record_17f0cb15ba5c2f25ff17b12b2ccc5129",
+      "source_wall_relationships_complete": false
+    },
+    {
+      "canonical_room_id": "live_physical_room_660be6e4e831de172db0f00da88fd333",
+      "native_geometry_area_page_pts2": 1034.207113680197,
+      "native_source_room_bbox_pdf_pts": [
+        322.320007,
+        1689.920044,
+        345.119995,
+        1735.280029
+      ],
+      "native_source_room_label": "AIRLOCK",
+      "physical_room_id": "live_physical_room_660be6e4e831de172db0f00da88fd333",
+      "source_bounding_wall_count": 4,
+      "source_room_record_id": "source_room_face_record_a0f786d8997e532c332b1a1c28980d14",
+      "source_wall_relationships_complete": false
+    },
+    {
+      "canonical_room_id": "live_physical_room_7f1b099c553030e42f0dca9e0fe22f1d",
+      "native_geometry_area_page_pts2": 1034.2099180786754,
+      "native_source_room_bbox_pdf_pts": [
+        276.959991,
+        1599.199951,
+        299.759979,
+        1644.560059
+      ],
+      "native_source_room_label": "LAUNDRY",
+      "physical_room_id": "live_physical_room_7f1b099c553030e42f0dca9e0fe22f1d",
+      "source_bounding_wall_count": 4,
+      "source_room_record_id": "source_room_face_record_dde9e143bdd9627f96b7d5aaaea51f7f",
+      "source_wall_relationships_complete": false
+    },
+    {
+      "canonical_room_id": "live_physical_room_7f9fb47969b3ac3c1496e2a18104b812",
+      "native_geometry_area_page_pts2": 8026.758458793687,
+      "native_source_room_bbox_pdf_pts": [
+        328.320007,
+        578.47998,
+        397.919983,
+        748.736035
+      ],
+      "native_source_room_label": "FOOD PREP",
+      "physical_room_id": "live_physical_room_7f9fb47969b3ac3c1496e2a18104b812",
+      "source_bounding_wall_count": 8,
+      "source_room_record_id": "source_room_face_record_a163b3690c0b2db83f89fcf7465bd831",
+      "source_wall_relationships_complete": false
+    },
+    {
+      "canonical_room_id": "live_physical_room_9eea8a328d9da55c19258c05c282c88c",
+      "native_geometry_area_page_pts2": 1145.144855519582,
+      "native_source_room_bbox_pdf_pts": [
+        226.319992,
+        1463.119995,
+        260.160004,
+        1496.959961
+      ],
+      "native_source_room_label": "OFFICE",
+      "physical_room_id": "live_physical_room_9eea8a328d9da55c19258c05c282c88c",
+      "source_bounding_wall_count": 4,
+      "source_room_record_id": "source_room_face_record_735f9b309cca70f513c9fcd9390e3e10",
+      "source_wall_relationships_complete": false
+    },
+    {
+      "canonical_room_id": "live_physical_room_decceeeb5c395a8edee347b1454f0881",
+      "native_geometry_area_page_pts2": 2838.04715643503,
+      "native_source_room_bbox_pdf_pts": [
+        407.039978,
+        1426.160034,
+        445.679993,
+        1562.23999
+      ],
+      "native_source_room_label": "PWD",
+      "physical_room_id": "live_physical_room_decceeeb5c395a8edee347b1454f0881",
+      "source_bounding_wall_count": 16,
+      "source_room_record_id": "source_room_face_record_6722d55c0ce8c8a8706cdcc6094860f9",
+      "source_wall_relationships_complete": false
+    }
+  ],
+  "source_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+}
