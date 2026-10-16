@@ -59,6 +59,12 @@ The same check was deliberately tested against four synthetic negative mutations
 
 **Integrity vocabulary:** the V1 "signed" and "sealed" quantities use public, **unkeyed SHA-256 content fingerprints** and deterministic content-derived IDs, as directly observed in `pb_source_closed_run_export.py`; they are not an asymmetric digital signature, cryptographic authentication of the producer, or proof that a third party did not construct another self-consistent envelope. Recomputing the fingerprints detects edits against a **separately trusted pinned digest**; source authentication requires the original-PDF reissue/authority gates. Here "signed" follows the repository's historical API names and must not imply stronger security properties.
 
+## Original customer provenance does not bind to the new V1 run
+
+A read-only exact-field comparison examined every `commercial_projection_provenance.quantity.evidence_ids` and `commercial_projection_provenance.source_trace.evidence_ids` embedded in the **eight committed archived customer rows**. By exact quantity ID, **8/8** agree with both evidence arrays in the archived V1 seal; **0/8** agree with the corresponding arrays in the owner's fresh primary-PDF handoff. All eight customer entries still carry their original `commercial_projection_fingerprint` and remain provisional.
+
+This is a direct persisted-provenance **first failing gate** for naïve customer reuse, independent of numeric equality. It is not a standalone execution of `verify_sealed_customer_output` with the new run, and therefore should not be overstated as an observed exception raised by that function. The correct action is to retain original customer receipts unmodified, obtain actual old→new original-source issuer/scope proof, then produce fresh rows from the permitted producer/adapter and execute the existing full customer verifier. Never mask host/frame IDs in persisted customer provenance.
+
 ## Original owner-machine production outcomes
 
 | Project | Eligible | Machine process status | Authenticated handoff observation | First score/customer gate |
