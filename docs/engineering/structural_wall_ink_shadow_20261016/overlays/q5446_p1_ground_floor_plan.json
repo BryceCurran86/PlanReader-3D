@@ -185,6 +185,7 @@
   ],
   "live_effect": false,
   "network_count": 2,
+  "opening_gap_candidates": 53,
   "page": 1,
   "reason_counts": {
     "below_minimum_run_length": 4797,

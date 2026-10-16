@@ -2,7 +2,7 @@
 
 Status: **shadow-only evidence module and read-only overlay tool.** Nothing here is called by a live path, raises an authority,
 filters a candidate, or changes a quantity. Claude integration lane, 2026-10-16. Code: `pb_structural_wall_ink_shadow.py`,
-`tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (29),
+`tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (34),
 `tests/test_structural_wall_ink_overlay_tool.py` (2).
 
 ## 1. Why (observed repository behaviour)
@@ -36,14 +36,19 @@ single-constant or single-rule mutants of the module are each killed by a test.
 Known limits: constants in page points (8 pt face gap, 2 pt minimum run, 0.6 pt contact slack) are only exercised in a scale band; walls drawn
 thicker than 8 pt stay `UNPROVEN`; fixtures that touch a wall network are not separated from it; a wall drawn as a raster image has no native ink and stays `UNPROVEN`.
 
+Opening-gap evidence (`StructuralWallInkReport.opening_gaps`): two facing ends of one wall face line, equal thickness, with a gap of up to 12 wall
+thicknesses on one face, or up to 80 thicknesses when the partner face of the same wall is interrupted over the same interval (two collinear walls on opposite
+sides of a room do not do that). It is evidence of an interruption in the wall body only; the kind, host, frame and size of whatever occupies the gap are not claimed.
+A pairing bug found by a test on the way: a short face failed to find a much longer partner because candidates were indexed by midpoint; faces are now indexed by every cell they cover (regression test fails on the earlier version).
+
 ## 3. What the original plans show (overlays in `overlays/`: red = candidate, blue = paired but unproven, purple = repeated small paths, orange = frame)
-| page (original PDF) | native segments | candidates | negatives | unproven | wall representation seen |
-|---|---:|---:|---:|---:|---|
-| 3Laurel p3 floor plan | 9,977 | 771 | 1,192 | 8,014 | black filled strips + 0.71 pt outlines |
-| Q5446 p1 ground floor plan | 47,184 | 177 | 36,520 | 10,487 | paired 0.96 pt faces with a 1.92 pt core; lettering is outlined |
-| Q5446 p2 first floor plan | 35,997 | 219 | 27,698 | 8,080 | same |
-| Maryborough p7 floor plan (rotated sheet) | 59,874 | 262 | 2,743 | 56,869 | paired black faces; green hatch and joinery are lighter ink and stay unproven |
-| Lot16 p3 floor plan (negative control) | 1,739 | 0 | 609 | 1,130 | **no native wall ink**: the sheet is 11 tiled raster images with vector text and dimensions over them, so the module abstains |
+| page (original PDF) | native segments | candidates | negatives | unproven | opening-gap candidates | wall representation seen |
+|---|---:|---:|---:|---:|---:|---|
+| 3Laurel p3 floor plan | 9,977 | 849 | 1,018 | 8,110 | 354 | black filled strips + 0.71 pt outlines |
+| Q5446 p1 ground floor plan | 47,184 | 177 | 36,520 | 10,487 | 53 | paired 0.96 pt faces with a 1.92 pt core; lettering is outlined |
+| Q5446 p2 first floor plan | 35,997 | 222 | 27,698 | 8,077 | 46 | same |
+| Maryborough p7 floor plan (rotated sheet) | 59,874 | 320 | 2,546 | 57,008 | 180 | paired black faces; green hatch and joinery are lighter ink and stay unproven |
+| Lot16 p3 floor plan (negative control) | 1,739 | 0 | 609 | 1,130 | 0 | **no native wall ink**: the sheet is 11 tiled raster images with vector text and dimensions over them, so the module abstains |
 The same code, with no per-project input, finds the walls on three different drawing conventions and abstains on the fourth.
 
 ## 4. Counterfactuals through the unchanged source-authority stage tool (3Laurel p3, original PDF; module attributes swapped in a running process only)
@@ -52,11 +57,11 @@ The same code, with no per-project input, finds the walls on three different dra
 | baseline (production) | 1,559 | 114 | no | 1 | |
 | `eligible`: every candidate relaxed (earlier report) | 1,559 | 4 | no | **2** | the second host is the gas-cylinder false positive (four primitives on layer `Service_Gas.Bottled`) |
 | `negatives_withheld_eligible`: definite negatives withheld, every candidate relaxed | 1,468 | 4 | no | **2** | the false host is still there: its ink is `UNPROVEN`, not a definite negative |
-| `structural_boundary`: relax only candidates made wholly of structural ink | 1,559 | 106 | no | 1 | the false host is **not** added |
+| `structural_boundary`: relax only candidates made wholly of structural ink | 1,559 | 105 | no | 1 | the false host is **not** added |
 | `darkest_ink_eligible`: only dark, non-negative ink enters, relaxed | 626 | 1 | no | 0 | |
-| `structural_input_eligible`: only structural ink enters, relaxed | 216 | **0** | **yes** | 0 | |
+| `structural_input_eligible`: only structural ink enters, relaxed | 227 | **0** | **yes** | 0 | |
 Reading. Only **positive** structural evidence keeps the false host out: none of the gas-cylinder primitives is ever a candidate (they are lighter ink, unpaired or a typed negative),
-whereas withholding only the definite negatives leaves it in. Positive-only input completes the wall scope (216 walls, nothing tainted) but then loses the one genuine host,
+whereas withholding only the definite negatives leaves it in. Positive-only input completes the wall scope (227 walls, nothing tainted) but then loses the one genuine host,
 because that host (a sliding door between the alfresco and the living area) is made of door-frame pieces (all `UNPROVEN`, attached) and slab-edge lines that are not wall ink: its binding becomes
 `no_authenticated_host_wall_band`. So a wall-structural universe is necessary to complete the scope and not sufficient to host an opening; the host band needs the opening's own frame and slab evidence,
 and physical scale is still unavailable (the sheet's native scale bar is a block-style bar that the scale producer does not recognise). That is the next measured gate; no host, quantity or score is created here.

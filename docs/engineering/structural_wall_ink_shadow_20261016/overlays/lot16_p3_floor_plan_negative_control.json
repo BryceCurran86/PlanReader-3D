@@ -180,6 +180,7 @@
   ],
   "live_effect": false,
   "network_count": 0,
+  "opening_gap_candidates": 0,
   "page": 3,
   "reason_counts": {
     "below_minimum_run_length": 3,

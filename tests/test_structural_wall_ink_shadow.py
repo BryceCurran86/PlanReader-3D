@@ -350,3 +350,61 @@ def test_a_touching_chain_of_small_pieces_is_attached_as_a_whole():
     # P2 and P3 alone, with nothing standing on a wall, are an isolated row of small paths
     alone = labels(run(building() + p2 + p3 + _box("p4", 168, 105.6, 174, 108.6)))
     assert all(alone[s["id"]] == NOT_WALL_INK for s in p2 + p3)
+
+
+# ---------------------------------------------------------------- opening-gap evidence
+def _door_building(gap=24.0, t=2.6):
+    segs = []
+    segs += strip("tl", 100, 100, 215, 100 + t)
+    segs += strip("tr", 215 + gap, 100, 400, 100 + t)
+    segs += strip("bot", 100, 300 - t, 400, 300)
+    segs += strip("left", 100, 100 + t, 100 + t, 300 - t)
+    segs += strip("right", 400 - t, 100 + t, 400, 300 - t)
+    return segs
+
+
+def test_a_door_sized_interruption_is_reported_as_a_gap_on_both_faces():
+    report = run(_door_building())
+    top = [g for g in report.opening_gaps if g.end_a[0] < 220 < g.end_b[0] and g.end_a[1] < 110]
+    assert len(top) == 2                                                    # one per face line
+    assert all(abs(g.gap_length_pt - 24.0) < 0.01 and abs(g.thickness_pt - 2.6) < 0.01 for g in top)
+    assert all(g.source_primitive_id_a.startswith("tl.") and g.source_primitive_id_b.startswith("tr.") for g in top)
+    # evidence of an interruption only: nothing about the opening kind, host, frame or size is claimed
+    assert not any(hasattr(g, attr) for g in top for attr in ("kind", "host", "frame", "width_mm"))
+
+
+def test_a_wide_gap_needs_the_partner_face_to_be_interrupted_too():
+    t = 2.6
+    wide = 100.0                                                             # 38 thicknesses: not a door-sized face gap
+    both = _door_building(gap=wide)
+    assert any(abs(g.gap_length_pt - wide) < 0.01 for g in run(both).opening_gaps)
+    # the same gap on one face only (the other face runs straight through) is not accepted
+    one_face = []
+    one_face += [seg("a1", 100, 100, 215, 100), seg("a2", 215 + wide, 100, 400, 100)]
+    one_face += [seg("a3", 100, 100 + t, 400, 100 + t)]
+    one_face += strip("bot", 100, 300 - t, 400, 300) + strip("left", 100, 100 + t, 100 + t, 300 - t)
+    one_face += strip("right", 400 - t, 100 + t, 400, 300 - t)
+    assert not [g for g in run(one_face).opening_gaps if abs(g.gap_length_pt - wide) < 0.01]
+
+
+def test_collinear_walls_far_apart_are_not_one_interrupted_wall():
+    t = 2.6
+    segs = strip("w1", 100, 100, 160, 100 + t) + strip("w2", 160 + 300.0, 100, 700, 100 + t)   # 115 thicknesses apart
+    assert not [g for g in run(segs).opening_gaps]
+
+
+def test_gap_evidence_is_deterministic_and_order_invariant():
+    base = _door_building()
+    expected = run(base).opening_gaps
+    shuffled = list(base)
+    random.Random(3).shuffle(shuffled)
+    assert run(shuffled).opening_gaps == expected
+    assert run(base).opening_gaps == expected
+
+
+def test_a_short_face_finds_a_much_longer_partner_from_either_side():
+    # the long face's midpoint is far from the short face's cell: pairing must still be symmetric
+    segs = [seg("short", 100, 100, 215, 100), seg("long", 100, 102.6, 700, 102.6)]
+    report = run(segs)
+    assert REASON_NO_PARTNER not in reasons(report)["short"]
+    assert REASON_NO_PARTNER not in reasons(report)["long"]

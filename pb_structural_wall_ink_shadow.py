@@ -66,7 +66,10 @@ GLYPH_MAX_EXTENT_FRACTION = 0.02    # one glyph path is at most this fraction of
 GLYPH_MIN_RUN = 3                   # a text line has at least this many glyph-sized paths on a baseline
 GLYPH_BASELINE_TOL_FRACTION = 0.2   # baseline alignment tolerance relative to glyph height
 GLYPH_MAX_GAP_FACTOR = 2.5          # neighbouring glyphs of one line are at most this many glyph heights apart
-MAX_OPENING_GAP_FACTOR = 12.0       # a wall body may continue across a collinear gap up to this many wall thicknesses
+MAX_OPENING_GAP_FACTOR = 12.0       # a wall face may continue across a collinear gap up to this many wall thicknesses
+MAX_WALL_BODY_GAP_FACTOR = 80.0     # a wider gap needs the partner face interrupted over the same interval
+GAP_PARTNER_MATCH_TOL_PT = 1.0
+MAX_GAP_CANDIDATES_FOR_PARTNER_MATCH = 5000
 OPENING_GAP_COLLINEAR_TOL_PT = 0.5
 REASON_CONTINUED_ACROSS_GAP = "network_continued_across_collinear_gap"
 REASON_HEAVIEST_SINGLE_STROKE_NETWORK = "heaviest_areal_single_stroke_network"
@@ -93,6 +96,23 @@ class StructuralInkDecision:
 
 
 @dataclass(frozen=True)
+class OpeningGapCandidate:
+    """Two facing ends of one wall face line, equal thickness, a plausible opening apart.
+
+    Evidence of an interruption in the wall body, not an opening: the kind, host, frame and size of whatever
+    occupies the gap are not proven here. ``end_a``/``end_b`` are the facing face ends; the primitive ids
+    are the source primitives that own those ends.
+    """
+
+    end_a: Tuple[float, float]
+    end_b: Tuple[float, float]
+    gap_length_pt: float
+    thickness_pt: float
+    source_primitive_id_a: str
+    source_primitive_id_b: str
+
+
+@dataclass(frozen=True)
 class InkClassRow:
     ink_class: Tuple[Any, ...]
     segment_count: int
@@ -107,6 +127,7 @@ class StructuralWallInkReport:
     network_count: int
     darkest_ink_color: Optional[Tuple[float, ...]]
     reason_codes: Tuple[str, ...]
+    opening_gaps: Tuple[OpeningGapCandidate, ...] = ()
     schema_version: str = STRUCTURAL_WALL_INK_SCHEMA_VERSION
     shadow_only: bool = True
     live_effect: bool = False
@@ -459,10 +480,15 @@ def classify_structural_wall_ink(
     runs = kept_runs
 
     # ---- pairing: two faces a plausible wall thickness apart with a long overlap ------------------------------------
+    # Every run is registered in all cells its box (padded by the face-gap search bound) covers and queries all cells
+    # its own box covers, so two overlapping faces find each other from either side, however long either one is.
     grid: Dict[Tuple[int, int], List[int]] = defaultdict(list)
     for r, run in enumerate(runs):
-        cx, cy = (run.p[0] + run.p[2]) / 2, (run.p[1] + run.p[3]) / 2
-        grid[(int(cx // _GRID_CELL_PT), int(cy // _GRID_CELL_PT))].append(r)
+        bx0, bx1 = sorted((run.p[0], run.p[2]))
+        by0, by1 = sorted((run.p[1], run.p[3]))
+        for gx in range(int((bx0 - MAX_FACE_GAP_PT) // _GRID_CELL_PT), int((bx1 + MAX_FACE_GAP_PT) // _GRID_CELL_PT) + 1):
+            for gy in range(int((by0 - MAX_FACE_GAP_PT) // _GRID_CELL_PT), int((by1 + MAX_FACE_GAP_PT) // _GRID_CELL_PT) + 1):
+                grid[(gx, gy)].append(r)
     paired: set = set()
     thickness: Dict[int, float] = {}
     for r, run in enumerate(runs):
@@ -471,14 +497,17 @@ def classify_structural_wall_ink(
         ux, uy = math.cos(a), math.sin(a)
         nx, ny = -uy, ux
         cx, cy = (run.p[0] + run.p[2]) / 2, (run.p[1] + run.p[3]) / 2
-        reach = int((run_len / 2 + MAX_FACE_GAP_PT) // _GRID_CELL_PT) + 1
         found = False
         best_off = None
-        for gx in range(int(cx // _GRID_CELL_PT) - reach, int(cx // _GRID_CELL_PT) + reach + 1):
-            for gy in range(int(cy // _GRID_CELL_PT) - reach, int(cy // _GRID_CELL_PT) + reach + 1):
+        qx0, qx1 = sorted((run.p[0], run.p[2]))
+        qy0, qy1 = sorted((run.p[1], run.p[3]))
+        seen_q: set = set()
+        for gx in range(int(qx0 // _GRID_CELL_PT), int(qx1 // _GRID_CELL_PT) + 1):
+            for gy in range(int(qy0 // _GRID_CELL_PT), int(qy1 // _GRID_CELL_PT) + 1):
                 for q in grid.get((gx, gy), ()):
-                    if q == r:
+                    if q == r or q in seen_q:
                         continue
+                    seen_q.add(q)
                     other = runs[q]
                     d = abs(_angle(other.p) - a)
                     if min(d, math.pi - d) > ANGLE_TOL_RAD:
@@ -536,8 +565,9 @@ def classify_structural_wall_ink(
     for k, (r, ex, ey, _, _) in enumerate(face_ends):
         end_grid[(int(ex // _GRID_CELL_PT), int(ey // _GRID_CELL_PT))].append(k)
     bridged: set = set()
+    gap_pairs: Dict[Tuple[int, int], Tuple[int, int, float, float]] = {}
     for k, (r, ex, ey, ux, uy) in enumerate(face_ends):
-        max_gap = MAX_OPENING_GAP_FACTOR * thickness[r]
+        max_gap = MAX_WALL_BODY_GAP_FACTOR * thickness[r]
         reach = int(max_gap // _GRID_CELL_PT) + 1
         for gx in range(int(ex // _GRID_CELL_PT) - reach, int(ex // _GRID_CELL_PT) + reach + 1):
             for gy in range(int(ey // _GRID_CELL_PT) - reach, int(ey // _GRID_CELL_PT) + reach + 1):
@@ -545,7 +575,7 @@ def classify_structural_wall_ink(
                     if k2 <= k:
                         continue
                     r2, fx, fy, vx, vy = face_ends[k2]
-                    if r2 == r or uf.find(r2) == uf.find(r):
+                    if r2 == r:
                         continue
                     if abs(ux * vx + uy * vy + 1.0) > 0.02:
                         continue
@@ -557,11 +587,61 @@ def classify_structural_wall_ink(
                         continue
                     if abs(dx * -uy + dy * ux) > OPENING_GAP_COLLINEAR_TOL_PT:
                         continue
-                    blocked = False
-                    if not blocked:
-                        uf.union(r, r2)
-                        bridged.add(r)
-                        bridged.add(r2)
+                    gap_pairs[(k, k2)] = (r, r2, gap, thickness[r])
+    # Short gaps are accepted on one face. A wider gap is accepted only when the partner face of the same wall is
+    # interrupted over the same interval (two collinear walls on opposite sides of a room do not do that).
+    def _partner_gap_exists(key: Tuple[int, int]) -> bool:
+        r, r2, gap, thick = gap_pairs[key]
+        _, ex, ey, ux, uy = face_ends[key[0]]
+        _, fx, fy, _, _ = face_ends[key[1]]
+        nx, ny = -uy, ux
+        for sign in (1.0, -1.0):
+            tx, ty = sign * thick * nx, sign * thick * ny
+            for other, (_, _, _, _) in gap_pairs.items():
+                if other == key:
+                    continue
+                _, ox, oy, _, _ = face_ends[other[0]]
+                _, px, py, _, _ = face_ends[other[1]]
+                for (ax, ay, bx, by) in ((ox, oy, px, py), (px, py, ox, oy)):
+                    if (math.hypot(ax - (ex + tx), ay - (ey + ty)) <= GAP_PARTNER_MATCH_TOL_PT
+                            and math.hypot(bx - (fx + tx), by - (fy + ty)) <= GAP_PARTNER_MATCH_TOL_PT):
+                        return True
+        return False
+
+    valid_gap_pairs: Dict[Tuple[int, int], Tuple[int, int, float, float]] = {}
+    can_match = len(gap_pairs) <= MAX_GAP_CANDIDATES_FOR_PARTNER_MATCH
+    for key in sorted(gap_pairs):
+        r, r2, gap, thick = gap_pairs[key]
+        if gap <= MAX_OPENING_GAP_FACTOR * thick or (can_match and _partner_gap_exists(key)):
+            valid_gap_pairs[key] = gap_pairs[key]
+    gap_pairs = valid_gap_pairs
+    for key in sorted(gap_pairs):
+        r, r2, gap, thick = gap_pairs[key]
+        if uf.find(r2) != uf.find(r):
+            uf.union(r, r2)
+            bridged.add(r)
+            bridged.add(r2)
+
+    def owner_of_end(r: int, ex: float, ey: float) -> str:
+        best, best_d = None, None
+        for m in runs[r].members:
+            q = pts[m]
+            for px, py in ((q[0], q[1]), (q[2], q[3])):
+                d = math.hypot(px - ex, py - ey)
+                if best_d is None or d < best_d or (d == best_d and ids[m] < ids[best]):
+                    best, best_d = m, d
+        return ids[best]
+
+    gaps_found = []
+    for (k, k2), (r, r2, gap, thick) in sorted(gap_pairs.items()):
+        _, ex, ey, _, _ = face_ends[k]
+        _, fx, fy, _, _ = face_ends[k2]
+        gaps_found.append(OpeningGapCandidate(
+            end_a=(round(ex, 4), round(ey, 4)), end_b=(round(fx, 4), round(fy, 4)),
+            gap_length_pt=round(gap, 4), thickness_pt=round(thick, 4),
+            source_primitive_id_a=owner_of_end(r, ex, ey), source_primitive_id_b=owner_of_end(r2, fx, fy)))
+    gaps_found.sort(key=lambda g: (g.end_a, g.end_b))
+
     components: Dict[int, List[int]] = defaultdict(list)
     for r in paired_list:
         components[uf.find(r)].append(r)
@@ -756,7 +836,7 @@ def classify_structural_wall_ink(
     class_table = tuple(
         InkClassRow(k, int(v[0]), round(v[1], 3), int(v[2])) for k, v in sorted(table.items(), key=lambda kv: (-kv[1][1], repr(kv[0])))
     )
-    return StructuralWallInkReport(decisions, class_table, network_id, darkest_color, ())
+    return StructuralWallInkReport(decisions, class_table, network_id, darkest_color, (), tuple(gaps_found))
 
 
 def _make_run(members: List[int], pts: Mapping[int, Tuple[float, float, float, float]],

@@ -1,7 +1,7 @@
 """Read-only overlay of the structural wall-ink shadow on an original PDF page.
 
-Draws accepted network ink (red), unproven paired ink (blue), the sheet frame / dashed / outlined-glyph negatives
-(orange / grey / purple) over a faded render of the page and writes a JSON summary. It never writes to the PDF
+Draws accepted network ink (red), unproven paired ink (blue), opening-gap candidates (cyan), the sheet frame / dashed / outlined-glyph
+negatives (orange / grey / purple) over a faded render of the page and writes a JSON summary. It never writes to the PDF
 or the repository checkout and publishes no authority.
 
 Usage: python -m tools.diag_structural_wall_ink_overlay --pdf FILE --page 3 --png OUT.png --json OUT.json
@@ -48,6 +48,7 @@ def run(pdf: Path, page_number: int, png: Path | None, summary_path: Path | None
         "classification_counts": dict(by_class),
         "reason_counts": dict(reasons),
         "network_count": report.network_count,
+        "opening_gap_candidates": len(report.opening_gaps),
         "darkest_ink_color": report.darkest_ink_color,
         "ink_class_table": [
             {"ink_class": list(r.ink_class), "segments": r.segment_count, "length_pt": r.total_length_pt,
@@ -87,6 +88,10 @@ def run(pdf: Path, page_number: int, png: Path | None, summary_path: Path | None
             p1 = fitz.Point(segment["x1"], segment["y1"]) * to_view
             p2 = fitz.Point(segment["x2"], segment["y2"]) * to_view
             draw.line([(p1.x * zoom, p1.y * zoom), (p2.x * zoom, p2.y * zoom)], fill=color, width=2)
+        for gap in report.opening_gaps:
+            a = fitz.Point(*gap.end_a) * to_view
+            b = fitz.Point(*gap.end_b) * to_view
+            draw.line([(a.x * zoom, a.y * zoom), (b.x * zoom, b.y * zoom)], fill=(0, 190, 190), width=3)
         image.save(str(png))
     return summary
 
