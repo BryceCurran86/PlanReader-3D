@@ -175,3 +175,54 @@ def trace_accepted_semantic_frame_sources(
         "newly_authorized_room_or_ceiling_material_occurrences": 0,
         "newly_authorized_customer_quantities": 0,
     }
+
+
+
+def main() -> int:
+    """Produce one immutable-source evidence receipt; never mutate the PDF."""
+    import argparse
+    from hashlib import sha256
+    import json
+    from pathlib import Path
+    import fitz
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pdf", type=Path, required=True)
+    parser.add_argument("--source-sha256", required=True)
+    parser.add_argument("--page", type=int, required=True)
+    parser.add_argument("--json", type=Path, required=True)
+    args = parser.parse_args()
+    source = args.pdf.read_bytes()
+    digest = sha256(source).hexdigest()
+    if digest != args.source_sha256:
+        raise ValueError("immutable_source_sha256_mismatch")
+    with fitz.open(stream=source, filetype="pdf") as document:
+        if args.page < 1 or args.page > len(document):
+            raise ValueError("source_page_out_of_range")
+        report = trace_accepted_semantic_frame_sources(
+            document[args.page - 1], page_number=args.page,
+        )
+    report["original_pdf_sha256"] = digest
+    report["original_bytes_immutable"] = sha256(args.pdf.read_bytes()).hexdigest() == digest
+    args.json.parent.mkdir(parents=True, exist_ok=True)
+    args.json.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    for row in report["reported_semantic_frame_source_gate_rows"]:
+        print(json.dumps({
+            "view": row["reported_semantic_view_id"],
+            "caption": row["original_semantic_title_not_trusted"],
+            "status": row["reported_status"],
+            "claimed_box": row["reported_frame_native_bbox_pdf_pts"],
+            "title_inside": row["reported_title_inside_frame"],
+            "strict_native_cell_candidate":
+                row.get("strict_repeated_native_rectangle_cells_candidate"),
+            "native_line_grid_candidate":
+                row.get("native_line_grid_appearance_candidate"),
+            "first_unclosed_gate": row.get("first_unclosed_external_table_owner_gate"),
+        }, sort_keys=True))
+    for row in report["reported_rotated_separator_dependents"]:
+        print(json.dumps(row, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
