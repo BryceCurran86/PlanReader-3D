@@ -89,3 +89,48 @@ def test_identity_map_and_report_bind_exactly_the_same_eight():
     assert report["source_sha_verified"] and report["reconciliation_complete"]
     assert report["denominator"] == 27 and report["matched_within_tolerance"] == 8
     assert report["lineage_conflicts"] == report["unsupported_extra"] == 0
+
+def test_identity_bindings_cover_every_signed_physical_object_exactly_once():
+    """Prevent an eight-row benchmark map with a reused or omitted physical source."""
+    sealed = _sealed()
+    identity = _load("identity_map_with_1215.json")
+    bindings = identity["bindings"]
+    signed_keys = {
+        (row.family, tuple(row.object_identity_refs))
+        for row in sealed.quantities
+    }
+    binding_keys = [
+        (row["production_family"], tuple(row["production_object_identity_refs"]))
+        for row in bindings
+    ]
+    assert len(signed_keys) == len(binding_keys) == 8
+    assert len(set(binding_keys)) == 8
+    assert set(binding_keys) == signed_keys
+    assert len({row["benchmark_item_id"] for row in bindings}) == 8
+    report = _load("exact_project_report.json")
+    produced = report["produced_items"]
+    assert len(produced) == 8
+    assert {row["quantity_id"] for row in produced} == {
+        row.quantity_id for row in sealed.quantities
+    }
+
+
+def test_customer_projection_retains_source_roots_and_review_only_status():
+    """Signed source evidence may be verified without becoming commercial approval."""
+    sealed = _sealed()
+    customers = _load("production/verified_customer_rows.json")
+    by_id = {row.quantity_id: row for row in sealed.quantities}
+    assert len(by_id) == len(customers) == 8
+    for customer in customers:
+        original = by_id[customer["quantity_id"]]
+        assert customer["quantity"] == original.value
+        assert customer["unit"] == original.unit
+        assert customer["canonical_entity_ids"] == list(original.object_identity_refs)
+        assert customer["source_sha256"] == original.source_sha256
+        assert customer["revision_id"] == original.revision_id
+        assert customer["document_id"] == original.document_id
+        assert customer["viewport_id"] == original.viewport_id
+        assert customer["source_page"] == original.source_page
+        assert customer["project_id"] == original.project_id
+        assert customer["inclusion_status"] == "PROVISIONAL"
+        assert customer["quantity_status"] == "To review"
