@@ -10,7 +10,7 @@ from pb_live_floor_finish_area_source_closed_export import (
     build_live_floor_finish_area_source_traces,
 )
 from pb_source_closed_run_export import SourceClosedRunConflictError
-from tests.test_live_floor_finish_area_source_closed_export import _claim, _floor
+from tests.test_live_floor_finish_area_source_closed_export import _claim, _floor, _quantity
 
 
 RECTANGLE = ((0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0))
@@ -82,3 +82,70 @@ def test_nonfinite_or_boolean_source_coordinate_never_mints_area(broken):
     # The commercial caller independently verifies typed finite vertices.
     # GEOS should not become a competing positive authority on those inputs.
     assert not _original_floor_polygon_is_simple(broken)
+
+
+@pytest.mark.parametrize("copied_source_sha", ["not-a-real-pdf-source", "g" * 64, 37])
+def test_two_matching_but_nonsha_source_ids_cannot_seal_finish(copied_source_sha):
+    original = _claim()
+    floor = replace(original.canonical_floors[0], source_sha256=copied_source_sha)
+    quantity = replace(
+        original.floor_finish_quantity_evidence[0],
+        metadata={
+            **dict(original.floor_finish_quantity_evidence[0].metadata),
+            "source_sha256": copied_source_sha,
+        },
+    )
+    compromised = replace(
+        original, canonical_floors=(floor,),
+        floor_finish_quantity_evidence=(quantity,),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="source SHA is malformed"):
+        build_live_floor_finish_area_source_traces(
+            compromised, workspace_id=1, project_id="project-1"
+        )
+
+
+@pytest.mark.parametrize("bad", [None, "", True, 12, " room-area-id", "room-area-id "])
+def test_floor_finish_requires_one_exact_canonical_metric_area_receipt(bad):
+    floor = replace(_floor(), metric_area_quantity_id=bad)
+    with pytest.raises(SourceClosedRunConflictError, match="metric area receipt is missing"):
+        build_live_floor_finish_area_source_traces(
+            _claim(floor), workspace_id=1, project_id="project-1"
+        )
+
+
+@pytest.mark.parametrize("field", ["finish_code", "semantic_finish"])
+@pytest.mark.parametrize("bad", ["", " padded", "padded ", True, 12, None])
+def test_finish_cannot_seal_with_untyped_or_missing_source_material_code(field, bad):
+    original = _claim()
+    source_quantity = original.floor_finish_quantity_evidence[0]
+    altered = replace(
+        source_quantity,
+        metadata={**dict(source_quantity.metadata), field: bad},
+    )
+    claim = replace(original, floor_finish_quantity_evidence=(altered,))
+    with pytest.raises(SourceClosedRunConflictError, match="source material identity is malformed"):
+        build_live_floor_finish_area_source_traces(
+            claim, workspace_id=1, project_id="project-1"
+        )
+
+
+def test_valid_uppercase_source_sha_still_passes_source_seal():
+    original = _claim()
+    uppercase_digest = "AB" * 32
+    floor = replace(original.canonical_floors[0], source_sha256=uppercase_digest)
+    quantity = replace(
+        original.floor_finish_quantity_evidence[0],
+        metadata={
+            **dict(original.floor_finish_quantity_evidence[0].metadata),
+            "source_sha256": uppercase_digest,
+        },
+    )
+    claim = replace(
+        original, canonical_floors=(floor,),
+        floor_finish_quantity_evidence=(quantity,),
+    )
+    traces = build_live_floor_finish_area_source_traces(
+        claim, workspace_id=1, project_id="project-1"
+    )
+    assert tuple(traces) == ("floor-finish-q1",)
