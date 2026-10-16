@@ -36,16 +36,29 @@ def _signed_area(points: Sequence[Tuple[float, float]]) -> float:
 
 
 def orientation_from_text(*values: Any) -> str:
-    text = " ".join(str(v or "") for v in values).lower()
+    """Return one elevation side.
+
+    Two sides abstain. A line that only refers to another elevation does not vote.
+    """
     patterns = {
         "North": (r"\bnorth\s+elevation\b", r"\belevation\s*[-:]?\s*north\b", r"\bnorth\s+facade\b", r"\bnorth\s+fa[cç]ade\b"),
         "East": (r"\beast\s+elevation\b", r"\belevation\s*[-:]?\s*east\b", r"\beast\s+facade\b", r"\beast\s+fa[cç]ade\b"),
         "South": (r"\bsouth\s+elevation\b", r"\belevation\s*[-:]?\s*south\b", r"\bsouth\s+facade\b", r"\bsouth\s+fa[cç]ade\b"),
         "West": (r"\bwest\s+elevation\b", r"\belevation\s*[-:]?\s*west\b", r"\bwest\s+facade\b", r"\bwest\s+fa[cç]ade\b"),
     }
-    for side, tests in patterns.items():
-        if any(re.search(test, text) for test in tests):
-            return side
+    found: List[str] = []
+    for value in values:
+        for raw in str(value or "").splitlines():
+            line = " ".join(raw.split()).lower()
+            if not line or line.startswith(("refer ", "see ", "matchline ", "keynote ")):
+                continue
+            for side, tests in patterns.items():
+                if side in found:
+                    continue
+                if any(re.search(test, line) for test in tests):
+                    found.append(side)
+    if len(found) == 1:
+        return found[0]
     return ""
 
 
