@@ -81,3 +81,83 @@ def test_unowned_w4_and_empty_source_fragment_never_publish():
                    atomic_edge=((0.,0.),(0.,0.)))["status"]==(
         "invalid_exact_original_w4_query"
     )
+
+
+
+def test_w4_original_centerline_has_diagonal_when_w2_original_fragment_does_not():
+    original = record(fragments=(frag("w2_other", (0., 2., 10., 2.)),))
+    original.wall_candidate = N(
+        candidate_id="wall_a", centerline_pts=((0., 0.), (10., 0.))
+    )
+    result = run((original,))
+    assert result["status"] == "no_original_w2_fragment_covering_selected_atomic_edge"
+    assert result["w4_centerline_geometry_first_gate"]["status"] == (
+        "original_w4_centerline_full_span_observed"
+    )
+    assert result["first_unrepresented_geometry_stage_diagnostic_only"] == (
+        "W2_SOURCE_FRAGMENTS_TO_W4_CENTERLINE"
+    )
+    assert not result["physical_wall_role_or_w4_equivalence_proven"]
+
+
+def test_original_face_edge_can_be_unsupported_by_both_w2_and_w4_path():
+    original = record(fragments=(frag("w2_other", (0., 2., 10., 2.)),))
+    original.wall_candidate = N(
+        candidate_id="wall_a", centerline_pts=((0., 2.), (10., 2.))
+    )
+    result = run((original,))
+    assert result["w4_centerline_geometry_first_gate"]["status"] == (
+        "original_w4_centerline_no_collinear_support"
+    )
+    assert result["first_unrepresented_geometry_stage_diagnostic_only"] == (
+        "W4_CENTERLINE_TO_FACE_SUBEDGE"
+    )
+
+
+def test_centerline_split_path_preserves_all_partial_receipts_never_elects_owner():
+    original = record(fragments=(frag("w2_other", (0., 2., 10., 2.)),))
+    original.wall_candidate = N(
+        candidate_id="wall_a",
+        centerline_pts=((0., 0.), (5., 0.), (10., 0.)),
+    )
+    old = tuple(original.wall_candidate.centerline_pts)
+    result = run((original,))
+    info = result["w4_centerline_geometry_first_gate"]
+    assert info["status"] == "original_w4_centerline_partial_only"
+    assert info["w4_centerline_source_segment_count"] == 2
+    assert len(info["w4_centerline_partial_span_receipts"]) == 2
+    assert info["w4_centerline_full_span_receipts"] == []
+    assert result["first_unrepresented_geometry_stage_diagnostic_only"] == "UNAVAILABLE"
+    assert not info["source_w4_path_match_is_structural_wall_role"]
+    assert original.wall_candidate.centerline_pts == old
+
+
+def test_invalid_centerline_or_foreign_w4_owner_does_not_claim_role():
+    for wall in (
+        N(candidate_id="different",centerline_pts=((0.,0.),(10.,0.))),
+        N(candidate_id="wall_a",centerline_pts=((0.,0.),(float("nan"),0.))),
+        N(candidate_id="wall_a",centerline_pts=((0.,0.),(0.,0.))),
+        N(candidate_id="wall_a",centerline_pts=((0.,0.),)),
+    ):
+        original = record()
+        original.wall_candidate = wall
+        result = run((original,))
+        assert result["w4_centerline_geometry_first_gate"]["status"] in (
+            "w4_centerline_candidate_identity_conflict", "w4_centerline_invalid"
+        )
+        assert result["first_unrepresented_geometry_stage_diagnostic_only"] == (
+            "UNAVAILABLE"
+        )
+        assert not result["physical_room_closed_or_metric_quantity_published"]
+
+
+def test_original_w2_and_w4_both_witnessed_does_not_mint_structural_wall():
+    original=record()
+    original.wall_candidate=N(
+        candidate_id="wall_a", centerline_pts=((0.,0.),(10.,0.))
+    )
+    result=run((original,))
+    assert result["first_unrepresented_geometry_stage_diagnostic_only"] == (
+        "BOTH_W2_SOURCE_AND_W4_GEOMETRY_OBSERVED_NOT_WALL_AUTHORITY"
+    )
+    assert result["candidate_only_no_wall_or_room_authority"]
