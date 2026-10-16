@@ -382,3 +382,55 @@ def test_clean_scope_guards_preserve_owner_maryborough_memory_abstention():
         "earliest_verified_project_execution_gate"
     ] == "source_producer_unsealed:source_complexity_blocked"
     assert audit_result["official_four_project_coverage_accuracy"] is None
+
+
+def test_unindexed_non_pdf_source_record_is_also_not_share_safe(tmp_path):
+    root = _copy(tmp_path)
+    (root / "private-field-notes.txt").write_text(
+        "synthetic file not in provenance archive", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="unindexed artifact"):
+        audit.verify_owner_four_job_receipts(root)
+
+
+def test_cross_semantic_signed_claims_are_retained_for_source_review_not_merged():
+    from types import SimpleNamespace
+    def row(qid, family, objects):
+        return SimpleNamespace(
+            quantity_id=qid,
+            family=family,
+            source_sha256="f" * 64,
+            revision_id="original-revision-1",
+            object_identity_refs=tuple(objects),
+        )
+    claims = audit._cross_semantic_source_claims([
+        row("q1", "floor_area", ["floor-A"]),
+        row("q2", "floor_finish_area", ["floor-A"]),
+        row("q3", "opening_area", ["opening-B"]),
+    ])
+    assert len(claims) == 1
+    assert claims[0]["canonical_object_refs"] == ["floor-A"]
+    assert claims[0]["signed_quantity_ids"] == ["q1", "q2"]
+    assert claims[0]["quantity_families"] == ["floor_area", "floor_finish_area"]
+    assert claims[0]["source_review_required"] is True
+
+
+def test_two_independent_source_revisions_are_not_cross_semantic_conflated():
+    from types import SimpleNamespace
+    original = SimpleNamespace(
+        quantity_id="q1", family="floor_area",
+        source_sha256="f" * 64, revision_id="original-revision",
+        object_identity_refs=("floor-A",),
+    )
+    newer = SimpleNamespace(
+        quantity_id="q2", family="floor_finish_area",
+        source_sha256="f" * 64, revision_id="changed-revision",
+        object_identity_refs=("floor-A",),
+    )
+    assert audit._cross_semantic_source_claims([original, newer]) == []
+
+
+def test_historical_original_lot16_eight_has_no_crosssemantic_false_alert():
+    receipt = audit.verify_owner_four_job_receipts(_ROOT)
+    assertions = receipt["cross_semantic_signed_object_claims_for_review"]
+    assert assertions["au_qld_lot16_power"] == []
