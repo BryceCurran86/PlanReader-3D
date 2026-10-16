@@ -69,3 +69,25 @@ alternative end conflicts, third-party competition, stale/forged identities,
 source order invariance, malformed original source and no quantity grant.
 All 20,000 raster primitive input bound, 2.5pt and 4pt policies, frozen V2,
 original PDF, published W4/host/frame and customer bytes are untouched.
+
+
+## Completed follow-on: original four-edge compound W2/W3/W4 graphs
+
+The source-positive eight dual-ended original G17 rings now execute the EXISTING
+`tools.diag_gptmax_g17_original_w2_w4_source_shadow._isolated_graph` twice:
+normal 2.5pt source snap and strictly isolated zero-snap counterfactual. Their
+W2 edges, W3 junctions, W4 source candidate IDs, and original four observation
+and parent references are retained. No physical opening is invented as a graph
+owner; the graph scope is a stable hash of original source SHA, page, two
+original physical owners and the four G17 source observation IDs. Original G17
+primitive identities, not synthetic boxes or a borrowed neighbour's W4 ID,
+enter the existing compiler.
+
+A source-closed four-edge ring is NOT proof of structural material; even a
+non-zero W4 graph candidate must face native drafting negatives, historical
+wall candidate physical equivalence, a complete competed host scope and a
+formal source-role review. The 2.16pt face separation of the 4.8pt-long
+81a45/f819 pier is below the existing 2.5pt snap; the exact comparator
+explicitly does NOT change that production value. The original output must
+retain any snapped terminal as an explicit negative, rather than silently
+publishing it as a canonical wall.

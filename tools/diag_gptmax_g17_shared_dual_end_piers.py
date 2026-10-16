@@ -206,9 +206,17 @@ def source_original_dual_end_replay(pdf:bytes,expected_sha256:str):
                 raise RuntimeError("missing producer-authenticated source observation")
             obs[sid]={"id":sid,"kind":o.observation_kind,
                       "geometry_pdf_pts":list(o.geometry),
-                      "parents":sorted(o.derivation_parent_ids)}
+                      "parents":sorted(o.derivation_parent_ids),
+                      "source_primitive_ref":o.source_primitive_ref}
         inventoried[opening.record_id]=obs
     out=audit_shared_original_g17_dual_end_piers(inventoried)
+    from tools.diag_gptmax_g17_shared_pier_w2_shadow import isolated_original_dual_end_w2_w4
+    for pair in out["source_sharing_pairs"]:
+        if not pair["source_closed_pier_candidate"]:
+            pair["isolated_original_W2_W3_W4_source_graph"] = None
+            continue
+        pair["isolated_original_W2_W3_W4_source_graph"] = isolated_original_dual_end_w2_w4(
+            pair,inventoried,source_sha=expected_sha256,page_id="3")
     if (src.published_snapshot_for_revision(pub.revision.revision_id)!=snapshot
             or sha256(src._producer._store.source_bytes_by_revision[
                 pub.revision.revision_id]).hexdigest()!=expected_sha256
