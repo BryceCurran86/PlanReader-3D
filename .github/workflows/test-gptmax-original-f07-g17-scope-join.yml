@@ -1,0 +1,102 @@
+name: GPT MAX Original F07-to-G17 Snapshot Firewall
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/lot16-original-raw-nine-w4-ancestry-20261015
+    paths:
+      - tools/diag_gptmax_f07_g17_original_scope_join.py
+      - tests/test_gptmax_f07_g17_original_scope_join.py
+      - docs/engineering/gptmax_lot16_original_f07_g17_source_scope_20261015.md
+      - .github/workflows/test-gptmax-original-f07-g17-scope-join.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  fail-closed-cross-root-source-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_f07_g17_original_scope_join.py
+          ruff check --select F821,F823 tools/diag_gptmax_f07_g17_original_scope_join.py tests/test_gptmax_f07_g17_original_scope_join.py
+
+  original-source-view-and-opening-independent-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Verify immutable original PDF
+        run: |
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+      - name: Independently reissue producer-owned F07 drawing region
+        run: |
+          PYTHONPATH=. python -u tools/diag_source_owned_physical_plan_view.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page 3 --raster-supports --output-dir artifacts/lot16-f07
+      - name: Independently reissue existing original G17 source scope
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_paired_outer_faces_quantity_shadow.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output artifacts/original-g17.json
+      - name: Assert cross-snapshot firewall and no source/customer promotion
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_f07_g17_original_scope_join.py \
+            --f07-source-report artifacts/lot16-f07/source_view_proof.json \
+            --g17-source-report artifacts/original-g17.json \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --page 3 --output artifacts/lot16-f07-g17-snapshot-join.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/lot16-f07-g17-snapshot-join.json').read_text())
+          assert r['status']=='UNPUBLISHED_F07_G17_DIFFERENT_SNAPSHOT_GEOMETRY_AUDIT'
+          assert r['view_source_snapshot_id']=='source_snapshot_e87d3fc05d44903e8ab4b26e88b8a6c8'
+          assert r['opening_source_snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
+          assert not r['same_snapshot']
+          assert r['view_id']=='source_plan_view_67db409f1a44214bbf0766ac'
+          assert len(r['unresolved_raw'])==9
+          assert sum(x['relation']=='GEOMETRICALLY_DISJOINT_OTHER_SNAPSHOT_VIEW' for x in r['unresolved_raw'])==4
+          assert sum(x['relation']=='GEOMETRICALLY_INSIDE_OTHER_SNAPSHOT_VIEW' for x in r['unresolved_raw'])==5
+          assert len(r['original_hostless_openings'])==6
+          assert all(x['relation']=='GEOMETRICALLY_INSIDE_OTHER_SNAPSHOT_VIEW'
+              and not x['source_host_granted'] for x in r['original_hostless_openings'])
+          assert all(not x['typed_nonplan_role_proven'] and not x['physical_nonexistence_proven']
+              for x in r['unresolved_raw'])
+          assert all(v is False for v in r['authority_grants'].values())
+          g=json.loads(Path('artifacts/original-g17.json').read_text())
+          assert len(g['baseline_receipts']['canonical'])==21
+          assert len(g['baseline_receipts']['quantities'])==len(g['baseline_receipts']['customer_rows'])==8
+          assert sum(bool(x['host_wall_id']) for x in g['baseline_receipts']['hosts'])==15
+          assert sum(bool(x['record_id']) for x in g['baseline_receipts']['frames'])==9
+          assert g['baseline_receipts']['quantities']==g['candidate_receipts']['quantities']
+          assert g['baseline_receipts']['sealed_run']==g['candidate_receipts']['sealed_run']
+          assert g['original_receipts_retained'] is False
+          assert g['count_granted'] is False and g['primitive_safety_cap']==20000
+          print('F07 source plan owned independently; original G17 source root unjoined, count ABSTAIN')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-f07-g17-scope-first-gate
+          path: artifacts/lot16-f07-g17-snapshot-join.json
+          retention-days: 21
