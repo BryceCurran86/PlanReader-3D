@@ -13,6 +13,13 @@ import pytest
 from tools import gpt3_frozen_120_score_delta_guard as delta
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_future_verified_manifests(monkeypatch):
+    # These synthetic PUBLISHED snapshots test the delta arithmetic only;
+    # the actual frozen 2026-10-17 manifests remain INCOMPLETE and cannot publish.
+    monkeypatch.setattr(delta, "_official_source_universe_verified", lambda: True)
+
+
 def _fake_ledger(*, published: bool = False, fingerprint: str = "a" * 64) -> dict:
     targets, sources, scorer = delta._expected_inputs_and_targets()
     rows = []
@@ -168,12 +175,29 @@ def test_nonwinning_status_change_and_rekey_are_not_extra_correct_targets():
     old = _fake_ledger(published=True, fingerprint="1" * 64)
     new = _fake_ledger(published=True, fingerprint="2" * 64)
     new["items"][0]["evaluation_state"] = "UNRESOLVED"
+    old["items"][1]["evaluation_state"] = "UNRESOLVED"
+    new["items"][1]["evaluation_state"] = "UNRESOLVED"
     old["items"][1]["produced_quantity_id"] = "synthetic-old-id"
     new["items"][1]["produced_quantity_id"] = "synthetic-new-id"
     out = delta.compare_postscore_ledgers(old, new)
     assert out["net_additional_correct_items"] == 0
     assert len(out["other_changed_target_states"]) == 1
     assert len(out["changed_produced_quantity_ids"]) == 1
+
+
+def test_actual_unverified_frozen_manifest_blocks_any_published_comparison(monkeypatch):
+    monkeypatch.setattr(delta, "_official_source_universe_verified", lambda: False)
+    with pytest.raises(ValueError, match="INCOMPLETE"):
+        delta.compare_postscore_ledgers(_fake_ledger(published=True),
+                                        _fake_ledger(published=True, fingerprint="c"*64))
+
+
+def test_identical_input_fingerprint_cannot_hide_new_producer_head():
+    old = _fake_ledger(published=True)
+    new = deepcopy(old)
+    new["producer_head"] = "f"*40
+    with pytest.raises(ValueError, match="same scoring fingerprint"):
+        delta.compare_postscore_ledgers(old, new)
 
 
 def test_cli_cannot_overwrite_either_ledger(tmp_path):
