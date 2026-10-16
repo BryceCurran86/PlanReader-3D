@@ -1,0 +1,43 @@
+name: GPT3 Ten Customer Release Gates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_ten_customer_release_gates.py"
+      - "tests/test_gpt3_ten_customer_release_gates.py"
+      - "pb_customer_output_verification.py"
+      - "pb_source_closed_run_export.py"
+      - "pb_migration_contracts.py"
+      - "requirements.txt"
+      - "requirements-ci-v1228.txt"
+      - ".github/workflows/test-gpt3-ten-customer-release-gates.yml"
+
+concurrency:
+  group: gpt3-ten-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-and-consumer-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Ten source-to-customer failure gates and unchanged frozen integrity
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt3_ten_customer_release_gates.py
+          ruff check --select F821,F823 tools/diag_gpt3_ten_customer_release_gates.py tests/test_gpt3_ten_customer_release_gates.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
