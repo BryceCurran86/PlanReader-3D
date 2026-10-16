@@ -133,13 +133,21 @@ def _original_title_frame_relation(title, frame):
     """Classify exact source-native bboxes, without inferring drawing roles."""
     import math
     def check(value):
+        # PyMuPDF can supply a Rect rather than a raw tuple. The exact
+        # source coordinates remain the same; no string/numeric coercion.
+        if isinstance(value,(str,bytes)):
+            raise ValueError("invalid original title/frame geometry")
+        try:
+            row=tuple(value)
+        except (TypeError,ValueError,OverflowError) as exc:
+            raise ValueError("invalid original title/frame geometry") from exc
         if (
-            type(value) not in (tuple,list) or len(value)!=4
-            or any(type(v) not in (int,float) or not math.isfinite(v) for v in value)
-            or value[2]<=value[0] or value[3]<=value[1]
+            len(row)!=4
+            or any(type(v) not in (int,float) or not math.isfinite(v) for v in row)
+            or row[2]<=row[0] or row[3]<=row[1]
         ):
             raise ValueError("invalid original title/frame geometry")
-        return tuple(float(v) for v in value)
+        return tuple(float(v) for v in row)
     a,b=check(title),check(frame)
     within=(b[0]<=a[0] and b[1]<=a[1]
             and a[2]<=b[2] and a[3]<=b[3])
