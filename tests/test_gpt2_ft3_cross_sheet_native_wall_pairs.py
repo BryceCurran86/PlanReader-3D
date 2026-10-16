@@ -120,3 +120,192 @@ def test_source_index_duplicate_ids_and_missing_source_addresses_abstain():
         indexed_original_native_primitives([one,one])
     with pytest.raises(ValueError,match="missing or duplicate"):
         indexed_original_native_primitives([{"id":None,**seg(0,0,10,0)}])
+
+
+# Full competing-registration audit; these are NOT physical wall identity.
+from tools.diag_gpt2_ft3_cross_sheet_native_wall_pairs import (
+    ranked_original_registrations,
+    registration_side_geometry,
+    compare_side_under_affine,
+    audit_registration_candidate_sides,
+)
+
+def _hypothesis(orientation="identity", scale=1.0, dx=-6.0, dy=0.0):
+    return dict(orientation=orientation, scale=scale, dx=dx, dy=dy,
+                min_support_pt=100.0)
+
+
+def _rows(box, *, owner="wall", grid=False):
+    x0,y0,x1,y1=box
+    original={
+        "top":dict(id="top", **seg(x0,y0,x1,y0)),
+        "bottom":dict(id="bottom", **seg(x0,y1,x1,y1)),
+        "left":dict(id="left", **seg(x0,y0,x0,y1)),
+        "right":dict(id="right", **seg(x1,y0,x1,y1)),
+    }
+    return original, {k:[owner] for k in original}, {owner:grid}
+
+
+def test_ranked_source_competitors_are_all_retained_input_order_stable():
+    rows=[
+        {**_hypothesis(dx=-6), "next_distinct_translation":[-2,0],
+         "next_distinct_min_support_pt":22.0},
+        {**_hypothesis(orientation="mirror_y",dx=7), "min_support_pt":85.0,
+         "next_distinct_translation":None},
+    ]
+    before=deepcopy(rows)
+    a=ranked_original_registrations(rows)
+    b=ranked_original_registrations(list(reversed(rows)))
+    assert a==b and rows==before
+    assert len(a)==3
+    assert {(r["orientation"],r["dx"],r["dy"]) for r in a} == {
+        ("identity",-6.0,0.0),("identity",-2.0,0.0),("mirror_y",7.0,0.0)
+    }
+    assert all(r["candidate_not_authenticated_registration"] for r in a)
+
+
+@pytest.mark.parametrize("broken",[
+    {"orientation":"unknown","scale":1,"dx":0,"dy":0,"min_support_pt":1},
+    {"orientation":"identity","scale":0,"dx":0,"dy":0,"min_support_pt":1},
+    {"orientation":"identity","scale":1,"dx":float("inf"),"dy":0,"min_support_pt":1},
+    {"orientation":"identity","scale":1,"dx":0,"dy":0,"min_support_pt":float("nan")},
+    {**_hypothesis(),"next_distinct_translation":[1.0],
+     "next_distinct_min_support_pt":2},
+    {**_hypothesis(),"next_distinct_translation":[0.0,float("inf")],
+     "next_distinct_min_support_pt":2},
+    {**_hypothesis(),"next_distinct_translation":[2.0,0.0],
+     "next_distinct_min_support_pt":float("nan")},
+])
+def test_competing_source_registration_rejects_malformed_candidates(broken):
+    with pytest.raises(ValueError,match="registration"):
+        ranked_original_registrations([broken])
+
+
+def test_ranked_candidate_universe_never_silently_truncated():
+    many=[{**_hypothesis(dx=i), "min_support_pt":float(i)}
+          for i in range(129)]
+    with pytest.raises(ValueError,match="over safety bound"):
+        ranked_original_registrations(many)
+
+
+@pytest.mark.parametrize("orientation",[
+    "identity","rot90","rot180","rot270",
+    "mirror_x","mirror_y","transpose","anti_transpose",
+])
+@pytest.mark.parametrize("scale", [0.5, 1.0, 2.0])
+def test_all_d4_orientations_exactly_map_four_original_sides(orientation,scale):
+    from tools.diag_ft3_p11_p7_floor_correspondence import D4
+    box=(10.,20.,34.,50.)
+    a,b,c,d=D4[orientation]
+    def move(s):
+        x,y=s
+        return (scale*(a*x+b*y)+7.,scale*(c*x+d*y)-4.)
+    corners=[move(p) for p in ((10,20),(10,50),(34,20),(34,50))]
+    expected=(min(p[0] for p in corners),min(p[1] for p in corners),
+              max(p[0] for p in corners),max(p[1] for p in corners))
+    seen=set()
+    for side in ("x0","x1","y0","y1"):
+        tb, name,slope,offset=registration_side_geometry(
+            box,side,_hypothesis(orientation=orientation,scale=scale,dx=7,dy=-4)
+        )
+        assert tb==pytest.approx(expected,abs=1e-9)
+        assert abs(slope)==pytest.approx(scale)
+        assert name not in seen
+        seen.add(name)
+    assert seen=={"x0","x1","y0","y1"}
+
+
+@pytest.mark.parametrize("orientation",[
+    "identity","rot90","rot180","rot270",
+    "mirror_x","mirror_y","transpose","anti_transpose",
+])
+def test_all_rotated_original_native_sides_compare_without_loss(orientation):
+    box=(10.,20.,34.,50.)
+    candidate=_hypothesis(orientation=orientation,scale=1.0,dx=-6.0,dy=9.0)
+    from tools.diag_ft3_p11_p7_floor_correspondence import D4
+    a,b,c,d=D4[orientation]
+    def move(p):
+        x,y=p
+        return (a*x+b*y-6,c*x+d*y+9)
+    originals,owners,grid=_rows(box)
+    target={}
+    for name,s in originals.items():
+        p=move((s["x1"],s["y1"]))
+        q=move((s["x2"],s["y2"]))
+        target[name]={"id":name,**seg(*p,*q)}
+    before=deepcopy((originals,target,owners,grid))
+    report=audit_registration_candidate_sides(
+        box,candidate,
+        native_support=originals,native_target=target,
+        owners_support=owners,owners_target=owners,
+        grid_support=grid,grid_target=grid,
+    )
+    assert (originals,target,owners,grid)==before
+    sides=report["source_original_wall_side_provenance"]
+    assert len(sides)==4
+    assert all(g["source_native_ink_interval_iou"]==pytest.approx(1.0)
+               for g in sides.values())
+    assert all(len(g["all_original_native_ink_overlap_pairs"])==1
+               for g in sides.values())
+    assert all(not g["physical_wall_or_room_equivalence_granted"]
+               for g in sides.values())
+    assert not report["candidate_physical_registration_elected"]
+    assert not report["cross_page_physical_room_equivalence_granted"]
+
+
+def test_split_segments_and_reverse_direction_retain_all_native_lineage():
+    box=(10.,20.,34.,50.)
+    original,owners,grid=_rows(box)
+    del original["left"]
+    original.update({
+        "a":dict(id="a",**seg(10,20,10,30)),
+        "b":dict(id="b",**seg(10,50,10,30)),
+    })
+    owners["a"]=["wa"];owners["b"]=["wb"]
+    target,target_owners,target_grid=_rows((4.,20.,28.,50.))
+    report=audit_registration_candidate_sides(
+        box,_hypothesis(),
+        native_support=original,native_target=target,
+        owners_support=owners,owners_target=target_owners,
+        grid_support=grid,grid_target=target_grid,
+    )
+    lhs=report["source_original_wall_side_provenance"]["x0"]
+    assert lhs["source_native_ink_interval_iou"]==1
+    assert len(lhs["all_original_native_ink_overlap_pairs"])==2
+    assert {r["native_primitive_id"] for r in lhs["original_support_native_fragments"]}=={"a","b"}
+    assert "cross_page_physical_structural_wall_equivalence_unproven" in lhs[
+        "source_role_first_failure_reasons"
+    ]
+
+
+def test_grid_opponents_and_multiple_wall_owners_never_elect_registration():
+    box=(10.,20.,34.,50.)
+    support,owners,grid=_rows(box,owner="w1",grid=True)
+    owners["top"]=["w1","w2"]
+    target,target_owners,target_grid=_rows((4.,20.,28.,50.))
+    receipt=audit_registration_candidate_sides(
+        box,_hypothesis(),
+        native_support=support,native_target=target,
+        owners_support=owners,owners_target=target_owners,
+        grid_support=grid,grid_target=target_grid,
+    )
+    top=receipt["source_original_wall_side_provenance"]["y0"]
+    assert top["native_multiowner_ids"]["support"]==["top"]
+    assert top["typed_grid_opposed_ids"]["support"]==["top"]
+    assert not receipt["candidate_physical_registration_elected"]
+
+
+def test_reverse_affine_overlap_and_out_of_span_strictness():
+    support=[{"native_primitive_id":"p11","source_clipped_interval_pdf_pts":[10.,30.],
+              "source_w4_candidate_count":1,"typed_grid_opposed_owner_ids":[]}]
+    target=[{"native_primitive_id":"p7","source_clipped_interval_pdf_pts":[-20.,0.],
+             "source_w4_candidate_count":1,"typed_grid_opposed_owner_ids":[]}]
+    out=compare_side_under_affine(support,target,slope=-1,offset=10)
+    assert out["source_native_ink_interval_iou"]==1
+    assert out["all_original_native_ink_overlap_pairs"][0][
+        "exact_intersection_in_support_pdf_pts"]==[10.,30.]
+    assert not out["physical_wall_or_room_equivalence_granted"]
+    with pytest.raises(ValueError,match="noninvertible"):
+        compare_side_under_affine(support,target,slope=0,offset=1)
+    with pytest.raises(ValueError,match="noninvertible"):
+        compare_side_under_affine(support,target,slope=float("nan"),offset=1)
