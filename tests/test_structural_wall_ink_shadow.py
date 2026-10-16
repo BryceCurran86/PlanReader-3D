@@ -11,6 +11,7 @@ import pb_structural_wall_ink_shadow as ink
 from pb_structural_wall_ink_shadow import (
     NOT_WALL_INK,
     REASON_DASHED_OR_PATTERNED,
+    REASON_RULED_RING,
     REASON_LIGHTER_INK,
     REASON_NO_PARTNER,
     REASON_OUTLINED_GLYPH_RUN,
@@ -387,6 +388,99 @@ def test_a_wide_gap_needs_the_partner_face_to_be_interrupted_too():
     assert not [g for g in run(one_face).opening_gaps if abs(g.gap_length_pt - wide) < 0.01]
 
 
+def _overhang_building(wide=100.0, left_overhang=4.0, right_overhang=0.0, t=2.6):
+    """A top wall interrupted by an opening ``wide`` apart; the lower face of the left piece stops ``left_overhang`` short
+    of the upper face (a jamb symbol or an end cap), so the two faces' gap ends do not line up to a point."""
+    segs = [seg("a1", 100, 100, 215, 100), seg("a2", 215 + wide, 100, 400, 100),
+            seg("c1", 100, 100 + t, 215 - left_overhang, 100 + t), seg("c2", 215 + wide + right_overhang, 100 + t, 400, 100 + t)]
+    segs += strip("bot", 100, 300 - t, 400, 300) + strip("left", 100, 100 + t, 100 + t, 300 - t)
+    segs += strip("right", 400 - t, 100 + t, 400, 300 - t)
+    return segs
+
+
+def _gaps_of_length(report, length):
+    return [g for g in report.opening_gaps if abs(g.gap_length_pt - length) < 0.01]
+
+
+def test_a_wide_opening_is_found_when_a_jamb_symbol_makes_the_partner_face_ends_overhang():
+    t = 2.6
+    wide = 100.0                                                             # 38 thicknesses: needs the partner face
+    exact = run(_overhang_building(left_overhang=0.0))
+    assert _gaps_of_length(exact, wide)                                      # aligned ends: accepted as before
+    overhung = run(_overhang_building(left_overhang=4.0, right_overhang=3.0))
+    got = _gaps_of_length(overhung, wide)
+    assert got, "an overhang of a jamb symbol must not hide the opening"
+    assert all(abs(g.thickness_pt - t) < 0.01 for g in got)
+    assert {g.source_primitive_id_a for g in got} <= {"a1", "c1"} and {g.source_primitive_id_b for g in got} <= {"a2", "c2"}
+    # both faces report it, each against the other: the upper face's 100 pt and the lower face's 107 pt
+    assert _gaps_of_length(overhung, 107.0)
+
+
+def test_a_partner_face_ending_further_than_the_face_gap_bound_does_not_make_the_wide_opening():
+    far = run(_overhang_building(left_overhang=ink.MAX_FACE_GAP_PT + 4.0))
+    assert not _gaps_of_length(far, 100.0)
+
+
+def test_the_bound_applies_to_the_far_side_of_the_opening_as_well():
+    assert _gaps_of_length(run(_overhang_building(left_overhang=0.0, right_overhang=ink.MAX_FACE_GAP_PT - 2.0)), 100.0)
+    assert not _gaps_of_length(run(_overhang_building(left_overhang=0.0, right_overhang=ink.MAX_FACE_GAP_PT + 4.0)), 100.0)
+
+
+def test_partner_faces_may_also_run_a_symbol_length_into_the_opening():
+    # the lower faces run 4 pt and 3 pt INTO the opening (an end cap or a door frame): still the same wall, interrupted
+    got = _gaps_of_length(run(_overhang_building(left_overhang=-4.0, right_overhang=-3.0)), 100.0)
+    assert got and {g.source_primitive_id_a for g in got} <= {"a1", "c1"}
+    # but a partner face that fills most of the opening is a wall through the opening, not an interruption of it
+    through = _overhang_building(left_overhang=-70.0, right_overhang=-20.0)
+    assert not _gaps_of_length(run(through), 100.0)
+    # 20 pt (7.7 thicknesses) into the opening is already more than a jamb symbol: refused
+    assert not _gaps_of_length(run(_overhang_building(left_overhang=-20.0)), 100.0)
+
+
+def test_a_parallel_line_beside_the_partner_face_does_not_block_the_opening():
+    # a fixture line 3 pt inside the room, running across the whole opening, is not on the partner face's line
+    got = _gaps_of_length(run(_overhang_building(left_overhang=4.0) + [seg("fixture", 150, 105.6, 360, 105.6)]), 100.0)
+    assert got and {g.source_primitive_id_a for g in got} <= {"a1", "c1"}
+
+
+def test_a_wide_opening_is_refused_when_solid_wall_ink_runs_through_the_partner_line():
+    t = 2.6
+    segs = [seg("a1", 100, 100, 215, 100), seg("a2", 315, 100, 400, 100),
+            seg("c1", 100, 100 + t, 400, 100 + t)]                           # the other face runs straight through
+    segs += strip("bot", 100, 300 - t, 400, 300) + strip("left", 100, 100 + t, 100 + t, 300 - t)
+    segs += strip("right", 400 - t, 100 + t, 400, 300 - t)
+    assert not _gaps_of_length(run(segs), 100.0)
+
+
+def test_the_overhang_opening_rule_is_deterministic_order_and_translation_invariant():
+    base = _overhang_building(left_overhang=4.0)
+    expected = run(base).opening_gaps
+    shuffled = list(base)
+    random.Random(11).shuffle(shuffled)
+    assert run(shuffled).opening_gaps == expected
+    moved = [dict(s, x1=s["x1"] + 13.0, x2=s["x2"] + 13.0, y1=s["y1"] - 7.0, y2=s["y2"] - 7.0) for s in base]
+    got = run(moved).opening_gaps
+    assert [(round(g.end_a[0] - 13.0, 3), round(g.end_a[1] + 7.0, 3), g.gap_length_pt) for g in got] == [
+        (g.end_a[0], g.end_a[1], g.gap_length_pt) for g in expected]
+
+
+def test_the_overhang_opening_rule_is_invariant_to_a_quarter_turn_splitting_and_unrelated_content():
+    base = _overhang_building(left_overhang=4.0, right_overhang=3.0)
+    expected = sorted(g.gap_length_pt for g in run(base).opening_gaps)
+    assert 100.0 in expected and 107.0 in expected
+    turned = [dict(s, x1=-s["y1"] + 700.0, y1=s["x1"], x2=-s["y2"] + 700.0, y2=s["x2"]) for s in base]
+    assert sorted(g.gap_length_pt for g in run(turned, page=(PAGE[1] + 200, PAGE[0])).opening_gaps) == expected
+    split = []
+    for s in base:
+        mx, my = (s["x1"] + s["x2"]) / 2, (s["y1"] + s["y2"]) / 2
+        split.append(dict(s, id=s["id"] + ".1", x2=mx, y2=my))
+        split.append(dict(s, id=s["id"] + ".2", x1=mx, y1=my))
+    assert sorted(g.gap_length_pt for g in run(split).opening_gaps) == expected
+    far = [dict(s, id="far." + s["id"], x1=s["x1"] + 1000.0, x2=s["x2"] + 1000.0) for s in _overhang_building(left_overhang=0.0)]
+    got = run(base + far, page=(2200.0, PAGE[1])).opening_gaps
+    assert sorted(g.gap_length_pt for g in got if g.end_a[0] < 900.0) == expected
+
+
 def test_collinear_walls_far_apart_are_not_one_interrupted_wall():
     t = 2.6
     segs = strip("w1", 100, 100, 160, 100 + t) + strip("w2", 160 + 300.0, 100, 700, 100 + t)   # 115 thicknesses apart
@@ -408,6 +502,178 @@ def test_a_short_face_finds_a_much_longer_partner_from_either_side():
     report = run(segs)
     assert REASON_NO_PARTNER not in reasons(report)["short"]
     assert REASON_NO_PARTNER not in reasons(report)["long"]
+
+
+# ---------------------------------------------------------------- ruled rings: schedules, legends, title blocks, grilles
+def _table(prefix="tb", x0=500.0, y0=100.0, w=200.0, h=300.0, rows=5, ring_width=1.5, row_width=0.48, span=1.0, columns=0):
+    """A framed table: a ring of single heavy strokes around ``rows`` thin parallel rule lines (and optional column rules)."""
+    out = [seg(f"{prefix}.top", x0, y0, x0 + w, y0, width=ring_width), seg(f"{prefix}.right", x0 + w, y0, x0 + w, y0 + h, width=ring_width),
+           seg(f"{prefix}.bottom", x0 + w, y0 + h, x0, y0 + h, width=ring_width), seg(f"{prefix}.left", x0, y0 + h, x0, y0, width=ring_width)]
+    pitch = h / (rows + 1)
+    margin = w * (1.0 - span) / 2.0
+    for i in range(rows):
+        y = y0 + pitch * (i + 1)
+        out.append(seg(f"{prefix}.row{i}", x0 + margin, y, x0 + w - margin, y, width=row_width))
+    for j in range(columns):
+        x = x0 + w * (j + 1) / (columns + 1)
+        out.append(seg(f"{prefix}.col{j}", x, y0 + 1.0, x, y0 + h - 1.0, width=row_width))
+    return out
+
+
+def _heavy_building(prefix="hb", x0=100.0, y0=100.0, w=300.0, h=250.0, ring_width=1.5):
+    """A building drawn as single heavy strokes, with two full-span partitions of the same heavy class touching the ring."""
+    return [seg(f"{prefix}.top", x0, y0, x0 + w, y0, width=ring_width), seg(f"{prefix}.right", x0 + w, y0, x0 + w, y0 + h, width=ring_width),
+            seg(f"{prefix}.bottom", x0 + w, y0 + h, x0, y0 + h, width=ring_width), seg(f"{prefix}.left", x0, y0 + h, x0, y0, width=ring_width),
+            seg(f"{prefix}.p1", x0, y0 + h / 3, x0 + w, y0 + h / 3, width=ring_width), seg(f"{prefix}.p2", x0, y0 + 2 * h / 3, x0 + w, y0 + 2 * h / 3, width=ring_width)]
+
+
+def test_a_framed_table_is_a_typed_negative_with_its_rule_lines_and_is_never_a_wall_network():
+    report = run(_table())
+    got, why = labels(report), reasons(report)
+    assert set(got.values()) == {NOT_WALL_INK}
+    assert all(REASON_RULED_RING in why[i] for i in got)                       # the ring AND every rule line carry the reason
+    assert not report.ids_with(WALL_NETWORK_INK_CANDIDATE)
+
+
+def test_a_table_with_column_rules_is_the_same_negative():
+    got = labels(run(_table(columns=2)))
+    assert set(got.values()) == {NOT_WALL_INK}
+
+
+def test_a_building_ring_with_partitions_of_its_own_class_is_not_a_table():
+    got = labels(run(_heavy_building()))
+    assert set(got.values()) == {WALL_NETWORK_INK_CANDIDATE}
+
+
+def test_a_building_ring_with_fewer_than_four_lighter_full_span_lines_is_not_a_table():
+    for rows in (1, 2, 3):
+        got = labels(run(_table(rows=rows)))
+        assert WALL_NETWORK_INK_CANDIDATE in got.values() and REASON_RULED_RING not in {r for rs in reasons(run(_table(rows=rows))).values() for r in rs}
+    assert set(labels(run(_table(rows=4))).values()) == {NOT_WALL_INK}
+
+
+def test_rule_lines_that_do_not_span_the_ring_do_not_make_it_a_table():
+    got = labels(run(_table(rows=6, span=0.6)))
+    assert WALL_NETWORK_INK_CANDIDATE in got.values()
+    assert not any(REASON_RULED_RING in r for r in reasons(run(_table(rows=6, span=0.6))).values())
+
+
+def test_a_double_rule_counts_once_so_three_double_rules_are_not_a_table():
+    rows = []
+    for i, y in enumerate((175.0, 250.0, 325.0)):
+        rows.append(seg(f"dr{i}a", 500.0, y, 700.0, y, width=0.48))
+        rows.append(seg(f"dr{i}b", 500.0, y + 0.5, 700.0, y + 0.5, width=0.48))
+    ring = [t for t in _table(rows=0)]
+    got = labels(run(ring + rows))
+    assert WALL_NETWORK_INK_CANDIDATE in got.values()
+
+
+def test_a_table_whose_rows_are_double_rules_is_still_a_table():
+    # five rows, each a double rule 0.5 pt apart: a hairline duplicate is one row, never the two faces of a wall
+    ring = _table(rows=0)
+    rows = []
+    for i in range(5):
+        y = 100.0 + 50.0 * (i + 1)
+        rows += [seg(f"dr{i}a", 500.0, y, 700.0, y, width=0.48), seg(f"dr{i}b", 500.0, y + 0.5, 700.0, y + 0.5, width=0.48)]
+    assert set(labels(run(ring + rows)).values()) == {NOT_WALL_INK}
+
+
+def test_rule_lines_outside_the_ring_are_not_its_rows():
+    stray = [seg(f"stray{i}", 500.0, 450.0 + 20 * i, 700.0, 450.0 + 20 * i, width=0.48) for i in range(6)]
+    got = labels(run(_table(rows=1) + stray))
+    assert WALL_NETWORK_INK_CANDIDATE in got.values()
+
+
+def test_a_table_drawn_with_a_paired_face_frame_is_the_same_negative():
+    t = 2.6
+    x0, y0, w, h = 500.0, 100.0, 200.0, 300.0
+    frame = (strip("fa", x0, y0, x0 + w, y0 + t) + strip("fb", x0, y0 + h - t, x0 + w, y0 + h)
+             + strip("fc", x0, y0 + t, x0 + t, y0 + h - t) + strip("fd", x0 + w - t, y0 + t, x0 + w, y0 + h - t))
+    rows = [seg(f"r{i}", x0 + t, y0 + 50.0 * (i + 1), x0 + w - t, y0 + 50.0 * (i + 1), width=0.48) for i in range(5)]
+    got = labels(run(frame + rows))
+    assert set(got.values()) == {NOT_WALL_INK}
+
+
+def test_a_ring_with_a_heavy_interior_wall_of_its_own_class_is_a_building_even_with_rule_lines():
+    # the interior wall touches the ring and is part of its component, so the component is not a pure ring
+    wall = [seg("heavy.wall", 600.0, 100.0, 600.0, 300.0, width=1.5)]
+    got = labels(run(_table(rows=5) + wall))
+    assert WALL_NETWORK_INK_CANDIDATE in got.values()
+    assert not any(REASON_RULED_RING in r for r in reasons(run(_table(rows=5) + wall)).values())
+
+
+def test_lines_hugging_the_frame_are_part_of_the_frame_not_rows():
+    hugging = [seg(f"hug{i}", 500.0, 100.0 + 1.5 * (i + 1), 700.0, 100.0 + 1.5 * (i + 1), width=0.48) for i in range(5)]
+    got = labels(run(_table(rows=3) + hugging))
+    assert WALL_NETWORK_INK_CANDIDATE in got.values()
+
+
+def test_a_paired_face_frame_in_the_same_ink_class_as_its_rows_is_judged_as_a_paired_component():
+    t = 2.6
+    x0, y0, w, h = 500.0, 100.0, 200.0, 300.0
+    frame = (strip("fa", x0, y0, x0 + w, y0 + t, width=0.48) + strip("fb", x0, y0 + h - t, x0 + w, y0 + h, width=0.48)
+             + strip("fc", x0, y0 + t, x0 + t, y0 + h - t, width=0.48) + strip("fd", x0 + w - t, y0 + t, x0 + w, y0 + h - t, width=0.48))
+    rows = [seg(f"r{i}", x0 + t, y0 + 50.0 * (i + 1), x0 + w - t, y0 + 50.0 * (i + 1), width=0.48) for i in range(5)]
+    assert set(labels(run(frame + rows)).values()) == {NOT_WALL_INK}
+    assert WALL_NETWORK_INK_CANDIDATE in set(labels(run(frame + rows[:3])).values())
+
+
+def test_a_pure_heavy_ring_with_thin_partitions_drawn_as_two_faces_is_a_building_not_a_table():
+    t = 2.6
+    ring = [seg("hr.top", 100, 100, 400, 100, width=1.5), seg("hr.right", 400, 100, 400, 300, width=1.5),
+            seg("hr.bottom", 400, 300, 100, 300, width=1.5), seg("hr.left", 100, 300, 100, 100, width=1.5)]
+    # four full-height partitions in the same colour but a thinner class, each drawn as two faces a wall thickness apart
+    partitions = []
+    for i, x in enumerate((160.0, 220.0, 280.0, 340.0)):
+        partitions += strip(f"tp{i}", x - t / 2, 101.0, x + t / 2, 299.0, width=0.37)
+    report = run(ring + partitions)
+    assert not any(REASON_RULED_RING in r for r in reasons(report).values())
+    assert all(labels(report)[s_["id"]] == WALL_NETWORK_INK_CANDIDATE for s_ in ring)
+    # the same ring around four SINGLE thin rules (no wall thickness apart) is a table
+    singles = [seg(f"sr{i}", 100.0, 100.0 + 40.0 * (i + 1), 400.0, 100.0 + 40.0 * (i + 1), width=0.37) for i in range(4)]
+    assert set(labels(run(ring + singles)).values()) == {NOT_WALL_INK}
+
+
+def test_a_table_beside_a_building_does_not_change_the_building_and_is_not_changed_by_it():
+    house, table = building(), _table()
+    alone_b, alone_t = labels(run(house)), labels(run(table))
+    both = labels(run(house + table))
+    assert {k: v for k, v in both.items() if k in alone_b} == alone_b
+    assert {k: v for k, v in both.items() if k in alone_t} == alone_t
+
+
+def test_the_ruled_ring_rule_is_invariant_to_order_translation_quarter_turn_scale_splitting_and_unrelated_content():
+    base = _heavy_building() + _table()
+    expected = labels(run(base))
+    shuffled = list(base)
+    random.Random(21).shuffle(shuffled)
+    assert labels(run(shuffled)) == expected
+    moved = [dict(s, x1=s["x1"] + 13.0, x2=s["x2"] + 13.0, y1=s["y1"] - 7.0, y2=s["y2"] - 7.0) for s in base]
+    assert labels(run(moved)) == expected
+    turned = [dict(s, x1=-s["y1"] + 900.0, y1=s["x1"], x2=-s["y2"] + 900.0, y2=s["x2"]) for s in base]
+    assert labels(run(turned, page=(PAGE[1] + 400, PAGE[0]))) == expected
+    k = 2.0
+    scaled = [dict(s, x1=s["x1"] * k, y1=s["y1"] * k, x2=s["x2"] * k, y2=s["y2"] * k, width=s["width"] * k) for s in base]
+    assert labels(run(scaled, page=(PAGE[0] * k, PAGE[1] * k))) == expected
+    split = []
+    for s in base:
+        mx, my = (s["x1"] + s["x2"]) / 2, (s["y1"] + s["y2"]) / 2
+        split.append(dict(s, id=s["id"] + ".1", x2=mx, y2=my))
+        split.append(dict(s, id=s["id"] + ".2", x1=mx, y1=my))
+    got = labels(run(split))
+    assert {k2: v for k2, v in got.items() if k2.startswith("tb.")} and all(v == NOT_WALL_INK for k2, v in got.items() if k2.startswith("tb."))
+    assert all(v == WALL_NETWORK_INK_CANDIDATE for k2, v in got.items() if k2.startswith("hb."))
+    far = _table(prefix="far", x0=1500.0, y0=100.0)
+    both = labels(run(base + far, page=(2200.0, 900.0)))
+    assert {k2: v for k2, v in both.items() if k2 in expected} == expected
+
+
+def test_the_ruled_ring_rule_is_deterministic_and_does_not_mutate_its_input():
+    base = _heavy_building() + _table()
+    before = copy.deepcopy(base)
+    first = run(base)
+    assert base == before and run(base) == first
+
 
 
 # ---------------------------------------------------------------- glyph-sized runs (label ink with ancestry)

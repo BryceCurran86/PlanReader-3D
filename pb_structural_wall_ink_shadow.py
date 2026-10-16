@@ -12,8 +12,11 @@ What it does. From native stroke/fill segments of one page it reports, per sourc
   wall thickness apart that overlap along a long run) inside a connected paired-face network of building scale, or is
   the heaviest ink class whose own strokes form a connected network of building scale (walls drawn as one heavy
   line each);
-* ``NOT_WALL_INK``: only for definite negatives (a sheet-frame ring, a dashed/patterned stroke, a run of at least
-  three glyph-sized paths on one baseline: outlined lettering, dimension ticks);
+* ``NOT_WALL_INK``: only for definite negatives (a sheet-frame ring, a ruled ring, a dashed/patterned stroke, a run of at
+  least three glyph-sized paths on one baseline: outlined lettering, dimension ticks). A ruled ring is a pure ring in its
+  own ink class (nearly all of its length on its own bounding box) around at least four parallel full-span rule lines: a
+  schedule, legend or title-block table, or a grille symbol. A building ring has partitions of its own class touching it, so
+  it is not a pure ring;
 * ``UNPROVEN``: everything else, retained, with the reason it could not be proven.
 
 What it deliberately does not do. It does not use a numeric stroke-weight threshold, a colour list, a layer name, a
@@ -73,7 +76,12 @@ MAX_GAP_CANDIDATES_FOR_PARTNER_MATCH = 5000
 OPENING_GAP_COLLINEAR_TOL_PT = 0.5
 REASON_CONTINUED_ACROSS_GAP = "network_continued_across_collinear_gap"
 REASON_HEAVIEST_SINGLE_STROKE_NETWORK = "heaviest_areal_single_stroke_network"
+REASON_RULED_RING = "ruled_ring_table_or_grille"
 REASON_GLYPH_RUN_ATTACHED = "glyph_sized_run_attached_to_wall_network"
+TABLE_MIN_ROWS = 4                  # a pure ring around at least this many full-span parallel lines is a table, not a building
+TABLE_ROW_SPAN_FRACTION = 0.9       # a row line spans at least this share of the ring's side
+TABLE_ROW_MIN_SEPARATION_PT = 1.0   # row lines closer than this are one line (a double rule)
+TABLE_RING_FRACTION = 0.9           # share of the ring component's length that runs along its own box sides (stricter than a frame)
 STRIP_MAX_SEGMENTS = 5              # a filled wall strip is a rectangle-like path
 STRIP_MIN_ASPECT = 4.0
 STRIP_MIN_LENGTH_PT = 6.0
@@ -611,7 +619,9 @@ def classify_structural_wall_ink(
                         continue
                     gap_pairs[(k, k2)] = (r, r2, gap, thickness[r])
     # Short gaps are accepted on one face. A wider gap is accepted only when the partner face of the same wall is
-    # interrupted over the same interval (two collinear walls on opposite sides of a room do not do that).
+    # interrupted over the same interval: either its own gap ends line up with this one (to a point tolerance), or its
+    # line is free of solid wall runs over the interval and has a face on each side of it (a jamb symbol or an end cap
+    # can overhang a face end, so alignment to a point is not required).
     def _partner_gap_exists(key: Tuple[int, int]) -> bool:
         r, r2, gap, thick = gap_pairs[key]
         _, ex, ey, ux, uy = face_ends[key[0]]
@@ -630,11 +640,54 @@ def classify_structural_wall_ink(
                         return True
         return False
 
+    run_dirs: List[Tuple[float, float, float, float, float, float]] = []
+    for other in runs:
+        oa = _angle(other.p)
+        run_dirs.append((math.cos(oa), math.sin(oa), other.p[0], other.p[1], other.p[2], other.p[3]))
+
+    def _partner_line_interrupted(key: Tuple[int, int]) -> bool:
+        """The partner face line (one reading of the wall thickness to either side) carries no solid wall run over the gap
+        interval and has a face ending on each side of it. A jamb symbol may overhang a face end, so ends are matched
+        within the face-gap bound and the interval is shortened by it instead of by a point tolerance."""
+        r, r2, gap, thick = gap_pairs[key]
+        _, ex, ey, ux, uy = face_ends[key[0]]
+        nx, ny = -uy, ux
+        tol = max(MIN_FACE_OFFSET_PT, 0.25 * thick)
+        shrink = min(MAX_FACE_GAP_PT, 0.25 * gap)
+        lo, hi = shrink, gap - shrink
+        for sign in (1.0, -1.0):
+            target = sign * thick
+            left = right = blocked = False
+            for q in range(len(runs)):
+                if q == r or q == r2:
+                    continue
+                oux, ouy, ax, ay, bx, by = run_dirs[q]
+                if abs(oux * ux + ouy * uy) < math.cos(ANGLE_TOL_RAD):
+                    continue
+                o1 = (ax - ex) * nx + (ay - ey) * ny
+                o2 = (bx - ex) * nx + (by - ey) * ny
+                if abs(o1 - target) > tol or abs(o2 - target) > tol:
+                    continue
+                t1 = (ax - ex) * ux + (ay - ey) * uy
+                t2 = (bx - ex) * ux + (by - ey) * uy
+                a, b = (t1, t2) if t1 <= t2 else (t2, t1)
+                if min(b, hi) - max(a, lo) > 0.0:
+                    blocked = True
+                    break
+                if a < lo and b >= -MAX_FACE_GAP_PT:
+                    left = True
+                if b > hi and a <= gap + MAX_FACE_GAP_PT:
+                    right = True
+            if not blocked and left and right:
+                return True
+        return False
+
     valid_gap_pairs: Dict[Tuple[int, int], Tuple[int, int, float, float]] = {}
     can_match = len(gap_pairs) <= MAX_GAP_CANDIDATES_FOR_PARTNER_MATCH
     for key in sorted(gap_pairs):
         r, r2, gap, thick = gap_pairs[key]
-        if gap <= MAX_OPENING_GAP_FACTOR * thick or (can_match and _partner_gap_exists(key)):
+        if gap <= MAX_OPENING_GAP_FACTOR * thick or (
+                can_match and (_partner_gap_exists(key) or _partner_line_interrupted(key))):
             valid_gap_pairs[key] = gap_pairs[key]
     gap_pairs = valid_gap_pairs
     for key in sorted(gap_pairs):
@@ -689,6 +742,65 @@ def classify_structural_wall_ink(
                 on_edge += _length(p)
         return on_edge / total >= FRAME_RING_FRACTION
 
+    def table_grid_runs(rs: Sequence[int], box: Tuple[float, float, float, float]) -> List[int]:
+        """Interior full-span parallel lines when the component is a pure ring around rule lines (a table or a grille).
+
+        Pure ring: nearly all of the component's length runs along the sides of its own bounding box, within one face-gap bound
+        of them (a frame drawn as a single stroke or as a pair of faces). Rows: at least ``TABLE_MIN_ROWS`` parallel lines inside
+        the box, each spanning at least ``TABLE_ROW_SPAN_FRACTION`` of the box side, closer than ``TABLE_ROW_MIN_SEPARATION_PT``
+        counted once (a double rule). Two full-span lines a wall thickness apart (within the face-gap bound but not a double rule)
+        are the two faces of a partition: such a ring is a building, never a table. When the rows hold in one direction, the
+        full-span lines of the other direction (column rules) belong too."""
+        bx0, by0, bx1, by1 = box
+        total = sum(_length(runs[r].p) for r in rs)
+        if total <= 0:
+            return []
+        band = MAX_FACE_GAP_PT
+        on_side = 0.0
+        for r in rs:
+            p = runs[r].p
+            horiz = abs(p[1] - p[3]) <= FRAME_RING_TOL_PT and (abs(p[1] - by0) <= band or abs(p[1] - by1) <= band)
+            vert = abs(p[0] - p[2]) <= FRAME_RING_TOL_PT and (abs(p[0] - bx0) <= band or abs(p[0] - bx1) <= band)
+            if horiz or vert:
+                on_side += _length(p)
+        if on_side / total < TABLE_RING_FRACTION:
+            return []
+        own = set(rs)
+        tol = FRAME_RING_TOL_PT
+        rows: Dict[str, List[Tuple[float, int]]] = {"across": [], "down": []}
+        for q, run in enumerate(runs):
+            if q in own:
+                continue
+            p = run.p
+            x_lo, x_hi = sorted((p[0], p[2]))
+            y_lo, y_hi = sorted((p[1], p[3]))
+            if x_lo < bx0 - tol or x_hi > bx1 + tol or y_lo < by0 - tol or y_hi > by1 + tol:
+                continue
+            if abs(p[1] - p[3]) <= tol and x_hi - x_lo >= TABLE_ROW_SPAN_FRACTION * (bx1 - bx0) and by0 + band < y_lo < by1 - band:
+                rows["across"].append((p[1], q))
+            elif abs(p[0] - p[2]) <= tol and y_hi - y_lo >= TABLE_ROW_SPAN_FRACTION * (by1 - by0) and bx0 + band < x_lo < bx1 - band:
+                rows["down"].append((p[0], q))
+
+        def distinct(lines: Sequence[Tuple[float, int]]) -> Tuple[int, bool]:
+            """Rule lines counted once per double rule, and whether two of them stand a wall thickness apart."""
+            count, last, wall_like = 0, None, False
+            for offset in sorted(o for o, _ in lines):
+                if last is None or offset - last >= TABLE_ROW_MIN_SEPARATION_PT:
+                    count += 1
+                    wall_like = wall_like or (last is not None and offset - last <= MAX_FACE_GAP_PT)
+                last = offset
+            return count, wall_like
+
+        across, down = distinct(rows["across"]), distinct(rows["down"])
+        if across[1] or down[1] or max(across[0], down[0]) < TABLE_MIN_ROWS:
+            return []                  # a pair of full-span faces a wall thickness apart inside the ring is a wall, not a rule
+        return sorted(q for lines in rows.values() for _, q in lines)
+
+    def mark_table(rs: Sequence[int], grid: Sequence[int]) -> None:
+        for r in list(rs) + list(grid):
+            for m in runs[r].members:
+                set_label(m, NOT_WALL_INK, REASON_RULED_RING)
+
     frame_idx: set = set()
     for k, rs in enumerate(ordered):
         bx0, by0, bx1, by1 = boxes[k]
@@ -704,9 +816,12 @@ def classify_structural_wall_ink(
         member_ids = sorted(m for r in rs for m in runs[r].members)
         x0, y0, x1, y1 = boxes[k]
         major, minor = max(x1 - x0, y1 - y0), min(x1 - x0, y1 - y0)
+        grid = [] if k in frame_idx else table_grid_runs(rs, boxes[k])
         if k in frame_idx:
             for m in member_ids:
                 set_label(m, NOT_WALL_INK, REASON_SHEET_FRAME_RING)
+        elif grid:
+            mark_table(rs, grid)
         elif major >= NETWORK_MIN_MAJOR_FRACTION * page_min and minor >= NETWORK_MIN_MINOR_FRACTION * page_min:
             network_id += 1
             for r in rs:
@@ -762,6 +877,10 @@ def classify_structural_wall_ink(
                         if label.get(m) in (None, UNPROVEN):
                             label[m] = NOT_WALL_INK
                             reasons[m] = [REASON_SHEET_FRAME_RING]
+                continue
+            grid = table_grid_runs(rs, (bx0, by0, bx1, by1))
+            if grid:
+                mark_table(rs, grid)
                 continue
             if max(w, h) >= NETWORK_MIN_MAJOR_FRACTION * page_min and min(w, h) >= NETWORK_MIN_MINOR_FRACTION * page_min:
                 areal.append(sorted(rs))

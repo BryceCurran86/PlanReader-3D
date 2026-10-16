@@ -1,9 +1,17 @@
 # Structural wall-ink evidence (shadow): what the original plans show and what the pipeline ignores
 
+> **Public-source confidentiality update (2026-10-17):** The ten original-drawing PNG/JSON overlay artifacts previously merged under this folder were removed from the current branch tree for privacy. The original architectural PDF drawings and any raster-backed, polygon-coordinate or otherwise reconstructable source-derived overlays must remain in an owner-private workspace unless public redistribution is explicitly authorised. The old public Git commits containing them remain in Git history; current-HEAD removal is not history erasure. Recreate overlays only locally with original source permission. The aggregate counts and synthetic tests below do **not** authenticate a physical room or publish a construction quantity.
+
 Status: **shadow-only evidence module and read-only overlay tool.** Nothing here is called by a live path, raises an authority,
 filters a candidate, or changes a quantity. Claude integration lane, 2026-10-16. Code: `pb_structural_wall_ink_shadow.py`,
 `tools/diag_structural_wall_ink_overlay.py`; tests: `tests/test_structural_wall_ink_shadow.py` (37),
 `tests/test_structural_wall_ink_overlay_tool.py` (2).
+
+> **Update 2026-10-17.** The wide-gap rule (§2) now also accepts a partner face whose line is clear over the gap interval and has a face ending on each side of it, so a jamb symbol that
+> overhangs one face end no longer hides an opening (the aligned-ends rule is kept; no candidate was dropped on any page). The counts below were measured before that change; after it:
+> 3Laurel p3 849 -> 860 candidates and 354 -> 369 gap candidates; Q5446 p1 177 -> 189 and 53 -> 87; Q5446 p2 222 and 46 -> 68; Maryborough p7 320 -> 339 and 180 -> 222; Lot16 p3 unchanged (0).
+> `tests/test_structural_wall_ink_shadow.py` now has 45 tests. Attached partition ink, room-region evidence and the room-region overlay are in
+> `../structural_room_region_shadow_20261017/README.md`.
 
 ## 1. Why (observed repository behaviour)
 `docs/engineering/3laurel_p3_wall_universe_architecture_report_v1.md` §9.6 named the first impossible gate for 3Laurel page 3:
@@ -46,7 +54,7 @@ door-frame pieces are runs too, which is what the flag is for). Counts (runs / t
 Maryborough p7 515 / 220; Lot16 p3 98 / 0. In the Q5446 p1 overlay the purple boxes sit on the room names (GARAGE, ENTRY, LIVING, GUEST, MEALS, FAMILY, KITCHEN, W.I.P ...).
 A pairing bug found by a test on the way: a short face failed to find a much longer partner because candidates were indexed by midpoint; faces are now indexed by every cell they cover (regression test fails on the earlier version).
 
-## 3. What the original plans show (overlays in `overlays/`: red = candidate, blue = paired but unproven, purple = repeated small paths, orange = frame)
+## 3. Aggregate original-source diagnostic counts (private overlays are not committed)
 | page (original PDF) | native segments | candidates | negatives | unproven | opening-gap candidates | wall representation seen |
 |---|---:|---:|---:|---:|---:|---|
 | 3Laurel p3 floor plan | 9,977 | 849 | 1,018 | 8,110 | 354 | black filled strips + 0.71 pt outlines |
