@@ -2,6 +2,7 @@ name: GPT MAX Original F07-to-G17 Snapshot Firewall
 on:
   pull_request:
     branches:
+      - main
       - gptmax/lot16-original-raw-nine-w4-ancestry-20261015
     paths:
       - tools/diag_gptmax_f07_g17_original_scope_join.py

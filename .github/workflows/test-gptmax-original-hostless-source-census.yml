@@ -2,6 +2,7 @@ name: GPT MAX Original Hostless Source Scope Census
 on:
   pull_request:
     branches:
+      - main
       - gptmax/lot16-frame-competitor-census-20261015
     paths:
       - tools/diag_gptmax_original_hostless_source_census.py
