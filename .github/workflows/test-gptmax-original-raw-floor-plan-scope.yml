@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - "pb_g17_raw_floor_plan_scope_shadow.py"
+      - "pb_g17_raw_endpoint_ink_shadow.py"
+      - "tests/test_g17_raw_endpoint_ink_shadow.py"
       - "tests/test_g17_raw_floor_plan_scope_shadow.py"
       - "tools/verify_gptmax_original_raw_floor_plan_scope.py"
       - ".github/workflows/test-gptmax-original-raw-floor-plan-scope.yml"
@@ -66,6 +68,15 @@ jobs:
           assert sum(g['authenticated_floor_plan_membership']=='outside_this_authenticated_floor_plan_other_role_unproven' for g in audit['raw_groups'])==4
           assert len({g['raw_candidate_id'] for g in audit['raw_groups']})==9
           assert all(g['source_observation_ids'] and not g['opening_count_granted'] for g in audit['raw_groups'])
+          inside=[g for g in audit['raw_groups'] if g['authenticated_floor_plan_membership']=='inside_this_authenticated_floor_plan']
+          assert all(g['endpoint_source_evidence_is_not_physical_wall_role'] for g in audit['raw_groups'])
+          original_negatives=[w for g in inside for w in g['original_source_negative_endpoint_paint_witnesses']]
+          assert original_negatives
+          assert all(w['original_full_line_negative_preserved'] and w['original_pixel_receipt_verified'] for w in original_negatives)
+          assert all(w['original_endpoint_ink']['original_whole_line_negative_preserved'] for w in original_negatives)
+          assert all(not w['original_endpoint_ink']['source_wall_identity_granted'] for w in original_negatives)
+          assert all(not w['original_endpoint_ink']['metric_quantity_granted'] for w in original_negatives)
+          print('source-owned-negative-endpoint-audit:', [(g['raw_candidate_id'], [(w['original_source_observation_id'], [(e['original_axis_endpoint'],e['original_endpoint_span_pt']) for e in w['original_endpoint_ink']['authenticated_contained_original_endpoint_witnesses']]) for w in g['original_source_negative_endpoint_paint_witnesses']]) for g in inside])
           assert not any(report[k] for k in ('new_physical_host_granted','new_quantity_granted','opening_count_granted'))
           assert not any(audit[k] for k in ('physical_wall_role_granted','opening_host_granted','opening_count_granted','metric_quantity_granted'))
           assert not audit['original_page_candidate_universe_complete']
