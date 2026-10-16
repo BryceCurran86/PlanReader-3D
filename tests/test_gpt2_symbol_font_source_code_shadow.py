@@ -20,9 +20,28 @@ SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 def test_original_ft3_dash_and_both_quotes_source_byte_ttf_gid_proof():
     source=ORIGINAL.read_bytes()
     assert hashlib.sha256(source).hexdigest()==SHA
+    # Original native text-block ordinal differs between supported MuPDF
+    # extraction versions; authenticate one *complete original FT3 row* in
+    # this test runtime instead of copying a foreign version's block index.
+    with fitz.open(stream=source,filetype="pdf") as original:
+        blocks={}
+        for word in original[10].get_text("words",flags=fitz.TEXTFLAGS_WORDS):
+            blocks.setdefault(word[5],[]).append(word)
+        complete=[
+            words for words in blocks.values()
+            if {"FT3","-","“DURA","GREY”"}.issubset({w[4] for w in words})
+        ]
+        assert len(complete)==1
+        candidates=complete[0]
+        addresses=tuple(
+            (w[5],w[6],w[7])
+            for token in ("-","“DURA","GREY”")
+            for w in candidates if w[4]==token
+        )
+        assert len(addresses)==3 and len(set(addresses))==3
     result=audit_pdf_embedded_symbol_source(
         source,expected_sha256=SHA,page_number=11,
-        native_word_addresses=((244,2,2),(244,2,4),(244,2,5)),
+        native_word_addresses=addresses,
     )
     assert [r["native_literal_word"] for r in result["source_word_candidates"]]==[
         "-", "“DURA","GREY”"
