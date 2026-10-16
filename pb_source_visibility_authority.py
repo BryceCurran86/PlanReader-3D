@@ -58,6 +58,7 @@ from pb_pdf_text_integrity_authority import (
     classify_native_word_integrity,
 )
 from pb_source_observation_authority import (
+    _bind_record_to_snapshot,
     NativePageImagePlacement,
     OBSERVATION_UNAVAILABLE,
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
@@ -2861,7 +2862,7 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
 
-            rows.append((observation_id, replace(observation)))
+            rows.append((observation_id, _bind_record_to_snapshot(observation, snapshot)))
         return tuple(rows)
 
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
