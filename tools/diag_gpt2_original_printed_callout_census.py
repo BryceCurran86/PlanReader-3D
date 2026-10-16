@@ -21,7 +21,7 @@ from pb_cross_sheet_printed_callout_shadow import (
 )
 
 
-_NATIVE_SHEET_CODE_LOOKALIKE = re.compile(r"^[A-Z]{1,4}[-.]?\\d{1,4}(?:\\.\\d{1,3})?$", re.I)
+_NATIVE_SHEET_CODE_LOOKALIKE = re.compile(r"^[A-Z]{1,4}[-.]?\d{1,4}(?:\.\d{1,3})?$", re.I)
 
 
 def _unbound_native_reference_lines(page, *, page_num: int) -> list[dict]:
