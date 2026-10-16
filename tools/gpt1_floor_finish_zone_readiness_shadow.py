@@ -67,7 +67,7 @@ def _area(value):
 
 def check_source_scope(scope: Mapping, records: Sequence[Mapping]) -> tuple[str, ...]:
     """01: source hash, revision, snapshot and decision scope must agree."""
-    if type(records) not in (list, tuple):
+    if type(records) not in (list, tuple) or any(not isinstance(r, Mapping) for r in records):
         return ("source_scope_inventory_invalid",)
     if not isinstance(scope, Mapping):
         return ("source_scope_missing",)
