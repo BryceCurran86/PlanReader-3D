@@ -19,7 +19,10 @@ import importlib.util
 import sys
 
 from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
-from pb_customer_output_verification import verify_sealed_customer_output
+from pb_customer_output_verification import (
+    _customer_quantity_id,
+    verify_sealed_customer_output,
+)
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
@@ -98,8 +101,11 @@ def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
     value = _read_json_without_duplicate_keys(path)
     if type(value) is not list or any(type(row) is not dict for row in value):
         raise ValueError("customer projection must be a JSON array of objects")
-    # Manual/customer-only rows are not allowed into this signed automated lane.
-    if any(type(row.get("quantity_id")) is not str or not row["quantity_id"] for row in value):
+    # Use the already authoritative V1 identity reader. Persisted commercial
+    # rows may carry the quantity ID in structured provenance or strict notes
+    # rather than in a top-level optional column. Full provenance validity is
+    # checked independently by verify_sealed_customer_output below.
+    if any(not _customer_quantity_id(row) for row in value):
         raise ValueError("automated customer row lacks canonical quantity identity")
     return value
 
@@ -130,7 +136,9 @@ def _verify_customer_counts(sealed: Any, verified: Any, customer_rows: list[dict
     }
     if valid & abstained or len(valid) + len(abstained) != len(sealed.quantities):
         raise ValueError("duplicate or conflicting signed quantity identities")
-    customer_ids = [row["quantity_id"] for row in customer_rows]
+    # Match the identity source actually accepted by the V1 verifier; a
+    # top-level-only lookup would reject valid database-row projections.
+    customer_ids = [_customer_quantity_id(row) for row in customer_rows]
     if (
         verified.project_id != sealed.project_id
         or verified.sealed_quantity_count != len(sealed.quantities)
