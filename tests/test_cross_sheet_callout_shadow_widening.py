@@ -126,3 +126,19 @@ def test_source_text_and_title_records_remain_unmodified():
         assert find_unique_bound_target_page(titles, "S-0.01") == 2
     assert words_before == page.words
     assert before == [title.meta() for title in titles]
+
+
+def test_inline_prose_does_not_become_shadow_callout():
+    page = Page([
+        word("See", 5, 30, pos=0),
+        word("detail", 24, 30, pos=1),
+        word("5/A-302", 58, 30, pos=2),
+    ])
+    assert find_callout_references(page, page_num=1, shadow_extended=True) == []
+    split = Page([
+        word("Refer", 5, 30, pos=0),
+        word("5", 38, 30, pos=1),
+        word("/", 50, 30, pos=2),
+        word("A-302", 61, 30, pos=3),
+    ])
+    assert find_callout_references(split, page_num=1, shadow_extended=True) == []
