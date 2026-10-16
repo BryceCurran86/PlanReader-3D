@@ -1,0 +1,131 @@
+COMMAND: <HOME>\Documents\PlanReader_Private_V2_Run\.venv\Scripts\python.exe -u -c import faulthandler, sys, runpy
+f = open(r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_3laurel/stack_dumps.txt', 'a')
+faulthandler.dump_traceback_later(600, repeat=True, file=f)
+sys.argv = ['run_source_closed_project_handoff', '--pdf', r'<HOME>\Downloads\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\sources\au_qld_3laurel\3LAUREL - Construction Plan Set Rev3 08.05.26.pdf', '--project-id', 'au_qld_3laurel',
+            '--family-group', 'all', '--output-dir', r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_3laurel']
+runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)
+
+2026-10-16 17:32:29.812 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+{
+  "benchmark_score_granted": false,
+  "canonical_counts": {
+    "ceilings": 0,
+    "floors": 292,
+    "openings": 139,
+    "rooms": 292,
+    "spaces": 292,
+    "walls": 0
+  },
+  "canonical_wall_reason_codes": [
+    "live_canonical_wall_frame_conflict"
+  ],
+  "canonical_wall_source_pages": [
+    3
+  ],
+  "canonical_wall_status": "conflict",
+  "ceiling_authority_path": "unavailable",
+  "claim_reason_codes": [
+    "live_physical_net_wall_integration_unavailable",
+    "live_external_physical_net_wall_publication_upstream_incomplete",
+    "live_wall_opening_composition_partial",
+    "semantic_opening_physical_conflict",
+    "semantic_opening_residual_source_evidence",
+    "semantic_opening_raster_candidate_closure_unproven",
+    "semantic_opening_universe_exhaustiveness_unproven",
+    "opening_universe_completeness_record_unavailable",
+    "physical_wall_candidate_scope_resolved",
+    "physical_wall_candidate_scope_bounds_unresolved",
+    "opening_two_face_wall_lineage_ambiguous",
+    "ambiguous_physical_wall_equivalence_for_host",
+    "complete_authenticated_host_wall_universe_required",
+    "physical_wall_candidate_scope_unavailable",
+    "opening_host_local_boundary_scope_unavailable",
+    "no_local_host_wall_candidates",
+    "host_relevant_wall_boundary_tainted",
+    "no_authenticated_host_wall_band",
+    "host_equivalence_bridges_unsafe_boundary_evidence",
+    "opening_host_binding_resolved",
+    "opening_host_local_boundary_clean_scope_resolved",
+    "multiple_authenticated_host_wall_bands",
+    "opening_host_frame_host_unavailable",
+    "host_binding_record_unavailable",
+    "opening_host_frame_whole_wall_unproven",
+    "opening_host_frame_wall_unavailable",
+    "opening_host_frame_complete_wall_scope_unavailable",
+    "live_gross_wall_geometry_upstream_incomplete",
+    "live_gross_wall_geometry_wall_coverage_incomplete",
+    "live_whole_wall_role_composition_unavailable"
+  ],
+  "claim_status": "abstained",
+  "combined_quantity_count": 0,
+  "combined_run_file": null,
+  "combined_run_id": null,
+  "complete_project_handoff": true,
+  "customer_rows_file": null,
+  "customer_rows_verified": false,
+  "execution_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "family_counts": {
+    "ceiling_area": 0,
+    "floor_area": 0,
+    "floor_finish_area": 0,
+    "opening_area": 0,
+    "opening_count": 0
+  },
+  "family_group": "all",
+  "family_run_files": {},
+  "family_run_ids": {},
+  "frozen_v2_reconciliation_complete": false,
+  "page_count": 18,
+  "project_id": "au_qld_3laurel",
+  "room_area_support_pages": [],
+  "schema_version": "1.0.0",
+  "semantic_execution_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "source_path": "<HOME>\\Downloads\\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\\sources\\au_qld_3laurel\\3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+  "source_positive_partial_page": null,
+  "source_sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+  "status": "no_sealable_quantities",
+  "topology_mode": "source_classified_scope",
+  "topology_pages": [
+    3
+  ],
+  "unresolved_wall_candidate_count": 1559,
+  "verified_customer_row_count": 0
+}
