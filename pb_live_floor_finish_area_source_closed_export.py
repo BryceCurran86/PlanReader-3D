@@ -26,6 +26,29 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _original_floor_polygon_is_simple(
+    points: tuple[tuple[float, float], ...],
+) -> bool:
+    """A source floor area cannot be sealed from a self-crossing ring.
+
+    This is a *negative* geometry check on an already source-owned floor,
+    not a replacement physical room issuer, scale or measurement authority.
+    GEOS failures and unavailable validation abstain rather than publish.
+    """
+    try:
+        from shapely.geometry import Polygon
+
+        shape = Polygon(points)
+        return bool(
+            shape.is_valid
+            and shape.exterior.is_simple
+            and math.isfinite(shape.area)
+            and shape.area > 0.0
+        )
+    except Exception:
+        return False
+
+
 def build_live_floor_finish_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -342,6 +365,12 @@ def build_live_floor_finish_area_source_traces(
                 if not math.isfinite(twice_area) or abs(twice_area) <= 2e-9:
                     raise SourceClosedRunConflictError(
                         f"floor-finish source polygon is degenerate: {quantity.quantity_id}"
+                    )
+                # A bow-tie or source stroke backtrack can have strictly
+                # positive shoelace area. It is not a physical floor ring.
+                if not _original_floor_polygon_is_simple(points):
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish source polygon self-intersects or is invalid: {quantity.quantity_id}"
                     )
                 source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
