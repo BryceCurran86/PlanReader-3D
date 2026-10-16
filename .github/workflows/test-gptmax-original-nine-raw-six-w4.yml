@@ -1,0 +1,120 @@
+name: GPT MAX Original Nine Raw and Six W4 Ancestry
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/lot16-hostless-source-ownership-census-20261015
+    paths:
+      - tools/diag_gptmax_original_raw_and_w4_ancestry.py
+      - tests/test_gptmax_original_raw_and_w4_ancestry.py
+      - docs/engineering/gptmax_original_nine_raw_six_w4_ancestry_20261015.md
+      - .github/workflows/test-gptmax-original-nine-raw-six-w4.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  isolated-negative-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_raw_and_w4_ancestry.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_raw_and_w4_ancestry.py tests/test_gptmax_original_raw_and_w4_ancestry.py
+
+  immutable-original-raw-and-w4-census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Reissue original Lot16 source without producer changes
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_paired_outer_faces_quantity_shadow.py \
+            --pdf "$PDF" --page-id 3 --output artifacts/original-paired-wall-faces-shadow.json
+      - name: Reissue six hostless original W4 shortlist receipts
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_original_hostless_source_census.py \
+            --source-report artifacts/original-paired-wall-faces-shadow.json \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --snapshot source_snapshot_3fcb6bc5c44b51d930e9600080501d27 \
+            --physical-id physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8 \
+            --physical-id physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d \
+            --physical-id physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f \
+            --physical-id physical_opening_existence_b248972669988c108ebc90c6ca3908fd \
+            --physical-id physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b \
+            --physical-id physical_opening_existence_f819752382d44a00d9f28feca4b00787 \
+            --output artifacts/hostless-original-source-census.json
+      - name: Verify nine raw ownership and six original split-lineage audits
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_original_raw_and_w4_ancestry.py \
+            --original-replay artifacts/original-paired-wall-faces-shadow.json \
+            --hostless-report artifacts/hostless-original-source-census.json \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --snapshot source_snapshot_3fcb6bc5c44b51d930e9600080501d27 \
+            --output artifacts/original-nine-raw-six-w4.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-nine-raw-six-w4.json').read_text())
+          assert r['status']=='UNPUBLISHED_ORIGINAL_RAW_AND_W4_ANCESTRY_AUDIT'
+          assert r['original_raw_total']==30
+          assert r['original_unresolved_count']==9
+          assert r['isolated_shadow_unresolved_count']==8
+          assert r['original_unresolved_observation_memberships']==54
+          assert r['original_unique_unresolved_observations']==52
+          assert len(r['shared_unresolved_source_observations'])==2
+          shared=r['shared_unresolved_source_observations']
+          assert {x['source_observation_id'] for x in shared}=={
+              'source_observation_90449fbe754325038beb2cbfe421b7d6',
+              'source_observation_74464563a174f90802820d9087a6ced7'}
+          assert {tuple(x['raw_candidate_ids']) for x in shared}=={(
+              'physical_opening_raw_candidate_47508d3dd60dc6408ae622e1f4b246b6',
+              'physical_opening_raw_candidate_ea4ddcd4324b4530f06bec6aaed53158')}
+          assert len(r['hostless_source_chains'])==6
+          all_chains=[z for x in r['hostless_source_chains'] for z in x['w4_source_chains']]
+          assert len(all_chains)==5
+          assert sorted(z['split_edge_count'] for z in all_chains)==[1,1,2,3,6]
+          snap=[z for z in all_chains if z['max_original_source_to_w4_centerline_offset_pt']>0]
+          assert len(snap)==1 and snap[0]['wall_candidate_id']=='wall_bc75efccd0a16038ce99'
+          assert snap[0]['max_original_source_to_w4_centerline_offset_pt']==0.3
+          assert all(z['source_primitive_ancestry_internally_consistent']
+              and not z['missing_flank_membership_proven'] for z in all_chains)
+          assert all(not g for g in r['authority_grants'].values())
+          original=json.loads(Path('artifacts/original-paired-wall-faces-shadow.json').read_text())
+          a=original['baseline_receipts']; b=original['candidate_receipts']
+          assert len(a['canonical'])==21 and len(a['quantities'])==len(a['customer_rows'])==8
+          assert sum(bool(z['host_wall_id']) for z in a['hosts'])==15
+          assert sum(bool(z['record_id']) for z in a['frames'])==9
+          assert a['quantities']==b['quantities'] and a['customer_rows']==b['customer_rows']
+          assert a['sealed_run']==b['sealed_run'] and a['customer_verification']==b['customer_verification']
+          assert not original['original_receipts_retained'] and not original['count_granted']
+          assert original['primitive_safety_cap']==20000 and not original['production_activation_granted']
+          print('Nine raw / six W4 source audits complete; no production grants')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-nine-raw-six-w4-ancestry
+          path: artifacts/original-nine-raw-six-w4.json
+          retention-days: 21
