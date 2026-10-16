@@ -49,6 +49,16 @@ Each result below names an actual separately tested guard or an inspected source
 
 Independent SHA implementation was checked against known SHA-256 test vector `sha256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad`. The source seal digest algorithm and deterministic run ID were independently recomputed from actual committed JSON with Python's canonical JSON semantics (including float confidence representation); checks are **integrity** checks, not proof of physical geometry.
 
+## Independently checked snapshot-scoped rekey compatibility (follow-up)
+
+A later read-only GPT3 pass traced the existing `tools/source_report_scoped_equality.py`: `mask_snapshot_scoped_ids` → `equal_modulo_snapshot_scoped_ids`, and `evidence_swap_matches`. **All eight** actual Lot16 archived-vs-owner-run sealed quantity bodies pass *structural* equality after masking **only** the allowlisted snapshot-scoped receipt prefixes and excluding the derived `fingerprint`. **All eight** pass the comparator's stricter receipt-set rule: at most one replaced `opening_host_binding_v3` and at most one `opening_host_frame_v2` in each of `evidence_ids` and `trace_evidence_ids`, no source observation/other evidence added or lost. Five rows rekey one host and one frame, and three rekey one host only.
+
+The same check was deliberately tested against four synthetic negative mutations of the genuine untrusted *comparands*: changed measured value, changed physical object identity, altered original source observation receipt, and a second added host receipt. All four comparisons **reject** the mutation. These are independently executed read-only comparisons, **not newly merged CI tests or approval**.
+
+**Scope of this result:** the two snapshots have compatible quantity-body **shapes**, not proven issuer/host geometry equivalence. The masked string comparator does not reissue original wall membership, frame ancestry or decision scope; it is unsafe to project customer rows, combine old/new V1 receipts, or claim new scores based on masking. Require old/new original producer-issued source records and positive same-physical/source-owner checks before a versioned lineage attestation.
+
+**Integrity vocabulary:** the V1 "signed" and "sealed" quantities use public, **unkeyed SHA-256 content fingerprints** and deterministic content-derived IDs, as directly observed in `pb_source_closed_run_export.py`; they are not an asymmetric digital signature, cryptographic authentication of the producer, or proof that a third party did not construct another self-consistent envelope. Recomputing the fingerprints detects edits against a **separately trusted pinned digest**; source authentication requires the original-PDF reissue/authority gates. Here "signed" follows the repository's historical API names and must not imply stronger security properties.
+
 ## Original owner-machine production outcomes
 
 | Project | Eligible | Machine process status | Authenticated handoff observation | First score/customer gate |
