@@ -67,6 +67,22 @@ def _low(value: Any) -> str:
     return _norm(value).lower()
 
 
+_SHEET_INDEX_HEADINGS = frozenset({
+    "drawing index", "drawing register", "drawing schedule", "sheet index", "title sheet",
+})
+
+
+def _sheet_index_heading(text: Any) -> bool:
+    """True when a line is itself a sheet-index heading, not a reference to one."""
+    for raw in str(text or "").splitlines():
+        line = _low(raw)
+        if not line or line.startswith(("refer ", "see ", "matchline ", "keynote ")):
+            continue
+        if line in _SHEET_INDEX_HEADINGS:
+            return True
+    return False
+
+
 def _manual_key(page_id: int) -> str:
     return f"{SETTING_PREFIX}{int(page_id)}_manual"
 
@@ -295,6 +311,8 @@ def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "
     it must not type a page whose own text has no sheet heading.
     """
     del file_name
+    if _sheet_index_heading(title_block) or (not _low(title_block) and _sheet_index_heading(full_text)):
+        return "Title / Drawing Register", 90, "sheet index heading"
     sources = [(_low(title_block), 12, "title block"), (_low(full_text), 2, "page text")]
     scores: Dict[str, int] = {name: 0 for name in _TYPE_RULES}
     evidence: Dict[str, List[str]] = {name: [] for name in _TYPE_RULES}
