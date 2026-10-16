@@ -20,7 +20,7 @@ A unique aligned unconnected source wall still has no DISTINCT relation. `tests/
 
 ## Proposed change
 
-Opt-in `raster_split_frame_shadow` only. After W4 IDs exist, reuse the existing orthogonal drafting-motif census on raster-only single-segment W4 records. A motif wall with no stored identity relation against a non-motif component member is accepted as DISTINCT for the whole-wall aligned-fragment gate. Unique aligned fragments, native remote strokes, SAME/AMBIGUOUS pairs, and default production stay fail-closed. Split IDs are not rekeyed.
+Opt-in `raster_split_frame_shadow` only. After W4 IDs exist, reuse the existing orthogonal drafting-motif repeat count and span fraction on raster-only single-segment W4 records. The fraction is applied to the repeated family's own along-axis occupancy, not a page or viewport bbox. A motif wall with no stored identity relation against a non-motif component member is accepted as DISTINCT for the whole-wall aligned-fragment gate. This is a repeat census, not a dimension-annotation bind. Unique aligned fragments, native remote strokes, SAME/AMBIGUOUS pairs, eight or more genuine wall-length collinear fragments, and default production stay fail-closed. Split IDs are not rekeyed.
 
 ## Independent original-source result
 
@@ -34,7 +34,7 @@ Default production is unchanged: 21 physical openings, 15 hosts, 9 complete fram
 
 Whole-wall members: `wall_037156cd6ac85472c11f`, `wall_2c74d7fb7c6a96671107`, `wall_2c98be6d134ba709b065`, `wall_e0c3801840a2de6853a6`. No new customer quantity. GPT1 metric-axis handoff is not granted.
 
-`2c31` remains `opening_host_frame_aligned_fragment_distinctness_unproven` on `:1583`. `2b2a91e8` remains `opening_host_frame_aligned_opening_binding_unavailable` because neighbour `physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f` has no host record. `dbcec9c3` remains `opening_host_frame_aligned_band_geometry_inconsistent` against already-framed 3.36 pt openings on a parallel band.
+`2c31` remains `opening_host_frame_aligned_fragment_distinctness_unproven` on `:1583`. `2b2a91e8` and `dbcec9c3` remain independently ABSTAINED; see `docs/engineering/gptmax_2b2a_dbce_frame_abstain_20261016.md`.
 
 ## Benchmark observations that must not influence implementation
 

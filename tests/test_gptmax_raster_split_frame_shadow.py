@@ -127,8 +127,8 @@ def test_extra_unproven_real_source_wall_fragment_remains_a_whole_wall_abstain()
 def _aligned_tick_records(base, center, count):
     extra=[]
     for index in range(count):
-        start=(10.0 + index * 20.0, center)
-        end=(14.5 + index * 20.0, center)
+        start=(10.0 + index * 25.0, center)
+        end=(14.5 + index * 25.0, center)
         extra.append(replace(base, wall_candidate_id=f"tick-{index}",
             physical_identity=replace(base.physical_identity,
                 candidate_identity_id=f"wall2-tick-{index}",
@@ -181,6 +181,30 @@ def test_repeated_raster_dimension_ticks_do_not_block_opt_in_shadow_frame(monkey
     voids=compose_live_physical_opening_voids(source_visibility_producer=source,
         wall_opening_composition=composition)
     assert publish_live_opening_area_quantities(voids)==()
+
+
+def test_eight_aligned_wall_fragments_remain_unproven_in_shadow(monkeypatch):
+    _source,composition,producer,bound=_fixture()
+    scope=_scope(producer,bound)
+    center=_publish(producer,bound)[0].evidence.origin_pt[1]
+    extra=[]
+    for index in range(8):
+        start=(10.0 + index * 60.0, center)
+        end=(38.0 + index * 60.0, center)
+        extra.append(replace(scope.records[0], wall_candidate_id=f"piece-{index}",
+            physical_identity=replace(scope.records[0].physical_identity,
+                candidate_identity_id=f"wall2-piece-{index}",
+                source_primitive_ids=(f"raster_segment:piece:1.0.0:{index}",),
+                edge_ids=(f"piece-edge-{index}",),
+                path_fingerprint=(start, end)),
+            wall_candidate=replace(scope.records[0].wall_candidate, centerline_pts=(start, end))))
+    shadow=_shadow(composition)
+    monkeypatch.setattr(shadow._walls,"resolve_scope",
+        lambda _s: replace(scope,records=(*scope.records, *extra)))
+    results=_publish(shadow,bound)
+    assert all(r.status is Status.ABSTAINED and
+        "opening_host_frame_aligned_fragment_distinctness_unproven" in r.reason_codes
+        for r in results)
 
 
 def test_source_corrupted_tick_geometry_cannot_mint_a_shadow_frame(monkeypatch):

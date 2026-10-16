@@ -430,16 +430,13 @@ def _raster_wall(wall_id: str, x1: float, y1: float, x2: float, y2: float, *, ra
 
 
 def test_eight_repeated_raster_ticks_are_a_drafting_motif_family() -> None:
-    ticks = [_raster_wall(f"t{idx}", float(idx * 20), 10.0, float(idx * 20 + 4.5), 10.0) for idx in range(8)]
+    ticks = [_raster_wall(f"t{idx}", float(idx * 25), 10.0, float(idx * 25 + 4.5), 10.0) for idx in range(8)]
     host = _raster_wall("host", 200.0, 10.0, 400.0, 10.0)
     unique = _raster_wall("unique", 0.0, 50.0, 6.0, 50.0)
     native = _raster_wall("native", 0.0, 80.0, 4.5, 80.0, raster=False)
     bent = _raster_wall("bent", 0.0, 90.0, 4.5, 90.0)
     bent.wall_candidate.centerline_pts = ((0.0, 90.0), (2.0, 91.0), (4.5, 90.0))
-    motif = repeated_raster_drafting_motif_wall_ids(
-        (*ticks, host, unique, native, bent),
-        page_span=1000.0,
-    )
+    motif = repeated_raster_drafting_motif_wall_ids((*ticks, host, unique, native, bent))
     assert motif == frozenset(f"t{idx}" for idx in range(8))
     assert "host" not in motif
     assert "unique" not in motif
@@ -448,26 +445,82 @@ def test_eight_repeated_raster_ticks_are_a_drafting_motif_family() -> None:
 
 
 def test_seven_repeated_raster_ticks_are_not_a_motif_family() -> None:
-    ticks = [_raster_wall(f"t{idx}", float(idx * 20), 10.0, float(idx * 20 + 4.5), 10.0) for idx in range(7)]
-    assert repeated_raster_drafting_motif_wall_ids(ticks, page_span=1000.0) == frozenset()
+    ticks = [_raster_wall(f"t{idx}", float(idx * 25), 10.0, float(idx * 25 + 4.5), 10.0) for idx in range(7)]
+    assert repeated_raster_drafting_motif_wall_ids(ticks) == frozenset()
 
 
 def test_motif_census_is_order_and_translation_invariant() -> None:
-    ticks = [_raster_wall(f"t{idx}", float(idx * 20), 10.0, float(idx * 20 + 4.5), 10.0) for idx in range(8)]
+    ticks = [_raster_wall(f"t{idx}", float(idx * 25), 10.0, float(idx * 25 + 4.5), 10.0) for idx in range(8)]
     translated = [
-        _raster_wall(f"t{idx}", float(idx * 20) + 35.0, 80.0, float(idx * 20 + 4.5) + 35.0, 80.0)
+        _raster_wall(f"t{idx}", float(idx * 25) + 35.0, 80.0, float(idx * 25 + 4.5) + 35.0, 80.0)
         for idx in range(8)
     ]
-    first = repeated_raster_drafting_motif_wall_ids(ticks, page_span=1000.0)
-    second = repeated_raster_drafting_motif_wall_ids(tuple(reversed(ticks)), page_span=1000.0)
-    third = repeated_raster_drafting_motif_wall_ids(translated, page_span=1000.0)
+    first = repeated_raster_drafting_motif_wall_ids(ticks)
+    second = repeated_raster_drafting_motif_wall_ids(tuple(reversed(ticks)))
+    third = repeated_raster_drafting_motif_wall_ids(translated)
     assert first == second == frozenset(f"t{idx}" for idx in range(8))
     assert third == first
 
 
-def test_invalid_page_span_cannot_invent_a_motif_family() -> None:
+def test_motif_census_is_viewport_expansion_invariant() -> None:
+    ticks = [_raster_wall(f"t{idx}", float(idx * 25), 10.0, float(idx * 25 + 4.5), 10.0) for idx in range(8)]
+    distant = _raster_wall("sheet", 0.0, 5000.0, 2000.0, 5000.0)
+    assert repeated_raster_drafting_motif_wall_ids(ticks) == frozenset(
+        f"t{idx}" for idx in range(8)
+    )
+    assert repeated_raster_drafting_motif_wall_ids((*ticks, distant)) == frozenset(
+        f"t{idx}" for idx in range(8)
+    )
+
+
+def test_motif_census_scales_with_the_family_not_the_page() -> None:
+    ticks = [_raster_wall(f"t{idx}", float(idx * 25), 10.0, float(idx * 25 + 4.5), 10.0) for idx in range(8)]
+    for scale in (0.5, 2.0, 10.0):
+        scaled = [
+            _raster_wall(
+                f"t{idx}",
+                float(idx * 25) * scale,
+                10.0 * scale,
+                float(idx * 25 + 4.5) * scale,
+                10.0 * scale,
+            )
+            for idx in range(8)
+        ]
+        assert repeated_raster_drafting_motif_wall_ids(scaled) == frozenset(
+            f"t{idx}" for idx in range(8)
+        )
+    assert repeated_raster_drafting_motif_wall_ids(ticks) == frozenset(
+        f"t{idx}" for idx in range(8)
+    )
+
+
+def test_eight_identical_collinear_wall_fragments_are_not_a_motif() -> None:
+    pieces = [
+        _raster_wall(f"w{idx}", float(idx * 60), 10.0, float(idx * 60 + 28.0), 10.0)
+        for idx in range(8)
+    ]
+    host = _raster_wall("host", 500.0, 10.0, 620.0, 10.0)
+    assert repeated_raster_drafting_motif_wall_ids((*pieces, host)) == frozenset()
+
+
+def test_tight_eight_tick_cluster_cannot_invent_a_motif_family() -> None:
     ticks = [_raster_wall(f"t{idx}", float(idx * 20), 10.0, float(idx * 20 + 4.5), 10.0) for idx in range(8)]
-    assert repeated_raster_drafting_motif_wall_ids(ticks, page_span=0.0) == frozenset()
-    assert repeated_raster_drafting_motif_wall_ids(ticks, page_span=float("nan")) == frozenset()
+    assert repeated_raster_drafting_motif_wall_ids(ticks) == frozenset()
+
+
+def test_sub_centipoint_length_jitter_keeps_one_signature() -> None:
+    ticks = [
+        _raster_wall(
+            f"t{idx}",
+            float(idx * 25),
+            10.0,
+            float(idx * 25 + 4.5 + (0.004 if idx % 2 else 0.0)),
+            10.0,
+        )
+        for idx in range(8)
+    ]
+    assert repeated_raster_drafting_motif_wall_ids(ticks) == frozenset(
+        f"t{idx}" for idx in range(8)
+    )
 
 

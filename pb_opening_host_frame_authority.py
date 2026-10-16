@@ -122,35 +122,6 @@ def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
     return tuple(sorted({wall_id for group in node for wall_id in group}))
 
 
-def _span_from_rect(width: float, height: float) -> float | None:
-    if not (math.isfinite(width) and math.isfinite(height)) or width <= 0.0 or height <= 0.0:
-        return None
-    short, long = min(width, height), max(width, height)
-    # A collinear-only wall census is 1-D. Using min() would collapse the
-    # motif span to stroke thickness and exclude every tick.
-    if short / long < 0.05:
-        return long
-    return short
-
-
-def _scope_page_span(wall_scope) -> float | None:
-    """Page span for the drafting-motif census, never a snap tolerance."""
-    bbox = wall_scope.viewport_bbox
-    if bbox is not None and len(bbox) == 4:
-        span = _span_from_rect(float(bbox[2]) - float(bbox[0]), float(bbox[3]) - float(bbox[1]))
-        if span is not None:
-            return span
-    xs: list[float] = []
-    ys: list[float] = []
-    for record in wall_scope.records:
-        for point in record.wall_candidate.centerline_pts or ():
-            xs.append(float(point[0]))
-            ys.append(float(point[1]))
-    if not xs or not ys:
-        return None
-    return _span_from_rect(max(xs) - min(xs), max(ys) - min(ys))
-
-
 def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for left, right, raw in equivalence.pair_classifications:
@@ -903,12 +874,7 @@ class OpeningHostFrameProducer:
         component_set = set(component_ids)
         motif_ids = frozenset()
         if self._raster_split_frame_shadow and raster_component:
-            span = _scope_page_span(wall_scope)
-            if span is not None:
-                motif_ids = repeated_raster_drafting_motif_wall_ids(
-                    wall_scope.records,
-                    page_span=span,
-                )
+            motif_ids = repeated_raster_drafting_motif_wall_ids(wall_scope.records)
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
