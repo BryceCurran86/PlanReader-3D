@@ -1,0 +1,35 @@
+{
+  "live_effect": false,
+  "native_room_name_candidates_on_page": 17,
+  "page": 3,
+  "partition": {
+    "decision_counts": {},
+    "opening_gap_candidates_with_partitions": 0
+  },
+  "region_rows": [],
+  "regions": {
+    "closure_half_width_pt": 4.0,
+    "discarded_fragments": 0,
+    "exterior_adjacent_primitives": 0,
+    "interior_only_primitives": 0,
+    "listed": 0,
+    "reason_codes": [
+      "no_structural_wall_ink"
+    ],
+    "typed_opening_chords": 0,
+    "within_wall_body_primitives": 0
+  },
+  "room_authority_granted": false,
+  "scale_authority_granted": false,
+  "segments": 1739,
+  "shadow_only": true,
+  "share_safe": true,
+  "structural": {
+    "classification_counts": {
+      "not_wall_ink": 609,
+      "unproven": 1130
+    },
+    "glyph_sized_runs": 98,
+    "opening_gap_candidates": 0
+  }
+}

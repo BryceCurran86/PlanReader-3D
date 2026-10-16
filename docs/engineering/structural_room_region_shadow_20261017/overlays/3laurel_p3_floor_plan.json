@@ -1,0 +1,3037 @@
+{
+  "live_effect": false,
+  "native_room_name_candidates_on_page": 41,
+  "page": 3,
+  "partition": {
+    "decision_counts": {
+      "not_partition_ink": 336,
+      "partition_ink_candidate": 351,
+      "unproven": 3100
+    },
+    "opening_gap_candidates_with_partitions": 463
+  },
+  "region_rows": [
+    {
+      "area_pt2": 41114.825,
+      "bbox": [
+        478.99,
+        192.71,
+        783.43,
+        336.43
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 9,
+        "paired_face_network": 17
+      },
+      "boundary_tier_counts": [
+        17,
+        9
+      ],
+      "closure_chord_count": 4,
+      "glyph_run_count": 20,
+      "gross_area_pt2": 41114.825,
+      "hole_count": 0,
+      "index": 0,
+      "inradius_pt": 71.858,
+      "multi_label": true,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            547.17,
+            252.15
+          ],
+          "text": "LIVING",
+          "trust": "not_supplied"
+        },
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            656.16,
+            252.15
+          ],
+          "text": "DINING",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          478.99,
+          192.71
+        ],
+        [
+          478.99,
+          202.56
+        ],
+        [
+          481.83,
+          202.56
+        ],
+        [
+          481.83,
+          203.77
+        ],
+        [
+          482.11,
+          203.77
+        ],
+        [
+          482.11,
+          227.01
+        ],
+        [
+          481.83,
+          227.01
+        ],
+        [
+          481.83,
+          281.72
+        ],
+        [
+          481.83,
+          282.29
+        ],
+        [
+          481.83,
+          336.43
+        ],
+        [
+          783.43,
+          336.43
+        ],
+        [
+          783.43,
+          306.1
+        ],
+        [
+          765.86,
+          306.1
+        ],
+        [
+          765.86,
+          303.83
+        ],
+        [
+          783.43,
+          303.83
+        ],
+        [
+          783.43,
+          302.42
+        ],
+        [
+          783.43,
+          299.55
+        ],
+        [
+          783.43,
+          274.92
+        ],
+        [
+          766.42,
+          274.92
+        ],
+        [
+          766.42,
+          274.47
+        ],
+        [
+          783.15,
+          274.47
+        ],
+        [
+          783.15,
+          219.93
+        ],
+        [
+          766.42,
+          219.93
+        ],
+        [
+          731.27,
+          220.09
+        ],
+        [
+          731.27,
+          237.84
+        ],
+        [
+          730.71,
+          237.84
+        ],
+        [
+          730.71,
+          275.32
+        ],
+        [
+          730.71,
+          275.32
+        ],
+        [
+          730.71,
+          292.32
+        ],
+        [
+          729.57,
+          292.32
+        ],
+        [
+          729.57,
+          220.1
+        ],
+        [
+          706.9,
+          220.1
+        ],
+        [
+          706.9,
+          219.64
+        ],
+        [
+          706.61,
+          219.64
+        ],
+        [
+          706.61,
+          192.71
+        ],
+        [
+          622.17,
+          192.71
+        ],
+        [
+          618.17,
+          192.71
+        ],
+        [
+          584.16,
+          192.71
+        ],
+        [
+          584.16,
+          192.71
+        ],
+        [
+          478.99,
+          192.71
+        ]
+      ],
+      "region_id": "structural_room_region_703e75c8f855350f56f3"
+    },
+    {
+      "area_pt2": 29210.063,
+      "bbox": [
+        783.15,
+        338.7,
+        958.33,
+        507.36
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 3,
+        "paired_face_network": 10
+      },
+      "boundary_tier_counts": [
+        10,
+        3
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 9,
+      "gross_area_pt2": 29210.063,
+      "hole_count": 0,
+      "index": 1,
+      "inradius_pt": 84.331,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            860.47,
+            427.31
+          ],
+          "text": "GARAGE",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          783.15,
+          457.75
+        ],
+        [
+          783.15,
+          502.26
+        ],
+        [
+          788.25,
+          507.36
+        ],
+        [
+          953.23,
+          507.36
+        ],
+        [
+          958.33,
+          502.26
+        ],
+        [
+          958.33,
+          338.7
+        ],
+        [
+          785.98,
+          338.7
+        ],
+        [
+          785.98,
+          340.97
+        ],
+        [
+          785.88,
+          340.97
+        ],
+        [
+          785.7,
+          406.44
+        ],
+        [
+          785.7,
+          457.75
+        ],
+        [
+          783.15,
+          457.75
+        ]
+      ],
+      "region_id": "structural_room_region_034a731ffc90be1f50e2"
+    },
+    {
+      "area_pt2": 24299.936,
+      "bbox": [
+        249.05,
+        192.71,
+        353.13,
+        457.02
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 13,
+        "paired_face_network": 24
+      },
+      "boundary_tier_counts": [
+        24,
+        13
+      ],
+      "closure_chord_count": 2,
+      "glyph_run_count": 18,
+      "gross_area_pt2": 24328.863,
+      "hole_count": 1,
+      "index": 2,
+      "inradius_pt": 52.029,
+      "multi_label": true,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            296.93,
+            442.72
+          ],
+          "text": "PANTRY",
+          "trust": "not_supplied"
+        },
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            301.62,
+            286.17
+          ],
+          "text": "LIVING",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          249.05,
+          271.52
+        ],
+        [
+          249.1,
+          351.99
+        ],
+        [
+          249.1,
+          355.99
+        ],
+        [
+          249.1,
+          401.46
+        ],
+        [
+          250.66,
+          401.46
+        ],
+        [
+          250.66,
+          426.12
+        ],
+        [
+          277.35,
+          426.12
+        ],
+        [
+          277.35,
+          371.52
+        ],
+        [
+          304.94,
+          371.52
+        ],
+        [
+          304.94,
+          372.26
+        ],
+        [
+          282.26,
+          372.26
+        ],
+        [
+          282.26,
+          426.12
+        ],
+        [
+          287.37,
+          426.12
+        ],
+        [
+          287.94,
+          426.12
+        ],
+        [
+          304.94,
+          426.12
+        ],
+        [
+          304.94,
+          428.39
+        ],
+        [
+          288.16,
+          428.39
+        ],
+        [
+          288.16,
+          457.02
+        ],
+        [
+          304.94,
+          457.02
+        ],
+        [
+          304.94,
+          457.02
+        ],
+        [
+          304.94,
+          457.02
+        ],
+        [
+          304.94,
+          457.02
+        ],
+        [
+          332.12,
+          457.02
+        ],
+        [
+          336.12,
+          457.02
+        ],
+        [
+          336.12,
+          457.02
+        ],
+        [
+          353.13,
+          457.02
+        ],
+        [
+          353.13,
+          428.67
+        ],
+        [
+          336.12,
+          428.67
+        ],
+        [
+          336.12,
+          428.22
+        ],
+        [
+          334.42,
+          428.22
+        ],
+        [
+          334.42,
+          411.21
+        ],
+        [
+          334.42,
+          411.21
+        ],
+        [
+          334.42,
+          398.2
+        ],
+        [
+          334.42,
+          394.2
+        ],
+        [
+          334.42,
+          377.19
+        ],
+        [
+          334.6,
+          377.19
+        ],
+        [
+          334.6,
+          366.77
+        ],
+        [
+          334.99,
+          366.77
+        ],
+        [
+          334.99,
+          359.45
+        ],
+        [
+          353.13,
+          359.45
+        ],
+        [
+          353.13,
+          192.71
+        ],
+        [
+          253.07,
+          192.71
+        ],
+        [
+          253.07,
+          271.52
+        ],
+        [
+          249.05,
+          271.52
+        ]
+      ],
+      "region_id": "structural_room_region_cb3f9e3b31f80bd89980"
+    },
+    {
+      "area_pt2": 19953.674,
+      "bbox": [
+        561.76,
+        338.96,
+        733.26,
+        457.47
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 20,
+        "paired_face_network": 3
+      },
+      "boundary_tier_counts": [
+        3,
+        20
+      ],
+      "closure_chord_count": 4,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 19953.674,
+      "hole_count": 0,
+      "index": 3,
+      "inradius_pt": 42.236,
+      "multi_label": true,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            691.04,
+            404.09
+          ],
+          "text": "BED 2",
+          "trust": "not_supplied"
+        },
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            669.7,
+            345.58
+          ],
+          "text": "ROBE",
+          "trust": "not_supplied"
+        },
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            620.89,
+            345.58
+          ],
+          "text": "ROBE",
+          "trust": "not_supplied"
+        },
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            604.02,
+            404.09
+          ],
+          "text": "BED 3",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          561.76,
+          340.97
+        ],
+        [
+          561.76,
+          457.47
+        ],
+        [
+          646.24,
+          457.47
+        ],
+        [
+          646.24,
+          355.99
+        ],
+        [
+          639.97,
+          355.99
+        ],
+        [
+          642.24,
+          355.99
+        ],
+        [
+          646.52,
+          355.99
+        ],
+        [
+          646.52,
+          355.71
+        ],
+        [
+          648.5,
+          355.71
+        ],
+        [
+          648.5,
+          355.99
+        ],
+        [
+          651.05,
+          355.99
+        ],
+        [
+          651.05,
+          355.99
+        ],
+        [
+          648.79,
+          355.99
+        ],
+        [
+          648.79,
+          457.47
+        ],
+        [
+          733.26,
+          457.47
+        ],
+        [
+          733.26,
+          340.97
+        ],
+        [
+          708.6,
+          340.97
+        ],
+        [
+          708.6,
+          340.13
+        ],
+        [
+          704.63,
+          340.13
+        ],
+        [
+          704.63,
+          338.96
+        ],
+        [
+          699.33,
+          339.0
+        ],
+        [
+          699.29,
+          338.98
+        ],
+        [
+          652.74,
+          338.98
+        ],
+        [
+          649.28,
+          339.04
+        ],
+        [
+          648.79,
+          338.98
+        ],
+        [
+          646.24,
+          338.98
+        ],
+        [
+          646.24,
+          338.98
+        ],
+        [
+          644.58,
+          338.99
+        ],
+        [
+          644.57,
+          338.98
+        ],
+        [
+          596.92,
+          338.98
+        ],
+        [
+          590.39,
+          339.0
+        ],
+        [
+          590.39,
+          340.13
+        ],
+        [
+          586.42,
+          340.13
+        ],
+        [
+          586.42,
+          340.97
+        ],
+        [
+          561.76,
+          340.97
+        ]
+      ],
+      "region_id": "structural_room_region_da122ed570f9a4e4ae43"
+    },
+    {
+      "area_pt2": 10657.402,
+      "bbox": [
+        884.91,
+        192.71,
+        989.23,
+        295.61
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 6
+      },
+      "boundary_tier_counts": [
+        0,
+        6
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 10657.402,
+      "hole_count": 0,
+      "index": 4,
+      "inradius_pt": 51.449,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          884.91,
+          238.07
+        ],
+        [
+          884.91,
+          266.7
+        ],
+        [
+          884.91,
+          266.7
+        ],
+        [
+          884.91,
+          267.27
+        ],
+        [
+          887.75,
+          270.1
+        ],
+        [
+          887.75,
+          295.61
+        ],
+        [
+          946.99,
+          295.61
+        ],
+        [
+          947.56,
+          295.61
+        ],
+        [
+          989.23,
+          295.61
+        ],
+        [
+          989.23,
+          192.71
+        ],
+        [
+          884.91,
+          192.71
+        ],
+        [
+          884.91,
+          234.12
+        ],
+        [
+          884.94,
+          237.48
+        ],
+        [
+          884.91,
+          237.5
+        ],
+        [
+          884.91,
+          238.07
+        ],
+        [
+          884.91,
+          238.07
+        ]
+      ],
+      "region_id": "structural_room_region_24f296e484abd16d8c36"
+    },
+    {
+      "area_pt2": 10420.627,
+      "bbox": [
+        360.5,
+        282.29,
+        478.71,
+        370.45
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4,
+        "paired_face_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 10420.627,
+      "hole_count": 0,
+      "index": 5,
+      "inradius_pt": 44.079,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            419.47,
+            324.65
+          ],
+          "text": "MEDIA",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          360.5,
+          282.29
+        ],
+        [
+          360.5,
+          370.45
+        ],
+        [
+          360.5,
+          370.45
+        ],
+        [
+          360.5,
+          370.45
+        ],
+        [
+          478.71,
+          370.45
+        ],
+        [
+          478.71,
+          282.29
+        ],
+        [
+          360.5,
+          282.29
+        ]
+      ],
+      "region_id": "structural_room_region_de3eafe606eb1c6d811a"
+    },
+    {
+      "area_pt2": 10092.548,
+      "bbox": [
+        364.19,
+        190.87,
+        478.99,
+        279.17
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 9,
+        "paired_face_network": 8
+      },
+      "boundary_tier_counts": [
+        8,
+        9
+      ],
+      "closure_chord_count": 4,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 10092.548,
+      "hole_count": 0,
+      "index": 6,
+      "inradius_pt": 44.15,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          364.19,
+          191.82
+        ],
+        [
+          364.19,
+          279.17
+        ],
+        [
+          478.71,
+          279.17
+        ],
+        [
+          478.71,
+          249.97
+        ],
+        [
+          478.99,
+          249.97
+        ],
+        [
+          478.99,
+          191.82
+        ],
+        [
+          466.26,
+          191.85
+        ],
+        [
+          462.29,
+          191.86
+        ],
+        [
+          462.27,
+          191.86
+        ],
+        [
+          462.27,
+          191.86
+        ],
+        [
+          454.28,
+          191.86
+        ],
+        [
+          454.28,
+          190.87
+        ],
+        [
+          452.46,
+          190.87
+        ],
+        [
+          452.46,
+          190.87
+        ],
+        [
+          447.46,
+          190.87
+        ],
+        [
+          443.46,
+          190.87
+        ],
+        [
+          433.46,
+          190.87
+        ],
+        [
+          433.46,
+          190.87
+        ],
+        [
+          428.46,
+          190.87
+        ],
+        [
+          424.46,
+          190.87
+        ],
+        [
+          414.46,
+          190.87
+        ],
+        [
+          414.46,
+          190.87
+        ],
+        [
+          409.46,
+          190.87
+        ],
+        [
+          405.46,
+          190.87
+        ],
+        [
+          395.46,
+          190.87
+        ],
+        [
+          395.46,
+          190.87
+        ],
+        [
+          390.46,
+          190.87
+        ],
+        [
+          386.46,
+          190.87
+        ],
+        [
+          376.65,
+          190.87
+        ],
+        [
+          376.65,
+          191.86
+        ],
+        [
+          364.19,
+          191.82
+        ]
+      ],
+      "region_id": "structural_room_region_c3a733fd0014598156aa"
+    },
+    {
+      "area_pt2": 9936.133,
+      "bbox": [
+        360.5,
+        373.0,
+        478.71,
+        457.47
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 8,
+        "paired_face_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        8
+      ],
+      "closure_chord_count": 4,
+      "glyph_run_count": 6,
+      "gross_area_pt2": 9936.133,
+      "hole_count": 0,
+      "index": 7,
+      "inradius_pt": 42.236,
+      "multi_label": true,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            410.98,
+            415.29
+          ],
+          "text": "BED 4",
+          "trust": "not_supplied"
+        },
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            471.67,
+            430.62
+          ],
+          "text": "ROBE",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          360.5,
+          373.0
+        ],
+        [
+          360.5,
+          457.47
+        ],
+        [
+          461.7,
+          457.47
+        ],
+        [
+          461.7,
+          457.47
+        ],
+        [
+          478.71,
+          457.47
+        ],
+        [
+          478.71,
+          374.98
+        ],
+        [
+          454.05,
+          374.98
+        ],
+        [
+          454.05,
+          373.0
+        ],
+        [
+          360.5,
+          373.0
+        ]
+      ],
+      "region_id": "structural_room_region_a74c9bba099cdf0cfa46"
+    },
+    {
+      "area_pt2": 8452.562,
+      "bbox": [
+        145.92,
+        271.52,
+        245.98,
+        355.99
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4,
+        "paired_face_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        4
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 8452.562,
+      "hole_count": 0,
+      "index": 8,
+      "inradius_pt": 42.236,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            196.3,
+            306.77
+          ],
+          "text": "BED 5",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          145.92,
+          271.52
+        ],
+        [
+          145.92,
+          335.15
+        ],
+        [
+          145.92,
+          335.15
+        ],
+        [
+          145.92,
+          355.99
+        ],
+        [
+          245.98,
+          355.99
+        ],
+        [
+          245.98,
+          271.52
+        ],
+        [
+          145.92,
+          271.52
+        ]
+      ],
+      "region_id": "structural_room_region_97f4b316eab3cb00c4ac"
+    },
+    {
+      "area_pt2": 6714.086,
+      "bbox": [
+        161.22,
+        190.87,
+        250.23,
+        266.41
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 9,
+        "paired_face_network": 5
+      },
+      "boundary_tier_counts": [
+        5,
+        9
+      ],
+      "closure_chord_count": 4,
+      "glyph_run_count": 3,
+      "gross_area_pt2": 6714.086,
+      "hole_count": 0,
+      "index": 9,
+      "inradius_pt": 37.772,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          161.22,
+          190.87
+        ],
+        [
+          161.22,
+          266.41
+        ],
+        [
+          249.95,
+          266.41
+        ],
+        [
+          249.95,
+          261.03
+        ],
+        [
+          250.23,
+          261.03
+        ],
+        [
+          250.23,
+          231.83
+        ],
+        [
+          249.95,
+          231.83
+        ],
+        [
+          249.95,
+          202.35
+        ],
+        [
+          250.23,
+          202.35
+        ],
+        [
+          250.23,
+          190.87
+        ],
+        [
+          239.65,
+          190.87
+        ],
+        [
+          239.65,
+          190.87
+        ],
+        [
+          234.65,
+          190.87
+        ],
+        [
+          230.65,
+          190.87
+        ],
+        [
+          220.65,
+          190.87
+        ],
+        [
+          220.65,
+          190.87
+        ],
+        [
+          215.65,
+          190.87
+        ],
+        [
+          211.65,
+          190.87
+        ],
+        [
+          201.65,
+          190.87
+        ],
+        [
+          201.65,
+          190.87
+        ],
+        [
+          196.65,
+          190.87
+        ],
+        [
+          192.65,
+          190.87
+        ],
+        [
+          182.65,
+          190.87
+        ],
+        [
+          182.65,
+          190.87
+        ],
+        [
+          177.65,
+          190.87
+        ],
+        [
+          173.65,
+          190.87
+        ],
+        [
+          161.22,
+          190.87
+        ]
+      ],
+      "region_id": "structural_room_region_ce0ff544dbba886e77b8"
+    },
+    {
+      "area_pt2": 5306.583,
+      "bbox": [
+        785.89,
+        298.16,
+        946.99,
+        336.43
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 5
+      },
+      "boundary_tier_counts": [
+        0,
+        5
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 5306.583,
+      "hole_count": 0,
+      "index": 10,
+      "inradius_pt": 18.505,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            912.62,
+            315.05
+          ],
+          "text": "ENTRY",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          785.89,
+          336.43
+        ],
+        [
+          946.99,
+          336.43
+        ],
+        [
+          946.99,
+          300.29
+        ],
+        [
+          913.54,
+          300.29
+        ],
+        [
+          913.54,
+          298.16
+        ],
+        [
+          884.91,
+          298.16
+        ],
+        [
+          884.91,
+          305.53
+        ],
+        [
+          884.91,
+          306.1
+        ],
+        [
+          884.91,
+          306.1
+        ],
+        [
+          884.35,
+          306.1
+        ],
+        [
+          785.98,
+          306.1
+        ],
+        [
+          785.89,
+          336.43
+        ]
+      ],
+      "region_id": "structural_room_region_9431c193ea76b0757954"
+    },
+    {
+      "area_pt2": 4345.581,
+      "bbox": [
+        145.92,
+        359.11,
+        190.42,
+        457.47
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 8,
+        "paired_face_network": 18
+      },
+      "boundary_tier_counts": [
+        18,
+        8
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 3,
+      "gross_area_pt2": 4345.581,
+      "hole_count": 0,
+      "index": 11,
+      "inradius_pt": 22.252,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            162.6,
+            387.44
+          ],
+          "text": "WIR",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          145.92,
+          378.24
+        ],
+        [
+          145.92,
+          444.71
+        ],
+        [
+          177.21,
+          444.71
+        ],
+        [
+          177.21,
+          445.73
+        ],
+        [
+          145.92,
+          445.73
+        ],
+        [
+          145.92,
+          457.47
+        ],
+        [
+          190.42,
+          457.47
+        ],
+        [
+          190.42,
+          359.11
+        ],
+        [
+          145.92,
+          359.11
+        ],
+        [
+          145.92,
+          378.24
+        ],
+        [
+          145.92,
+          378.24
+        ]
+      ],
+      "region_id": "structural_room_region_bf39788db93303edb029"
+    },
+    {
+      "area_pt2": 3164.594,
+      "bbox": [
+        481.54,
+        340.13,
+        559.21,
+        401.63
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 5
+      },
+      "boundary_tier_counts": [
+        0,
+        5
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 3164.594,
+      "hole_count": 0,
+      "index": 12,
+      "inradius_pt": 16.383,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          481.54,
+          373.0
+        ],
+        [
+          481.54,
+          401.63
+        ],
+        [
+          559.21,
+          401.63
+        ],
+        [
+          559.21,
+          340.13
+        ],
+        [
+          530.58,
+          340.13
+        ],
+        [
+          530.58,
+          372.43
+        ],
+        [
+          530.58,
+          373.0
+        ],
+        [
+          530.58,
+          373.0
+        ],
+        [
+          530.01,
+          373.0
+        ],
+        [
+          481.54,
+          373.0
+        ]
+      ],
+      "region_id": "structural_room_region_89d67deb487b61491f0b"
+    },
+    {
+      "area_pt2": 2706.753,
+      "bbox": [
+        709.16,
+        179.96,
+        783.43,
+        216.53
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4,
+        "paired_face_network": 17
+      },
+      "boundary_tier_counts": [
+        17,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 2706.753,
+      "hole_count": 0,
+      "index": 13,
+      "inradius_pt": 18.283,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          709.16,
+          179.96
+        ],
+        [
+          709.16,
+          216.07
+        ],
+        [
+          719.09,
+          216.07
+        ],
+        [
+          719.09,
+          216.53
+        ],
+        [
+          773.51,
+          216.53
+        ],
+        [
+          773.51,
+          216.07
+        ],
+        [
+          783.43,
+          216.07
+        ],
+        [
+          783.43,
+          179.96
+        ],
+        [
+          709.16,
+          179.96
+        ]
+      ],
+      "region_id": "structural_room_region_a2991139337b5c7084b2"
+    },
+    {
+      "area_pt2": 2164.168,
+      "bbox": [
+        739.36,
+        370.16,
+        764.87,
+        454.99
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4
+      },
+      "boundary_tier_counts": [
+        0,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 2164.168,
+      "hole_count": 0,
+      "index": 14,
+      "inradius_pt": 12.756,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          739.36,
+          370.16
+        ],
+        [
+          739.36,
+          454.99
+        ],
+        [
+          764.87,
+          454.99
+        ],
+        [
+          764.87,
+          370.16
+        ],
+        [
+          739.36,
+          370.16
+        ]
+      ],
+      "region_id": "structural_room_region_42d2d284bf72cc25117b"
+    },
+    {
+      "area_pt2": 1910.502,
+      "bbox": [
+        996.6,
+        233.82,
+        1026.65,
+        310.64
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 3,
+        "paired_face_network": 1
+      },
+      "boundary_tier_counts": [
+        1,
+        3
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 1910.502,
+      "hole_count": 0,
+      "index": 15,
+      "inradius_pt": 12.623,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          996.6,
+          234.1
+        ],
+        [
+          996.6,
+          309.59
+        ],
+        [
+          1007.9,
+          309.59
+        ],
+        [
+          1007.9,
+          310.64
+        ],
+        [
+          1020.13,
+          310.64
+        ],
+        [
+          1020.13,
+          266.93
+        ],
+        [
+          1022.11,
+          266.93
+        ],
+        [
+          1022.11,
+          245.72
+        ],
+        [
+          1026.65,
+          245.72
+        ],
+        [
+          1026.65,
+          233.82
+        ],
+        [
+          1013.32,
+          233.82
+        ],
+        [
+          1013.32,
+          234.1
+        ],
+        [
+          996.6,
+          234.1
+        ]
+      ],
+      "region_id": "structural_room_region_d938c49a43b9963f2f5a"
+    },
+    {
+      "area_pt2": 1896.439,
+      "bbox": [
+        836.16,
+        192.71,
+        882.36,
+        235.52
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 9,
+        "paired_face_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        9
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 1896.439,
+      "hole_count": 0,
+      "index": 16,
+      "inradius_pt": 20.647,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            856.93,
+            206.04
+          ],
+          "text": "WIR",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          836.16,
+          192.71
+        ],
+        [
+          836.16,
+          221.06
+        ],
+        [
+          840.98,
+          216.24
+        ],
+        [
+          840.98,
+          216.24
+        ],
+        [
+          840.98,
+          235.52
+        ],
+        [
+          882.36,
+          235.52
+        ],
+        [
+          882.36,
+          192.71
+        ],
+        [
+          836.16,
+          192.71
+        ]
+      ],
+      "region_id": "structural_room_region_2b34b0560c3ab30011f3"
+    },
+    {
+      "area_pt2": 1675.359,
+      "bbox": [
+        212.11,
+        378.46,
+        245.98,
+        429.48
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4
+      },
+      "boundary_tier_counts": [
+        0,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 1675.359,
+      "hole_count": 0,
+      "index": 17,
+      "inradius_pt": 16.344,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            228.65,
+            384.44
+          ],
+          "text": "BATH",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          212.11,
+          378.46
+        ],
+        [
+          212.11,
+          429.48
+        ],
+        [
+          244.17,
+          429.48
+        ],
+        [
+          244.17,
+          425.08
+        ],
+        [
+          244.17,
+          425.08
+        ],
+        [
+          244.17,
+          425.08
+        ],
+        [
+          244.17,
+          400.29
+        ],
+        [
+          245.98,
+          400.29
+        ],
+        [
+          245.98,
+          378.46
+        ],
+        [
+          212.11,
+          378.46
+        ]
+      ],
+      "region_id": "structural_room_region_8a5222d94380f6c90168"
+    },
+    {
+      "area_pt2": 1409.771,
+      "bbox": [
+        841.26,
+        269.25,
+        882.36,
+        303.55
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 8
+      },
+      "boundary_tier_counts": [
+        0,
+        8
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 1409.771,
+      "hole_count": 0,
+      "index": 18,
+      "inradius_pt": 17.149,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            856.93,
+            282.3
+          ],
+          "text": "WIR",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          841.26,
+          269.25
+        ],
+        [
+          841.26,
+          303.55
+        ],
+        [
+          882.36,
+          303.55
+        ],
+        [
+          882.36,
+          269.25
+        ],
+        [
+          841.26,
+          269.25
+        ]
+      ],
+      "region_id": "structural_room_region_4508521d090f005d5c22"
+    },
+    {
+      "area_pt2": 1345.099,
+      "bbox": [
+        785.98,
+        276.41,
+        838.71,
+        301.92
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4
+      },
+      "boundary_tier_counts": [
+        0,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 3,
+      "gross_area_pt2": 1345.099,
+      "hole_count": 0,
+      "index": 19,
+      "inradius_pt": 12.756,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          785.98,
+          276.41
+        ],
+        [
+          785.98,
+          301.92
+        ],
+        [
+          838.71,
+          301.92
+        ],
+        [
+          838.71,
+          276.41
+        ],
+        [
+          785.98,
+          276.41
+        ]
+      ],
+      "region_id": "structural_room_region_078d881d9ff121466dd6"
+    },
+    {
+      "area_pt2": 1322.762,
+      "bbox": [
+        766.42,
+        367.61,
+        781.88,
+        453.22
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 8
+      },
+      "boundary_tier_counts": [
+        0,
+        8
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 7,
+      "gross_area_pt2": 1322.762,
+      "hole_count": 0,
+      "index": 20,
+      "inradius_pt": 7.726,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": true,
+          "centre": [
+            771.08,
+            429.14
+          ],
+          "text": "LAUNDRY",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          766.42,
+          367.61
+        ],
+        [
+          766.42,
+          453.22
+        ],
+        [
+          781.88,
+          453.22
+        ],
+        [
+          781.88,
+          367.61
+        ],
+        [
+          766.42,
+          367.61
+        ]
+      ],
+      "region_id": "structural_room_region_e7838d58e785b965b7cb"
+    },
+    {
+      "area_pt2": 1268.925,
+      "bbox": [
+        735.81,
+        340.97,
+        783.43,
+        367.61
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2
+      },
+      "boundary_tier_counts": [
+        0,
+        2
+      ],
+      "closure_chord_count": 2,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 1268.925,
+      "hole_count": 0,
+      "index": 21,
+      "inradius_pt": 13.323,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          735.81,
+          340.97
+        ],
+        [
+          735.81,
+          367.61
+        ],
+        [
+          783.43,
+          367.61
+        ],
+        [
+          783.43,
+          340.97
+        ],
+        [
+          735.81,
+          340.97
+        ]
+      ],
+      "region_id": "structural_room_region_0405e575d25cd06879e1"
+    },
+    {
+      "area_pt2": 1267.423,
+      "bbox": [
+        807.39,
+        218.23,
+        832.9,
+        267.91
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 3,
+        "paired_face_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        3
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 1267.423,
+      "hole_count": 0,
+      "index": 22,
+      "inradius_pt": 12.756,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": true,
+          "centre": [
+            815.98,
+            243.59
+          ],
+          "text": "ENS",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          807.39,
+          218.23
+        ],
+        [
+          807.39,
+          267.91
+        ],
+        [
+          832.9,
+          267.91
+        ],
+        [
+          832.9,
+          218.23
+        ],
+        [
+          807.39,
+          218.23
+        ]
+      ],
+      "region_id": "structural_room_region_f9ab64a5e50b0fad823c"
+    },
+    {
+      "area_pt2": 1261.863,
+      "bbox": [
+        509.75,
+        429.48,
+        559.21,
+        454.99
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4
+      },
+      "boundary_tier_counts": [
+        0,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 9,
+      "gross_area_pt2": 1261.863,
+      "hole_count": 0,
+      "index": 23,
+      "inradius_pt": 12.756,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          509.75,
+          429.48
+        ],
+        [
+          509.75,
+          454.99
+        ],
+        [
+          559.21,
+          454.99
+        ],
+        [
+          559.21,
+          429.48
+        ],
+        [
+          509.75,
+          429.48
+        ]
+      ],
+      "region_id": "structural_room_region_af039f8eb715e921e22d"
+    },
+    {
+      "area_pt2": 1249.899,
+      "bbox": [
+        509.75,
+        404.18,
+        559.21,
+        429.48
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4
+      },
+      "boundary_tier_counts": [
+        0,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 10,
+      "gross_area_pt2": 1249.899,
+      "hole_count": 0,
+      "index": 24,
+      "inradius_pt": 12.651,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": true,
+          "centre": [
+            522.21,
+            415.09
+          ],
+          "text": "BATH",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          509.75,
+          404.18
+        ],
+        [
+          509.75,
+          429.48
+        ],
+        [
+          559.21,
+          429.48
+        ],
+        [
+          559.21,
+          405.09
+        ],
+        [
+          555.72,
+          404.18
+        ],
+        [
+          509.75,
+          404.18
+        ]
+      ],
+      "region_id": "structural_room_region_eba3248678fc36b51679"
+    },
+    {
+      "area_pt2": 1193.231,
+      "bbox": [
+        949.83,
+        310.64,
+        996.6,
+        336.15
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4,
+        "heaviest_single_stroke_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 1193.231,
+      "hole_count": 0,
+      "index": 25,
+      "inradius_pt": 12.756,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          949.83,
+          310.64
+        ],
+        [
+          949.83,
+          336.15
+        ],
+        [
+          996.6,
+          336.15
+        ],
+        [
+          996.6,
+          310.64
+        ],
+        [
+          949.83,
+          310.64
+        ]
+      ],
+      "region_id": "structural_room_region_134a63de14eabb1bf65a"
+    },
+    {
+      "area_pt2": 1176.761,
+      "bbox": [
+        841.26,
+        238.07,
+        882.36,
+        266.7
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 3
+      },
+      "boundary_tier_counts": [
+        0,
+        3
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 1176.761,
+      "hole_count": 0,
+      "index": 26,
+      "inradius_pt": 14.315,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          841.26,
+          238.07
+        ],
+        [
+          841.26,
+          266.7
+        ],
+        [
+          841.26,
+          266.7
+        ],
+        [
+          841.26,
+          266.7
+        ],
+        [
+          882.36,
+          266.7
+        ],
+        [
+          882.36,
+          238.07
+        ],
+        [
+          841.26,
+          238.07
+        ]
+      ],
+      "region_id": "structural_room_region_752f070b91196b3fc37a"
+    },
+    {
+      "area_pt2": 1137.789,
+      "bbox": [
+        336.12,
+        360.18,
+        352.85,
+        428.22
+      ],
+      "boundary_evidence_kinds": {
+        "paired_face_network": 9
+      },
+      "boundary_tier_counts": [
+        9,
+        0
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 8,
+      "gross_area_pt2": 1137.789,
+      "hole_count": 0,
+      "index": 27,
+      "inradius_pt": 8.362,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          336.12,
+          360.18
+        ],
+        [
+          336.12,
+          428.22
+        ],
+        [
+          352.85,
+          428.22
+        ],
+        [
+          352.85,
+          360.18
+        ],
+        [
+          336.12,
+          360.18
+        ]
+      ],
+      "region_id": "structural_room_region_76ec4ef4d25eb65aaa74"
+    },
+    {
+      "area_pt2": 1029.283,
+      "bbox": [
+        996.6,
+        310.64,
+        1026.65,
+        348.9
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 1,
+        "heaviest_single_stroke_network": 1
+      },
+      "boundary_tier_counts": [
+        1,
+        1
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 1029.283,
+      "hole_count": 0,
+      "index": 28,
+      "inradius_pt": 12.756,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          996.6,
+          310.64
+        ],
+        [
+          996.6,
+          336.15
+        ],
+        [
+          996.6,
+          348.9
+        ],
+        [
+          1026.65,
+          348.9
+        ],
+        [
+          1026.65,
+          335.58
+        ],
+        [
+          1022.11,
+          335.58
+        ],
+        [
+          1022.11,
+          314.38
+        ],
+        [
+          1020.13,
+          314.38
+        ],
+        [
+          1020.13,
+          310.64
+        ],
+        [
+          996.6,
+          310.64
+        ]
+      ],
+      "region_id": "structural_room_region_853e06df71f46796650e"
+    },
+    {
+      "area_pt2": 963.627,
+      "bbox": [
+        148.47,
+        190.87,
+        161.22,
+        266.41
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2
+      },
+      "boundary_tier_counts": [
+        0,
+        2
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 963.627,
+      "hole_count": 0,
+      "index": 29,
+      "inradius_pt": 6.378,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          148.47,
+          190.87
+        ],
+        [
+          148.47,
+          266.41
+        ],
+        [
+          161.22,
+          266.41
+        ],
+        [
+          161.22,
+          190.87
+        ],
+        [
+          148.47,
+          190.87
+        ]
+      ],
+      "region_id": "structural_room_region_84cab040310d94dde5d2"
+    },
+    {
+      "area_pt2": 908.965,
+      "bbox": [
+        192.97,
+        378.46,
+        212.11,
+        429.48
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2,
+        "paired_face_network": 1
+      },
+      "boundary_tier_counts": [
+        1,
+        2
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 908.965,
+      "hole_count": 0,
+      "index": 30,
+      "inradius_pt": 9.171,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          192.97,
+          406.45
+        ],
+        [
+          192.97,
+          429.48
+        ],
+        [
+          212.11,
+          429.48
+        ],
+        [
+          212.11,
+          406.45
+        ],
+        [
+          209.98,
+          406.45
+        ],
+        [
+          209.98,
+          378.46
+        ],
+        [
+          193.26,
+          378.46
+        ],
+        [
+          193.26,
+          406.45
+        ],
+        [
+          192.97,
+          406.45
+        ]
+      ],
+      "region_id": "structural_room_region_b396bfaf28064226427b"
+    },
+    {
+      "area_pt2": 703.734,
+      "bbox": [
+        484.24,
+        344.44,
+        526.76,
+        361.45
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 4
+      },
+      "boundary_tier_counts": [
+        0,
+        4
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 703.734,
+      "hole_count": 0,
+      "index": 31,
+      "inradius_pt": 8.504,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            514.75,
+            350.34
+          ],
+          "text": "WC",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          484.24,
+          344.44
+        ],
+        [
+          484.24,
+          359.96
+        ],
+        [
+          497.27,
+          359.96
+        ],
+        [
+          497.27,
+          361.45
+        ],
+        [
+          526.76,
+          361.45
+        ],
+        [
+          526.76,
+          344.44
+        ],
+        [
+          484.24,
+          344.44
+        ]
+      ],
+      "region_id": "structural_room_region_5387d1d33617206bb88b"
+    },
+    {
+      "area_pt2": 614.696,
+      "bbox": [
+        807.39,
+        192.71,
+        832.9,
+        216.81
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2,
+        "paired_face_network": 4
+      },
+      "boundary_tier_counts": [
+        4,
+        2
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 614.696,
+      "hole_count": 0,
+      "index": 32,
+      "inradius_pt": 12.047,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          807.39,
+          192.71
+        ],
+        [
+          807.39,
+          216.81
+        ],
+        [
+          832.9,
+          216.81
+        ],
+        [
+          832.9,
+          192.71
+        ],
+        [
+          807.39,
+          192.71
+        ]
+      ],
+      "region_id": "structural_room_region_33dea58268796a095849"
+    },
+    {
+      "area_pt2": 576.035,
+      "bbox": [
+        212.11,
+        361.45,
+        245.98,
+        378.46
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2
+      },
+      "boundary_tier_counts": [
+        0,
+        2
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 576.035,
+      "hole_count": 0,
+      "index": 33,
+      "inradius_pt": 8.504,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          212.11,
+          361.45
+        ],
+        [
+          212.11,
+          378.46
+        ],
+        [
+          245.98,
+          378.46
+        ],
+        [
+          245.98,
+          361.45
+        ],
+        [
+          212.11,
+          361.45
+        ]
+      ],
+      "region_id": "structural_room_region_68a64c36b2385afd6133"
+    },
+    {
+      "area_pt2": 561.58,
+      "bbox": [
+        949.83,
+        293.91,
+        996.6,
+        310.64
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2,
+        "paired_face_network": 5
+      },
+      "boundary_tier_counts": [
+        5,
+        2
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 0,
+      "gross_area_pt2": 561.58,
+      "hole_count": 0,
+      "index": 34,
+      "inradius_pt": 6.019,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          949.83,
+          300.29
+        ],
+        [
+          949.83,
+          310.64
+        ],
+        [
+          979.12,
+          310.64
+        ],
+        [
+          979.12,
+          309.59
+        ],
+        [
+          996.6,
+          309.59
+        ],
+        [
+          996.6,
+          293.91
+        ],
+        [
+          992.06,
+          298.45
+        ],
+        [
+          950.11,
+          298.45
+        ],
+        [
+          950.11,
+          300.29
+        ],
+        [
+          949.83,
+          300.29
+        ]
+      ],
+      "region_id": "structural_room_region_91d2b512ee673e6a7101"
+    },
+    {
+      "area_pt2": 545.301,
+      "bbox": [
+        212.11,
+        437.98,
+        244.17,
+        454.99
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 3
+      },
+      "boundary_tier_counts": [
+        0,
+        3
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 545.301,
+      "hole_count": 0,
+      "index": 35,
+      "inradius_pt": 8.504,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          212.11,
+          437.98
+        ],
+        [
+          212.11,
+          454.99
+        ],
+        [
+          244.17,
+          454.99
+        ],
+        [
+          244.17,
+          437.98
+        ],
+        [
+          212.11,
+          437.98
+        ]
+      ],
+      "region_id": "structural_room_region_e8cea54f8a4189233dc1"
+    },
+    {
+      "area_pt2": 488.141,
+      "bbox": [
+        958.33,
+        336.15,
+        996.6,
+        348.9
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2,
+        "heaviest_single_stroke_network": 1
+      },
+      "boundary_tier_counts": [
+        1,
+        2
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 488.141,
+      "hole_count": 0,
+      "index": 36,
+      "inradius_pt": 6.378,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          958.33,
+          336.15
+        ],
+        [
+          958.33,
+          348.9
+        ],
+        [
+          996.6,
+          348.9
+        ],
+        [
+          996.6,
+          336.15
+        ],
+        [
+          958.33,
+          336.15
+        ]
+      ],
+      "region_id": "structural_room_region_e1dd02bab537ecb38f79"
+    },
+    {
+      "area_pt2": 422.475,
+      "bbox": [
+        790.38,
+        218.23,
+        798.88,
+        267.91
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2
+      },
+      "boundary_tier_counts": [
+        0,
+        2
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 2,
+      "gross_area_pt2": 422.475,
+      "hole_count": 0,
+      "index": 37,
+      "inradius_pt": 4.252,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          790.38,
+          218.23
+        ],
+        [
+          790.38,
+          267.91
+        ],
+        [
+          798.88,
+          267.91
+        ],
+        [
+          798.88,
+          218.23
+        ],
+        [
+          790.38,
+          218.23
+        ]
+      ],
+      "region_id": "structural_room_region_9f0e889b4e6516902681"
+    }
+  ],
+  "regions": {
+    "closure_half_width_pt": 4.0,
+    "discarded_fragments": 10,
+    "exterior_adjacent_primitives": 99,
+    "interior_only_primitives": 325,
+    "listed": 38,
+    "reason_codes": [],
+    "typed_opening_chords": 307,
+    "within_wall_body_primitives": 787
+  },
+  "room_authority_granted": false,
+  "scale_authority_granted": false,
+  "segments": 9977,
+  "shadow_only": true,
+  "share_safe": true,
+  "structural": {
+    "classification_counts": {
+      "not_wall_ink": 997,
+      "unproven": 8120,
+      "wall_network_ink_candidate": 860
+    },
+    "glyph_sized_runs": 409,
+    "opening_gap_candidates": 369
+  }
+}
