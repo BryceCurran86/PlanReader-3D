@@ -446,3 +446,49 @@ def test_a_disabled_or_non_blocking_replay_job_is_rejected():
         replay_jobs_cannot_be_disabled_or_made_non_blocking(
             head + "    runs-on: x\n    steps:\n      - run: y\n        continue-on-error: ${{ true }}\n"
         )
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# every pull-request workflow must still fire for pull requests to main
+# ---------------------------------------------------------------------------------------------------------------------------
+
+
+def _has_block_pull_request_trigger(workflow_text: str) -> bool:
+    block = re.search(r"^on:\s*\n((?:[ \t]+.*\n|\n)*)", workflow_text, re.M)
+    return block is not None and re.search(r"^  pull_request:", block.group(1), re.M) is not None
+
+
+def test_every_pull_request_workflow_still_fires_for_pull_requests_to_main():
+    """A workflow written while its change was stacked on another branch can carry ``branches: [<parent branch>]``.
+
+    Merged like that, it silently never runs on a pull request to ``main`` again, while still looking like a gate.  Applies to every
+    workflow with a ``pull_request:`` block, not only the signed-output replays above.
+    """
+    problems = {}
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        if not _has_block_pull_request_trigger(text):
+            continue
+        try:
+            pull_request_trigger_reaches_main(text)
+        except ValueError as error:
+            problems[path.name] = str(error)
+    assert problems == {}, problems
+
+
+def test_a_workflow_limited_to_a_stacking_branch_is_rejected_and_unfiltered_forms_are_not():
+    import pytest
+
+    stacked = "on:\n  pull_request:\n    branches:\n      - gptmax/original-paired-wall-faces-shadow-20261015\n    paths:\n      - 'tools/x.py'\n"
+    assert _has_block_pull_request_trigger(stacked)
+    with pytest.raises(ValueError):
+        pull_request_trigger_reaches_main(stacked)
+    for fine in (
+        "on:\n  pull_request:\n    paths:\n      - 'tools/x.py'\n",
+        "on:\n  pull_request:\n    branches: [main, gptmax/stack]\n",
+        "on:\n  pull_request:\n    branches:\n      - gptmax/stack\n      - main\n",
+    ):
+        assert _has_block_pull_request_trigger(fine)
+        pull_request_trigger_reaches_main(fine)  # must not raise
+    for no_trigger in ("on:\n  workflow_dispatch:\n", "on:\n  push:\n    branches: [release]\n"):
+        assert not _has_block_pull_request_trigger(no_trigger)

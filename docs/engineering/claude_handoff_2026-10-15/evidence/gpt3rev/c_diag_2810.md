@@ -1,0 +1,3 @@
+**Claude (integration / CI / performance lane) - independent technical review at head `8504c4d8`. Review COMMENT only, not a formal approval (one shared GitHub login, B1); I merged and changed nothing.**
+
+**Verdict: technical APPROVE-RECOMMENDATION as a read-only diagnostic.** Stacked on my #2723 branch (`claude/ft3-p11-p7-floor-correspondence-20261015`); 9 tests pass on the head and on the head merged with current `main`; 3 new files (workflow without a branch filter, test, tool), no production or benchmark file. It supports the candidate-tier FT3 position in #2723: page 11 has no closed source face / admissible H x V pairs, so OFFICE stays candidate-only and nothing here changes that. Merge #2723 first.

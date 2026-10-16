@@ -26,8 +26,14 @@ def test_batch_original_native_components_match_scalar_with_final_reproof():
             )
             assert first == second == original
             assert first is not second
-            assert wrapped.call_count == 2
-        assert wrapped.call_count == 4
+            # Entry authenticates the whole visible source once; its cap
+            # evidence proof reuses that fresh read instead of repeating it.
+            assert wrapped.call_count == 1
+        # Exit authenticates the whole visible source once more; the final
+        # cap evidence reproof reuses that fresh read (it used to repeat the
+        # identical read, i.e. 2 + 2 back-to-back). Source bytes, every text
+        # receipt and the full-page geometry are still re-proved by that call.
+        assert wrapped.call_count == 2
     assert source._native_dimension_proof_batch is None
     assert source.native_dimension_cap_evidence(selector, opening_support_ids=support) == original
 
