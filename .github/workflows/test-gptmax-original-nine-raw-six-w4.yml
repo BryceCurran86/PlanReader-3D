@@ -2,6 +2,7 @@ name: GPT MAX Original Nine Raw and Six W4 Ancestry
 on:
   pull_request:
     branches:
+      - main
       - gptmax/lot16-hostless-source-ownership-census-20261015
     paths:
       - tools/diag_gptmax_original_raw_and_w4_ancestry.py
