@@ -192,9 +192,9 @@ def inspect_signed_v1_replay(
         "candidate_customer_verified": fresh_customer_verified,
         "original_source_package_complete_in_both_seals": source_scope_complete,
         "historical_v1_byte_exact": historical_exact,
-        "safe_to_reuse_archived_customers_with_candidate": (
-            historical_exact and fresh_customer_verified
-        ),
+        # An exact V1 comparison is insufficient to authenticate a NEW source
+        # issuer/snapshot or complete original package; never grant reuse here.
+        "safe_to_reuse_archived_customers_with_candidate": False,
         "source_issuer_scope_attestation_proven": False,
         "new_firm_quantities_authorized": 0,
         "receipt_status_counts": dict(sorted(summary.items())),
