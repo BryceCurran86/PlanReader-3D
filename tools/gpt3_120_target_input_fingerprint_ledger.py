@@ -48,6 +48,8 @@ def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
     """Copy post-evaluator item states ONLY from a complete published suite."""
     if report.get("publication_status") != "PUBLISHED":
         return {}
+    if any(m.status != "VERIFIED" or not m.source_package_complete for m in manifests):
+        raise ValueError("official publication requires VERIFIED frozen project manifests")
     official = report.get("official_suite_result")
     if not isinstance(official, dict) or official.get("publication_status") != "PUBLISHED":
         raise ValueError("published claim lacks authoritative official suite report")
