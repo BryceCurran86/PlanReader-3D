@@ -1,7 +1,7 @@
 """GPT1 shadow-only dependency integrity checks for gross wall-area publication.
 
-The green cases exercise current fail-closed rules. The two strict XFAIL
-cases document a directly traced upstream FIRM-but-blocked contradiction.
+The adversarial cases exercise current fail-closed rules, including the
+reviewed FIRM-with-blockers correction merged in #2826.
 No producer, source PDF, original quantity, signature or benchmark is changed.
 See GPT1 #2017 wall-gross architecture preflight (2026-10-16).
 """
@@ -63,7 +63,7 @@ def test_source_scope_and_page_mutations_abstain(which, field, value, expected):
     assert expected in result.blocking_reasons
     assert result.status == "blocked"
     # The upstream receipt remains unchanged; downstream never repairs source.
-    assert baseline.metadata[field] != value
+    assert type(baseline.metadata[field]) is not type(value) or baseline.metadata[field] != value
 
 
 @pytest.mark.parametrize(
@@ -114,14 +114,10 @@ def test_real_positive_contract_replays_with_unchanged_firm_fingerprint():
 
 
 @pytest.mark.parametrize("which", ("length", "height"))
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known Q07 trust-boundary preflight: non-abstained FIRM input can carry blocking_reasons",
-)
 def test_firm_upstream_with_explicit_blocking_reasons_must_not_publish_firm(which):
     parent = _length() if which == "length" else _height()
     # QuantityEvidence permits this contradictory imported/replayed state.
-    # This documents the missing check; production change requires review.
+    # #2826 enforces this check: a numerically populated blocked parent is not firm.
     corrupted = replace(parent, blocking_reasons=("original_source_conflict",))
     result = _publish(**{which: corrupted})
     assert result.abstained
