@@ -1708,6 +1708,92 @@ def _extract_scales_for_bbox(page: Any, bbox: Sequence[float]) -> tuple[Optional
     return raw, value, False, []
 
 
+def _source_connected_native_cell_family_shadow(
+    frame: Sequence[float], page: Any,
+) -> bool:
+    """Opt-in positive source shared-edge gate for external schedule cells.
+
+    The legacy table heuristic checks periodic rectangle CENTRES. Here a
+    family must additionally have an actually connected >=8-cell component
+    with source-shared edges in both native axes. No proximity, room labels,
+    nearest-frame ranking or inferred missing edges. This cannot prove text,
+    schedule identity, glyph, clip or real physical construction walls.
+    Performance-fail-closed cap is separate from the frozen raster cap.
+    """
+    width = float(frame[2]) - float(frame[0])
+    height = float(frame[3]) - float(frame[1])
+    if width <= 0 or height <= 0:
+        return False
+    area = width * height
+    families: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
+    candidates = _page_rectangle_primitives(page)
+    if len(candidates) > 20000:
+        return False  # native source inventory exceeds bounded shadow scope
+    for rect in candidates:
+        if not _bbox_contains(frame, rect, margin=1.0):
+            continue
+        rect_area = _bbox_area(rect)
+        if not (4.0 < rect_area < 0.15 * area):
+            continue
+        key = (
+            round((rect[2]-rect[0])/width, _TABLE_CELL_DIMENSION_ROUND_DIGITS),
+            round((rect[3]-rect[1])/height, _TABLE_CELL_DIMENSION_ROUND_DIGITS),
+        )
+        families.setdefault(key, []).append(rect)
+
+    tolerance = 0.01  # native PDF numerical exactness, NOT W2 wall snap
+    for cells in families.values():
+        n = len(cells)
+        if n < _TABLE_CELL_COUNT:
+            continue
+        if n > 512:
+            return False  # unknown source cell universe, never first/partial
+        parent = list(range(n))
+        shared_axes: list[tuple[int, int, str]] = []
+
+        def root(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i, left in enumerate(cells):
+            for j in range(i+1, n):
+                right = cells[j]
+                axis = None
+                if (
+                    min(abs(left[2]-right[0]), abs(right[2]-left[0])) <= tolerance
+                    and min(left[3],right[3])-max(left[1],right[1]) > tolerance
+                ):
+                    axis = "x"
+                elif (
+                    min(abs(left[3]-right[1]), abs(right[3]-left[1])) <= tolerance
+                    and min(left[2],right[2])-max(left[0],right[0]) > tolerance
+                ):
+                    axis = "y"
+                if axis is None:
+                    continue
+                ri, rj = root(i), root(j)
+                if ri != rj:
+                    parent[rj] = ri
+                shared_axes.append((i,j,axis))
+
+        components: dict[int, list[int]] = {}
+        for i in range(n):
+            components.setdefault(root(i), []).append(i)
+        for members in components.values():
+            if len(members) < _TABLE_CELL_COUNT:
+                continue
+            owned = set(members)
+            axes = {
+                axis for i,j,axis in shared_axes
+                if i in owned and j in owned
+            }
+            if axes == {"x","y"}:
+                return True
+    return False
+
+
 def _frame_resolved_viewports(
     page: Any,
     anchors: Sequence[_TitleAnchor],
@@ -1715,7 +1801,10 @@ def _frame_resolved_viewports(
     calibration: ViewportLayoutCalibration,
     *,
     page_number: int,
+    source_connected_table_cell_shadow: bool = False,
 ) -> tuple[list[SegmentedViewport], set[int]]:
+    if type(source_connected_table_cell_shadow) is not bool:
+        raise ValueError("source_table_shadow_requires_explicit_bool")
     fragments = _text_fragments(page)
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
@@ -1769,6 +1858,14 @@ def _frame_resolved_viewports(
                     # frames constitute an unresolved semantic ownership
                     # conflict (Maryborough page 11), not permission to
                     # choose the physically closest plan grid.
+                    if source_connected_table_cell_shadow:
+                        # A dense plan grid can mimic table cell CENTRES. Do not
+                        # mistake isolated fixture rectangles for source cells.
+                        # Shadow only: normal source publication is unchanged.
+                        true_cell_tables = [
+                            frame for frame in true_cell_tables
+                            if _source_connected_native_cell_family_shadow(frame, page)
+                        ]
                     if true_cell_tables:
                         external_source_owned = true_cell_tables
                     else:
@@ -2868,7 +2965,12 @@ def segment_source_page_viewports(
     )
 
 
-def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
+def segment_page_viewports(
+    page: Any, *, page_number: int,
+    source_connected_table_cell_shadow: bool = False,
+) -> list[SegmentedViewport]:
+    if type(source_connected_table_cell_shadow) is not bool:
+        raise ValueError("source_table_shadow_requires_explicit_bool")
     try:
         calibration = calibrate_viewport_layout(page)
     except NativePageFrameUnresolved:
@@ -2910,6 +3012,10 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
         frames,
         calibration,
         page_number=page_number,
+        **(
+            {"source_connected_table_cell_shadow": True}
+            if source_connected_table_cell_shadow else {}
+        ),
     )
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
     try:
