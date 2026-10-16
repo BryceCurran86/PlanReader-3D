@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
+import numbers
 import re
 from typing import Any, Dict, Optional
 
@@ -68,8 +69,8 @@ def parse_figured_dimension_mm(raw: Optional[str]) -> float:
 
 def _validate_direct_figured_mm(value: float) -> float:
     """A direct figured value must be a real number, never bool or coerced text."""
-    if type(value) not in (int, float):
-        raise DimensionParseError("Figured dimension must be numeric millimetres (not bool)")
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise DimensionParseError("Figured dimension must be real numeric millimetres (not bool)")
     try:
         number = float(value)
     except (ValueError, OverflowError):
@@ -81,7 +82,7 @@ def _validate_direct_figured_mm(value: float) -> float:
 
 def _finite_positive_numeric(value: object) -> Optional[float]:
     """Return a typed finite positive numeric value; reject bool and coercions."""
-    if type(value) not in (int, float):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         return None
     try:
         number = float(value)
@@ -131,7 +132,8 @@ def resolve_measurement_authority(
          cannot be trusted even provisionally.
     """
     # An invalid comparison tolerance must not turn conflicting dimensions FIRM.
-    if (type(max_delta_ratio) not in (int, float)
+    if (isinstance(max_delta_ratio, bool)
+            or not isinstance(max_delta_ratio, numbers.Real)
             or (_finite_positive_numeric(max_delta_ratio) is None and max_delta_ratio != 0)):
         return MeasurementAuthorityResult(
             value_m=None,
@@ -198,7 +200,9 @@ def resolve_measurement_authority(
 
         if scaled_valid:
             delta_mm = round(abs(figured_value_mm - trusted_scaled_mm), 2)
-            delta_ratio = abs(figured_value_mm - trusted_scaled_mm) / figured_value_mm
+            # Keep the historical rounded-delta comparison byte-for-byte for
+            # valid measurements (including the exact tolerance boundary).
+            delta_ratio = delta_mm / figured_value_mm
             if delta_ratio > max_delta_ratio:
                 return MeasurementAuthorityResult(
                     value_m=value_m,
