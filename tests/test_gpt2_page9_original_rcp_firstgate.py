@@ -220,3 +220,85 @@ def test_page9_original_image_api_absence_is_unavailable_not_zero():
     assert result["status"] == "SOURCE_IMAGE_API_UNAVAILABLE"
     assert not result["image_universe_complete"]
     assert not result["source_image_placement_is_rcp_role"]
+
+
+from tools.diag_gpt2_page9_original_rcp_firstgate import (
+    _original_title_frame_relation,
+)
+
+@pytest.mark.parametrize("frame,relation",[
+    ((0.,0.,30.,30.),"frame_strictly_contains_title"),
+    ((10.,10.,30.,30.),"frame_contains_title_on_boundary"),
+    ((14.,14.,28.,28.),"title_contains_original_frame"),
+    ((15.,0.,25.,20.),"partial_native_overlap"),
+    ((20.,10.,40.,30.),"boundary_contact_only"),
+    ((40.,40.,70.,70.),"source_geometries_disjoint"),
+])
+def test_gpt2_all_original_title_frame_relations_survive(frame,relation):
+    title=(10.,10.,20.,20.)
+    result=_original_title_frame_relation(title,frame)
+    assert result["original_native_geometric_relation"]==relation
+    assert not result["title_owns_physical_viewport"]
+    assert not result["title_frame_structural_ownership_proven"]
+
+
+def test_gpt2_no_nearest_four_source_truncation_while_all_rivals_retained():
+    from tools.diag_gpt2_page9_original_rcp_firstgate import (
+        _nearest_native_frames_to_title,
+    )
+    frames=[(10.*i,50.,10.*i+9.,60.) for i in range(8)]
+    rows=_nearest_native_frames_to_title((0.,0.,9.,9.),frames)
+    assert len(rows)==8
+    assert all(r["original_vector_frame_not_title_owned"] for r in rows)
+    assert len(_nearest_native_frames_to_title(
+        (0.,0.,9.,9.),list(reversed(frames))
+    ))==8
+    assert rows==_nearest_native_frames_to_title(
+        (0.,0.,9.,9.),list(reversed(frames))
+    )
+    with pytest.raises(ValueError,match="nonpositive"):
+        _nearest_native_frames_to_title((0.,0.,9.,9.),frames,limit=0)
+
+
+@pytest.mark.parametrize("bad",[
+    (0,0,0,12),(0,0,13,0),
+    (0,0,float("nan"),10),
+    (0,0,float("inf"),10),
+    ("0",0,10,10),
+    (True,0,10,10),
+])
+def test_gpt2_title_frame_relation_invalid_source_geometry_fails_closed(bad):
+    with pytest.raises(ValueError,match="invalid original title/frame geometry"):
+        _original_title_frame_relation(bad,(0.,0.,20.,20.))
+
+
+def test_gpt2_source_native_title_relation_matrix_never_grants_rcp():
+    from types import SimpleNamespace
+    from tools.diag_gpt2_page9_original_rcp_firstgate import _frame_ownership_matrix
+    import pb_viewport_segmentation as seg
+    class Page:
+        rotation=0
+        def get_drawings(self):
+            return []
+        def get_text(self,mode):
+            return {"blocks": []} if mode=="dict" else []
+    cal=seg.ViewportLayoutCalibration(5.,10.,20.,10.,500.,500.)
+    frames=((0.,0.,100.,100.),(120.,120.,160.,160.))
+    anchors=(
+        SimpleNamespace(text="REFLECTED CEILING PLAN",
+                        bbox=(10.,10.,20.,20.),direction=(1.,0.),
+                        view_type="reflected_ceiling_plan"),
+        SimpleNamespace(text="PROP. REFLECTED CEILING PLAN",
+                        bbox=(125.,125.,135.,135.),direction=(1.,0.),
+                        view_type="reflected_ceiling_plan"),
+    )
+    report=_frame_ownership_matrix(Page(),frames,anchors,cal)
+    assert not report["frame_candidate_matrix_grants_authority"]
+    assert all(len(t["all_original_native_frame_relations"])==2
+               for t in report["source_titles"])
+    assert all(t["all_original_native_frames_evaluated"]
+               and not t["original_frame_relationships_grant_role"]
+               for t in report["source_titles"])
+    assert all(not row["title_owns_physical_viewport"]
+               for t in report["source_titles"]
+               for row in t["all_original_native_frame_relations"])
