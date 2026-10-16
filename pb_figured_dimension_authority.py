@@ -60,19 +60,34 @@ def parse_figured_dimension_mm(raw: Optional[str]) -> float:
 
     value_mm = value * 1000.0 if unit == "m" else value
 
-    if value_mm <= 0.0:
-        raise DimensionParseError(f"Figured dimension value must be strictly positive, got {value_mm}mm")
+    if not math.isfinite(value_mm) or value_mm <= 0.0:
+        raise DimensionParseError(f"Figured dimension value must be finite and strictly positive, got {value_mm}mm")
 
     return value_mm
 
 
 def _validate_direct_figured_mm(value: float) -> float:
-    """Validate an already-numeric figured mm value with the same rules as parsed text."""
-    if not math.isfinite(value):
-        raise DimensionParseError(f"Figured dimension value must be finite, got {value}")
-    if value <= 0.0:
-        raise DimensionParseError(f"Figured dimension value must be strictly positive, got {value}")
-    return float(value)
+    """A direct figured value must be a real number, never bool or coerced text."""
+    if type(value) not in (int, float):
+        raise DimensionParseError("Figured dimension must be numeric millimetres (not bool)")
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        raise DimensionParseError("Figured dimension cannot be represented as finite") from None
+    if not math.isfinite(number) or number <= 0.0:
+        raise DimensionParseError("Figured dimension must be finite and strictly positive")
+    return number
+
+
+def _finite_positive_numeric(value: object) -> Optional[float]:
+    """Return a typed finite positive numeric value; reject bool and coercions."""
+    if type(value) not in (int, float):
+        return None
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and number > 0.0 else None
 
 
 @dataclass
@@ -115,6 +130,21 @@ def resolve_measurement_authority(
          producing a provisional value, since a fabricated/uncalibrated scale
          cannot be trusted even provisionally.
     """
+    # An invalid comparison tolerance must not turn conflicting dimensions FIRM.
+    if (type(max_delta_ratio) not in (int, float)
+            or (_finite_positive_numeric(max_delta_ratio) is None and max_delta_ratio != 0)):
+        return MeasurementAuthorityResult(
+            value_m=None,
+            source_type=(MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+                         if figured_text is not None or figured_mm is not None
+                         else MeasurementAuthorityType.PDF_SCALED.value if scaled_mm is not None else None),
+            authority_status=AuthorityStatus.BLOCKED.value,
+            scaled_delta_mm=None,
+            figured_mm=None,
+            scaled_mm=None,
+            notes="Blocked: comparison tolerance must be finite and nonnegative",
+        )
+
     figured_value_mm: Optional[float] = None
     figured_error: Optional[str] = None
 
@@ -140,14 +170,35 @@ def resolve_measurement_authority(
             notes=f"Blocked: malformed figured dimension rejected ({figured_error})",
         )
 
-    scaled_valid = scaled_mm is not None and math.isfinite(scaled_mm) and scaled_mm > 0.0
+    trusted_scaled_mm = _finite_positive_numeric(scaled_mm)
+    scaled_valid = trusted_scaled_mm is not None
+    if scaled_mm is not None and not scaled_valid and figured_value_mm is not None:
+        return MeasurementAuthorityResult(
+            value_m=None,
+            source_type=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            authority_status=AuthorityStatus.BLOCKED.value,
+            scaled_delta_mm=None,
+            figured_mm=figured_value_mm,
+            scaled_mm=None,
+            notes="Blocked: supplied scaled comparison is not finite positive numeric",
+        )
 
     if figured_value_mm is not None:
         value_m = round(figured_value_mm / 1000.0, 4)
+        if value_m <= 0.0:
+            return MeasurementAuthorityResult(
+                value_m=None,
+                source_type=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                authority_status=AuthorityStatus.BLOCKED.value,
+                scaled_delta_mm=None,
+                figured_mm=figured_value_mm,
+                scaled_mm=trusted_scaled_mm,
+                notes="Blocked: documented dimension would round to zero metres",
+            )
 
         if scaled_valid:
-            delta_mm = round(abs(figured_value_mm - scaled_mm), 2)
-            delta_ratio = delta_mm / figured_value_mm
+            delta_mm = round(abs(figured_value_mm - trusted_scaled_mm), 2)
+            delta_ratio = abs(figured_value_mm - trusted_scaled_mm) / figured_value_mm
             if delta_ratio > max_delta_ratio:
                 return MeasurementAuthorityResult(
                     value_m=value_m,
@@ -185,7 +236,7 @@ def resolve_measurement_authority(
     # when the underlying page scale is itself reliable.
     if scaled_valid and scale_reliable:
         return MeasurementAuthorityResult(
-            value_m=round(scaled_mm / 1000.0, 4),
+            value_m=round(trusted_scaled_mm / 1000.0, 4),
             source_type=MeasurementAuthorityType.PDF_SCALED.value,
             authority_status=AuthorityStatus.PROVISIONAL.value,
             scaled_delta_mm=None,
