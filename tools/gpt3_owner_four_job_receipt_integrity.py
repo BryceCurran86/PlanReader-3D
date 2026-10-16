@@ -288,6 +288,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                  "invalid combined sealed quantity count")
         _require(not (combined is not None and state != "COMPLETED"),
                  "noncompleted source process cannot claim a sealed run")
+        _require(not (summary.get("status") == "source_attempt_recorded_unsealed"
+                      and state == "COMPLETED"),
+                 "unsealed interrupted source attempt cannot claim completed process")
         _require(not (state != "COMPLETED" and summary.get("status") != "source_attempt_recorded_unsealed"),
                  "interrupted production must have an unsealed attempt record")
         _require(not (summary.get("complete_project_handoff") is False and combined is not None),
