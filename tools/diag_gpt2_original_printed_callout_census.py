@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import fitz
@@ -18,6 +19,51 @@ from pb_cross_sheet_printed_callout_shadow import (
     find_printed_callout_candidates_shadow,
     candidates_for_resolved_sheet_shadow,
 )
+
+
+_NATIVE_SHEET_CODE_LOOKALIKE = re.compile(r"^[A-Z]{1,4}[-.]?\\d{1,4}(?:\\.\\d{1,3})?$", re.I)
+
+
+def _unbound_native_reference_lines(page, *, page_num: int) -> list[dict]:
+    """Retain original neighbouring words for source-format forensics only.
+
+    Standalone title codes, fractions, drawing scales and index references
+    have no semantic role here. This cannot promote a sheet/element match.
+    """
+    rows = {}
+    for word in page.get_text("words"):
+        if len(word) < 8:
+            continue
+        try:
+            block, line, ordinal = (int(word[i]) for i in (5, 6, 7))
+            value = str(word[4]).strip()
+            bbox = [float(word[i]) for i in range(4)]
+        except (IndexError, TypeError, ValueError):
+            continue
+        rows.setdefault((block, line), []).append((ordinal, value, bbox))
+    candidates = []
+    for (block, line), words in sorted(rows.items()):
+        words.sort(key=lambda row: (row[0], row[2]))
+        hits = [
+            (ordinal, value, bbox) for ordinal, value, bbox in words
+            if _NATIVE_SHEET_CODE_LOOKALIKE.fullmatch(value)
+            or ("/" in value and any(char.isdigit() for char in value))
+        ]
+        if not hits:
+            continue
+        candidates.append({
+            "source_page": page_num,
+            "native_block": block,
+            "native_line": line,
+            "source_word_ordinal_receipts": [row[0] for row in words],
+            "source_line_literal_text": " ".join(row[1] for row in words),
+            "candidate_word_boxes": [
+                {"word_ordinal": ordinal, "raw_text": value, "bbox": bbox}
+                for ordinal, value, bbox in hits
+            ],
+            "text_or_code_not_physical_correspondence": True,
+        })
+    return candidates
 
 
 def census(source_bytes: bytes, *, expected_sha256: str) -> dict:
@@ -39,8 +85,10 @@ def census(source_bytes: bytes, *, expected_sha256: str) -> dict:
                 "sheet_number_evidence_source": entry.sheet_number_source,
                 "sheet_number_resolved_by_this_diagnostic": False,
             })
+        native_lookalikes = []
         candidates = []
         for i in range(pdf.page_count):
+            native_lookalikes.extend(_unbound_native_reference_lines(pdf[i], page_num=i + 1))
             for item in find_printed_callout_candidates_shadow(pdf[i], page_num=i + 1):
                 # Even a single title sheet match is just an unbound lexical
                 # code correspondence: never grant physical element identity.
@@ -68,6 +116,8 @@ def census(source_bytes: bytes, *, expected_sha256: str) -> dict:
         "title_block_sheet_evidence": sheet_rows,
         "printed_cross_sheet_callout_candidate_ledger": candidates,
         "unbound_literal_reference_count": len(candidates),
+        "native_unbound_reference_text_lines": native_lookalikes,
+        "native_unbound_reference_line_count": len(native_lookalikes),
         "diagnostic_only": True,
         "new_producer_authored_source_or_viewports": False,
         "new_physical_correspondences": 0,
@@ -90,6 +140,8 @@ def main() -> None:
         "source_sha256": result["source_sha256"],
         "pages": result["original_pdf_page_count"],
         "printed_candidates": result["unbound_literal_reference_count"],
+        "unbound_native_lines": result["native_unbound_reference_line_count"],
+        "first_native_lines": [row["source_line_literal_text"] for row in result["native_unbound_reference_text_lines"][:15]],
         "new_physical_correspondences": 0,
         "new_signed_construction_quantities": 0,
     }, sort_keys=True), flush=True)
