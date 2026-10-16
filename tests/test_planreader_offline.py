@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 # Ensure repo root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from pb_planreader_offline import detect_scale
 from pb_planreader_shared import (
     SCALE_RE,
     classify_page,
@@ -24,6 +25,17 @@ from pb_planreader_shared import (
     dimension_value_m,
     extract_scale_ratio,
 )
+
+
+class TestDetectScaleAbstains(unittest.TestCase):
+    def test_one_printed_ratio_is_kept(self):
+        result = detect_scale(None, [{"text": "SCALE"}, {"text": "1:100"}])
+        self.assertIsNotNone(result)
+        self.assertEqual(result["ratio"], 100)
+
+    def test_two_different_ratios_abstain(self):
+        result = detect_scale(None, [{"text": "1:100"}, {"text": "1:50"}])
+        self.assertIsNone(result)
 
 
 class TestDimensionValueM(unittest.TestCase):

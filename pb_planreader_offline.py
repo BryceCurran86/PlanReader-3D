@@ -700,6 +700,17 @@ def detect_scale(
         (r"(\d+)\s*mm\s*=\s*(\d+)\s*m", "metric"),
     ]
     
+    ratio_pattern = scale_patterns[0][0]
+    ratio_values = {
+        int(match.group(1))
+        for match in re.finditer(ratio_pattern, all_text, re.IGNORECASE)
+    }
+    loose_values = {
+        int(match.group(1))
+        for match in re.finditer(scale_patterns[1][0], all_text, re.IGNORECASE)
+    }
+    if len(ratio_values | loose_values) > 1:
+        return None
     for pattern, scale_type in scale_patterns:
         match = re.search(pattern, all_text, re.IGNORECASE)
         if match:
