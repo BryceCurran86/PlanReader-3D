@@ -118,29 +118,49 @@ def native_frame_conventions_verified(rotation: int) -> bool:
     if rotation in _frame_check_cache:
         return _frame_check_cache[rotation]
     ok = False
+    document = reference = None
     try:
+        reference = _fixture_document(0)
+        reference_words = reference[0].get_text("words")
+        reference_trace = reference[0].get_texttrace()
         document = _fixture_document(rotation)
         page = document[0]
         words = page.get_text("words")
         trace = page.get_texttrace()
         clips = [e for e in page.get_drawings(extended=True) if e.get("type") == "clip"]
-        if len(words) == 1 and len(trace) >= 1 and len(clips) == 2 and page.rotation == rotation:
+        if (len(words) == len(reference_words) == 1
+                and len(trace) == len(reference_trace) == 1
+                and len(clips) == 2 and page.rotation == rotation):
             word_box = tuple(float(v) for v in words[0][:4])
             trace_box = tuple(float(v) for v in trace[0]["bbox"])
             scissor = tuple(float(v) for v in fitz.Rect(clips[0]["scissor"]))
             native = fitz.Rect(0.0, 0.0, _FIXTURE_WIDTH, _FIXTURE_HEIGHT)
             inside_native = all(native.x0 - _TOL <= b[0] and b[2] <= native.x1 + _TOL and native.y0 - _TOL <= b[1] and b[3] <= native.y1 + _TOL
                                 for b in (word_box, trace_box, scissor))
-            same_frame_word_trace = all(abs(word_box[i] - trace_box[i]) <= 2.0 for i in (0, 2))
+            # Word and trace font-metric boxes can legitimately differ. Each
+            # API must instead retain all four coordinates of its own known
+            # unrotated reference; agreement between two shifted APIs is not
+            # independent evidence that either is in the native frame.
+            same_frame_word_trace = all(
+                abs(word_box[i] - float(reference_words[0][i])) <= _TOL
+                and abs(trace_box[i] - float(reference_trace[0]["bbox"][i])) <= _TOL
+                for i in range(4)
+            )
             clip_matches = all(abs(a - b) <= _TOL for a, b in zip(scissor, _FIXTURE_CLIP))
             text_in_clip = (scissor[0] - _TOL <= word_box[0] and word_box[2] <= scissor[2] + _TOL
                             and scissor[1] - _TOL <= word_box[1] and word_box[3] <= scissor[3] + _TOL)
             rings = _rings_from_items(clips[1].get("items") or [])
             triangle_matches = rings is not None and len(rings) == 1 and _same_vertices(rings[0][0], _FIXTURE_TRIANGLE)
             ok = bool(inside_native and same_frame_word_trace and clip_matches and text_in_clip and triangle_matches)
-        document.close()
     except Exception:
         ok = False
+    finally:
+        for opened in (document, reference):
+            if opened is not None:
+                try:
+                    opened.close()
+                except Exception:
+                    ok = False
     _frame_check_cache[rotation] = ok
     return ok
 

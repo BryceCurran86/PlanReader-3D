@@ -337,6 +337,45 @@ def test_a_rotated_page_with_an_offset_crop_box_still_resolves_in_the_native_fra
     assert result.verdict == UNCLIPPED
 
 
+@pytest.mark.parametrize("rotation", [90, 180, 270])
+@pytest.mark.parametrize("which", ["words", "trace", "both"])
+@pytest.mark.parametrize("axis", [0, 1], ids=["horizontal", "vertical"])
+def test_shifted_text_apis_cannot_verify_the_native_frame(monkeypatch, rotation, which, axis):
+    original_words = fitz.Page.get_text
+    original_trace = fitz.Page.get_texttrace
+
+    def shifted_box(values):
+        return tuple(value + (10.0 if i in (axis, axis + 2) else 0.0)
+                     for i, value in enumerate(values))
+
+    def get_text(self, option="text", *args, **kwargs):
+        result = original_words(self, option, *args, **kwargs)
+        if self.rotation and option == "words":
+            return [shifted_box(word[:4]) + tuple(word[4:]) for word in result]
+        return result
+
+    def get_trace(self, *args, **kwargs):
+        result = original_trace(self, *args, **kwargs)
+        if self.rotation:
+            return [dict(span, bbox=shifted_box(span["bbox"])) for span in result]
+        return result
+
+    shadow._frame_check_cache.clear()
+    try:
+        if which in ("words", "both"):
+            monkeypatch.setattr(fitz.Page, "get_text", get_text)
+        if which in ("trace", "both"):
+            monkeypatch.setattr(fitz.Page, "get_texttrace", get_trace)
+        assert shadow.native_frame_conventions_verified(rotation) is False
+        result, _ = evaluate(rect_ops(50, 50, 250, 120), 60, 100, rotation=rotation)
+        assert result.verdict == UNRESOLVED
+        assert shadow.REASON_ROTATED_FRAMES_UNVERIFIED in result.reasons
+        assert shadow.native_frame_conventions_verified(0) is True
+    finally:
+        monkeypatch.undo()
+        shadow._frame_check_cache.clear()
+
+
 # ---------------------------------------------------------------- differential safety against the authority
 def test_on_rectangle_only_scenes_the_shadow_makes_exactly_the_authority_decision():
     rng = random.Random(17)
