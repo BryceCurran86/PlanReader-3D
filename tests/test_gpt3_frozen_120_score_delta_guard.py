@@ -215,3 +215,33 @@ def test_cli_cannot_overwrite_either_ledger(tmp_path):
             "--before-ledger", str(old), "--after-ledger", str(new),
             "--output", str(old),
         ])
+
+
+def test_precision_adjusted_must_have_integer_unsupported_extra_denominator():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    _set_scored(new, 0, "MATCHED_WITHIN_TOLERANCE", "synthetic-q")
+    # One winner, official precision 1/(120+integer extras). 0.0051 is
+    # misleading but bounded by coverage; no integer extras can yield it.
+    new["official_precision_adjusted_accuracy"] = 0.0051
+    with pytest.raises(ValueError, match="integer unsupported-extra"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_precision_adjusted_can_legitimately_include_extra_produced_items():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    _set_scored(new, 0, "MATCHED_WITHIN_TOLERANCE", "synthetic-q")
+    new["official_precision_adjusted_accuracy"] = 1/124
+    result = delta.compare_postscore_ledgers(old, new)
+    assert result["net_additional_correct_items"] == 1
+    assert result["after_precision_adjusted_accuracy"] == pytest.approx(1/124)
+    assert result["issuer_authentication_proven_by_this_comparator"] is False
+
+
+def test_precision_adjusted_zero_winners_has_no_arbitrary_positive_value():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    new["official_precision_adjusted_accuracy"] = 0.01
+    with pytest.raises(ValueError, match="consistent with item states"):
+        delta.compare_postscore_ledgers(old, new)
