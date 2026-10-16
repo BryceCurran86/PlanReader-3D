@@ -209,8 +209,10 @@ def build_live_floor_finish_area_source_traces(
         )
         if any(
             type(metadata.get(name)) is not str
-            or not metadata[name]
-            or metadata[name] != metadata[name].strip()
+            or (
+                metadata[name]
+                and metadata[name] != metadata[name].strip()
+            )
             for name in issuer_fields
         ):
             raise SourceClosedRunConflictError(
@@ -242,17 +244,6 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish source occurrence has competing physical floors: "
                 f"{occurrence_id}"
             )
-        # Producer IDs and original observation IDs are independent. A
-        # rekeyed occurrence cannot turn one original material mark into
-        # two separately measured physical floor-finish quantities.
-        prior_observation_floor = floor_owner_by_original_observation.get(
-            occurrence_evidence_id
-        )
-        if prior_observation_floor is not None and prior_observation_floor != floor_id:
-            raise SourceClosedRunConflictError(
-                "floor-finish original observation has competing physical floors: "
-                f"{occurrence_evidence_id}"
-            )
         # Resolve the most specific failed authority first: a repeated
         # canonical floor is a direct conflict before considering competing
         # canonical aliases of the same physical surface.
@@ -273,6 +264,17 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 "physical floor has competing finish area quantities: "
                 f"{physical_floor_id}"
+            )
+        # Producer IDs and original observation IDs are independent. A
+        # rekeyed occurrence cannot turn one original material mark into
+        # two separately measured physical floor-finish quantities.
+        prior_observation_floor = floor_owner_by_original_observation.get(
+            occurrence_evidence_id
+        )
+        if prior_observation_floor is not None and prior_observation_floor != floor_id:
+            raise SourceClosedRunConflictError(
+                "floor-finish original observation has competing physical floors: "
+                f"{occurrence_evidence_id}"
             )
         floor_owner_by_occurrence[occurrence_id] = floor_id
         floor_owner_by_original_observation[occurrence_evidence_id] = floor_id
