@@ -1323,6 +1323,7 @@ def _text_clip_reasons(
     seqno: Optional[int],
     *,
     native_word: Optional[Mapping[str, object]] = None,
+    source_raw_no_active_text_clip_shadow: bool = False,
 ) -> tuple[str, ...]:
     model = _clip_model(page)
     has_clip_operator = _page_content_has_clip_operator(page)
@@ -1336,6 +1337,18 @@ def _text_clip_reasons(
         return (TEXT_CLIP_STATE_UNRESOLVED,)
     try:
         if int(getattr(page, "rotation", 0) or 0) != 0:
+            # Unlike rotation parity of two handles of the same PDF,
+            # raw PDF q/Q/W/BT operator ancestry is direct source evidence.
+            # The original content stream must prove that EVERY text object
+            # is outside a graphics clipping scope; unknown Form XObjects,
+            # nested clips, inline image data and malformed ops ABSTAIN.
+            # The existing glyph/paint/OCG/native-word gates still apply.
+            if source_raw_no_active_text_clip_shadow and _native_word_is_present(page, native_word):
+                from tools.diag_original_pdf_active_clip_operator_authority import (
+                    source_page_all_native_text_unclipped,
+                )
+                if source_page_all_native_text_unclipped(page):
+                    return ()
             return (TEXT_CLIP_STATE_UNRESOLVED,)
         bbox = _rect_tuple(subject_bbox)
     except (TypeError, ValueError):
@@ -1990,6 +2003,7 @@ def _visibility_status(
     span: Mapping[str, object],
     *,
     native_word: Optional[Mapping[str, object]] = None,
+    source_raw_no_active_text_clip_shadow: bool = False,
 ) -> tuple[str, tuple[str, ...], Optional[int]]:
     reasons: list[str] = []
     try:
@@ -2018,6 +2032,7 @@ def _visibility_status(
             span.get("bbox") or subject_bbox,
             seqno,
             native_word=native_word,
+            source_raw_no_active_text_clip_shadow=source_raw_no_active_text_clip_shadow,
         )
     )
     try:
@@ -2051,6 +2066,7 @@ def classify_native_word_integrity(
     word: Mapping[str, object],
     *,
     source_symbol_font_chain_shadow: bool = False,
+    source_raw_no_active_text_clip_shadow: bool = False,
 ) -> NativeTextIntegrityDecision:
     """Classify one raw native word using producer-owned PDF state.
 
@@ -2063,6 +2079,8 @@ def classify_native_word_integrity(
 
     if type(source_symbol_font_chain_shadow) is not bool:
         raise ValueError("symbol_source_glyph_shadow_requires_explicit_bool")
+    if type(source_raw_no_active_text_clip_shadow) is not bool:
+        raise ValueError("source_raw_clip_shadow_requires_explicit_bool")
     raw_text = str(word.get("text") or "")
     reasons: list[str] = []
     spans, trace_text, trace_reasons = _matching_trace_spans(page, word)
@@ -2105,6 +2123,7 @@ def classify_native_word_integrity(
             subject,
             span,
             native_word=word,
+            source_raw_no_active_text_clip_shadow=source_raw_no_active_text_clip_shadow,
         )
         reasons.extend(visibility_reasons)
         if index == 0:
