@@ -14,6 +14,7 @@ from pb_explicit_floor_area_evidence import (
     DECLARED_FLOOR_AREA_BINDING,
     extract_declared_component_floor_areas,
     extract_explicit_floor_area_evidence,
+    reconcile_declared_component_area_total,
 )
 
 
@@ -146,3 +147,80 @@ def test_repeated_reads_are_deterministic_and_only_copy_source_fields():
     assert first[0].source_page == 3
     assert first[0].revision_id == "source-revision-1"
     assert first[0].raw_evidence == "ATTIC AREA: 12.375m²"
+
+
+
+def _reconciled_source_table():
+    text = (
+        "UPPER LIVING AREA: 42.75m2\n"
+        "GARAGE AREA: 18.50m2\n"
+        "TOTAL FLOOR AREA: 61.25m2"
+    )
+    rows = _parse(text)
+    total = extract_explicit_floor_area_evidence(
+        "FLOOR PLAN\nTOTAL FLOOR AREA: 61.25m2",
+        source_page=3,
+        source_sha256=SOURCE_SHA,
+        revision_id="source-revision-1",
+    )
+    assert total is not None
+    return rows, total
+
+
+def test_exact_declared_components_reconcile_to_total_without_quantity_grant():
+    rows, total = _reconciled_source_table()
+    reconciled = reconcile_declared_component_area_total(rows, total)
+    assert {row.label for row in reconciled} == {"UPPER LIVING", "GARAGE"}
+    assert len(reconciled) == 2
+    assert all(row.binding == "unbound" for row in reconciled)
+    assert not any(hasattr(row, "quantity_id") for row in reconciled)
+    assert reconcile_declared_component_area_total(tuple(reversed(rows)), total) == reconciled
+
+
+@pytest.mark.parametrize("revision", ["other-source-revision", "", None])
+def test_different_source_revision_cannot_correlate_to_declared_total(revision):
+    rows, total = _reconciled_source_table()
+    altered = replace(rows[0], revision_id=revision)
+    assert reconcile_declared_component_area_total((altered, rows[1]), total) == ()
+
+
+def test_exact_original_text_block_identity_needed_for_sum_proof():
+    rows, total = _reconciled_source_table()
+    assert reconcile_declared_component_area_total(
+        (rows[0], replace(rows[1], source_block_id="different-source-block")),
+        total,
+    ) == ()
+
+
+def test_missing_row_and_duplicate_row_cannot_claim_complete_original_component_universe():
+    rows, total = _reconciled_source_table()
+    assert reconcile_declared_component_area_total(rows[:1], total) == ()
+    assert reconcile_declared_component_area_total((*rows, rows[0]), total) == ()
+
+
+@pytest.mark.parametrize("delta", [0.01, -0.01])
+def test_wrong_declared_total_is_not_numeric_area_permission(delta):
+    rows, total = _reconciled_source_table()
+    assert reconcile_declared_component_area_total(
+        rows, replace(total, area_m2=total.area_m2 + delta),
+    ) == ()
+
+
+@pytest.mark.parametrize("bad", [True, "18.50", 0.0, float("nan"), float("inf")])
+def test_invalid_metric_component_cannot_claim_sum_checksum(bad):
+    rows, total = _reconciled_source_table()
+    altered = replace(rows[1], area_m2=bad)
+    assert reconcile_declared_component_area_total((rows[0], altered), total) == ()
+
+
+def test_source_page_and_sha_agreement_are_independent_of_numeric_sum():
+    rows, total = _reconciled_source_table()
+    assert reconcile_declared_component_area_total(
+        (rows[0], replace(rows[1], source_page=4)), total
+    ) == ()
+    assert reconcile_declared_component_area_total(
+        (rows[0], replace(rows[1], source_sha256="b" * 64)), total
+    ) == ()
+    assert reconcile_declared_component_area_total(
+        rows, replace(total, source_pages=(3, 4))
+    ) == ()
