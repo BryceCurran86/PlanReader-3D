@@ -95,6 +95,24 @@ def test_non_integer_sequence_is_not_coerced(sequence) -> None:
     assert record["sequence_number_present"] is False
 
 
+@pytest.mark.parametrize(
+    ("field", "raw", "expected"),
+    [
+        ("path_index", True, True),
+        ("path_index", False, False),
+        ("item_index", True, True),
+        ("edge_index", False, False),
+        ("path_index", 3, 3),
+        ("item_index", 0, 0),
+        ("edge_index", "4", 4),
+    ],
+)
+def test_boolean_path_index_is_not_invented(field, raw, expected) -> None:
+    record = _record(**{field: raw})
+    assert record[field] == expected
+    assert type(record[field]) is type(expected)
+
+
 def test_zero_sequence_number_stays_present() -> None:
     record = _record(sequence_number=0)
     assert record["sequence_number"] == 0

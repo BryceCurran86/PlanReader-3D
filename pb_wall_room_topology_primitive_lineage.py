@@ -161,10 +161,15 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
     # the source record so later snap/merge cannot erase native span provenance.
     for field in _PATH_INDEX_FIELDS:
         if field in segment and segment.get(field) is not None:
-            try:
-                record[field] = int(segment[field])
-            except (TypeError, ValueError):
-                record[field] = segment[field]
+            raw_index = segment[field]
+            # bool is an int subclass. int(True) == 1 would invent a path index.
+            if type(raw_index) is bool:
+                record[field] = raw_index
+            else:
+                try:
+                    record[field] = int(raw_index)
+                except (TypeError, ValueError):
+                    record[field] = raw_index
     coords_available = all(field in segment for field in _PAGE_COORD_FIELDS)
     page_coords_present = False
     if coords_available:
