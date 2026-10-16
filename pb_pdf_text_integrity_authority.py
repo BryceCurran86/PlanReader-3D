@@ -2422,18 +2422,14 @@ def classify_original_rotated_words_with_parity_source(
                 candidate = classify_native_word_integrity(
                     zero, record, **opt,
                 )
-                # An originally untrusted word can gain native text integrity
-                # only if rotation's clip state was the SOLE remaining cause.
-                # Retain all unrelated invalid Unicode, paint, glyph, OCG,
-                # font/cmap and competing source issues as original negatives.
-                if not original_decision.trusted and (
-                    set(original_decision.reason_codes)
-                    != {TEXT_CLIP_STATE_UNRESOLVED}
-                    or not candidate.trusted
-                ):
-                    out.append((address, original_decision))
-                else:
-                    out.append((address, candidate))
+                # Native representation parity across two handles of the
+                # SAME PDF is not independent source visibility proof. It can
+                # diagnose the remaining gate, but MUST NOT turn originally
+                # unresolved rotation/clip evidence into TRUSTED_PDF_TEXT.
+                # Retain original source decision unmodified on both positive
+                # and negative candidates. Never let zero-rotation only paint
+                # state become a consumer-authority bypass.
+                out.append((address, original_decision))
             return tuple(out)
 
 
