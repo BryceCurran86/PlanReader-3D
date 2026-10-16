@@ -10,6 +10,7 @@ import pytest
 
 from pb_source_native_dimension_stroke_shadow import (
     nominate_printed_native_dimension_strokes as nominate,
+    trace_native_endpoint_tick_candidates_shadow as ticks,
 )
 
 ORIGINAL = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
@@ -120,3 +121,57 @@ def test_original_page_a502_figured_3570_2200_native_lineage_recovered():
         ratio_b = recovered["2200"][0]["native_segment_length_pdf_pts"]/2200
         assert abs(ratio_a-ratio_b)/max(ratio_a,ratio_b) < .002
     assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest() == ORIGINAL_SHA
+
+
+
+def test_native_endpoint_ticks_require_exact_orthogonal_source_intersection():
+    source=FakePage([
+        _line((20.,0.),(20.,100.)),
+        _line((20.,0.),(35.,0.)),
+        _line((20.,100.),(35.,100.)),
+        _line((20.,100.),(35.,100.),color=(.5,.5,.5)),
+        _line((22.,0.),(35.,0.)),
+    ])
+    original=nominate(source,_word("3570"))[0]
+    ends=ticks(source,original)
+    assert len(ends)==2
+    assert [[v["source_primitive_id"] for v in end["all_native_perpendicular_tick_candidates"]]
+            for end in ends]==[["d1i0"],["d2i0"]]
+    assert all(not end["source_endpoint_is_physical_wall_face_proven"] for end in ends)
+
+
+@pytest.mark.parametrize("bad", [
+    {}, {"native_segment_pdf_pts":[0,0,0,float("nan")],"line_axis":"native_y"},
+    {"native_segment_pdf_pts":[0,0,0,100],"line_axis":"unknown"},
+])
+def test_unproven_or_nonfinite_dimension_candidate_has_no_endpoint_owners(bad):
+    assert ticks(FakePage([_line((20.,0.),(20.,100.))]),bad)==[]
+
+
+def test_original_a502_both_3570_and_2200_native_end_tick_source_pairs():
+    raw=ORIGINAL.read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==ORIGINAL_SHA
+    with fitz.open(stream=raw,filetype="pdf") as pdf:
+        p=pdf[25]
+        expected={
+            "3570":("d12615i0",["d12624i0","d12619i0"]),
+            "2200":("d12656i0",["d12665i0","d12660i0"]),
+        }
+        for word in p.get_text("words"):
+            if word[4] not in expected:
+                continue
+            rows=nominate(p,word)
+            assert len(rows)==1
+            assert rows[0]["source_primitive_id"]==expected[word[4]][0]
+            endpoints=ticks(p,rows[0])
+            assert len(endpoints)==2
+            assert [
+                item["source_primitive_id"]
+                for end in endpoints
+                for item in end["all_native_perpendicular_tick_candidates"]
+            ]==expected[word[4]][1]
+            assert all(
+                not end["source_endpoint_is_physical_wall_face_proven"]
+                for end in endpoints
+            )
+    assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()==ORIGINAL_SHA
