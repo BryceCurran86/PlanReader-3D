@@ -1,0 +1,67 @@
+name: GPT3 Original Signed Fixture Guard Shadow
+
+on:
+  push:
+    branches: [gpt3/immutable-evidence-package-guard-20261016]
+  pull_request:
+    branches: [gpt3/verified-eight-match-development-checkpoint-20261016]
+    paths:
+      - "tools/diag_gpt3_sealed_fixture_guard.py"
+      - "tests/test_gpt3_sealed_fixture_guard.py"
+      - "tests/test_lot16_signed_eight_row_fixture.py"
+      - "docs/engineering/lot16_original_signed_eight_row_20261015/**"
+      - "pb_source_closed_run_export.py"
+      - "pb_customer_output_verification.py"
+      - "scripts/report_full_plan_v2_readiness.py"
+      - "requirements.txt"
+      - "requirements-ci-v1228.txt"
+      - ".github/workflows/test-gpt3-sealed-fixture-guard-shadow.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt3-immutable-evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  immutable-fixture-shadow:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Frozen truth and provider separation
+        run: |
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Exact V1 and customer immutable fixture regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_lot16_signed_eight_row_fixture.py tests/test_gpt3_sealed_fixture_guard.py
+          ruff check --select F821,F823 tools/diag_gpt3_sealed_fixture_guard.py tests/test_gpt3_sealed_fixture_guard.py
+      - name: Assert shadow verdict never grants V2/commercial authority
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m tools.diag_gpt3_sealed_fixture_guard --fixture-dir docs/engineering/lot16_original_signed_eight_row_20261015 > /tmp/fixture-verdict.json
+          python - <<'PY'
+          import json
+          report=json.load(open("/tmp/fixture-verdict.json"))
+          assert report["status"] == "UNSIGNED_REVIEW_ONLY"
+          assert report["signed_v2_scope_granted"] is False
+          assert report["customer_commercial_approval_granted"] is False
+          assert report["full_suite_score_granted"] is False
+          assert report["signed_quantity_count"] == report["verified_customer_row_count"] == 8
+          print("SHADOW ORIGINAL V1 VERIFIED; NO COMMERCIAL OR SCORE GRANT")
+          PY
