@@ -291,14 +291,24 @@ def check_metric_partition(floor: Mapping, projection: Mapping,
     Does not derive metric area from page points², and explicitly DOES NOT
     authenticate the caller-supplied receipt claims. Shadow only.
     """
+    if not isinstance(floor, Mapping) or not isinstance(projection, Mapping):
+        return ("floor_metric_receipt_unavailable",)
     base = _area(floor.get("metric_area_m2"))
-    if base is None or not _id(floor.get("metric_area_evidence_id")):
+    if (base is None or not _id(floor.get("metric_area_evidence_id"))
+            or floor.get("metric_area_unit") != "m2"):
         return ("floor_metric_receipt_unavailable",)
     metric = []
+    seen_metric_evidence_ids = {floor["metric_area_evidence_id"]}
     for z in zones:
-        area = _area(z.get("metric_area_m2"))
-        if area is None or not _id(z.get("metric_area_evidence_id")):
+        if not isinstance(z, Mapping):
             return ("zone_metric_receipt_unavailable",)
+        area = _area(z.get("metric_area_m2"))
+        evidence_id = z.get("metric_area_evidence_id")
+        if area is None or not _id(evidence_id) or z.get("metric_area_unit") != "m2":
+            return ("zone_metric_receipt_unavailable",)
+        if evidence_id in seen_metric_evidence_ids:
+            return ("zone_metric_evidence_reused",)
+        seen_metric_evidence_ids.add(evidence_id)
         metric.append(area)
     if not metric or sum(metric) != base:
         return ("zone_metric_partition_incomplete_or_conflicting",)
@@ -315,6 +325,20 @@ def check_metric_partition(floor: Mapping, projection: Mapping,
         covered = p if covered is None else covered.union(p)
     if covered is None or not covered.equals(floor_poly):
         return ("source_finish_partition_gap_or_excess",)
+    return ()
+
+
+def check_zone_physical_floor_owner(floor: Mapping, zones: Sequence[Mapping]) -> tuple[str, ...]:
+    """Syntactic same-floor constraint; issuer-owned physical identity remains unproved."""
+    if not isinstance(floor, Mapping) or any(
+        not _id(floor.get(k)) for k in ("canonical_floor_id", "physical_floor_id")
+    ):
+        return ("physical_floor_identity_unavailable",)
+    for zone in zones:
+        if (not isinstance(zone, Mapping)
+                or zone.get("physical_floor_id") != floor["physical_floor_id"]
+                or zone.get("canonical_floor_id") != floor["canonical_floor_id"]):
+            return ("finish_zone_floor_owner_conflict",)
     return ()
 
 
@@ -340,6 +364,7 @@ def inspect_candidate_finish_zone_bundle(bundle: Mapping) -> dict:
     reports: dict[str, tuple[str, ...]] = {}
     reports["01_scope"] = check_source_scope(scope, (floor, projection, *zones, *all_edges, *pairs))
     reports["02_edges"] = check_unique_source_edges(all_edges)
+    reports["11_zone_floor_owner"] = check_zone_physical_floor_owner(floor, zones)
     if reports["02_edges"]:
         # Do not turn bad IDs into an arbitrary last-write-wins lookup.
         for i in range(3, 11):
@@ -362,7 +387,7 @@ def inspect_candidate_finish_zone_bundle(bundle: Mapping) -> dict:
         reports["09_material"] = check_finish_occurrence_ownership(zones)
     reasons = tuple(sorted({x for codes in reports.values() for x in codes}))
     status = (EvidenceResolutionStatus.CONFLICT if any("conflict" in x or "overlap" in x or "duplicate" in x
-                                                     or "multiple_owners" in x for x in reasons)
+                                                     or "multiple_owners" in x or "reused" in x for x in reasons)
               else EvidenceResolutionStatus.ABSTAINED if reasons
               else EvidenceResolutionStatus.CANDIDATE)
     return {"status": status.value, "authority_granted": False, "quantity_granted": False,
