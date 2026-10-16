@@ -267,9 +267,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     _write_readiness_report(
         args.output, json.dumps(result, indent=2, sort_keys=True) + "\n",
-        protected_roots=(
-            FROZEN_ROOT, args.before_ledger.parent, args.after_ledger.parent,
-        ),
+        # The two input files are protected above by exact resolved paths.
+        # Their containing directory is a valid location for a NEW report.
+        protected_roots=(FROZEN_ROOT,),
     )
     print(json.dumps({
         "comparison_status": result["comparison_status"],
