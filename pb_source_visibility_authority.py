@@ -161,7 +161,10 @@ def _derive_visibility_page(
     page: fitz.Page,
     *,
     native_page: Optional[Mapping[str, Any]] = None,
+    source_native_finish_text_shadow: bool = False,
 ) -> _CachedVisibilityPage:
+    if type(source_native_finish_text_shadow) is not bool:
+        raise ValueError("source_finish_text_shadow_requires_explicit_bool")
     native = native_page if native_page is not None else extract_native_page(page)
     words: list[_CachedVisibilityWord] = []
     visible_segments: list[_CachedVisibleSegment] = []
@@ -173,7 +176,13 @@ def _derive_visibility_page(
                 raw_text=raw_text,
                 geometry=geometry,
                 primitive_ref=native_word_primitive_ref(word),
-                decision=classify_native_word_integrity(page, word),
+                decision=classify_native_word_integrity(
+                    page, word,
+                    **({
+                        "source_symbol_font_chain_shadow": True,
+                        "source_raw_no_active_text_clip_shadow": True,
+                    } if source_native_finish_text_shadow else {}),
+                ),
                 block_no=word.get("block_no"),
                 line_no=word.get("line_no"),
                 word_no=word.get("word_no"),
@@ -756,7 +765,13 @@ class SourceVisibilityProducer:
     exposed. Ordinary consumers receive read-only producer-owned authorities.
     """
 
-    def __init__(self, *, producer_method: str, producer_version: str) -> None:
+    def __init__(
+        self, *, producer_method: str, producer_version: str,
+        source_native_finish_text_shadow: bool = False,
+    ) -> None:
+        if type(source_native_finish_text_shadow) is not bool:
+            raise ValueError("source_finish_text_shadow_requires_explicit_bool")
+        self._source_native_finish_text_shadow = source_native_finish_text_shadow
         self._producer = SourceObservationProducer(
             producer_method=producer_method,
             producer_version=producer_version,
@@ -1695,6 +1710,7 @@ class SourceVisibilityProducer:
                     base.revision.source_sha256,
                     base.snapshot.snapshot_id,
                     int(page_number),
+                    self._source_native_finish_text_shadow,
                 )
                 derived = self._visibility_page_cache.get(visibility_cache_key)
                 if derived is not None:
@@ -1713,6 +1729,9 @@ class SourceVisibilityProducer:
                             if native_cached is None or native_cached.failed
                             else native_cached.native_page
                         ),
+                        **({
+                            "source_native_finish_text_shadow": True
+                        } if self._source_native_finish_text_shadow else {}),
                     )
                     self._visibility_page_cache[visibility_cache_key] = derived
                     self._visibility_page_cache.move_to_end(visibility_cache_key)
