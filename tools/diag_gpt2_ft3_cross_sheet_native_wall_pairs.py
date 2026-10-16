@@ -60,11 +60,21 @@ def source_fragments_on_documented_side(
     axis, fixed, low, high = positions[side]
     found = []
     for original_id, segment in sorted(originals.items()):
+        if (
+            not isinstance(segment, Mapping)
+            or any(
+                key not in segment
+                or type(segment[key]) not in (float, int)
+                or not math.isfinite(segment[key])
+                for key in ("x1", "y1", "x2", "y2")
+            )
+        ):
+            # A corrupt indexed native primitive is a missing source record,
+            # never a reason to silently obtain a cleaner-looking side.
+            raise ValueError("invalid indexed original PDF source segment")
         a, b, c, d = (
             float(segment[k]) for k in ("x1", "y1", "x2", "y2")
         )
-        if not all(map(math.isfinite, (a, b, c, d))):
-            continue
         if axis == "V":
             if abs(a-c) > AXIS_TOL or abs(a-fixed) > COORD_TOL:
                 continue
