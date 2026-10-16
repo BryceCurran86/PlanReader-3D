@@ -21,13 +21,20 @@ Reproduce on the actual #2813 head with
 Members: `wall_037156cd6ac85472c11f`, `wall_2c74d7fb7c6a96671107`,
 `wall_2c98be6d134ba709b065`, `wall_e0c3801840a2de6853a6`.
 
-Default first DISTINCT fail before motif skip: `wall_834b98f11c6b792ad73b`
-/ `:713` at (1065.5, 297)–(1070, 297), a repeated 90/1080 dimension tick.
-Skip receipts, when present, are
-`opening_host_frame_aligned_motif_fragments_skipped` plus one
-`…skipped:{wall_id}` per leftover. Those codes are decision provenance.
-They do not enter `opening_host_frame_v2` or
-`opening_host_whole_wall_frame_v1`.
+Reproduced on head `13cc46d1`. Default first DISTINCT fail before motif
+skip remains `wall_834b98f11c6b792ad73b` / `:713` at (1065.5, 297)–(1070,
+297). All three shadow frames name the same five leftover receipts:
+
+- `opening_host_frame_aligned_motif_fragments_skipped`
+- `…:wall_834b98f11c6b792ad73b`
+- `…:wall_a5598661c0fa52c5b81e`
+- `…:wall_c5e00d5a5edcc70f20bf`
+- `…:wall_cb4b89ac477d3f26fddf`
+- `…:wall_cbd5120133f33920fefa`
+
+Those codes are decision provenance. They do not enter
+`opening_host_frame_v2` or `opening_host_whole_wall_frame_v1`. The three
+frame ids below match the frames that exist if those leftovers are absent.
 
 ## Three additional shadow frames
 
@@ -37,26 +44,31 @@ They do not enter `opening_host_frame_v2` or
 | `physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b` | `opening_host_binding_v3_70e95586cd2bbf769a790b247047b09c` | `wall_2c98be6d134ba709b065`, `wall_e0c3801840a2de6853a6` | `opening_host_frame_v2_84b7886ae5cfdc50ef777647666f2560` |
 | `physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096` | `opening_host_binding_v3_3d9f107e23c6937695ca30d0b2782f3c` | `wall_037156cd6ac85472c11f`, `wall_2c98be6d134ba709b065` | `opening_host_frame_v2_160b309a576abd9cce008f0dcbc80821` |
 
-Origins on the shared 3.36 pt band at y=298.32: 384.0, 579.6, 400.32.
-Each G17 length is 23.76 pt. Neighbours on the same band already have
-corroborated hosts.
+Whole-wall origin is (384.0, 298.32), thickness 3.36 pt. Opening intervals
+on that axis: `4b8c` u0=242.40–266.16; `ab43` 195.60–219.36; `c3c1`
+16.32–40.08. Host bindings remain the two-member sets above; the bundle
+`member_wall_ids` field is the shared four-wall whole-wall component.
 
 ## Remaining GPT1 blockers (not granted here)
 
-Typed kind is resolved only from `PhysicalOpeningExistenceRecord.structural_pattern`
-via `resolve_opening_kind`. A missing door/window structural pattern stays
-`opening_kind_unavailable`. A label or schedule class is not inferred from
-the 870 callout text. The exact pattern and kind status are on each bundle.
+Typed kind on all three is `door` from
+`raster_door_swing_wall_band_interruption`
+(`opening_kind_structural_door`, `opening_kind_corroborated`). That is
+structural pattern only. No schedule instance is bound. Label text is not
+a kind source. GPT1 still owns schedule/label corroboration and any
+conflict if those sources disagree.
 
 Metric width is `opening_dimension_witness_topology_required` on all three
-(and on all 21 page-3 physical openings). Jambs from G17 support are not
-enough. `OpeningDimensionAuthority.resolve_width` still requires one visible
-dimension line on the two jamb axes, two distinct witness lines, and trusted
-text bound to that line. Raster figured labels that already mint eight signed
-areas are a different seam and must not be converted to millimetres here.
+(and on all 21 page-3 physical openings). `value_mm` is null. Jambs from
+G17 support are not enough. `OpeningDimensionAuthority.resolve_width`
+still requires one visible dimension line on the two jamb axes, two
+distinct witness lines, and trusted text bound to that line. Raster
+figured labels that already mint eight signed areas are a different seam
+and must not be converted to millimetres here.
 
 `gpt1_metric_axis_handoff_granted` stays false. `firm_quantity_granted`
-stays false. `new_customer_quantity_granted` stays false.
+stays false. `new_customer_quantity_granted` stays false. Shadow frames
+are not FIRM quantities.
 
 ## Independent of this stack
 
