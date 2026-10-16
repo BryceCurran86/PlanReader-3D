@@ -1,5 +1,5 @@
 import re, subprocess, sys
-sys.path.insert(0, "C:/claude-work/ci-trigger/tests"); sys.path.insert(0, "C:/claude-work/ci-trigger")
+sys.path.insert(0, "C:/claude-work/main-ref/tests"); sys.path.insert(0, "C:/claude-work/main-ref")
 import test_signed_output_gate_path_coverage as m
 repo = "C:/claude-work/rev-2811"
 def git(*a):
