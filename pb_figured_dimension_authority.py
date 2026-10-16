@@ -83,7 +83,7 @@ def _validate_direct_figured_mm(value: float) -> float:
 
 def _finite_positive_numeric(value: object) -> Optional[float]:
     """Return a typed finite positive numeric value; reject bool and coercions."""
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+    if isinstance(value, bool) or not isinstance(value, (numbers.Real, Decimal)):
         return None
     try:
         number = float(value)
