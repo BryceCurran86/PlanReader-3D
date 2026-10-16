@@ -2103,6 +2103,32 @@ class PdfTextIntegrityAuthority:
             if receipt_snapshot_id == snapshot_id
         )
 
+    def observation_ids_with_receipt_page(
+        self,
+        snapshot_id: str,
+        observation_ids: Sequence[str],
+        page_id: str,
+    ) -> tuple[str, ...]:
+        """Ids (in the given order) whose producer-owned text receipt is on ``page_id``.
+
+        Addressing only: a pure filter over the receipt table that authenticates
+        nothing and grants no trust. A caller that needs a word's text must still
+        resolve every kept id with resolve_text. resolve_text reports the very
+        receipt looked up here, so an id dropped by this filter could only ever
+        have been rejected afterwards for a missing receipt or a receipt on
+        another page; callers that discard such words anyway can skip resolving
+        them instead of re-authenticating every word of every other page.
+        """
+        snapshot_id = str(snapshot_id)
+        page = str(page_id)
+        receipts = self._receipts
+        kept = []
+        for observation_id in observation_ids:
+            receipt = receipts.get((snapshot_id, observation_id))
+            if receipt is not None and str(receipt.page_id) == page:
+                kept.append(observation_id)
+        return tuple(kept)
+
     def observation_ids_for_page(
         self,
         snapshot_id: str,

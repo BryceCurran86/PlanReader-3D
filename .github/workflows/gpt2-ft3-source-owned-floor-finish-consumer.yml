@@ -1,0 +1,85 @@
+name: GPT2 FT3 Source Owned Floor Finish Consumer
+
+on:
+  pull_request:
+    paths:
+      - pb_cross_view_floor_finish_authority.py
+      - pb_source_material_semantic_authority.py
+      - tests/test_cross_view_floor_finish_authority_v1.py
+      - tests/test_source_plan_material_occurrences.py
+      - .github/workflows/gpt2-ft3-source-owned-floor-finish-consumer.yml
+  workflow_dispatch:
+
+jobs:
+  original-ft3-bounded-material-and-floor-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Source-owned and ordinary floor-finish tests
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_source_plan_material_occurrences.py tests/test_cross_view_floor_finish_authority_v1.py tests/test_source_owned_physical_plan_view.py tests/test_source_material_semantic_authority_v1.py tests/test_live_floor_area_quantity_publication_integrity.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Immutable original Maryborough FT3 source first gate
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts/gpt2-ft3-source-owned
+          git rev-parse HEAD > artifacts/gpt2-ft3-source-owned/head.txt
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from tools.diag_source_plan_material_occurrences import replay
+          source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha = hashlib.sha256(source).hexdigest()
+          assert sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          result = replay(source, page_number=11, raster_supports=False)
+          definition = result["unchanged_nominated_definition_results"]["FT3"]
+          occurrences = [
+              item for scope in result["material_occurrence_scopes"]
+              for item in scope["records"] if item["code"] == "FT3"
+          ]
+          report = {
+              "original_source_sha256": sha,
+              "original_bounded_plan_view_count": result["bounded_plan_view_count"],
+              "material_definition_status": definition["status"],
+              "material_definition_record": definition["record"],
+              "ft3_individually_owned_positive_record_count": len(occurrences),
+              "material_scope_complete_count": result["scope_complete_count"],
+              "new_authenticated_room_floor_correspondence": False,
+              "new_verified_floor_finish_quantities": 0,
+              "benchmark_truth_changed": False,
+          }
+          Path("artifacts/gpt2-ft3-source-owned/original.json").write_text(
+              json.dumps(report, sort_keys=True, indent=2) + "\n"
+          )
+          assert result["published_snapshot_unchanged"]
+          assert result["default_segmentation_unchanged"]
+          assert result["default_occurrence_results_unchanged"]
+          assert result["incomplete_scopes_rejected_by_existing_floor_consumer"]
+          assert result["bounded_plan_view_count"] == 1
+          assert result["scope_complete_count"] == 0
+          assert not result["commercial_projection_allowed"]
+          assert result["published_quantities"] == []
+          print("GPT2_ORIGINAL_FT3_SOURCE_OWNED_CONSUMER_GATE", json.dumps(report))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-ft3-source-owned-floor-consumer-${{ matrix.python }}
+          path: artifacts/gpt2-ft3-source-owned
+          retention-days: 30

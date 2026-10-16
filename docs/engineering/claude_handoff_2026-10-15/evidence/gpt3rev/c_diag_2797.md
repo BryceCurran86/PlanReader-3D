@@ -1,0 +1,8 @@
+**Claude (integration / CI / performance lane) - independent technical review at head `565dc727`. Review COMMENT only, not a formal approval (one shared GitHub login, B1); I merged and changed nothing.**
+
+**Verdict: diagnostic content fine on its own (19 tests pass, also merged with current `main`; read-only; the tools write only their `--output` JSON); it cannot merge ahead of its parents, and one result must not be cited.**
+
+- Stack: #2776 -> #2791 -> #2792 -> #2795 -> #2797. #2776 is not promotable (strict retention failure on the hostless existence id), so this cannot be merged ahead of it.
+- **Do not cite the F07-to-G17 correspondence from this PR.** #2804's own doc states that the nine G17 geometry cases here were compared with an F07 view from a *different* snapshot than the candidates, so no correspondence was warranted; #2804 redoes it inside one source instance and supersedes this result for that question.
+
+**Merge-blocking defect (workflow trigger):** the new/changed workflow(s) list only the parent stack branch under `pull_request.branches`, so after this PR (or its parent) is merged and retargeted they will never run on a pull request to `main` again while still looking like a gate (this PR carries four such workflows: `f07-g17-scope-join`, `frame-competitors`, `hostless-source-census`, `nine-raw-six-w4`, each limited to a parent branch). Fix: `branches: [main]` (or `[main, <stack branch>]` while stacked). I opened #2814, an always-on test that fails any workflow with this shape (passes on current `main`, 161 workflows; mutation-verified with the #2804 workflow). Owner: GPT MAX.

@@ -1,0 +1,2610 @@
+{
+  "benchmark_identity_assigned": false,
+  "commercial_projection_allowed": false,
+  "customer_quantity_published": false,
+  "diagnostic_only": true,
+  "first_unclosed_gate": "floor_finish_quantity_requires_authenticated_material_definition_and_occurrence_scope",
+  "live_claim": {
+    "canonical_floor_count": 683,
+    "claim_status": "abstained"
+  },
+  "material_code": "FT3",
+  "measured_floors": [
+    {
+      "area_evidence_id": "cross_view_room_area_89533edd9138ed97cb2472b761bf32de",
+      "area_m2": 25.37875,
+      "canonical_floor_id": "physical_room_floor_surface_4bca8579c101670bbfa0853cbbfc6f87",
+      "correspondence": {
+        "competing_registrations_box_test": [
+          {
+            "side_kinds": {
+              "x0": "not_wall",
+              "x1": "not_wall",
+              "y0": "with_openings",
+              "y1": "with_openings"
+            },
+            "translation": [
+              0.0,
+              0.0
+            ],
+            "wall_bounded_on_both_sheets": false
+          },
+          {
+            "side_kinds": {
+              "x0": "not_wall",
+              "x1": "not_wall",
+              "y0": "with_openings",
+              "y1": "with_openings"
+            },
+            "translation": [
+              -43.92,
+              0.0
+            ],
+            "wall_bounded_on_both_sheets": false
+          }
+        ],
+        "finish_codes_in_box": {
+          "EPX": 1
+        },
+        "geometry": {
+          "box_support_sheet": [
+            442.32,
+            811.04,
+            666.24,
+            1175.12
+          ],
+          "box_target_sheet": [
+            364.32,
+            811.04,
+            588.24,
+            1175.12
+          ],
+          "side_kinds": {
+            "x0": "full",
+            "x1": "with_openings",
+            "y0": "full",
+            "y1": "full"
+          },
+          "sides": {
+            "x0": {
+              "covered_interval_iou": 0.999340804218853,
+              "support_sheet": {
+                "coordinate": 442.32,
+                "covered_intervals": [
+                  [
+                    811.04,
+                    1175.12
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    4.32,
+                    0.875
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 364.32,
+                "covered_intervals": [
+                  [
+                    811.04,
+                    1027.76
+                  ],
+                  [
+                    1028.0,
+                    1175.12
+                  ]
+                ],
+                "face_coverage": 0.9993,
+                "second_face": [
+                  [
+                    4.32,
+                    0.999
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            },
+            "x1": {
+              "covered_interval_iou": 0.903098220171391,
+              "support_sheet": {
+                "coordinate": 666.24,
+                "covered_intervals": [
+                  [
+                    811.04,
+                    1134.08
+                  ],
+                  [
+                    1169.36,
+                    1175.12
+                  ]
+                ],
+                "face_coverage": 0.9031,
+                "second_face": [
+                  [
+                    8.64,
+                    1.0
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 588.24,
+                "covered_intervals": [
+                  [
+                    811.04,
+                    1175.12
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    8.64,
+                    1.0
+                  ],
+                  [
+                    12.24,
+                    1.0
+                  ]
+                ]
+              },
+              "wall_side": "with_openings"
+            },
+            "y0": {
+              "covered_interval_iou": 1.0,
+              "support_sheet": {
+                "coordinate": 811.04,
+                "covered_intervals": [
+                  [
+                    442.32,
+                    666.24
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    4.32,
+                    1.0
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 811.04,
+                "covered_intervals": [
+                  [
+                    364.32,
+                    588.24
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    4.32,
+                    1.0
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            },
+            "y1": {
+              "covered_interval_iou": 0.9989281886387995,
+              "support_sheet": {
+                "coordinate": 1175.12,
+                "covered_intervals": [
+                  [
+                    442.32,
+                    666.24
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    4.32,
+                    1.0
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 1175.12,
+                "covered_intervals": [
+                  [
+                    364.32,
+                    521.28
+                  ],
+                  [
+                    521.52,
+                    588.24
+                  ]
+                ],
+                "face_coverage": 0.9989,
+                "second_face": [
+                  [
+                    4.32,
+                    0.999
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            }
+          },
+          "wall_bounded_on_both_sheets": true,
+          "wall_evidence_identical_on_both_sheets": false
+        },
+        "marks_inside_box": [
+          {
+            "center": [
+              572.82,
+              993.962
+            ],
+            "code": "EPX",
+            "margin_pt": 93.42,
+            "registered_region": true
+          }
+        ],
+        "reason_codes": [
+          "wall_evidence_differs_between_sheets",
+          "box_owned_by_other_finish_code"
+        ],
+        "status": "abstained"
+      },
+      "floor_area_reissue_quantity_id": "floor_area_quantity_6b28b3abaedf519631ed",
+      "floor_polygon_pdf_pts": [
+        [
+          359.519997,
+          1025.059998
+        ],
+        [
+          360.0,
+          1020.800049
+        ],
+        [
+          360.0,
+          1027.76001
+        ],
+        [
+          364.319977,
+          1027.76001
+        ],
+        [
+          364.319977,
+          811.040039
+        ],
+        [
+          373.440002,
+          811.040039
+        ],
+        [
+          392.639984,
+          811.040039
+        ],
+        [
+          430.799988,
+          811.040039
+        ],
+        [
+          468.959991,
+          811.040039
+        ],
+        [
+          545.039978,
+          811.040039
+        ],
+        [
+          548.399963,
+          814.400024
+        ],
+        [
+          543.839996,
+          814.52002
+        ],
+        [
+          544.080017,
+          818.47998
+        ],
+        [
+          544.080017,
+          822.560059
+        ],
+        [
+          544.080017,
+          834.560059
+        ],
+        [
+          544.285723,
+          858.422886
+        ],
+        [
+          544.080017,
+          870.560059
+        ],
+        [
+          544.080017,
+          882.560059
+        ],
+        [
+          544.080017,
+          894.560059
+        ],
+        [
+          544.0,
+          902.240031
+        ],
+        [
+          544.080017,
+          906.800049
+        ],
+        [
+          544.080017,
+          918.800049
+        ],
+        [
+          544.080017,
+          930.800049
+        ],
+        [
+          544.080017,
+          946.160034
+        ],
+        [
+          559.440002,
+          946.160034
+        ],
+        [
+          571.440002,
+          946.160034
+        ],
+        [
+          583.627088,
+          946.107449
+        ],
+        [
+          586.271977,
+          946.096037
+        ],
+        [
+          588.23999,
+          946.288994
+        ],
+        [
+          588.23999,
+          948.217846
+        ],
+        [
+          586.919973,
+          948.400065
+        ],
+        [
+          561.599976,
+          948.320068
+        ],
+        [
+          549.599976,
+          948.320068
+        ],
+        [
+          543.960007,
+          949.520081
+        ],
+        [
+          544.080017,
+          954.800049
+        ],
+        [
+          544.080017,
+          966.800049
+        ],
+        [
+          544.080017,
+          978.800049
+        ],
+        [
+          544.902867,
+          992.34293
+        ],
+        [
+          543.900009,
+          1002.800049
+        ],
+        [
+          544.080017,
+          1015.040039
+        ],
+        [
+          544.080017,
+          1035.440063
+        ],
+        [
+          564.47998,
+          1035.440063
+        ],
+        [
+          576.47998,
+          1035.440063
+        ],
+        [
+          586.919973,
+          1035.360067
+        ],
+        [
+          588.23999,
+          1035.513797
+        ],
+        [
+          588.23999,
+          1037.526278
+        ],
+        [
+          586.919973,
+          1037.680013
+        ],
+        [
+          578.640015,
+          1037.599976
+        ],
+        [
+          566.640015,
+          1037.599976
+        ],
+        [
+          554.640015,
+          1037.599976
+        ],
+        [
+          544.080017,
+          1038.464014
+        ],
+        [
+          544.080017,
+          1039.040039
+        ],
+        [
+          544.080017,
+          1051.040039
+        ],
+        [
+          544.080017,
+          1063.040039
+        ],
+        [
+          544.080017,
+          1075.040039
+        ],
+        [
+          543.679993,
+          1079.440063
+        ],
+        [
+          549.119995,
+          1080.080078
+        ],
+        [
+          561.119995,
+          1080.080078
+        ],
+        [
+          573.119995,
+          1080.080078
+        ],
+        [
+          585.036995,
+          1079.997078
+        ],
+        [
+          586.519982,
+          1079.986749
+        ],
+        [
+          588.23999,
+          1080.138391
+        ],
+        [
+          588.23999,
+          1082.23999
+        ],
+        [
+          588.23999,
+          1082.303384
+        ],
+        [
+          586.919973,
+          1082.319987
+        ],
+        [
+          563.279968,
+          1082.23999
+        ],
+        [
+          551.039978,
+          1082.23999
+        ],
+        [
+          544.020004,
+          1082.600037
+        ],
+        [
+          544.080017,
+          1087.040039
+        ],
+        [
+          544.080017,
+          1099.040039
+        ],
+        [
+          543.900009,
+          1111.040039
+        ],
+        [
+          543.840007,
+          1126.23999
+        ],
+        [
+          544.080017,
+          1131.200073
+        ],
+        [
+          544.080017,
+          1147.280029
+        ],
+        [
+          544.080017,
+          1169.359985
+        ],
+        [
+          562.559998,
+          1169.359985
+        ],
+        [
+          568.080017,
+          1175.119995
+        ],
+        [
+          529.919983,
+          1175.119995
+        ],
+        [
+          524.399963,
+          1175.119995
+        ],
+        [
+          524.309967,
+          1175.119995
+        ],
+        [
+          521.399963,
+          1175.119995
+        ],
+        [
+          521.279968,
+          1175.119995
+        ],
+        [
+          510.720001,
+          1175.119995
+        ],
+        [
+          491.534985,
+          1174.175034
+        ],
+        [
+          476.160004,
+          1175.119995
+        ],
+        [
+          476.160004,
+          1179.440063
+        ],
+        [
+          457.440002,
+          1179.440063
+        ],
+        [
+          438.23999,
+          1179.440063
+        ],
+        [
+          419.279999,
+          1179.440063
+        ],
+        [
+          400.079987,
+          1179.440063
+        ],
+        [
+          381.119995,
+          1179.440063
+        ],
+        [
+          368.639984,
+          1179.440063
+        ],
+        [
+          368.639984,
+          1182.320068
+        ],
+        [
+          368.639984,
+          1270.880005
+        ],
+        [
+          364.799996,
+          1274.72004
+        ],
+        [
+          360.0,
+          1269.920044
+        ],
+        [
+          360.0,
+          1183.040039
+        ],
+        [
+          363.600006,
+          1179.440063
+        ],
+        [
+          360.0,
+          1179.440063
+        ],
+        [
+          360.0,
+          1155.680054
+        ],
+        [
+          360.0,
+          1088.719971
+        ],
+        [
+          360.0,
+          1077.243641
+        ],
+        [
+          360.599997,
+          1073.540009
+        ],
+        [
+          360.0,
+          1054.640015
+        ],
+        [
+          360.0,
+          1027.888005
+        ]
+      ],
+      "horizontal_dimension_id": "cross_view_native_dimension_14db7e698ac5e456bcbdc5ff249ab634",
+      "horizontal_value_mm": 3950,
+      "method": "authenticated_cross_view_figured_dimensions",
+      "physical_floor_surface_id": "physical_room_floor_surface_4bca8579c101670bbfa0853cbbfc6f87",
+      "physical_room_id": "live_physical_room_5c63d335f387637ebdae8ab93a51f7b4",
+      "room_area_quantity_id": "qty_9795d69439e85c35b01c",
+      "room_label": "COLD ROOM",
+      "room_polygon_pdf_pts": [
+        [
+          359.519997,
+          1025.059998
+        ],
+        [
+          360.0,
+          1020.800049
+        ],
+        [
+          360.0,
+          1027.76001
+        ],
+        [
+          364.319977,
+          1027.76001
+        ],
+        [
+          364.319977,
+          811.040039
+        ],
+        [
+          373.440002,
+          811.040039
+        ],
+        [
+          392.639984,
+          811.040039
+        ],
+        [
+          430.799988,
+          811.040039
+        ],
+        [
+          468.959991,
+          811.040039
+        ],
+        [
+          545.039978,
+          811.040039
+        ],
+        [
+          548.399963,
+          814.400024
+        ],
+        [
+          543.839996,
+          814.52002
+        ],
+        [
+          544.080017,
+          818.47998
+        ],
+        [
+          544.080017,
+          822.560059
+        ],
+        [
+          544.080017,
+          834.560059
+        ],
+        [
+          544.285723,
+          858.422886
+        ],
+        [
+          544.080017,
+          870.560059
+        ],
+        [
+          544.080017,
+          882.560059
+        ],
+        [
+          544.080017,
+          894.560059
+        ],
+        [
+          544.0,
+          902.240031
+        ],
+        [
+          544.080017,
+          906.800049
+        ],
+        [
+          544.080017,
+          918.800049
+        ],
+        [
+          544.080017,
+          930.800049
+        ],
+        [
+          544.080017,
+          946.160034
+        ],
+        [
+          559.440002,
+          946.160034
+        ],
+        [
+          571.440002,
+          946.160034
+        ],
+        [
+          583.627088,
+          946.107449
+        ],
+        [
+          586.271977,
+          946.096037
+        ],
+        [
+          588.23999,
+          946.288994
+        ],
+        [
+          588.23999,
+          948.217846
+        ],
+        [
+          586.919973,
+          948.400065
+        ],
+        [
+          561.599976,
+          948.320068
+        ],
+        [
+          549.599976,
+          948.320068
+        ],
+        [
+          543.960007,
+          949.520081
+        ],
+        [
+          544.080017,
+          954.800049
+        ],
+        [
+          544.080017,
+          966.800049
+        ],
+        [
+          544.080017,
+          978.800049
+        ],
+        [
+          544.902867,
+          992.34293
+        ],
+        [
+          543.900009,
+          1002.800049
+        ],
+        [
+          544.080017,
+          1015.040039
+        ],
+        [
+          544.080017,
+          1035.440063
+        ],
+        [
+          564.47998,
+          1035.440063
+        ],
+        [
+          576.47998,
+          1035.440063
+        ],
+        [
+          586.919973,
+          1035.360067
+        ],
+        [
+          588.23999,
+          1035.513797
+        ],
+        [
+          588.23999,
+          1037.526278
+        ],
+        [
+          586.919973,
+          1037.680013
+        ],
+        [
+          578.640015,
+          1037.599976
+        ],
+        [
+          566.640015,
+          1037.599976
+        ],
+        [
+          554.640015,
+          1037.599976
+        ],
+        [
+          544.080017,
+          1038.464014
+        ],
+        [
+          544.080017,
+          1039.040039
+        ],
+        [
+          544.080017,
+          1051.040039
+        ],
+        [
+          544.080017,
+          1063.040039
+        ],
+        [
+          544.080017,
+          1075.040039
+        ],
+        [
+          543.679993,
+          1079.440063
+        ],
+        [
+          549.119995,
+          1080.080078
+        ],
+        [
+          561.119995,
+          1080.080078
+        ],
+        [
+          573.119995,
+          1080.080078
+        ],
+        [
+          585.036995,
+          1079.997078
+        ],
+        [
+          586.519982,
+          1079.986749
+        ],
+        [
+          588.23999,
+          1080.138391
+        ],
+        [
+          588.23999,
+          1082.23999
+        ],
+        [
+          588.23999,
+          1082.303384
+        ],
+        [
+          586.919973,
+          1082.319987
+        ],
+        [
+          563.279968,
+          1082.23999
+        ],
+        [
+          551.039978,
+          1082.23999
+        ],
+        [
+          544.020004,
+          1082.600037
+        ],
+        [
+          544.080017,
+          1087.040039
+        ],
+        [
+          544.080017,
+          1099.040039
+        ],
+        [
+          543.900009,
+          1111.040039
+        ],
+        [
+          543.840007,
+          1126.23999
+        ],
+        [
+          544.080017,
+          1131.200073
+        ],
+        [
+          544.080017,
+          1147.280029
+        ],
+        [
+          544.080017,
+          1169.359985
+        ],
+        [
+          562.559998,
+          1169.359985
+        ],
+        [
+          568.080017,
+          1175.119995
+        ],
+        [
+          529.919983,
+          1175.119995
+        ],
+        [
+          524.399963,
+          1175.119995
+        ],
+        [
+          524.309967,
+          1175.119995
+        ],
+        [
+          521.399963,
+          1175.119995
+        ],
+        [
+          521.279968,
+          1175.119995
+        ],
+        [
+          510.720001,
+          1175.119995
+        ],
+        [
+          491.534985,
+          1174.175034
+        ],
+        [
+          476.160004,
+          1175.119995
+        ],
+        [
+          476.160004,
+          1179.440063
+        ],
+        [
+          457.440002,
+          1179.440063
+        ],
+        [
+          438.23999,
+          1179.440063
+        ],
+        [
+          419.279999,
+          1179.440063
+        ],
+        [
+          400.079987,
+          1179.440063
+        ],
+        [
+          381.119995,
+          1179.440063
+        ],
+        [
+          368.639984,
+          1179.440063
+        ],
+        [
+          368.639984,
+          1182.320068
+        ],
+        [
+          368.639984,
+          1270.880005
+        ],
+        [
+          364.799996,
+          1274.72004
+        ],
+        [
+          360.0,
+          1269.920044
+        ],
+        [
+          360.0,
+          1183.040039
+        ],
+        [
+          363.600006,
+          1179.440063
+        ],
+        [
+          360.0,
+          1179.440063
+        ],
+        [
+          360.0,
+          1155.680054
+        ],
+        [
+          360.0,
+          1088.719971
+        ],
+        [
+          360.0,
+          1077.243641
+        ],
+        [
+          360.599997,
+          1073.540009
+        ],
+        [
+          360.0,
+          1054.640015
+        ],
+        [
+          360.0,
+          1027.888005
+        ]
+      ],
+      "source_dimension_box_pdf_pts": [
+        442.3199768066406,
+        811.0400390625,
+        666.239990234375,
+        1175.1199951171875
+      ],
+      "source_dimension_page_id": "11",
+      "source_room_face_record_id": "source_room_face_record_17f0cb15ba5c2f25ff17b12b2ccc5129",
+      "vertical_dimension_id": "cross_view_native_dimension_b570d370d0745272b45271cdc870632a",
+      "vertical_value_mm": 6425
+    },
+    {
+      "area_evidence_id": "cross_view_room_area_a140691500159ae7d7eeecdc32691ca6",
+      "area_m2": 13.270425,
+      "canonical_floor_id": "physical_room_floor_surface_10d0d5ddf8103483397512c5a74584f7",
+      "correspondence": {
+        "competing_registrations_box_test": [
+          {
+            "side_kinds": {
+              "x0": "not_wall",
+              "x1": "not_wall",
+              "y0": "not_wall",
+              "y1": "with_openings"
+            },
+            "translation": [
+              0.0,
+              0.0
+            ],
+            "wall_bounded_on_both_sheets": false
+          },
+          {
+            "side_kinds": {
+              "x0": "not_wall",
+              "x1": "not_wall",
+              "y0": "not_wall",
+              "y1": "with_openings"
+            },
+            "translation": [
+              -43.92,
+              0.0
+            ],
+            "wall_bounded_on_both_sheets": false
+          }
+        ],
+        "finish_codes_in_box": {
+          "FT3": 1
+        },
+        "geometry": {
+          "box_support_sheet": [
+            483.12,
+            578.48,
+            678.48,
+            811.04
+          ],
+          "box_target_sheet": [
+            405.12,
+            578.48,
+            600.48,
+            811.04
+          ],
+          "side_kinds": {
+            "x0": "full",
+            "x1": "not_wall",
+            "y0": "not_wall",
+            "y1": "full"
+          },
+          "sides": {
+            "x0": {
+              "covered_interval_iou": 1.0,
+              "support_sheet": {
+                "coordinate": 483.12,
+                "covered_intervals": [
+                  [
+                    578.48,
+                    806.72
+                  ]
+                ],
+                "face_coverage": 0.9814,
+                "second_face": [
+                  [
+                    8.88,
+                    0.981
+                  ],
+                  [
+                    5.76,
+                    0.981
+                  ],
+                  [
+                    5.28,
+                    0.981
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 405.12,
+                "covered_intervals": [
+                  [
+                    578.48,
+                    806.72
+                  ]
+                ],
+                "face_coverage": 0.9814,
+                "second_face": [
+                  [
+                    7.2,
+                    0.683
+                  ],
+                  [
+                    5.76,
+                    0.981
+                  ],
+                  [
+                    5.28,
+                    0.981
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            },
+            "x1": {
+              "covered_interval_iou": 0.0,
+              "support_sheet": {
+                "coordinate": 678.48,
+                "covered_intervals": [],
+                "face_coverage": 0.0,
+                "second_face": []
+              },
+              "target_sheet": {
+                "coordinate": 600.48,
+                "covered_intervals": [
+                  [
+                    646.4,
+                    811.04
+                  ]
+                ],
+                "face_coverage": 0.7079,
+                "second_face": []
+              },
+              "wall_side": "not_wall"
+            },
+            "y0": {
+              "covered_interval_iou": 1.0,
+              "support_sheet": {
+                "coordinate": 578.48,
+                "covered_intervals": [
+                  [
+                    483.12,
+                    678.48
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": []
+              },
+              "target_sheet": {
+                "coordinate": 578.48,
+                "covered_intervals": [
+                  [
+                    405.12,
+                    600.48
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": []
+              },
+              "wall_side": "not_wall"
+            },
+            "y1": {
+              "covered_interval_iou": 1.0,
+              "support_sheet": {
+                "coordinate": 811.04,
+                "covered_intervals": [
+                  [
+                    483.12,
+                    674.88
+                  ]
+                ],
+                "face_coverage": 0.9816,
+                "second_face": [
+                  [
+                    -4.32,
+                    0.982
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 811.04,
+                "covered_intervals": [
+                  [
+                    405.12,
+                    596.88
+                  ]
+                ],
+                "face_coverage": 0.9816,
+                "second_face": [
+                  [
+                    -4.32,
+                    0.982
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            }
+          },
+          "wall_bounded_on_both_sheets": false,
+          "wall_evidence_identical_on_both_sheets": false
+        },
+        "marks_inside_box": [
+          {
+            "center": [
+              586.74,
+              642.832
+            ],
+            "code": "FT3",
+            "margin_pt": 64.35,
+            "registered_region": true
+          }
+        ],
+        "reason_codes": [
+          "box_not_wall_bounded_on_both_sheets"
+        ],
+        "status": "abstained"
+      },
+      "floor_area_reissue_quantity_id": "floor_area_quantity_d62c2f382a0c773ec36f",
+      "floor_polygon_pdf_pts": [
+        [
+          328.320007,
+          578.47998
+        ],
+        [
+          328.320007,
+          612.560059
+        ],
+        [
+          328.320007,
+          646.400024
+        ],
+        [
+          328.320007,
+          680.47998
+        ],
+        [
+          328.320007,
+          714.560059
+        ],
+        [
+          328.320007,
+          748.640015
+        ],
+        [
+          359.519989,
+          748.736035
+        ],
+        [
+          359.819992,
+          738.050079
+        ],
+        [
+          360.0,
+          734.47998
+        ],
+        [
+          360.0,
+          722.47998
+        ],
+        [
+          360.0,
+          710.47998
+        ],
+        [
+          360.0,
+          638.23999
+        ],
+        [
+          397.919983,
+          676.400024
+        ],
+        [
+          397.919983,
+          616.160034
+        ],
+        [
+          397.919983,
+          604.160034
+        ],
+        [
+          373.440002,
+          579.680054
+        ],
+        [
+          362.880822,
+          579.200073
+        ],
+        [
+          361.999997,
+          579.160034
+        ]
+      ],
+      "horizontal_dimension_id": "cross_view_native_dimension_6659af3072a9c6d25d36922052b70163",
+      "horizontal_value_mm": 3297,
+      "method": "authenticated_cross_view_figured_dimensions",
+      "physical_floor_surface_id": "physical_room_floor_surface_10d0d5ddf8103483397512c5a74584f7",
+      "physical_room_id": "live_physical_room_7f9fb47969b3ac3c1496e2a18104b812",
+      "room_area_quantity_id": "qty_be2a3b3108220d48f6f5",
+      "room_label": "FOOD PREP",
+      "room_polygon_pdf_pts": [
+        [
+          328.320007,
+          578.47998
+        ],
+        [
+          328.320007,
+          612.560059
+        ],
+        [
+          328.320007,
+          646.400024
+        ],
+        [
+          328.320007,
+          680.47998
+        ],
+        [
+          328.320007,
+          714.560059
+        ],
+        [
+          328.320007,
+          748.640015
+        ],
+        [
+          359.519989,
+          748.736035
+        ],
+        [
+          359.819992,
+          738.050079
+        ],
+        [
+          360.0,
+          734.47998
+        ],
+        [
+          360.0,
+          722.47998
+        ],
+        [
+          360.0,
+          710.47998
+        ],
+        [
+          360.0,
+          638.23999
+        ],
+        [
+          397.919983,
+          676.400024
+        ],
+        [
+          397.919983,
+          616.160034
+        ],
+        [
+          397.919983,
+          604.160034
+        ],
+        [
+          373.440002,
+          579.680054
+        ],
+        [
+          362.880822,
+          579.200073
+        ],
+        [
+          361.999997,
+          579.160034
+        ]
+      ],
+      "source_dimension_box_pdf_pts": [
+        483.1199951171875,
+        578.47998046875,
+        678.47998046875,
+        811.0400390625
+      ],
+      "source_dimension_page_id": "11",
+      "source_room_face_record_id": "source_room_face_record_a163b3690c0b2db83f89fcf7465bd831",
+      "vertical_dimension_id": "cross_view_native_dimension_ea6109c5114a92cab7225ca0168df425",
+      "vertical_value_mm": 4025
+    },
+    {
+      "area_evidence_id": "cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5",
+      "area_m2": 9.05352,
+      "canonical_floor_id": "physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e",
+      "correspondence": {
+        "competing_registrations_box_test": [
+          {
+            "side_kinds": {
+              "x0": "not_wall",
+              "x1": "not_wall",
+              "y0": "with_openings",
+              "y1": "full"
+            },
+            "translation": [
+              0.0,
+              0.0
+            ],
+            "wall_bounded_on_both_sheets": false
+          },
+          {
+            "side_kinds": {
+              "x0": "not_wall",
+              "x1": "not_wall",
+              "y0": "with_openings",
+              "y1": "full"
+            },
+            "translation": [
+              -43.92,
+              0.0
+            ],
+            "wall_bounded_on_both_sheets": false
+          }
+        ],
+        "finish_codes_in_box": {
+          "FT3": 1
+        },
+        "geometry": {
+          "box_support_sheet": [
+            251.04,
+            1382.72,
+            394.8,
+            1585.04
+          ],
+          "box_target_sheet": [
+            173.04,
+            1382.72,
+            316.8,
+            1585.04
+          ],
+          "side_kinds": {
+            "x0": "full",
+            "x1": "full",
+            "y0": "with_openings",
+            "y1": "full"
+          },
+          "sides": {
+            "x0": {
+              "covered_interval_iou": 1.0,
+              "support_sheet": {
+                "coordinate": 251.04,
+                "covered_intervals": [
+                  [
+                    1382.72,
+                    1585.04
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    12.96,
+                    1.0
+                  ],
+                  [
+                    4.32,
+                    1.0
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 173.04,
+                "covered_intervals": [
+                  [
+                    1382.72,
+                    1585.04
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    12.72,
+                    1.0
+                  ],
+                  [
+                    4.32,
+                    1.0
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            },
+            "x1": {
+              "covered_interval_iou": 0.9952550415183865,
+              "support_sheet": {
+                "coordinate": 394.8,
+                "covered_intervals": [
+                  [
+                    1383.2,
+                    1584.56
+                  ]
+                ],
+                "face_coverage": 0.9953,
+                "second_face": [
+                  [
+                    5.76,
+                    0.995
+                  ],
+                  [
+                    6.24,
+                    0.989
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 316.8,
+                "covered_intervals": [
+                  [
+                    1382.72,
+                    1585.04
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    5.76,
+                    0.995
+                  ],
+                  [
+                    6.48,
+                    0.995
+                  ],
+                  [
+                    9.6,
+                    0.502
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            },
+            "y0": {
+              "covered_interval_iou": 1.0,
+              "support_sheet": {
+                "coordinate": 1382.72,
+                "covered_intervals": [
+                  [
+                    311.76,
+                    394.8
+                  ]
+                ],
+                "face_coverage": 0.5776,
+                "second_face": [
+                  [
+                    6.0,
+                    0.578
+                  ],
+                  [
+                    5.28,
+                    0.578
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 1382.72,
+                "covered_intervals": [
+                  [
+                    233.76,
+                    316.8
+                  ]
+                ],
+                "face_coverage": 0.5776,
+                "second_face": [
+                  [
+                    6.0,
+                    0.578
+                  ],
+                  [
+                    5.28,
+                    0.578
+                  ]
+                ]
+              },
+              "wall_side": "with_openings"
+            },
+            "y1": {
+              "covered_interval_iou": 0.9966611018363939,
+              "support_sheet": {
+                "coordinate": 1585.04,
+                "covered_intervals": [
+                  [
+                    251.52,
+                    394.8
+                  ]
+                ],
+                "face_coverage": 0.9967,
+                "second_face": [
+                  [
+                    5.76,
+                    0.997
+                  ],
+                  [
+                    6.24,
+                    0.992
+                  ]
+                ]
+              },
+              "target_sheet": {
+                "coordinate": 1585.04,
+                "covered_intervals": [
+                  [
+                    173.04,
+                    316.8
+                  ]
+                ],
+                "face_coverage": 1.0,
+                "second_face": [
+                  [
+                    5.28,
+                    1.0
+                  ],
+                  [
+                    5.76,
+                    0.997
+                  ],
+                  [
+                    6.24,
+                    0.76
+                  ]
+                ]
+              },
+              "wall_side": "full"
+            }
+          },
+          "wall_bounded_on_both_sheets": true,
+          "wall_evidence_identical_on_both_sheets": true
+        },
+        "marks_inside_box": [
+          {
+            "center": [
+              327.779,
+              1437.473
+            ],
+            "code": "FT3",
+            "margin_pt": 54.75,
+            "registered_region": true
+          }
+        ],
+        "reason_codes": [
+          "floor_uniquely_owned_by_material_marks"
+        ],
+        "status": "corroborated"
+      },
+      "floor_area_reissue_quantity_id": "floor_area_quantity_8bcdc01455538a6a105a",
+      "floor_polygon_pdf_pts": [
+        [
+          226.319992,
+          1463.119995
+        ],
+        [
+          226.319992,
+          1496.959961
+        ],
+        [
+          260.160004,
+          1496.959961
+        ],
+        [
+          260.160004,
+          1463.119995
+        ]
+      ],
+      "horizontal_dimension_id": "cross_view_native_dimension_5bfac195a93c9131d80f2be4abfb14a1",
+      "horizontal_value_mm": 2536,
+      "method": "authenticated_cross_view_figured_dimensions",
+      "physical_floor_surface_id": "physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e",
+      "physical_room_id": "live_physical_room_9eea8a328d9da55c19258c05c282c88c",
+      "room_area_quantity_id": "qty_29e71bd466a9e5fa1783",
+      "room_label": "OFFICE",
+      "room_polygon_pdf_pts": [
+        [
+          226.319992,
+          1463.119995
+        ],
+        [
+          226.319992,
+          1496.959961
+        ],
+        [
+          260.160004,
+          1496.959961
+        ],
+        [
+          260.160004,
+          1463.119995
+        ]
+      ],
+      "source_dimension_box_pdf_pts": [
+        251.0399932861328,
+        1382.719970703125,
+        394.79998779296875,
+        1585.0400390625
+      ],
+      "source_dimension_page_id": "11",
+      "source_room_face_record_id": "source_room_face_record_735f9b309cca70f513c9fcd9390e3e10",
+      "vertical_dimension_id": "cross_view_native_dimension_a02403b2a039d0844ca697825a2dfc9c",
+      "vertical_value_mm": 3570
+    }
+  ],
+  "plan_marks": [
+    {
+      "center": [
+        572.82,
+        993.962
+      ],
+      "code": "EPX",
+      "local_registration": {
+        "best_support_pt": 939.1,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 939.1
+      },
+      "native_bbox_pdf_pts": [
+        566.197,
+        985.364,
+        579.442,
+        1002.559
+      ],
+      "native_source_address": [
+        93,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        572.82,
+        1227.722
+      ],
+      "code": "EPX",
+      "local_registration": {
+        "best_support_pt": 2944.6,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 2944.6
+      },
+      "native_bbox_pdf_pts": [
+        566.197,
+        1219.124,
+        579.442,
+        1236.319
+      ],
+      "native_source_address": [
+        93,
+        1,
+        0
+      ]
+    },
+    {
+      "center": [
+        1326.99,
+        2205.787
+      ],
+      "code": "EPX",
+      "local_registration": {
+        "best_support_pt": 470.6,
+        "best_translation": [
+          -940.04,
+          -1006.6
+        ],
+        "registered_region": false,
+        "support_at_global_translation_pt": 155.4
+      },
+      "native_bbox_pdf_pts": [
+        1320.127,
+        2197.255,
+        1333.853,
+        2214.32
+      ],
+      "native_source_address": [
+        259,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        935.46,
+        1081.064
+      ],
+      "code": "FT1",
+      "local_registration": {
+        "best_support_pt": 518.5,
+        "best_translation": [
+          -78.0,
+          666.96
+        ],
+        "registered_region": false,
+        "support_at_global_translation_pt": 20.3
+      },
+      "native_bbox_pdf_pts": [
+        928.837,
+        1073.888,
+        942.083,
+        1088.239
+      ],
+      "native_source_address": [
+        111,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        1072.74,
+        505.303
+      ],
+      "code": "FT1",
+      "local_registration": {
+        "best_support_pt": 802.0,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 802.0
+      },
+      "native_bbox_pdf_pts": [
+        1066.117,
+        498.128,
+        1079.363,
+        512.479
+      ],
+      "native_source_address": [
+        115,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        1345.71,
+        2205.621
+      ],
+      "code": "FT1",
+      "local_registration": {
+        "best_support_pt": 489.3,
+        "best_translation": [
+          -940.04,
+          -1006.6
+        ],
+        "registered_region": false,
+        "support_at_global_translation_pt": 155.9
+      },
+      "native_bbox_pdf_pts": [
+        1338.847,
+        2198.602,
+        1352.573,
+        2212.64
+      ],
+      "native_source_address": [
+        260,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        329.699,
+        1853.153
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 3634.5,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 3634.5
+      },
+      "native_bbox_pdf_pts": [
+        323.077,
+        1845.266,
+        336.322,
+        1861.04
+      ],
+      "native_source_address": [
+        19,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        389.939,
+        1617.952
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 5246.8,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 5246.8
+      },
+      "native_bbox_pdf_pts": [
+        383.317,
+        1610.065,
+        396.562,
+        1625.839
+      ],
+      "native_source_address": [
+        54,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        412.259,
+        1842.353
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 5608.3,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 5608.3
+      },
+      "native_bbox_pdf_pts": [
+        405.637,
+        1834.466,
+        418.882,
+        1850.24
+      ],
+      "native_source_address": [
+        29,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        427.379,
+        1727.153
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 6584.6,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 6584.6
+      },
+      "native_bbox_pdf_pts": [
+        420.757,
+        1719.266,
+        434.002,
+        1735.04
+      ],
+      "native_source_address": [
+        36,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        484.26,
+        1483.792
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 5989.8,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 5989.8
+      },
+      "native_bbox_pdf_pts": [
+        477.637,
+        1475.905,
+        490.882,
+        1491.679
+      ],
+      "native_source_address": [
+        55,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        511.62,
+        1845.473
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 5647.0,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 5647.0
+      },
+      "native_bbox_pdf_pts": [
+        504.997,
+        1837.586,
+        518.242,
+        1853.36
+      ],
+      "native_source_address": [
+        30,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        557.22,
+        1408.192
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 5731.8,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 5731.8
+      },
+      "native_bbox_pdf_pts": [
+        550.597,
+        1400.305,
+        563.842,
+        1416.079
+      ],
+      "native_source_address": [
+        56,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        655.14,
+        1483.072
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 5328.3,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 5328.3
+      },
+      "native_bbox_pdf_pts": [
+        648.517,
+        1475.185,
+        661.762,
+        1490.959
+      ],
+      "native_source_address": [
+        57,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        1364.67,
+        2205.645
+      ],
+      "code": "FT2",
+      "local_registration": {
+        "best_support_pt": 504.5,
+        "best_translation": [
+          -940.04,
+          -1006.6
+        ],
+        "registered_region": false,
+        "support_at_global_translation_pt": 155.9
+      },
+      "native_bbox_pdf_pts": [
+        1357.807,
+        2197.929,
+        1371.533,
+        2213.361
+      ],
+      "native_source_address": [
+        261,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        316.259,
+        622.912
+      ],
+      "code": "FT3",
+      "local_registration": {
+        "best_support_pt": 1859.0,
+        "best_translation": [
+          -77.96,
+          -0.04
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 1858.9
+      },
+      "native_bbox_pdf_pts": [
+        309.637,
+        615.025,
+        322.882,
+        630.799
+      ],
+      "native_source_address": [
+        112,
+        2,
+        0
+      ]
+    },
+    {
+      "center": [
+        324.419,
+        1022.272
+      ],
+      "code": "FT3",
+      "local_registration": {
+        "best_support_pt": 783.7,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 783.7
+      },
+      "native_bbox_pdf_pts": [
+        317.797,
+        1014.386,
+        331.042,
+        1030.159
+      ],
+      "native_source_address": [
+        112,
+        1,
+        0
+      ]
+    },
+    {
+      "center": [
+        327.779,
+        1437.473
+      ],
+      "code": "FT3",
+      "local_registration": {
+        "best_support_pt": 4720.3,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 4720.3
+      },
+      "native_bbox_pdf_pts": [
+        321.157,
+        1429.586,
+        334.402,
+        1445.359
+      ],
+      "native_source_address": [
+        112,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        586.74,
+        642.832
+      ],
+      "code": "FT3",
+      "local_registration": {
+        "best_support_pt": 3113.4,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 3113.4
+      },
+      "native_bbox_pdf_pts": [
+        580.117,
+        634.945,
+        593.362,
+        650.719
+      ],
+      "native_source_address": [
+        113,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        736.98,
+        507.952
+      ],
+      "code": "FT3",
+      "local_registration": {
+        "best_support_pt": 2148.3,
+        "best_translation": [
+          -78.0,
+          0.0
+        ],
+        "registered_region": true,
+        "support_at_global_translation_pt": 2148.3
+      },
+      "native_bbox_pdf_pts": [
+        730.357,
+        500.065,
+        743.602,
+        515.839
+      ],
+      "native_source_address": [
+        114,
+        0,
+        0
+      ]
+    },
+    {
+      "center": [
+        1383.39,
+        2205.645
+      ],
+      "code": "FT3",
+      "local_registration": {
+        "best_support_pt": 497.6,
+        "best_translation": [
+          -940.08,
+          -1006.56
+        ],
+        "registered_region": false,
+        "support_at_global_translation_pt": 155.9
+      },
+      "native_bbox_pdf_pts": [
+        1376.526,
+        2197.929,
+        1390.253,
+        2213.361
+      ],
+      "native_source_address": [
+        262,
+        0,
+        0
+      ]
+    }
+  ],
+  "published_floor_finish_quantities": 0,
+  "published_material_occurrences": 0,
+  "registration": {
+    "best": {
+      "dx": -78.0,
+      "dy": 0.0,
+      "min_support_pt": 22338.5,
+      "orientation": "identity",
+      "scale": 1.0
+    },
+    "best_over_null_max": 130.7,
+    "best_over_strongest_competitor": 3.66,
+    "evidence_pt": {
+      "p11_non_grid_wall_linework": 122886.5,
+      "p7_non_grid_wall_linework": 103957.0
+    },
+    "null_support_pt": {
+      "max": 170.87991333007812,
+      "median": 0.0,
+      "p99": 70.52856459762711
+    },
+    "p11_to_p7_hypotheses": [
+      {
+        "dx": -78.0,
+        "dy": 0.0,
+        "h_support_pt": 22338.5,
+        "min_support_pt": 22338.5,
+        "next_distinct_min_support_pt": 6096.0,
+        "next_distinct_translation": [
+          -43.92,
+          0.0
+        ],
+        "orientation": "identity",
+        "scale": 1.0,
+        "v_support_pt": 28026.7
+      },
+      {
+        "dx": 1362.2,
+        "dy": 0.04,
+        "h_support_pt": 9499.4,
+        "min_support_pt": 4774.2,
+        "next_distinct_min_support_pt": 4138.6,
+        "next_distinct_translation": [
+          700.08,
+          0.0
+        ],
+        "orientation": "mirror_x",
+        "scale": 1.0,
+        "v_support_pt": 4774.2
+      },
+      {
+        "dx": -78.0,
+        "dy": 2417.2,
+        "h_support_pt": 4330.6,
+        "min_support_pt": 4330.6,
+        "next_distinct_min_support_pt": 3892.1,
+        "next_distinct_translation": [
+          -43.92,
+          2417.2
+        ],
+        "orientation": "mirror_y",
+        "scale": 1.0,
+        "v_support_pt": 12280.8
+      },
+      {
+        "dx": 1362.24,
+        "dy": 2417.2,
+        "h_support_pt": 4101.4,
+        "min_support_pt": 4101.4,
+        "next_distinct_min_support_pt": 3413.8,
+        "next_distinct_translation": [
+          1487.04,
+          2417.2
+        ],
+        "orientation": "rot180",
+        "scale": 1.0,
+        "v_support_pt": 4711.2
+      },
+      {
+        "dx": 2120.2,
+        "dy": 219.24,
+        "h_support_pt": 3627.2,
+        "min_support_pt": 2582.3,
+        "next_distinct_min_support_pt": 2018.6,
+        "next_distinct_translation": [
+          2120.24,
+          206.24
+        ],
+        "orientation": "rot90",
+        "scale": 1.0,
+        "v_support_pt": 2582.3
+      },
+      {
+        "dx": 2120.2,
+        "dy": 2197.96,
+        "h_support_pt": 2492.6,
+        "min_support_pt": 2492.6,
+        "next_distinct_min_support_pt": 1984.8,
+        "next_distinct_translation": [
+          2120.24,
+          1971.2
+        ],
+        "orientation": "anti_transpose",
+        "scale": 1.0,
+        "v_support_pt": 2592.3
+      },
+      {
+        "dx": -835.8,
+        "dy": 219.24,
+        "h_support_pt": 3654.8,
+        "min_support_pt": 2408.3,
+        "next_distinct_min_support_pt": 2253.1,
+        "next_distinct_translation": [
+          -1066.64,
+          219.2
+        ],
+        "orientation": "transpose",
+        "scale": 1.0,
+        "v_support_pt": 2408.3
+      },
+      {
+        "dx": -835.8,
+        "dy": 2198.2,
+        "h_support_pt": 2453.3,
+        "min_support_pt": 2297.9,
+        "next_distinct_min_support_pt": 2011.0,
+        "next_distinct_translation": [
+          -297.2,
+          1835.12
+        ],
+        "orientation": "rot270",
+        "scale": 1.0,
+        "v_support_pt": 2297.9
+      },
+      {
+        "dx": -584.16,
+        "dy": -1973.36,
+        "h_support_pt": 1909.2,
+        "min_support_pt": 1909.2,
+        "next_distinct_min_support_pt": 1902.2,
+        "next_distinct_translation": [
+          -484.32,
+          -1973.36
+        ],
+        "orientation": "identity",
+        "scale": 2.0,
+        "v_support_pt": 2025.8
+      },
+      {
+        "dx": -345.2,
+        "dy": -144.64,
+        "h_support_pt": 1665.4,
+        "min_support_pt": 1665.4,
+        "next_distinct_min_support_pt": 1665.4,
+        "next_distinct_translation": [
+          -262.4,
+          -144.64
+        ],
+        "orientation": "identity",
+        "scale": 1.25,
+        "v_support_pt": 2187.1
+      },
+      {
+        "dx": 80.4,
+        "dy": 427.72,
+        "h_support_pt": 1274.6,
+        "min_support_pt": 1274.6,
+        "next_distinct_min_support_pt": 1274.6,
+        "next_distinct_translation": [
+          81.6,
+          427.72
+        ],
+        "orientation": "identity",
+        "scale": 0.75,
+        "v_support_pt": 1285.1
+      },
+      {
+        "dx": 361.2,
+        "dy": 237.28,
+        "h_support_pt": 1041.4,
+        "min_support_pt": 1041.4,
+        "next_distinct_min_support_pt": 1031.9,
+        "next_distinct_translation": [
+          424.32,
+          237.28
+        ],
+        "orientation": "identity",
+        "scale": 0.5,
+        "v_support_pt": 1161.8
+      }
+    ],
+    "page_evidence": {
+      "11": {
+        "grid_opposed_excluded": 110,
+        "viewport_id": null,
+        "w4_reason_codes": [
+          "physical_wall_candidate_scope_resolved"
+        ],
+        "w4_records": 1412,
+        "w4_scope_complete": true,
+        "w4_status": "corroborated"
+      },
+      "7": {
+        "grid_opposed_excluded": 195,
+        "viewport_id": "view_p7_2",
+        "w4_reason_codes": [
+          "physical_wall_candidate_scope_resolved",
+          "physical_wall_candidate_scope_cropped_at_viewport_boundary",
+          "physical_wall_candidate_source_primitive_ownership_ambiguous"
+        ],
+        "w4_records": 3467,
+        "w4_scope_complete": false,
+        "w4_status": "corroborated"
+      }
+    },
+    "unique": true
+  },
+  "scale_or_metric_authority_granted": false,
+  "source_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+  "support_page": 11,
+  "target_page": 7,
+  "uniquely_owned_floors": [
+    {
+      "area_evidence_id": "cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5",
+      "area_m2": 9.05352,
+      "canonical_floor_id": "physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e",
+      "floor_area_reissue_quantity_id": "floor_area_quantity_8bcdc01455538a6a105a",
+      "physical_floor_surface_id": "physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e",
+      "physical_room_id": "live_physical_room_9eea8a328d9da55c19258c05c282c88c",
+      "room_area_quantity_id": "qty_29e71bd466a9e5fa1783",
+      "room_label": "OFFICE",
+      "source_room_face_record_id": "source_room_face_record_735f9b309cca70f513c9fcd9390e3e10"
+    }
+  ]
+}

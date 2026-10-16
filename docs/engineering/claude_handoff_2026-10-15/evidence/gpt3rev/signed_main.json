@@ -1,0 +1,152 @@
+{
+ "lot16": {
+  "customer_row_count": 8,
+  "fingerprint": "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb",
+  "project_id": "au_qld_lot16_power",
+  "quantities": [
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_0b6477e219f9117d29b2803c181af665",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 2.16
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 2.16
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 1.8
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_1a755970ebeca773650f41e73eb0f113",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 0.9
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 10.08
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_6809b61112132ffd701e6eae02076876",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 1.26
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 0.54
+   },
+   {
+    "abstained": false,
+    "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+    "family": "opening_area",
+    "quantity_id": "opening_area_a2c85322d97e20ba087f6d74574fa7eb",
+    "status": "corroborated",
+    "unit": "m2",
+    "value": 1.8
+   }
+  ],
+  "revision_ids": [
+   "source_revision_31b112fa62447a99d83fe3d10044d2bb"
+  ],
+  "run_id": "source_closed_run_f97c4a99dc25f0ba408a1ad1d9de2756",
+  "sealed_quantity_count": 8,
+  "source_sha256s": [
+   "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  ],
+  "source_sha_present_in_repo_pdfs": {
+   "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844": "1. Construction Plans - Lot 16 Power (REV E).pdf"
+  },
+  "verified_quantity_ids": [
+   "opening_area_0b6477e219f9117d29b2803c181af665",
+   "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+   "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+   "opening_area_1a755970ebeca773650f41e73eb0f113",
+   "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+   "opening_area_6809b61112132ffd701e6eae02076876",
+   "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+   "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+  ]
+ },
+ "maryborough": {
+  "customer_row_count": 3,
+  "fingerprint": "9f3ab9ac1497cae5c29f8873af9287a5d6e3b3a386937fdeb37f8b5989fd780d",
+  "project_id": "au_qld_maryborough_service_station",
+  "quantities": [
+   {
+    "abstained": false,
+    "authority": "documented_dimension",
+    "family": "floor_area",
+    "quantity_id": "floor_area_quantity_6b28b3abaedf519631ed",
+    "status": "firm",
+    "unit": "m2",
+    "value": 25.37875
+   },
+   {
+    "abstained": false,
+    "authority": "documented_dimension",
+    "family": "floor_area",
+    "quantity_id": "floor_area_quantity_8bcdc01455538a6a105a",
+    "status": "firm",
+    "unit": "m2",
+    "value": 9.05352
+   },
+   {
+    "abstained": false,
+    "authority": "documented_dimension",
+    "family": "floor_area",
+    "quantity_id": "floor_area_quantity_d62c2f382a0c773ec36f",
+    "status": "firm",
+    "unit": "m2",
+    "value": 13.270425
+   }
+  ],
+  "revision_ids": [
+   "source_revision_c3e667ba619e86c70d99bfc3ae5be275"
+  ],
+  "run_id": "source_closed_run_4ede094095a8b8fa12a838c3c95f5b64",
+  "sealed_quantity_count": 3,
+  "source_sha256s": [
+   "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+  ],
+  "source_sha_present_in_repo_pdfs": {
+   "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007": "Arch_Combined_Maryborough_Service_Station.pdf"
+  },
+  "verified_quantity_ids": [
+   "floor_area_quantity_6b28b3abaedf519631ed",
+   "floor_area_quantity_8bcdc01455538a6a105a",
+   "floor_area_quantity_d62c2f382a0c773ec36f"
+  ]
+ }
+}
