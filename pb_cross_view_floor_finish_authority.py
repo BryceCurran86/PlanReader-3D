@@ -60,6 +60,7 @@ from pb_source_material_semantic_authority import (
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
+    is_authoritative_derived_viewport,
     is_segment_page_viewports_product,
     segment_page_viewports,
     validate_non_overlapping_viewports,
@@ -357,6 +358,81 @@ def _floor_finish_viewports(
     return MappingProxyType(output)
 
 
+def _source_owned_mark_eligible_for_existing_physical_floor(
+    *,
+    floor: LiveCanonicalFloorSurfaceObject,
+    occurrence: SourceMaterialOccurrenceRecord,
+    source_owned_shadow: bool,
+) -> bool:
+    """Do not reinterpret cross-sheet mark containment as physical equality.
+
+    A new, independently issued cross-sheet structural correspondence receipt
+    is needed before this isolated mode could accept p11→p7 finishes.
+    Existing same-view/default quantities keep their original authority.
+    """
+    if type(source_owned_shadow) is not bool:
+        raise ValueError("source-owned floor mode must be an explicit boolean")
+    return (
+        not source_owned_shadow
+        or _clean(floor.page_id) == _clean(occurrence.page_id)
+    )
+
+
+def _source_owned_floor_finish_viewports(
+    producer: SourceMaterialSemanticProducer,
+    *,
+    published: object,
+    permitted_page_ids: Sequence[str],
+) -> Mapping[tuple[str, str], tuple[float, float, float, float]]:
+    """Consume ONLY the material producer's authentic bounded F07 view products.
+
+    A geometrically plausible box, unsealed viewport, copied provenance,
+    overlapping sibling, or foreign page cannot acquire commercial ownership.
+    This is source viewport evidence only, not a room/floor equivalence grant.
+    """
+    allowed = set(permitted_page_ids)
+    grouped = {}
+    views = producer.published_plan_viewports()
+    for view in views:
+        page_id = str(view.page_number)
+        if (
+            page_id not in allowed
+            or not is_segment_page_viewports_product(view)
+        ):
+            return MappingProxyType({})
+        provenance = view.provenance or {}
+        if any(
+            str(provenance.get(key) or "") != str(expected)
+            for key, expected in (
+                ("document_id", published.revision.document_id),
+                ("revision_id", published.revision.revision_id),
+                ("source_sha256", published.revision.source_sha256),
+                ("snapshot_id", published.snapshot.snapshot_id),
+            )
+        ):
+            return MappingProxyType({})
+        grouped.setdefault(page_id, []).append(view)
+    if not grouped:
+        return MappingProxyType({})
+    result = {}
+    for page_id, siblings in sorted(grouped.items()):
+        if not validate_non_overlapping_viewports(siblings):
+            return MappingProxyType({})
+        for view in siblings:
+            if (
+                view.view_type != DrawingViewType.FLOOR_FINISH_PLAN.value
+                or not is_authoritative_derived_viewport(view)
+                or view.bounding_box is None
+            ):
+                continue
+            key = (page_id, _clean(view.view_id))
+            box = _bbox(view.bounding_box)
+            if not key[1] or box is None or key in result:
+                return MappingProxyType({})
+            result[key] = box
+    return MappingProxyType(result)
+
+
 def _occurrences_on_page(
     results: Sequence[SourceMaterialOccurrenceScopeResult],
     *,
@@ -591,6 +667,7 @@ class CrossViewFloorFinishProducer:
         room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
         same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+        _physical_plan_page_ids: tuple[str, ...] = (),
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -618,6 +695,7 @@ class CrossViewFloorFinishProducer:
         self._room_areas = room_areas
         self._same_view_room_areas = same_view_room_areas
         self._floors = floors
+        self._physical_plan_page_ids = _physical_plan_page_ids
 
     @classmethod
     def from_source(
@@ -633,6 +711,36 @@ class CrossViewFloorFinishProducer:
             room_areas=room_areas,
             floors=floors,
             same_view_room_areas=same_view_room_areas,
+            _seal=_PRODUCER_SEAL,
+        )
+
+    @classmethod
+    def for_source_owned_plan_view_shadow(
+        cls,
+        *,
+        source: SourceVisibilityProducer,
+        room_areas: Optional[CrossViewRoomAreaResult],
+        floors: LiveCanonicalFloorSurfaceComposition,
+        page_ids: Sequence[str],
+        same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
+    ) -> "CrossViewFloorFinishProducer":
+        """Explicit consumer of source-owned plan products; commercial default untouched."""
+        if (
+            not isinstance(page_ids, (tuple, list))
+            or not page_ids
+            or any(
+                type(page) is not str or not page.isdecimal()
+                or int(page) <= 0 or str(int(page)) != page
+                for page in page_ids
+            )
+        ):
+            raise ValueError("page_ids must be nonempty canonical page IDs")
+        return cls(
+            source=source,
+            room_areas=room_areas,
+            floors=floors,
+            same_view_room_areas=same_view_room_areas,
+            _physical_plan_page_ids=tuple(sorted(set(page_ids), key=int)),
             _seal=_PRODUCER_SEAL,
         )
 
@@ -732,6 +840,10 @@ class CrossViewFloorFinishProducer:
             )
 
         material_producer = (
+            SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
+                self._source, page_ids=self._physical_plan_page_ids
+            )
+            if self._physical_plan_page_ids else
             SourceMaterialSemanticProducer.from_source_visibility_producer(
                 self._source
             )
@@ -773,9 +885,16 @@ class CrossViewFloorFinishProducer:
                 ]
             ],
         ] = {}
-        floor_finish_viewports = _floor_finish_viewports(
-            self._source,
-            revision_id=revision_id,
+        floor_finish_viewports = (
+            _source_owned_floor_finish_viewports(
+                material_producer,
+                published=published,
+                permitted_page_ids=self._physical_plan_page_ids,
+            )
+            if self._physical_plan_page_ids else
+            _floor_finish_viewports(
+                self._source, revision_id=revision_id,
+            )
         )
         if floor_finish_viewports and unique_area_by_label:
             support_page_ids = tuple(
@@ -946,6 +1065,19 @@ class CrossViewFloorFinishProducer:
                 continue
             if len(candidates) == 1:
                 occurrence, definition = candidates[0]
+                # The explicit source-owned F07 shadow authenticates the
+                # finish DRAWING, not cross-sheet PHYSICAL room equivalence.
+                # A p11 mark inside p11 figured dimensions cannot silently
+                # become a p7 physical-floor material without an independent
+                # source wall/room correspondence producer. Preserve the
+                # ordinary existing consumer unmodified.
+                if not _source_owned_mark_eligible_for_existing_physical_floor(
+                    floor=floor,
+                    occurrence=occurrence,
+                    source_owned_shadow=bool(self._physical_plan_page_ids),
+                ):
+                    unresolved.add(floor.canonical_floor_id)
+                    continue
             else:
                 # A native text block can span several physical spaces. An
                 # identical room label on two pages and a code in its text
