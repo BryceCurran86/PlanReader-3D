@@ -20,6 +20,8 @@ Changes from v1 (each one is a failure observed on the first owner run):
   stops a project that commits more than ``--max-private-gb`` (MEMORY_LIMIT) or that pushes the machine's free
   commit below ``--min-free-commit-gb`` (SYSTEM_MEMORY_GUARD) so one project cannot make the owner's other
   programs fail; both are recorded as negative evidence.
+* ``--with-ocr`` (default off) installs the optional OCR extras into the isolated environment and records whether they
+  were installed, because most text on subset-font CAD exports is untrusted without raster corroboration.
 * v2 writes ``SHARE_SAFE_STATUS.json`` with no local paths, so it can be pasted
   into the coordination issue without exposing the owner's folder names.
 
@@ -180,6 +182,14 @@ def run_logged(
                          f"(log: {log.name})")
 
 
+OCR_EXTRAS = ("rapidocr", "onnxruntime")
+
+
+def ocr_install_command(python: Path) -> list[str]:
+    """The optional OCR extras the diagnostic CI jobs install (not in requirements.txt on purpose)."""
+    return [str(python), "-m", "pip", "install", "--disable-pip-version-check", *OCR_EXTRAS]
+
+
 def verify_originals(kit: Path, report_dir: Path) -> bool:
     manifest = json.loads((kit / "LOCAL_SOURCE_INVENTORY.json").read_text(encoding="utf-8-sig"))
     entries = manifest.get("docs")
@@ -249,7 +259,7 @@ def share_safe(status: dict, home: str) -> dict:
     return json.loads(text)
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source-only", action="store_true",
                         help="Verify bundled files only; skip network, packages and production")
@@ -257,10 +267,20 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", choices=PROJECTS, help="Run production for these projects only")
     parser.add_argument("--timeout-min", type=int, default=180, help="Per-project production limit in minutes")
     parser.add_argument("--stack-dump-min", type=int, default=10, help="Dump Python stacks this often (minutes)")
+    parser.add_argument("--with-ocr", action="store_true",
+                        help="Also install the optional OCR extras (rapidocr, onnxruntime) into the isolated environment, "
+                             "as the diagnostic CI jobs do. The shadow raster text corroboration reads about one word per "
+                             "2.7 s with them; most of the text on subset-font CAD exports is otherwise untrusted "
+                             "(docs/engineering/text_integrity_coverage_20261016.md). Default off.")
     parser.add_argument("--max-private-gb", type=float, default=10.0,
                         help="Stop a project whose process tree commits more private memory than this (MEMORY_LIMIT)")
     parser.add_argument("--min-free-commit-gb", type=float, default=3.0,
                         help="Stop a project when the machine's free commit falls below this (SYSTEM_MEMORY_GUARD)")
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
     opts = parser.parse_args()
     projects = tuple(opts.only) if opts.only else PROJECTS
 
@@ -335,6 +355,14 @@ def main() -> int:
         note(f"Production dependency installation failed. Source preflight succeeded. See {session / 'install_production_dependencies.log'}.")
         return 7
 
+    ocr_installed = False
+    if opts.with_ocr:
+        note("Step 6b: installing the optional OCR extras (rapidocr, onnxruntime) into the isolated environment")
+        rc, _, _ = run_logged(ocr_install_command(python), repo, session / "install_ocr_extras.log", timeout_s=1800)
+        ocr_installed = rc == 0
+        if not ocr_installed:
+            note(f"OCR extras were not installed; continuing without them. See {session / 'install_ocr_extras.log'}.")
+
     note("Step 7: running separate source-closed production diagnostics, one project at a time")
     note("NOTE: the main architectural PDF is the per-project handoff input. Multi-document roles are NOT silently "
          "treated as a complete source-closed project.")
@@ -346,6 +374,8 @@ def main() -> int:
         "source_pdf_count": 10,
         "source_preflight": "VERIFIED",
         "per_project_timeout_min": opts.timeout_min,
+        "ocr_extras_requested": bool(opts.with_ocr),
+        "ocr_extras_installed": ocr_installed,
         "max_private_gb": opts.max_private_gb,
         "min_free_commit_gb": opts.min_free_commit_gb,
         "project_handoffs": [],

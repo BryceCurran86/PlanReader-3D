@@ -134,3 +134,20 @@ def test_a_process_under_its_limits_still_completes_and_reports_peaks(tmp_path):
         timeout_s=60, poll_s=0.3, track_memory=True, max_private_mb=4096, min_free_commit_mb=1)
     assert (rc, status) == (0, "COMPLETED")
     assert usage["peak_private_kb"] > 0
+
+
+def test_the_ocr_extras_command_installs_only_the_two_optional_packages_into_the_given_environment():
+    from pathlib import Path
+
+    command = launcher.ocr_install_command(Path("venv") / "python.exe")
+    assert command[0].endswith("python.exe") and command[1:4] == ["-m", "pip", "install"]
+    assert command[-2:] == ["rapidocr", "onnxruntime"] and "--disable-pip-version-check" in command
+    assert not any(part.startswith("-r") or part == "requirements.txt" for part in command)
+
+
+def test_with_ocr_is_off_by_default_and_the_limits_have_safe_defaults():
+    parser = launcher.build_parser()
+    defaults = parser.parse_args([])
+    assert defaults.with_ocr is False and defaults.max_private_gb == 10.0 and defaults.min_free_commit_gb == 3.0
+    assert defaults.timeout_min == 180 and defaults.only is None and defaults.source_only is False
+    assert parser.parse_args(["--with-ocr"]).with_ocr is True
