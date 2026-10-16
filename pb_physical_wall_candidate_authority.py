@@ -3784,13 +3784,17 @@ class PhysicalWallCandidateProducer:
         source_visibility_producer,
         *,
         page_ids: Optional[Sequence[str]] = None,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
     ):
+        if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+            raise TypeError("unmeasured G17 capture shadow must be an explicit boolean")
         return cls._from_source_visibility_producer(
             source_visibility_producer,
             page_ids=page_ids,
             include_authenticated_viewports=False,
             include_page_scopes=True,
             supplemental_only=False,
+            include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
         )
 
     @classmethod
@@ -3803,6 +3807,7 @@ class PhysicalWallCandidateProducer:
         include_page_scopes: bool,
         supplemental_only: bool,
         physical_plan_view_shadow: bool = False,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -3847,10 +3852,11 @@ class PhysicalWallCandidateProducer:
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
             if not physical_plan_view_shadow:
-                # The ordinary production W4 source path retains its
-                # existing producer-owned raster augmentation unchanged.
+                # Default production never sets the shadow flag. The opt-in
+                # still relies on the original source producer, not user ink.
                 source_visibility_producer.augment_with_raster_visible_segments(
                     revision_id,
+                    include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
                     page_ids=(
                         tuple(
                             sorted(

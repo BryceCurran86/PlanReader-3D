@@ -1874,6 +1874,7 @@ class SourceVisibilityProducer:
         revision_id: str,
         *,
         page_ids: Sequence[str] | None = None,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
     ) -> PublishedVisibleSourceSnapshot:
         """Add source-bound raster visible segments where native visibility is absent.
 
@@ -1883,6 +1884,8 @@ class SourceVisibilityProducer:
         producer-owned.
         """
 
+        if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+            raise TypeError("unmeasured G17 flank capture must be an explicit boolean")
         published = self._published_by_revision.get(str(revision_id))
         if published is None:
             raise ValueError(OBSERVATION_UNAVAILABLE)
@@ -2016,7 +2019,10 @@ class SourceVisibilityProducer:
                     # proven raster-opening support inventory. Unrelated raster
                     # table/furniture bands must not perturb the ordinary W4
                     # graph simply because they contain solid paint.
-                    flank_boxes = self._proven_raster_opening_flank_boxes(published, page_id)
+                    flank_boxes = self._proven_raster_opening_flank_boxes(
+                        published, page_id,
+                        include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
+                    )
                     supplemental = tuple(s for s in supplemental
                         if any(_unchanged_segment_inside_flank(s, box,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
@@ -2194,8 +2200,20 @@ class SourceVisibilityProducer:
         self._raster_visibility_attempted_pages.update(completed_attempts)
         return updated
 
-    def _proven_raster_opening_flank_boxes(self, published, page_id):
-        """Nominate source capture only; never supply a host or completeness."""
+    def _proven_raster_opening_flank_boxes(
+        self, published, page_id, *,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
+    ):
+        """Nominate real source paint into raster capture, never a host or count.
+
+        The default figured-area nomination stays byte-for-byte unchanged.
+        Explicit shadow scope may also nominate otherwise unmeasured flanks,
+        but ONLY after the original producer has independently re-proven both
+        closed G17 face/end groups and solid unchanged source ink. This changes
+        a shadow source snapshot and is not a commercial promotion.
+        """
+        if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+            raise TypeError("unmeasured G17 flank capture must be an explicit boolean")
         physical = self.physical_opening_authority()
         visibility = self.authority()
         # The existing source compiler reauthenticates the *complete* isolated
@@ -2235,10 +2253,35 @@ class SourceVisibilityProducer:
             # geometry, role, host choice or any detector threshold.
             results = tuple(labels.publish_scope(selectors[oid])
                 for oid in opening.source_observation_ids if oid in selectors)
-            if not any(r.status is EvidenceResolutionStatus.CORROBORATED
-                       and r.evidence is not None and r.evidence.area_m2 is not None
-                       for r in results):
-                continue
+            has_source_issued_area = any(
+                r.status is EvidenceResolutionStatus.CORROBORATED
+                and r.evidence is not None and r.evidence.area_m2 is not None
+                for r in results
+            )
+            if not has_source_issued_area:
+                if not include_unmeasured_ink_closed_flanks_shadow:
+                    continue
+                # The extra source capture is NOT controlled by an opening
+                # label, benchmark item, or a guessed wall. It depends on the
+                # exact producer-issued G17 physical identity and a separate
+                # original-pixel source test. No partial flank may enter W2.
+                from pb_opening_local_g17_wall_shadow import (
+                    build_opening_local_g17_wall_shadow,
+                )
+                original_selector = selectors.get(
+                    min(opening.source_observation_ids)
+                )
+                if original_selector is None:
+                    continue
+                ink = build_opening_local_g17_wall_shadow(
+                    self, original_selector
+                )
+                if (
+                    ink.physical_opening_id != opening.record_id
+                    or len(ink.flanks) != 2
+                    or not all(flank.source_ink_supported for flank in ink.flanks)
+                ):
+                    continue
             faces = [by_id[oid].geometry for oid in opening.source_observation_ids
                      if by_id[oid].observation_kind == RASTER_WALL_BAND_FACE]
             grouped = {}
