@@ -173,6 +173,21 @@ def report_same_view_witness_census(
             rows.append({**base, "status": "ABSTAINED",
                          "reason": "canonical_source_label_or_room_owner_ambiguous"})
             continue
+        # This diagnostic must not lend a page-wide trusted text line to a
+        # manually reconstructed or foreign room.  The original room-face
+        # producer keeps its scope binding private and source-sealed.
+        face_binding = rooms.room_face_authority_binding_for(room)
+        if (
+            face_binding is None
+            or face_binding.snapshot_id != room.snapshot_id
+            or face_binding.page_id != room.page_id
+            or face_binding.decision_scope_id != room.decision_scope_id
+            or room.source_room_face_record_id not in face_binding.source_room_face_record_ids
+            or face_binding.viewport_id != room.viewport_id
+        ):
+            rows.append({**base, "status": "ABSTAINED",
+                         "reason": "original_room_face_authority_binding_unavailable"})
+            continue
         trusted_lines = tuple(
             line for line in _trusted_lines_for_page(
                 source, revision_id=revision_id, page_id=room.page_id,
@@ -185,6 +200,23 @@ def report_same_view_witness_census(
                          "trusted_label_line_count": len(trusted_lines)})
             continue
         line = trusted_lines[0]
+        # SourceRoomLabelRecord.observation_ids feed this room's immutable
+        # label evidence.  Similar normalized words elsewhere on this sheet
+        # may never impersonate those native text observations.
+        line_ids = tuple(line.observation_ids)
+        owned_label_ids = set(room.room_label_evidence_ids)
+        if (
+            not line_ids
+            or len(set(line_ids)) != len(line_ids)
+            or not all(type(value) is str and value and value == value.strip()
+                       for value in line_ids)
+            or not set(line_ids).issubset(owned_label_ids)
+            or len(tuple(line.receipt_ids)) != len(line_ids)
+        ):
+            rows.append({**base, "status": "ABSTAINED",
+                         "reason": "original_room_label_observations_unowned",
+                         "trusted_label_line_observation_ids": line_ids})
+            continue
         dimensions = _trusted_native_dimensions_for_page(
             source, revision_id=revision_id, page_id=room.page_id,
             candidate_lines=(line,), view_type=DrawingViewType.FLOOR_PLAN.value,
