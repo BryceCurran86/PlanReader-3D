@@ -2,11 +2,13 @@ name: GPT3 Original Signed Fixture Guard Shadow
 
 on:
   push:
-    branches: [gpt3/immutable-evidence-package-guard-20261016]
+    branches: [main, gpt3/immutable-evidence-package-guard-20261016]
   pull_request:
-    branches: [gpt3/verified-eight-match-development-checkpoint-20261016]
+    branches: [main, gpt3/verified-eight-match-development-checkpoint-20261016]
     paths:
       - "tools/diag_gpt3_sealed_fixture_guard.py"
+      - "pb_*.py"
+      - "tests/test_signed_output_gate_path_coverage.py"
       - "tests/test_gpt3_sealed_fixture_guard.py"
       - "tests/test_lot16_signed_eight_row_fixture.py"
       - "docs/engineering/lot16_original_signed_eight_row_20261015/**"
