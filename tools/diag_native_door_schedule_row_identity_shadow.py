@@ -70,6 +70,15 @@ def _row_candidates(source_words):
                 w["original_native_text_address"] for w in words
                 if w["raw_literal_untrusted"]==nums[1][1]
             ),
+            "source_door_kind_candidate":(
+                "partition_system_single_swing"
+                if "PARTITION" in txt and "SYSTEM" in txt
+                else "solid_core_single_swing"
+                if "SOLID" in txt and "CORE" in txt
+                else "other_source_single_swing"
+            ),
+            "source_height_derived_from_explicit_row_not_default":True,
+            "source_door_height_units_authenticated":False,
             "native_pdf_glyph_clip_paint_row_authenticated":False,
             "schedule_row_semantics_source_verified":False,
         })
