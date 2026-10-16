@@ -1,0 +1,198 @@
+{
+  "classification_counts": {
+    "not_wall_ink": 609,
+    "unproven": 1130
+  },
+  "darkest_ink_color": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "glyph_sized_runs": 98,
+  "glyph_sized_runs_touching_wall_network": 0,
+  "ink_class_table": [
+    {
+      "ink_class": [
+        "stroke",
+        0.24,
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "solid"
+      ],
+      "length_pt": 13974.493,
+      "network_candidates": 0,
+      "segments": 592
+    },
+    {
+      "ink_class": [
+        "stroke",
+        0.24,
+        [
+          0.6,
+          0.6,
+          0.6
+        ],
+        "solid"
+      ],
+      "length_pt": 10847.041,
+      "network_candidates": 0,
+      "segments": 51
+    },
+    {
+      "ink_class": [
+        "fill",
+        [
+          1.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "length_pt": 6602.878,
+      "network_candidates": 0,
+      "segments": 640
+    },
+    {
+      "ink_class": [
+        "fill",
+        [
+          0.914,
+          0.914,
+          0.914
+        ]
+      ],
+      "length_pt": 1859.52,
+      "network_candidates": 0,
+      "segments": 8
+    },
+    {
+      "ink_class": [
+        "stroke",
+        0.6,
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "solid"
+      ],
+      "length_pt": 1652.51,
+      "network_candidates": 0,
+      "segments": 388
+    },
+    {
+      "ink_class": [
+        "stroke",
+        0.48,
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "solid"
+      ],
+      "length_pt": 690.783,
+      "network_candidates": 0,
+      "segments": 16
+    },
+    {
+      "ink_class": [
+        "fill",
+        [
+          0.961,
+          0.961,
+          0.961
+        ]
+      ],
+      "length_pt": 442.08,
+      "network_candidates": 0,
+      "segments": 8
+    },
+    {
+      "ink_class": [
+        "stroke",
+        0.24,
+        [
+          0.816,
+          0.0,
+          0.0
+        ],
+        "solid"
+      ],
+      "length_pt": 281.76,
+      "network_candidates": 0,
+      "segments": 4
+    },
+    {
+      "ink_class": [
+        "fill",
+        [
+          1.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "length_pt": 165.12,
+      "network_candidates": 0,
+      "segments": 8
+    },
+    {
+      "ink_class": [
+        "fill",
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "length_pt": 86.4,
+      "network_candidates": 0,
+      "segments": 16
+    },
+    {
+      "ink_class": [
+        "stroke",
+        0.48,
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "solid"
+      ],
+      "length_pt": 65.663,
+      "network_candidates": 0,
+      "segments": 4
+    },
+    {
+      "ink_class": [
+        "fill",
+        [
+          0.753,
+          0.753,
+          0.753
+        ]
+      ],
+      "length_pt": 47.52,
+      "network_candidates": 0,
+      "segments": 4
+    }
+  ],
+  "live_effect": false,
+  "network_count": 0,
+  "opening_gap_candidates": 0,
+  "page": 3,
+  "reason_counts": {
+    "below_minimum_run_length": 3,
+    "filled_primitive_not_a_strip": 16,
+    "lighter_than_darkest_present_ink": 739,
+    "no_parallel_face_partner": 382,
+    "paired_island_below_network_extent": 6,
+    "repeated_small_path_run": 609
+  },
+  "segments": 1739,
+  "shadow_only": true,
+  "wall_authority_granted": false
+}
