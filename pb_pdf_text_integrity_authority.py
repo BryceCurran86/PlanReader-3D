@@ -2306,6 +2306,138 @@ class PdfTextIntegrityAuthority:
         )
 
 
+
+def classify_original_rotated_words_with_parity_source(
+    original_source_pdf_bytes: bytes,
+    *,
+    expected_original_source_sha256: str,
+    original_page_number: int,
+    original_native_word_addresses: tuple[tuple[int, int, int], ...],
+    source_symbol_font_chain_shadow: bool = False,
+) -> tuple[tuple[tuple[int, int, int], NativeTextIntegrityDecision], ...]:
+    """Default-unwired strict native-rotation parity classification.
+
+    The original PDF /Rotate presentation is not content-stream clipping.
+    Only if TWO separately opened handles from exactly the caller's verified
+    source bytes have identical *entire-page* native drawing/clip records,
+    words, glyph traces, bboxlog paint ancestry, font bindings, content stream
+    and optional content may a zero-rotation handle call the EXISTING clip
+    classifier. No clip rule is weakened. This method is source text-integrity
+    evidence only, not a producer-issued SourceVisibility receipt or any
+    physical floor/material/quantity authority.
+
+    Source word addresses are native PyMuPDF (block,line,word) identifiers,
+    never inferred by label proximity. No document/source bytes are changed.
+    Every mismatch raises, leaving no partial positive decision.
+    """
+    import hashlib
+
+    if type(original_source_pdf_bytes) is not bytes:
+        raise TypeError("original_source_pdf_bytes_required")
+    if (type(expected_original_source_sha256) is not str
+            or hashlib.sha256(original_source_pdf_bytes).hexdigest()
+            != expected_original_source_sha256):
+        raise ValueError("original_source_sha_mismatch")
+    if type(original_page_number) is not int or original_page_number < 1:
+        raise ValueError("valid_original_one_based_page_required")
+    if type(source_symbol_font_chain_shadow) is not bool:
+        raise ValueError("explicit_symbol_source_shadow_bool_required")
+    if (type(original_native_word_addresses) is not tuple
+            or not original_native_word_addresses
+            or len(original_native_word_addresses) > 64
+            or len(set(original_native_word_addresses))
+               != len(original_native_word_addresses)
+            or any(type(a) is not tuple or len(a) != 3
+                   or any(type(v) is not int or v < 0 for v in a)
+                   for a in original_native_word_addresses)):
+        raise ValueError("exact_native_word_addresses_required")
+
+    # Separate page objects and document handles guarantee that the clip,
+    # font and renderer caches cannot alias across the two interpretations.
+    with fitz.open(stream=original_source_pdf_bytes, filetype="pdf") as source:
+        with fitz.open(stream=original_source_pdf_bytes, filetype="pdf") as normalized:
+            if (original_page_number > len(source)
+                    or original_page_number > len(normalized)):
+                raise ValueError("original_source_page_out_of_range")
+            page = source[original_page_number-1]
+            zero = normalized[original_page_number-1]
+            native_rotation = int(page.rotation)
+            if native_rotation not in (90, 180, 270):
+                raise ValueError("original_nonzero_native_rotation_required")
+            zero.set_rotation(0)
+            if int(zero.rotation) != 0 or int(page.rotation) != native_rotation:
+                raise ValueError("source_rotation_scope_inconsistent")
+
+            # Complete native-page source equality, including original
+            # *active clip ancestry*, not merely a cropped glyph/word box.
+            # The caps fail closed and are independent of the 20k raster
+            # opening primitive safety cap.
+            def paired_native(method, *, limit):
+                a = method(page)
+                b = method(zero)
+                if (len(a) > limit or len(b) > limit or a != b):
+                    raise ValueError("native_rotation_source_parity_unresolved")
+                return a
+
+            paired_native(lambda p: p.get_drawings(extended=True), limit=120000)
+            words = paired_native(lambda p: p.get_text("words"), limit=100000)
+            paired_native(lambda p: p.get_texttrace(), limit=100000)
+            paired_native(lambda p: p.get_bboxlog(), limit=200000)
+            paired_native(lambda p: p.get_fonts(full=True), limit=10000)
+            if (bytes(page.read_contents() or b"")
+                    != bytes(zero.read_contents() or b"")):
+                raise ValueError("native_rotation_content_stream_conflict")
+            if source.get_ocgs() != normalized.get_ocgs():
+                raise ValueError("native_rotation_ocg_source_conflict")
+
+            indexed: dict[tuple[int, int, int], list[object]] = {}
+            for w in words:
+                if len(w) < 8:
+                    continue
+                try:
+                    address = (int(w[5]), int(w[6]), int(w[7]))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                indexed.setdefault(address, []).append(w)
+            out: list[tuple[tuple[int,int,int], NativeTextIntegrityDecision]] = []
+            for address in original_native_word_addresses:
+                candidates = indexed.get(address, ())
+                if len(candidates) != 1:
+                    raise ValueError("original_native_word_missing_or_ambiguous")
+                w = candidates[0]
+                record = {
+                    "text": str(w[4]),
+                    "bbox": tuple(float(n) for n in w[:4]),
+                    "block_no": address[0],
+                    "line_no": address[1],
+                    "word_no": address[2],
+                }
+                opt = (
+                    {"source_symbol_font_chain_shadow": True}
+                    if source_symbol_font_chain_shadow else {}
+                )
+                original_decision = classify_native_word_integrity(
+                    page, record, **opt,
+                )
+                candidate = classify_native_word_integrity(
+                    zero, record, **opt,
+                )
+                # An originally untrusted word can gain native text integrity
+                # only if rotation's clip state was the SOLE remaining cause.
+                # Retain all unrelated invalid Unicode, paint, glyph, OCG,
+                # font/cmap and competing source issues as original negatives.
+                if not original_decision.trusted and (
+                    set(original_decision.reason_codes)
+                    != {TEXT_CLIP_STATE_UNRESOLVED}
+                    or not candidate.trusted
+                ):
+                    out.append((address, original_decision))
+                else:
+                    out.append((address, candidate))
+            return tuple(out)
+
+
+
 __all__ = [
     "PDF_TEXT_INTEGRITY_SCHEMA_VERSION",
     "TRUSTED_PDF_TEXT",
@@ -2336,4 +2468,5 @@ __all__ = [
     "PdfTextIntegrityResult",
     "build_pdf_text_integrity_receipt",
     "classify_native_word_integrity",
+    "classify_original_rotated_words_with_parity_source",
 ]
