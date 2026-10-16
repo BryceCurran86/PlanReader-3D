@@ -122,10 +122,11 @@ def audit(source_bytes: bytes, *, expected_sha256: str,
     if len(set(source_pages)) != len(source_pages):
         raise ValueError("duplicate-source-page-address")
     with fitz.open(stream=source_bytes, filetype="pdf") as pdf:
-        titles = resolve_document([
+        title_analyses = [
             analyse_page(pdf[i], i + 1, allow_ocr=False)
             for i in range(pdf.page_count)
-        ])
+        ]
+        titles = resolve_document(title_analyses)
         result = []
         for page_no in source_pages:
             if type(page_no) is not int or page_no < 1 or page_no > len(pdf):
@@ -134,6 +135,15 @@ def audit(source_bytes: bytes, *, expected_sha256: str,
             sheet = titles[page_no - 1]
             lines = _original_native_lines(page, page_no)
             roles = _all_local_view_evidence(page, page_no)
+            sheet_code_candidates = [
+                word for line in lines for word in line["native_word_receipts"]
+                if re.fullmatch(r"[A-Z]{1,3}[-.]?\d{2,4}(?:\.\d{1,3})?", word["raw_text"].strip(), re.I)
+            ]
+            field_label_lines = [
+                line for line in lines
+                if any(token in line["native_raw_line_text"].upper()
+                       for token in ("DRAWING NO", "SHEET NO", "SHEET NUMBER", "DWG NO", "DRAWING TITLE"))
+            ]
             source_candidates = [
                 line for line in lines
                 if line["line_has_plan_or_elevation_vocabulary"]
@@ -146,6 +156,10 @@ def audit(source_bytes: bytes, *, expected_sha256: str,
                 "sheet_id_resolution_source": sheet.sheet_number_source,
                 "sheet_title_resolution_source": sheet.source,
                 "native_original_line_count": len(lines),
+                "source_native_sheet_code_word_candidates": sheet_code_candidates,
+                "native_title_field_label_line_candidates": field_label_lines,
+                "title_reader_page_analysis_sheet_values": list(title_analyses[page_no - 1].sheet_numbers),
+                "title_reader_page_analysis_has_title_block": title_analyses[page_no - 1].title_block is not None,
                 "native_candidate_lines": source_candidates,
                 "native_unfiltered_word_count":
                     sum(len(line["native_word_receipts"]) for line in lines),
@@ -192,6 +206,10 @@ def main():
             "original_page": sheet["original_pdf_page"],
             "original_sheet": sheet["native_title_block_sheet_number"],
             "native_candidate_count": len(native),
+            "native_sheet_code_words": [w["raw_text"] for w in sheet["source_native_sheet_code_word_candidates"][:30]],
+            "native_title_field_label_lines": [v["native_raw_line_text"] for v in sheet["native_title_field_label_line_candidates"][:10]],
+            "reader_bound_sheet_values": sheet["title_reader_page_analysis_sheet_values"],
+            "reader_has_title_block": sheet["title_reader_page_analysis_has_title_block"],
             "printed_local_title_lines": [
                 line["native_raw_line_text"] for line in titled[:25]
             ],
