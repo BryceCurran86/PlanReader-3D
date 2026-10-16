@@ -220,6 +220,7 @@ def _snap_geometry_indexed(
     include_endpoint_assignments: bool = False,
     exact_endpoint_index_shadow: bool = False,
     immutable_exact_endpoints_shadow: bool = False,
+    complete_link_snap_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
 
@@ -237,6 +238,10 @@ def _snap_geometry_indexed(
         raise ValueError("immutable exact endpoint shadow must be explicit boolean")
     if immutable_exact_endpoints_shadow and not (exact_endpoint_index_shadow and tolerance_pt == 0):
         raise ValueError("immutable exact endpoint shadow requires indexed zero tolerance")
+    if type(complete_link_snap_shadow) is not bool:
+        raise ValueError("complete link snap shadow must be explicit boolean")
+    if complete_link_snap_shadow and (exact_endpoint_index_shadow or tolerance_pt <= 0):
+        raise ValueError("complete link snap shadow requires positive tolerance")
     if exact_endpoint_index_shadow and tolerance_pt != 0:
         raise ValueError("exact endpoint index shadow requires zero tolerance")
     if tolerance_pt <= 0 and not exact_endpoint_index_shadow:
@@ -252,6 +257,11 @@ def _snap_geometry_indexed(
 
     nodes: List[Dict[str, Any]] = []
     endpoint_assignments: Dict[str, Tuple[int, int]] = {}
+    # Shadow-only complete-link membership. Every native split endpoint in a
+    # candidate node must be within the original tolerance of the NEW point,
+    # rather than only the continually drifting running centroid.
+    original_endpoint_samples: List[List[Tuple[float, float]]] = []
+    rejected_running_centroid_joins = 0
     # A bin is a lookup aid, never a geometric join tolerance. Zero-mode still
     # uses the unchanged exact distance predicate and running-centroid update.
     cell_size = 1.0 if exact_endpoint_index_shadow else float(tolerance_pt)
@@ -303,8 +313,24 @@ def _snap_geometry_indexed(
             node = nodes[idx]
             d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
             if d <= tolerance_pt and d < best_d:
+                if complete_link_snap_shadow and any(
+                    math.hypot(previous[0] - pt[0], previous[1] - pt[1])
+                    > tolerance_pt
+                    for previous in original_endpoint_samples[idx]
+                ):
+                    continue
                 best, best_d = idx, d
 
+        if complete_link_snap_shadow:
+            nonlocal rejected_running_centroid_joins
+            for idx in sorted(candidate_indexes):
+                node = nodes[idx]
+                d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
+                if d <= tolerance_pt and any(
+                    math.hypot(old[0] - pt[0], old[1] - pt[1]) > tolerance_pt
+                    for old in original_endpoint_samples[idx]
+                ):
+                    rejected_running_centroid_joins += 1
         if best >= 0:
             node = nodes[best]
             if immutable_exact_endpoints_shadow:
@@ -313,6 +339,8 @@ def _snap_geometry_indexed(
                 # its next identical occurrence. Keep the exact source value.
                 node["samples"] += 1
                 return best
+            if complete_link_snap_shadow:
+                original_endpoint_samples[best].append(pt)
             old_cell = cell_for(node["x"], node["y"])
             count = node["samples"] + 1
             node["x"] = (node["x"] * node["samples"] + pt[0]) / count
@@ -324,6 +352,8 @@ def _snap_geometry_indexed(
         nodes.append(
             {"id": len(nodes), "x": pt[0], "y": pt[1], "samples": 1}
         )
+        if complete_link_snap_shadow:
+            original_endpoint_samples.append([pt])
         add_to_grid(len(nodes) - 1)
         return len(nodes) - 1
 
@@ -362,6 +392,16 @@ def _snap_geometry_indexed(
     result = {"nodes": nodes, "edges": edges, "adjacency": adjacency}
     if include_endpoint_assignments:
         result["endpoint_snap_assignments"] = endpoint_assignments
+    if complete_link_snap_shadow:
+        result["complete_link_snap_shadow"] = {
+            "enabled": True,
+            "running_centroid_eligible_joins_rejected": rejected_running_centroid_joins,
+            "retained_original_endpoint_sample_count": sum(
+                len(samples) for samples in original_endpoint_samples
+            ),
+            "source_wall_role_authenticated": False,
+            "diagnostic_only": True,
+        }
     return result
 
 
@@ -678,6 +718,7 @@ def build_wall_graph_for_viewport(
     preserve_overlapping_spans_shadow: bool = False,
     immutable_exact_endpoints_shadow: bool = False,
     partition_exact_collinear_overlaps_shadow: bool = False,
+    complete_link_snap_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -718,6 +759,19 @@ def build_wall_graph_for_viewport(
         raise ValueError("exact split parent lineage shadow must be explicit boolean")
     if type(preserve_overlapping_spans_shadow) is not bool:
         raise ValueError("overlap preservation shadow must be explicit boolean")
+    if type(complete_link_snap_shadow) is not bool:
+        raise ValueError("complete link snap shadow must be explicit boolean")
+    if complete_link_snap_shadow and (
+        exact_endpoint_index_shadow
+        or immutable_exact_endpoints_shadow
+        or preserve_overlapping_spans_shadow
+        or partition_exact_collinear_overlaps_shadow
+    ):
+        # Complete-link replay answers "which original endpoints may share one
+        # positive-tolerance node"; the exact-incidence policies answer the
+        # opposite question for zero tolerance. They act on the same W2 source
+        # scope and have never been exercised together, so they stay exclusive.
+        raise ValueError("complete link snap shadow is exclusive with the exact source-incidence shadows")
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
     parent_indexes: List[int] | None = [] if exact_split_parent_lineage_shadow else None
@@ -738,6 +792,7 @@ def build_wall_graph_for_viewport(
         include_endpoint_assignments=audit_short_source,
         **({"exact_endpoint_index_shadow": True} if exact_endpoint_index_shadow else {}),
         **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
+        **({"complete_link_snap_shadow": True} if complete_link_snap_shadow else {}),
     )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
@@ -749,6 +804,10 @@ def build_wall_graph_for_viewport(
     )
     merged_graph["excluded_segments"] = excluded_segments
     merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments
+    if complete_link_snap_shadow:
+        merged_graph["complete_link_snap_shadow"] = (
+            snapped_graph["complete_link_snap_shadow"]
+        )
     # Explicit opt-in diagnostic only. This is an observational source
     # provenance ledger; it never changes the wall graph or creates hosts.
     if audit_short_source:
