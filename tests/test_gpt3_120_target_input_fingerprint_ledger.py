@@ -74,6 +74,48 @@ def test_identical_exact_input_fingerprint_suppresses_replay_advice(tmp_path):
     )
 
 
+def test_owner_runtime_paths_memory_and_elapsed_time_do_not_force_rescore(tmp_path):
+    report = _blocked_report(tmp_path)
+    owner = _original_owner_receipt()
+    head = owner["repo_head"]
+    first = ledger.build_120_target_ledger(
+        report, owner_receipt=owner, producer_head=head,
+    )
+    same_evidence = deepcopy(owner)
+    same_evidence["project_handoffs"][0]["elapsed_s"] += 999.5
+    same_evidence["project_handoffs"][1]["peak_private_mb_sampled"] += 1024
+    same_evidence["project_handoffs"][2]["output_folder"] = (
+        "C:/new/session/id/should-not-change-source-identity"
+    )
+    second = ledger.build_120_target_ledger(
+        report, owner_receipt=same_evidence, producer_head=head,
+        previous_input_fingerprint=first["input_fingerprint"],
+    )
+    assert second["input_fingerprint"] == first["input_fingerprint"]
+    assert second["repeat_evaluation_advice"] == (
+        "UNCHANGED_PRODUCER_SOURCE_SCORING_INPUTS_DO_NOT_RERUN"
+    )
+
+
+def test_changed_actual_sealed_output_artifact_invalidates_fingerprint(tmp_path):
+    report = _blocked_report(tmp_path)
+    owner = _original_owner_receipt()
+    head = owner["repo_head"]
+    first = ledger.build_120_target_ledger(
+        report, owner_receipt=owner, producer_head=head,
+    )
+    changed = deepcopy(owner)
+    sealed_row = next(row for row in changed["files"]
+                      if row["file"].endswith(".sealed.json"))
+    sealed_row["share_safe_sha256"] = "a" * 64
+    second = ledger.build_120_target_ledger(
+        report, owner_receipt=changed, producer_head=head,
+        previous_input_fingerprint=first["input_fingerprint"],
+    )
+    assert second["input_fingerprint"] != first["input_fingerprint"]
+    assert second["repeat_evaluation_advice"] == "CHANGED_INPUTS_OR_UNPROVEN_COMPARISON"
+
+
 def test_report_change_invalidates_previous_input_fingerprint(tmp_path):
     report = _blocked_report(tmp_path)
     owner = _original_owner_receipt()
