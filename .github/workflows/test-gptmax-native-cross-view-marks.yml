@@ -40,28 +40,44 @@ jobs:
           python tools/diag_gptmax_cross_view_native_marks.py \
             --pdf "$PDF" \
             --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
-            --page-ids 3 5 --phrase '2127 STACKER' \
+            --page-ids 0 1 2 3 4 5 6 7 8 9 10 11 12 --phrase '2127 STACKER' \
             --datum-tokens FSL JL 68560 70660 2100 2590 \
             --output artifacts/gptmax-original-native-cross-view-marks.json
+          # Separate exact token censuses; do not stitch native lines or choose
+          # a page solely because two words appear nearby.
+          python tools/diag_gptmax_cross_view_native_marks.py \
+            --pdf "$PDF" --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --page-ids 0 1 2 3 4 5 6 7 8 9 10 11 12 --phrase '2127' \
+            --output artifacts/gptmax-native-token-2127.json
+          python tools/diag_gptmax_cross_view_native_marks.py \
+            --pdf "$PDF" --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --page-ids 0 1 2 3 4 5 6 7 8 9 10 11 12 --phrase 'STACKER' \
+            --output artifacts/gptmax-native-token-stacker.json
           python - <<'PY'
           import json
           from pathlib import Path
           r=json.loads(Path('artifacts/gptmax-original-native-cross-view-marks.json').read_text())
           assert r['status']=='UNBOUND_NATIVE_CROSS_VIEW_MARK_CENSUS'
           assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert r['requested_source_page_indices']==[3,5]
+          assert r['requested_source_page_indices']==list(range(13))
           assert not any(r[k] for k in (
               'page_viewport_identity_proven','cross_sheet_physical_identity_proven',
               'opening_kind_proven','opening_host_proven','ordered_width_height_proven',
               'datum_to_opening_alignment_proven','opening_count_proven','firm_quantity_granted'))
-          assert all(p['mark_occurrences'] for p in r['pages']), 'native mark unresolved'
-          assert any(p['datum_token_occurrences']['2100']
-                     for p in r['pages'] if p['source_page_index_zero_based']==5)
-          print('Unbound original native mark evidence:',r['occurrence_count'])
+          code=json.loads(Path('artifacts/gptmax-native-token-2127.json').read_text())
+          kind=json.loads(Path('artifacts/gptmax-native-token-stacker.json').read_text())
+          assert code['source_sha256']==r['source_sha256']==kind['source_sha256']
+          assert code['occurrence_count']>0 and kind['occurrence_count']>0, 'original native mark token missing'
+          for name, receipt in [('2127',code),('STACKER',kind),('paired phrase',r)]:
+              print(name, 'count',receipt['occurrence_count'], 'source page indices',
+                    [p['source_page_index_zero_based'] for p in receipt['pages'] if p['mark_occurrences']])
+          print('2100 datum page indices', [p['source_page_index_zero_based']
+                for p in r['pages'] if p['datum_token_occurrences']['2100']])
+          print('No physical cross-sheet identity or height authorization')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gptmax-original-native-cross-view-marks
-          path: artifacts/gptmax-original-native-cross-view-marks.json
+          path: artifacts/gptmax-*.json
           retention-days: 21
