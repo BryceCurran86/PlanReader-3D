@@ -14,7 +14,7 @@ A full set is easy for a person because a person interprets: reads a schedule, a
 
 ## 2. Ranked levers (items that would become reachable; upper bounds, each still needs identity binding)
 
-Scored today: Lot16 27 items, 8 matched; Maryborough 24 eligible items, 0 matched. 3Laurel and Q5446 (the rest of the 120-object suite) produce nothing yet.
+The item counts below are diagnostic upper bounds read from the first failing gate, not producer coverage or a forecast. Scored today: Lot16 27 items, 8 matched; Maryborough 24 eligible items, 0 matched. 3Laurel and Q5446 (the rest of the 120-object suite) produce nothing yet.
 
 | # | Lever | Items | Lot16 / Mary | First failing gate (observed) | Suggested lane (lane owners decide) |
 |---|---|---:|---|---|---|
@@ -25,7 +25,7 @@ Scored today: Lot16 27 items, 8 matched; Maryborough 24 eligible items, 0 matche
 
 Lever 1 splits: 12 items are six rooms (three WC/showers, PWD, airlock, laundry; FT2 floors and WFPB ceilings) that appear not to depend on the page-11 to page-7 correspondence (inference: their finish codes are not the FT3 one that `#2806` abstained on); 4 items are Food Prep and Office (FT3 floors, FPB and grid ceilings), which do. Lever 2 splits by evidence: 7 of the 13 unsigned openings already have a host. Lever 4 is five items: three ceilings, one floor, one tiled floor.
 
-Door heights. The 13-page Lot16 set has no door schedule and no door-height note as text; `2590` and `2100` appear only beside datum labels on pages 4 and 5; internal doors are not on the elevations (inference from the sheet layout). So for the internal doors the height is not stated in the drawings. See the owner decision in section 4.
+Door heights. The 13-page Lot16 set has no door schedule and no door-height note as text; `2590` and `2100` appear only beside datum labels on pages 4 and 5; internal doors are not on the elevations (inference from the sheet layout). So no producer-authenticated door-height source has yet been found for the internal doors in the pages read. Absence of extracted text, or of a selected elevation, does not prove the height is stated nowhere in the PDF, so the door height stays ABSTAIN rather than "not stated". See the owner decision in section 4.
 
 ## 3. Instructions for all agents
 
@@ -37,7 +37,7 @@ Door heights. The 13-page Lot16 set has no door schedule and no door-height note
 5. New topology and extraction work starts in shadow mode (default-False, explicit-bool, forwarded only when on). Production-affecting changes need an independent review comment on the exact head.
 
 **Evidence and releases**
-6. Every production-module change must keep the historical signed outputs byte-identical: compare `source_sealed_run.json` and `verified_customer_rows.json` from the Lot16 and Maryborough replays with the archived originals (`docs/engineering/lot16_original_signed_eight_row_20261015/` for Lot16; hash-pinned, `* -text`). Do not edit the fixture, the benchmark files, the scorer or the source PDFs in a PR that changes production code (`scripts/check_v2_truth_separation.py` enforces it).
+6. Signed-output retention, by kind of change. (a) A production-module change that makes no approved promotion (shadow, refactor, performance, default-off flag) must keep the historical signed outputs byte-identical: compare `source_sealed_run.json` and `verified_customer_rows.json` from the Lot16 and Maryborough replays with the archived originals (`docs/engineering/lot16_original_signed_eight_row_20261015/` for Lot16; hash-pinned, `* -text`). (b) A change that carries an independently reviewed, owner-approved promotion (an additional FIRM quantity) cannot be byte-identical, because the new aggregate run necessarily differs. There, every existing signed row, quantity, fingerprint, ID and lineage must stay immutable, and the authorised new rows must be explicitly appended, newly signed, verified and independently reconciled; no silent rewrite of an old row. Do not edit the fixture, the benchmark files, the scorer or the source PDFs in a PR that changes production code (`scripts/check_v2_truth_separation.py` enforces it).
 7. Batches of production PRs are verified as one tree: build a throwaway integration branch, open it as a draft "do not merge" PR so the full path-triggered CI runs on the exact result, compare the signed outputs, then merge the PRs individually in the same order and check tree equality (`git rev-parse HEAD^{tree}`). The pattern and scripts are in `docs/engineering/claude_handoff_2026-10-15/` (`HANDOFF.md`; the `scripts/clean/` helpers arrive with `#2827`).
 8. Formal independent approval does not exist (one shared login). Post COMMENT reviews; never present a comment or a shared-account review as independent approval; merges need explicit owner authorisation.
 
