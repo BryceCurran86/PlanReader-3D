@@ -119,7 +119,7 @@ class SheetClassificationRegistry:
             label = str(p.get("page_label") or "")
             ptype = str(p.get("page_type") or "")
 
-            role, conf, disc, target = classify_sheet_role(f"{label} {ptype}")
+            role, conf, disc, target = classify_sheet_role(label, ptype)
             level = extract_storey_level(label)
 
             records.append(SheetClassificationRecord(
