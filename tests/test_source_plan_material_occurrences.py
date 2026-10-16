@@ -286,3 +286,48 @@ def test_original_replay_observer_cannot_hide_a_source_recovery_error(monkeypatc
     with pytest.raises(RuntimeError, match="original-source-recovery-error"):
         replay(_drawing(), page_number=1)
     assert semantic._recover_native_material_block is failed_reader
+
+
+
+def test_consumer_source_owned_ft3_viewport_requires_private_original_f07_product():
+    """The trusted material producer, not a caller bbox, owns the view."""
+    from types import SimpleNamespace
+    from pb_cross_view_floor_finish_authority import (
+        _source_owned_floor_finish_viewports,
+    )
+    source, published, producer, _authority = _publish(_drawing())
+    produced = producer.published_plan_viewports()
+    assert len(produced) == 1
+    view = produced[0]
+    key = ("1", view.view_id)
+    verified = _source_owned_floor_finish_viewports(
+        producer, published=published, permitted_page_ids=("1",)
+    )
+    assert key in verified
+    assert verified[key] == tuple(view.bounding_box)
+    assert not _source_owned_floor_finish_viewports(
+        producer, published=published, permitted_page_ids=("2",)
+    )
+    def fake_viewports(*views):
+        return SimpleNamespace(published_plan_viewports=lambda: views)
+    # An otherwise identical, unstamped caller copy is never F07 authority.
+    copied = replace(view, _producer_token=None, _producer_fingerprint="")
+    assert not _source_owned_floor_finish_viewports(
+        fake_viewports(copied), published=published, permitted_page_ids=("1",)
+    )
+    assert not _source_owned_floor_finish_viewports(
+        fake_viewports(view, view), published=published, permitted_page_ids=("1",)
+    )
+    compromised = replace(view, provenance={
+        **view.provenance, "source_sha256": "0" * 64
+    })
+    assert not _source_owned_floor_finish_viewports(
+        fake_viewports(compromised), published=published, permitted_page_ids=("1",)
+    )
+    # Authenticated FT9 text in an otherwise incomplete scope cannot be used
+    # by the commercial floor consumer, even with a valid F07 view.
+    _s, p, incomplete, _auth = _publish(_drawing(unrelated_hidden=True))
+    scope = incomplete.published_occurrence_results()[0]
+    assert not scope.scope_complete
+    assert len(scope.records) == 1
+    assert _occurrences_on_page((scope,), page_id="1") == ()

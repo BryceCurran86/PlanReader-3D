@@ -1,0 +1,70 @@
+name: GPT MAX Original Opening Role Text Audit
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_original_opening_role_text.py
+      - tests/test_original_opening_role_text_audit.py
+      - .github/workflows/test-gptmax-original-opening-role-audit.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  source-text-trust:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_original_opening_role_text_audit.py tests/test_pdf_text_integrity_production_v1.py tests/test_pdf_text_integrity_source_state_v1.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_opening_role_text.py tests/test_original_opening_role_text_audit.py
+  original-native-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Audit original source legend, callouts, elevations and manufacturer text
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_original_opening_role_text.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --query BIFOLD --query STACKER --query STACK --query CRNR --query DOOR --query DOORS --query WINDOW --query WINDOWS --query SGD --query SGW --query LEGEND --query SCHEDULE --query NATHERS --query BRADNAMS --query ELEVATION --query 2142 --output artifacts/original-native-opening-role-text.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('artifacts/original-native-opening-role-text.json').read_text())
+          assert p['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert p['original_published_snapshot']['snapshot']['snapshot_id']=='source_snapshot_3be1479e703bfa11cc25f1e2c4051d86'
+          assert p['original_native_word_count']==6596 and len(p['original_native_text_blocks'])==506
+          assert not any(p[k] for k in ['filling_role_granted','physical_identity_transfer_granted','quantity_granted','count_granted','signed_scope_lineage_granted'])
+          rows=[r['text_result'] for r in p['original_native_text_blocks']]
+          bifold=[r for r in rows if r['receipt']['raw_text']=='BIFOLD']
+          assert len(bifold)==1 and bifold[0]['trusted_text']=='BIFOLD' and bifold[0]['receipt']['page_id']=='3'
+          assert bifold[0]['receipt']['parent_observation_id']=='source_observation_2c6a094089539f575900ff7e114b7150'
+          assert bifold[0]['receipt']['receipt_id']=='pdf_text_integrity_793bee5700de384439cd326896a276df'
+          legend=[r for r in rows if r['receipt']['page_id']=='3' and r['receipt']['block_no']==152]
+          assert legend and all(r['trusted_text'] is None and 'text_clip_state_unresolved' in r['reason_codes'] for r in legend)
+          assert any(r['trusted_text']=='Bradnams' and r['receipt']['page_id']=='7' for r in rows)
+          assert not any(r['receipt']['raw_text'] in ['2142','BIFOLD'] and r['receipt']['page_id'] in ['4','5'] for r in rows)
+          print({'native_words':p['original_native_word_count'],'exact_bifold_text_trusted':True,'legend_clip_negative_retained':True,'filling_role_granted':False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-native-opening-role-text
+          path: artifacts/original-native-opening-role-text.json
+          retention-days: 21

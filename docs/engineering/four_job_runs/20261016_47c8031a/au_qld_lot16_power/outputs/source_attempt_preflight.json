@@ -1,0 +1,26 @@
+{
+  "benchmark_score_granted": false,
+  "complete_source_coverage_proven": false,
+  "execution_page_numbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "family_group": "all",
+  "project_id": "au_qld_lot16_power",
+  "sealed_run_file": null,
+  "source_page_count": 13,
+  "source_sha256_at_start": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "SOURCE_INPUT_RECORDED_UNSEALED",
+  "topology_mode": "source_classified_scope"
+}

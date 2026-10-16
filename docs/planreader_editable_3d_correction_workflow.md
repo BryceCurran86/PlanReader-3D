@@ -32,7 +32,7 @@ This module enforces the split explicitly:
 (`pb_editable_3d_model.py` from #147 predates this rule and does not yet follow it —
 its `apply_correction_event()` sets `authority_status=FIRM` and stamps `approved_by`
 immediately on correction. That's a known, separate defect, out of scope for this PR;
-see `scratch_pr_d1_editable_3d_module_map.md`.)
+see `docs/archive/root_level_reports_2026-10-16/scratch_pr_d1_editable_3d_module_map.md`.)
 
 ## How corrections invalidate quantities
 

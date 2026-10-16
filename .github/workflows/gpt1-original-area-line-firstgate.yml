@@ -1,0 +1,122 @@
+name: GPT1 Original Area Line First Failure Shadow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt1_original_area_line_first_failure.py"
+      - "tests/test_gpt1_original_area_line_first_failure.py"
+      - ".github/workflows/gpt1-original-area-line-firstgate.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-original-area-firstgate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source text adversarial cases, V2 truth and provider isolation
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt1_original_area_line_first_failure.py
+          ruff check --select F821,F823 tools/diag_gpt1_original_area_line_first_failure.py tests/test_gpt1_original_area_line_first_failure.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original Lot16 SHA/F07/text first gate - zero commercial grants
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-area-firstgate
+          python tools/diag_gpt1_original_area_line_first_failure.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page 3 --raster-supports \
+            --sha "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844" \
+            --output artifacts/gpt1-area-firstgate/lot16-page3.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('artifacts/gpt1-area-firstgate/lot16-page3.json').read_text())
+          assert data['original_source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          # Independently replay the repository's already-mergable F07 source
+          # proof from the same actual PDF. Do not invent the viewport bbox.
+          from tools.diag_source_owned_physical_plan_view import replay as proven_f07
+          pdf=Path('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf')
+          baseline=proven_f07(pdf.read_bytes(),page_number=3,raster_supports=True)
+          assert baseline['authoritative_plan_view_count']==1, baseline['viewports']
+          assert len(data['source_plan_positive_viewport_ids'])==1, data['source_raw_viewport_census_diagnostic_only']
+          assert data['source_original_snapshot_unchanged'] is True
+          assert data['diagnostic_only'] is True
+          assert data['published_quantities']==[] and data['customer_rows']==[]
+          assert data['benchmark_scored'] is False
+          # Recognize authentic native bedroom labels independently of area
+          # words. Do not synthesize a room face or bind either by proximity.
+          labels={v['literal_original_room_label'] for v in data['literal_room_label_candidates']}
+          assert {'BED 1','BED 2','BED 3'}.issubset(labels), sorted(labels)
+          assert all(not v['source_physical_room_face_authenticated']
+                     and not v['area_annotation_to_label_binding_granted']
+                     and not v['quantity_evidence_published']
+                     for v in data['literal_room_label_candidates'])
+          # Competing native WIR words are DISTINCT original source events;
+          # neither can be silently dropped or used as its sibling's room.
+          wir=[v for v in data['literal_room_label_candidates']
+               if v['literal_original_room_label']=='WIR']
+          assert len(wir)==2
+          assert wir[0]['source_text_observation_ids'] != wir[1]['source_text_observation_ids']
+          plan_ids=set(data['source_plan_positive_viewport_ids'])
+          for title in ('BED 1','BED 2','BED 3'):
+              matching=[v for v in data['literal_room_label_candidates']
+                        if v['literal_original_room_label']==title]
+              assert len(matching)==1 and matching[0]['source_text_integrity_all_words']
+              assert set(matching[0]['containing_source_floor_plan_viewport_ids'])==plan_ids
+              assert matching[0]['first_unclosed_gate']=='source_room_face_and_exact_label_owner_unproven'
+          assert data['label_first_failure_counts'].get(
+              'source_room_label_text_integrity_unavailable',0)>=2
+
+          assert data['first_failure_counts'].get(
+              'source_physical_room_face_and_exact_area_line_owner_unproven',0)==3
+          assert data['first_failure_counts'].get(
+              'source_floor_plan_viewport_unavailable_or_ambiguous',0)==4
+          assert all(not row['source_physical_room_face_authenticated']
+                     and not row['quantity_evidence_published']
+                     and not row['room_area_measurement_authority_granted']
+                     for row in data['literal_area_candidates'])
+          # Missing glyphs/room ownership are expected negative source results,
+          # never a reason to synthesize a positive commercial quantity.
+          print(json.dumps({'candidate_count':data['literal_area_candidate_count'],
+                            'first_failure_counts':data['first_failure_counts'],
+                            'new_quantity_count':0},sort_keys=True),flush=True)
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-lot16-native-area-firstgate
+          path: artifacts/gpt1-area-firstgate/
+          retention-days: 14

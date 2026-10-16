@@ -41,6 +41,23 @@ def test_drawing_number_rejects_finish_code_but_accepts_issued_sheet_no():
     assert registration._candidate_code("PT01 KEY PLAN WALL PIECES | DRAWING NO A-205 | REV B") == "A-205"
 
 
+def test_guard_does_not_keep_the_first_of_two_headings():
+    kind, confidence, evidence = priority.weighted_page_type(
+        "FLOOR PLAN\nNORTH ELEVATION",
+        "mixed.pdf",
+        "",
+    )
+    assert kind == "Other"
+    assert confidence == 0
+    assert evidence == "competing page headings"
+    reversed_kind, _confidence, _evidence = priority.weighted_page_type(
+        "NORTH ELEVATION\nFLOOR PLAN",
+        "mixed.pdf",
+        "",
+    )
+    assert reversed_kind == "Other"
+
+
 def test_fallback_classification_does_not_turn_partition_plan_into_elevation():
     page_type, _label = priority.classify_page(
         "LEVEL 03 PARTITION PLAN\nREFER EXTERNAL ELEVATION A301\nSEE SECTION A501",

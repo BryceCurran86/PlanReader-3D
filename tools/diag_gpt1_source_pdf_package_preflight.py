@@ -127,6 +127,7 @@ def main() -> None:
     result = check_source_pdf_package(args.manifest, args.source_root)
     data = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(data, encoding="utf-8")
     print(data)
     if not result["actual_source_package_runtime_complete"]:

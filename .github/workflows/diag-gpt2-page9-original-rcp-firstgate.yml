@@ -1,5 +1,11 @@
 name: DIAG GPT2 Maryborough Page9 Original RCP First Gates
 on:
+  push:
+    branches: [main]
+    paths:
+      - tools/diag_gpt2_page9_original_rcp_firstgate.py
+      - tests/test_gpt2_page9_original_rcp_firstgate.py
+      - .github/workflows/diag-gpt2-page9-original-rcp-firstgate.yml
   pull_request:
     branches: [main]
     paths:
@@ -13,6 +19,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -22,13 +30,68 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. pytest -q tests/test_gpt2_page9_original_rcp_firstgate.py
-      - name: SHA-verified real page9 RCP viewport source gates
+      - name: SHA-verified real page9 RCP indexed native frame ownership negatives
         run: |
-          set -o pipefail
-          PYTHONPATH=. python -u tools/diag_gpt2_page9_original_rcp_firstgate.py | tee page9_rcp_first_gates.json
+          set -euo pipefail
+          PYTHONPATH=. python - <<'PY'
+          import json
+          import hashlib
+          from pathlib import Path
+          from tools.diag_gpt2_page9_original_rcp_firstgate import audit, PDF, SOURCE_SHA
+          source = PDF.read_bytes()
+          assert hashlib.sha256(source).hexdigest() == SOURCE_SHA
+          result = audit(source)
+          image=result["original_native_image_placement_census"]
+          assert image["status"] in (
+              "SOURCE_IMAGE_PLACEMENTS_COMPLETE",
+              "SOURCE_IMAGE_PLACEMENT_PARTIAL",
+              "SOURCE_IMAGE_API_UNAVAILABLE",
+          )
+          assert not image["source_image_placement_is_rcp_role"]
+          assert image.get("diagnostic_only",True)
+          if image["status"] == "SOURCE_IMAGE_PLACEMENTS_COMPLETE":
+              assert image["image_universe_complete"]
+              assert image["source_image_placement_count"] == len(image["source_image_placements"])
+          print("P9_ORIGINAL_IMAGE_PLACEMENTS", image["status"],
+                image.get("source_image_placement_count"),
+                [r["native_image_placement_index"] for r in image["source_image_placements"]])
+          matrix = result["original_native_frame_ownership_matrix"]
+          assert result["native_frame_count"] == 8
+          assert len(matrix["source_frames"]) == result["native_frame_count"]
+          assert len(matrix["source_titles"]) == len(result["title_frame_candidates"])
+          # Original title and all eight source-native frames, not nearest 4.
+          assert all(
+              len(t["all_original_native_frame_relations"]) == result["native_frame_count"]
+              and t["all_original_native_frames_evaluated"]
+              and not t["original_frame_relationships_grant_role"]
+              for t in matrix["source_titles"]
+          )
+          for title in matrix["source_titles"]:
+              assert all(
+                  not f["title_frame_structural_ownership_proven"]
+                  and not f["title_owns_physical_viewport"]
+                  for f in title["all_original_native_frame_relations"]
+              )
+          original = [
+              t for t in matrix["source_titles"]
+              if t["reported_view_id"] == "view_p9_2"
+          ]
+          assert len(original)==1
+          assert original[0]["geometric_frame_candidate_count"]==0
+          assert matrix["diagnostic_only"] and not matrix["frame_candidate_matrix_grants_authority"]
+          assert all(row["no_source_role_or_viewport_granted"] for row in matrix["source_frames"])
+          assert result["original_view_p9_2_first_gate"] == "missing_source_viewport_boundary"
+          assert not result["original_rcp_view_p9_2_authenticated"]
+          assert result["material_occurrences_published"] == 0
+          assert result["metric_quantities_published"] == 0
+          Path("page9_rcp_first_gates.json").write_text(json.dumps(result, indent=2, sort_keys=True)+"\n")
+          print("P9_ORIGINAL_FRAME_ANCESTRY", len(matrix["source_frames"]),
+                [len(row["candidate_native_source_receipts"]) for row in matrix["source_frames"]])
+          print("P9_RCP_FIRST_GATE", result["original_view_p9_2_first_gate"])
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gpt2-page9-original-rcp-first-gates
           path: page9_rcp_first_gates.json
-          retention-days: 7
+          retention-days: 14

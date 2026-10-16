@@ -1,0 +1,128 @@
+COMMAND: <HOME>\Documents\PlanReader_Private_V2_Run\.venv\Scripts\python.exe -u -c import faulthandler, sys, runpy
+f = open(r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_lot16_power/stack_dumps.txt', 'a')
+faulthandler.dump_traceback_later(600, repeat=True, file=f)
+sys.argv = ['run_source_closed_project_handoff', '--pdf', r'<HOME>\Downloads\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\sources\au_qld_lot16_power\1. Construction Plans - Lot 16 Power (REV E).pdf', '--project-id', 'au_qld_lot16_power',
+            '--family-group', 'all', '--output-dir', r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_lot16_power']
+runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)
+
+2026-10-16 17:27:19.805 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+{
+  "benchmark_score_granted": false,
+  "canonical_counts": {
+    "ceilings": 0,
+    "floors": 61,
+    "openings": 21,
+    "rooms": 61,
+    "spaces": 61,
+    "walls": 2094
+  },
+  "canonical_wall_reason_codes": [
+    "live_canonical_wall_composition_partial",
+    "live_canonical_wall_frame_conflict",
+    "live_canonical_wall_physical_identity_unresolved"
+  ],
+  "canonical_wall_source_pages": [
+    3
+  ],
+  "canonical_wall_status": "candidate",
+  "ceiling_authority_path": "unavailable",
+  "claim_reason_codes": [
+    "live_physical_net_wall_integration_unavailable",
+    "live_external_physical_net_wall_publication_upstream_incomplete",
+    "live_wall_opening_composition_partial",
+    "semantic_opening_physical_conflict",
+    "semantic_opening_residual_source_evidence",
+    "semantic_opening_raster_candidate_closure_unproven",
+    "semantic_opening_universe_exhaustiveness_unproven",
+    "opening_universe_completeness_record_unavailable",
+    "physical_wall_candidate_scope_resolved",
+    "opening_host_binding_resolved",
+    "raster_whole_wall_host_resolved",
+    "opening_local_supplemental_source_band_host_resolved",
+    "raster_source_band_host_resolved",
+    "raster_split_centerline_host_resolved",
+    "no_authenticated_host_wall_band",
+    "raster_source_band_left_source_primitive_unmapped",
+    "raster_source_band_right_source_primitive_unmapped",
+    "raster_source_primitive_host_resolved",
+    "opening_host_frame_resolved",
+    "opening_host_frame_whole_wall_unproven",
+    "opening_host_frame_wall_unavailable",
+    "opening_host_frame_aligned_opening_binding_unavailable",
+    "opening_host_frame_connected_edge_unproven",
+    "opening_host_frame_host_unavailable",
+    "host_binding_record_unavailable",
+    "opening_host_frame_aligned_fragment_distinctness_unproven",
+    "opening_host_frame_aligned_band_geometry_inconsistent",
+    "live_gross_wall_geometry_composition_unavailable",
+    "live_gross_wall_geometry_upstream_incomplete",
+    "live_gross_wall_geometry_wall_coverage_incomplete",
+    "live_whole_wall_role_composition_unavailable"
+  ],
+  "claim_status": "abstained",
+  "combined_quantity_count": 8,
+  "combined_run_file": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\project_outputs\\au_qld_lot16_power\\au_qld_lot16_power.json",
+  "combined_run_id": "source_closed_run_ba04849b1ae2fb280f374a70aa97b2c1",
+  "complete_project_handoff": true,
+  "customer_rows_file": null,
+  "customer_rows_verified": false,
+  "execution_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "family_counts": {
+    "ceiling_area": 0,
+    "floor_area": 0,
+    "floor_finish_area": 0,
+    "opening_area": 8,
+    "opening_count": 0
+  },
+  "family_group": "all",
+  "family_run_files": {
+    "opening_area": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\project_outputs\\au_qld_lot16_power\\family_runs\\opening_area.sealed.json"
+  },
+  "family_run_ids": {
+    "opening_area": "source_closed_run_ba04849b1ae2fb280f374a70aa97b2c1"
+  },
+  "frozen_v2_reconciliation_complete": false,
+  "page_count": 13,
+  "project_id": "au_qld_lot16_power",
+  "room_area_support_pages": [],
+  "schema_version": "1.0.0",
+  "semantic_execution_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "source_path": "<HOME>\\Downloads\\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\\sources\\au_qld_lot16_power\\1. Construction Plans - Lot 16 Power (REV E).pdf",
+  "source_positive_partial_page": null,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "sealed",
+  "topology_mode": "source_classified_scope",
+  "topology_pages": [
+    3
+  ],
+  "unresolved_wall_candidate_count": 2027,
+  "verified_customer_row_count": 0
+}

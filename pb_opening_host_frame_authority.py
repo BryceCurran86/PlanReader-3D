@@ -264,6 +264,7 @@ class OpeningHostFrameProducer:
         host_binding_authority: OpeningHostBindingAuthority,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
         *,
+        raster_split_frame_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -276,9 +277,13 @@ class OpeningHostFrameProducer:
             raise TypeError("host_binding_authority must be producer-owned")
         if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
             raise TypeError("physical_wall_candidate_authority must be producer-owned")
+        if type(raster_split_frame_shadow) is not bool:
+            raise TypeError("raster_split_frame_shadow must be a bool")
         self._opening = physical_opening_authority
         self._host = host_binding_authority
         self._walls = physical_wall_candidate_authority
+        # Opt-in diagnostic ONLY: never enabled in the default composition.
+        self._raster_split_frame_shadow = raster_split_frame_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
 
     @classmethod
@@ -288,11 +293,13 @@ class OpeningHostFrameProducer:
         physical_opening_authority: PhysicalOpeningAuthority,
         host_binding_authority: OpeningHostBindingAuthority,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+        raster_split_frame_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
             host_binding_authority,
             physical_wall_candidate_authority,
+            raster_split_frame_shadow=raster_split_frame_shadow,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -360,6 +367,40 @@ class OpeningHostFrameProducer:
             self._opening, opening, wall_scope.records, geometry,
             wall_scope.equivalence, wall_scope.source_observation_ids,
         )
+        # The source-owner reason codes belong to the PRODUCER'S
+        # OpeningHostBindingResult, never to its immutable binding record.
+        # Re-resolve the exact original selector rather than trusting caller
+        # metadata or weakening a source-band CONFLICT/ABSTAIN.
+        alternate_source_proven = False
+        if (self._raster_split_frame_shadow
+                and proof.status is EvidenceResolutionStatus.CORROBORATED
+                and not proof.bands):
+            selector = OpeningHostBindingSelector(
+                document_id=binding.document_id,
+                revision_id=binding.revision_id,
+                source_sha256=binding.source_sha256,
+                snapshot_id=binding.snapshot_id,
+                page_id=binding.page_id,
+                decision_scope_id=binding.decision_scope_id,
+                opening_identity_id=binding.opening_identity_id,
+            )
+            bound = self._host.resolve(selector)
+            alternate_source_proven = bool(
+                bound.status is EvidenceResolutionStatus.CORROBORATED
+                and bound.record is not None
+                and bound.record.record_id == binding.record_id
+                and tuple(bound.record.member_wall_candidate_ids)
+                    == tuple(binding.member_wall_candidate_ids)
+                and host_geometry.RASTER_SPLIT_CENTERLINE_HOST_RESOLVED
+                    in bound.reason_codes
+            )
+        if alternate_source_proven:
+            alternative = host_geometry._resolve_raster_split_centerline_host(
+                wall_scope.records, geometry, wall_scope.equivalence,
+            )
+            if (alternative.status is EvidenceResolutionStatus.CORROBORATED
+                    and len(alternative.bands) == 1):
+                proof = alternative
         if (
             proof.status is not EvidenceResolutionStatus.CORROBORATED
             or len(proof.bands) != 1

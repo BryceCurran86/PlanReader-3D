@@ -1,0 +1,79 @@
+name: GPT MAX Original Terminal Paint and Customer Retention
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_terminal_flank_source_shadow.py"
+      - "tests/test_g17_terminal_flank_source_shadow.py"
+      - "tools/verify_g17_original_customer_scope_retention.py"
+      - ".github/workflows/test-gptmax-original-terminal-paint.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  terminal-source-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Actual holes, short terminals, transforms, source ownership and mid-read damage
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_g17_terminal_flank_source_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_g17_plan_wall_scope_shadow.py tests/test_g17_source_infill_opposition_shadow.py tests/test_live_opening_customer_projection.py tests/test_gpt3_customer_workspace_identity.py
+          ruff check --select F821,F823 pb_g17_terminal_flank_source_shadow.py tests/test_g17_terminal_flank_source_shadow.py tools/verify_g17_original_customer_scope_retention.py
+  original-terminal-customer-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original collector, all opening terminals, complete signed seal and verified customer rows
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/verify_g17_original_customer_scope_retention.py --pdf "$PDF" --page 3 --project-id au_qld_lot16_power --terminal-flanks --output artifacts/original-terminal-customer-retention.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-terminal-customer-retention.json').read_text())
+          assert r['all_actual_production_receipts_unchanged'] and r['original_customer_scope_verified']
+          a,b=r['baseline_customer_receipts'],r['candidate_customer_receipts']
+          assert a==b and a['verification']['valid_quantity_count']==len(a['customer_rows'])==8
+          p,=r['source_observers']
+          assert p['source_sha256']==r['source_sha256'] and len(p['source_openings'])==21
+          negatives=[f for o in p['source_openings'] for f in o['flanks'] if not f['original_full_flank_source_supported']]
+          positive=[f for f in negatives if f['terminal_source_atom'] is not None]
+          assert positive and len(negatives)>len(positive)
+          assert all(f['terminal_endpoint_span_pt']>=f['unchanged_minimum_line_length_pt'] for f in positive)
+          assert all(f['derived_terminal_paint_proof']['source_one_end_shadow_eligible'] for f in positive)
+          assert all(f['terminal_source_atom']['kind']=='unknown' and f['terminal_source_atom']['status']=='candidate' for f in positive)
+          assert all(not f['derived_outer_end_cap_assumed'] for f in negatives)
+          assert all(not p[k] for k in ('host_granted','structural_wall_role_granted','metric_quantity_granted','scope_complete'))
+          assert all(o['original_source_snapshot_unchanged'] and not o['host_granted'] for o in p['source_openings'])
+          print(json.dumps({'verified_customer_rows':8,'original_openings':len(p['source_openings']),
+              'original_full_flank_negatives':len(negatives),'original_contained_source_terminals':len(positive)}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-terminal-actual-customer-retention
+          path: artifacts/original-terminal-customer-retention.json
+          retention-days: 21

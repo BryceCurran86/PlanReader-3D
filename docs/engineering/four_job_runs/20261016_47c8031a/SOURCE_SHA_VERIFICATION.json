@@ -1,0 +1,58 @@
+{
+  "benchmark_id": "full_plan_takeoff_reconciliation_v2",
+  "expected_document_count": 10,
+  "rows": [
+    {
+      "file_name": "1. Construction Plans - Lot 16 Power (REV E).pdf",
+      "project_id": "au_qld_lot16_power",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "4. Structural Engineering - Lot 16 Power.pdf",
+      "project_id": "au_qld_lot16_power",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+      "project_id": "au_qld_3laurel",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "Arch_Combined_Maryborough_Service_Station.pdf",
+      "project_id": "au_qld_maryborough_service_station",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "Q5446_Standard_Plans_V1_20220320.pdf",
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "Q5446_Siting_V1_20220313.pdf",
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "Q5446_Standard_Inclusions_V1_20220313.pdf",
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "mysimonds_specificationdocumentqld.pdf",
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "Colour Boards.pdf",
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "status": "VERIFIED"
+    },
+    {
+      "file_name": "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "status": "VERIFIED"
+    }
+  ],
+  "score_granted": false,
+  "verified_document_count": 10
+}

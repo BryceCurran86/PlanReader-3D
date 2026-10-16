@@ -1,0 +1,110 @@
+name: GPT2 FT3 Original Cross Sheet Native Wall Pairs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - tools/diag_gpt2_ft3_cross_sheet_native_wall_pairs.py
+      - tests/test_gpt2_ft3_cross_sheet_native_wall_pairs.py
+      - tools/diag_ft3_p11_p7_floor_correspondence.py
+      - .github/workflows/diag-gpt2-ft3-native-wall-pairs.yml
+  workflow_dispatch:
+
+jobs:
+  original-native-physical-wall-firstgate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact source and code head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install genuine original-source toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source geometry negative and original signed controls
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt2_ft3_cross_sheet_native_wall_pairs.py tests/test_cross_view_floor_finish_authority_v1.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Immutable PDF original W4 candidate and native indexed OFFICE side pairs
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt2-ft3-crosssheet-native-pairs
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          timeout 3900s python -u -m tools.diag_gpt2_ft3_cross_sheet_native_wall_pairs \
+            --pdf "$PDF" --sha256 "$SHA" --output "$OUT/original.json" \
+            | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path("artifacts/gpt2-ft3-crosssheet-native-pairs/original.json").read_text())
+          assert x["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert x["source_pages"]==[7,11]
+          assert x["source_evidence_only"]
+          assert not x["new_physical_wall_or_room_equivalence_granted"]
+          assert x["new_floor_finish_quantities"]==0
+          assert x["new_signed_customer_rows"]==0
+          assert not x["frozen_v2_expected_or_truth_used"]
+          assert x["all_source_measured_room_side_reports"]
+          assert x["all_ranked_registration_hypotheses"]
+          assert not x["hypothesis_search_exhaustive"]
+          assert not x["physical_registration_elected"]
+          # A ranked source-wall vote candidate is not physical room identity.
+          assert len(x["all_ranked_registration_hypotheses"]) <= 128
+          for hypothesis in x["all_ranked_registration_hypotheses"]:
+            assert hypothesis["candidate_not_authenticated_registration"]
+            assert hypothesis["orientation"] in (
+                "identity","rot90","rot180","rot270",
+                "mirror_x","mirror_y","transpose","anti_transpose"
+            )
+            assert hypothesis["scale"] > 0
+          for room in x["all_source_measured_room_side_reports"]:
+            assert not room["physical_floor_correspondence_granted"]
+            assert not room["material_occurrence_granted"]
+            alternatives = room.get("original_source_registration_competing_side_reports")
+            assert len(alternatives) == len(x["all_ranked_registration_hypotheses"])
+            for hypothesis in alternatives:
+              assert not hypothesis["candidate_physical_registration_elected"]
+              assert not hypothesis["cross_page_physical_room_equivalence_granted"]
+              assert set(hypothesis["source_original_wall_side_provenance"]) == {
+                "x0","x1","y0","y1"
+              }
+              for side_gate in hypothesis["source_original_wall_side_provenance"].values():
+                assert not side_gate["physical_wall_or_room_equivalence_granted"]
+                assert not side_gate["new_metric_or_material_quantity"]
+                assert "cross_page_physical_structural_wall_equivalence_unproven" in (
+                    side_gate["source_role_first_failure_reasons"]
+                )
+            for side,gate in room.get("source_original_wall_side_provenance",{}).items():
+              assert side in ("x0","x1","y0","y1")
+              assert not gate["physical_wall_or_room_equivalence_granted"]
+              assert not gate["new_metric_or_material_quantity"]
+              assert "cross_page_physical_structural_wall_equivalence_unproven" in gate["source_role_first_failure_reasons"]
+          print("ORIGINAL_INDEXED_CROSS_SHEET_W4_SIDE_LINEAGE_NO_FIRM",flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-ft3-original-native-wall-side-pairs
+          path: artifacts/gpt2-ft3-crosssheet-native-pairs
+          retention-days: 30

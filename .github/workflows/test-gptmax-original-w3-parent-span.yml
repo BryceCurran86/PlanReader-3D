@@ -1,0 +1,83 @@
+name: GPT MAX Original W3 Source Parent Span
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_w3_original_parent_span_shadow.py"
+      - "tests/test_g17_w3_original_parent_span_shadow.py"
+      - "tools/verify_original_g17_w3_source_parent_span.py"
+      - ".github/workflows/test-gptmax-original-w3-parent-span.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  source-parent-span-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install pytest ruff
+      - name: Source-original split-arm positives, negatives, transforms and safety
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_g17_w3_original_parent_span_shadow.py
+          ruff check --select F821,F823 pb_g17_w3_original_parent_span_shadow.py tests/test_g17_w3_original_parent_span_shadow.py tools/verify_original_g17_w3_source_parent_span.py
+  original-source-W3-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Immutable original Lot16 W3 parent and complete signed eight retention
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/verify_original_g17_w3_source_parent_span.py --pdf "$PDF" --page-id 3 --output artifacts/gptmax-original-w3-parent.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('artifacts/gptmax-original-w3-parent.json').read_text())
+          assert data['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert data['all_original_signed_customer_and_host_frame_receipts_unchanged']
+          assert data['verified_signed_customer_count']==8
+          assert (data['original_physical_opening_count'],data['original_host_count'],data['original_frame_count'])==(21,15,9)
+          shadow=data['independent_W3_original_parent_shadow']
+          rows=shadow['candidate_only_short_child_original_parent_results']
+          assert len(rows['exact_coordinate_w2_w3_w4'])>0
+          for mode in rows:
+              assert all(row['W3_short_arm_abstention_preserved'] and not row['W4_union_granted']
+                  and not row['physical_wall_role_granted']
+                  and not row['physical_opening_host_granted'] for row in rows[mode])
+          assert any(r['W2_suspect_edge_id']=='merged_split_286_split_386'
+              and r['any_full_painted_original_parent_longer_than_child']
+              for r in rows['exact_coordinate_w2_w3_w4'])
+          assert any(r['W2_suspect_edge_id']=='split_950'
+              and r['any_full_painted_original_parent_longer_than_child']
+              for r in rows['exact_coordinate_w2_w3_w4'])
+          assert not data['new_structural_wall_host_metric_or_count_granted']
+          assert not any(shadow[k] for k in ('physical_wall_equivalence_granted',
+              'opening_host_granted','opening_count_granted','metric_quantity_granted',
+              'source_authentication_reperformed'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-w3-parent-source
+          path: artifacts/gptmax-original-w3-parent.json
+          if-no-files-found: error
