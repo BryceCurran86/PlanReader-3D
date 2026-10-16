@@ -59,7 +59,7 @@ def test_aggregate_total_never_becomes_a_component_quantity():
     assert len(rows) == 2
     assert all("TOTAL" not in row.label.upper() for row in rows)
     aggregate = extract_explicit_floor_area_evidence(
-        "FLOOR PLAN\nTOTAL FLOOR AREA: 61.25m²",
+        "FLOOR PLAN\nTOTAL FLOOR AREA: 61.25m2",
         source_page=3,
         source_sha256=SOURCE_SHA,
     )
