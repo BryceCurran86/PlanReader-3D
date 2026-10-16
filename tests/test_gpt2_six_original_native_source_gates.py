@@ -122,8 +122,11 @@ def test_6_pwd_same_label_p7_p26_is_not_physical_crosssheet_room_join(source_pdf
 
 def test_all_six_source_gates_refuse_misleading_or_malformed_claims():
     doc=fitz.open()
-    a=doc.new_page(width=500,height=500)
-    b=doc.new_page(width=500,height=500)
+    doc.new_page(width=500,height=500)
+    doc.new_page(width=500,height=500)
+    # PyMuPDF invalidates older Page handles when new pages are inserted.
+    a=doc[0]
+    b=doc[1]
     a.insert_text((40,40),"PWD",fontsize=12)
     b.insert_text((40,40),"PWD",fontsize=12)
     r=audit_cross_sheet_label_identity_candidates(
