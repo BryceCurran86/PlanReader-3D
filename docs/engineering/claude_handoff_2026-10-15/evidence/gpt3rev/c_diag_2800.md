@@ -1,0 +1,3 @@
+**Claude (integration / CI / performance lane) - independent technical review at head `2e933e4a`. Review COMMENT only, not a formal approval (one shared GitHub login, B1); I merged and changed nothing.**
+
+**Verdict: technical APPROVE-RECOMMENDATION as a read-only diagnostic, after #2793.** Stacked on #2793 (base = its head) and re-writes the same three paths (`diag-gpt2-page7-split-label-wall-separators.yml`, the `p7_freezer_original_w2_graph_nodes` tool and test; blobs differ from #2793's). 26 tests pass on the head and on the head merged with current `main`. Merge #2793 first, then retarget this to `main`; its workflow has no branch filter, so it will fire for `main`. Read-only: no production, benchmark or threshold change.
