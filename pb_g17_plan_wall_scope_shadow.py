@@ -95,9 +95,12 @@ def _infill_edge_opening_ids(edge,infill_intervals):
     return tuple(owners)
 
 
-def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
+def _graph(segments, *, root, scope_id, tolerance, infill_intervals=(), preserve_overlapping_spans_shadow=False,
+           immutable_exact_endpoints_shadow=False):
     graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=tolerance,
-        exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True)
+        exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True,
+        **({"preserve_overlapping_spans_shadow": True} if preserve_overlapping_spans_shadow else {}),
+        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}))
     junctions, relationships = classify_junctions(graph,
         document_id=root["document_id"], page_id=root["page_id"], viewport_id=scope_id)
     deduped, removed = deduplicate_coincident_edges(graph)
@@ -151,10 +154,16 @@ def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
         "w4_records":[asdict(r) for r in records]}
 
 
-def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str) -> dict:
+def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str,
+                                     preserve_overlapping_spans_shadow: bool = False,
+                                     immutable_exact_endpoints_shadow: bool = False) -> dict:
     """Only original producer and source addresses; never caller evidence bodies."""
     if type(source) is not SourceVisibilityProducer:
         raise TypeError("actual SourceVisibilityProducer required")
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
+    if type(immutable_exact_endpoints_shadow) is not bool:
+        raise ValueError("immutable exact endpoint shadow must be explicit boolean")
     if (type(page_id) is not str or not page_id.isdecimal()
             or int(page_id) < 1 or str(int(page_id)) != page_id):
         raise ValueError("canonical_original_page_address_required")
@@ -262,6 +271,21 @@ def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str) 
             scope_id = stable_contract_id("g17-original-plan-wall-shadow",dict(root,
                 viewport_ownership_id=plan.ownership_id,snap_tolerance_pt=tol))
             report[name] = _graph(segments,root=root,scope_id=scope_id,tolerance=tol)
+        if preserve_overlapping_spans_shadow:
+            guarded_scope = stable_contract_id("g17-original-plan-wall-shadow", dict(root,
+                viewport_ownership_id=plan.ownership_id, snap_tolerance_pt=0.,
+                preserve_overlapping_spans_shadow=True))
+            report["overlap_preserving_exact_w2_w3_w4"] = _graph(segments,
+                root=root,scope_id=guarded_scope,tolerance=0.,preserve_overlapping_spans_shadow=True)
+        if immutable_exact_endpoints_shadow:
+            immutable_scope = stable_contract_id("g17-original-plan-wall-shadow", dict(root,
+                viewport_ownership_id=plan.ownership_id, snap_tolerance_pt=0.,
+                preserve_overlapping_spans_shadow=preserve_overlapping_spans_shadow,
+                immutable_exact_endpoints_shadow=True))
+            report["immutable_endpoint_exact_w2_w3_w4"] = _graph(segments,
+                root=root,scope_id=immutable_scope,tolerance=0.,
+                preserve_overlapping_spans_shadow=preserve_overlapping_spans_shadow,
+                immutable_exact_endpoints_shadow=True)
     opening = source.physical_opening_authority()
     physical = {}
     proof_addresses = {}
