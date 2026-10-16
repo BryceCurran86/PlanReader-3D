@@ -1,0 +1,193 @@
+"""Source-neutral tests for exact 120-item *postscore* change accounting.
+
+These are synthetic, untrusted post-evaluator snapshots, not benchmark
+executions or proof of signed extraction, geometry or source closure.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+import json
+
+import pytest
+
+from tools import gpt3_frozen_120_score_delta_guard as delta
+
+
+def _fake_ledger(*, published: bool = False, fingerprint: str = "a" * 64) -> dict:
+    targets, sources, scorer = delta._expected_inputs_and_targets()
+    rows = []
+    for (project, target), (trade, unit) in sorted(targets.items()):
+        rows.append({
+            "project_id": project, "item_id": target,
+            "trade_category": trade, "unit": unit,
+            "evaluation_state": "MISSED" if published else "NOT_EVALUATED",
+            "produced_quantity_id": None,
+        })
+    return {
+        "schema_version": "gpt3-120-target-ledger-v1",
+        "target_count": 120,
+        "evaluated_target_count": 120 if published else 0,
+        "not_evaluated_target_count": 0 if published else 120,
+        "publication_status": "PUBLISHED" if published else "UNPUBLISHED",
+        "producer_head": "b" * 40 if published else None,
+        "source_sha256s_by_project": sources,
+        "frozen_file_sha256s": scorer,
+        "input_fingerprint": fingerprint,
+        "official_coverage_accuracy": 0.0 if published else None,
+        "official_precision_adjusted_accuracy": 0.0 if published else None,
+        "items": rows,
+    }
+
+
+def _set_scored(ledger, idx, state, quantity_id):
+    ledger["items"][idx]["evaluation_state"] = state
+    ledger["items"][idx]["produced_quantity_id"] = quantity_id
+    matched = sum(
+        row["evaluation_state"] == "MATCHED_WITHIN_TOLERANCE"
+        for row in ledger["items"]
+    )
+    ledger["official_coverage_accuracy"] = matched / 120
+    ledger["official_precision_adjusted_accuracy"] = matched / 120
+
+
+def test_two_missing_official_scores_must_not_be_called_zero_or_gains():
+    old = _fake_ledger()
+    fresh = _fake_ledger(fingerprint="c" * 64)
+    result = delta.compare_postscore_ledgers(old, fresh)
+    assert result["comparison_status"] == "OFFICIAL_BASELINE_OR_REEVALUATION_UNAVAILABLE"
+    assert result["score_comparison_available"] is False
+    assert result["before_coverage_accuracy"] is None
+    assert result["after_coverage_accuracy"] is None
+    assert result["net_additional_correct_items"] is None
+    assert result["accuracy_percentage_point_change"] is None
+    assert result["newly_correct_target_ids"] == []
+    assert result["regressed_target_ids"] == []
+
+
+def test_mixed_published_and_unpublished_rejects_claim_of_40pp():
+    old = _fake_ledger()
+    fresh = _fake_ledger(published=True, fingerprint="d" * 64)
+    _set_scored(fresh, 0, "MATCHED_WITHIN_TOLERANCE", "synthetic-q0")
+    result = delta.compare_postscore_ledgers(old, fresh)
+    assert result["score_comparison_available"] is False
+    assert result["net_additional_correct_items"] is None
+
+
+def test_synthetic_two_gains_one_regression_net_exact_one_target():
+    old = _fake_ledger(published=True, fingerprint="a" * 64)
+    fresh = _fake_ledger(published=True, fingerprint="b" * 64)
+    _set_scored(old, 1, "MATCHED_WITHIN_TOLERANCE", "synthetic-old-1")
+    _set_scored(fresh, 0, "MATCHED_WITHIN_TOLERANCE", "synthetic-new-0")
+    _set_scored(fresh, 2, "MATCHED_WITHIN_TOLERANCE", "synthetic-new-2")
+    result = delta.compare_postscore_ledgers(old, fresh)
+    assert result["score_comparison_available"] is True
+    assert result["gross_new_correct_items"] == 2
+    assert result["regressed_correct_items"] == 1
+    assert result["net_additional_correct_items"] == 1
+    assert result["accuracy_percentage_point_change"] == pytest.approx(100/120)
+    assert len(result["newly_correct_target_ids"]) == 2
+    assert len(result["regressed_target_ids"]) == 1
+    assert result["issuer_authentication_proven_by_this_comparator"] is False
+
+
+def test_genuine_repeat_fingerprint_reports_no_new_targets():
+    before = _fake_ledger(published=True)
+    result = delta.compare_postscore_ledgers(before, deepcopy(before))
+    assert result["comparison_status"] == "UNCHANGED_PRODUCER_SOURCE_SCORING_INPUTS"
+    assert result["net_additional_correct_items"] == 0
+    assert result["accuracy_percentage_point_change"] == 0
+
+
+def test_changed_target_with_identical_input_fingerprint_is_forbidden():
+    before = _fake_ledger(published=True)
+    after = deepcopy(before)
+    _set_scored(after, 0, "MATCHED_WITHIN_TOLERANCE", "synthetic-q")
+    with pytest.raises(ValueError, match="same scoring fingerprint"):
+        delta.compare_postscore_ledgers(before, after)
+
+
+def test_modified_unpublished_targets_are_never_accepted_as_evaluation():
+    before = _fake_ledger()
+    after = _fake_ledger(fingerprint="c" * 64)
+    after["items"][0]["evaluation_state"] = "MISSED"
+    with pytest.raises(ValueError, match="unpublished run"):
+        delta.compare_postscore_ledgers(before, after)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda x: x.update(target_count=119),
+        lambda x: x.update(schema_version="wrong"),
+        lambda x: x.update(evaluated_target_count=3),
+        lambda x: x.update(not_evaluated_target_count=1),
+        lambda x: x.update(official_coverage_accuracy=0),
+        lambda x: x["items"].pop(),
+        lambda x: x["items"].append(deepcopy(x["items"][0])),
+        lambda x: x["items"][0].update(item_id="synthetic-nonexistent-id"),
+        lambda x: x["items"][0].update(trade_category="wrong-trade"),
+        lambda x: x["items"][0].update(unit="wrong-unit"),
+        lambda x: x["source_sha256s_by_project"].update(
+            {next(iter(x["source_sha256s_by_project"])): ["0"*64]}),
+        lambda x: x["frozen_file_sha256s"].update({"evaluator.py": "0" * 64}),
+        lambda x: x.update(input_fingerprint="NOT_SHA256"),
+        lambda x: x.update(producer_head=True),
+    ],
+)
+def test_14_independent_unpublished_scope_integrity_negatives(damage):
+    before = _fake_ledger()
+    after = deepcopy(before)
+    damage(after)
+    with pytest.raises(ValueError):
+        delta.compare_postscore_ledgers(before, after)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda x: x.update(evaluated_target_count=119),
+        lambda x: x.update(not_evaluated_target_count=1),
+        lambda x: x["items"][0].update(evaluation_state="NOT_EVALUATED"),
+        lambda x: x["items"][0].update(
+            evaluation_state="MATCHED_WITHIN_TOLERANCE",
+            produced_quantity_id=None),
+        lambda x: x.update(official_coverage_accuracy=0.9),
+        lambda x: x.update(official_precision_adjusted_accuracy=0.8),
+        lambda x: x.update(producer_head=None),
+    ],
+)
+def test_published_target_source_and_numerator_invariants_fail_closed(damage):
+    old = _fake_ledger(published=True)
+    new = _fake_ledger(published=True, fingerprint="b" * 64)
+    damage(new)
+    with pytest.raises(ValueError):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_nonwinning_status_change_and_rekey_are_not_extra_correct_targets():
+    old = _fake_ledger(published=True, fingerprint="1" * 64)
+    new = _fake_ledger(published=True, fingerprint="2" * 64)
+    new["items"][0]["evaluation_state"] = "UNRESOLVED"
+    old["items"][1]["produced_quantity_id"] = "synthetic-old-id"
+    new["items"][1]["produced_quantity_id"] = "synthetic-new-id"
+    out = delta.compare_postscore_ledgers(old, new)
+    assert out["net_additional_correct_items"] == 0
+    assert len(out["other_changed_target_states"]) == 1
+    assert len(out["changed_produced_quantity_ids"]) == 1
+
+
+def test_cli_cannot_overwrite_either_ledger(tmp_path):
+    old = tmp_path / "before.json"
+    new = tmp_path / "after.json"
+    old.write_text(json.dumps(_fake_ledger()), encoding="utf-8")
+    new.write_text(json.dumps(_fake_ledger(fingerprint="d"*64)), encoding="utf-8")
+    out = tmp_path / "comparison.json"
+    assert delta.main([
+        "--before-ledger", str(old), "--after-ledger", str(new),
+        "--output", str(out),
+    ]) == 2
+    with pytest.raises(ValueError, match="cannot overwrite"):
+        delta.main([
+            "--before-ledger", str(old), "--after-ledger", str(new),
+            "--output", str(old),
+        ])
