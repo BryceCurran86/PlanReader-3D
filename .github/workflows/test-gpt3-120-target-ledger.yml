@@ -1,0 +1,33 @@
+name: TEST GPT3 120-Target Reconciliation Ledger
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/gpt3_120_target_input_fingerprint_ledger.py"
+      - "tests/test_gpt3_120_target_input_fingerprint_ledger.py"
+      - ".github/workflows/test-gpt3-120-target-ledger.yml"
+  workflow_dispatch:
+
+jobs:
+  source-neutral-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-neutral target inventory and no-repeat fingerprint gates
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_120_target_input_fingerprint_ledger.py
+      - name: Frozen benchmark and provider isolation unchanged
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
