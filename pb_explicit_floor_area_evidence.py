@@ -154,12 +154,12 @@ def resolve_explicit_floor_area_evidence(
 # This narrow parser is reconciliation *input* only, never a source-authenticated
 # physical floor measurement and never QuantityEvidence.
 _COMPONENT_AREA_LABEL_RE = re.compile(
-    r"^(?P<label>[A-Za-z][A-Za-z0-9&/()+. -]{0,79}?)\\s+AREA\\s*:\\s*(?P<inline>.*)$",
+    r"^(?P<label>[A-Za-z][A-Za-z0-9&/()+. -]{0,79}?)\s+AREA\s*:\s*(?P<inline>.*)$",
     re.IGNORECASE,
 )
 _COMPONENT_AREA_VALUE_RE = re.compile(
-    r"^(?P<value>\\d{1,6}(?:\\.\\d{1,3})?)\\s*"
-    r"(?P<unit>m(?:2|²)|sq\\.?\\s*m|sqm)$",
+    r"^(?P<value>\d{1,6}(?:\\.\d{1,3})?)\s*"
+    r"(?P<unit>m(?:2|²)|sq\\.?\s*m|sqm)$",
     re.IGNORECASE,
 )
 _COMPONENT_AGGREGATE_PREFIXES = ("TOTAL", "SUBTOTAL", "GRAND TOTAL")
