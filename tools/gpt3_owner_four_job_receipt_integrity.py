@@ -338,11 +338,21 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                      "unsealed source attempt cannot claim signed quantities")
             _require(not summary.get("family_run_files") and not summary.get("family_run_ids"),
                      "unsealed attempt cannot carry signed family references")
+        # Source-stage classification is derived from the original producer's
+        # own status and NOT from benchmark target expectations. Never label an
+        # unevaluated target MISSED based on a source process outcome.
+        if state != "COMPLETED":
+            observed_gate = "owner_process_stopped:" + state
+        elif not is_sealed:
+            observed_gate = "source_producer_unsealed:" + str(summary.get("status"))
+        else:
+            observed_gate = "customer_rows_not_verified_for_fresh_source_run"
         rows.append({
             "project_id": project_id,
             "frozen_denominator": denominator_by_id[project_id],
             "process_status": state,
             "producer_status": summary.get("status"),
+            "earliest_verified_project_execution_gate": observed_gate,
             "derived_sealed_quantity_count": count,
             "signed_run_verified_against_derived_bytes": is_sealed,
             "verified_customer_rows_in_run": 0,
@@ -355,6 +365,11 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             "official_project_score": None,
         })
     _require(verified_manifest_docs == 10, "all ten per-project manifest receipts not proven")
+    # A public/share-safe diagnostic kit must not accidentally include original
+    # confidential source files, even outside its SHA-indexed derived list.
+    _require(not any(p.is_file() and p.suffix.lower() == ".pdf"
+                     for p in root.rglob("*")),
+             "private original PDF appeared in derived share-safe receipt package")
     indexed, sums = _sha_index(root, owner)
     _require(_REQUIRED_FILES.issubset(sums), "required owner receipt source files absent")
     _require(all(path in sums for path in (
