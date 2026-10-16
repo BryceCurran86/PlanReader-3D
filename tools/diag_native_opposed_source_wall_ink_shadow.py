@@ -114,11 +114,29 @@ def source_parallel_face_candidates(
     full_a=sum(e-s for s,e in spans[0])
     full_b=sum(e-s for s,e in spans[1])
     shared=sum(e-s for s,e in overlap)
+    native_separation=abs(next(iter(coords[0]))-next(iter(coords[1])))
+    # Opposing wall faces must overlap for many of their native separations.
+    # Two opposite building sides must not become one physical wall merely
+    # because they share long x/y projection intervals and the same ink.
+    # This uses the independent structural-ink shadow's existing aspect rule,
+    # not a project-specific width, metric area, label or inferred snap.
+    from pb_structural_wall_ink_shadow import MIN_FACE_ASPECT
+    wall_aspect_candidate = (
+        shared > 0 and shared >= MIN_FACE_ASPECT*native_separation
+        and shared >= 0.5 * min(full_a,full_b)
+    )
+    if not wall_aspect_candidate:
+        status="source_parallel_ink_separation_not_wall_scale"
+    elif not style_matches:
+        status="source_paint_mismatch_competing_parallel_lines"
+    else:
+        status="source_paint_consistent_parallel_candidate_pair"
     return {
-        "status":"source_paint_consistent_parallel_candidate_pair" if style_matches else "source_paint_mismatch_competing_parallel_lines",
+        "status":status,
+        "source_wall_aspect_ratio_candidate_only":wall_aspect_candidate,
         "original_native_axis":next(iter(axes)),
         "source_parallel_axis_coordinates":[next(iter(cs)) for cs in coords],
-        "source_parallel_face_separation_pdf_pts":abs(next(iter(coords[0]))-next(iter(coords[1]))),
+        "source_parallel_face_separation_pdf_pts":native_separation,
         "source_unbridged_side_intervals_pdf_pts":spans,
         "source_shared_opposed_intervals_pdf_pts":overlap,
         "source_shared_opposed_length_pdf_pt":shared,
