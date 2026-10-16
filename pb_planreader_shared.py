@@ -65,8 +65,11 @@ def dimension_value_m(raw: str) -> Optional[float]:
 # ---------------------------------------------------------------------------
 _FLOOR_PLAN_KW = [
     "floor plan", "site plan", "ground floor", "first floor",
-    "second floor", "roof plan", "basement plan",
+    "second floor", "basement plan",
     "upper floor", "lower floor",
+]
+_ROOF_KW = [
+    "roof plan", "roof layout",
 ]
 _ELEVATION_KW = [
     "elevation", "external elevation", "internal elevation",
@@ -137,6 +140,7 @@ def classify_page(text: str) -> str:
         "Schedule": _type_score(body, _SCHEDULE_KW),
         "Title / Drawing Register": _type_score(body, _TITLE_KW),
         "Reflected Ceiling Plan": _type_score(body, CEILING_KW),
+        "Roof Plan": _type_score(body, _ROOF_KW),
     }
 
     best_score = max(scores.values())
