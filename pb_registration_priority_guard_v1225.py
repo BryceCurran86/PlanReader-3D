@@ -72,8 +72,7 @@ def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "
 
 def classify_page(text: str, file_name: str, page_no: int):
     page_type, _confidence, _evidence = weighted_page_type(text, file_name, "")
-    code = registration._candidate_code(text)
-    return page_type, code or f"Page {int(page_no)}"
+    return page_type, f"Page {int(page_no)}"
 
 
 def apply(app: Any) -> None:

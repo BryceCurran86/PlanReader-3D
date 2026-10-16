@@ -67,6 +67,22 @@ def _low(value: Any) -> str:
     return _norm(value).lower()
 
 
+_SHEET_INDEX_HEADINGS = frozenset({
+    "drawing index", "drawing register", "drawing schedule", "sheet index", "title sheet",
+})
+
+
+def _sheet_index_heading(text: Any) -> bool:
+    """True when a line is itself a sheet-index heading, not a reference to one."""
+    for raw in str(text or "").splitlines():
+        line = _low(raw)
+        if not line or line.startswith(("refer ", "see ", "matchline ", "keynote ")):
+            continue
+        if line in _SHEET_INDEX_HEADINGS:
+            return True
+    return False
+
+
 def _manual_key(page_id: int) -> str:
     return f"{SETTING_PREFIX}{int(page_id)}_manual"
 
@@ -288,7 +304,16 @@ def title_block_evidence(pdf_page: Any) -> Dict[str, Any]:
 
 
 def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "") -> Tuple[str, int, str]:
-    sources = [(_low(title_block), 12, "title block"), (_low(full_text), 2, "page text"), (_low(file_name), 1, "file name")]
+    """Score sheet type from the title block and this page's text.
+
+    ``file_name`` is accepted so existing callers keep working. It is not
+    evidence: a PDF named like a floor plan must not type an elevation, and
+    it must not type a page whose own text has no sheet heading.
+    """
+    del file_name
+    if _sheet_index_heading(title_block) or (not _low(title_block) and _sheet_index_heading(full_text)):
+        return "Title / Drawing Register", 90, "sheet index heading"
+    sources = [(_low(title_block), 12, "title block"), (_low(full_text), 2, "page text")]
     scores: Dict[str, int] = {name: 0 for name in _TYPE_RULES}
     evidence: Dict[str, List[str]] = {name: [] for name in _TYPE_RULES}
     for name, phrases in _TYPE_RULES.items():
@@ -317,10 +342,14 @@ def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "
 
 
 def classify_page(text: str, file_name: str, page_no: int) -> Tuple[str, str]:
-    """Fallback classifier used before native title-block geometry is available."""
+    """Fallback type used before native title-block geometry is available.
+
+    The label stays ``Page N``. The first drawing-code token on the page is
+    not this sheet's number; title-block resolution fills a neutral label
+    only when that evidence is unique.
+    """
     page_type, _confidence, _evidence = weighted_page_type(text, file_name, "")
-    code = _candidate_code(text)
-    return page_type, code or f"Page {int(page_no)}"
+    return page_type, f"Page {int(page_no)}"
 
 
 def _authoritative_page_label(current: Any, page_no: int, sheet_number: Any) -> str:

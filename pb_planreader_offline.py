@@ -872,14 +872,14 @@ def classify_page_offline(
     Returns:
         Tuple of (page_type, label, metadata)
     """
-    lower = f"{file_name} {text}".lower()
+    del file_name
     page_type = "Other"
     
-    # Keyword patterns for page types
+    # Keyword patterns for page types. Field labels such as "drawing number"
+    # are not a sheet type. Matching is per heading line, below.
     patterns = [
         ("Title / Drawing Register", [
-            "drawing register", "drawing schedule", "title sheet",
-            "project title", "job number", "drawing number",
+            "drawing register", "drawing schedule", "title sheet", "drawing index",
         ]),
         ("Reflected Ceiling Plan", [
             "reflected ceiling", "rcp", "ceiling plan",
@@ -924,16 +924,32 @@ def classify_page_offline(
         ]),
     ]
     
-    for candidate, keywords in patterns:
-        if any(kw in lower for kw in keywords):
-            page_type = candidate
+    found: dict[str, int] = {}
+    index_headings = {"drawing index", "drawing register", "drawing schedule", "title sheet", "sheet index"}
+    for raw_line in (text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip().lower()
+        if not line or re.match(r"^(?:refer\b|see\b|matchline\b|keynote\b)", line):
+            continue
+        if line in index_headings:
+            page_type = "Title / Drawing Register"
+            found = {}
             break
+        for candidate, keywords in patterns:
+            for keyword in keywords:
+                if re.search(rf"(?<!\w){re.escape(keyword)}s?(?!\w)", line):
+                    found[candidate] = max(found.get(candidate, 0), len(keyword))
+    else:
+        headings = {name for name, length in found.items() if length >= 8}
+        if len(headings) > 1:
+            page_type = "Other"
+        elif len(headings) == 1:
+            page_type = next(iter(headings))
+        elif len(found) == 1:
+            page_type = next(iter(found))
     
-    # Extract drawing number
-    drawing_match = re.search(
-        r"\b([A-Z]{1,3}\d{2,4}(?:[-/.][A-Z0-9]+)?)\b", text
-    )
-    label = drawing_match.group(1) if drawing_match else f"Page {page_no}"
+    # A sheet code printed in an index or a title-block field is not this page's
+    # sheet number. Title-block resolution owns that identity.
+    label = f"Page {int(page_no)}"
     
     # Analyze visual features
     metadata = {}
