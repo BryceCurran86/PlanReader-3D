@@ -219,6 +219,7 @@ def _snap_geometry_indexed(
     *,
     include_endpoint_assignments: bool = False,
     exact_endpoint_index_shadow: bool = False,
+    immutable_exact_endpoints_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
 
@@ -226,10 +227,16 @@ def _snap_geometry_indexed(
     centroid is within tolerance_pt. The same lowest-distance / lowest-existing
     node index wins because candidates are visited in ascending node id and the
     historical strict distance comparison is retained. Node centroids still
-    move by the same running mean after every accepted endpoint.
+    move by the same running mean after every accepted endpoint by default.
+    The separately opt-in immutable exact endpoint shadow retains each matched
+    zero-distance source coordinate instead of re-averaging identical floats.
     """
     if type(exact_endpoint_index_shadow) is not bool:
         raise ValueError("exact endpoint index shadow must be explicit boolean")
+    if type(immutable_exact_endpoints_shadow) is not bool:
+        raise ValueError("immutable exact endpoint shadow must be explicit boolean")
+    if immutable_exact_endpoints_shadow and not (exact_endpoint_index_shadow and tolerance_pt == 0):
+        raise ValueError("immutable exact endpoint shadow requires indexed zero tolerance")
     if exact_endpoint_index_shadow and tolerance_pt != 0:
         raise ValueError("exact endpoint index shadow requires zero tolerance")
     if tolerance_pt <= 0 and not exact_endpoint_index_shadow:
@@ -237,6 +244,8 @@ def _snap_geometry_indexed(
     if exact_endpoint_index_shadow:
         if any(not math.isfinite(float(seg[key]))
                for seg in segments for key in ("x1", "y1", "x2", "y2")):
+            if immutable_exact_endpoints_shadow:
+                raise ValueError("immutable exact endpoint source must be finite")
             return snap_geometry(segments, tolerance_pt=tolerance_pt)
         # Legacy zero-mode never exposed these optional audit assignments.
         include_endpoint_assignments = False
@@ -298,6 +307,12 @@ def _snap_geometry_indexed(
 
         if best >= 0:
             node = nodes[best]
+            if immutable_exact_endpoints_shadow:
+                # Membership already required d==0. Averaging identical source
+                # floats can move a decimal endpoint by an ULP and disconnect
+                # its next identical occurrence. Keep the exact source value.
+                node["samples"] += 1
+                return best
             old_cell = cell_for(node["x"], node["y"])
             count = node["samples"] + 1
             node["x"] = (node["x"] * node["samples"] + pt[0]) / count
@@ -350,9 +365,25 @@ def _snap_geometry_indexed(
     return result
 
 
+def _has_opposing_endpoint_rays(node, far1, far2) -> bool:
+    """A straight continuation passes through the shared node, not back over it.
+
+    Same-side overlapping edges cannot be replaced by their far-end chord:
+    that would erase their common source interval. No extra join tolerance.
+    """
+    dx1, dy1 = far1["x"] - node["x"], far1["y"] - node["y"]
+    dx2, dy2 = far2["x"] - node["x"], far2["y"] - node["y"]
+    l1, l2 = math.hypot(dx1, dy1), math.hypot(dx2, dy2)
+    if not (math.isfinite(l1) and math.isfinite(l2) and l1 > 0 and l2 > 0):
+        return False
+    return (dx1 / l1) * (dx2 / l2) + (dy1 / l1) * (dy2 / l2) < 0
+
+
 def merge_collinear_degree_two_nodes(
     graph: Dict[str, Any],
     angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+    *,
+    preserve_overlapping_spans_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Collapse a degree-two node whose two incident edges are collinear.
 
@@ -376,6 +407,8 @@ def merge_collinear_degree_two_nodes(
     have their ``degree`` set to ``0`` and gain a ``"merged_into_edge"`` key
     naming the id of the edge that replaced their two incident edges.
     """
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
     nodes = [dict(n) for n in graph["nodes"]]
     edges = []
     for edge in graph["edges"]:
@@ -426,6 +459,8 @@ def merge_collinear_degree_two_nodes(
                 continue
 
             n_far1, n_far2 = nodes[far1], nodes[far2]
+            if preserve_overlapping_spans_shadow and not _has_opposing_endpoint_rays(node, n_far1, n_far2):
+                continue
             merged_id = f"merged_{e1.get('id', e1_idx)}_{e2.get('id', e2_idx)}"
             merged_edge = {
                 **e1,
@@ -491,8 +526,12 @@ def merge_collinear_degree_two_nodes(
 def _merge_collinear_degree_two_nodes_indexed(
     graph: Dict[str, Any],
     angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+    *,
+    preserve_overlapping_spans_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Exact active-incidence equivalent of merge_collinear_degree_two_nodes."""
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
     nodes = [dict(n) for n in graph["nodes"]]
     edges = []
     for edge in graph["edges"]:
@@ -552,6 +591,8 @@ def _merge_collinear_degree_two_nodes_indexed(
             continue
 
         n_far1, n_far2 = nodes[far1], nodes[far2]
+        if preserve_overlapping_spans_shadow and not _has_opposing_endpoint_rays(node, n_far1, n_far2):
+            continue
         merged_id = f"merged_{e1.get('id', e1_idx)}_{e2.get('id', e2_idx)}"
         merged_edge = {
             **e1,
@@ -634,6 +675,8 @@ def build_wall_graph_for_viewport(
     collinear_angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
     exact_endpoint_index_shadow: bool = False,
     exact_split_parent_lineage_shadow: bool = False,
+    preserve_overlapping_spans_shadow: bool = False,
+    immutable_exact_endpoints_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -649,13 +692,23 @@ def build_wall_graph_for_viewport(
     ``exact_split_parent_lineage_shadow`` is explicit shadow-only provenance:
     retain the actual splitter emitter alongside existing plural containment
     parents. It does not alter topology or authorize structural wall roles.
+
+    Two additional explicit source-only policies preserve same-side overlap
+    intervals and immutable exactly equal vertices. Both are off by default;
+    neither supplies structural wall, host, measurement or quantity authority.
     """
+    if type(immutable_exact_endpoints_shadow) is not bool:
+        raise ValueError("immutable exact endpoint shadow must be explicit boolean")
+    if immutable_exact_endpoints_shadow and not (exact_endpoint_index_shadow and gap_snap_tolerance_pt == 0):
+        raise ValueError("immutable exact endpoint shadow requires indexed zero tolerance")
     if type(exact_endpoint_index_shadow) is not bool:
         raise ValueError("exact endpoint index shadow must be explicit boolean")
     if exact_endpoint_index_shadow and gap_snap_tolerance_pt != 0:
         raise ValueError("exact endpoint index shadow requires zero tolerance")
     if type(exact_split_parent_lineage_shadow) is not bool:
         raise ValueError("exact split parent lineage shadow must be explicit boolean")
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
     parent_indexes: List[int] | None = [] if exact_split_parent_lineage_shadow else None
@@ -672,13 +725,15 @@ def build_wall_graph_for_viewport(
         tolerance_pt=gap_snap_tolerance_pt,
         include_endpoint_assignments=audit_short_source,
         **({"exact_endpoint_index_shadow": True} if exact_endpoint_index_shadow else {}),
+        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
     )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
     )
     merged_graph = _merge_collinear_degree_two_nodes_indexed(
-        snapped_graph, angle_tolerance_deg=collinear_angle_tolerance_deg
+        snapped_graph, angle_tolerance_deg=collinear_angle_tolerance_deg,
+        **({"preserve_overlapping_spans_shadow": True} if preserve_overlapping_spans_shadow else {}),
     )
     merged_graph["excluded_segments"] = excluded_segments
     merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments

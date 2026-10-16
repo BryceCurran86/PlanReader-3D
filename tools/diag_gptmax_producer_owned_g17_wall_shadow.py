@@ -58,7 +58,11 @@ def _retention(composition, voids, *, verify_customer_rows=False):
 
 
 def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str,
-                                    include_plan_wall_scope: bool = False) -> dict:
+                                    include_plan_wall_scope: bool = False,
+                                    preserve_overlapping_spans_shadow: bool = False,
+                                    immutable_exact_endpoints_shadow: bool = False) -> dict:
+    if (preserve_overlapping_spans_shadow or immutable_exact_endpoints_shadow) and not include_plan_wall_scope:
+        raise ValueError("source incidence shadow requires plan-wall scope")
     digest = sha256(original_pdf).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -138,7 +142,9 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str,
     if include_plan_wall_scope:
         from pb_g17_plan_wall_scope_shadow import build_g17_plan_wall_scope_shadow
         plan_wall_scope = build_g17_plan_wall_scope_shadow(
-            source, revision_id=published.revision.revision_id, page_id=page_id)
+            source, revision_id=published.revision.revision_id, page_id=page_id,
+            **({"preserve_overlapping_spans_shadow": True} if preserve_overlapping_spans_shadow else {}),
+            **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}))
     recomposed, revoids = compose()
     if _retention(recomposed,revoids,verify_customer_rows=include_plan_wall_scope) != before:
         raise RuntimeError("G17 shadow changed original wall/host/frame/area receipts")
@@ -176,9 +182,13 @@ def main() -> int:
     parser.add_argument("--page-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--plan-wall-scope", action="store_true")
+    parser.add_argument("--preserve-overlapping-spans-shadow", action="store_true")
+    parser.add_argument("--immutable-exact-endpoints-shadow", action="store_true")
     args = parser.parse_args()
     report = producer_owned_wall_shadow_report(args.pdf.read_bytes(),page_id=args.page_id,
-                                              include_plan_wall_scope=args.plan_wall_scope)
+                                              include_plan_wall_scope=args.plan_wall_scope,
+                                              preserve_overlapping_spans_shadow=args.preserve_overlapping_spans_shadow,
+                                              immutable_exact_endpoints_shadow=args.immutable_exact_endpoints_shadow)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(report,indent=2,sort_keys=True)+"\n")
     print(json.dumps({k:v for k,v in report.items() if k not in (

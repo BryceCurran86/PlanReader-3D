@@ -30,6 +30,7 @@ jobs:
       - name: Real source lineage, complete alternatives, transforms and tampering
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_g17_plan_wall_scope_shadow.py tests/test_gptmax_w4_identity_abstention_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_g17_dual_dpi_source_correspondence_shadow.py tests/test_source_owned_physical_plan_view.py tests/test_g17_w4_equivalence_competitor_shadow.py
+          PYTHONPATH=. python -m pytest -q tests/test_w2_overlap_preservation_shadow.py tests/test_w2_immutable_exact_endpoint_shadow.py tests/test_g17_source_incidence_preservation_shadow.py tests/test_wall_room_topology_zero_snap_index_shadow.py
           ruff check --select F821,F823 pb_g17_plan_wall_scope_shadow.py tests/test_g17_plan_wall_scope_shadow.py tools/diag_gptmax_producer_owned_g17_wall_shadow.py
   original-source-retention:
     runs-on: ubuntu-latest
@@ -49,7 +50,7 @@ jobs:
           PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --plan-wall-scope --output artifacts/original-g17-plan-wall-scope.json
+          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --plan-wall-scope --preserve-overlapping-spans-shadow --immutable-exact-endpoints-shadow --output artifacts/original-g17-plan-wall-scope.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -70,6 +71,41 @@ jobs:
           assert all(c['shared_source_is_host_transfer_authority'] is False for c in p['shared_source_opening_identity_checks'])
           assert len(r['original_opening_measurement_traces'])==r['original_physical_opening_count']
           assert all(not p[k] for k in ('scope_complete','structural_wall_role_granted','physical_wall_equivalence_granted','host_granted','metric_quantity_granted'))
+          # Source-span conservation is a candidate graph invariant, NOT a
+          # construction quantity or structural-wall authority. No gold read.
+          def missing_intervals(graph):
+              failures=[]
+              sources=[s for s in p['source_primitive_dispositions'] if s.get('drawing_disposition')=='inside' and s['inside_original_image_regions'] and s['source_paint']['original_solid_and_unchanged']]
+              for s in sources:
+                  a,b=s['geometry'][:2],s['geometry'][2:]
+                  axis=0 if a[1]==b[1] else 1
+                  cross=1-axis
+                  lo,hi=sorted((a[axis],b[axis]))
+                  spans=[]
+                  for e in graph['w2_edges']:
+                      if s['source_primitive_id'] not in e['source_primitive_ids']: continue
+                      c,d=e['geometry'][:2],e['geometry'][2:]
+                      if abs(c[cross]-a[cross])>1e-7 or abs(d[cross]-a[cross])>1e-7: continue
+                      x,y=sorted((c[axis],d[axis]))
+                      x,y=max(x,lo),min(y,hi)
+                      if y>x: spans.append((x,y))
+                  cursor=lo
+                  for x,y in sorted(spans):
+                      if x>cursor+1e-7: break
+                      cursor=max(cursor,y)
+                  if cursor<hi-1e-7: failures.append(s['observation_id'])
+              return failures
+          original_missing=missing_intervals(p['exact_coordinate_w2_w3_w4'])
+          assert original_missing, 'original source loss control did not reproduce'
+          assert not missing_intervals(p['overlap_preserving_exact_w2_w3_w4'])
+          assert not missing_intervals(p['immutable_endpoint_exact_w2_w3_w4'])
+          # Actual immutable source controls only; neither graph can become a host.
+          upper={'split_1485','split_1486','split_1487','split_1488'}
+          assert any(upper <= {e['edge_id'] for e in w['source_edge_fragments']} for w in p['immutable_endpoint_exact_w2_w3_w4']['w4_records'])
+          lower=[j for j in p['immutable_endpoint_exact_w2_w3_w4']['w3_junctions'] if abs(j['position_pt'][0]-737.76)<1e-7 and abs(j['position_pt'][1]-429.36)<1e-7]
+          assert len(lower)==1 and lower[0]['status']=='abstained'
+          assert 'degenerate_angle_group_size_over_two' in lower[0]['reason_codes']
+          print({'source_intervals_lost_before':len(original_missing),'source_intervals_lost_after':0,'lower_actual_overlap_remains_abstained':True})
           for name in ('default_w2_w3_w4','exact_coordinate_w2_w3_w4'):
               g=p[name]
               assert g is not None and g['w3_junctions']
