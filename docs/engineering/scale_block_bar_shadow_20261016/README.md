@@ -14,7 +14,7 @@ Numerals forming `0, s, 2s ... N s` on one baseline, equally spaced, with one ph
 | page | bar | span | points per mm | label / edge residual | printed ratio |
 |---|---|---|---|---|---|
 | 3Laurel p3 | `0 ... 10m` | 283.462 pt = 10,000 mm | 0.028346241 | 0.005 / 0.011 pt | `1:100`, relative difference 8e-6 |
-| 3Laurel p2 (site plan) | `0 ... 10m` | | 0.014172741 | 0.005 / 0.011 pt | 1:200 |
+| 3Laurel p2 (site plan) | `0 ... 10m` | 141.727 pt = 10,000 mm | 0.014172741 | 0.005 / 0.011 pt | `1:200` expected 0.0141732 (consistent; the page prints a ratio only in its title block) |
 Every page of the five primary PDFs (Lot16 architecture and structure, 3Laurel, Maryborough, Q5446) was scanned: **no other bar and no false positive**; the Lot16, Maryborough and Q5446 sheets state a ratio only.
 
 ## Counterfactual through the unchanged scale producer (3Laurel p3)
