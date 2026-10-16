@@ -1,0 +1,72 @@
+name: GPT MAX Original Six G17 Local Source Wall Roles
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_six_opening_local_g17_source.py
+      - tests/test_gptmax_six_opening_local_g17_source.py
+      - docs/engineering/gptmax_original_six_g17_source_w4_20261017.md
+      - .github/workflows/test-gptmax-original-six-g17-local-wall-source.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_six_opening_local_g17_source.py
+      - tests/test_gptmax_six_opening_local_g17_source.py
+      - docs/engineering/gptmax_original_six_g17_source_w4_20261017.md
+      - .github/workflows/test-gptmax-original-six-g17-local-wall-source.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  verified-original-six:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original source-basis and adversarial role tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_six_opening_local_g17_source.py
+          ruff check --select F821,F823 tools/diag_gptmax_six_opening_local_g17_source.py tests/test_gptmax_six_opening_local_g17_source.py
+      - name: Original 13-page source SHA, current producer, every unfigured flank
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA=10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_six_opening_local_g17_source.py \
+            --pdf "$PDF" --sha256 "$SHA" \
+            --output artifacts/gptmax-six-source-local-g17-wall-shadows.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gptmax-six-source-local-g17-wall-shadows.json").read_text())
+          assert r["status"]=="gptmax_original_six_g17_local_w4_source_role_abstain"
+          assert r["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert r["source_snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
+          assert (r["original_physical_openings"],r["original_authenticated_hosts"],
+                  r["original_complete_frames"],r["original_signed_area_count"],
+                  r["original_customer_verification_count"])==(21,15,9,8,8)
+          assert r["original_source_snapshot_and_customer_rows_unchanged"]
+          assert len(r["unhosted_source_cases"])==6
+          ids=[c["physical_opening_id"] for c in r["unhosted_source_cases"]]
+          assert len(ids)==len(set(ids))
+          assert all(len(c["opening_local_original_source_flanks"])==2
+                     for c in r["unhosted_source_cases"])
+          assert not any(r[k] for k in ("cross_resolution_physical_equivalence_granted",
+               "new_host_granted","new_frame_granted","metric_width_height_granted",
+               "opening_count_granted","new_firm_quantity_granted"))
+          print("Six original G17 local sources verified; ZERO host/quantity grants")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-six-g17-source-local-w4
+          path: artifacts/gptmax-six-source-local-g17-wall-shadows.json
+          retention-days: 21
