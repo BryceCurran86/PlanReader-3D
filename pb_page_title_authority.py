@@ -309,7 +309,7 @@ def _split_native_sheet_revision_values(
             num_words = [
                 row for row in original
                 if sheet_number_shape(row[0])
-                and not re.fullmatch(r"\\d{2,6}", row[0])
+                and not re.fullmatch(r"\d{2,6}", row[0])
                 and row[1] >= number.x1 - number.size
                 and row[3] < revision.x0
                 and number.y1 - 0.4 * number.height <= row[2] <= number.y1 + 4 * number.size
