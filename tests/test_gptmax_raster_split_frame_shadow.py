@@ -173,6 +173,14 @@ def test_repeated_raster_dimension_ticks_do_not_block_opt_in_shadow_frame(monkey
         lambda _s: replace(scope,records=(*scope.records, *extra)))
     results=_publish(shadow,bound)
     assert all(r.status is Status.CORROBORATED for r in results)
+    skipped={f"tick-{index}" for index in range(8)}
+    for result in results:
+        assert "opening_host_frame_aligned_motif_fragments_skipped" in result.reason_codes
+        assert skipped <= {
+            code.split(":", 1)[1]
+            for code in result.reason_codes
+            if code.startswith("opening_host_frame_aligned_motif_fragments_skipped:")
+        }
     assert {r.evidence.whole_wall_frame_id for r in results}=={
         r.evidence.whole_wall_frame_id for r in expected}
     assert _publish(shadow,tuple(reversed(bound)))==tuple(reversed(results))

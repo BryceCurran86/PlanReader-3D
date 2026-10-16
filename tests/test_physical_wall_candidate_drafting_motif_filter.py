@@ -494,6 +494,28 @@ def test_motif_census_scales_with_the_family_not_the_page() -> None:
     )
 
 
+def test_sparse_collinear_wall_fragments_are_a_motif_under_occupancy_rule() -> None:
+    # Deliberate unsigned-shadow residual: 28 pt pieces at pitch 130 have
+    # occupancy 938 and 28 <= 938 * 0.03, so the occupancy rule classifies
+    # them as a motif. This is not wall authority and is not a dimension bind.
+    pieces = [
+        _raster_wall(f"w{idx}", float(idx * 130), 10.0, float(idx * 130 + 28.0), 10.0)
+        for idx in range(8)
+    ]
+    host = _raster_wall("host", 1200.0, 10.0, 1320.0, 10.0)
+    assert repeated_raster_drafting_motif_wall_ids((*pieces, host)) == frozenset(
+        f"w{idx}" for idx in range(8)
+    )
+
+
+def test_parallel_perpendicular_ticks_are_not_one_collinear_family() -> None:
+    ticks = [
+        _raster_wall(f"t{idx}", float(idx * 25), 10.0, float(idx * 25), 14.5)
+        for idx in range(8)
+    ]
+    assert repeated_raster_drafting_motif_wall_ids(ticks) == frozenset()
+
+
 def test_eight_identical_collinear_wall_fragments_are_not_a_motif() -> None:
     pieces = [
         _raster_wall(f"w{idx}", float(idx * 60), 10.0, float(idx * 60 + 28.0), 10.0)

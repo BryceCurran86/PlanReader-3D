@@ -49,6 +49,9 @@ from pb_raster_source_wall_frame_projection import source_edge_axis_projection
 
 OPENING_HOST_FRAME_SCHEMA_VERSION = "1.3.0"
 OPENING_HOST_FRAME_RESOLVED = "opening_host_frame_resolved"
+OPENING_HOST_FRAME_ALIGNED_MOTIF_FRAGMENTS_SKIPPED = (
+    "opening_host_frame_aligned_motif_fragments_skipped"
+)
 OPENING_HOST_FRAME_OPENING_UNAVAILABLE = "opening_host_frame_opening_unavailable"
 OPENING_HOST_FRAME_HOST_UNAVAILABLE = "opening_host_frame_host_unavailable"
 OPENING_HOST_FRAME_WALL_UNAVAILABLE = "opening_host_frame_wall_unavailable"
@@ -217,6 +220,7 @@ class _WholeWallFrame:
     frame_id: str
     candidate_ids: tuple[str, ...]
     source_observation_ids: tuple[str, ...]
+    skipped_motif_wall_ids: tuple[str, ...] = ()
 
 
 def _blocked(
@@ -875,6 +879,7 @@ class OpeningHostFrameProducer:
         motif_ids = frozenset()
         if self._raster_split_frame_shadow and raster_component:
             motif_ids = repeated_raster_drafting_motif_wall_ids(wall_scope.records)
+        skipped_motif_wall_ids: list[str] = []
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
@@ -919,6 +924,7 @@ class OpeningHostFrameProducer:
                     and member_id not in motif_ids
                     and classification is None
                 ):
+                    skipped_motif_wall_ids.append(wall_id)
                     continue
                 return fail("opening_host_frame_aligned_fragment_distinctness_unproven")
 
@@ -992,6 +998,7 @@ class OpeningHostFrameProducer:
             frame_id=frame_id,
             candidate_ids=component_ids,
             source_observation_ids=source_observation_ids,
+            skipped_motif_wall_ids=tuple(sorted(dict.fromkeys(skipped_motif_wall_ids))),
         )
 
     def publish(
@@ -1157,9 +1164,19 @@ class OpeningHostFrameProducer:
             wall_thickness_pt=float(frame.wall_thickness),
             whole_wall_length_pt=float(frame.whole_wall_length),
         )
+        reason_codes = (OPENING_HOST_FRAME_RESOLVED,)
+        if frame.skipped_motif_wall_ids:
+            reason_codes = (
+                OPENING_HOST_FRAME_RESOLVED,
+                OPENING_HOST_FRAME_ALIGNED_MOTIF_FRAGMENTS_SKIPPED,
+                *(
+                    f"{OPENING_HOST_FRAME_ALIGNED_MOTIF_FRAGMENTS_SKIPPED}:{wall_id}"
+                    for wall_id in frame.skipped_motif_wall_ids
+                ),
+            )
         result = OpeningHostFrameResult(
             status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(OPENING_HOST_FRAME_RESOLVED,),
+            reason_codes=reason_codes,
             evidence=evidence,
         )
         existing = self._results.get(selector.key)
@@ -1181,6 +1198,7 @@ __all__ = [
     "OPENING_HOST_FRAME_HOST_UNAVAILABLE",
     "OPENING_HOST_FRAME_OPENING_UNAVAILABLE",
     "OPENING_HOST_FRAME_RESOLVED",
+    "OPENING_HOST_FRAME_ALIGNED_MOTIF_FRAGMENTS_SKIPPED",
     "OPENING_HOST_FRAME_SCHEMA_VERSION",
     "OPENING_HOST_FRAME_SCOPE_MISMATCH",
     "OPENING_HOST_FRAME_WALL_UNAVAILABLE",
