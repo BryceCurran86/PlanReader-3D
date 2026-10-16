@@ -112,6 +112,15 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
                  "SHA256SUMS actual byte digest mismatch: " + path)
     _require(set(sums) == set(indexed) | _EXTRA_DERIVED,
              "SHA256SUMS universe differs from archived derived receipt")
+    # No extra arbitrary artifact may be smuggled into an otherwise hash-valid
+    # share-safe owner archive. SHA256SUMS itself is the only unlisted hash file.
+    expected_tree = set(sums) | {"SHA256SUMS"}
+    actual_tree = {
+        file.relative_to(root).as_posix()
+        for file in root.rglob("*") if file.is_file()
+    }
+    _require(actual_tree == expected_tree,
+             "unindexed artifact in original share-safe receipt package")
     _require(all(sums[k] == sha for k, sha in indexed.items()),
              "SHA256SUMS and owner receipt disagree")
     return indexed, sums
@@ -255,6 +264,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
     _require(set(process) == set(frozen_by_id), "missing owner production status")
 
     rows: list[dict[str, Any]] = []
+    cross_semantic_claims: dict[str, list[dict[str, Any]]] = {}
     verified_manifest_docs = 0
     for project_id, manifest in frozen_by_id.items():
         pre = _object(root, project_id + "/source_package_preflight.json")
@@ -414,6 +424,27 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                      and set(sealed.source_sha256s) == {primary_sha}
                      and sealed.run_id == summary["combined_run_id"],
                      "sealed project original source identity or run ID mismatch")
+            # Do not silently collapse physically overlapping but separately
+            # typed quantity families. Surface possible cross-semantic reuse for
+            # issuer review without deleting either signed quantity.
+            claims: dict[tuple[str, str, tuple[str, ...]], list] = {}
+            for q in sealed.quantities:
+                object_key = (
+                    q.source_sha256, q.revision_id, tuple(q.object_identity_refs),
+                )
+                claims.setdefault(object_key, []).append(q)
+            cross_semantic_claims[project_id] = [
+                {
+                    "source_sha256": key[0],
+                    "revision_id": key[1],
+                    "canonical_object_refs": list(key[2]),
+                    "signed_quantity_ids": sorted(q.quantity_id for q in values),
+                    "quantity_families": sorted({q.family for q in values}),
+                    "source_review_required": True,
+                }
+                for key, values in sorted(claims.items())
+                if key[2] and len({q.family for q in values}) > 1
+            ]
             _require(len(sealed.quantities) == count
                      and sum(family_counts.values()) == count,
                      "producer family quantity counts disagree with sealed run")
@@ -512,6 +543,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         "frozen_denominator": 120,
         "official_four_project_coverage_accuracy": None,
         "official_four_project_precision_adjusted_accuracy": None,
+        "cross_semantic_signed_object_claims_for_review": cross_semantic_claims,
         "official_publication_status": "UNPUBLISHED",
         "projects": rows,
     }
