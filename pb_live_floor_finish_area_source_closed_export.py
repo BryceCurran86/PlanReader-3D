@@ -35,7 +35,20 @@ def _original_floor_polygon_is_simple(
     not a replacement physical room issuer, scale or measurement authority.
     GEOS failures and unavailable validation abstain rather than publish.
     """
+    if not isinstance(points, (tuple, list)) or len(points) < 3:
+        return False
     try:
+        if any(
+            not isinstance(point, (tuple, list))
+            or len(point) != 2
+            or any(
+                type(value) not in (int, float)
+                or not math.isfinite(float(value))
+                for value in point
+            )
+            for point in points
+        ):
+            return False
         from shapely.geometry import Polygon
 
         shape = Polygon(points)
