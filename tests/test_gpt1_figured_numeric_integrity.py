@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from fractions import Fraction
+from decimal import Decimal
 
 import pytest
 
@@ -184,3 +185,22 @@ def test_tolerance_boundary_retains_original_rounded_delta_verdict_and_notes():
     assert at_edge.notes == "Figured dimension precedence applied (scaled delta: 325.0mm)"
     assert over_edge.authority_status == AuthorityStatus.REVIEW_REQUIRED.value
     assert over_edge.scaled_delta_mm == 325.01
+
+
+def test_finite_decimal_scaled_and_figured_inputs_remain_authoritative():
+    figure = resolve_measurement_authority(figured_mm=Decimal("6500"))
+    scaled = resolve_measurement_authority(scaled_mm=Decimal("6500"), scale_reliable=True)
+    same = resolve_measurement_authority(
+        figured_mm=Decimal("6500"), scaled_mm=Decimal("6500"),
+        max_delta_ratio=Decimal("0.05"),
+    )
+    assert figure.value_m == 6.5 and figure.authority_status == AuthorityStatus.FIRM.value
+    assert scaled.value_m == 6.5 and scaled.authority_status == AuthorityStatus.PROVISIONAL.value
+    assert same.value_m == 6.5 and same.authority_status == AuthorityStatus.FIRM.value
+
+
+@pytest.mark.parametrize("bad", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_nonfinite_decimals_fail_closed_without_parser_exception(bad):
+    assert resolve_measurement_authority(figured_mm=bad).authority_status == AuthorityStatus.BLOCKED.value
+    assert resolve_measurement_authority(scaled_mm=bad).authority_status == AuthorityStatus.BLOCKED.value
+    assert resolve_measurement_authority(figured_mm=6500, max_delta_ratio=bad).authority_status == AuthorityStatus.BLOCKED.value
