@@ -20,7 +20,7 @@ many words are trusted and why the rest are not.
 | Q5446 p1 (outlined lettering) | 4 | **0** | `text_glyph_mapping_unverified`, `text_clip_state_unresolved` |
 | Lot16 p3 (floor plan) | 738 | **493 (67 %)** | clip state unresolved on 237 |
 | Lot16 p4 / p10 | 291 / 364 | **291 (100 %) / 344 (94 %)** | |
-Lot16 is the only project whose text the producer trusts, which is the project with signed quantities (8/27); the others have no trusted label, scale numeral, tag or schedule word at all (0/24 and 0/63 on the frozen development scoreboard).
+Among the pages measured above, Lot16 is the only project with native words trusted by this producer. These page-level text counts are separate from signed quantities and frozen target-family matches. Maryborough already has three historically signed, V1 customer-verified plain `floor_area` quantities (13.270425, 9.05352 and 25.37875 m²; sealed run fingerprint `9f3ab9ac1497cae5c29f8873af9287a5d6e3b3a386937fdeb37f8b5989fd780d`), even though the prior selected checkpoint matches zero of its 24 target-family items. Lot16's prior checkpoint matches 8/27; 3Laurel matches 0/63. The current four-job owner-session receipts have no accepted original production quantities for 3Laurel or Q5446. No new score or loss of an existing signed quantity follows from this text-integrity census.
 
 ## Cause, measured
 The authority verifies the glyph mapping independently of ToUnicode: `get_texttrace()` gives the rendered glyph id per character and the font program must return the same glyph for the decoded Unicode
