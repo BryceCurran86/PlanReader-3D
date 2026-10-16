@@ -160,6 +160,12 @@ def audit(source_bytes: bytes, *, expected_sha256: str,
                 "native_title_field_label_line_candidates": field_label_lines,
                 "title_reader_page_analysis_sheet_values": list(title_analyses[page_no - 1].sheet_numbers),
                 "title_reader_page_analysis_has_title_block": title_analyses[page_no - 1].title_block is not None,
+                "original_native_title_block_bbox_pdf_pts": list(title_analyses[page_no - 1].title_block) if title_analyses[page_no - 1].title_block else None,
+                "original_native_title_reader_field_labels": [
+                    {"source_text": c.text, "kind": c.kind, "source_bbox_rel": list(c.box),
+                     "label_strength": c.label_strength, "source_reason": c.reason}
+                    for c in title_analyses[page_no - 1].candidates if c.kind == "label"
+                ],
                 "native_candidate_lines": source_candidates,
                 "native_unfiltered_word_count":
                     sum(len(line["native_word_receipts"]) for line in lines),
@@ -210,6 +216,13 @@ def main():
             "native_title_field_label_lines": [v["native_raw_line_text"] for v in sheet["native_title_field_label_line_candidates"][:10]],
             "reader_bound_sheet_values": sheet["title_reader_page_analysis_sheet_values"],
             "reader_has_title_block": sheet["title_reader_page_analysis_has_title_block"],
+            "reader_original_title_block_bbox": sheet["original_native_title_block_bbox_pdf_pts"],
+            "original_source_A50_codes_and_bboxes": [
+                {"text": w["raw_text"], "bbox": w["bbox_pdf_pts"]}
+                for w in sheet["source_native_sheet_code_word_candidates"]
+                if w["raw_text"] in {"A500", "A501", "A502", "A503"}
+            ],
+            "source_title_field_binding_candidates": [v["source_reason"] for v in sheet["original_native_title_reader_field_labels"][:12]],
             "printed_local_title_lines": [
                 line["native_raw_line_text"] for line in titled[:25]
             ],
