@@ -147,7 +147,13 @@ def test_g07_customer_quantity_id_universe_fails_closed(damage):
     elif damage == "foreign":
         modified[0]["quantity_id"] = "source_foreign"
     elif damage == "identity_stripped":
+        # The real V1 verifier permits identity recovered from authenticated
+        # direct or persisted provenance. Strip ALL three carriers to prove
+        # only an original machine source reference survives, which must be
+        # rejected as a missing automated identity.
         del modified[0]["quantity_id"]
+        del modified[0]["commercial_projection_provenance"]
+        del modified[0]["notes"]
     got = _inspect(old, modified)
     assert not got["gates"]["G07_customer_identity_bijection"]["passed"]
     assert got["gates"]["G08_customer_provenance_exact_v1"]["passed"] is False
