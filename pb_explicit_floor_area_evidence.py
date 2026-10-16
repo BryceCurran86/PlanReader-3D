@@ -26,6 +26,7 @@ a footprint, or promotes a declared aggregate into physical take-off authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import re
 from typing import Iterable, Optional, Tuple
 
@@ -274,3 +275,72 @@ def extract_declared_component_floor_areas(
         row for row in candidates
         if counts[" ".join(row.label.casefold().split())] == 1
     )
+
+
+
+def reconcile_declared_component_area_total(
+    components: Iterable[DeclaredComponentFloorAreaEvidence],
+    total: ExplicitFloorAreaEvidence,
+) -> Tuple[DeclaredComponentFloorAreaEvidence, ...]:
+    """Reconcile one exact printed source-area schedule; grant no m² authority.
+
+    A total is an aggregate ledger observation, not another physical zone.
+    Do not reconcile separate original text blocks/pages, inferred category
+    names, mixed revisions, duplicate row labels, missing receipts or rounded
+    numeric approximations. The result remains unbound source text evidence.
+    """
+    if type(total) is not ExplicitFloorAreaEvidence:
+        raise TypeError("total must be original declared floor-area evidence")
+    records = tuple(components)
+    if (
+        not records
+        or total.authority != DECLARED_FLOOR_AREA_AUTHORITY
+        or total.binding != DECLARED_FLOOR_AREA_BINDING
+        or len(total.source_pages) != 1
+        or type(total.source_pages[0]) is not int
+        or total.source_pages[0] <= 0
+        or any(type(row) is not DeclaredComponentFloorAreaEvidence for row in records)
+    ):
+        return ()
+
+    row_labels: set[str] = set()
+    block_ids: set[str] = set()
+    values: list[Decimal] = []
+    for row in records:
+        if (
+            row.source_page != total.source_pages[0]
+            or row.source_sha256 != total.source_sha256
+            or row.revision_id != total.revision_id
+            or row.authority != DECLARED_FLOOR_AREA_AUTHORITY
+            or row.binding != DECLARED_FLOOR_AREA_BINDING
+            or type(row.label) is not str
+            or not row.label
+            or row.label != row.label.strip()
+            or type(row.source_block_id) is not str
+            or not row.source_block_id
+            or row.source_block_id != row.source_block_id.strip()
+            or type(row.area_m2) not in (int, float)
+        ):
+            return ()
+        key = " ".join(row.label.casefold().split())
+        if key in row_labels:
+            return ()
+        row_labels.add(key)
+        block_ids.add(row.source_block_id)
+        try:
+            value = Decimal(str(row.area_m2))
+        except InvalidOperation:
+            return ()
+        if not value.is_finite() or value <= 0:
+            return ()
+        values.append(value)
+    if len(block_ids) != 1 or type(total.area_m2) not in (int, float):
+        return ()
+    try:
+        expected = Decimal(str(total.area_m2))
+    except InvalidOperation:
+        return ()
+    if not expected.is_finite() or expected <= 0 or sum(values, Decimal("0")) != expected:
+        return ()
+
+    return tuple(sorted(records, key=lambda row: row.label.casefold()))
