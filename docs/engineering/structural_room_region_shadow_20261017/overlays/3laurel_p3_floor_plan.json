@@ -4,9 +4,9 @@
   "page": 3,
   "partition": {
     "decision_counts": {
-      "not_partition_ink": 336,
-      "partition_ink_candidate": 351,
-      "unproven": 3100
+      "not_partition_ink": 334,
+      "partition_ink_candidate": 338,
+      "unproven": 3104
     },
     "opening_gap_candidates_with_partitions": 463
   },
@@ -1574,6 +1574,97 @@
       "region_id": "structural_room_region_89d67deb487b61491f0b"
     },
     {
+      "area_pt2": 2932.651,
+      "bbox": [
+        498.27,
+        403.9,
+        559.49,
+        454.99
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 2,
+        "paired_face_network": 7
+      },
+      "boundary_tier_counts": [
+        7,
+        2
+      ],
+      "closure_chord_count": 1,
+      "glyph_run_count": 20,
+      "gross_area_pt2": 2932.651,
+      "hole_count": 0,
+      "index": 13,
+      "inradius_pt": 25.07,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            522.21,
+            415.09
+          ],
+          "text": "BATH",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          498.27,
+          403.9
+        ],
+        [
+          498.27,
+          431.96
+        ],
+        [
+          506.77,
+          431.96
+        ],
+        [
+          506.77,
+          454.99
+        ],
+        [
+          559.49,
+          454.99
+        ],
+        [
+          559.49,
+          404.18
+        ],
+        [
+          559.21,
+          404.18
+        ],
+        [
+          559.21,
+          403.9
+        ],
+        [
+          531.15,
+          403.9
+        ],
+        [
+          531.15,
+          403.9
+        ],
+        [
+          512.47,
+          403.9
+        ],
+        [
+          508.47,
+          403.9
+        ],
+        [
+          498.27,
+          403.9
+        ]
+      ],
+      "region_id": "structural_room_region_6702d1529d6826fe3d2e"
+    },
+    {
       "area_pt2": 2706.753,
       "bbox": [
         709.16,
@@ -1593,7 +1684,7 @@
       "glyph_run_count": 0,
       "gross_area_pt2": 2706.753,
       "hole_count": 0,
-      "index": 13,
+      "index": 14,
       "inradius_pt": 18.283,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -1657,7 +1748,7 @@
       "glyph_run_count": 0,
       "gross_area_pt2": 2164.168,
       "hole_count": 0,
-      "index": 14,
+      "index": 15,
       "inradius_pt": 12.756,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -1706,7 +1797,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 1910.502,
       "hole_count": 0,
-      "index": 15,
+      "index": 16,
       "inradius_pt": 12.623,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -1787,7 +1878,7 @@
       "glyph_run_count": 2,
       "gross_area_pt2": 1896.439,
       "hole_count": 0,
-      "index": 16,
+      "index": 17,
       "inradius_pt": 20.647,
       "multi_label": false,
       "native_room_name_candidates": [
@@ -1857,7 +1948,7 @@
       "glyph_run_count": 2,
       "gross_area_pt2": 1675.359,
       "hole_count": 0,
-      "index": 17,
+      "index": 18,
       "inradius_pt": 16.344,
       "multi_label": false,
       "native_room_name_candidates": [
@@ -1935,7 +2026,7 @@
       "glyph_run_count": 0,
       "gross_area_pt2": 1409.771,
       "hole_count": 0,
-      "index": 18,
+      "index": 19,
       "inradius_pt": 17.149,
       "multi_label": false,
       "native_room_name_candidates": [
@@ -1975,52 +2066,53 @@
       "region_id": "structural_room_region_4508521d090f005d5c22"
     },
     {
-      "area_pt2": 1345.099,
+      "area_pt2": 1359.561,
       "bbox": [
-        785.98,
+        785.7,
         276.41,
-        838.71,
+        838.99,
         301.92
       ],
       "boundary_evidence_kinds": {
-        "attached_partition_paired_face": 4
+        "attached_partition_paired_face": 2,
+        "paired_face_network": 4
       },
       "boundary_tier_counts": [
-        0,
-        4
+        4,
+        2
       ],
       "closure_chord_count": 0,
       "glyph_run_count": 3,
-      "gross_area_pt2": 1345.099,
+      "gross_area_pt2": 1359.561,
       "hole_count": 0,
-      "index": 19,
+      "index": 20,
       "inradius_pt": 12.756,
       "multi_label": false,
       "native_room_name_candidates": [],
       "ocr_candidate_lines": [],
       "polygon": [
         [
-          785.98,
+          785.7,
           276.41
         ],
         [
-          785.98,
+          785.7,
           301.92
         ],
         [
-          838.71,
+          838.99,
           301.92
         ],
         [
-          838.71,
+          838.99,
           276.41
         ],
         [
-          785.98,
+          785.7,
           276.41
         ]
       ],
-      "region_id": "structural_room_region_078d881d9ff121466dd6"
+      "region_id": "structural_room_region_79814a14ea721f753edc"
     },
     {
       "area_pt2": 1322.762,
@@ -2041,7 +2133,7 @@
       "glyph_run_count": 7,
       "gross_area_pt2": 1322.762,
       "hole_count": 0,
-      "index": 20,
+      "index": 21,
       "inradius_pt": 7.726,
       "multi_label": false,
       "native_room_name_candidates": [
@@ -2099,7 +2191,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 1268.925,
       "hole_count": 0,
-      "index": 21,
+      "index": 22,
       "inradius_pt": 13.323,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2148,7 +2240,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 1267.423,
       "hole_count": 0,
-      "index": 22,
+      "index": 23,
       "inradius_pt": 12.756,
       "multi_label": false,
       "native_room_name_candidates": [
@@ -2188,116 +2280,6 @@
       "region_id": "structural_room_region_f9ab64a5e50b0fad823c"
     },
     {
-      "area_pt2": 1261.863,
-      "bbox": [
-        509.75,
-        429.48,
-        559.21,
-        454.99
-      ],
-      "boundary_evidence_kinds": {
-        "attached_partition_paired_face": 4
-      },
-      "boundary_tier_counts": [
-        0,
-        4
-      ],
-      "closure_chord_count": 0,
-      "glyph_run_count": 9,
-      "gross_area_pt2": 1261.863,
-      "hole_count": 0,
-      "index": 23,
-      "inradius_pt": 12.756,
-      "multi_label": false,
-      "native_room_name_candidates": [],
-      "ocr_candidate_lines": [],
-      "polygon": [
-        [
-          509.75,
-          429.48
-        ],
-        [
-          509.75,
-          454.99
-        ],
-        [
-          559.21,
-          454.99
-        ],
-        [
-          559.21,
-          429.48
-        ],
-        [
-          509.75,
-          429.48
-        ]
-      ],
-      "region_id": "structural_room_region_af039f8eb715e921e22d"
-    },
-    {
-      "area_pt2": 1249.899,
-      "bbox": [
-        509.75,
-        404.18,
-        559.21,
-        429.48
-      ],
-      "boundary_evidence_kinds": {
-        "attached_partition_paired_face": 4
-      },
-      "boundary_tier_counts": [
-        0,
-        4
-      ],
-      "closure_chord_count": 0,
-      "glyph_run_count": 10,
-      "gross_area_pt2": 1249.899,
-      "hole_count": 0,
-      "index": 24,
-      "inradius_pt": 12.651,
-      "multi_label": false,
-      "native_room_name_candidates": [
-        {
-          "bbox_crosses_boundary": true,
-          "centre": [
-            522.21,
-            415.09
-          ],
-          "text": "BATH",
-          "trust": "not_supplied"
-        }
-      ],
-      "ocr_candidate_lines": [],
-      "polygon": [
-        [
-          509.75,
-          404.18
-        ],
-        [
-          509.75,
-          429.48
-        ],
-        [
-          559.21,
-          429.48
-        ],
-        [
-          559.21,
-          405.09
-        ],
-        [
-          555.72,
-          404.18
-        ],
-        [
-          509.75,
-          404.18
-        ]
-      ],
-      "region_id": "structural_room_region_eba3248678fc36b51679"
-    },
-    {
       "area_pt2": 1193.231,
       "bbox": [
         949.83,
@@ -2317,7 +2299,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 1193.231,
       "hole_count": 0,
-      "index": 25,
+      "index": 24,
       "inradius_pt": 12.756,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2365,7 +2347,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 1176.761,
       "hole_count": 0,
-      "index": 26,
+      "index": 25,
       "inradius_pt": 14.315,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2421,7 +2403,7 @@
       "glyph_run_count": 8,
       "gross_area_pt2": 1137.789,
       "hole_count": 0,
-      "index": 27,
+      "index": 26,
       "inradius_pt": 8.362,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2449,6 +2431,68 @@
         ]
       ],
       "region_id": "structural_room_region_76ec4ef4d25eb65aaa74"
+    },
+    {
+      "area_pt2": 1105.73,
+      "bbox": [
+        484.24,
+        344.44,
+        526.76,
+        370.45
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 5
+      },
+      "boundary_tier_counts": [
+        0,
+        5
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 1105.73,
+      "hole_count": 0,
+      "index": 27,
+      "inradius_pt": 13.003,
+      "multi_label": false,
+      "native_room_name_candidates": [
+        {
+          "bbox_crosses_boundary": false,
+          "centre": [
+            514.75,
+            350.34
+          ],
+          "text": "WC",
+          "trust": "not_supplied"
+        }
+      ],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          484.24,
+          344.44
+        ],
+        [
+          484.24,
+          359.96
+        ],
+        [
+          484.24,
+          370.45
+        ],
+        [
+          526.76,
+          370.45
+        ],
+        [
+          526.76,
+          344.44
+        ],
+        [
+          484.24,
+          344.44
+        ]
+      ],
+      "region_id": "structural_room_region_d9d80a592e7738f3cd09"
     },
     {
       "area_pt2": 1029.283,
@@ -2633,72 +2677,6 @@
       "region_id": "structural_room_region_b396bfaf28064226427b"
     },
     {
-      "area_pt2": 703.734,
-      "bbox": [
-        484.24,
-        344.44,
-        526.76,
-        361.45
-      ],
-      "boundary_evidence_kinds": {
-        "attached_partition_paired_face": 4
-      },
-      "boundary_tier_counts": [
-        0,
-        4
-      ],
-      "closure_chord_count": 0,
-      "glyph_run_count": 1,
-      "gross_area_pt2": 703.734,
-      "hole_count": 0,
-      "index": 31,
-      "inradius_pt": 8.504,
-      "multi_label": false,
-      "native_room_name_candidates": [
-        {
-          "bbox_crosses_boundary": false,
-          "centre": [
-            514.75,
-            350.34
-          ],
-          "text": "WC",
-          "trust": "not_supplied"
-        }
-      ],
-      "ocr_candidate_lines": [],
-      "polygon": [
-        [
-          484.24,
-          344.44
-        ],
-        [
-          484.24,
-          359.96
-        ],
-        [
-          497.27,
-          359.96
-        ],
-        [
-          497.27,
-          361.45
-        ],
-        [
-          526.76,
-          361.45
-        ],
-        [
-          526.76,
-          344.44
-        ],
-        [
-          484.24,
-          344.44
-        ]
-      ],
-      "region_id": "structural_room_region_5387d1d33617206bb88b"
-    },
-    {
       "area_pt2": 614.696,
       "bbox": [
         807.39,
@@ -2718,7 +2696,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 614.696,
       "hole_count": 0,
-      "index": 32,
+      "index": 31,
       "inradius_pt": 12.047,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2766,7 +2744,7 @@
       "glyph_run_count": 0,
       "gross_area_pt2": 576.035,
       "hole_count": 0,
-      "index": 33,
+      "index": 32,
       "inradius_pt": 8.504,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2815,7 +2793,7 @@
       "glyph_run_count": 0,
       "gross_area_pt2": 561.58,
       "hole_count": 0,
-      "index": 34,
+      "index": 33,
       "inradius_pt": 6.019,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2883,7 +2861,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 545.301,
       "hole_count": 0,
-      "index": 35,
+      "index": 34,
       "inradius_pt": 8.504,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2932,7 +2910,7 @@
       "glyph_run_count": 1,
       "gross_area_pt2": 488.141,
       "hole_count": 0,
-      "index": 36,
+      "index": 35,
       "inradius_pt": 6.378,
       "multi_label": false,
       "native_room_name_candidates": [],
@@ -2960,6 +2938,55 @@
         ]
       ],
       "region_id": "structural_room_region_e1dd02bab537ecb38f79"
+    },
+    {
+      "area_pt2": 456.45,
+      "bbox": [
+        484.24,
+        433.38,
+        505.35,
+        454.99
+      ],
+      "boundary_evidence_kinds": {
+        "attached_partition_paired_face": 1,
+        "paired_face_network": 2
+      },
+      "boundary_tier_counts": [
+        2,
+        1
+      ],
+      "closure_chord_count": 0,
+      "glyph_run_count": 1,
+      "gross_area_pt2": 456.45,
+      "hole_count": 0,
+      "index": 36,
+      "inradius_pt": 10.558,
+      "multi_label": false,
+      "native_room_name_candidates": [],
+      "ocr_candidate_lines": [],
+      "polygon": [
+        [
+          484.24,
+          433.38
+        ],
+        [
+          484.24,
+          454.99
+        ],
+        [
+          505.35,
+          454.99
+        ],
+        [
+          505.35,
+          433.38
+        ],
+        [
+          484.24,
+          433.38
+        ]
+      ],
+      "region_id": "structural_room_region_5ea1e80b9fb0a6402ee8"
     },
     {
       "area_pt2": 422.475,
@@ -3012,13 +3039,13 @@
   ],
   "regions": {
     "closure_half_width_pt": 4.0,
-    "discarded_fragments": 10,
+    "discarded_fragments": 7,
     "exterior_adjacent_primitives": 99,
-    "interior_only_primitives": 325,
+    "interior_only_primitives": 330,
     "listed": 38,
     "reason_codes": [],
     "typed_opening_chords": 307,
-    "within_wall_body_primitives": 787
+    "within_wall_body_primitives": 769
   },
   "room_authority_granted": false,
   "scale_authority_granted": false,
@@ -3027,8 +3054,8 @@
   "share_safe": true,
   "structural": {
     "classification_counts": {
-      "not_wall_ink": 997,
-      "unproven": 8120,
+      "not_wall_ink": 1008,
+      "unproven": 8109,
       "wall_network_ink_candidate": 860
     },
     "glyph_sized_runs": 409,

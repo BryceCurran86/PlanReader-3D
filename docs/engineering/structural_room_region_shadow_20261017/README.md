@@ -1,4 +1,4 @@
-# Structural room regions, attached partitions and a symbol-tolerant opening-gap rule (shadow evidence, 2026-10-17)
+# Structural room regions, attached partitions, a symbol-tolerant opening-gap rule and a ruled-ring negative (shadow evidence, 2026-10-17)
 
 Status: **shadow-only modules and a read-only overlay tool.** Nothing here is called by a live path, raises an authority, filters a
 candidate, changes a threshold or the 20,000-segment cap, touches a benchmark file or a signed output, or publishes a quantity.
@@ -7,9 +7,10 @@ report. Tracker: #2608 (coordination), GPT1 #2017, GPT2 #2843, GPT3 #2004. Autho
 independent measurement, not a formal independent approval).
 
 Code: `pb_structural_partition_ink_shadow.py`, `pb_structural_room_region_shadow.py`, `tools/diag_structural_room_region_overlay.py`,
-and a small change to the gap rule of `pb_structural_wall_ink_shadow.py` (merged in #2848).
-Tests: `tests/test_structural_partition_ink_shadow.py` (22), `tests/test_structural_room_region_shadow.py` (31),
-`tests/test_structural_room_region_overlay_tool.py` (10), `tests/test_structural_wall_ink_shadow.py` (37 -> 45).
+`tools/diag_region_translation_vote.py`, and two small changes to `pb_structural_wall_ink_shadow.py` (merged in #2848): the wide-gap rule and a
+ruled-ring typed negative.
+Tests: `tests/test_structural_partition_ink_shadow.py` (22), `tests/test_structural_room_region_shadow.py` (32),
+`tests/test_structural_room_region_overlay_tool.py` (10), `tests/test_region_translation_vote.py` (10), `tests/test_structural_wall_ink_shadow.py` (37 -> 61).
 
 ## 1. Observed repository behaviour (before this change)
 - `pb_source_room_face_authority` derives room faces only from authenticated physical-wall scopes (`SourceRoomFaceAuthority`). It has no notion
@@ -52,7 +53,15 @@ Tests: `tests/test_structural_partition_ink_shadow.py` (22), `tests/test_structu
    primitive ids that run along its boundary with their tier, the **typed chords that close it** (nothing is closed without one), the printed-name
    candidates and the outlined-lettering runs whose centre stands in it (`multi_label` when two or more: an open or merged area, never split), and the
    primitives adjacent to the page exterior / to enclosed regions only / to neither.
-4. **Overlay tool** (`tools/diag_structural_room_region_overlay.py`). Draws all of the above (rotated sheets handled) and writes JSON. **Share-safe by default**: the repository is public and the
+4. **Ruled-ring typed negative** (`pb_structural_wall_ink_shadow.py`, `table_grid_runs`). Reported by the owner on the first A140 overlay: the WALL TYPE SCHEDULE table appeared as a blue region
+   inside a box, because its frame is drawn in the heaviest ink class and is of building scale. A component is now a `NOT_WALL_INK` **ruled ring** (reason `ruled_ring_table_or_grille`, retained with every rule line) when it is a
+   pure ring (at least 90 % of its length along its own box sides, within one face-gap bound) around at least four parallel full-span rule lines, closer-than-1-pt double rules counted once, with column rules joining when rows hold. A pair
+   of full-span lines a wall thickness apart (1 - 8 pt) inside the ring is a partition, never a rule: such a ring is a building. On the seven original pages it drops exactly six candidates (the schedule frame on A140) and types the title-block
+   ring on 3Laurel p3 and a few grille symbols; no building candidate changes. Residual risk, stated: a pure ring of one ink class around four or more *single* thin full-span lines at 8 pt pitch or more (a terrace drawn as a single-line ring with single-line
+   party walls) would be typed a ruled ring; the primitives are retained with the reason, not dropped.
+5. **Translation vote** (`tools/diag_region_translation_vote.py`). Which translation takes the regions of one sheet onto the regions of another, by exact corner coincidences (0.05 pt) of the region polygons: every candidate with its own count,
+   whole regions identical by shape after the shift, `selected_by_this_tool: null` always, and `unambiguous` only as a 3x ratio statement. Translation only; no label text, no scale, no plausibility.
+6. **Overlay tool** (`tools/diag_structural_room_region_overlay.py`). Draws all of the above (rotated sheets handled) and writes JSON. **Share-safe by default**: the repository is public and the
    originals are private customer drawings, so the drawing is made on a white sheet (no render of the page: no title block, client name, address or note text), only room names the existing vocabulary accepts are kept, and
    `--ocr-candidates` readings (RapidOCR, `candidate_only`) are reduced to the vocabulary match, its confidence and position. `--private-detail` adds the faded page render and every OCR line for local review only.
 
@@ -63,22 +72,22 @@ filled polygons = regions (`#k`).
 
 | page | segments | structural candidates | gap candidates (tier 0 -> with partitions) | partition candidates / ladder negatives | regions listed (+ discarded fragments) | regions closed with a typed chord | native room-name lines on page / standing in a region / regions with a name / multi-label regions |
 |---|---:|---:|---:|---:|---:|---:|---|
-| 3Laurel p3 floor plan | 9,977 | 860 | 369 -> 463 | 351 / 336 | 38 (+10) | 17 | 41 / 22 / 16 / 4 |
+| 3Laurel p3 floor plan | 9,977 | 860 | 369 -> 463 | 338 / 334 | 38 (+7) | 18 | 41 / 22 / 16 / 4 |
 | Q5446 p1 ground floor | 47,184 | 189 | 87 -> 90 | 7 / 27 | 7 (+0) | 7 | outlined: 0 native; OCR candidates below |
 | Q5446 p2 first floor | 35,997 | 222 | 68 -> 68 | 2 / 12 | 10 (+1) | 8 | outlined: 0 native; OCR candidates below |
-| Maryborough p7 A110 floor plan | 59,874 | 339 | 222 -> 219 | 262 / 287 | 27 (+4) | 17 | 18 / 18 / 9 / 3 |
-| Maryborough p11 A140 finishes and partitions | 27,160 | 250 | 75 -> 123 | 121 / 36 | 30 (+1) | 16 | 30 / 18 / 14 / 3 |
+| Maryborough p7 A110 floor plan | 59,874 | 339 | 222 -> 219 | 256 / 287 | 26 (+4) | 17 | 18 / 18 / 9 / 3 |
+| Maryborough p11 A140 finishes and partitions | 27,160 | 244 | 75 -> 123 | 121 / 36 | 29 (+1) | 16 | 30 / 18 / 14 / 3 |
 | Lot16 p3 (negative control: eleven raster tiles) | 1,739 | 0 | 0 | none | 0 (`no_structural_wall_ink`) | - | 17 / 0 / 0 / 0 |
 
-**Ablation** (regions listed, regions that carry a native room-name line; same code, three configurations):
+**Ablation** (regions listed, regions that carry a native room-name line; same code, three configurations; columns (a) and (b) still count the schedule table on A140 as a region):
 
 | page | (a) `main` #2848 ink and gaps | (b) + symbol-tolerant gap rule | (c) + attached partitions (this change) |
 |---|---|---|---|
 | 3Laurel p3 | 17 regions, 9 named | 18, 10 | **38, 16** |
 | Q5446 p1 | 1 region | 6 | **7** |
 | Q5446 p2 | 3 regions | 10 | **10** |
-| Maryborough p7 | 6 regions, 1 named | 8, 3 | **27, 9** |
-| Maryborough p11 | 7 regions, 2 named | 9, 4 | **30, 14** |
+| Maryborough p7 | 6 regions, 1 named | 8, 3 | **26, 9** |
+| Maryborough p11 | 7 regions, 2 named | 9, 4 | **29, 14** |
 
 What the overlays show, honestly:
 - **3Laurel p3.** Sixteen regions carry a native room-name line: LIVING and DINING (one open-plan region, `multi_label`, with the kitchen in it), GARAGE, MEDIA, BED 4, BED 5,
@@ -90,7 +99,7 @@ What the overlays show, honestly:
   Candidate OCR (RapidOCR, `candidate_only`, confidence kept) read a printed name inside **every** p1 region and in 9 of 10 p2 regions in the private-detail run (for example KITCHEN, SERVERY, MEALS and FAMILY together in the open-plan region; GUEST, W.I.R
   and ENS together; LIVING; ALFRESCO; L'DRY and W.I.P; PDR'; POR' on p1; BED 2, BED 3, BED 4, MASTER, BATH, WC, ENS' on p2). The committed share-safe JSON keeps only the readings the existing room-name vocabulary accepts (p1: the open-plan region with
   KITCHEN, SERVERY, MEALS, FAMILY; GUEST and ENS; LIVING; p2: MASTER, BED, LINEN, BED 3, BATH, WC, ENS'), because the vocabulary has no ALFRESCO, PORCH, W.I.P, L'DRY or PDR' (§5).
-- **Maryborough p7 (A110) / p11 (A140).** 27 / 30 regions on the rotated sheet. FREEZER and COLD ROOM come out as their own enclosures (FREEZER's actual enclosure, not a box around its label);
+- **Maryborough p7 (A110) / p11 (A140).** 26 / 29 regions on the rotated sheet. FREEZER and COLD ROOM come out as their own enclosures (FREEZER's actual enclosure, not a box around its label);
   OFFICE, LAUNDRY, PWD and WC & SHOWER are separate regions; M-AMB, F-AMB and PWD (p7) and WC & SHOWER and AIRLOCK (both sheets) share regions where an interior doorway was not typed. On A110 the shop floor,
   back of house and lounge are **one** region with seven names: no closed partition between them is in A110's structural or partition ink (A140, the partitions plan, separates them), and nothing is drawn around a label. On A140:
   DRY STORE, WASH UP and FOOD PREP, which carry the same floor-finish mark (FT3), stand in **one** enclosed region; OFFICE (FT3) is its own enclosed region; FOOD SERVICE (FT3) stands in the open region that also carries SALES (FT1).
@@ -98,7 +107,8 @@ What the overlays show, honestly:
 - **A look-alike this evidence does not separate (Maryborough A140).** POS COUNTER stands in a region of its own, bounded by the outer wall and by the 150 mm *step-down* outline, which is drawn as single heavy lines.
   The owner states that FOOD SERVICE and POS COUNTER are zones of one space, so this is a **false split**: a floor-level or zone outline drawn in wall-weight ink looks like a wall to a geometry-only rule.
   `boundary_evidence_kinds` reports it (4 paired-face, 2 single heavy stroke and 1 attached-partition primitive on that region's boundary), so a consumer can treat single-stroke sides as weaker than paired faces; no rule here removes it.
-  One more known false positive: the border of the WALL TYPE SCHEDULE table is read as wall ink (a paired-face rectangle of building scale) and appears as an enclosed region on A140.
+  The WALL TYPE SCHEDULE table, which the first A140 overlay drew as a blue region inside a box (the owner spotted it), is now a typed ruled ring and is no region: no region lies inside its box on the final overlay.
+  Removing it also moved A110's LAUNDRY left edge onto A140's (x0 = 173.5 pt on both after the -78 pt shift; six table-like primitives that had been partition candidates are now typed negatives).
 - **Lot16 p3** is eleven raster tiles with no native linework: the modules return `no_structural_wall_ink` and zero regions, as they must.
 
 ## 5. Limits and open findings
@@ -109,20 +119,24 @@ What the overlays show, honestly:
 - The existing room-name vocabulary (`pb_room_face_takeoff.ROOM_LABEL_EXACT`, 75 names) has no ALFRESCO, PORCH, BALCONY, VERANDAH, W.I.P, LDY or PDR. ALFRESCO and PORCH are printed on
   both 3Laurel and Q5446 and stand in their own regions, so they are not room-name candidates for `SourceRoomLabelAuthority`. That is an authority-owner decision (generic residential names, no benchmark-aware vocabulary), not changed here.
 - Fixtures and joinery that stand on a wall and are drawn as a double line are not separated from partitions (the same open gate as the structural report).
+- **Floor-plan sheets only.** On Maryborough's reflected ceiling plan (A120, page 9, private-detail run) the perimeter and the amenity rooms come out as regions, but the ceiling grid and troffer lines attach as partition ink and cut the sales floor into bands.
+  Ceiling zones are not wall-bounded; do not read regions from a ceiling sheet as rooms. (Observation for GPT2's ceiling lane: each enclosed amenity room on A120 carries one ceiling-type mark and height as native text.)
 - The 20,000-segment cap, the motif filter and `PhysicalWallCandidateAuthority` are untouched; these modules are not consumed by them.
 
 ## 6. Verification
-- 110 shadow tests pass locally (structural 45, partition 22, regions 31, room-region overlay tool 10, structural overlay tool 2). Each module has synthetic positives,
+- 137 shadow tests pass locally (structural 61, partition 22, regions 32, room-region overlay tool 10, structural overlay tool 2, translation vote 10). Each module has synthetic positives,
   look-alike negatives (plank ladder, detached grey building, paper-coloured / zero-width / too-short strokes, stub too short for its distance, parallel line beside the partner
   face, solid ink through the partner line, partner ending beyond the bound), ambiguity (two labels in one region, label in a wall body, label straddling a wall, hairline break), translation, quarter-turn,
   uniform-scale and segment-splitting invariance, input-order and unrelated-content / larger-sheet invariance, deterministic replay with stable region ids, no mutation of inputs, bounded work with an explicit reason
   (no silent cap), and shadow-flag checks. The OCR path is tested with an injected mock backend, including a rotated sheet.
-- Mutation checks: 45 mutants were run against the new rules and behaviours (the gap rule's blocked / overhang / shrink / support / side / tolerance conditions, the ladder's two-sided / edge / class / offset /
+- Mutation checks: 45 mutants were run against the first set of rules and behaviours (the gap rule's blocked / overhang / shrink / support / side / tolerance conditions, the ladder's two-sided / edge / class / offset /
   overlap / aspect conditions, anchoring, re-inking, the paper / short / zero-width filters, the region barrier width, caps, growth back to the faces, adjacency by shared boundary length, label centre containment,
-  the multi-label threshold, fragment discard, ordering, partition tier, partition gaps, chord use, hole identity, area, the boundary-evidence kinds, the rotated-sheet OCR mapping, and the share-safe page render / OCR text / flag).
+  the multi-label threshold, fragment discard, ordering, partition tier, partition gaps, chord use, hole identity, area, the boundary-evidence kinds, the rotated-sheet OCR mapping, and the share-safe page render / OCR text / flag):
   43 are killed by a test, one is equivalent (a parallelism guard that the endpoint-offset test already subsumes), and one exposed a redundant check (dashed strokes are already typed negatives of the structural report), which was removed instead of tested.
-- No production module imports any file added or changed here (`grep` over `*.py` outside `tests/`, `tools/diag_structural*`, `docs/`: only the shadow modules themselves), so no signed Lot16 / Maryborough
-  output, customer row or commercial quantity can change; the exact-head replays are still run on this head before any merge.
+  Later, 18 mutants of the ruled-ring rule (row count, span, double-rule separation, pure-ring fraction and band, rows inside the ring, column rules, both branches, marking of the rule lines, the wall-pair disqualifier) and 10 of the translation vote
+  (coincidence tolerance, merge, ranking by exact coincidence rather than votes, shape identity, translation, no selection, ratio) were run: every one is killed.
+- No production module imports any file added or changed here (`grep` over `*.py` outside `tests/`, `tools/diag_structural*`, `docs/`: only the shadow modules themselves), so no signed Lot16 / Maryborough output, customer row or commercial quantity can change.
+  Exact-head replays of the two signed-output workflows on this PR's head `ce05a0b4` (before the ruled-ring and vote commits, which touch no production module): Lot16 `ef58f8ae...` and Maryborough `9f3ab9ac...`, `source_sealed_run.json` and `verified_customer_rows.json` byte-identical (`cmp`) to the archives.
 - Nothing in `benchmarks/frozen_holdout/full_plan_v2/` or `documents/sources/` is touched (truth separation).
 
 ## 7. Counterfactual (not a repository change): what the 20,000-segment cap hides on Q5446

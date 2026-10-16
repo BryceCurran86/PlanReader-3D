@@ -138,6 +138,18 @@ def test_a_hairline_break_between_collinear_wall_pieces_is_closed_by_the_barrier
     assert len(no_chords.regions) == 1 and no_chords.chord_ids == ()
 
 
+def test_a_framed_schedule_table_beside_the_building_is_not_a_region():
+    # a heavy single-stroke frame around five thin rule lines, drawn beside the shell: a schedule, not a room
+    x0, y0, w, h = 500.0, 100.0, 200.0, 300.0
+    table = [seg("tb.top", x0, y0, x0 + w, y0, width=1.5), seg("tb.right", x0 + w, y0, x0 + w, y0 + h, width=1.5),
+             seg("tb.bottom", x0 + w, y0 + h, x0, y0 + h, width=1.5), seg("tb.left", x0, y0 + h, x0, y0, width=1.5)]
+    table += [seg(f"tb.row{i}", x0, y0 + 50.0 * (i + 1), x0 + w, y0 + 50.0 * (i + 1), width=0.48) for i in range(5)]
+    _, _, with_table = build(shell() + table)
+    _, _, without = build(shell())
+    assert [r.region_id for r in with_table.regions] == [r.region_id for r in without.regions]
+    assert not any(i.startswith("tb.") for r in with_table.regions for i in r.boundary_primitive_ids)
+
+
 def test_an_external_opening_leaves_the_room_open_unless_its_gap_was_typed():
     scene = shell(top_gap=(215.0, 239.0))
     ink, _, closed = build(scene)
