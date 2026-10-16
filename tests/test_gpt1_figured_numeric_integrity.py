@@ -16,8 +16,9 @@ from pb_figured_dimension_authority import (
     parse_figured_dimension_mm,
     resolve_measurement_authority,
 )
-from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType, ScaleCalibration
 from pb_migration_contracts import QuantityEvidence
+from pb_page_scale_calibration_authority import ScaleSourceType, ScaleCalibrationStatus
 from pb_migration_measurement_authority_binder import (
     MeasurementAuthorityBindingError,
     bind_commercial_measurement_authority,
@@ -204,3 +205,75 @@ def test_nonfinite_decimals_fail_closed_without_parser_exception(bad):
     assert resolve_measurement_authority(figured_mm=bad).authority_status == AuthorityStatus.BLOCKED.value
     assert resolve_measurement_authority(scaled_mm=bad).authority_status == AuthorityStatus.BLOCKED.value
     assert resolve_measurement_authority(figured_mm=6500, max_delta_ratio=bad).authority_status == AuthorityStatus.BLOCKED.value
+
+
+def _verified_scale_bar():
+    return ScaleCalibration(
+        page_no=1,
+        ratio_str="1:100",
+        px_per_m=28.346,
+        method="SCALE_BAR",
+        is_verified=True,
+        confidence=1.0,
+        source_type=ScaleSourceType.SCALE_BAR.value,
+        status=ScaleCalibrationStatus.VALID.value,
+    )
+
+
+def _scaled_quantity():
+    return QuantityEvidence(
+        quantity_id="test_source_scaled",
+        family="length",
+        semantic_key="wall_span",
+        value=1.5,
+        unit="m",
+        input_entity_ids=("wall_1",),
+        evidence_ids=("original_wall_source_1",),
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        status="firm",
+        confidence=1.0,
+    )
+
+
+@pytest.mark.parametrize(
+    "bad", [None, True, False, "1500", {}, [], 0, -1, float("nan"),
+            float("inf"), -float("inf"), 10 ** 1000, Decimal("NaN"), 0.001],
+)
+def test_m5_scaled_only_rejects_invalid_or_unusable_metric_even_with_firm_scale(bad):
+    with pytest.raises(MeasurementAuthorityBindingError, match="finite positive measured value"):
+        bind_commercial_measurement_authority(
+            _scaled_quantity(),
+            scaled_mm=bad,
+            scale_calibration=_verified_scale_bar(),
+        )
+
+
+def test_m5_scaled_only_requires_existing_firm_scale_and_valid_metric():
+    bound = bind_commercial_measurement_authority(
+        _scaled_quantity(),
+        scaled_mm=1500.0,
+        scale_calibration=_verified_scale_bar(),
+        trusted_scale_id="trusted_source_bar_1",
+    )
+    assert bound.method == "scaled_geometry"
+    assert bound.resolved_scale_id == "trusted_source_bar_1"
+    assert bound.scale_status == "resolved"
+
+
+def test_m5_scaled_quantity_rejects_explicitly_malformed_figured_competitor():
+    with pytest.raises(MeasurementAuthorityBindingError, match="FIRM"):
+        bind_commercial_measurement_authority(
+            _scaled_quantity(),
+            scaled_mm=1500.0,
+            figured_text="",
+            scale_calibration=_verified_scale_bar(),
+        )
+
+
+def test_m5_valid_non_builtin_real_scaled_metric_is_accepted():
+    bound = bind_commercial_measurement_authority(
+        _scaled_quantity(),
+        scaled_mm=Decimal("1500.0"),
+        scale_calibration=_verified_scale_bar(),
+    )
+    assert bound.method == "scaled_geometry"
