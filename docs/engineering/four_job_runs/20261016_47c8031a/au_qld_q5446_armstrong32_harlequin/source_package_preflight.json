@@ -1,0 +1,78 @@
+{
+  "actual_source_package_runtime_complete": true,
+  "benchmark_score_granted": false,
+  "commercial_quantity_publication_granted": false,
+  "expected_source_document_count": 6,
+  "manifest_declares_source_package_complete": true,
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "rcp_or_metric_or_finish_authority_granted": false,
+  "source_documents": [
+    {
+      "actual_page_count": 10,
+      "actual_sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+      "actual_size_bytes": 1769126,
+      "expected_page_count": 10,
+      "expected_sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+      "expected_size_bytes": 1769126,
+      "name": "Q5446_Standard_Plans_V1_20220320.pdf",
+      "role": "architectural_drawings",
+      "status": "VERIFIED"
+    },
+    {
+      "actual_page_count": 1,
+      "actual_sha256": "80f30567db613e44af18998e82ee9e044513a7c1393dc9b9c5aa0ecd82685900",
+      "actual_size_bytes": 287367,
+      "expected_page_count": 1,
+      "expected_sha256": "80f30567db613e44af18998e82ee9e044513a7c1393dc9b9c5aa0ecd82685900",
+      "expected_size_bytes": 287367,
+      "name": "Q5446_Siting_V1_20220313.pdf",
+      "role": "siting",
+      "status": "VERIFIED"
+    },
+    {
+      "actual_page_count": 2,
+      "actual_sha256": "db0af9871032e9b77f151cd2f8bddf171aa10ad3a3c975abba0d24a020e0bd63",
+      "actual_size_bytes": 179662,
+      "expected_page_count": 2,
+      "expected_sha256": "db0af9871032e9b77f151cd2f8bddf171aa10ad3a3c975abba0d24a020e0bd63",
+      "expected_size_bytes": 179662,
+      "name": "Q5446_Standard_Inclusions_V1_20220313.pdf",
+      "role": "standard_inclusions",
+      "status": "VERIFIED"
+    },
+    {
+      "actual_page_count": 1,
+      "actual_sha256": "a4217d18de87e5b4deb545fe511b6cf480c499844b1a4e8415e929c3c9051bbc",
+      "actual_size_bytes": 54029,
+      "expected_page_count": 1,
+      "expected_sha256": "a4217d18de87e5b4deb545fe511b6cf480c499844b1a4e8415e929c3c9051bbc",
+      "expected_size_bytes": 54029,
+      "name": "mysimonds_specificationdocumentqld.pdf",
+      "role": "specification",
+      "status": "VERIFIED"
+    },
+    {
+      "actual_page_count": 6,
+      "actual_sha256": "425b554664061b9fca04b4511572f80ee76dc55f000b2907241272f687a85b0e",
+      "actual_size_bytes": 2702439,
+      "expected_page_count": 6,
+      "expected_sha256": "425b554664061b9fca04b4511572f80ee76dc55f000b2907241272f687a85b0e",
+      "expected_size_bytes": 2702439,
+      "name": "Colour Boards.pdf",
+      "role": "finish_selection_reference",
+      "status": "VERIFIED"
+    },
+    {
+      "actual_page_count": 6,
+      "actual_sha256": "a2b134a0bca2b314737e2f58351018b65e0ff011774780f3e5758e9f576444dd",
+      "actual_size_bytes": 475217,
+      "expected_page_count": 6,
+      "expected_sha256": "a2b134a0bca2b314737e2f58351018b65e0ff011774780f3e5758e9f576444dd",
+      "expected_size_bytes": 475217,
+      "name": "Q5446_Sales_Advice_Estimate_V1_20220320.pdf",
+      "role": "scope_and_allowance_reference",
+      "status": "VERIFIED"
+    }
+  ],
+  "verified_source_document_count": 6
+}

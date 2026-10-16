@@ -1,0 +1,31 @@
+{
+  "benchmark_score_granted": false,
+  "complete_source_coverage_proven": false,
+  "execution_page_numbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "family_group": "all",
+  "project_id": "au_qld_3laurel",
+  "sealed_run_file": null,
+  "source_page_count": 18,
+  "source_sha256_at_start": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+  "status": "SOURCE_INPUT_RECORDED_UNSEALED",
+  "topology_mode": "source_classified_scope"
+}

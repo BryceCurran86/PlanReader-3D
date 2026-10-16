@@ -1,0 +1,170 @@
+name: TEST GPT3 1215 Opening-Local Source Retention
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_raster_unchanged_band_segments.py"
+      - "pb_source_visibility_authority.py"
+      - "pb_physical_wall_candidate_authority.py"
+      - "pb_opening_host_binding_authority.py"
+      - "pb_live_wall_opening_authority_composition.py"
+      - "tools/verify_gpt3_additive_snapshot_host_retention.py"
+      - "tests/test_raster_unchanged_band_segments.py"
+      - "tests/test_gpt3_additive_snapshot_host_retention.py"
+      - ".github/workflows/test-gpt3-1215-opening-local-retention.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-1215-opening-local-retention-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Opening-local source retention regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q \
+            tests/test_raster_unchanged_band_segments.py \
+            tests/test_gpt3_additive_snapshot_host_retention.py \
+            tests/test_opening_host_source_candidate_witness.py \
+            tests/test_raster_source_visibility_v1.py
+          python -m compileall -q \
+            pb_raster_unchanged_band_segments.py \
+            pb_source_visibility_authority.py \
+            pb_physical_wall_candidate_authority.py \
+            pb_opening_host_binding_authority.py \
+            pb_live_wall_opening_authority_composition.py \
+            tools/verify_gpt3_additive_snapshot_host_retention.py
+          ruff check --select F821,F823 \
+            pb_raster_unchanged_band_segments.py \
+            pb_source_visibility_authority.py \
+            pb_physical_wall_candidate_authority.py \
+            pb_opening_host_binding_authority.py \
+            pb_live_wall_opening_authority_composition.py \
+            tools/verify_gpt3_additive_snapshot_host_retention.py \
+            tests/test_raster_unchanged_band_segments.py \
+            tests/test_gpt3_additive_snapshot_host_retention.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-source-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Produce exact base and candidate Lot16 source reports
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          ROOT=artifacts/gpt3-1215-opening-local-retention
+          mkdir -p "$ROOT"
+          git fetch origin main
+          # The accepted 1215 source-host addition is historical: current main
+          # already has 15 authenticated hosts. Pin the original pre-1215
+          # 14-host source control; preserve the exact additive verifier.
+          BASE="e579030e37606dfdd1b0d0b302b3f29138631552"
+          printf '%s\n' "$BASE" > "$ROOT/base_sha.txt"
+          git worktree add --detach /tmp/gpt3-retention-main "$BASE"
+          (
+            cd /tmp/gpt3-retention-main
+            PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --source-all-pages \
+              --output "$GITHUB_WORKSPACE/$ROOT/baseline.json"
+          )
+          python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --output "$ROOT/candidate.json"
+
+      - name: Require canonical page-wide W4 byte-level source proposition retention
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root=Path("artifacts/gpt3-1215-opening-local-retention")
+          before=json.loads((root/"baseline.json").read_text())
+          after=json.loads((root/"candidate.json").read_text())
+
+          def page3(report):
+              scopes=[
+                  row for row in report["source_owned_wall_scopes"]
+                  if str(row["page_id"])=="3"
+                  and row["decision_scope_id"]=="wall-source:page-3"
+              ]
+              assert len(scopes)==1
+              return scopes[0]
+
+          def signatures(report):
+              rows={}
+              for record in page3(report)["records"]:
+                  wall=record["wall_candidate"]
+                  physical=record["physical_identity"]
+                  rows[record["wall_candidate_id"]]={
+                      "candidate_identity_id":physical["candidate_identity_id"],
+                      "source_primitive_ids":physical["source_primitive_ids"],
+                      "edge_ids":physical["edge_ids"],
+                      "path_fingerprint":physical["path_fingerprint"],
+                      "centerline_pts":wall["centerline_pts"],
+                  }
+              return rows
+
+          old,new=signatures(before),signatures(after)
+          assert old==new, {
+              "lost":sorted(set(old)-set(new))[:20],
+              "gained":sorted(set(new)-set(old))[:20],
+              "changed":[key for key in old.keys() & new.keys()
+                         if old[key]!=new[key]][:20],
+              "old_count":len(old),
+              "new_count":len(new),
+          }
+          print("CANONICAL W4 RETAINED",json.dumps({
+              "wall_candidate_count":len(new),
+              "source_sha256":after["source_sha256"],
+          },sort_keys=True))
+          PY
+
+      - name: Require additive host/frame/source retention
+        env:
+          PYTHONPATH: .
+        run: |
+          python -u tools/verify_gpt3_additive_snapshot_host_retention.py \
+            --baseline artifacts/gpt3-1215-opening-local-retention/baseline.json \
+            --candidate artifacts/gpt3-1215-opening-local-retention/candidate.json \
+            --expected-new-host-id physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9 \
+            --output artifacts/gpt3-1215-opening-local-retention/retention.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-1215-opening-local-retention
+          path: artifacts/gpt3-1215-opening-local-retention
+          retention-days: 30

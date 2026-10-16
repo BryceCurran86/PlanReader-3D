@@ -4,9 +4,27 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # every module the replayed production chain can import must re-run the signed-output replay
+      - "pb_*.py"
+      - "tools/run_source_closed_project_handoff.py"
+      - "tools/diag_gpt2_room_measurement_gates.py"
+      - "tools/diag_gpt3_maryborough_floor_customer_gate.py"
       - "tools/run_gpt3_maryborough_original_floor_score_input.py"
       - "tests/test_gpt3_maryborough_original_floor_score_input.py"
       - ".github/workflows/test-gpt3-maryborough-original-floor-score-input.yml"
+      - "pb_wall_room_topology_typed_negative_evidence.py"
+      - "pb_live_floor_family_customer_output.py"
+      - "pb_live_floor_area_source_closed_export.py"
+      - "pb_live_floor_finish_area_source_closed_export.py"
+      - "pb_live_floor_area_customer_projection.py"
+      - "pb_live_floor_finish_customer_projection.py"
+      - "pb_source_closed_run_export.py"
+      - "pb_customer_output_verification.py"
+      - "pb_material_schedule_v1222.py"
+      - "pb_source_material_semantic_authority.py"
+      - "tools/prepare_gpt3_pending_floor_surface_identity_activation.py"
+      - "tests/test_live_floor_family_customer_output.py"
+      - "tests/test_gpt3_pending_floor_surface_identity_activation.py"
   workflow_dispatch:
 
 concurrency:
@@ -30,7 +48,7 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Source-seal score-input regressions
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt3_maryborough_original_floor_score_input.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_maryborough_original_floor_score_input.py tests/test_live_floor_family_customer_output.py tests/test_gpt3_pending_floor_surface_identity_activation.py
           python -m compileall -q tools/run_gpt3_maryborough_original_floor_score_input.py
           ruff check --select F821,F823 tools/run_gpt3_maryborough_original_floor_score_input.py tests/test_gpt3_maryborough_original_floor_score_input.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
@@ -74,6 +92,11 @@ jobs:
           ))
           rows=json.loads((prod/"verified_customer_rows.json").read_text())
           verified=verify_sealed_customer_output(sealed, rows)
+          # Preserve the complete historical signed evidence receipt, not just
+          # three unchanged numbers or quantity identities.
+          assert sealed.fingerprint=="9f3ab9ac1497cae5c29f8873af9287a5d6e3b3a386937fdeb37f8b5989fd780d", (
+              "original Maryborough V1 sealed receipt changed", sealed.fingerprint
+          )
           receipt=json.loads((prod/"source_score_readiness_UNPUBLISHED.json").read_text())
           stage=json.loads((prod/"source_stage_diagnostic.json").read_text())
           expected_sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
@@ -114,6 +137,57 @@ jobs:
           PY
         env:
           PYTHONPATH: .
+      - name: Write zero-binding current-source identity map
+        run: |
+          cat > artifacts/gpt3-maryborough-original-floor-score-input/identity_map.json <<'JSON'
+          {
+            "schema_version": "1.0.0",
+            "project_id": "au_qld_maryborough_service_station",
+            "source_sha256s": [
+              "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+            ],
+            "bindings": []
+          }
+          JSON
+
+      - name: Run unchanged frozen 24-object reconciler on fresh source output
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-original-floor-score-input
+          python benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
+            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json \
+            --sealed-run "$OUT/production/source_sealed_run.json" \
+            --identity-map "$OUT/identity_map.json" \
+            --output "$OUT/exact_project_report.json"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("artifacts/gpt3-maryborough-original-floor-score-input/exact_project_report.json")
+          d=json.loads(p.read_text())
+          assert d["project_id"]=="au_qld_maryborough_service_station"
+          assert d["source_sha_verified"] is True
+          assert d["reconciliation_complete"] is True
+          assert d["denominator"]==24
+          assert d["matched_within_tolerance"]==0
+          assert d["matched_outside_tolerance"]==0
+          assert d["missed"]==24
+          assert d["partial"]==0
+          assert d["unresolved"]==0
+          assert d["unsupported_extra"]==3
+          assert d["lineage_conflicts"]==0
+          assert d["coverage_accuracy"]==0.0
+          assert d["precision_adjusted_accuracy"]==0.0
+          assert len(d["produced_items"])==3
+          assert all(
+              all(str(ref).startswith("production-unmapped:")
+                  for ref in item["object_refs"])
+              for item in d["produced_items"]
+          )
+          print("MARYBOROUGH_CURRENT_SOURCE_EXACT24",json.dumps(d,sort_keys=True))
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

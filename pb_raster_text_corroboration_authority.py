@@ -15,15 +15,17 @@ that same text:
          exactly ``text_glyph_mapping_unverified``, optionally plus
          ``text_clip_state_unresolved``; the latter can be discharged only
          by the same post-clip rendered-pixel proof below
-      -> producer-owned word bbox for ordinary left-to-right text; for a
-         non-horizontal source word, only a uniquely bound source texttrace
-         character run may replace that bbox as the raster target
+      -> producer-owned word bbox; for an original left-to-right word
+         missing texttrace lineage, a UNIQUE native character-origin run
+         may supply an ink-bbox enlargement only when every expanded
+         glyph is source-owned and foreign native characters are vetoed;
+         for non-horizontal words use existing source direction/trace rules
       -> the exact region rendered from the immutable stored PDF bytes at
          300 DPI and at 450 DPI (renderer clip; never a page crop)
       -> non-horizontal source text is normalized by one producer-derived,
          lossless quarter-turn before OCR; ordinary text is unchanged
-      -> NO padding, NO expansion into neighbouring source pixels and NO
-         retry / alternative preprocessing: one deterministic raster pipeline only
+      -> NO heuristic padding, foreign-word expansion, retry or alternative
+         preprocessing: one deterministic source-owned raster crop per word
          (trying a tight crop, then a padded one, then keeping whichever
          matches the claim would turn preprocessing selection into an
          authority preference)
@@ -164,6 +166,89 @@ def _lossless_rotate(image: Image.Image, degrees: int) -> Image.Image:
     if degrees == 180:
         return image.transpose(Image.Transpose.ROTATE_180)
     return image
+
+
+def _glyph_reading_cover_from_centres(claim, centres, readings):
+    """All readings must own an exact contiguous source-glyph run.
+
+    This cannot elect a largest/full/first OCR box. Overlapping readings must
+    agree on their shared original characters and together cover EVERY glyph.
+    Partial, contradictory, unlocalised or cross-word readings fail closed.
+    """
+    if len(centres) != len(claim) or not claim or not readings:
+        return None
+    covered = set()
+    evidence = []
+    for row in readings:
+        box = _rect4(row.bbox_px)
+        if box is None:
+            return None
+        # Reuse the existing OCR pixel-rounding bound when registering native
+        # glyph centres to integer OCR polygons. Never expand a source crop.
+        rounding = _OCR_GEOMETRY_ROUNDING_PX
+        indices = tuple(i for i, (x, y) in enumerate(centres)
+                        if box[0]-rounding <= x <= box[2]+rounding
+                        and box[1]-rounding <= y <= box[3]+rounding)
+        if (not indices or indices != tuple(range(indices[0], indices[-1]+1))
+                or "".join(claim[i] for i in indices) != normalize_reading(row.text)):
+            return None
+        covered.update(indices)
+        evidence.append({"text": normalize_reading(row.text), "bbox_px": box,
+                         "source_glyph_indices": indices})
+    if covered != set(range(len(claim))):
+        return None
+    return tuple(sorted(evidence, key=lambda r: (r["source_glyph_indices"], r["text"], r["bbox_px"])))
+
+
+def _source_glyph_reading_cover(source_producer, selector, receipt, *, claim,
+                               raster_bbox, dpi, image_size, degrees, readings):
+    """Register OCR boxes to the unique original word's native glyphs."""
+    data = source_producer._store.source_bytes_by_revision.get(selector.revision_id)
+    if data is None or hashlib.sha256(data).hexdigest() != selector.source_sha256:
+        return None
+    try:
+        with fitz.open(stream=data, filetype="pdf") as pdf:
+            page = pdf[int(receipt.page_id)-1]
+            # Native word ordinals belong to TEXTFLAGS_WORDS. The default
+            # rawdict profile can regroup blocks and includes image blocks;
+            # borrowing those ordinals would point at a different source run.
+            line = page.get_text("rawdict", flags=fitz.TEXTFLAGS_WORDS)["blocks"][receipt.block_no]["lines"][receipt.line_no]
+            characters = [c for span in line["spans"] for c in span["chars"]]
+            runs = []
+            for start in range(len(characters)-len(claim)+1):
+                run = characters[start:start+len(claim)]
+                if "".join(c["c"] for c in run) != claim:
+                    continue
+                origins = [_point2(c.get("origin")) for c in run]
+                if all(o is not None and _bbox_contains(receipt.geometry, (*o, *o)) for o in origins):
+                    runs.append(run)
+            if len(runs) != 1:
+                return None
+            run = runs[0]
+            if any(c.get("synthetic", False) or _rect4(c.get("bbox")) is None for c in run):
+                return None
+            visual_clip = fitz.Rect(raster_bbox) * page.rotation_matrix
+            scale = dpi/72.
+            offset = (math.floor(visual_clip.x0*scale), math.floor(visual_clip.y0*scale))
+            centres = []
+            for c in run:
+                x0,y0,x1,y1 = c["bbox"]
+                point = fitz.Point((x0+x1)/2, (y0+y1)/2) * page.rotation_matrix
+                x,y = point.x*scale-offset[0], point.y*scale-offset[1]
+                # Inverse dimensions of the already losslessly rotated image.
+                w,h = image_size[::-1] if degrees in (-90,90) else image_size
+                if degrees == -90: x,y = h-y,x
+                elif degrees == 90: x,y = y,w-x
+                elif degrees == 180: x,y = w-x,h-y
+                centres.append((x,y))
+            proof = _glyph_reading_cover_from_centres(claim, centres, readings)
+            if proof is None:
+                return None
+            return {"source_observation_id": selector.observation_id, "dpi": dpi,
+                    "source_native_character_bboxes": tuple(tuple(c["bbox"]) for c in run),
+                    "source_glyph_centres_px": tuple(centres), "ocr_readings": proof}
+    except (ValueError, IndexError, KeyError, TypeError, RuntimeError):
+        return None
 
 
 def _exact_native_word_origin_run(
@@ -337,8 +422,10 @@ def _producer_owned_ocr_target(
 ) -> tuple[tuple[float, float, float, float], int]:
     """Resolve one source-owned raster target for non-horizontal native text.
 
-    The historical word bbox remains authoritative for ordinary left-to-right
-    text. For text whose authenticated source line direction renders vertical
+    The historical word bbox remains the fallback for left-to-right text.
+    When its trace IDs are unavailable, only a uniquely anchored native
+    glyph-origin run with verified foreign-ink exclusion may extend it.
+    For text whose authenticated source line direction renders vertical
     or reversed, PyMuPDF's native word bbox can clip glyph ink even though its
     text identity is correct. In that case this helper uses exact source
     character identity (codepoint + origin) to bind the word to one unique
@@ -399,6 +486,28 @@ def _producer_owned_ocr_target(
             display_dy /= magnitude
             axis_tol = 1e-6
             if abs(display_dy) <= axis_tol and display_dx > 0.0:
+                # Native LTR ink can protrude outside the word's PDF bbox,
+                # including punctuation or very small schedule tokens.
+                # Allow precisely ONE source-owned crop, never an OCR retry:
+                # only when texttrace linkage is absent, the entire native
+                # character run matches exactly once by original glyph
+                # origins, and no neighbouring native line or character
+                # contributes pixels to the expanded bbox. This does not
+                # authenticate the word; both DPI OCR readings still must
+                # exactly match the claimed native text.
+                if not sequence_ids:
+                    ink_crop = _unique_native_word_source_ink_crop(
+                        line, word_bbox=word_bbox, raw_text=raw_text
+                    )
+                    if (ink_crop is not None and (
+                            ink_crop[0] < word_bbox[0] - 1e-4
+                            or ink_crop[1] < word_bbox[1] - 1e-4
+                            or ink_crop[2] > word_bbox[2] + 1e-4
+                            or ink_crop[3] > word_bbox[3] + 1e-4
+                        ) and _source_ink_crop_avoids_other_lines(
+                            rawdict, selected_line=line, crop=ink_crop
+                        )):
+                        return ink_crop, 0
                 return word_bbox, 0
             if abs(display_dy) <= axis_tol and display_dx < 0.0:
                 rotation_degrees = 180
@@ -693,6 +802,7 @@ class RasterTextCorroborationProducer:
         backend: RasterOCRBackend,
         *,
         _seal: object = None,
+        _allow_clip_only_shadow: bool = False,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
@@ -704,11 +814,13 @@ class RasterTextCorroborationProducer:
         self._source_authority: SourceObservationAuthority = self._source_producer.authority()
         self._text_authority: PdfTextIntegrityAuthority = source_visibility_producer.text_integrity_authority()
         self._backend = backend
+        self._allow_clip_only_shadow = _allow_clip_only_shadow
+        self._glyph_cover_proofs = {}
         self._results: dict[tuple[str, str, str, str, str], RasterTextCorroborationResult] = {}
 
     @classmethod
     def from_source_visibility_producer(
-        cls, source_visibility_producer: SourceVisibilityProducer
+        cls, source_visibility_producer: SourceVisibilityProducer,
     ) -> "RasterTextCorroborationProducer":
         """Production entry with deterministic availability-only OCR selection.
 
@@ -721,6 +833,22 @@ class RasterTextCorroborationProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         backend, _selection_reason = select_production_ocr_backend()
         return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_physical_plan_view_shadow(
+        cls, source_visibility_producer: SourceVisibilityProducer,
+    ) -> "RasterTextCorroborationProducer":
+        """Isolated view-role proof for a decoded word with unresolved clipping.
+
+        Only a sole unresolved-clip reason is additionally admissible. Both
+        original post-clip renders must still exactly reproduce the native
+        claim. This never changes native receipts or ordinary consumers.
+        """
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        backend, _selection_reason = select_production_ocr_backend()
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL,
+                   _allow_clip_only_shadow=True)
 
     @classmethod
     def from_source_visibility_producer_for_tests(
@@ -736,8 +864,28 @@ class RasterTextCorroborationProducer:
             raise TypeError("from_source_visibility_producer_for_tests requires exact MockOCRBackend")
         return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL)
 
+    @classmethod
+    def for_physical_plan_view_shadow_for_tests(
+        cls, source_visibility_producer: SourceVisibilityProducer, backend: MockOCRBackend,
+    ) -> "RasterTextCorroborationProducer":
+        """Exact mock test seam for the isolated view-role clip proof."""
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("source_visibility_producer must be producer-owned")
+        if type(backend) is not MockOCRBackend:
+            raise TypeError("exact MockOCRBackend required")
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL,
+                   _allow_clip_only_shadow=True)
+
     def authority(self) -> RasterTextCorroborationAuthority:
         return RasterTextCorroborationAuthority(self._results, _seal=_AUTHORITY_SEAL)
+
+    def glyph_reading_cover_proofs(self, selector: RasterTextCorroborationSelector):
+        """Read-only audit of already corroborated view-shadow glyph ownership."""
+        from copy import deepcopy
+        result = self.publish(selector)
+        if result.status is not EvidenceResolutionStatus.CORROBORATED:
+            return ()
+        return deepcopy(self._glyph_cover_proofs.get(selector.key, ()))
 
     def _store(
         self, selector: RasterTextCorroborationSelector, result: RasterTextCorroborationResult
@@ -827,7 +975,9 @@ class RasterTextCorroborationProducer:
         if (
             text_result.status != EvidenceResolutionStatus.ABSTAINED
             or receipt.trusted
-            or TEXT_GLYPH_MAPPING_UNVERIFIED not in receipt_reason_set
+            or (TEXT_GLYPH_MAPPING_UNVERIFIED not in receipt_reason_set
+                and not (self._allow_clip_only_shadow
+                         and receipt_reason_set == {TEXT_CLIP_STATE_UNRESOLVED}))
             or not receipt_reason_set.issubset(raster_admissible_reasons)
             or tuple(text_result.reason_codes) != receipt_reasons
         ):
@@ -870,6 +1020,7 @@ class RasterTextCorroborationProducer:
 
         # 5. Two independent renderings of that exact producer-owned region.
         views: list[RasterTextView] = []
+        glyph_covers = []
         parent_ids: set[tuple[str, str, str]] = set()
         for dpi in RASTER_TEXT_CORROBORATION_DPIS:
             try:
@@ -913,6 +1064,14 @@ class RasterTextCorroborationProducer:
             if len(readable) == 1:
                 reading = normalize_reading(readable[0].text)
                 confidence = readable[0].confidence
+            elif len(readable) > 1 and self._allow_clip_only_shadow:
+                cover = _source_glyph_reading_cover(
+                    self._source_producer, selector, receipt, claim=native_claim,
+                    raster_bbox=raster_bbox, dpi=int(dpi), image_size=cropped.size,
+                    degrees=ocr_rotation_degrees, readings=readable)
+                if cover is not None:
+                    glyph_covers.append(cover)
+                    reading = native_claim
             if ocr_rotation_degrees == 0:
                 ocr_image_png_sha256 = hashlib.sha256(png_bytes).hexdigest()
             else:
@@ -941,13 +1100,15 @@ class RasterTextCorroborationProducer:
         # 6. Strict per-view acceptance, then strict agreement.
         if any(view.line_count == 0 for view in views):
             return _abstain(RASTER_TEXT_NO_READING)
-        if any(view.line_count > 1 for view in views):
+        if any(view.line_count > 1 and view.ocr_reading is None for view in views):
             return _abstain(RASTER_TEXT_COMPETING_READINGS)
         readings = [view.ocr_reading for view in views]
         if len(set(readings)) != 1:
             return _abstain(RASTER_TEXT_VIEW_DISAGREEMENT)
         if readings[0] != native_claim:
             return _abstain(RASTER_TEXT_NATIVE_MISMATCH)
+        if glyph_covers:
+            self._glyph_cover_proofs[selector.key] = tuple(glyph_covers)
 
         payload = {
             "document_id": selector.document_id,

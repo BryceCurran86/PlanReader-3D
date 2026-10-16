@@ -108,16 +108,12 @@ import pandas as pd
 
 # Common dimension formats
 DIMENSION_PATTERNS = [
-    # Millimeters: 1200, 2400, 350
-    (r"\b(\d{2,5})\b", "mm"),
-    # Meters: 3.5m, 12.0m
-    (r"\b(\d+\.?\d*)\s*m\b", "m"),
-    # Feet-inches: 10'-6"
+    # Specific forms before a bare number, so 1:100 is a scale and not 100 mm.
     (r"\b(\d+)['']\s*-?\s*(\d+)['\"]", "ft-in"),
-    # Scale ratios: 1:100, 1:50
     (r"1\s*[:/]\s*(\d{2,4})", "scale"),
-    # Metric with units: 1200mm, 3.5m
+    (r"\b(\d+\.?\d*)\s*m\b", "m"),
     (r"\b(\d+\.?\d*)\s*(mm|m|cm)\b", "metric"),
+    (r"\b(\d{2,5})\b", "mm"),
 ]
 
 # Room/area keywords
@@ -700,6 +696,27 @@ def detect_scale(
         (r"(\d+)\s*mm\s*=\s*(\d+)\s*m", "metric"),
     ]
     
+    ratio_pattern = scale_patterns[0][0]
+    ratio_values = {
+        int(match.group(1))
+        for match in re.finditer(ratio_pattern, all_text, re.IGNORECASE)
+    }
+    loose_values = {
+        int(match.group(1))
+        for match in re.finditer(scale_patterns[1][0], all_text, re.IGNORECASE)
+    }
+    if len(ratio_values | loose_values) > 1:
+        return None
+    metric_ratios: set[tuple[int, int]] = set()
+    for match in re.finditer(scale_patterns[3][0], all_text, re.IGNORECASE):
+        millimetres = int(match.group(1))
+        metres = int(match.group(2))
+        if metres <= 0:
+            continue
+        divisor = math.gcd(millimetres, metres)
+        metric_ratios.add((millimetres // divisor, metres // divisor))
+    if len(metric_ratios) > 1:
+        return None
     for pattern, scale_type in scale_patterns:
         match = re.search(pattern, all_text, re.IGNORECASE)
         if match:
@@ -713,12 +730,14 @@ def detect_scale(
                 }
             elif scale_type == "metric":
                 mm = float(match.group(1))
-                m = float(match.group(2)) if match.lastindex >= 2 else 1.0
-                px_per_m = mm / m
+                metres = float(match.group(2)) if match.lastindex and match.lastindex >= 2 else 1.0
+                if metres <= 0:
+                    continue
+                mm_per_m = mm / metres
                 return {
                     "type": "metric",
-                    "mm_per_m": mm,
-                    "px_per_m": px_per_m,
+                    "mm_per_m": mm_per_m,
+                    "px_per_m": mm_per_m,
                     "text": match.group(0),
                 }
     
@@ -872,21 +891,21 @@ def classify_page_offline(
     Returns:
         Tuple of (page_type, label, metadata)
     """
-    lower = f"{file_name} {text}".lower()
+    del file_name
     page_type = "Other"
     
-    # Keyword patterns for page types
+    # Keyword patterns for page types. Field labels such as "drawing number"
+    # are not a sheet type. Matching is per heading line, below.
     patterns = [
         ("Title / Drawing Register", [
-            "drawing register", "drawing schedule", "title sheet",
-            "project title", "job number", "drawing number",
+            "drawing register", "drawing schedule", "title sheet", "drawing index",
         ]),
         ("Reflected Ceiling Plan", [
             "reflected ceiling", "rcp", "ceiling plan",
         ]),
         ("Floor Plan", [
             "floor plan", "proposed plan", "general arrangement",
-            "ground floor", "first floor", "level 1", "level 2",
+            "ground floor", "first floor", "level 1 plan", "level 2 plan",
         ]),
         ("Roof Plan", [
             "roof plan", "roof layout",
@@ -924,16 +943,32 @@ def classify_page_offline(
         ]),
     ]
     
-    for candidate, keywords in patterns:
-        if any(kw in lower for kw in keywords):
-            page_type = candidate
+    found: dict[str, int] = {}
+    index_headings = {"drawing index", "drawing register", "drawing schedule", "title sheet", "sheet index"}
+    for raw_line in (text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip().lower()
+        if not line or re.match(r"^(?:refer\b|see\b|matchline\b|keynote\b)", line):
+            continue
+        if line in index_headings:
+            page_type = "Title / Drawing Register"
+            found = {}
             break
+        for candidate, keywords in patterns:
+            for keyword in keywords:
+                if re.search(rf"(?<!\w){re.escape(keyword)}s?(?!\w)", line):
+                    found[candidate] = max(found.get(candidate, 0), len(keyword))
+    else:
+        headings = {name for name, length in found.items() if length >= 8}
+        if len(headings) > 1:
+            page_type = "Other"
+        elif len(headings) == 1:
+            page_type = next(iter(headings))
+        elif len(found) == 1:
+            page_type = next(iter(found))
     
-    # Extract drawing number
-    drawing_match = re.search(
-        r"\b([A-Z]{1,3}\d{2,4}(?:[-/.][A-Z0-9]+)?)\b", text
-    )
-    label = drawing_match.group(1) if drawing_match else f"Page {page_no}"
+    # A sheet code printed in an index or a title-block field is not this page's
+    # sheet number. Title-block resolution owns that identity.
+    label = f"Page {int(page_no)}"
     
     # Analyze visual features
     metadata = {}

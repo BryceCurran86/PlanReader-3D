@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 import fitz
 
 import pb_cross_view_floor_finish_authority as floor_finish_authority
@@ -680,13 +681,18 @@ def _patch_cross_view_floor_finish_viewports(monkeypatch) -> None:
     )
 
 
-def test_separate_floor_finish_plan_binds_by_exact_native_room_block(
+def test_separate_floor_finish_plan_same_native_text_block_is_not_physical_owner(
     monkeypatch,
 ) -> None:
+    # The original figured-area room and its canonical floor remain valid.
+    # A DIFFERENT finish-plan page having "TEST ROOM" + "FT1" in one
+    # native PDF text block does not prove the same physical room/wall ring.
     _patch_cross_view_floor_finish_viewports(monkeypatch)
     source, room_areas, floors = _source_room_area_and_floor(
         _cross_view_floor_finish_payload(same_block=True)
     )
+    assert len(room_areas.records) == 1
+    assert len(floors.floors) == 1
 
     result = CrossViewFloorFinishProducer.from_source(
         source=source,
@@ -694,19 +700,13 @@ def test_separate_floor_finish_plan_binds_by_exact_native_room_block(
         floors=floors,
     ).publish()
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED
-    assert len(result.records) == 1
-    record = result.records[0]
-    assert record.finish_code == "FT1"
-    assert record.semantic_finish == "tile"
-    assert record.quantity.value == 8.64
-    assert record.quantity.metadata["source_dimension_page_id"] == "2"
-    assert record.quantity.metadata["support_page_id"] == "3"
-    assert record.quantity.metadata["support_viewport_id"] == "vp-3"
-    assert (
-        record.quantity.metadata["finish_binding_mode"]
-        == "native_block_room_label"
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
     )
+    assert room_areas.records[0].area_evidence.normalized_value == 8.64
 
 
 def test_separate_floor_finish_plan_nearby_code_in_different_block_abstains(
@@ -1268,3 +1268,64 @@ def test_gpt2_two_source_faces_cannot_publish_one_physical_room_floor_twice():
         owners, disputed = _unique_documented_area_owner_receipts((), records)
         assert owners == {"unrelated-source-face": independent}
         assert disputed == ("first-source-face", "second-source-face")
+
+
+
+def test_source_owned_finish_plan_shadow_is_explicit_and_keeps_default_receipts(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    original = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+    assert len(original.quantities) == 1
+    guarded = CrossViewFloorFinishProducer.for_source_owned_plan_view_shadow(
+        source=source, room_areas=room_areas, floors=floors, page_ids=("3",)
+    ).publish()
+    # The default synthetic schedule page does not contain an independently
+    # F07-authenticated physical floor-finish drawing with certified marks.
+    assert guarded.records == ()
+    assert guarded.quantities == ()
+    assert original.quantities[0].family == "floor_finish_area"
+    assert CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish().quantities == original.quantities
+
+
+@pytest.mark.parametrize("pages", [
+    (), ("0",), ("01",), ("7", "7x"), ("+7",),
+    "7", ("-1",), ("7.0",),
+])
+def test_source_owned_plan_finish_rejects_invalid_page_scopes(pages) -> None:
+    with pytest.raises(ValueError, match="canonical page IDs"):
+        CrossViewFloorFinishProducer.for_source_owned_plan_view_shadow(
+            source=None, room_areas=None, floors=None,
+            page_ids=pages,
+        )
+
+
+
+def test_source_owned_original_finish_mark_cannot_cross_physical_floor_page_without_wall_proof():
+    """The p11 OFFICE box is not itself a p7 physical wall equivalence seal."""
+    from types import SimpleNamespace
+    from pb_cross_view_floor_finish_authority import (
+        _source_owned_mark_eligible_for_existing_physical_floor,
+    )
+    floor = SimpleNamespace(page_id="7", canonical_floor_id="actual-floor-7")
+    mark = SimpleNamespace(page_id="11", record_id="actual-mark-11")
+    assert not _source_owned_mark_eligible_for_existing_physical_floor(
+        floor=floor, occurrence=mark, source_owned_shadow=True
+    )
+    assert _source_owned_mark_eligible_for_existing_physical_floor(
+        floor=floor, occurrence=SimpleNamespace(page_id="7"),
+        source_owned_shadow=True,
+    )
+    # Existing default quantified dimension-box path is unchanged.
+    assert _source_owned_mark_eligible_for_existing_physical_floor(
+        floor=floor, occurrence=mark, source_owned_shadow=False,
+    )
+    with pytest.raises(ValueError, match="explicit boolean"):
+        _source_owned_mark_eligible_for_existing_physical_floor(
+            floor=floor, occurrence=mark, source_owned_shadow="true",
+        )

@@ -61,10 +61,33 @@ jobs:
           assert a['source_sha256']==b['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert a['opening_bindings']==b['opening_bindings']
           assert a['host_frames']==b['host_frames']
-          assert b['summary']==dict(physical_existence_claims=21,host_bindings=14,host_frames=9)
+          assert b['summary']==dict(physical_existence_claims=21,host_bindings=15,host_frames=9)
           assert a['primitive_safety_cap']==20000 and a['producer_snapshot_unchanged']
           assert a['original_pdf_reauthenticated']
-          assert len(a['rows'])==14 and len({r['opening_identity_id'] for r in a['rows']})==7
+          # This producer audits only still-unhosted raster-source openings.
+          # The genuine 1215 opening now owns a FIRM source host (15 vs 14),
+          # so its two flank rows correctly exit this unresolved query.
+          # Preserve the exact remaining 6 identities, both painted flanks
+          # per opening, and the authenticated 1215 original host receipt.
+          rows=a['rows']
+          ids={r['opening_identity_id'] for r in rows}
+          assert len(rows)==12 and len(ids)==6
+          assert all(
+              {r['role'] for r in rows if r['opening_identity_id']==opening_id}
+              == {'left','right'}
+              for opening_id in ids
+          )
+          recovered_1215='physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9'
+          assert recovered_1215 not in ids
+          original_host=[
+              row for row in b['opening_bindings']
+              if row['opening_identity_id']==recovered_1215
+          ]
+          assert len(original_host)==1
+          assert original_host[0]['status']=='corroborated'
+          assert original_host[0]['host_wall_id']
+          assert len(original_host[0]['member_wall_candidate_ids'])==2
+          assert 'opening_local_supplemental_source_band_host_resolved' in original_host[0]['reason_codes']
           for key in ('host_publication_allowed','opening_count_publication_allowed',
                       'metric_quantity_publication_allowed','physical_equivalence_proven',
                       'native_paint_role_authenticated','source_universe_completeness_proven'):
@@ -76,14 +99,18 @@ jobs:
               assert all(not c['paint_causality_proven'] and not c['native_paint_role_authenticated']
                          for c in row['intersecting_original_paint_commands'])
           # Immutable-source negative controls, never detector inputs.
-          priority=next(r for r in a['rows'] if r['opening_identity_id']=='physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9' and r['role']=='left')
-          assert priority['paint_profile']['inset_core']['source_mass_solid']
-          assert priority['paint_profile']['inset_core']['full_render_mass_solid']
-          assert not priority['paint_profile']['inset_core']['rgb_equal']
-          assert any(c['seqno']==1169 and c['original_paint_kind']=='stroke-path'
-                     and c['literal_native_path']['rect'][0]==c['literal_native_path']['rect'][2]
-                     for c in priority['intersecting_original_paint_commands'])
-          assert any(not r['paint_profile']['inset_core']['source_mass_solid'] for r in a['rows'])
+          # Historical 1215 painted flank is now HOSTED and is therefore not
+          # in this unresolved-raster-only diagnostic. Enforce real original
+          # paint command inventory and image-source-vs-full-render agreement
+          # for each of the six still-unhosted openings instead.
+          assert all(r['intersecting_original_paint_commands'] for r in rows)
+          assert all(r['paint_profile']['inset_core']['rgb_equal'] for r in rows)
+          assert any(r['paint_profile']['inset_core']['source_mass_solid'] for r in rows)
+          assert any(not r['paint_profile']['inset_core']['source_mass_solid'] for r in rows)
+          assert any(
+              c['seqno']==1378 and c['original_paint_kind']=='stroke-path'
+              for r in rows for c in r['intersecting_original_paint_commands']
+          )
           print({'original_host_frame_receipts_exact_equal':True,'queried_original_flanks':len(a['rows'])})
           PY
       - uses: actions/upload-artifact@v4

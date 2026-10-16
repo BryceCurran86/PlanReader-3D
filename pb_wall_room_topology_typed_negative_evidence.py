@@ -1082,31 +1082,27 @@ def collect_source_lineage_grid_evidence(
     source_lineage_dense_orthogonal_lattice. Running the complete U2
     classifier here is unnecessary and expensive on dense CAD pages.
 
-    The collector preserves the full classifier's same-kind precedence: when a
-    target would already receive legacy regular_long_parallels KIND_GRID, that
-    legacy nomination sorts first and suppresses the source-lineage grid
-    nomination in full U2, so this fastpath also omits it.
+    This *source-provenance sidecar* is intentionally independent of the
+    legacy regular_long_parallels nomination. Full U2 keeps its existing
+    single-kind precedence and output unchanged. However, if the SAME W2
+    source edge independently satisfies the stronger complete native-source
+    orthogonal lattice proof, a legacy GRID nomination must not erase that
+    independent producer-owned ancestry from the composite-room authority.
+
+    Only _source_lineage_grid_nominations can add a sidecar. A legacy family
+    nomination alone, geometry proximity, graphic colour, or short fragments
+    without a full original-source proof never become authenticated grid.
+    Every emitted atom remains CANDIDATE and opposing, not a FIRM wall role.
     """
     context = _context_items(graph)
     source_grid = _source_lineage_grid_nominations(context)
     if not source_grid:
         return ()
 
-    retained_grid = _generic_family_grid_nominations(context, retained=True)
-    excluded_grid = _generic_family_grid_nominations(context, retained=False)
     atoms: List[EvidenceAtom] = []
     for target in context:
         nomination = source_grid.get(target["id"])
         if nomination is None:
-            continue
-        generic = (
-            retained_grid.get(target["id"])
-            if target.get("retained")
-            else excluded_grid.get(target["id"])
-        )
-        if generic is not None:
-            # Full U2 sorts by (kind, reason_codes); regular_long_parallels
-            # wins over source_lineage_* for KIND_GRID.
             continue
         atoms.extend(
             _emit_atoms_for_target(

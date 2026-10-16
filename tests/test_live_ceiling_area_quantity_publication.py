@@ -656,3 +656,60 @@ def test_original_ceiling_scope_metadata_must_match_canonical_document_and_snaps
     assert len(publish_live_ceiling_area_quantities(_result(shadow=matched))) == 1
     # Older producers omitting optional scope metadata retain source-owned proof.
     assert len(publish_live_ceiling_area_quantities(_result())) == 1
+
+
+def test_malformed_copy_matching_canonical_and_shadow_source_sha_cannot_mint_firm():
+    # Comparing two copied fields is not evidence of a genuine original
+    # source checksum. All the surrounding room/scale/finish receipts can be
+    # otherwise syntactically correct, including two figured dimensions.
+    for bad in (
+        "", "not-an-original-sha", "a" * 63, "a" * 65,
+        "g" * 64, " " + "a" * 63, "a" * 63 + " ", True, 123,
+    ):
+        ceiling = replace(_ceiling(), source_sha256=bad)
+        shadow = replace(
+            _shadow_quantity(),
+            metadata={**_shadow_quantity().metadata, "source_sha256":bad},
+        )
+        result = _result(ceiling=ceiling, shadow=shadow)
+        assert publish_live_ceiling_area_quantities(result) == ()
+        assert publish_live_ceiling_area_quantities(result) == ()
+
+
+def test_source_sha_validation_keeps_original_hex_and_rejects_foreign_parent():
+    original = publish_live_ceiling_area_quantities(_result())
+    assert len(original) == 1
+    upper_sha = SOURCE_SHA.upper()
+    upper = _result(
+        ceiling=replace(_ceiling(), source_sha256=upper_sha),
+        shadow=replace(
+            _shadow_quantity(),
+            metadata={**_shadow_quantity().metadata, "source_sha256":upper_sha},
+        ),
+    )
+    assert len(publish_live_ceiling_area_quantities(upper)) == 1
+
+    # Independently valid 64-hex source IDs still may not cross revisions.
+    wrong = _result(
+        ceiling=replace(_ceiling(), source_sha256="b" * 64),
+        shadow=_shadow_quantity(),
+    )
+    assert publish_live_ceiling_area_quantities(wrong) == ()
+
+
+def test_pdf_scaled_ceiling_cannot_use_copied_malformed_source_sha():
+    ceiling = replace(
+        _ceiling(
+            authority=MeasurementAuthorityType.PDF_SCALED.value,
+            physical_scale_record_id="physical-scale-1",
+            figured_dimension_ids=(),
+        ),
+        source_sha256="fake-sha",
+    )
+    shadow = replace(
+        _shadow_quantity(),
+        metadata={**_shadow_quantity().metadata, "source_sha256":"fake-sha"},
+    )
+    assert publish_live_ceiling_area_quantities(
+        _result(ceiling=ceiling, shadow=shadow)
+    ) == ()

@@ -1,0 +1,90 @@
+name: GPT MAX Original Room Source Boundary Gap
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_original_room_boundary_gap_sources.py"
+      - "tests/test_gptmax_original_room_boundary_gap_sources.py"
+      - ".github/workflows/test-gptmax-original-room-boundary-gap.yml"
+permissions:
+  contents: read
+jobs:
+  room-source-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original source gaps, forged owner and invalid snap guards
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_room_boundary_gap_sources.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_room_boundary_gap_sources.py tests/test_gptmax_original_room_boundary_gap_sources.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+  original-lot16-bedrooms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify original full source and reproduce bedroom boundary ownership loss
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output artifacts/original-source.json
+          PYTHONPATH=. python -u tools/diag_gptmax_original_room_boundary_gap_sources.py --pdf "$PDF" --source-report artifacts/original-source.json --page-id 3 --native-room-word BED --output artifacts/room-native-gap-owners.json
+          python - <<'PY'
+          import json,fitz
+          from pathlib import Path
+          src=json.loads(Path('artifacts/original-source.json').read_text())
+          d=json.loads(Path('artifacts/room-native-gap-owners.json').read_text())
+          assert src['source_sha256']==d['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert src['primitive_safety_cap']==20000
+          assert src['summary']['physical_existence_claims']==21
+          assert src['summary']['authenticated_hosts']==15
+          assert src['summary']['resolved_source_frames']==9
+          assert src['summary']['canonical_opening_area_records']==8
+          assert len(src['source_owned_wall_scopes'][0]['records'])==2094
+          assert len(d['original_native_room_words'])>=3
+          assert all(g['virtual_wall_bridge_authorized'] is False and
+                     g['positive_wall_role_authorized'] is False for g in d['source_primitive_gaps'])
+          assert all(d[x] is False for x in ('physical_room_face_granted',
+                     'metric_room_area_granted','customer_quantity_granted','benchmark_score_granted'))
+          doc=fitz.open('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf')
+          page=doc[2]
+          for tag,region in (
+              ('bedrooms',fitz.Rect(305,165,780,325)),
+              ('bed3-left-seam',fitz.Rect(649,236,665,257))):
+              page.get_pixmap(matrix=fitz.Matrix(300/72,300/72),clip=region,alpha=False).save(f'artifacts/original-{tag}-300dpi.png')
+          print({'source_native_room_labels':len(d['original_native_room_words']),
+                 'nearby_original_w4_gaps':d['source_gap_count'],
+                 'physical_room_faces_granted':0,'new_firm_quantities':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-bedrooms-w4-native-source-gap
+          path: |
+            artifacts/room-native-gap-owners.json
+            artifacts/original-bedrooms-300dpi.png
+            artifacts/original-bed3-left-seam-300dpi.png
+          retention-days: 21

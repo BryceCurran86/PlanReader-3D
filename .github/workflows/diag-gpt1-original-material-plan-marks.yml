@@ -1,0 +1,64 @@
+name: DIAG GPT1 Page11 Source-Owned Material Plan Marks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt1_page11_source_plan_ft3_mark_census.py"
+      - ".github/workflows/diag-gpt1-original-material-plan-marks.yml"
+      - "pb_source_material_semantic_authority.py"
+      - "pb_raster_text_corroboration_authority.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-original-plan-material-marks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original source page11 native FT3 mark and viewport census
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt1-page11-native-material-marks
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/producer_head_sha.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          /usr/bin/time -v timeout 1000s python -u -m tools.diag_gpt1_page11_source_plan_ft3_mark_census \
+            --pdf "$PDF" --source-sha256 "$SHA" --page-id 11 --code FT3 \
+            --output "$OUT/source_mark_census.json" 2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gpt1-page11-native-material-marks/source_mark_census.json").read_text())
+          assert r["source_native_page_decoded"] is True
+          assert r["native_code_word_count"] > 0
+          assert len(r["marks"]) == r["native_code_word_count"]
+          assert len({m["source_word_observation_id"] for m in r["marks"]}) == len(r["marks"])
+          assert all(m["text"] == "FT3" and m["source_partition_id"] == "page:11" for m in r["marks"])
+          assert r["complete_material_occurrence_universe"] is False
+          assert r["physical_floor_owned"] is False
+          assert r["area_measured_m2"] is None
+          assert r["signed_customer_quantity"] is None
+          assert r["benchmark_accuracy"] is None
+          print("ORIGINAL_FT3_PLAN_NATIVE_CODE_MARKS_SOURCE_CENSUSED")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-page11-native-ft3-marks
+          path: artifacts/gpt1-page11-native-material-marks/
+          retention-days: 30

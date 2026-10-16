@@ -9,6 +9,7 @@ If this file conflicts with a chat, this file wins.
 2. Trace the affected quantity through the real call path in the playbook.
 3. Prove compliance in the first reply: files read, functions traced, authority boundaries crossed, files that will stay untouched.
 4. Do not start from module names, prior chat claims, or benchmark scores.
+5. Read `docs/engineering/ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md` for the shared working agreement (PR, CI and evidence etiquette) and the ranked first-failing-gate levers. It is a planning index only; this file wins.
 
 Loop for every task: **trace → propose → synthetic proof → shadow run → authority review**.
 
@@ -25,7 +26,7 @@ evidence against promotion, not deletion before W2.
 - Unknown, conflicting, stale, or ambiguous evidence must abstain.
 - Retain all plausible candidates. Never resolve ties with nearest, first, or smallest.
 - Never use filenames, project names, benchmark IDs, or expected BOQ values as prediction inputs.
-- Never change production code and benchmark-defining files in the same PR. CI enforces this via `scripts/check_benchmark_gold_separation.py`.
+- Never change production code and benchmark-defining files in the same PR. CI enforces this via `scripts/check_v2_truth_separation.py` (benchmark-defining files include the whole `benchmarks/frozen_holdout/full_plan_v2/` tree and `documents/sources/*.pdf`).
 - Do not introduce a second scale resolver, evidence vocabulary, quantity schema, or canonical graph.
 - Do not give AI output, defaults, title-block scale text, geometric gap width, or empty detector results firm authority.
 - New topology and extraction work begins in shadow mode.

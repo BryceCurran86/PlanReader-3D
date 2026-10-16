@@ -1,0 +1,42 @@
+name: GPT3 Cross Semantic Physical Claim Shadow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_cross_semantic_physical_claims.py"
+      - "tests/test_gpt3_cross_semantic_physical_claims_shadow.py"
+      - "pb_source_closed_run_export.py"
+      - "pb_migration_contracts.py"
+      - "requirements.txt"
+      - "requirements-ci-v1228.txt"
+      - ".github/workflows/test-gpt3-cross-semantic-claim-shadow.yml"
+
+concurrency:
+  group: gpt3-cross-semantic-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthetic-source-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Exact identity synthetic shadow and original V1 retention
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt3_cross_semantic_physical_claims_shadow.py
+          ruff check --select F821,F823 tools/diag_gpt3_cross_semantic_physical_claims.py tests/test_gpt3_cross_semantic_physical_claims_shadow.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py

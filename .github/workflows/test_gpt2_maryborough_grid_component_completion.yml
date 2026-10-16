@@ -7,6 +7,8 @@ on:
       - "pb_*room*.py"
       - "pb_*wall*.py"
       - "pb_live_physical_net_wall_integration.py"
+      - "pb_wall_room_topology_typed_negative_evidence.py"
+      - "tests/test_wall_topology_typed_negative_evidence.py"
       # Native/raster text changes can alter commercial room labels or areas.
       - "pb_raster_text_corroboration_authority.py"
       - "tests/test_raster_text_corroboration_authority_v1.py"

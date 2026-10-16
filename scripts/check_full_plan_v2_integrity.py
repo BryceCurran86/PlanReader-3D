@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
 
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
+DEFAULT_SOURCE_DIR = REPO_ROOT / "documents" / "sources"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -45,7 +46,34 @@ def _collect_object_refs(value: Any) -> set[str]:
     return refs
 
 
-def validate_suite(root: Path = DEFAULT_ROOT) -> list[str]:
+def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_DIR) -> list[str]:
+    """A pinned source document that IS in the repository must have exactly the pinned SHA-256 and size.
+
+    Some pinned documents are not distributed with the repository; those are skipped (nothing to compare). A present file whose
+    bytes differ from the frozen manifest is a changed source and fails closed, so a source PDF cannot be replaced unnoticed.
+    """
+    failures: list[str] = []
+    for manifest in manifests:
+        for source in manifest.source_documents:
+            path = source_dir / source.name
+            if not path.is_file():
+                continue
+            data = path.read_bytes()
+            actual_sha = hashlib.sha256(data).hexdigest()
+            if actual_sha != source.sha256:
+                failures.append(
+                    f"{manifest.project_id}: source document {source.name} SHA mismatch "
+                    f"(manifest={source.sha256}, actual={actual_sha})"
+                )
+            if len(data) != source.size_bytes:
+                failures.append(
+                    f"{manifest.project_id}: source document {source.name} size mismatch "
+                    f"(manifest={source.size_bytes}, actual={len(data)})"
+                )
+    return failures
+
+
+def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_DIR) -> list[str]:
     failures: list[str] = []
 
     try:
@@ -118,6 +146,7 @@ def validate_suite(root: Path = DEFAULT_ROOT) -> list[str]:
                     f"records: {', '.join(missing)}"
                 )
 
+    failures.extend(source_document_failures(manifests, source_dir))
     return failures
 
 

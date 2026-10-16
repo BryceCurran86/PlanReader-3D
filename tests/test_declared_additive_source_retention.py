@@ -710,7 +710,7 @@ def test_assert_unchanged_or_declared_has_exactly_three_outcomes(monkeypatch):
         module.assert_unchanged_or_declared(base, broken)
 
 
-def test_strict_or_declared_context_runs_the_gates_own_assertions_first(monkeypatch):
+def test_strict_or_declared_never_waives_unrelated_integrity_assertions(monkeypatch):
     from tools import declared_additive_source_retention as module
 
     base, cand = event()
@@ -721,19 +721,28 @@ def test_strict_or_declared_context_runs_the_gates_own_assertions_first(monkeypa
     assert ran == ["strict block ran"]
 
     monkeypatch.setattr(module, "load_declarations", lambda path=None: declared())
-    with module.strict_or_declared(base, cand):  # failing assertion excused by a proven event
-        assert base["opening_bindings"] == cand["opening_bindings"]
-    with pytest.raises(ValueError):  # ...but a declared, violated event is never excused
-        broken = deepcopy(cand)
-        _damage("fragment_geometry", base, broken)
-        with module.strict_or_declared(base, broken):
-            assert base["opening_bindings"] == broken["opening_bindings"]
-
-    monkeypatch.setattr(module, "load_declarations", lambda path=None: ())
-    with pytest.raises(AssertionError):  # undeclared: the gate's own assertion decides
+    # The physical source event really is approved, but blanket approval
+    # must not mask an arbitrary invariant elsewhere in a CI workflow.
+    assert module.declared_event_approved(base, cand, explain=False)
+    with pytest.raises(AssertionError):
         with module.strict_or_declared(base, cand):
             assert base["opening_bindings"] == cand["opening_bindings"]
-    with pytest.raises(KeyError):  # non-assertion errors are never swallowed
+    with pytest.raises(AssertionError, match="independent canonical identity violation"):
+        with module.strict_or_declared(base, cand):
+            assert False, "independent canonical identity violation"
+
+    # Authorized comparison differences are resolved at one explicit point.
+    module.assert_unchanged_or_declared(base, cand)
+    broken = deepcopy(cand)
+    _damage("fragment_geometry", base, broken)
+    with pytest.raises(ValueError):
+        module.assert_unchanged_or_declared(base, broken)
+
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: ())
+    with pytest.raises(AssertionError):
+        with module.strict_or_declared(base, cand):
+            assert base["opening_bindings"] == cand["opening_bindings"]
+    with pytest.raises(KeyError):
         with module.strict_or_declared(base, cand):
             base["missing"]
 

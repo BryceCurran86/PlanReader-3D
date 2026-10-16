@@ -1,0 +1,103 @@
+name: DIAG GPT2 Original Page11 Native Ink vs W4 Mark-Local Face Subedges
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_p11_native_face_subedge_firstgates.py
+      - tests/test_gpt2_p11_native_face_subedge_firstgates.py
+      - .github/workflows/diag-gpt2-p11-mark-local-native-subedges.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-mark-local-native-subedges:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Synthetic native PDF ink, W2 loss, excluded-contact and owner negatives
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_p11_native_face_subedge_firstgates.py tests/test_gpt2_p11_ft3_mark_local_face_gates.py
+          ruff check --select F821,F823 tools/diag_gpt2_p11_native_face_subedge_firstgates.py tests/test_gpt2_p11_native_face_subedge_firstgates.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Exact original p11 source-owned plan W4 and all native face subedges
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-p11-native-local-face-subedges
+          git rev-parse HEAD > artifacts/gpt2-p11-native-local-face-subedges/head.txt
+          timeout 2300s python -u -m tools.diag_gpt2_p11_native_face_subedge_firstgates \
+            --pdf "$PDF" --sha "$SHA" --page 11 --code FT3 \
+            --output artifacts/gpt2-p11-native-local-face-subedges/original-local.json
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          p=Path('artifacts/gpt2-p11-native-local-face-subedges/original-local.json')
+          report=json.loads(p.read_text())
+          assert report['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert report['snapshot_preserved'] is True
+          assert len(report['scopes'])==1
+          s=report['scopes'][0]
+          assert s['producer_w4_wall_count']==890
+          assert s['producer_shadow_face_count']==1235
+          assert s['producer_native_text_mark_count']==6
+          assert s['shadow_mark_face_count']==5
+          assert s['original_authoritative_source_room_face_count']==0
+          assert s['physical_room_published'] is False
+          assert s['original_source_scope_complete_promoted'] is False
+          assert s['material_occurrence_published'] is False
+          assert s['metric_quantity_published'] is False
+          assert report['new_commercial_quantities']==[]
+          assert all(
+              not row['original_room_ring_authentication']
+              and not row['customer_quantity_published']
+              for row in s['mark_local_subedges']
+          )
+          rows=[e for row in s['mark_local_subedges']
+                for e in row['original_owned_face_subedges']]
+          assert rows
+          assert all(not row['structural_wall_role_granted'] and
+                     not row['source_local_room_authority_granted']
+                     for row in rows)
+          print('GPT2_NATIVE_SUBEDGE_CLASSES',Counter(
+              row['indexed_native_ink_status'] for row in rows
+          ))
+          print('GPT2_EDGE_CONTACTS',sum(
+              bool(row['original_excluded_primitive_subedge_contact_ids'])
+              for row in rows
+          ))
+          print('GPT2_TYPED_GRID_NEGATIVE_SUBEDGES',sum(
+              row['producer_full_wall_grid_opposition'] for row in rows
+          ))
+          print('GPT2_FULLY_GRID_OPPOSED_MARK_FACES',sum(
+              row['all_enclosing_w4_walls_typed_grid_opposed']
+              for row in s['mark_local_subedges']
+          ))
+          print('GPT2_W2_DROPOUTS',sum(
+              bool(row['original_native_source_ids_covering_subedge'])
+              and not row['surviving_w2_full_edge_source_primitive_ids']
+              for row in rows
+          ))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-p11-local-native-face-subedges
+          path: artifacts/gpt2-p11-native-local-face-subedges
+          retention-days: 14
