@@ -1,0 +1,1496 @@
+{
+ "main": "40d8e849",
+ "rows": [
+  {
+   "number": 1339,
+   "lane": "accuracy",
+   "title": "fix(openings): prove safe opening-local host scope from boundary-clean w",
+   "head": "aebb07f5",
+   "base": "1c4b1d1d",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "CONFLICTING",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_opening_host_binding_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 1481,
+   "lane": "gpt4",
+   "title": "fix(walls): carry raster opening face proof into equivalence",
+   "head": "39d7b894",
+   "base": "793ae7a3",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "CONFLICTING",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_physical_wall_candidate_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 1593,
+   "lane": "gptmax",
+   "title": "feat(openings): prove producer-owned raster candidate closure",
+   "head": "ea871b0b",
+   "base": "47e06a04",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_physical_opening_authority.py",
+    "pb_semantic_opening_enumeration_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 0,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 1744,
+   "lane": "gpt4",
+   "title": "fix(openings): bind raster schedules through sealed aperture",
+   "head": "e7544db4",
+   "base": "baa839c0",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "CONFLICTING",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_schedule_opening_instance_binding_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 1844,
+   "lane": "gptmax",
+   "title": "fix(walls): preserve G17-proven opening faces through motif filtering",
+   "head": "cebcebbb",
+   "base": "89a58ead",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_physical_wall_candidate_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 1864,
+   "lane": "gptmax",
+   "title": "fix(walls): protect faces from proven semantic opening representatives",
+   "head": "1621f7a7",
+   "base": "cebcebbb",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_physical_wall_candidate_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 1868,
+   "lane": "gptmax",
+   "title": "fix(openings): bind G17 two-face hosts by exact source lineage",
+   "head": "ff62649d",
+   "base": "1621f7a7",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_opening_host_binding_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 1953,
+   "lane": "fix",
+   "title": "Prove raster source edges and swing schedule ownership",
+   "head": "cda9b0a6",
+   "base": "12753903",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "CONFLICTING",
+   "merge_tree_clean": false,
+   "production": [
+    "pb_native_dimension_cap_evidence.py",
+    "pb_opening_dimension_authority.py",
+    "pb_opening_host_binding_authority.py",
+    "pb_opening_host_frame_authority.py",
+    "pb_physical_opening_authority.py",
+    "pb_physical_wall_candidate_authority.py",
+    "pb_raster_compact_wall_band_segments.py",
+    "pb_raster_source_wall_frame_projection.py",
+    "pb_raster_terminal_wall_band_segments.py",
+    "pb_raster_visible_segment_detector.py",
+    "pb_schedule_opening_instance_binding_authority.py",
+    "pb_source_observation_authority.py",
+    "pb_source_visibility_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 9,
+    "fail": 2,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": [
+    "prove",
+    "maryborough-grid-component"
+   ]
+  },
+  {
+   "number": 2511,
+   "lane": "fix",
+   "title": "fix(openings): source-visible solid stub prevents spanning adjacent open",
+   "head": "af58690c",
+   "base": "46be9c49",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_physical_opening_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 15,
+    "fail": 4,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": [
+    "original-lot16",
+    "source-proof",
+    "maryborough-core",
+    "maryborough-source-proof"
+   ]
+  },
+  {
+   "number": 2638,
+   "lane": "gpt2",
+   "title": "feat(gpt2): fail-closed source receipts for primitives excluded before W",
+   "head": "fb7c7a2e",
+   "base": "b5f5f5f4",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_filtered_native_primitive_receipts.py",
+    "pb_physical_wall_candidate_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 33,
+    "fail": 2,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": [
+    "source-proof",
+    "source-proof"
+   ]
+  },
+  {
+   "number": 2640,
+   "lane": "claude",
+   "title": "test(tools): independent candidate-id snapshot remap proof (evidence too",
+   "head": "2f7004bc",
+   "base": "fb5f249e",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2649,
+   "lane": "gpt2",
+   "title": "diag(gpt2): determine why an original external W4 boundary lacks a secon",
+   "head": "ab69dc1c",
+   "base": "f1ce6adc",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "CONFLICTING",
+   "merge_tree_clean": false,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 6,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2655,
+   "lane": "claude",
+   "title": "docs(walls): 3Laurel p3 wall-universe architecture report v1 (report onl",
+   "head": "1eddcf48",
+   "base": "5b2f464e",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": true,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2680,
+   "lane": "claude",
+   "title": "fix(walls): retain colliding candidate canonical walls locally instead o",
+   "head": "a4c3116c",
+   "base": "057b05dd",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_live_canonical_wall_composition.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 13,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2684,
+   "lane": "gptmax",
+   "title": "fix-prep(gptmax): verify real original Lot16 bedroom perimeter source be",
+   "head": "1aadd31c",
+   "base": "294f8530",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2692,
+   "lane": "claude",
+   "title": "diag(ci): bounded complete-handoff measurement for 3Laurel and Q5446 (me",
+   "head": "d266ca06",
+   "base": "5b2f464e",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2693,
+   "lane": "claude",
+   "title": "perf(source): share unchanged immutable records across derived snapshot ",
+   "head": "5ee56c40",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_source_observation_authority.py",
+    "pb_source_visibility_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 36,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2694,
+   "lane": "claude",
+   "title": "perf(source): drop back-to-back duplicate whole-source reads and the qua",
+   "head": "45631368",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_physical_opening_authority.py",
+    "pb_source_visibility_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 45,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2695,
+   "lane": "claude",
+   "title": "perf(handoff): pause the cyclic garbage collector for the duration of on",
+   "head": "b5a43303",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "tools/run_source_closed_project_handoff.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 11,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2705,
+   "lane": "claude",
+   "title": "perf(openings): resolve only the opening's own page of text words when b",
+   "head": "318a7e1d",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_opening_label_semantic_authority.py",
+    "pb_pdf_text_integrity_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 11,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2706,
+   "lane": "claude",
+   "title": "perf(source): field-for-field defensive copies instead of dataclasses.re",
+   "head": "f4a679c6",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_source_observation_authority.py",
+    "pb_source_visibility_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 36,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2723,
+   "lane": "claude",
+   "title": "diag(claude): FT3 page-11 -> page-7 measured-floor correspondence from o",
+   "head": "2b2af634",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 7,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2726,
+   "lane": "gpt2",
+   "title": "feat(gpt2): feed authenticated source plan view into W4 in isolated shad",
+   "head": "975c0066",
+   "base": "7a50a83b",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_physical_wall_candidate_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 42,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2731,
+   "lane": "gpt2",
+   "title": "diag(gpt2): first original source room-face authority after p11 plan W4 ",
+   "head": "d0488282",
+   "base": "975c0066",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2732,
+   "lane": "gpt1",
+   "title": "fix(gpt1 Q02/Q07): reject forged canonical ceiling source SHA before FIR",
+   "head": "01092b8b",
+   "base": "b48c3ad6",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_live_ceiling_area_quantity_publication.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2735,
+   "lane": "gpt1",
+   "title": "fix(gpt1 Q01/Q07): reject copied non-SHA canonical floor and room metric",
+   "head": "11f84350",
+   "base": "b48c3ad6",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_live_floor_area_quantity_publication.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2738,
+   "lane": "gpt1",
+   "title": "feat(gpt1 Q01): same-source F07 floor plan into real scale scope, never ",
+   "head": "3daefdde",
+   "base": "b48c3ad6",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_live_physical_net_wall_integration.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 14,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2743,
+   "lane": "gpt2",
+   "title": "docs(gpt2): review original-source room-face snap-only overlap first fai",
+   "head": "cec7c3d1",
+   "base": "d0488282",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": true,
+   "checks": {
+    "pass": 0,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2746,
+   "lane": "gpt2",
+   "title": "diag(gpt2): classify surviving W2 lineage spans vs W4 snapped face edges",
+   "head": "544db35f",
+   "base": "d0488282",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2747,
+   "lane": "gptmax",
+   "title": "feat(gptmax): authenticate original contained terminal paint without pro",
+   "head": "7758e0c1",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_terminal_flank_source_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 11,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2748,
+   "lane": "gptmax",
+   "title": "feat(gptmax): retain source-owned infill endpoint opposition without who",
+   "head": "815aaa72",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_infill_endpoint_opposition_shadow.py",
+    "pb_g17_plan_wall_scope_shadow.py",
+    "pb_g17_source_infill_opposition_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 19,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2749,
+   "lane": "gpt2",
+   "title": "diag(gpt2): independently read original PDF ink for page11 W2/W4 edge co",
+   "head": "c8f7cd9c",
+   "base": "544db35f",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2750,
+   "lane": "gpt2",
+   "title": "diag(gpt2): classify original FT3 mark-local boundary first failures acr",
+   "head": "bb934f6e",
+   "base": "d0488282",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2751,
+   "lane": "gptmax",
+   "title": "diag(gptmax): preserve original source-interval coverage and competing W",
+   "head": "ca6b3eae",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_source_interval_coverage_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2752,
+   "lane": "gpt2",
+   "title": "diag(gpt2): original indexed PDF ink for each FT3 mark-local W4 face sub",
+   "head": "ebf4884d",
+   "base": "bb934f6e",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2753,
+   "lane": "gpt3",
+   "title": "fix(gpt3): reject nonstandard signed JSON before original source reconci",
+   "head": "2b8d4cff",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 10,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2754,
+   "lane": "gptmax",
+   "title": "diag(gptmax): audit original source-owned plan tags without binding",
+   "head": "f564fff0",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_original_plan_tag_census_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 6,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2755,
+   "lane": "gptmax",
+   "title": "diag(gptmax): original source context for nine unresolved raster candida",
+   "head": "5fc2bddc",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 6,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2756,
+   "lane": "gpt2",
+   "title": "diag(gpt2): test original W4 identity stability with native PDF A-B-A re",
+   "head": "10ec777c",
+   "base": "ebf4884d",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2757,
+   "lane": "gpt2",
+   "title": "diag(gpt2): trace original native W2 to W4 centerline to FT3 face corner",
+   "head": "6a446204",
+   "base": "ebf4884d",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2758,
+   "lane": "gptmax",
+   "title": "diag(gptmax): keep raw G17 gap candidates separated by authenticated flo",
+   "head": "5a815fd5",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_raw_floor_plan_scope_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2759,
+   "lane": "gpt2",
+   "title": "diag(gpt2): compare original W4 wall identities across isolated Python h",
+   "head": "27722e42",
+   "base": "10ec777c",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 2,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2760,
+   "lane": "gptmax",
+   "title": "diag(gptmax): distinguish W3 short split fragments from original long so",
+   "head": "42e063e9",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_w3_original_parent_span_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2761,
+   "lane": "gpt1",
+   "title": "diag(gpt1 Q01): original producer-owned room area-text first-failure cen",
+   "head": "4fc3b367",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2762,
+   "lane": "gpt3",
+   "title": "fix(gpt3): fail closed on malformed embedded customer notes provenance",
+   "head": "e4e78280",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_customer_output_verification.py",
+    "pb_strict_evidence_json.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 11,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2763,
+   "lane": "gpt2",
+   "title": "diag(gpt2): audit original F07 sibling-view fingerprints ahead of W4 ide",
+   "head": "93ef5c7d",
+   "base": "27722e42",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2764,
+   "lane": "gpt2",
+   "title": "diag(gpt2): original W2 snapped node and W3 junction ancestry of unsuppo",
+   "head": "a9b338aa",
+   "base": "6a446204",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2765,
+   "lane": "gptmax",
+   "title": "diag(gptmax): prove original endpoint ink on unresolved raw G17 source m",
+   "head": "9652f1ae",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_raw_endpoint_ink_shadow.py",
+    "pb_g17_raw_floor_plan_scope_shadow.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2766,
+   "lane": "engineering",
+   "title": "diag(gptmax): reissue original producer opening scopes for GPT3 lineage",
+   "head": "74d0ddc8",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2767,
+   "lane": "gpt2",
+   "title": "diag(gpt2): preserve original F07 sibling source payload behind differin",
+   "head": "569dfa92",
+   "base": "a9b338aa",
+   "base_is_main": false,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2768,
+   "lane": "gpt2",
+   "title": "diag(gpt2): original source-native ink universe for FREEZER crossing W4 ",
+   "head": "8144d98e",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 6,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2769,
+   "lane": "claude",
+   "title": "fix(customer-notes): import-safe strict JSON reader, stacked on #2762 (f",
+   "head": "bae21e77",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_customer_output_verification.py",
+    "pb_strict_evidence_json.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 10,
+    "fail": 1,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": [
+    "original-source"
+   ]
+  },
+  {
+   "number": 2770,
+   "lane": "engineering",
+   "title": "Preserve original W2 source spans and exact incidence in shadow",
+   "head": "97d0e3bb",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_plan_wall_scope_shadow.py",
+    "pb_wall_room_topology_stage_a.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 27,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2771,
+   "lane": "engineering",
+   "title": "Partition exact overlapping source paint before shadow W3 junctions",
+   "head": "7fa63407",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_g17_plan_wall_scope_shadow.py",
+    "pb_wall_room_topology_collinear_partition_shadow.py",
+    "pb_wall_room_topology_stage_a.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 27,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2772,
+   "lane": "gpt2",
+   "title": "docs(gpt2): original PWD/Airlock/Laundry/Sales source-owned area first g",
+   "head": "ed97aeb7",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": false,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": true,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2773,
+   "lane": "engineering",
+   "title": "Shadow compact bifold area hypothesis; semantic promotion blocked",
+   "head": "dc6dc13c",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_live_physical_opening_void_composition.py",
+    "pb_opening_label_dimension_authority.py",
+    "pb_opening_label_semantic_authority.py",
+    "pb_source_plan_opening_callout.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 16,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2774,
+   "lane": "gpt2",
+   "title": "docs(gpt2): original Maryborough RCP source viewport first gate and ceil",
+   "head": "4da9747e",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": true,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2775,
+   "lane": "claude",
+   "title": "diag(ci): profile the rebased resource stack on complete 3Laurel and Q54",
+   "head": "8833851f",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 7,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2776,
+   "lane": "gptmax",
+   "title": "Shadow original paired wall faces; STACKER host and strict retention blo",
+   "head": "08e4fc7f",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_physical_opening_authority.py",
+    "pb_source_visibility_authority.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 48,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2777,
+   "lane": "gpt2",
+   "title": "diag(gpt2): source-indexed FT3 mark cycle census without structural prom",
+   "head": "3e4cf1b3",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 4,
+    "fail": 0,
+    "pending": 2,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2778,
+   "lane": "integrate",
+   "title": "test(gpt3): fail closed on original opening/frame receipt disappearance",
+   "head": "47343e58",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 7,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2779,
+   "lane": "gptmax",
+   "title": "Audit original BIFOLD role sources and retain semantic ABSTAIN",
+   "head": "9dc68b8f",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 8,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2781,
+   "lane": "claude",
+   "title": "ci(gate): signed-output replays trigger on the whole production import c",
+   "head": "3167da60",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 11,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2782,
+   "lane": "gptmax",
+   "title": "Add verified original Lot16 structural source bytes; preserve quantity a",
+   "head": "d6861cf0",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 10,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2783,
+   "lane": "gpt1",
+   "title": "diag(gpt1): read-only authentic room figured-dimension witness census",
+   "head": "49b3d660",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 3,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2784,
+   "lane": "claude",
+   "title": "perf(w2): prune lineage-attach containment candidates; output-identical ",
+   "head": "6806a6a8",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [
+    "pb_wall_room_topology_primitive_lineage.py"
+   ],
+   "docs_only": false,
+   "checks": {
+    "pass": 14,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2785,
+   "lane": "claude",
+   "title": "docs(perf): architecture report - derived-snapshot republish (24% of Q54",
+   "head": "b190ee5d",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": true,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 2
+   },
+   "failing": []
+  },
+  {
+   "number": 2786,
+   "lane": "gptmax",
+   "title": "diag(gptmax): record original structural referenced revision without wal",
+   "head": "f930ea40",
+   "base": "d6861cf0",
+   "base_is_main": false,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 5,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  },
+  {
+   "number": 2787,
+   "lane": "gpt3",
+   "title": "ci(gpt3): full signed-output import gate with fail-closed PR trigger",
+   "head": "fdaa6f48",
+   "base": "40d8e849",
+   "base_is_main": true,
+   "draft": true,
+   "github_mergeable": "MERGEABLE",
+   "merge_tree_clean": true,
+   "production": [],
+   "docs_only": false,
+   "checks": {
+    "pass": 0,
+    "fail": 0,
+    "pending": 0,
+    "skipping": 0
+   },
+   "failing": []
+  }
+ ]
+}
