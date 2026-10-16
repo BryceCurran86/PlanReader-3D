@@ -24,7 +24,9 @@ def _traces(claim):
     )
 
 
-def _two_source_owned_ceiling_quantities(*, same_original_mark=False):
+def _two_source_owned_ceiling_quantities(
+    *, same_original_mark=False, same_occurrence=False,
+):
     first = _quantity()
     second_mark = "occ-evidence" if same_original_mark else "second-source-mark"
     second = replace(
@@ -48,7 +50,9 @@ def _two_source_owned_ceiling_quantities(*, same_original_mark=False):
             "upstream_room_area_quantity_id": "room-area-qty-2",
             "room_area_quantity_id": "room-area-qty-2",
             "figured_dimension_ids": ["second-dim-h", "second-dim-v"],
-            "finish_occurrence_record_id": "second-occurrence",
+            "finish_occurrence_record_id": (
+                "occ-grid" if same_occurrence else "second-occurrence"
+            ),
             "finish_occurrence_evidence_id": second_mark,
         },
     )
@@ -165,3 +169,30 @@ def test_source_receipt_verification_is_idempotent_and_does_not_mutate_evidence(
     first = _traces(claim)
     assert first == _traces(claim)
     assert claim.ceiling_lining_quantity_evidence == original
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_producer_occurrence_id_reused_for_different_marks_cannot_seal(reverse):
+    claim = _two_source_owned_ceiling_quantities(same_occurrence=True)
+    if reverse:
+        claim = replace(
+            claim,
+            ceiling_lining_quantity_evidence=tuple(
+                reversed(claim.ceiling_lining_quantity_evidence)
+            ),
+        )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="original RCP material mark has competing ceilings",
+    ):
+        _traces(claim)
+
+
+def test_other_ceiling_semantic_quantity_identity_cannot_borrow_original_mark():
+    base = _quantity()
+    copied = replace(base, semantic_key="ceiling_lining:other-ceiling:GRID:ceiling_grid")
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="material occurrence source receipt mismatch",
+    ):
+        _traces(_claim(copied))
