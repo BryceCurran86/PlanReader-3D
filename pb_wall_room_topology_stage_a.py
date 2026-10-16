@@ -219,6 +219,8 @@ def _snap_geometry_indexed(
     *,
     include_endpoint_assignments: bool = False,
     exact_endpoint_index_shadow: bool = False,
+    immutable_exact_endpoints_shadow: bool = False,
+    complete_link_snap_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
 
@@ -226,10 +228,20 @@ def _snap_geometry_indexed(
     centroid is within tolerance_pt. The same lowest-distance / lowest-existing
     node index wins because candidates are visited in ascending node id and the
     historical strict distance comparison is retained. Node centroids still
-    move by the same running mean after every accepted endpoint.
+    move by the same running mean after every accepted endpoint by default.
+    The separately opt-in immutable exact endpoint shadow retains each matched
+    zero-distance source coordinate instead of re-averaging identical floats.
     """
     if type(exact_endpoint_index_shadow) is not bool:
         raise ValueError("exact endpoint index shadow must be explicit boolean")
+    if type(immutable_exact_endpoints_shadow) is not bool:
+        raise ValueError("immutable exact endpoint shadow must be explicit boolean")
+    if immutable_exact_endpoints_shadow and not (exact_endpoint_index_shadow and tolerance_pt == 0):
+        raise ValueError("immutable exact endpoint shadow requires indexed zero tolerance")
+    if type(complete_link_snap_shadow) is not bool:
+        raise ValueError("complete link snap shadow must be explicit boolean")
+    if complete_link_snap_shadow and (exact_endpoint_index_shadow or tolerance_pt <= 0):
+        raise ValueError("complete link snap shadow requires positive tolerance")
     if exact_endpoint_index_shadow and tolerance_pt != 0:
         raise ValueError("exact endpoint index shadow requires zero tolerance")
     if tolerance_pt <= 0 and not exact_endpoint_index_shadow:
@@ -237,12 +249,19 @@ def _snap_geometry_indexed(
     if exact_endpoint_index_shadow:
         if any(not math.isfinite(float(seg[key]))
                for seg in segments for key in ("x1", "y1", "x2", "y2")):
+            if immutable_exact_endpoints_shadow:
+                raise ValueError("immutable exact endpoint source must be finite")
             return snap_geometry(segments, tolerance_pt=tolerance_pt)
         # Legacy zero-mode never exposed these optional audit assignments.
         include_endpoint_assignments = False
 
     nodes: List[Dict[str, Any]] = []
     endpoint_assignments: Dict[str, Tuple[int, int]] = {}
+    # Shadow-only complete-link membership. Every native split endpoint in a
+    # candidate node must be within the original tolerance of the NEW point,
+    # rather than only the continually drifting running centroid.
+    original_endpoint_samples: List[List[Tuple[float, float]]] = []
+    rejected_running_centroid_joins = 0
     # A bin is a lookup aid, never a geometric join tolerance. Zero-mode still
     # uses the unchanged exact distance predicate and running-centroid update.
     cell_size = 1.0 if exact_endpoint_index_shadow else float(tolerance_pt)
@@ -294,10 +313,34 @@ def _snap_geometry_indexed(
             node = nodes[idx]
             d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
             if d <= tolerance_pt and d < best_d:
+                if complete_link_snap_shadow and any(
+                    math.hypot(previous[0] - pt[0], previous[1] - pt[1])
+                    > tolerance_pt
+                    for previous in original_endpoint_samples[idx]
+                ):
+                    continue
                 best, best_d = idx, d
 
+        if complete_link_snap_shadow:
+            nonlocal rejected_running_centroid_joins
+            for idx in sorted(candidate_indexes):
+                node = nodes[idx]
+                d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
+                if d <= tolerance_pt and any(
+                    math.hypot(old[0] - pt[0], old[1] - pt[1]) > tolerance_pt
+                    for old in original_endpoint_samples[idx]
+                ):
+                    rejected_running_centroid_joins += 1
         if best >= 0:
             node = nodes[best]
+            if immutable_exact_endpoints_shadow:
+                # Membership already required d==0. Averaging identical source
+                # floats can move a decimal endpoint by an ULP and disconnect
+                # its next identical occurrence. Keep the exact source value.
+                node["samples"] += 1
+                return best
+            if complete_link_snap_shadow:
+                original_endpoint_samples[best].append(pt)
             old_cell = cell_for(node["x"], node["y"])
             count = node["samples"] + 1
             node["x"] = (node["x"] * node["samples"] + pt[0]) / count
@@ -309,6 +352,8 @@ def _snap_geometry_indexed(
         nodes.append(
             {"id": len(nodes), "x": pt[0], "y": pt[1], "samples": 1}
         )
+        if complete_link_snap_shadow:
+            original_endpoint_samples.append([pt])
         add_to_grid(len(nodes) - 1)
         return len(nodes) - 1
 
@@ -347,12 +392,38 @@ def _snap_geometry_indexed(
     result = {"nodes": nodes, "edges": edges, "adjacency": adjacency}
     if include_endpoint_assignments:
         result["endpoint_snap_assignments"] = endpoint_assignments
+    if complete_link_snap_shadow:
+        result["complete_link_snap_shadow"] = {
+            "enabled": True,
+            "running_centroid_eligible_joins_rejected": rejected_running_centroid_joins,
+            "retained_original_endpoint_sample_count": sum(
+                len(samples) for samples in original_endpoint_samples
+            ),
+            "source_wall_role_authenticated": False,
+            "diagnostic_only": True,
+        }
     return result
+
+
+def _has_opposing_endpoint_rays(node, far1, far2) -> bool:
+    """A straight continuation passes through the shared node, not back over it.
+
+    Same-side overlapping edges cannot be replaced by their far-end chord:
+    that would erase their common source interval. No extra join tolerance.
+    """
+    dx1, dy1 = far1["x"] - node["x"], far1["y"] - node["y"]
+    dx2, dy2 = far2["x"] - node["x"], far2["y"] - node["y"]
+    l1, l2 = math.hypot(dx1, dy1), math.hypot(dx2, dy2)
+    if not (math.isfinite(l1) and math.isfinite(l2) and l1 > 0 and l2 > 0):
+        return False
+    return (dx1 / l1) * (dx2 / l2) + (dy1 / l1) * (dy2 / l2) < 0
 
 
 def merge_collinear_degree_two_nodes(
     graph: Dict[str, Any],
     angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+    *,
+    preserve_overlapping_spans_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Collapse a degree-two node whose two incident edges are collinear.
 
@@ -376,6 +447,8 @@ def merge_collinear_degree_two_nodes(
     have their ``degree`` set to ``0`` and gain a ``"merged_into_edge"`` key
     naming the id of the edge that replaced their two incident edges.
     """
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
     nodes = [dict(n) for n in graph["nodes"]]
     edges = []
     for edge in graph["edges"]:
@@ -426,6 +499,8 @@ def merge_collinear_degree_two_nodes(
                 continue
 
             n_far1, n_far2 = nodes[far1], nodes[far2]
+            if preserve_overlapping_spans_shadow and not _has_opposing_endpoint_rays(node, n_far1, n_far2):
+                continue
             merged_id = f"merged_{e1.get('id', e1_idx)}_{e2.get('id', e2_idx)}"
             merged_edge = {
                 **e1,
@@ -491,8 +566,12 @@ def merge_collinear_degree_two_nodes(
 def _merge_collinear_degree_two_nodes_indexed(
     graph: Dict[str, Any],
     angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+    *,
+    preserve_overlapping_spans_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Exact active-incidence equivalent of merge_collinear_degree_two_nodes."""
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
     nodes = [dict(n) for n in graph["nodes"]]
     edges = []
     for edge in graph["edges"]:
@@ -552,6 +631,8 @@ def _merge_collinear_degree_two_nodes_indexed(
             continue
 
         n_far1, n_far2 = nodes[far1], nodes[far2]
+        if preserve_overlapping_spans_shadow and not _has_opposing_endpoint_rays(node, n_far1, n_far2):
+            continue
         merged_id = f"merged_{e1.get('id', e1_idx)}_{e2.get('id', e2_idx)}"
         merged_edge = {
             **e1,
@@ -634,6 +715,10 @@ def build_wall_graph_for_viewport(
     collinear_angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
     exact_endpoint_index_shadow: bool = False,
     exact_split_parent_lineage_shadow: bool = False,
+    preserve_overlapping_spans_shadow: bool = False,
+    immutable_exact_endpoints_shadow: bool = False,
+    partition_exact_collinear_overlaps_shadow: bool = False,
+    complete_link_snap_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -649,13 +734,44 @@ def build_wall_graph_for_viewport(
     ``exact_split_parent_lineage_shadow`` is explicit shadow-only provenance:
     retain the actual splitter emitter alongside existing plural containment
     parents. It does not alter topology or authorize structural wall roles.
+
+    Two additional explicit source-only policies preserve same-side overlap
+    intervals and immutable exactly equal vertices. Both are off by default;
+    neither supplies structural wall, host, measurement or quantity authority.
     """
+    if type(partition_exact_collinear_overlaps_shadow) is not bool:
+        raise ValueError("exact collinear partition shadow must be explicit boolean")
+    if partition_exact_collinear_overlaps_shadow and not (
+        exact_endpoint_index_shadow and exact_split_parent_lineage_shadow
+        and preserve_overlapping_spans_shadow and immutable_exact_endpoints_shadow
+        and gap_snap_tolerance_pt == 0
+    ):
+        raise ValueError("exact collinear partition shadow requires all exact source-incidence policies")
+    if type(immutable_exact_endpoints_shadow) is not bool:
+        raise ValueError("immutable exact endpoint shadow must be explicit boolean")
+    if immutable_exact_endpoints_shadow and not (exact_endpoint_index_shadow and gap_snap_tolerance_pt == 0):
+        raise ValueError("immutable exact endpoint shadow requires indexed zero tolerance")
     if type(exact_endpoint_index_shadow) is not bool:
         raise ValueError("exact endpoint index shadow must be explicit boolean")
     if exact_endpoint_index_shadow and gap_snap_tolerance_pt != 0:
         raise ValueError("exact endpoint index shadow requires zero tolerance")
     if type(exact_split_parent_lineage_shadow) is not bool:
         raise ValueError("exact split parent lineage shadow must be explicit boolean")
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
+    if type(complete_link_snap_shadow) is not bool:
+        raise ValueError("complete link snap shadow must be explicit boolean")
+    if complete_link_snap_shadow and (
+        exact_endpoint_index_shadow
+        or immutable_exact_endpoints_shadow
+        or preserve_overlapping_spans_shadow
+        or partition_exact_collinear_overlaps_shadow
+    ):
+        # Complete-link replay answers "which original endpoints may share one
+        # positive-tolerance node"; the exact-incidence policies answer the
+        # opposite question for zero tolerance. They act on the same W2 source
+        # scope and have never been exercised together, so they stay exclusive.
+        raise ValueError("complete link snap shadow is exclusive with the exact source-incidence shadows")
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
     parent_indexes: List[int] | None = [] if exact_split_parent_lineage_shadow else None
@@ -666,22 +782,32 @@ def build_wall_graph_for_viewport(
         split_pairs, source_segments=structural_segments,
         source_parent_indexes=parent_indexes,
     )
+    if partition_exact_collinear_overlaps_shadow:
+        from pb_wall_room_topology_collinear_partition_shadow import partition_exact_collinear_fragments
+        split_segment_dicts = partition_exact_collinear_fragments(split_segment_dicts)
     audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
         tolerance_pt=gap_snap_tolerance_pt,
         include_endpoint_assignments=audit_short_source,
         **({"exact_endpoint_index_shadow": True} if exact_endpoint_index_shadow else {}),
+        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
+        **({"complete_link_snap_shadow": True} if complete_link_snap_shadow else {}),
     )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
     )
     merged_graph = _merge_collinear_degree_two_nodes_indexed(
-        snapped_graph, angle_tolerance_deg=collinear_angle_tolerance_deg
+        snapped_graph, angle_tolerance_deg=collinear_angle_tolerance_deg,
+        **({"preserve_overlapping_spans_shadow": True} if preserve_overlapping_spans_shadow else {}),
     )
     merged_graph["excluded_segments"] = excluded_segments
     merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments
+    if complete_link_snap_shadow:
+        merged_graph["complete_link_snap_shadow"] = (
+            snapped_graph["complete_link_snap_shadow"]
+        )
     # Explicit opt-in diagnostic only. This is an observational source
     # provenance ledger; it never changes the wall graph or creates hosts.
     if audit_short_source:
