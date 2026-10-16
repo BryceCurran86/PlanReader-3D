@@ -1,6 +1,8 @@
 name: GPT2 FT3 Original Cross Sheet Native Wall Pairs
 
 on:
+  push:
+    branches: [main]
   pull_request:
     paths:
       - tools/diag_gpt2_ft3_cross_sheet_native_wall_pairs.py
@@ -64,9 +66,35 @@ jobs:
           assert x["new_signed_customer_rows"]==0
           assert not x["frozen_v2_expected_or_truth_used"]
           assert x["all_source_measured_room_side_reports"]
+          assert x["all_ranked_registration_hypotheses"]
+          assert not x["hypothesis_search_exhaustive"]
+          assert not x["physical_registration_elected"]
+          # A ranked source-wall vote candidate is not physical room identity.
+          assert len(x["all_ranked_registration_hypotheses"]) <= 128
+          for hypothesis in x["all_ranked_registration_hypotheses"]:
+            assert hypothesis["candidate_not_authenticated_registration"]
+            assert hypothesis["orientation"] in (
+                "identity","rot90","rot180","rot270",
+                "mirror_x","mirror_y","transpose","anti_transpose"
+            )
+            assert hypothesis["scale"] > 0
           for room in x["all_source_measured_room_side_reports"]:
             assert not room["physical_floor_correspondence_granted"]
             assert not room["material_occurrence_granted"]
+            alternatives = room.get("original_source_registration_competing_side_reports")
+            assert len(alternatives) == len(x["all_ranked_registration_hypotheses"])
+            for hypothesis in alternatives:
+              assert not hypothesis["candidate_physical_registration_elected"]
+              assert not hypothesis["cross_page_physical_room_equivalence_granted"]
+              assert set(hypothesis["source_original_wall_side_provenance"]) == {
+                "x0","x1","y0","y1"
+              }
+              for side_gate in hypothesis["source_original_wall_side_provenance"].values():
+                assert not side_gate["physical_wall_or_room_equivalence_granted"]
+                assert not side_gate["new_metric_or_material_quantity"]
+                assert "cross_page_physical_structural_wall_equivalence_unproven" in (
+                    side_gate["source_role_first_failure_reasons"]
+                )
             for side,gate in room.get("source_original_wall_side_provenance",{}).items():
               assert side in ("x0","x1","y0","y1")
               assert not gate["physical_wall_or_room_equivalence_granted"]
