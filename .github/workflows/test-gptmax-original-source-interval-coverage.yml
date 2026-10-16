@@ -1,0 +1,59 @@
+name: GPT MAX Original Source Interval Conservation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_source_interval_coverage_shadow.py"
+      - "tools/diag_gptmax_original_source_interval_coverage.py"
+      - ".github/workflows/test-gptmax-original-source-interval-coverage.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  original-source-intervals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original SHA, authentic production receipts and source-only interval proof
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --plan-wall-scope --output artifacts/actual-source-plan-wall-scope.json
+          PYTHONPATH=. python -u tools/diag_gptmax_original_source_interval_coverage.py --original-report artifacts/actual-source-plan-wall-scope.json --expected-source-sha "$SHA" --output artifacts/actual-original-source-intervals.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('artifacts/actual-source-plan-wall-scope.json').read_text())
+          b=json.loads(Path('artifacts/actual-original-source-intervals.json').read_text())
+          assert a['all_original_sealed_customer_rows_unchanged']
+          assert a['all_original_wall_host_frame_area_receipts_unchanged']
+          assert a['published_source_snapshot_unchanged']
+          assert b['unhosted_openings_examined']==len(a['opening_local_source_shadows'])
+          assert b['source_sha256']==a['source_sha256'] and b['snapshot_id']==a['snapshot_id']
+          assert b['original_source_reauthentication_performed'] is False
+          assert b['new_host_granted'] is False and b['new_metric_quantity_granted'] is False
+          assert b['original_opening_universe_complete_proven'] is False
+          assert len(a['original_sealed_customer_receipts']['customer_rows'])==8
+          assert a['original_sealed_customer_receipts']['customer_verification']['valid_quantity_count']==8
+          assert all(not row['host_granted'] and not row['metric_quantity_granted'] for row in b['openings'])
+          assert any(f['original_full_paint_negative_observations'] for row in b['openings'] for f in row['flanks'])
+          print(json.dumps({'source_SHA':b['source_sha256'],'unhosted_cases':b['unhosted_openings_examined'],'new_host':False,'customer_retention':True}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-source-interval-census
+          path: |
+            artifacts/actual-original-source-intervals.json
+          retention-days: 21

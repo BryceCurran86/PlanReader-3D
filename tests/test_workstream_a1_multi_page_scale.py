@@ -152,6 +152,8 @@ class WorkstreamA1ScaleTests(unittest.TestCase):
         ratio2 = extract_scale_ratio_from_text("DRAWING SCALE 1:50")
         self.assertEqual(ratio1, 100)
         self.assertEqual(ratio2, 50)
+        self.assertIsNone(extract_scale_ratio_from_text("SCALE 1:100 AND 1:50"))
+        self.assertEqual(extract_scale_ratio_from_text("SCALE 1:100 AND 1:100"), 100)
 
         cur = self.conn.cursor()
         cur.execute("INSERT INTO pages VALUES (11, 1, 'A-102', 'Plan', 2, 0.0, '1:50', 1, 'A-102.pdf')")

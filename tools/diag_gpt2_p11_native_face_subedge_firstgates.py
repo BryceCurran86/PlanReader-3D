@@ -31,6 +31,46 @@ from tools.diag_gpt2_native_w2_ink_source_role import read_native_ink_receipt
 from tools.diag_gpt2_p11_ft3_mark_local_face_gates import audit_mark_local_faces
 
 
+def _first_w2_w4_face_geometry_gate(*, atom, w4_centerline, w2_fragments,
+                                     native_covering_ids, native_unavailable):
+    """Read-only exact source geometry comparison; no wall or room election."""
+    w4_spans = any(
+        _edge_contains_edge(_edge(a, b), atom)
+        for a, b in zip(w4_centerline, w4_centerline[1:])
+        if a != b
+    )
+    w2_spans = any(
+        _edge_contains_edge(
+            _edge(f.geometry[:2], f.geometry[2:]), atom
+        ) for f in w2_fragments
+    )
+    native = None if native_unavailable else bool(native_covering_ids)
+    if native is None:
+        first = "original_indexed_source_unavailable"
+    elif native and w2_spans and w4_spans:
+        first = "original_native_w2_w4_geometry_consistent_candidate_only"
+    elif native and not w2_spans:
+        first = "surviving_w2_fragment_missing_native_span"
+    elif w2_spans and not w4_spans:
+        first = "w4_candidate_path_not_covering_surviving_w2_span"
+    elif w4_spans and not w2_spans and not native:
+        first = "w4_candidate_path_has_no_surviving_w2_or_indexed_native_span"
+    elif not w4_spans and not w2_spans and not native:
+        first = "planar_face_subedge_not_in_w4_w2_native_path"
+    elif w2_spans and not native:
+        first = "surviving_w2_span_has_no_indexed_original_native_support"
+    else:
+        first = "source_w4_planar_relation_conflicting_or_unresolved"
+    return {
+        "producer_w4_centerline_spans_face_subedge": w4_spans,
+        "surviving_w2_geometry_spans_face_subedge": w2_spans,
+        "source_indexed_native_ink_spans_face_subedge": native,
+        "first_geometry_path_disagreement": first,
+        "wall_role_unchanged": True,
+        "room_authority_granted": False,
+    }
+
+
 def inspect_local_edges(*, wall, witnesses, marks, drawings):
     """Compare EVERY original wall-face subedge with its candidate's native IDs."""
     if getattr(wall.boundary_evaluation, "status", None) != "evaluated":
@@ -125,7 +165,15 @@ def inspect_local_edges(*, wall, witnesses, marks, drawings):
                     all(v[0] <= p[0] <= v[2] and v[1] <= p[1] <= v[3]
                         for p in atom)
                 )
+                geometry_gate = _first_w2_w4_face_geometry_gate(
+                    atom=atom,
+                    w4_centerline=rec.wall_candidate.centerline_pts,
+                    w2_fragments=fragments,
+                    native_covering_ids=positives,
+                    native_unavailable=unknown,
+                )
                 inspected.append({
+                    "first_original_w2_w4_planar_geometry_gate": geometry_gate,
                     "source_w4_wall_id": wid,
                     "shadow_subedge_pdf_pts": [list(p) for p in atom],
                     "referenced_original_source_primitive_ids": referenced,

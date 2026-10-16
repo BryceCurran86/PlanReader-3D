@@ -1,0 +1,90 @@
+name: TEST GPT3 Original Opening Customer Source Inventory
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_live_opening_customer_projection.py"
+      - "tests/test_live_opening_customer_projection.py"
+      - ".github/workflows/gpt3-original-opening-customer-inventory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Customer inventory original typed quantity negatives and positive
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_live_opening_customer_projection.py tests/test_gpt1_opening_customer_firm_source_filter.py tests/test_gpt3_customer_workspace_identity.py
+          ruff check --select F821,F823 pb_live_opening_customer_projection.py tests/test_live_opening_customer_projection.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original Lot16 eight signed opening-area and commercial parity
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt3-opening-customer-inventory
+          git rev-parse HEAD > artifacts/gpt3-opening-customer-inventory/producer_head_sha.txt
+          python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
+            --pdf "$PDF" \
+            --output-dir artifacts/gpt3-opening-customer-inventory/production
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          from pb_customer_output_verification import verify_sealed_customer_output
+          root=Path("artifacts/gpt3-opening-customer-inventory/production")
+          sealed=sealed_source_closed_run_from_dict(json.loads(
+              (root/"source_sealed_run.json").read_text()
+          ))
+          rows=json.loads((root/"verified_customer_rows.json").read_text())
+          receipt=verify_sealed_customer_output(sealed,rows)
+          assert sealed.source_sha256s==(
+              "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+          )
+          assert len(sealed.quantities)==8
+          assert receipt.valid_quantity_count==8 and receipt.customer_row_count==8
+          assert receipt.verified_quantity_ids==tuple(sorted(q.quantity_id for q in sealed.quantities))
+          assert all(q.family=="opening_area" and q.lineage_ok and not q.abstained
+                     for q in sealed.quantities)
+          print("ORIGINAL_LOT16_EIGHT_RETAINED")
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-original-opening-customer-inventory
+          path: artifacts/gpt3-opening-customer-inventory/
+          retention-days: 14

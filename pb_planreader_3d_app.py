@@ -1254,30 +1254,83 @@ def create_standalone_workspace(job_no: str, job_name: str, builder: str, addres
 
 
 def classify_page(text: str, file_name: str, page_no: int) -> tuple[str, str]:
-    lower = f"{file_name} {text}".lower()
-    page_type = "Other"
-    patterns = [
-        ("Title / Drawing Register", ["drawing register", "drawing schedule", "title sheet"]),
-        ("Reflected Ceiling Plan", ["reflected ceiling", "rcp", "ceiling plan"]),
-        ("Floor Plan", ["floor plan", "proposed plan", "general arrangement"]),
-        ("Roof Plan", ["roof plan"]),
-        ("Elevation", ["elevation", "north elev", "south elev", "east elev", "west elev"]),
-        ("Render / Artist's Impression", ["artist's impression", "artists impression", "artists rendering", "artist rendering", "3d view", "3d render", "concept image", "perspective render", "concept render", "visualisation", "visualization", "render", "impression"]),
-        ("Section", ["section", "cross section"]),
-        ("Door / Window Schedule", ["door schedule", "window schedule", "door elevations"]),
-        ("Finishes Schedule", ["finish schedule", "finishes schedule", "colour schedule", "paint schedule"]),
-        ("Specification", ["specification", "painting specification", "architectural specification"]),
-        ("Structural", ["structural", "steel framing", "footing"]),
-        ("Services", ["mechanical", "electrical", "hydraulic", "fire services"]),
-        ("Landscape / Civil", ["civil", "landscape", "line marking", "pavement"]),
-    ]
-    for candidate, words in patterns:
-        if any(word in lower for word in words):
-            page_type = candidate
-            break
-    drawing_match = re.search(r"\b([A-Z]{1,3}\d{2,4}(?:[-/.][A-Z0-9]+)?)\b", text)
-    label = drawing_match.group(1) if drawing_match else f"Page {page_no}"
-    return page_type, label
+    """Index label from this page's own text.
+
+    ``file_name`` stays in the signature for existing callers and is not
+    evidence. A filename, a PDF page index, or the first sheet-like token in
+    an index listing is not this page's drawing type or sheet number. Sheet
+    identity remains with ``pb_page_title_authority.resolve_document``. A
+    neutral ``Page N`` label is the only label this function may emit, so a
+    later title-block sheet number is not blocked by a scraped code.
+    """
+    del file_name
+    return _sheet_type_from_page_text(text), f"Page {int(page_no)}"
+
+
+_PAGE_TYPE_PATTERNS = (
+    ("Title / Drawing Register", ("drawing register", "drawing schedule", "title sheet", "drawing index")),
+    ("Reflected Ceiling Plan", ("reflected ceiling", "rcp", "ceiling plan")),
+    ("Floor Plan", ("floor plan", "proposed plan", "general arrangement")),
+    ("Roof Plan", ("roof plan",)),
+    ("Elevation", ("elevation", "north elev", "south elev", "east elev", "west elev")),
+    ("Render / Artist's Impression", (
+        "artist's impression", "artists impression", "artists rendering", "artist rendering",
+        "3d view", "3d render", "concept image", "perspective render", "concept render",
+        "visualisation", "visualization", "render", "impression",
+    )),
+    ("Section", ("section", "cross section")),
+    ("Door / Window Schedule", ("door schedule", "window schedule", "door elevations")),
+    ("Finishes Schedule", ("finish schedule", "finishes schedule", "colour schedule", "paint schedule")),
+    ("Specification", ("specification", "painting specification", "architectural specification")),
+    ("Structural", ("structural", "steel framing", "footing")),
+    ("Services", ("mechanical", "electrical", "hydraulic", "fire services")),
+    ("Landscape / Civil", ("civil", "landscape", "line marking", "pavement")),
+)
+
+
+def _reference_line(line: str) -> bool:
+    return bool(re.match(r"^(?:refer\b|see\b|matchline\b|keynote\b)", line))
+
+
+def _phrase_on_line(line: str, phrase: str) -> bool:
+    if " " in phrase:
+        return phrase in line
+    return re.search(rf"\b{re.escape(phrase)}s?\b", line) is not None
+
+
+def _sheet_type_from_page_text(text: str) -> str:
+    """One sheet type from heading lines, or Other when headings disagree.
+
+    A reference line does not type the page. A short token must be its own
+    word, so ``rendered`` is not a render and ``intersection`` is not a
+    section. Two different heading types abstain instead of taking the first.
+    """
+    index_headings = {"drawing index", "drawing register", "drawing schedule", "title sheet", "sheet index"}
+    found: dict[str, int] = {}
+    for raw in (text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw).strip().lower()
+        if not line or _reference_line(line):
+            continue
+        if line in index_headings:
+            return "Title / Drawing Register"
+        matched = [
+            (candidate, phrase)
+            for candidate, phrases in _PAGE_TYPE_PATTERNS
+            for phrase in phrases
+            if _phrase_on_line(line, phrase)
+        ]
+        for candidate, phrase in matched:
+            if any(phrase != other and phrase in other for _candidate, other in matched):
+                continue
+            found[candidate] = max(found.get(candidate, 0), len(phrase))
+    headings = {name for name, length in found.items() if length >= 8}
+    if len(headings) > 1:
+        return "Other"
+    if len(headings) == 1:
+        return next(iter(headings))
+    if len(found) == 1:
+        return next(iter(found))
+    return "Other"
 
 
 def placeholder_image(title: str, body: str, target: Path) -> tuple[int, int]:

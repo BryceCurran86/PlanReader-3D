@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
@@ -465,6 +466,180 @@ def fabricated_live_fields() -> Dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------------------------------------------------------
+# Throughput helpers for ``attach_lineage_to_split_fragments``.  None of them changes WHICH sources own a fragment, the order in
+# which owners are tried, or the emitted payload; they only avoid repeating work whose result is already determined.
+# --------------------------------------------------------------------------------------------------------------------------
+
+# A source passes ``fragment_contained_in_segment`` only if each fragment endpoint lies in the oriented rectangle
+# [-tol, length + tol] x [-tol, +tol] around the source.  That rectangle's axis-aligned box extends beyond the source's own
+# box by at most tol * (|ux| + |uy|) <= sqrt(2) * tol per side.  Four tolerances therefore leave a margin of more than 2.8 tol
+# over the worst case and more than six orders of magnitude over double rounding for page coordinates, so the box test below can
+# only discard candidates the exact predicate would also reject.  The exact predicate still makes every ownership decision.
+_PREFILTER_MARGIN_PT = 4.0 * _CONTAINMENT_TOL_PT
+_PREFILTER_MIN_CANDIDATES = 16
+# 16x float overflow headroom for differences, dot/cross and squared length.
+# Inputs outside this range are never discarded by the optional box filter:
+# legacy _point_on_segment remains the sole parent authority, even on overflow.
+_PREFILTER_SAFE_ABS_PT = math.sqrt(sys.float_info.max) / 16.0
+
+
+class _BoxPrefilter:
+    """Axis-aligned, margin-expanded boxes for one candidate list; ``select`` keeps list order."""
+
+    __slots__ = ("_segments", "_bounds")
+
+    def __init__(self, segments: Sequence[Mapping[str, Any]]) -> None:
+        self._segments = segments
+        self._bounds = None
+
+    def _build(self):
+        import numpy as np
+
+        count = len(self._segments)
+        columns = [
+            np.fromiter((float(segment[field]) for segment in self._segments), dtype=float, count=count)
+            for field in _PAGE_COORD_FIELDS
+        ]
+        x1, y1, x2, y2 = columns
+        finite = np.isfinite(x1) & np.isfinite(y1) & np.isfinite(x2) & np.isfinite(y2)
+        # A finite endpoint can still overflow the unchanged exact predicate's
+        # subtraction, hypot, cross, dot or squared-length arithmetic. Those
+        # parents must stay candidates, NEVER be AABB-pruned.
+        safe = _PREFILTER_SAFE_ABS_PT
+        finite &= (np.abs(x1) <= safe) & (np.abs(y1) <= safe)
+        finite &= (np.abs(x2) <= safe) & (np.abs(y2) <= safe)
+        margin = _PREFILTER_MARGIN_PT
+        # a source with a non-finite coordinate is never discarded; the exact predicate decides
+        self._bounds = (
+            np.where(finite, np.minimum(x1, x2) - margin, -np.inf),
+            np.where(finite, np.maximum(x1, x2) + margin, np.inf),
+            np.where(finite, np.minimum(y1, y2) - margin, -np.inf),
+            np.where(finite, np.maximum(y1, y2) + margin, np.inf),
+        )
+        return self._bounds
+
+    def select(self, lo_x: float, hi_x: float, lo_y: float, hi_y: float) -> List[Mapping[str, Any]]:
+        import numpy as np
+
+        xmin, xmax, ymin, ymax = self._bounds or self._build()
+        keep = (xmin <= lo_x) & (xmax >= hi_x) & (ymin <= lo_y) & (ymax >= hi_y)
+        segments = self._segments
+        return [segments[i] for i in np.flatnonzero(keep).tolist()]
+
+    def select_indexes(self, indexes: Sequence[int], lo_x: float, hi_x: float, lo_y: float, hi_y: float) -> List[int]:
+        """The members of ``indexes`` (positions in this prefilter's segment list) that may contain the fragment box, in order."""
+        import numpy as np
+
+        xmin, xmax, ymin, ymax = self._bounds or self._build()
+        chosen = np.asarray(indexes, dtype=np.intp)
+        keep = (xmin[chosen] <= lo_x) & (xmax[chosen] >= hi_x) & (ymin[chosen] <= lo_y) & (ymax[chosen] >= hi_y)
+        return chosen[keep].tolist()
+
+
+def _containment_grid_candidate_indexes(
+    fragment: SegmentPair,
+    grid: Mapping[Tuple[int, int], set[int]],
+    global_indexes: set[int],
+) -> List[int]:
+    """Positions of ``_containment_grid_candidates`` (same selection, same ascending order)."""
+    first_cell = _containment_grid_cell(fragment[0])
+    second_cell = _containment_grid_cell(fragment[1])
+    first = grid.get(first_cell, set())
+    second = grid.get(second_cell, set())
+    indexes = set(first) if first_cell == second_cell else set(first).intersection(second)
+    indexes.update(global_indexes)
+    return sorted(indexes)
+
+
+def _fragment_box(pair: SegmentPair) -> Optional[Tuple[float, float, float, float]]:
+    """Fragment AABB only when exact containment arithmetic has safe float headroom."""
+    try:
+        x1, y1 = float(pair[0][0]), float(pair[0][1])
+        x2, y2 = float(pair[1][0]), float(pair[1][1])
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) and abs(v) <= _PREFILTER_SAFE_ABS_PT for v in (x1, y1, x2, y2)):
+        # Even finite 1e308 endpoints can cause legacy cross/dot overflow and
+        # permit parents outside a finite AABB; do not prune them.
+        return None
+    return (min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2))
+
+
+def _copy_json_like(value: Any) -> Any:
+    """``copy.deepcopy`` for the plain dict/list/tuple/scalar structures a lineage payload is made of.
+
+    Any other type is delegated to ``copy.deepcopy`` so the result is always what a deep copy would return.  Lineage payloads
+    hold no shared or cyclic substructure, so the missing memo table cannot change the result.
+    """
+    kind = type(value)
+    if kind is dict:
+        return {key: _copy_json_like(item) for key, item in value.items()}
+    if kind is list:
+        return [_copy_json_like(item) for item in value]
+    if kind is tuple:
+        return tuple(_copy_json_like(item) for item in value)
+    if kind in (str, int, float, bool, type(None)):
+        return value
+    return copy.deepcopy(value)
+
+
+class _ParentLineageBuilder:
+    """``lineage_from_source_segments`` with per-source work and per-parent-set results computed once per call.
+
+    The payload is a function of the SET of parent segments only (records are de-duplicated by content and sorted by a total
+    order; ids are de-duplicated and sorted), so equal parent sets share one payload.  Callers receive deep copies.
+    """
+
+    def __init__(self) -> None:
+        self._source: Dict[int, Tuple[Dict[str, Any], str]] = {}
+        self._payload: Dict[frozenset, Dict[str, Any]] = {}
+
+    def _record(self, segment: Mapping[str, Any]) -> Tuple[Dict[str, Any], str]:
+        entry = self._source.get(id(segment))
+        if entry is None:
+            record = source_record_from_segment(segment)
+            entry = (record, _record_dedupe_key(record))
+            self._source[id(segment)] = entry
+        return entry
+
+    def payload(self, parents: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        entries = [self._record(segment) for segment in parents]
+        signature = frozenset(id(segment) for segment in parents)
+        cached = self._payload.get(signature)
+        if cached is not None:
+            return cached
+        records: List[Dict[str, Any]] = []
+        keys: List[str] = []
+        seen_keys = set()
+        ids: List[str] = []
+        seen_ids = set()
+        for record, key in entries:
+            if key not in seen_keys:
+                seen_keys.add(key)
+                records.append(record)
+                keys.append(key)
+            source_id = record.get("id")
+            if source_id and source_id not in seen_ids:
+                seen_ids.add(source_id)
+                ids.append(source_id)
+        order = sorted(
+            range(len(records)),
+            key=lambda i: (records[i].get("id") is None, str(records[i].get("id") or ""), keys[i]),
+        )
+        records = [records[i] for i in order]
+        ids.sort()
+        status, conflicts = _attribute_status_from_records(records)
+        built = {
+            "source_primitive_ids": ids,
+            "source_records": records,
+            "attribute_status": status,
+            "attribute_conflicts": conflicts,
+        }
+        self._payload[signature] = built
+        return built
+
+
 def attach_lineage_to_split_fragments(
     split_pairs: Sequence[SegmentPair],
     source_segments: Sequence[Mapping[str, Any]],
@@ -491,13 +666,25 @@ def attach_lineage_to_split_fragments(
         source_segments
     )
 
+    prefilters: Dict[Tuple[Any, ...], _BoxPrefilter] = {}
+    source_prefilter: Optional[_BoxPrefilter] = None
+    lineage_builder = _ParentLineageBuilder()
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
         seen_candidates: set[int] = set()
         candidates: List[Mapping[str, Any]] = []
+        box = _fragment_box(pair)
         for neighbor_key in fragment_line_bucket_neighbors(pair):
-            for candidate in buckets.get(neighbor_key, ()):
+            bucket = buckets.get(neighbor_key)
+            if not bucket:
+                continue
+            if box is not None and len(bucket) >= _PREFILTER_MIN_CANDIDATES:
+                prefilter = prefilters.get(neighbor_key)
+                if prefilter is None:
+                    prefilter = prefilters[neighbor_key] = _BoxPrefilter(bucket)
+                bucket = prefilter.select(*box)
+            for candidate in bucket:
                 marker = id(candidate)
                 if marker in seen_candidates:
                     continue
@@ -507,12 +694,14 @@ def attach_lineage_to_split_fragments(
         # containment predicate: every true parent must cover both endpoints
         # within the existing containment tolerance. Union it with the line
         # buckets, then retain the unchanged exact test below.
-        for candidate in _containment_grid_candidates(
-            pair,
-            source_segments,
-            containment_grid,
-            global_containment_indexes,
-        ):
+        grid_indexes = _containment_grid_candidate_indexes(
+            pair, containment_grid, global_containment_indexes
+        )
+        if box is not None and len(grid_indexes) >= _PREFILTER_MIN_CANDIDATES:
+            if source_prefilter is None:
+                source_prefilter = _BoxPrefilter(source_segments)
+            grid_indexes = source_prefilter.select_indexes(grid_indexes, *box)
+        for candidate in (source_segments[index] for index in grid_indexes):
             marker = id(candidate)
             if marker in seen_candidates:
                 continue
@@ -540,7 +729,7 @@ def attach_lineage_to_split_fragments(
             "x2": p2[0],
             "y2": p2[1],
             **fabricated_live_fields(),
-            LINEAGE_KEY: isolated_lineage(lineage_from_source_segments(parents)),
+            LINEAGE_KEY: _copy_json_like(lineage_builder.payload(parents)),
         }
         out.append(fragment)
     return out

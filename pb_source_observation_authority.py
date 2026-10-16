@@ -10,9 +10,11 @@ equal-privilege Python code.
 from __future__ import annotations
 
 from collections import OrderedDict
+import dataclasses
 from dataclasses import dataclass, replace
 import hashlib
 import math
+from operator import attrgetter
 from typing import Any, Mapping, Optional, Sequence
 
 import fitz
@@ -368,6 +370,87 @@ def _record_payload(record: SourceObservationRecord) -> dict[str, object]:
         "producer_method": record.producer_method,
         "producer_version": record.producer_version,
     }
+
+
+def _shallow_cloner(cls):
+    """Return ``clone(obj, **changes)``: exactly what ``dataclasses.replace`` builds for ``cls``, faster.
+
+    The authority hands out a fresh defensive copy of a frozen value on every read, and
+    ``dataclasses.replace`` (keyword plumbing plus a re-run ``__init__``) was a fifth of a complete
+    project run. For these classes ``replace`` does nothing but pass every declared field to the
+    generated ``__init__``, so copying the declared fields straight onto a new instance is the same
+    object. That only holds while the class has no ``__post_init__``, no ``init=False`` / ``InitVar``
+    field and is a frozen dataclass; those preconditions are asserted at import time so a later change
+    to a class cannot silently make the clone differ from ``replace``. Only declared fields are copied
+    (never stray attributes), field values are shared exactly as ``replace`` shares them, and unknown
+    field names raise ``TypeError`` like ``replace`` does.
+    """
+    fields = dataclasses.fields(cls)
+    names = tuple(field.name for field in fields)
+    if (
+        not dataclasses.is_dataclass(cls)
+        or not cls.__dataclass_params__.frozen
+        or hasattr(cls, "__post_init__")
+        or any(not field.init for field in fields)
+        or len(cls.__dataclass_fields__) != len(fields)
+        or len(names) < 2
+    ):
+        raise TypeError(f"{cls.__name__} is not safe to clone field for field")
+    known = frozenset(names)
+    getter = attrgetter(*names)
+    new_instance = object.__new__
+    set_attribute = object.__setattr__
+    slotted = "__slots__" in cls.__dict__
+
+    def clone(obj, **changes):
+        if changes and not known.issuperset(changes):
+            raise TypeError(
+                f"{cls.__name__} clone got unexpected field names: "
+                + ", ".join(sorted(set(changes) - known))
+            )
+        values = getter(obj)
+        copy = new_instance(cls)
+        if slotted:
+            for name, value in zip(names, values):
+                set_attribute(copy, name, value)
+            for name, value in changes.items():
+                set_attribute(copy, name, value)
+        else:
+            state = copy.__dict__
+            state.update(zip(names, values))
+            if changes:
+                state.update(changes)
+        return copy
+
+    return clone
+
+
+_clone_revision = _shallow_cloner(SourceRevisionRecord)
+_clone_snapshot = _shallow_cloner(ProducerSnapshotRecord)
+_clone_observation = _shallow_cloner(SourceObservationRecord)
+_clone_result = _shallow_cloner(SourceObservationAuthorityResult)
+
+
+def _bind_record_to_snapshot(
+    record: SourceObservationRecord, snapshot: ProducerSnapshotRecord
+) -> SourceObservationRecord:
+    """Fresh copy of a stored record bound to the snapshot being read.
+
+    Stored records may be shared by several snapshot generations, so the
+    snapshot id and generation that consumers see are taken from the snapshot
+    they resolved against, exactly as when each generation held its own clone.
+    """
+
+    if (
+        record.snapshot_id == snapshot.snapshot_id
+        and record.producer_generation == snapshot.producer_generation
+    ):
+        return _clone_observation(record)
+    return _clone_observation(
+        record,
+        snapshot_id=snapshot.snapshot_id,
+        producer_generation=snapshot.producer_generation,
+    )
 
 
 def _validated_clip_pt(
@@ -1061,7 +1144,7 @@ class SourceObservationProducer:
                 observation_payload_sha256="",
             )
             fingerprint = _content_sha256(_record_payload(record))
-            record = replace(record, observation_payload_sha256=fingerprint)
+            record = _clone_observation(record, observation_payload_sha256=fingerprint)
             records.append(record)
 
         observation_ids = tuple(sorted(r.observation_id for r in records))
@@ -1150,12 +1233,15 @@ class SourceObservationProducer:
             },
             digest_chars=32,
         )
-        cloned = [
-            replace(
-                self._store.observations[(base_snapshot_id, obs_id)],
-                snapshot_id=snapshot_id,
-                producer_generation=generation,
-            )
+        # Share the immutable base records instead of cloning every one of them
+        # into each derived generation. A record's payload hash covers content
+        # only (never snapshot_id or producer_generation), so the same frozen
+        # object is valid in every snapshot that contains it. The snapshot-bound
+        # view is re-bound at the public resolve() boundary, which already
+        # returns a fresh defensive copy. Per-snapshot store entries, snapshot
+        # ids, fingerprints and tamper isolation are unchanged.
+        inherited = [
+            self._store.observations[(base_snapshot_id, obs_id)]
             for obs_id in base.observation_ids
         ]
         derived = SourceObservationRecord(
@@ -1178,10 +1264,10 @@ class SourceObservationProducer:
             snapshot_id=snapshot_id,
             observation_payload_sha256="",
         )
-        derived = replace(
+        derived = _clone_observation(
             derived, observation_payload_sha256=_content_sha256(_record_payload(derived))
         )
-        records = [*cloned, derived]
+        records = [*inherited, derived]
         ids = [r.observation_id for r in records]
         if len(ids) != len(set(ids)):
             by_id: dict[str, SourceObservationRecord] = {}
@@ -1342,12 +1428,15 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        cloned = [
-            replace(
-                self._store.observations[(base_snapshot_id, obs_id)],
-                snapshot_id=snapshot_id,
-                producer_generation=generation,
-            )
+        # Share the immutable base records instead of cloning every one of them
+        # into each derived generation. A record's payload hash covers content
+        # only (never snapshot_id or producer_generation), so the same frozen
+        # object is valid in every snapshot that contains it. The snapshot-bound
+        # view is re-bound at the public resolve() boundary, which already
+        # returns a fresh defensive copy. Per-snapshot store entries, snapshot
+        # ids, fingerprints and tamper isolation are unchanged.
+        inherited = [
+            self._store.observations[(base_snapshot_id, obs_id)]
             for obs_id in base.observation_ids
         ]
         derived_records: list[SourceObservationRecord] = []
@@ -1372,7 +1461,7 @@ class SourceObservationProducer:
                 snapshot_id=snapshot_id,
                 observation_payload_sha256="",
             )
-            record = replace(
+            record = _clone_observation(
                 record,
                 observation_payload_sha256=_content_sha256(
                     _record_payload(record)
@@ -1380,7 +1469,7 @@ class SourceObservationProducer:
             )
             derived_records.append(record)
 
-        records = [*cloned, *derived_records]
+        records = [*inherited, *derived_records]
         ids = [record.observation_id for record in records]
         if len(ids) != len(set(ids)):
             by_id: dict[str, SourceObservationRecord] = {}
@@ -1591,11 +1680,11 @@ class SourceObservationAuthority:
             # The cached object is internal validation state. Return fresh
             # defensive copies so even object.__setattr__ on a frozen value
             # cannot poison subsequent authority reads.
-            return replace(
+            return _clone_result(
                 cached[4],
-                source_revision=replace(revision),
-                snapshot=replace(snapshot),
-                observation=replace(record),
+                source_revision=_clone_revision(revision),
+                snapshot=_clone_snapshot(snapshot),
+                observation=_bind_record_to_snapshot(record, snapshot),
             )
 
         actual = _content_sha256(_record_payload(record))
@@ -1611,9 +1700,9 @@ class SourceObservationAuthority:
             proposition=SOURCE_OBSERVATION_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
             reason_codes=("producer_owned_source_observation_resolved",),
-            source_revision=replace(revision),
-            snapshot=replace(snapshot),
-            observation=replace(record),
+            source_revision=_clone_revision(revision),
+            snapshot=_clone_snapshot(snapshot),
+            observation=_bind_record_to_snapshot(record, snapshot),
             semantic_enumeration_complete=None,
             decision_scope_complete=None,
         )
@@ -1624,11 +1713,11 @@ class SourceObservationAuthority:
             expected,
             result,
         )
-        return replace(
+        return _clone_result(
             result,
-            source_revision=replace(revision),
-            snapshot=replace(snapshot),
-            observation=replace(record),
+            source_revision=_clone_revision(revision),
+            snapshot=_clone_snapshot(snapshot),
+            observation=_bind_record_to_snapshot(record, snapshot),
         )
 
     def coverage(

@@ -109,6 +109,75 @@ def test_exact_source_and_receipts_retained():
     assert r["official_host_receipt_identity_acceptance"] is False
 
 
+def supplemental_report():
+    r = report()
+    r.update(document_id="source-document", revision_id="source-revision", snapshot_id="original-snapshot")
+    original_scope = r["source_owned_wall_scope_results"][0]
+    supplement = deepcopy(original_scope)
+    supplement.update(document_id=r["document_id"], revision_id=r["revision_id"],
+        snapshot_id=r["snapshot_id"], decision_scope_id="wall-source:page-3",
+        scope_complete=False,
+        reason_codes=["physical_wall_candidate_opening_local_supplemental_scope"])
+    original_scope["records"] = []
+    r["supplemental_source_owned_wall_scope_results"] = [supplement]
+    # This opening has source-owned supplemental host members, not a frame.
+    r["host_frames"][0].update(record_id=None, whole_wall_candidate_ids=[], reason_codes=["host_frame_unavailable"])
+    r["resolved_host_frame_evidence"] = []
+    return r
+
+
+def test_partial_supplemental_original_source_can_only_be_compared_with_explicit_opt_in():
+    r = supplemental_report()
+    original = deepcopy(r)
+    with pytest.raises(ValueError, match="explicit diagnostic opt-in"):
+        compare_source_host_rekeys(r, deepcopy(r))
+    out = compare_source_host_rekeys(r, deepcopy(r), supplemental_source_evidence=True)
+    assert out["rekey_classification_counts"] == {"EXACT_PRIOR_RECEIPTS_RETAINED": 1}
+    assert out["supplemental_source_evidence_compared"] is True
+    assert not out["official_host_receipt_identity_acceptance"]
+    assert r == original
+    assert r["supplemental_source_owned_wall_scope_results"][0]["scope_complete"] is False
+
+
+@pytest.mark.parametrize("damage", ["complete", "wrong_reason", "foreign_sha", "foreign_snapshot", "foreign_revision", "empty_records", "duplicate_scope", "candidate_collision"])
+def test_supplemental_source_cannot_supply_false_completeness_or_competing_identity(damage):
+    r = supplemental_report()
+    s = r["supplemental_source_owned_wall_scope_results"][0]
+    if damage == "complete":
+        s["scope_complete"] = True
+    elif damage == "wrong_reason":
+        s["reason_codes"] = ["unproven"]
+    elif damage == "foreign_sha":
+        s["source_sha256"] = "b" * 64
+    elif damage == "foreign_snapshot":
+        s["snapshot_id"] = "different"
+    elif damage == "foreign_revision":
+        s["revision_id"] = "different"
+    elif damage == "empty_records":
+        s["records"] = []
+    elif damage == "duplicate_scope":
+        r["supplemental_source_owned_wall_scope_results"].append(deepcopy(s))
+    else:
+        r["source_owned_wall_scope_results"][0]["records"] = deepcopy(s["records"])
+    with pytest.raises(ValueError):
+        compare_source_host_rekeys(r, deepcopy(r), supplemental_source_evidence=True)
+
+
+@pytest.mark.parametrize("value", [1, 0, "true", None, []])
+def test_supplemental_source_option_requires_literal_bool(value):
+    with pytest.raises(TypeError):
+        compare_source_host_rekeys(report(), report(), supplemental_source_evidence=value)
+
+
+def test_partial_supplemental_members_never_supply_a_whole_wall_frame():
+    r = supplemental_report()
+    original = report()
+    r["host_frames"] = original["host_frames"]
+    r["resolved_host_frame_evidence"] = original["resolved_host_frame_evidence"]
+    with pytest.raises(ValueError, match="partial supplemental wall scope"):
+        compare_source_host_rekeys(r, deepcopy(r), supplemental_source_evidence=True)
+
+
 @pytest.mark.parametrize("damage",[
     "member_change","source_v2_change","source_original_primitive_change",
     "source_path_change","source_fragment_geom_change",

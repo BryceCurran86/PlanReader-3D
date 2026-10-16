@@ -1,0 +1,26 @@
+[
+  {
+    "exit_code": 0,
+    "project_id": "au_qld_lot16_power",
+    "report": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\preflight\\au_qld_lot16_power.json",
+    "status": "COMPLETED"
+  },
+  {
+    "exit_code": 0,
+    "project_id": "au_qld_3laurel",
+    "report": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\preflight\\au_qld_3laurel.json",
+    "status": "COMPLETED"
+  },
+  {
+    "exit_code": 0,
+    "project_id": "au_qld_maryborough_service_station",
+    "report": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\preflight\\au_qld_maryborough_service_station.json",
+    "status": "COMPLETED"
+  },
+  {
+    "exit_code": 0,
+    "project_id": "au_qld_q5446_armstrong32_harlequin",
+    "report": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\preflight\\au_qld_q5446_armstrong32_harlequin.json",
+    "status": "COMPLETED"
+  }
+]

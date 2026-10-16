@@ -25,6 +25,15 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _valid_original_source_sha(value: object) -> bool:
+    """A copied source label is not a real 64-hex original PDF digest."""
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in value)
+    )
+
+
 def _valid_source_room_area_quantity(quantity: QuantityEvidence) -> bool:
     """Reject untyped/replayed source m² before room-to-floor commercial reissue."""
     if (
@@ -192,6 +201,10 @@ def publish_live_floor_area_quantities(
                 floor.metric_area_quantity_id,
             )
         ):
+            continue
+        if not _valid_original_source_sha(floor.source_sha256):
+            # Never authorize a copied malformed SHA pair as a source-owning
+            # physical floor, even when its nominal area and receipts agree.
             continue
         if not floor.physical_floor_surface_identity_resolved:
             continue
@@ -426,9 +439,12 @@ def publish_live_canonical_room_area_quantities(
             metadata.get("source_room_face_record_id")
         ):
             continue
-        if room.source_sha256.lower() != floor_quantity.metadata.get(
-            "source_sha256", ""
-        ).lower():
+        source_floor_sha = floor_quantity.metadata.get("source_sha256")
+        if (
+            not _valid_original_source_sha(room.source_sha256)
+            or not _valid_original_source_sha(source_floor_sha)
+            or room.source_sha256.lower() != source_floor_sha.lower()
+        ):
             continue
         if room.revision_id != _clean(
             floor_quantity.metadata.get("revision_id")
