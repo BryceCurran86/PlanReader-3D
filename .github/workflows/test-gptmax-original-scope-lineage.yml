@@ -1,0 +1,104 @@
+name: GPT MAX Original Snapshot Host Frame Lineage
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_original_scope_lineage.py"
+      - "tests/test_gptmax_original_scope_lineage.py"
+      - "tools/gptmax_source_host_rekey_parity_ledger.py"
+      - "tests/test_gptmax_source_host_rekey_parity_ledger.py"
+      - "docs/engineering/gptmax_original_snapshot_host_frame_lineage_20261017.md"
+      - ".github/workflows/test-gptmax-original-scope-lineage.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  synthetic-source-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_scope_lineage.py tests/test_gptmax_source_host_rekey_parity_ledger.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_scope_lineage.py tests/test_gptmax_original_scope_lineage.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-source-lineage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Replay both explicit decoding scopes from immutable original bytes
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_original_scope_lineage.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --page-id 3 --baseline-decoded-page-id 3 \
+            --candidate-decoded-page-id 1 --candidate-decoded-page-id 2 \
+            --candidate-decoded-page-id 3 --candidate-decoded-page-id 4 \
+            --candidate-decoded-page-id 5 --candidate-decoded-page-id 6 \
+            --candidate-decoded-page-id 7 --candidate-decoded-page-id 8 \
+            --candidate-decoded-page-id 9 --candidate-decoded-page-id 10 \
+            --candidate-decoded-page-id 11 --candidate-decoded-page-id 12 \
+            --candidate-decoded-page-id 13 \
+            --candidate-evidence-page-id 1 --candidate-evidence-page-id 2 \
+            --candidate-evidence-page-id 4 --candidate-evidence-page-id 5 \
+            --candidate-evidence-page-id 6 --candidate-evidence-page-id 7 \
+            --candidate-evidence-page-id 8 --candidate-evidence-page-id 9 \
+            --candidate-evidence-page-id 10 --candidate-evidence-page-id 11 \
+            --candidate-evidence-page-id 12 --candidate-evidence-page-id 13 \
+            --project-id au_qld_lot16_power \
+            --output artifacts/original-snapshot-host-frame-lineage.json
+      - name: Verify original source roots and exact complete V1 seals after producer exit
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          r=json.loads(Path('artifacts/original-snapshot-host-frame-lineage.json').read_text())
+          a,b=r['baseline'],r['candidate']
+          assert a['snapshot_id'] != b['snapshot_id']
+          assert len(r['opening_lineage_rows']) == 21
+          for side in (a,b):
+              rows=list(side['opening_scope_evidence'].values())
+              assert len(rows)==21
+              assert sum(x['host_record'] is not None for x in rows)==15
+              assert sum(x['frame_record'] is not None for x in rows)==9
+              assert sum(x['sealed_quantity'] is not None for x in rows)==8
+              assert side['source_and_signed_receipts_unchanged']
+              assert side['original_customer_verification']['valid_quantity_count']==8
+              sealed_source_closed_run_from_dict(side['source_closed_run'])
+          archived=json.loads(Path('docs/engineering/lot16_original_signed_eight_row_20261015/production/source_sealed_run.json').read_text())
+          owner=json.loads(Path('docs/engineering/four_job_runs/20261016_47c8031a/au_qld_lot16_power/outputs/au_qld_lot16_power.json').read_text())
+          sealed_source_closed_run_from_dict(archived)
+          sealed_source_closed_run_from_dict(owner)
+          assert a['source_closed_run'] == archived
+          assert b['source_closed_run'] == owner
+          assert not any(r[k] for k in ('cross_snapshot_identity_granted', 'customer_approval_granted', 'new_firm_quantity_granted', 'opening_count_granted', 'benchmark_score_granted'))
+          assert not r['source_host_rekey_comparison']['official_host_receipt_identity_acceptance']
+          print('Both complete original V1 seals reproduced from actual distinct source roots; no migration/customer authority granted')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-snapshot-host-frame-lineage
+          path: artifacts/original-snapshot-host-frame-lineage.json
+          retention-days: 21

@@ -34,7 +34,7 @@ def _unique(rows, label, key):
     return out
 
 
-def _source_views(report,*,frame_evidence=True):
+def _source_views(report,*,frame_evidence=True,supplemental_source_evidence=False):
     if not isinstance(report,dict):
         raise ValueError("source report missing")
     sha=report.get("source_sha256")
@@ -63,6 +63,34 @@ def _source_views(report,*,frame_evidence=True):
             if k in walls:
                 raise ValueError("duplicate W4 physical candidate owner across pages")
             walls[k]=r
+    ordinary_wall_ids = set(walls)
+    supplemental = report.get("supplemental_source_owned_wall_scope_results", [])
+    if supplemental and not supplemental_source_evidence:
+        raise ValueError("supplemental source evidence requires explicit diagnostic opt-in")
+    if not isinstance(supplemental, list):
+        raise ValueError("supplemental source scope array missing")
+    seen_scopes = set()
+    for scope in supplemental:
+        if (not isinstance(scope, dict) or scope.get("source_sha256") != sha
+                or str(scope.get("page_id")) not in set(map(str, pages))
+                or scope.get("status") != "corroborated"
+                or scope.get("scope_complete") is not False
+                or scope.get("reason_codes") != ["physical_wall_candidate_opening_local_supplemental_scope"]
+                or any(not isinstance(report.get(k), str) or not report[k]
+                       or scope.get(k) != report[k]
+                       for k in ("document_id", "revision_id", "snapshot_id"))
+                or not isinstance(scope.get("decision_scope_id"), str)
+                or not scope["decision_scope_id"]
+                or not scope.get("records")):
+            raise ValueError("non-authenticated or incorrectly complete supplemental wall scope")
+        address = (scope.get("page_id"), scope.get("decision_scope_id"))
+        if address in seen_scopes:
+            raise ValueError("duplicate supplemental source scope")
+        seen_scopes.add(address)
+        for k, r in _unique(scope["records"], "supplemental W4 candidates", "wall_candidate_id").items():
+            if k in walls:
+                raise ValueError("competing ordinary/supplemental W4 candidate identity")
+            walls[k] = r
     # ``frame_evidence=False`` is for report shapes that never carry the frame
     # geometry array (``diag_opening_wall_face_preservation``). The caller must
     # then treat frame *geometry* as unverified; everything else still applies.
@@ -95,6 +123,9 @@ def _source_views(report,*,frame_evidence=True):
                     or receipt.get("record_id") != frame["record_id"]))):
             raise ValueError("inconsistent physical opening host/frame receipt lineage")
         members=frame.get("whole_wall_candidate_ids")
+        if supplemental and (not isinstance(members, list)
+                or not set(members) <= ordinary_wall_ids):
+            raise ValueError("partial supplemental wall scope cannot supply whole-wall frame authority")
         if members is not None and (
                 not isinstance(members,list)
                 or (frame_evidence and members != receipt.get("whole_wall_candidate_ids"))
@@ -256,9 +287,14 @@ def _frame_geometry_signature(frame):
         return None
 
 
-def compare_source_host_rekeys(baseline,candidate,*,frame_evidence=True):
-    asha,ap,ab,af,aw,ae=_source_views(baseline,frame_evidence=frame_evidence)
-    bsha,bp,bb,bf,bw,be=_source_views(candidate,frame_evidence=frame_evidence)
+def compare_source_host_rekeys(baseline,candidate,*,frame_evidence=True,
+                              supplemental_source_evidence=False):
+    if type(supplemental_source_evidence) is not bool:
+        raise TypeError("supplemental source evidence option must be an explicit bool")
+    asha,ap,ab,af,aw,ae=_source_views(baseline,frame_evidence=frame_evidence,
+        supplemental_source_evidence=supplemental_source_evidence)
+    bsha,bp,bb,bf,bw,be=_source_views(candidate,frame_evidence=frame_evidence,
+        supplemental_source_evidence=supplemental_source_evidence)
     if asha!=bsha or ap!=bp:
         raise ValueError("source file or page scope does not match")
     if not set(ab).issubset(bb):
@@ -349,6 +385,7 @@ def compare_source_host_rekeys(baseline,candidate,*,frame_evidence=True):
         # This report NEVER becomes a replacement for the strict source
         # opening host/frame identity retention gate.
         "frame_geometry_verified":bool(frame_evidence),
+        "supplemental_source_evidence_compared": bool(supplemental_source_evidence),
         "official_host_receipt_identity_acceptance":False,
         "opening_count_or_metric_publication_allowed":False,
         "benchmark_accuracy":None,
