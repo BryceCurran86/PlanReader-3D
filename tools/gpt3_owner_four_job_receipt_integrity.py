@@ -126,6 +126,28 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
     return indexed, sums
 
 
+def _cross_semantic_source_claims(quantities: Any) -> list[dict[str, Any]]:
+    """Surface shared physical source with multiple families; never erase rows."""
+    claims: dict[tuple[str, str, tuple[str, ...]], list] = {}
+    for q in quantities:
+        object_key = (
+            q.source_sha256, q.revision_id, tuple(q.object_identity_refs),
+        )
+        claims.setdefault(object_key, []).append(q)
+    return [
+        {
+            "source_sha256": key[0],
+            "revision_id": key[1],
+            "canonical_object_refs": list(key[2]),
+            "signed_quantity_ids": sorted(q.quantity_id for q in values),
+            "quantity_families": sorted({q.family for q in values}),
+            "source_review_required": True,
+        }
+        for key, values in sorted(claims.items())
+        if key[2] and len({q.family for q in values}) > 1
+    ]
+
+
 def _exact_execution_pages(value: Any, page_count: int, field: str) -> None:
     """A claimed all-page execution is not proved by an untyped/subset range."""
     _require(type(value) is list and all(type(v) is int for v in value),
@@ -427,24 +449,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             # Do not silently collapse physically overlapping but separately
             # typed quantity families. Surface possible cross-semantic reuse for
             # issuer review without deleting either signed quantity.
-            claims: dict[tuple[str, str, tuple[str, ...]], list] = {}
-            for q in sealed.quantities:
-                object_key = (
-                    q.source_sha256, q.revision_id, tuple(q.object_identity_refs),
-                )
-                claims.setdefault(object_key, []).append(q)
-            cross_semantic_claims[project_id] = [
-                {
-                    "source_sha256": key[0],
-                    "revision_id": key[1],
-                    "canonical_object_refs": list(key[2]),
-                    "signed_quantity_ids": sorted(q.quantity_id for q in values),
-                    "quantity_families": sorted({q.family for q in values}),
-                    "source_review_required": True,
-                }
-                for key, values in sorted(claims.items())
-                if key[2] and len({q.family for q in values}) > 1
-            ]
+            cross_semantic_claims[project_id] = _cross_semantic_source_claims(
+                sealed.quantities
+            )
             _require(len(sealed.quantities) == count
                      and sum(family_counts.values()) == count,
                      "producer family quantity counts disagree with sealed run")
