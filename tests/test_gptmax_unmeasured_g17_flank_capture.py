@@ -62,7 +62,7 @@ def scope(monkeypatch, *, ink=(True, True), physical_id="physical-one", observed
 
     monkeypatch.setattr(OpeningLabelDimensionProducer, "from_source_visibility_producer",
                         Labels.from_source_visibility_producer)
-    monkeypatch.setattr(g17, "build_opening_local_g17_wall_shadow", lambda src, sel: Obj(
+    monkeypatch.setattr(g17, "build_opening_local_g17_wall_shadow", lambda src, sel, **kwargs: Obj(
         physical_opening_id=physical_id,
         flanks=tuple(Obj(source_ink_supported=value) for value in ink),
     ))

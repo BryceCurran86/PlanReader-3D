@@ -813,7 +813,55 @@ class SourceVisibilityProducer:
         self._native_paint_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_page_text_dirs_cache: OrderedDict = OrderedDict()
+        # Exactly one immutable original G17 page render pair. Bound to source
+        # revision+snapshot+page+DPI; never reusable after augmentation or
+        # across independent SourceVisibilityProducer instances. Opt-in only.
+        self._g17_original_render_pair_cache: OrderedDict = OrderedDict()
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
+
+    def _original_g17_render_pair_shadow(
+        self, *, document_id: str, revision_id: str,
+        source_sha256: str, snapshot_id: str, page_id: str, dpi: int,
+    ):
+        """Reuse ORIGINAL immutable image/full render once per exact source scope.
+
+        This is a bounded source-performance cache, not a provider substitute,
+        visibility receipt, structural wall, host, opening or quantity proof.
+        The original parent, frame and immutable PDF SHA are rechecked even on
+        hits. No caller pixels, geometry or semantic metadata are accepted.
+        """
+        if type(dpi) is not int or dpi <= 0:
+            raise ValueError("original G17 render DPI must be positive integer")
+        published = self.published_snapshot_for_revision(revision_id)
+        if (published is None
+                or published.revision.document_id != document_id
+                or published.revision.source_sha256 != source_sha256
+                or published.snapshot.snapshot_id != snapshot_id
+                or not isinstance(page_id, str) or not page_id.isdecimal()):
+            raise ValueError("original G17 render selector foreign or stale")
+        original = self._producer._store.source_bytes_by_revision.get(revision_id)
+        if not original or hashlib.sha256(original).hexdigest() != source_sha256:
+            raise ValueError("original G17 immutable PDF SHA mismatch")
+        key = (document_id, revision_id, source_sha256, snapshot_id, page_id, dpi)
+        cached = self._g17_original_render_pair_cache.get(key)
+        if cached is not None:
+            self._g17_original_render_pair_cache.move_to_end(key)
+            return cached
+        args = dict(
+            document_id=document_id, revision_id=revision_id,
+            source_sha256=source_sha256, snapshot_id=snapshot_id,
+            page_id=page_id, dpi=float(dpi), include_native_frame=True,
+        )
+        image = self._producer.render_native_page_png(**args, images_only=True)
+        full = self._producer.render_native_page_png(**args)
+        # Do not turn mismatched original source render frames into a cache hit.
+        # The caller still owns the existing render-contradiction ABSTAIN.
+        if (image[1] == full[1] and image[2] == full[2]
+                and isinstance(image[0], bytes) and isinstance(full[0], bytes)):
+            self._g17_original_render_pair_cache[key] = (image, full)
+            while len(self._g17_original_render_pair_cache) > 1:
+                self._g17_original_render_pair_cache.popitem(last=False)
+        return (image, full)
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
@@ -2294,7 +2342,8 @@ class SourceVisibilityProducer:
                 if original_selector is None:
                     continue
                 ink = build_opening_local_g17_wall_shadow(
-                    self, original_selector
+                    self, original_selector,
+                    original_ink_render_cache_shadow=True,
                 )
                 if (
                     ink.physical_opening_id != opening.record_id
