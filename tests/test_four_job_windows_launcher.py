@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -101,3 +102,35 @@ def test_share_safe_status_removes_the_local_home_path():
     safe = launcher.share_safe(status, home)
     assert "someone" not in json.dumps(safe) and safe["n"] == 1
     assert safe["output_folder"].startswith("<HOME>")
+
+
+def test_sample_memory_sums_the_process_tree_and_never_raises():
+    ws_kb, private_kb, _free = launcher.sample_memory_kb(os.getpid())
+    assert ws_kb > 0 and private_kb > 0
+    assert len(launcher.sample_memory_kb(999_999_999)) == 3  # unknown pid: measured as nothing, no exception
+
+
+def test_memory_limit_stops_a_process_that_commits_too_much(tmp_path):
+    code = ("b = bytearray(400 * 1024 * 1024); "
+            "[b.__setitem__(i, 1) for i in range(0, len(b), 4096)]; "
+            "import time; time.sleep(60)")
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", code], tmp_path, tmp_path / "m.log",
+        timeout_s=60, poll_s=0.5, max_private_mb=150)
+    assert (rc, status) == (None, "MEMORY_LIMIT")
+    assert usage["peak_private_kb"] > 150 * 1024
+
+
+def test_system_memory_guard_stops_when_the_machine_has_no_headroom(tmp_path):
+    rc, status, _ = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, tmp_path / "g.log",
+        timeout_s=60, poll_s=0.5, min_free_commit_mb=10 ** 9)
+    assert (rc, status) == (None, "SYSTEM_MEMORY_GUARD")
+
+
+def test_a_process_under_its_limits_still_completes_and_reports_peaks(tmp_path):
+    rc, status, usage = launcher.run_logged(
+        [sys.executable, "-c", "import time; time.sleep(1.5)"], tmp_path, tmp_path / "ok.log",
+        timeout_s=60, poll_s=0.3, track_memory=True, max_private_mb=4096, min_free_commit_mb=1)
+    assert (rc, status) == (0, "COMPLETED")
+    assert usage["peak_private_kb"] > 0

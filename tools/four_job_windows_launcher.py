@@ -15,7 +15,11 @@ Changes from v1 (each one is a failure observed on the first owner run):
   results. v2 writes ``BENCHMARK_DIAGNOSTIC_STATUS.json`` after every project,
   takes ``--timeout-min`` per project, and dumps the Python stacks every
   ``--stack-dump-min`` minutes so a timeout names the stage that was running.
-* v2 samples the project process memory and records the peak.
+* v2 samples the memory of the whole project process tree (a Windows virtual environment's python.exe is only
+  a launcher; the real interpreter is its child) and records the peak working set and private memory. It
+  stops a project that commits more than ``--max-private-gb`` (MEMORY_LIMIT) or that pushes the machine's free
+  commit below ``--min-free-commit-gb`` (SYSTEM_MEMORY_GUARD) so one project cannot make the owner's other
+  programs fail; both are recorded as negative evidence.
 * v2 writes ``SHARE_SAFE_STATUS.json`` with no local paths, so it can be pasted
   into the coordination issue without exposing the owner's folder names.
 
@@ -25,9 +29,7 @@ source-closed project, not a signed quantity and not an official score.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
-import io
 import json
 import os
 import shutil
@@ -61,25 +63,90 @@ def output_report(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _working_set_kb(pid: int) -> int:
-    result = subprocess.run(
-        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-        capture_output=True, text=True, check=False,
-    )
+def _children_by_parent() -> dict[int, list[int]]:
+    """POSIX only: parent pid -> child pids, read from /proc."""
+    children: dict[int, list[int]] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(entry.name))
+    return children
+
+
+def sample_memory_kb(pid: int) -> tuple[int, int, int | None]:
+    """(working set KB, private KB, system free commit KB or None) for ``pid`` and all its descendants.
+
+    A Windows virtual environment's ``python.exe`` is only a launcher that starts the real interpreter as a
+    child, so sampling ``pid`` alone reads the launcher (a few MB). The whole process tree is summed.
+    Failure to sample returns zeros, never an exception: a missing measurement must not stop a run.
+    """
     try:
-        row = next(csv.reader(io.StringIO(result.stdout)))
-        return int(row[4].replace(",", "").replace("\xa0", "").replace("K", "").strip())
-    except (StopIteration, IndexError, ValueError):
-        return 0
+        if os.name == "nt":
+            script = (
+                "$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize,PrivatePageCount;"
+                f"$ids = [System.Collections.Generic.HashSet[int]]::new(); [void]$ids.Add({int(pid)});"
+                "do { $n = $ids.Count; foreach ($p in $all) { if ($ids.Contains([int]$p.ParentProcessId)) "
+                "{ [void]$ids.Add([int]$p.ProcessId) } } } while ($ids.Count -ne $n);"
+                "$ws = 0; $pv = 0; foreach ($p in $all) { if ($ids.Contains([int]$p.ProcessId)) "
+                "{ $ws += [int64]$p.WorkingSetSize; $pv += [int64]$p.PrivatePageCount } };"
+                "$free = (Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory;"
+                '"$ws $pv $free"'
+            )
+            result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                                    capture_output=True, text=True, check=False, timeout=60)
+            ws, private, free_kb = result.stdout.split()[:3]
+            return int(ws) // 1024, int(private) // 1024, int(free_kb)
+        children = _children_by_parent()
+        pids, stack = set(), [int(pid)]
+        while stack:
+            current = stack.pop()
+            if current not in pids:
+                pids.add(current)
+                stack.extend(children.get(current, ()))
+        rss_kb = 0
+        for current in pids:
+            try:
+                for line in Path(f"/proc/{current}/status").read_text().splitlines():
+                    if line.startswith("VmRSS:"):
+                        rss_kb += int(line.split()[1])
+            except OSError:
+                continue
+        free_kb = None
+        meminfo = {line.split(":")[0]: int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines()}
+        if "MemAvailable" in meminfo:
+            free_kb = meminfo["MemAvailable"] + meminfo.get("SwapFree", 0)
+        return rss_kb, rss_kb, free_kb
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return 0, 0, None
+
+
+def kill_tree(proc: subprocess.Popen) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, check=False)
+    else:
+        proc.kill()
+    proc.wait()
 
 
 def run_logged(
     args: list[str], cwd: Path, log: Path, *, timeout_s: int = 1800, track_memory: bool = False,
-    poll_s: float = 30,
-) -> tuple[int | None, str, int]:
-    """Run ``args`` with a hard time limit. Returns (exit code, status, peak working set KB)."""
+    poll_s: float = 15, max_private_mb: int | None = None, min_free_commit_mb: int | None = None,
+) -> tuple[int | None, str, dict]:
+    """Run ``args`` under hard limits. Returns (exit code, status, usage).
+
+    Status is COMPLETED, PROCESS_FAILED, TIMEOUT, MEMORY_LIMIT (the process tree's private memory exceeded
+    ``max_private_mb``) or SYSTEM_MEMORY_GUARD (the machine's free commit fell below ``min_free_commit_mb``,
+    which would start failing other programs). The last two are recorded as negative evidence, not hidden.
+    ``usage`` holds the sampled peaks in KB.
+    """
     log.parent.mkdir(parents=True, exist_ok=True)
-    peak_kb = 0
+    usage = {"peak_working_set_kb": 0, "peak_private_kb": 0, "min_system_free_commit_kb": None}
+    measure = track_memory or max_private_mb is not None or min_free_commit_mb is not None
     with log.open("w", encoding="utf-8", errors="replace") as fh:
         fh.write("COMMAND: " + " ".join(map(str, args)) + "\n")
         fh.flush()
@@ -88,21 +155,29 @@ def run_logged(
         while True:
             try:
                 rc = proc.wait(timeout=poll_s)
-                return rc, "COMPLETED" if rc == 0 else "PROCESS_FAILED", peak_kb
+                return rc, "COMPLETED" if rc == 0 else "PROCESS_FAILED", usage
             except subprocess.TimeoutExpired:
                 elapsed = time.monotonic() - started
-                if track_memory:
-                    peak_kb = max(peak_kb, _working_set_kb(proc.pid))
+                if measure:
+                    ws_kb, private_kb, free_kb = sample_memory_kb(proc.pid)
+                    usage["peak_working_set_kb"] = max(usage["peak_working_set_kb"], ws_kb)
+                    usage["peak_private_kb"] = max(usage["peak_private_kb"], private_kb)
+                    if free_kb is not None:
+                        previous = usage["min_system_free_commit_kb"]
+                        usage["min_system_free_commit_kb"] = free_kb if previous is None else min(previous, free_kb)
+                    if max_private_mb is not None and private_kb // 1024 > max_private_mb:
+                        kill_tree(proc)
+                        return None, "MEMORY_LIMIT", usage
+                    if (min_free_commit_mb is not None and free_kb is not None
+                            and free_kb // 1024 < min_free_commit_mb):
+                        kill_tree(proc)
+                        return None, "SYSTEM_MEMORY_GUARD", usage
                 if elapsed >= timeout_s:
-                    if os.name == "nt":
-                        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                                       capture_output=True, check=False)
-                    else:
-                        proc.kill()
-                    proc.wait()
-                    return None, "TIMEOUT", peak_kb
+                    kill_tree(proc)
+                    return None, "TIMEOUT", usage
                 if int(elapsed) % 300 < max(poll_s, 1):
-                    note(f"  ... running {int(elapsed // 60)} min, peak {peak_kb // 1024} MB (log: {log.name})")
+                    note(f"  ... running {int(elapsed // 60)} min, peak private {usage['peak_private_kb'] // 1024} MB "
+                         f"(log: {log.name})")
 
 
 def verify_originals(kit: Path, report_dir: Path) -> bool:
@@ -182,6 +257,10 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", choices=PROJECTS, help="Run production for these projects only")
     parser.add_argument("--timeout-min", type=int, default=180, help="Per-project production limit in minutes")
     parser.add_argument("--stack-dump-min", type=int, default=10, help="Dump Python stacks this often (minutes)")
+    parser.add_argument("--max-private-gb", type=float, default=10.0,
+                        help="Stop a project whose process tree commits more private memory than this (MEMORY_LIMIT)")
+    parser.add_argument("--min-free-commit-gb", type=float, default=3.0,
+                        help="Stop a project when the machine's free commit falls below this (SYSTEM_MEMORY_GUARD)")
     opts = parser.parse_args()
     projects = tuple(opts.only) if opts.only else PROJECTS
 
@@ -267,6 +346,8 @@ def main() -> int:
         "source_pdf_count": 10,
         "source_preflight": "VERIFIED",
         "per_project_timeout_min": opts.timeout_min,
+        "max_private_gb": opts.max_private_gb,
+        "min_free_commit_gb": opts.min_free_commit_gb,
         "project_handoffs": [],
         "official_four_project_coverage_accuracy": None,
         "official_four_project_precision_adjusted_accuracy": None,
@@ -292,13 +373,18 @@ def main() -> int:
         )
         note(f"  Starting {project} (max {opts.timeout_min} minutes; log in the logs folder)")
         started = time.monotonic()
-        rc, status, peak_kb = run_logged([str(python), "-u", "-c", bootstrap], repo,
-                                         session / "logs" / f"{project}.handoff.log",
-                                         timeout_s=opts.timeout_min * 60, track_memory=True)
+        rc, status, usage = run_logged([str(python), "-u", "-c", bootstrap], repo,
+                                       session / "logs" / f"{project}.handoff.log",
+                                       timeout_s=opts.timeout_min * 60, track_memory=True,
+                                       max_private_mb=int(opts.max_private_gb * 1024),
+                                       min_free_commit_mb=int(opts.min_free_commit_gb * 1024))
         summary["project_handoffs"].append({
             "project_id": project, "status": status, "exit_code": rc,
             "elapsed_s": round(time.monotonic() - started, 1),
-            "peak_working_set_mb_sampled": round(peak_kb / 1024, 1),
+            "peak_working_set_mb_sampled": round(usage["peak_working_set_kb"] / 1024, 1),
+            "peak_private_mb_sampled": round(usage["peak_private_kb"] / 1024, 1),
+            "min_system_free_commit_mb_sampled": (None if usage["min_system_free_commit_kb"] is None
+                                                  else round(usage["min_system_free_commit_kb"] / 1024, 1)),
             "single_document_handoff_only": True, "output_folder": str(out),
         })
         note(f"  {project}: {status}")
