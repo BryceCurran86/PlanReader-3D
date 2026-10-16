@@ -6,6 +6,7 @@ on:
     paths:
       # every module the replayed production chain can import must re-run the signed-output replay
       - "pb_*.py"
+      - "tools/diag_pdf_symbol_byte_glyph_shadow.py"
       - "tools/run_source_closed_project_handoff.py"
       - "tools/diag_gpt2_room_measurement_gates.py"
       - "tools/diag_gpt3_maryborough_floor_customer_gate.py"
