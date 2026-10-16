@@ -1,0 +1,40 @@
+name: TEST GPT2 Original Native Figured Dimension Strokes
+
+on:
+  pull_request:
+    paths:
+      - pb_source_native_dimension_stroke_shadow.py
+      - tests/test_gpt2_source_native_dimension_stroke_shadow.py
+      - .github/workflows/test-gpt2-original-native-dimension-strokes.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-pwd-figured-dimension-native-stroke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact-head guard
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install source toolchain
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original source and negative tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_source_native_dimension_stroke_shadow.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
