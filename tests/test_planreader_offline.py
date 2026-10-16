@@ -117,6 +117,36 @@ class TestClassifyPage(unittest.TestCase):
         self.assertEqual(classify_page("Random notes about construction"), "Other")
         self.assertEqual(classify_page(""), "Other")
 
+    def test_equal_floor_and_elevation_headings_abstain(self):
+        self.assertEqual(classify_page("FLOOR PLAN\nELEVATION"), "Other")
+        self.assertEqual(classify_page("FLOOR PLAN\nNORTH ELEVATION"), "Other")
+
+    def test_section_inside_another_word_is_not_a_section(self):
+        self.assertEqual(classify_page("INTERSECTION DETAIL"), "Other")
+
+    def test_bare_title_is_not_a_sheet_type(self):
+        self.assertEqual(classify_page("TITLE"), "Other")
+        self.assertEqual(classify_page("FLOOR PLAN\nTITLE"), "Floor Plan")
+        self.assertEqual(classify_page("TITLE SHEET"), "Title / Drawing Register")
+        self.assertEqual(classify_page("DRAWING INDEX"), "Title / Drawing Register")
+
+    def test_reference_line_does_not_vote(self):
+        self.assertEqual(classify_page("REFER FLOOR PLAN"), "Other")
+        self.assertEqual(
+            classify_page("FLOOR PLAN\nREFER TO NORTH ELEVATION"),
+            "Floor Plan",
+        )
+
+    def test_reflected_ceiling_plan_is_not_a_floor_plan(self):
+        self.assertEqual(classify_page("REFLECTED CEILING PLAN"), "Reflected Ceiling Plan")
+
+    def test_keyword_order_does_not_change_a_unique_type(self):
+        self.assertEqual(
+            classify_page("ELEVATION\nNORTH ELEVATION"),
+            classify_page("NORTH ELEVATION\nELEVATION"),
+        )
+        self.assertEqual(classify_page("NORTH ELEVATION"), "Elevation")
+
 
 class TestDetectScaleFromText(unittest.TestCase):
     """Test scale detection with confidence."""
