@@ -1,0 +1,4486 @@
+{
+  "archive_source_artifact_id": 11934748920,
+  "archive_source_run_url": "https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38651231157",
+  "authority_grants": {
+    "benchmark_score": false,
+    "new_frame": false,
+    "new_height": false,
+    "new_host": false,
+    "new_quantity": false,
+    "new_wall": false,
+    "new_width": false,
+    "opening_count": false
+  },
+  "baseline_summary": {
+    "authenticated_hosts": 15,
+    "canonical_opening_area_records": 8,
+    "canonical_opening_records": 21,
+    "complete_opening_geometry_records": 0,
+    "height_reason_counts": {
+      "schedule_opening_instance_binding_partial_source_coverage": 21
+    },
+    "label_dimension_reason_counts": {
+      "opening_label_dimension_ambiguous": 1,
+      "opening_label_dimension_resolved": 16,
+      "opening_label_dimension_text_unavailable": 4
+    },
+    "label_semantic_reason_counts": {
+      "opening_label_semantic_resolved": 8,
+      "opening_label_semantic_unavailable": 13
+    },
+    "physical_existence_claims": 21,
+    "resolved_source_frames": 9,
+    "room_scope_reason_counts": {
+      "source_room_face_scope_resolved": 1,
+      "source_room_face_universe_partial": 1
+    },
+    "schedule_reason_counts": {
+      "schedule_opening_instance_binding_partial_source_coverage": 21
+    },
+    "width_reason_counts": {
+      "opening_dimension_witness_topology_required": 21
+    }
+  },
+  "case_evidence": [
+    {
+      "existing_signed_quantity_receipts": [],
+      "figured_label": {
+        "evidence": {
+          "area_m2": null,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            870.0
+          ],
+          "evidence_id": "opening_label_dimension_97a7f560172fc4efdbb66cfe123b2c1c",
+          "opening_record_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+          "page_id": "3",
+          "raw_text": "870",
+          "schema_version": "1.0.0",
+          "semantic_kind": "door",
+          "source_text_observation_ids": [
+            "source_observation_3f293f706b0176b0118ab3f3e720d2bb"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+        "reason_codes": [
+          "opening_host_frame_host_unavailable",
+          "host_binding_record_unavailable"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_left_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_095ec2ac1a8e18624ec89bbf6be56cb6",
+        "status": "abstained"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_095ec2ac1a8e18624ec89bbf6be56cb6",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "original_aperture_coordinate_basis": {
+        "axis": [
+          1.0,
+          0.0
+        ],
+        "length": 23.75999999999999,
+        "normal": [
+          0.0,
+          1.0
+        ],
+        "origin": [
+          585.12,
+          362.88
+        ],
+        "thickness": 2.3999999999999773
+      },
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "source_g17_observations": [
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                608.88,
+                364.32,
+                687.6,
+                364.32
+              ],
+              "observation_id": "source_observation_df37d1c8fdf9e229e10f7e22d619a843",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1487"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            608.88,
+            364.32,
+            687.6,
+            364.32
+          ],
+          "observation_id": "source_observation_095ec2ac1a8e18624ec89bbf6be56cb6",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_df37d1c8fdf9e229e10f7e22d619a843"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1487"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                584.52,
+                364.56,
+                584.52,
+                388.56
+              ],
+              "observation_id": "source_observation_b9d95f485be75a97b596bfefde11e6ac",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:955"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            584.52,
+            364.56,
+            584.52,
+            388.56
+          ],
+          "observation_id": "source_observation_0fb7a935d8de50223ed89fc847633a9b",
+          "observation_kind": "raster_thin_ink_run",
+          "source_lineage_parent_ids": [
+            "source_observation_b9d95f485be75a97b596bfefde11e6ac"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:955"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                584.88,
+                361.68,
+                584.88,
+                363.84
+              ],
+              "observation_id": "source_observation_9adbb674ea2654887b30bc4cc9dcba32",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1325"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            584.88,
+            361.68,
+            584.88,
+            363.84
+          ],
+          "observation_id": "source_observation_2ea9d0741a2e42ba004144b7adfc3aa1",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_9adbb674ea2654887b30bc4cc9dcba32"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1325"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                581.04,
+                361.68,
+                584.88,
+                361.68
+              ],
+              "observation_id": "source_observation_c4f354d611b4ecb37ae440fa7dc692d7",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1467"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            581.04,
+            361.68,
+            584.88,
+            361.68
+          ],
+          "observation_id": "source_observation_715b8a6d333a3fefd845d7928f88e927",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_c4f354d611b4ecb37ae440fa7dc692d7"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1467"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                608.88,
+                361.44,
+                687.6,
+                361.44
+              ],
+              "observation_id": "source_observation_ef1b0d3bb20adfb96ab9ad79c657d406",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1486"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            608.88,
+            361.44,
+            687.6,
+            361.44
+          ],
+          "observation_id": "source_observation_9011f7811a8d9d957604d40836634dab",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_ef1b0d3bb20adfb96ab9ad79c657d406"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1486"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                581.04,
+                363.84,
+                584.88,
+                363.84
+              ],
+              "observation_id": "source_observation_7bece0e7b724bf091000ddc27f82fdfe",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1468"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            581.04,
+            363.84,
+            584.88,
+            363.84
+          ],
+          "observation_id": "source_observation_a7026aef8b8a1d3155133e07f1ca69de",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_7bece0e7b724bf091000ddc27f82fdfe"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1468"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                608.88,
+                361.44,
+                608.88,
+                364.32
+              ],
+              "observation_id": "source_observation_7b2ed98269ccba88915bfb581e2aeb33",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1332"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            608.88,
+            361.44,
+            608.88,
+            364.32
+          ],
+          "observation_id": "source_observation_cc416ea041db5d41707b197babfc1a18",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_7b2ed98269ccba88915bfb581e2aeb33"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1332"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                585.72,
+                363.84,
+                585.72,
+                388.56
+              ],
+              "observation_id": "source_observation_98d702bdde52ae509fbdb13fb8e6ac6e",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:958"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            585.72,
+            363.84,
+            585.72,
+            388.56
+          ],
+          "observation_id": "source_observation_eb03dfd768c19f83a9ad9c5ded83f0bb",
+          "observation_kind": "raster_thin_ink_run",
+          "source_lineage_parent_ids": [
+            "source_observation_98d702bdde52ae509fbdb13fb8e6ac6e"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:958"
+        }
+      ],
+      "source_w4_ancestry_audit": {
+        "benchmark_accuracy": null,
+        "candidate_ancestry_only": true,
+        "conflicting_w2_source_edge_addresses": [],
+        "diagnostic_local_raster_lines": [
+          {
+            "actual_w2_source_edges_by_w4_candidate": [
+              {
+                "source_edge_id": "split_2290",
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99"
+              },
+              {
+                "source_edge_id": "split_2291",
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99"
+              },
+              {
+                "source_edge_id": "split_2292",
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99"
+              },
+              {
+                "source_edge_id": "split_2293",
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99"
+              },
+              {
+                "source_edge_id": "split_2294",
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99"
+              },
+              {
+                "source_edge_id": "split_2295",
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99"
+              }
+            ],
+            "exact_positive_ancestry_w4_candidate_ids": [
+              "wall_bc75efccd0a16038ce99"
+            ],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              23.879999999999995,
+              102.38
+            ],
+            "opening_normal_offset_pt": -0.37999999999999545,
+            "original_source_line_pt": [
+              609.0,
+              362.5,
+              687.5,
+              362.5
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:433",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": [
+              {
+                "aperture_axis_span_pt": [
+                  23.879999999999995,
+                  30.129999999999995
+                ],
+                "aperture_normal_offset_pt": -0.37999999999999545,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  23.879999999999995,
+                  0.12000000000000455
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  609.0,
+                  362.5,
+                  615.25,
+                  362.5
+                ],
+                "source_edge_id": "split_2290",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99",
+                "within_aperture_diagnostic_band": true
+              },
+              {
+                "aperture_axis_span_pt": [
+                  30.129999999999995,
+                  45.379999999999995
+                ],
+                "aperture_normal_offset_pt": -0.37999999999999545,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  30.129999999999995,
+                  6.3700000000000045
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  615.25,
+                  362.5,
+                  630.5,
+                  362.5
+                ],
+                "source_edge_id": "split_2291",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  45.379999999999995,
+                  83.88
+                ],
+                "aperture_normal_offset_pt": -0.37999999999999545,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  45.379999999999995,
+                  21.620000000000005
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  630.5,
+                  362.5,
+                  669.0,
+                  362.5
+                ],
+                "source_edge_id": "split_2292",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  83.88,
+                  86.38
+                ],
+                "aperture_normal_offset_pt": -0.37999999999999545,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  83.88,
+                  60.120000000000005
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  669.0,
+                  362.5,
+                  671.5,
+                  362.5
+                ],
+                "source_edge_id": "split_2293",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  86.38,
+                  97.13
+                ],
+                "aperture_normal_offset_pt": -0.37999999999999545,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  86.38,
+                  62.620000000000005
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  671.5,
+                  362.5,
+                  682.25,
+                  362.5
+                ],
+                "source_edge_id": "split_2294",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  97.13,
+                  102.38
+                ],
+                "aperture_normal_offset_pt": -0.37999999999999545,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  97.13,
+                  73.37
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  682.25,
+                  362.5,
+                  687.5,
+                  362.5
+                ],
+                "source_edge_id": "split_2295",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_bc75efccd0a16038ce99",
+                "within_aperture_diagnostic_band": false
+              }
+            ]
+          }
+        ],
+        "host_publication_allowed": false,
+        "local_host_contact_proven": false,
+        "metric_quantity_publication_allowed": false,
+        "opening_count_publication_allowed": false,
+        "original_source_stage_counts": {
+          "line_not_parallel_to_opening": 1537,
+          "line_outside_aperture_local_band": 818,
+          "local_positive_source_with_w4_ancestry": 1
+        },
+        "page_id": "3",
+        "physical_equivalence_proven": false,
+        "quarantined_w4_candidate_addresses": [],
+        "source_edge_parent_identity_contradiction_count": 0,
+        "source_edge_parent_identity_contradictions": [],
+        "unusable_identity_source_parent_count": 0,
+        "w4_identity_count": 2094
+      }
+    },
+    {
+      "existing_signed_quantity_receipts": [],
+      "figured_label": {
+        "evidence": {
+          "area_m2": null,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            870.0
+          ],
+          "evidence_id": "opening_label_dimension_41c4b972c5f3e82895c2d6f47c5fcb2f",
+          "opening_record_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+          "page_id": "3",
+          "raw_text": "870",
+          "schema_version": "1.0.0",
+          "semantic_kind": null,
+          "source_text_observation_ids": [
+            "source_observation_71ed3c490e659f5d2ce8dfe4286403aa"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+        "reason_codes": [
+          "opening_host_frame_host_unavailable",
+          "host_binding_record_unavailable"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_02f8c26b1d48365347154ff576c6a6a3",
+        "status": "abstained"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_02f8c26b1d48365347154ff576c6a6a3",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "original_aperture_coordinate_basis": {
+        "axis": [
+          0.0,
+          1.0
+        ],
+        "length": 23.76000000000002,
+        "normal": [
+          -1.0,
+          0.0
+        ],
+        "origin": [
+          426.48,
+          223.92
+        ],
+        "thickness": 2.400000000000034
+      },
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "source_g17_observations": [
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                192.0,
+                425.28,
+                223.68
+              ],
+              "observation_id": "source_observation_d1ec03a7b7486b4818209edfc3f770a2",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1448"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            192.0,
+            425.28,
+            223.68
+          ],
+          "observation_id": "source_observation_02f8c26b1d48365347154ff576c6a6a3",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_d1ec03a7b7486b4818209edfc3f770a2"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1448"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                223.68,
+                427.92,
+                223.68
+              ],
+              "observation_id": "source_observation_4d0b92596d653ed21cfa575b621ec3f5",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1295"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            223.68,
+            427.92,
+            223.68
+          ],
+          "observation_id": "source_observation_1158c6f63608926030d7dd366cc8815a",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_4d0b92596d653ed21cfa575b621ec3f5"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1295"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                427.68,
+                223.68,
+                427.68,
+                248.88
+              ],
+              "observation_id": "source_observation_ee58dfea83e0c00fa483a89cc86bf733",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:188"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            427.68,
+            223.68,
+            427.68,
+            248.88
+          ],
+          "observation_id": "source_observation_37d295fe9f786e3c4fc2d558316b94a1",
+          "observation_kind": "raster_line_run",
+          "source_lineage_parent_ids": [
+            "source_observation_ee58dfea83e0c00fa483a89cc86bf733"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:188"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.76,
+                223.68,
+                425.76,
+                247.68
+              ],
+              "observation_id": "source_observation_bafe07ab8c26531e8564fd93cd9d5150",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:183"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.76,
+            223.68,
+            425.76,
+            247.68
+          ],
+          "observation_id": "source_observation_65bb3b533a83bf9fd7a5dd75fef684a6",
+          "observation_kind": "raster_line_run",
+          "source_lineage_parent_ids": [
+            "source_observation_bafe07ab8c26531e8564fd93cd9d5150"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:183"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                247.68,
+                427.44,
+                247.68
+              ],
+              "observation_id": "source_observation_18d2882a443381263b72e71f2997598b",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1296"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            247.68,
+            427.44,
+            247.68
+          ],
+          "observation_id": "source_observation_6720d976e70323c70656cc8e21844988",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_18d2882a443381263b72e71f2997598b"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1296"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                427.92,
+                192.0,
+                427.92,
+                223.68
+              ],
+              "observation_id": "source_observation_744fa2a6c19a7d3cdb29987b7aac5e5d",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1454"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            427.92,
+            192.0,
+            427.92,
+            223.68
+          ],
+          "observation_id": "source_observation_c6995406b86095bf32ee19b19e65212c",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_744fa2a6c19a7d3cdb29987b7aac5e5d"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1454"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                427.44,
+                247.68,
+                427.44,
+                252.48
+              ],
+              "observation_id": "source_observation_847697256a68c3a8ee36c55aa241d748",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1453"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            427.44,
+            247.68,
+            427.44,
+            252.48
+          ],
+          "observation_id": "source_observation_c7597710a5f137e21a6d3defa20e3c09",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_847697256a68c3a8ee36c55aa241d748"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1453"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                247.68,
+                425.28,
+                252.48
+              ],
+              "observation_id": "source_observation_4e27650c3e73a92bb01f435f5cee714f",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1449"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            247.68,
+            425.28,
+            252.48
+          ],
+          "observation_id": "source_observation_e2513e5e0d19443fc51f6a9f8192d225",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_4e27650c3e73a92bb01f435f5cee714f"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1449"
+        }
+      ],
+      "source_w4_ancestry_audit": {
+        "benchmark_accuracy": null,
+        "candidate_ancestry_only": true,
+        "conflicting_w2_source_edge_addresses": [],
+        "diagnostic_local_raster_lines": [
+          {
+            "actual_w2_source_edges_by_w4_candidate": [
+              {
+                "source_edge_id": "split_2643",
+                "wall_candidate_id": "wall_c388e20d2b9d004c01b5"
+              }
+            ],
+            "exact_positive_ancestry_w4_candidate_ids": [
+              "wall_c388e20d2b9d004c01b5"
+            ],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              -30.419999999999987,
+              0.5800000000000125
+            ],
+            "opening_normal_offset_pt": -0.2699999999999818,
+            "original_source_line_pt": [
+              426.75,
+              193.5,
+              426.75,
+              224.5
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1602",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": [
+              {
+                "aperture_axis_span_pt": [
+                  -30.419999999999987,
+                  0.5800000000000125
+                ],
+                "aperture_normal_offset_pt": -0.2699999999999818,
+                "axis_interval_overlaps_aperture": true,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  0.5800000000000125,
+                  23.180000000000007
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  426.75,
+                  193.5,
+                  426.75,
+                  224.5
+                ],
+                "source_edge_id": "split_2643",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_c388e20d2b9d004c01b5",
+                "within_aperture_diagnostic_band": true
+              }
+            ]
+          }
+        ],
+        "host_publication_allowed": false,
+        "local_host_contact_proven": false,
+        "metric_quantity_publication_allowed": false,
+        "opening_count_publication_allowed": false,
+        "original_source_stage_counts": {
+          "line_not_parallel_to_opening": 819,
+          "line_outside_aperture_local_band": 1536,
+          "local_positive_source_with_w4_ancestry": 1
+        },
+        "page_id": "3",
+        "physical_equivalence_proven": false,
+        "quarantined_w4_candidate_addresses": [],
+        "source_edge_parent_identity_contradiction_count": 0,
+        "source_edge_parent_identity_contradictions": [],
+        "unusable_identity_source_parent_count": 0,
+        "w4_identity_count": 2094
+      }
+    },
+    {
+      "existing_signed_quantity_receipts": [],
+      "figured_label": {
+        "evidence": {
+          "area_m2": null,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            870.0
+          ],
+          "evidence_id": "opening_label_dimension_4fad004def6444ef88be4c15df1b46d1",
+          "opening_record_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+          "page_id": "3",
+          "raw_text": "870",
+          "schema_version": "1.0.0",
+          "semantic_kind": null,
+          "source_text_observation_ids": [
+            "source_observation_b1f717ae0ac170f9bffbd05cdaa90b83"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+        "reason_codes": [
+          "opening_host_frame_host_unavailable",
+          "host_binding_record_unavailable"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_left_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_119ef8ca51e38a54cfd660353d490774",
+        "status": "abstained"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_119ef8ca51e38a54cfd660353d490774",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "original_aperture_coordinate_basis": {
+        "axis": [
+          1.0,
+          0.0
+        ],
+        "length": 23.519999999999982,
+        "normal": [
+          0.0,
+          1.0
+        ],
+        "origin": [
+          692.64,
+          427.92
+        ],
+        "thickness": 3.3600000000000136
+      },
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "source_g17_observations": [
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                716.16,
+                429.36,
+                760.32,
+                429.36
+              ],
+              "observation_id": "source_observation_0afc2e465eaeb2f7e9bb93d8dfc547df",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1516"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            716.16,
+            429.36,
+            760.32,
+            429.36
+          ],
+          "observation_id": "source_observation_119ef8ca51e38a54cfd660353d490774",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_0afc2e465eaeb2f7e9bb93d8dfc547df"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1516"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                692.4,
+                429.12,
+                716.16,
+                429.12
+              ],
+              "observation_id": "source_observation_c9319106625e1c84fa384164776cbf8c",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:483"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            692.4,
+            429.12,
+            716.16,
+            429.12
+          ],
+          "observation_id": "source_observation_39961957b3140d852383b76b25574113",
+          "observation_kind": "raster_line_run",
+          "source_lineage_parent_ids": [
+            "source_observation_c9319106625e1c84fa384164776cbf8c"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:483"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                716.16,
+                426.24,
+                760.32,
+                426.24
+              ],
+              "observation_id": "source_observation_b37b764324c969e9f8eccb08552540e4",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1515"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            716.16,
+            426.24,
+            760.32,
+            426.24
+          ],
+          "observation_id": "source_observation_460e69069e159690e0e18ca53dcbeb46",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_b37b764324c969e9f8eccb08552540e4"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1515"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                661.44,
+                426.24,
+                692.4,
+                426.24
+              ],
+              "observation_id": "source_observation_0dbd89197c09dc2f158f8f9dd8806c4b",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1498"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            661.44,
+            426.24,
+            692.4,
+            426.24
+          ],
+          "observation_id": "source_observation_d872c46d5d648ad5be5453a1f9444a55",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_0dbd89197c09dc2f158f8f9dd8806c4b"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1498"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                692.4,
+                426.24,
+                692.4,
+                429.36
+              ],
+              "observation_id": "source_observation_a26239589b27632b5cb430c88fb6a3c3",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1356"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            692.4,
+            426.24,
+            692.4,
+            429.36
+          ],
+          "observation_id": "source_observation_de5bab94dff2a5769ec4965e134e538e",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_a26239589b27632b5cb430c88fb6a3c3"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1356"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                661.44,
+                429.36,
+                692.4,
+                429.36
+              ],
+              "observation_id": "source_observation_4e5f256b41eb81011e62ea03b4c08ead",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1499"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            661.44,
+            429.36,
+            692.4,
+            429.36
+          ],
+          "observation_id": "source_observation_ec5bf71878c00a8b1703ed05a37a5625",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_4e5f256b41eb81011e62ea03b4c08ead"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1499"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                716.16,
+                426.24,
+                716.16,
+                429.36
+              ],
+              "observation_id": "source_observation_b3da855d72db5ce4e43dca5badbcbb74",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1362"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            716.16,
+            426.24,
+            716.16,
+            429.36
+          ],
+          "observation_id": "source_observation_ef8cefe9d1016979b05207249696ce69",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_b3da855d72db5ce4e43dca5badbcbb74"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1362"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                692.4,
+                426.48,
+                716.16,
+                426.48
+              ],
+              "observation_id": "source_observation_69b7baa8ce7d015624f7e200ac6ea23a",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:482"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            692.4,
+            426.48,
+            716.16,
+            426.48
+          ],
+          "observation_id": "source_observation_fe266c5b91a6a2285d6d18dc196f6760",
+          "observation_kind": "raster_line_run",
+          "source_lineage_parent_ids": [
+            "source_observation_69b7baa8ce7d015624f7e200ac6ea23a"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:482"
+        }
+      ],
+      "source_w4_ancestry_audit": {
+        "benchmark_accuracy": null,
+        "candidate_ancestry_only": true,
+        "conflicting_w2_source_edge_addresses": [],
+        "diagnostic_local_raster_lines": [],
+        "host_publication_allowed": false,
+        "local_host_contact_proven": false,
+        "metric_quantity_publication_allowed": false,
+        "opening_count_publication_allowed": false,
+        "original_source_stage_counts": {
+          "line_not_parallel_to_opening": 1537,
+          "line_outside_aperture_local_band": 819
+        },
+        "page_id": "3",
+        "physical_equivalence_proven": false,
+        "quarantined_w4_candidate_addresses": [],
+        "source_edge_parent_identity_contradiction_count": 0,
+        "source_edge_parent_identity_contradictions": [],
+        "unusable_identity_source_parent_count": 0,
+        "w4_identity_count": 2094
+      }
+    },
+    {
+      "existing_signed_quantity_receipts": [],
+      "figured_label": {
+        "evidence": null,
+        "reason_codes": [
+          "opening_label_dimension_text_unavailable"
+        ],
+        "schema_version": "1.0.0",
+        "status": "abstained"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+        "reason_codes": [
+          "opening_host_frame_host_unavailable",
+          "host_binding_record_unavailable"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_left_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_0baebb2b4ee58e0257a43c330ef8e300",
+        "status": "abstained"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_0baebb2b4ee58e0257a43c330ef8e300",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "original_aperture_coordinate_basis": {
+        "axis": [
+          0.0,
+          1.0
+        ],
+        "length": 45.360000000000014,
+        "normal": [
+          -1.0,
+          0.0
+        ],
+        "origin": [
+          606.0,
+          197.76
+        ],
+        "thickness": 2.400000000000091
+      },
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "source_g17_observations": [
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                605.04,
+                197.52,
+                605.04,
+                242.64
+              ],
+              "observation_id": "source_observation_6fddf6c4d5598bef2c83f89702bae6d2",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:367"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            605.04,
+            197.52,
+            605.04,
+            242.64
+          ],
+          "observation_id": "source_observation_0baebb2b4ee58e0257a43c330ef8e300",
+          "observation_kind": "raster_line_run",
+          "source_lineage_parent_ids": [
+            "source_observation_6fddf6c4d5598bef2c83f89702bae6d2"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:367"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                604.8,
+                243.12,
+                607.44,
+                243.12
+              ],
+              "observation_id": "source_observation_1c3473be41e796d0f21a7c840c58783c",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1329"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            604.8,
+            243.12,
+            607.44,
+            243.12
+          ],
+          "observation_id": "source_observation_111204d021e6a93f6308a5c5af8d828f",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_1c3473be41e796d0f21a7c840c58783c"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1329"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                607.44,
+                191.76,
+                607.44,
+                197.52
+              ],
+              "observation_id": "source_observation_9642a349b78f8daa3c64ed2f61d32c7a",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1484"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            607.44,
+            191.76,
+            607.44,
+            197.52
+          ],
+          "observation_id": "source_observation_26714952e19f6aea7675603833deeda6",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_9642a349b78f8daa3c64ed2f61d32c7a"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1484"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                606.48,
+                197.52,
+                606.48,
+                242.64
+              ],
+              "observation_id": "source_observation_ad8ec09ee6efbd10b2364dab14989c90",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:370"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            606.48,
+            197.52,
+            606.48,
+            242.64
+          ],
+          "observation_id": "source_observation_4dbc523f745cc6b4fbd7f463b3913825",
+          "observation_kind": "raster_line_run",
+          "source_lineage_parent_ids": [
+            "source_observation_ad8ec09ee6efbd10b2364dab14989c90"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:370"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                604.8,
+                191.76,
+                604.8,
+                197.52
+              ],
+              "observation_id": "source_observation_fd723f08629ea0473381efd3bcff152f",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1480"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            604.8,
+            191.76,
+            604.8,
+            197.52
+          ],
+          "observation_id": "source_observation_4f837a82ddd276a4c8a59c8661427ea4",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_fd723f08629ea0473381efd3bcff152f"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1480"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                604.8,
+                197.52,
+                607.44,
+                197.52
+              ],
+              "observation_id": "source_observation_58b79002d33b7cdb3732b1a745ad4568",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1328"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            604.8,
+            197.52,
+            607.44,
+            197.52
+          ],
+          "observation_id": "source_observation_5cdb0385b98bb7bd6c3b2cdceca35925",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_58b79002d33b7cdb3732b1a745ad4568"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1328"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                604.8,
+                243.12,
+                604.8,
+                299.76
+              ],
+              "observation_id": "source_observation_b5c1b3986fa36f2a31be5e31bc7800f3",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1481"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            604.8,
+            243.12,
+            604.8,
+            299.76
+          ],
+          "observation_id": "source_observation_6874bddc8026c85f223f783999c63979",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_b5c1b3986fa36f2a31be5e31bc7800f3"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1481"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                607.44,
+                243.12,
+                607.44,
+                299.76
+              ],
+              "observation_id": "source_observation_9daa1c71f74011492f6a78301a47489e",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1485"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            607.44,
+            243.12,
+            607.44,
+            299.76
+          ],
+          "observation_id": "source_observation_aa92e83c4d770da05c150b2d6d34be89",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_9daa1c71f74011492f6a78301a47489e"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1485"
+        }
+      ],
+      "source_w4_ancestry_audit": {
+        "benchmark_accuracy": null,
+        "candidate_ancestry_only": true,
+        "conflicting_w2_source_edge_addresses": [],
+        "diagnostic_local_raster_lines": [],
+        "host_publication_allowed": false,
+        "local_host_contact_proven": false,
+        "metric_quantity_publication_allowed": false,
+        "opening_count_publication_allowed": false,
+        "original_source_stage_counts": {
+          "line_not_parallel_to_opening": 819,
+          "line_outside_aperture_local_band": 1537
+        },
+        "page_id": "3",
+        "physical_equivalence_proven": false,
+        "quarantined_w4_candidate_addresses": [],
+        "source_edge_parent_identity_contradiction_count": 0,
+        "source_edge_parent_identity_contradictions": [],
+        "unusable_identity_source_parent_count": 0,
+        "w4_identity_count": 2094
+      }
+    },
+    {
+      "existing_signed_quantity_receipts": [],
+      "figured_label": {
+        "evidence": {
+          "area_m2": null,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            870.0
+          ],
+          "evidence_id": "opening_label_dimension_2fcfa1f4e18339b5fb11943cc3153db8",
+          "opening_record_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+          "page_id": "3",
+          "raw_text": "870",
+          "schema_version": "1.0.0",
+          "semantic_kind": "door",
+          "source_text_observation_ids": [
+            "source_observation_8a607e910c17fdf6ff88fef4e234dcb7"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+        "reason_codes": [
+          "opening_host_frame_host_unavailable",
+          "host_binding_record_unavailable"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_left_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_11130b2ce7f53e641b7fc9072b0b9bd7",
+        "status": "abstained"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_11130b2ce7f53e641b7fc9072b0b9bd7",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "original_aperture_coordinate_basis": {
+        "axis": [
+          0.0,
+          1.0
+        ],
+        "length": 23.75999999999999,
+        "normal": [
+          -1.0,
+          0.0
+        ],
+        "origin": [
+          582.72,
+          503.28
+        ],
+        "thickness": 3.3600000000000136
+      },
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "source_g17_observations": [
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                584.16,
+                527.04,
+                584.16,
+                533.52
+              ],
+              "observation_id": "source_observation_3ec4eed2d243bbecb1a9b53551b01294",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1477"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            584.16,
+            527.04,
+            584.16,
+            533.52
+          ],
+          "observation_id": "source_observation_11130b2ce7f53e641b7fc9072b0b9bd7",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_3ec4eed2d243bbecb1a9b53551b01294"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1477"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                556.56,
+                527.4,
+                580.56,
+                527.4
+              ],
+              "observation_id": "source_observation_592cfc970b8fa25ef8ac2f5a6f44d8f1",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:943"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            556.56,
+            527.4,
+            580.56,
+            527.4
+          ],
+          "observation_id": "source_observation_4876c56b8d37ccffee19af9f5acac23f",
+          "observation_kind": "raster_thin_ink_run",
+          "source_lineage_parent_ids": [
+            "source_observation_592cfc970b8fa25ef8ac2f5a6f44d8f1"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:943"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                556.56,
+                526.2,
+                581.52,
+                526.2
+              ],
+              "observation_id": "source_observation_eab934cc557b4d9583a20b8be97cab67",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:942"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            556.56,
+            526.2,
+            581.52,
+            526.2
+          ],
+          "observation_id": "source_observation_56309de05106417d02f27f101d286a27",
+          "observation_kind": "raster_thin_ink_run",
+          "source_lineage_parent_ids": [
+            "source_observation_eab934cc557b4d9583a20b8be97cab67"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:942"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                581.04,
+                527.04,
+                581.04,
+                533.52
+              ],
+              "observation_id": "source_observation_5463482db0255697793844f9dc007930",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1472"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            581.04,
+            527.04,
+            581.04,
+            533.52
+          ],
+          "observation_id": "source_observation_74589fd4c8a643df2f3ff05d3f3b162b",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_5463482db0255697793844f9dc007930"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1472"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                581.04,
+                527.04,
+                584.16,
+                527.04
+              ],
+              "observation_id": "source_observation_71bd5515d565dd7c62cb2984f9cdce20",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1321"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            581.04,
+            527.04,
+            584.16,
+            527.04
+          ],
+          "observation_id": "source_observation_75ff241e0efd11d49b4a6e3e1452d4ed",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_71bd5515d565dd7c62cb2984f9cdce20"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1321"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                581.04,
+                503.04,
+                584.16,
+                503.04
+              ],
+              "observation_id": "source_observation_a2c71a8ced13af8120fd473cbe4f9ec1",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1320"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            581.04,
+            503.04,
+            584.16,
+            503.04
+          ],
+          "observation_id": "source_observation_7dcdc7fda9ea3f5abb8476a1f3d8a3ea",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_a2c71a8ced13af8120fd473cbe4f9ec1"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1320"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                584.16,
+                411.84,
+                584.16,
+                503.04
+              ],
+              "observation_id": "source_observation_62710dae2409fc379d21d434f2cfa858",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1476"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            584.16,
+            411.84,
+            584.16,
+            503.04
+          ],
+          "observation_id": "source_observation_adff19f0cc45b0486693155223063213",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_62710dae2409fc379d21d434f2cfa858"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1476"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                581.04,
+                411.84,
+                581.04,
+                503.04
+              ],
+              "observation_id": "source_observation_e2a34294b4891995f9d6a64dc31dd1d4",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1469"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            581.04,
+            411.84,
+            581.04,
+            503.04
+          ],
+          "observation_id": "source_observation_d937f9ed6b038d2a4014dd98d09210ff",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_e2a34294b4891995f9d6a64dc31dd1d4"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1469"
+        }
+      ],
+      "source_w4_ancestry_audit": {
+        "benchmark_accuracy": null,
+        "candidate_ancestry_only": true,
+        "conflicting_w2_source_edge_addresses": [],
+        "diagnostic_local_raster_lines": [
+          {
+            "actual_w2_source_edges_by_w4_candidate": [
+              {
+                "source_edge_id": "split_2681",
+                "wall_candidate_id": "wall_48a37e9c447b2881aaa9"
+              },
+              {
+                "source_edge_id": "split_2766",
+                "wall_candidate_id": "wall_cd7a7131673d178751fe"
+              },
+              {
+                "source_edge_id": "split_1520",
+                "wall_candidate_id": "wall_fc36a8ba423a97b7685f"
+              },
+              {
+                "source_edge_id": "split_1521",
+                "wall_candidate_id": "wall_fc36a8ba423a97b7685f"
+              },
+              {
+                "source_edge_id": "split_1522",
+                "wall_candidate_id": "wall_fc36a8ba423a97b7685f"
+              }
+            ],
+            "exact_positive_ancestry_w4_candidate_ids": [
+              "wall_48a37e9c447b2881aaa9",
+              "wall_cd7a7131673d178751fe",
+              "wall_fc36a8ba423a97b7685f"
+            ],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              -173.77999999999997,
+              0.22000000000002728
+            ],
+            "opening_normal_offset_pt": -2.7799999999999727,
+            "original_source_line_pt": [
+              585.5,
+              329.5,
+              585.5,
+              503.5
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1749",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": [
+              {
+                "aperture_axis_span_pt": [
+                  -103.27999999999997,
+                  -99.27999999999997
+                ],
+                "aperture_normal_offset_pt": -2.7799999999999727,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  99.27999999999997,
+                  123.03999999999996
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  585.5,
+                  400.0,
+                  585.5,
+                  404.0
+                ],
+                "source_edge_id": "split_2681",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_48a37e9c447b2881aaa9",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  -139.27999999999997,
+                  -114.77999999999997
+                ],
+                "aperture_normal_offset_pt": -2.7799999999999727,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  114.77999999999997,
+                  138.53999999999996
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  585.5,
+                  364.0,
+                  585.5,
+                  388.5
+                ],
+                "source_edge_id": "split_2766",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_cd7a7131673d178751fe",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  -173.77999999999997,
+                  -111.27999999999997
+                ],
+                "aperture_normal_offset_pt": -2.7799999999999727,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  111.27999999999997,
+                  135.03999999999996
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  585.5,
+                  329.5,
+                  585.5,
+                  392.0
+                ],
+                "source_edge_id": "split_1520",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_fc36a8ba423a97b7685f",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  -111.27999999999997,
+                  -39.77999999999997
+                ],
+                "aperture_normal_offset_pt": -2.7799999999999727,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  39.77999999999997,
+                  63.539999999999964
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  585.5,
+                  392.0,
+                  585.5,
+                  463.5
+                ],
+                "source_edge_id": "split_1521",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_fc36a8ba423a97b7685f",
+                "within_aperture_diagnostic_band": false
+              },
+              {
+                "aperture_axis_span_pt": [
+                  -39.77999999999997,
+                  0.22000000000002728
+                ],
+                "aperture_normal_offset_pt": -2.7799999999999727,
+                "axis_interval_overlaps_aperture": true,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  0.22000000000002728,
+                  23.539999999999964
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  585.5,
+                  463.5,
+                  585.5,
+                  503.5
+                ],
+                "source_edge_id": "split_1522",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_fc36a8ba423a97b7685f",
+                "within_aperture_diagnostic_band": true
+              }
+            ]
+          }
+        ],
+        "host_publication_allowed": false,
+        "local_host_contact_proven": false,
+        "metric_quantity_publication_allowed": false,
+        "opening_count_publication_allowed": false,
+        "original_source_stage_counts": {
+          "line_not_parallel_to_opening": 819,
+          "line_outside_aperture_local_band": 1536,
+          "local_positive_source_with_w4_ancestry": 1
+        },
+        "page_id": "3",
+        "physical_equivalence_proven": false,
+        "quarantined_w4_candidate_addresses": [],
+        "source_edge_parent_identity_contradiction_count": 0,
+        "source_edge_parent_identity_contradictions": [],
+        "unusable_identity_source_parent_count": 0,
+        "w4_identity_count": 2094
+      }
+    },
+    {
+      "existing_signed_quantity_receipts": [],
+      "figured_label": {
+        "evidence": null,
+        "reason_codes": [
+          "opening_label_dimension_ambiguous"
+        ],
+        "schema_version": "1.0.0",
+        "status": "conflict"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+        "reason_codes": [
+          "opening_host_frame_host_unavailable",
+          "host_binding_record_unavailable"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_left_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_7c620249ea0179dd5affaa22ca70c2f3",
+        "status": "abstained"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_7c620249ea0179dd5affaa22ca70c2f3",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "original_aperture_coordinate_basis": {
+        "axis": [
+          0.0,
+          1.0
+        ],
+        "length": 23.76000000000002,
+        "normal": [
+          -1.0,
+          0.0
+        ],
+        "origin": [
+          426.48,
+          252.72
+        ],
+        "thickness": 2.400000000000034
+      },
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "source_g17_observations": [
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                427.44,
+                253.56,
+                452.4,
+                253.56
+              ],
+              "observation_id": "source_observation_f5b47bdbc2d2c196a9527bf97d3d75f9",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:845"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            427.44,
+            253.56,
+            452.4,
+            253.56
+          ],
+          "observation_id": "source_observation_7c620249ea0179dd5affaa22ca70c2f3",
+          "observation_kind": "raster_thin_ink_run",
+          "source_lineage_parent_ids": [
+            "source_observation_f5b47bdbc2d2c196a9527bf97d3d75f9"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:845"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                428.4,
+                252.12,
+                452.4,
+                252.12
+              ],
+              "observation_id": "source_observation_8f203cde9cf303d268a59fbe101a08a9",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:848"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            428.4,
+            252.12,
+            452.4,
+            252.12
+          ],
+          "observation_id": "source_observation_99beac9fa6f49a8a7781aa4d9cdd020d",
+          "observation_kind": "raster_thin_ink_run",
+          "source_lineage_parent_ids": [
+            "source_observation_8f203cde9cf303d268a59fbe101a08a9"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:848"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                427.44,
+                247.68,
+                427.44,
+                252.48
+              ],
+              "observation_id": "source_observation_847697256a68c3a8ee36c55aa241d748",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1453"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            427.44,
+            247.68,
+            427.44,
+            252.48
+          ],
+          "observation_id": "source_observation_c7597710a5f137e21a6d3defa20e3c09",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_847697256a68c3a8ee36c55aa241d748"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1453"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                247.68,
+                425.28,
+                252.48
+              ],
+              "observation_id": "source_observation_4e27650c3e73a92bb01f435f5cee714f",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1449"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            247.68,
+            425.28,
+            252.48
+          ],
+          "observation_id": "source_observation_e2513e5e0d19443fc51f6a9f8192d225",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_4e27650c3e73a92bb01f435f5cee714f"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1449"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                252.48,
+                427.44,
+                252.48
+              ],
+              "observation_id": "source_observation_4648aa311f5e172bef36bd78f751cbe5",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1298"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            252.48,
+            427.44,
+            252.48
+          ],
+          "observation_id": "source_observation_e2bbb7a971c417e77ed7f27c7fa43a35",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_4648aa311f5e172bef36bd78f751cbe5"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1298"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                427.92,
+                276.48,
+                427.92,
+                299.76
+              ],
+              "observation_id": "source_observation_ee4937f8a9f889ad0831469875f6cb05",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1455"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            427.92,
+            276.48,
+            427.92,
+            299.76
+          ],
+          "observation_id": "source_observation_e809cefa2e6ac1c69294c0f2741f734a",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_ee4937f8a9f889ad0831469875f6cb05"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1455"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                276.48,
+                427.92,
+                276.48
+              ],
+              "observation_id": "source_observation_3e9fb9892dcbfb4f43a298ca9cae51cb",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1299"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            276.48,
+            427.92,
+            276.48
+          ],
+          "observation_id": "source_observation_fbe691ed22538dc1eb0f9dfb47fd0fe7",
+          "observation_kind": "raster_wall_band_end",
+          "source_lineage_parent_ids": [
+            "source_observation_3e9fb9892dcbfb4f43a298ca9cae51cb"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1299"
+        },
+        {
+          "authenticated_source_parents": [
+            {
+              "exact_source_ref_w4_candidates": [],
+              "geometry_pdf_pts": [
+                425.28,
+                276.48,
+                425.28,
+                299.76
+              ],
+              "observation_id": "source_observation_3d5bd46b7c51a7c2260837defba206f3",
+              "observation_kind": "raster_opening_primitive_segment",
+              "source_primitive_ref": "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1452"
+            }
+          ],
+          "exact_source_ref_w4_candidates": [],
+          "geometry_pdf_pts": [
+            425.28,
+            276.48,
+            425.28,
+            299.76
+          ],
+          "observation_id": "source_observation_fe236cb8837e65ff87287e6b499cb19e",
+          "observation_kind": "raster_wall_band_face",
+          "source_lineage_parent_ids": [
+            "source_observation_3d5bd46b7c51a7c2260837defba206f3"
+          ],
+          "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1452"
+        }
+      ],
+      "source_w4_ancestry_audit": {
+        "benchmark_accuracy": null,
+        "candidate_ancestry_only": true,
+        "conflicting_w2_source_edge_addresses": [],
+        "diagnostic_local_raster_lines": [
+          {
+            "actual_w2_source_edges_by_w4_candidate": [
+              {
+                "source_edge_id": "split_1840",
+                "wall_candidate_id": "wall_70afde906c6c1375b09c"
+              }
+            ],
+            "exact_positive_ancestry_w4_candidate_ids": [
+              "wall_70afde906c6c1375b09c"
+            ],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              19.78,
+              44.28
+            ],
+            "opening_normal_offset_pt": 3.230000000000018,
+            "original_source_line_pt": [
+              423.25,
+              272.5,
+              423.25,
+              297.0
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1595",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": [
+              {
+                "aperture_axis_span_pt": [
+                  19.78,
+                  44.28
+                ],
+                "aperture_normal_offset_pt": 3.230000000000018,
+                "axis_interval_overlaps_aperture": true,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  19.78,
+                  3.980000000000018
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  423.25,
+                  272.5,
+                  423.25,
+                  297.0
+                ],
+                "source_edge_id": "split_1840",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_70afde906c6c1375b09c",
+                "within_aperture_diagnostic_band": true
+              }
+            ]
+          },
+          {
+            "actual_w2_source_edges_by_w4_candidate": [],
+            "exact_positive_ancestry_w4_candidate_ids": [],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              19.78,
+              47.28
+            ],
+            "opening_normal_offset_pt": 1.9800000000000182,
+            "original_source_line_pt": [
+              424.5,
+              272.5,
+              424.5,
+              300.0
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1597",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": []
+          },
+          {
+            "actual_w2_source_edges_by_w4_candidate": [
+              {
+                "source_edge_id": "split_1621",
+                "wall_candidate_id": "wall_4931493b1809384a6cda"
+              }
+            ],
+            "exact_positive_ancestry_w4_candidate_ids": [
+              "wall_4931493b1809384a6cda"
+            ],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              9.780000000000001,
+              13.780000000000001
+            ],
+            "opening_normal_offset_pt": 0.4800000000000182,
+            "original_source_line_pt": [
+              426.0,
+              262.5,
+              426.0,
+              266.5
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1600",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": [
+              {
+                "aperture_axis_span_pt": [
+                  9.780000000000001,
+                  13.780000000000001
+                ],
+                "aperture_normal_offset_pt": 0.4800000000000182,
+                "axis_interval_overlaps_aperture": true,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  9.780000000000001,
+                  9.980000000000018
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  426.0,
+                  262.5,
+                  426.0,
+                  266.5
+                ],
+                "source_edge_id": "split_1621",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_4931493b1809384a6cda",
+                "within_aperture_diagnostic_band": true
+              }
+            ]
+          },
+          {
+            "actual_w2_source_edges_by_w4_candidate": [
+              {
+                "source_edge_id": "split_1528",
+                "wall_candidate_id": "wall_30841e0cc3925d5cfaed"
+              },
+              {
+                "source_edge_id": "split_1529",
+                "wall_candidate_id": "wall_30841e0cc3925d5cfaed"
+              }
+            ],
+            "exact_positive_ancestry_w4_candidate_ids": [
+              "wall_30841e0cc3925d5cfaed"
+            ],
+            "locally_authenticated_host": false,
+            "opening_axis_span_pt": [
+              21.28,
+              47.28
+            ],
+            "opening_normal_offset_pt": -0.2699999999999818,
+            "original_source_line_pt": [
+              426.75,
+              274.0,
+              426.75,
+              300.0
+            ],
+            "source_primitive_id": "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1603",
+            "w2_snap_loss_geometry_by_associated_w4_candidate": [],
+            "w2_source_fragment_geometry_by_w4_candidate": [
+              {
+                "aperture_axis_span_pt": [
+                  21.28,
+                  31.28
+                ],
+                "aperture_normal_offset_pt": -0.2699999999999818,
+                "axis_interval_overlaps_aperture": true,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  21.28,
+                  2.480000000000018
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  426.75,
+                  274.0,
+                  426.75,
+                  284.0
+                ],
+                "source_edge_id": "split_1528",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_30841e0cc3925d5cfaed",
+                "within_aperture_diagnostic_band": true
+              },
+              {
+                "aperture_axis_span_pt": [
+                  31.28,
+                  44.28
+                ],
+                "aperture_normal_offset_pt": -0.2699999999999818,
+                "axis_interval_overlaps_aperture": false,
+                "distance_from_fragment_axis_endpoints_to_aperture_ends_pt": [
+                  31.28,
+                  7.519999999999982
+                ],
+                "geometry_disposition": "finite_parallel_fragment_observed",
+                "host_publication_allowed": false,
+                "physical_contact_proven": false,
+                "producer_w2_fragment_geometry_pt": [
+                  426.75,
+                  284.0,
+                  426.75,
+                  297.0
+                ],
+                "source_edge_id": "split_1529",
+                "source_parent_contains_w2_fragment_geometry": true,
+                "wall_candidate_id": "wall_30841e0cc3925d5cfaed",
+                "within_aperture_diagnostic_band": false
+              }
+            ]
+          }
+        ],
+        "host_publication_allowed": false,
+        "local_host_contact_proven": false,
+        "metric_quantity_publication_allowed": false,
+        "opening_count_publication_allowed": false,
+        "original_source_stage_counts": {
+          "line_not_parallel_to_opening": 819,
+          "line_outside_aperture_local_band": 1533,
+          "local_positive_source_with_w4_ancestry": 3,
+          "local_source_without_usable_w4_ancestry": 1
+        },
+        "page_id": "3",
+        "physical_equivalence_proven": false,
+        "quarantined_w4_candidate_addresses": [],
+        "source_edge_parent_identity_contradiction_count": 0,
+        "source_edge_parent_identity_contradictions": [],
+        "unusable_identity_source_parent_count": 0,
+        "w4_identity_count": 2094
+      }
+    },
+    {
+      "existing_canonical_area_m2": 10.08,
+      "existing_signed_quantity_receipts": [
+        {
+          "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+          "family": "opening_area",
+          "fingerprint": "f96a03ee3c95ee348110670f4c5e4b0d4ab86f46f9425e55451bbe99be369e27",
+          "lineage_ok": true,
+          "object_identity_refs": [
+            "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176"
+          ],
+          "quantity_id": "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+          "status": "corroborated",
+          "unit": "m2",
+          "value": 10.08
+        }
+      ],
+      "figured_label": {
+        "evidence": {
+          "area_m2": 10.08,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            2100.0,
+            4800.0
+          ],
+          "evidence_id": "opening_label_dimension_1afd7e2d7902994f0a8ad1dadea3ab52",
+          "opening_record_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+          "page_id": "3",
+          "raw_text": "2148 PANEL LIFT",
+          "schema_version": "1.0.0",
+          "semantic_kind": "door",
+          "source_text_observation_ids": [
+            "source_observation_5fc652aaf3238efcc8f7e7e530277ae7",
+            "source_observation_adc1ac9aa4302fcec95a40ef2c19fa29",
+            "source_observation_d7b9a687bb590454282b9a725975a211"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+        "reason_codes": [
+          "opening_host_frame_whole_wall_unproven",
+          "opening_host_frame_wall_unavailable",
+          "opening_host_frame_connected_edge_unproven"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": "opening_host_binding_group_dd1ebe9611386f10aa50512965f42d80",
+        "member_wall_candidate_ids": [
+          "wall_7d3dcc7ce4afc5c15704",
+          "wall_b25b5ffd3a29be53747f"
+        ],
+        "opening_identity_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+        "page_id": "3",
+        "reason_codes": [
+          "opening_host_binding_resolved",
+          "raster_split_centerline_host_resolved"
+        ],
+        "record_id": "opening_host_binding_v3_a697e7a7a6b492438ada99cf52aaa17a",
+        "representative_observation_id": "source_observation_18913a9bbcbae9103521bfdd2e6ab2da",
+        "status": "corroborated"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_18913a9bbcbae9103521bfdd2e6ab2da",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "new_quantity_opportunity_counted": false,
+      "physical_opening_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176"
+    },
+    {
+      "existing_canonical_area_m2": 1.26,
+      "existing_signed_quantity_receipts": [
+        {
+          "authority": "pb_opening_label_dimension_authority.figured_opening_label_area",
+          "family": "opening_area",
+          "fingerprint": "2c7b0b09fdfc6e0816c17af75df20a4cbf3bc27cf7d5a1a179991c2567fc3981",
+          "lineage_ok": true,
+          "object_identity_refs": [
+            "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985"
+          ],
+          "quantity_id": "opening_area_6809b61112132ffd701e6eae02076876",
+          "status": "corroborated",
+          "unit": "m2",
+          "value": 1.26
+        }
+      ],
+      "figured_label": {
+        "evidence": {
+          "area_m2": 1.26,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            600.0,
+            2100.0
+          ],
+          "evidence_id": "opening_label_dimension_44d25b95c7ab4ac290ed3bd5cd1d0602",
+          "opening_record_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+          "page_id": "3",
+          "raw_text": "0621 SGW",
+          "schema_version": "1.0.0",
+          "semantic_kind": "window",
+          "source_text_observation_ids": [
+            "source_observation_31680cc6616e51afa8baf6f40795e784",
+            "source_observation_595f4a880d1e8b2f7a8d42c75982a46f"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      },
+      "frame": {
+        "host_wall_id": null,
+        "opening_identity_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+        "reason_codes": [
+          "opening_host_frame_whole_wall_unproven",
+          "opening_host_frame_wall_unavailable",
+          "opening_host_frame_aligned_band_geometry_inconsistent"
+        ],
+        "record_id": null,
+        "status": "abstained",
+        "whole_wall_candidate_ids": []
+      },
+      "host_binding": {
+        "host_wall_id": "opening_host_binding_group_e7c672be444a3ed35890009cb5a357c6",
+        "member_wall_candidate_ids": [
+          "wall_b689beedb69c1be4eae7"
+        ],
+        "opening_identity_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+        "page_id": "3",
+        "reason_codes": [
+          "opening_host_binding_resolved",
+          "raster_source_primitive_host_resolved"
+        ],
+        "record_id": "opening_host_binding_v3_bd08d853e34f452a55e76b3d4439fac7",
+        "representative_observation_id": "source_observation_1557018ba02891bb28cc80c473f5ed72",
+        "status": "corroborated"
+      },
+      "measurement": {
+        "decision_scope_id": "wall-source:page-3",
+        "height_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "height_record_id": null,
+        "height_status": "abstained",
+        "opening_identity_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+        "page_id": "3",
+        "representative_observation_id": "source_observation_1557018ba02891bb28cc80c473f5ed72",
+        "scale_reason_codes": [
+          "physical_scale_bar_unavailable"
+        ],
+        "scale_record_id": null,
+        "scale_status": "abstained",
+        "schedule_binding_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "schedule_binding_record_id": null,
+        "schedule_binding_status": "abstained",
+        "vertical_reason_codes": [
+          "schedule_opening_instance_binding_partial_source_coverage"
+        ],
+        "vertical_record_id": null,
+        "vertical_status": "abstained",
+        "void_reason_codes": [
+          "opening_universe_completeness_record_unavailable",
+          "physical_opening_void_universe_incomplete"
+        ],
+        "void_record_id": null,
+        "void_status": "abstained",
+        "width_reason_codes": [
+          "opening_dimension_witness_topology_required"
+        ],
+        "width_record_id": null,
+        "width_status": "abstained"
+      },
+      "new_quantity_opportunity_counted": false,
+      "physical_opening_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985"
+    }
+  ],
+  "code_commit": "6bfd22fa8e09b2cbed5ed59a38128157c3bf83af",
+  "current_main_sealed_handoff": {
+    "benchmark_accuracy": null,
+    "benchmark_score_granted": false,
+    "customer_verified_quantity_ids": [
+      "opening_area_0b6477e219f9117d29b2803c181af665",
+      "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+      "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+      "opening_area_1a755970ebeca773650f41e73eb0f113",
+      "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+      "opening_area_6809b61112132ffd701e6eae02076876",
+      "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+      "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+    ],
+    "frozen_v2_reconciliation_complete": false,
+    "identity_map_status": "INDEPENDENT_ORIGINAL_SOURCE_BINDINGS_REQUIRED",
+    "project_id": "au_qld_lot16_power",
+    "quantity_count": 8,
+    "sealed_quantity_ids": [
+      "opening_area_0b6477e219f9117d29b2803c181af665",
+      "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+      "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+      "opening_area_1a755970ebeca773650f41e73eb0f113",
+      "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+      "opening_area_6809b61112132ffd701e6eae02076876",
+      "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+      "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+    ],
+    "sealed_run_fingerprint": "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb",
+    "sealed_run_id": "source_closed_run_f97c4a99dc25f0ba408a1ad1d9de2756",
+    "signed_run_and_customer_parity": true,
+    "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  },
+  "dbce_actual_first_failure_probe": {
+    "actual_binding_and_frame_receipts_equal_selected_baseline": true,
+    "actual_published_host_pair_classification": [
+      "wall_44435f10931bfe1d18b4",
+      "wall_b689beedb69c1be4eae7",
+      "distinct_physical_walls"
+    ],
+    "captures": [
+      {
+        "center_tol_pt": 0.75,
+        "competing_geometry": {
+          "axis": [
+            1.0,
+            0.0
+          ],
+          "length": 50.15999999999997,
+          "normal": [
+            0.0,
+            1.0
+          ],
+          "origin": [
+            645.12,
+            193.68
+          ],
+          "thickness": 3.3600000000000136
+        },
+        "competing_opening_id": "physical_opening_existence_91ae06327d4fcc8004a557b116a77820",
+        "decision_scope_id": "wall-source:page-3",
+        "first_failure": "opening_host_frame_aligned_band_geometry_inconsistent",
+        "opening_support": {
+          "physical_opening_existence_91ae06327d4fcc8004a557b116a77820": [
+            {
+              "geometry_pdf_pts": [
+                644.88,
+                194.88,
+                695.28,
+                194.88
+              ],
+              "observation_id": "source_observation_05d7c01a89634b3adda669d6e06fac09",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_8f0f922df5fcb1784851b5b6dc9aa67b"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:430",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                583.44,
+                195.36,
+                644.88,
+                195.36
+              ],
+              "observation_id": "source_observation_10f72da069b1f6b76b642a55866068e4",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_7b1b04edca4ad930c2b1e10a3536c62f"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1474",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                644.88,
+                191.76,
+                644.88,
+                195.36
+              ],
+              "observation_id": "source_observation_15a719841e5d77812a915f21097b7609",
+              "observation_kind": "raster_wall_band_end",
+              "source_parent_ids": [
+                "source_observation_0a7e2a1aadb4b210dc19d455794a3d28"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1344",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                583.44,
+                191.76,
+                644.88,
+                191.76
+              ],
+              "observation_id": "source_observation_23d7321e5996b5283ff7a2397f0b644b",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_0e7265f9ecae6774ceea230e4d396b8e"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1473",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                695.28,
+                192.0,
+                782.16,
+                192.0
+              ],
+              "observation_id": "source_observation_26a4c391d80e8771c3d0e8c787a74703",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_f07d101574e2223a45758b49a1bda80e"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1508",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                644.88,
+                192.48,
+                695.28,
+                192.48
+              ],
+              "observation_id": "source_observation_2853b838cf8350e14def457c789be6f1",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_d331689364e7b52043f874fb0749f32a"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:427",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                644.88,
+                194.64,
+                695.28,
+                194.64
+              ],
+              "observation_id": "source_observation_28bc4f90f284a5efd1fed4e3e1a10083",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_e502a35a8f1b0f0ecc1e23b2803989ad"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:429",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                695.28,
+                192.0,
+                695.28,
+                195.36
+              ],
+              "observation_id": "source_observation_582e504b09a721ae55d736b7c194ae65",
+              "observation_kind": "raster_wall_band_end",
+              "source_parent_ids": [
+                "source_observation_d28dd1aa94126a8a38915cc3c1cf9ed3"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1357",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                644.88,
+                192.72,
+                695.28,
+                192.72
+              ],
+              "observation_id": "source_observation_6a0987c7a06f6b95c754b2c6c8bdf718",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_192bcee95298fee91c38801759f695c4"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:428",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                695.28,
+                195.36,
+                782.16,
+                195.36
+              ],
+              "observation_id": "source_observation_dae90f62a6ab52fc1b26eb9326c23607",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_2b4fc38f4d9b648749295e118d4672d8"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1509",
+              "status": "corroborated"
+            }
+          ],
+          "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985": [
+            {
+              "geometry_pdf_pts": [
+                345.84,
+                192.72,
+                403.92,
+                192.72
+              ],
+              "observation_id": "source_observation_1557018ba02891bb28cc80c473f5ed72",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_1bcbcb1044247d5cc2d83366b45e69d8"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:99",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                346.56,
+                192.96,
+                346.56,
+                195.36
+              ],
+              "observation_id": "source_observation_177266c20df070dfef44800d58f761e7",
+              "observation_kind": "raster_wall_band_end",
+              "source_parent_ids": [
+                "source_observation_83054c6c260a266140d7083cb55215a8"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1262",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                346.56,
+                194.88,
+                403.92,
+                194.88
+              ],
+              "observation_id": "source_observation_21097a95714ba910cbadf0ee91ee2db3",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_9db5442b1f669f0e04437bf2fb17cc43"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:104",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                403.92,
+                192.0,
+                487.44,
+                192.0
+              ],
+              "observation_id": "source_observation_328901ba29e7786cbfd5294a8cf40eda",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_d6f539ff28bffbae034b681b1bca6412"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1438",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                323.52,
+                192.96,
+                346.56,
+                192.96
+              ],
+              "observation_id": "source_observation_614f63f5597d9e4f503a62e045e96e29",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_afa5084fed96f0626b78b1c0deca978b"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1405",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                346.56,
+                194.64,
+                403.92,
+                194.64
+              ],
+              "observation_id": "source_observation_61ed400fadd978e9246d8873b1b25480",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_955d42ade940a425dc9f4761f3ec754f"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:103",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                403.92,
+                192.0,
+                403.92,
+                195.36
+              ],
+              "observation_id": "source_observation_90cdbc1a57cfc86d711a6c3defcfe8d9",
+              "observation_kind": "raster_wall_band_end",
+              "source_parent_ids": [
+                "source_observation_3ffcdbae16f07c411ec68ac23bfc0641"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1287",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                345.84,
+                192.48,
+                403.92,
+                192.48
+              ],
+              "observation_id": "source_observation_dc2f45a0c14c2397c849b137bc5af645",
+              "observation_kind": "raster_line_run",
+              "source_parent_ids": [
+                "source_observation_a2ac4735fbfc6ddc8b1de35fbfa89bbb"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:98",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                403.92,
+                195.36,
+                487.44,
+                195.36
+              ],
+              "observation_id": "source_observation_e042beacb0962019eb0b8ea4a82b3b76",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_522925aa073588a0ee653cee151be38e"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1439",
+              "status": "corroborated"
+            },
+            {
+              "geometry_pdf_pts": [
+                323.52,
+                195.36,
+                346.56,
+                195.36
+              ],
+              "observation_id": "source_observation_fe61f461727733ee86ff2fa104b61d3d",
+              "observation_kind": "raster_wall_band_face",
+              "source_parent_ids": [
+                "source_observation_dab1dfd22511b4b697993fc09988cebf"
+              ],
+              "source_primitive_ref": "visible:raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1406",
+              "status": "corroborated"
+            }
+          ]
+        },
+        "selected_binding_id": "opening_host_binding_v3_bd08d853e34f452a55e76b3d4439fac7",
+        "selected_geometry": {
+          "axis": [
+            1.0,
+            0.0
+          ],
+          "length": 57.120000000000005,
+          "normal": [
+            0.0,
+            1.0
+          ],
+          "origin": [
+            346.8,
+            194.16000000000003
+          ],
+          "thickness": 2.4000000000000057
+        },
+        "selected_opening_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+        "thickness_tol_pt": 0.75
+      }
+    ],
+    "competing_host_binding": {
+      "host_wall_id": "opening_host_binding_group_98842c896ffe5f355e5ff866f57f438d",
+      "member_wall_candidate_ids": [
+        "wall_44435f10931bfe1d18b4"
+      ],
+      "opening_identity_id": "physical_opening_existence_91ae06327d4fcc8004a557b116a77820",
+      "page_id": "3",
+      "reason_codes": [
+        "opening_host_binding_resolved",
+        "raster_whole_wall_host_resolved"
+      ],
+      "record_id": "opening_host_binding_v3_5d6e0a3f37e54693b54a9351f8eddfb7",
+      "representative_observation_id": "source_observation_05d7c01a89634b3adda669d6e06fac09",
+      "status": "corroborated"
+    },
+    "snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+    "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+    "transparent_actual_producer_trace": true
+  },
+  "decision_scope_id": "wall-source:page-3",
+  "dimension_fragment_probe": {
+    "after_snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+    "before_snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+    "observation_primitive_refs": {
+      "source_observation_150aa0c263e4bfc52e198ee0e0575c5b": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:524",
+      "source_observation_2bf65d44be38a0a998f70166f2789046": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:536",
+      "source_observation_413bbb74c637496d15f93cf15bed0381": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:2230",
+      "source_observation_43e436b258a87d2db87a66d456dce8f4": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:2003",
+      "source_observation_564a33b0a96646c31f0f18cc846e50d3": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:514",
+      "source_observation_5a275807f84eab863f6e3bb1892b0b14": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269",
+      "source_observation_9e78756da2a1b20b6f9fe30a4524f00f": "visible:segment:d777i1",
+      "source_observation_aa9a1e89135010e75513915b6cc4c649": "visible:segment:d1062i0",
+      "source_observation_e9a5942be29830f83d3607bf347054e7": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:2151",
+      "source_observation_f49c440f725bc98d5b6b7fc62242b634": "visible:raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:588"
+    },
+    "result": {
+      "bound_dimensions": [
+        {
+          "dimension_id": "raster_bound_dimension_69b5e6b96bc4598024ce201a447e42fc",
+          "dimension_line_observation_ids": [
+            "source_observation_f49c440f725bc98d5b6b7fc62242b634"
+          ],
+          "endpoints_pt": [
+            [
+              886.5,
+              280.25
+            ],
+            [
+              970.5,
+              280.25
+            ]
+          ],
+          "orientation": "horizontal",
+          "span_pt": 84.0,
+          "status": "candidate",
+          "text_observation_id": "source_observation_a309d9d427ab83f9ffad6e7fa0e125b5",
+          "value_mm": 2124,
+          "witness_observation_ids": [
+            "source_observation_413bbb74c637496d15f93cf15bed0381",
+            "source_observation_e9a5942be29830f83d3607bf347054e7"
+          ]
+        },
+        {
+          "dimension_id": "raster_bound_dimension_82c563e7fcf4f8902e4d211af52f7200",
+          "dimension_line_observation_ids": [
+            "source_observation_43e436b258a87d2db87a66d456dce8f4"
+          ],
+          "endpoints_pt": [
+            [
+              763.0,
+              191.36399841308594
+            ],
+            [
+              763.0,
+              299.5199890136719
+            ]
+          ],
+          "orientation": "vertical",
+          "span_pt": 108.156,
+          "status": "candidate",
+          "text_observation_id": "source_observation_70e6af0fc5fa785e52cf3c76effbc94d",
+          "value_mm": 2110,
+          "witness_observation_ids": [
+            "source_observation_150aa0c263e4bfc52e198ee0e0575c5b",
+            "source_observation_2bf65d44be38a0a998f70166f2789046",
+            "source_observation_564a33b0a96646c31f0f18cc846e50d3",
+            "source_observation_5a275807f84eab863f6e3bb1892b0b14",
+            "source_observation_9e78756da2a1b20b6f9fe30a4524f00f",
+            "source_observation_aa9a1e89135010e75513915b6cc4c649"
+          ]
+        }
+      ],
+      "document_id": "live-source:10109b4b6e85e6e27af81f6399ce4b92",
+      "horizontal": null,
+      "length_m": null,
+      "page_id": "3",
+      "quantity_m2": null,
+      "reason_codes": [
+        "raster_dimension_orthogonal_scope_unavailable"
+      ],
+      "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+      "scale_px_per_m": null,
+      "scale_status": null,
+      "schema_version": "1.0.0",
+      "snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+      "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+      "status": "abstained",
+      "vertical": null,
+      "width_m": null
+    },
+    "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  },
+  "historical_receipt_comparison": {
+    "source_sealed_run.json": {
+      "byte_equal_to_2748_archived_canonical_body": true,
+      "sha256": "61c4e5d27c2505bf811a300c39a48298f19d0363d5942c684fe44dd16406482c"
+    },
+    "verified_customer_rows.json": {
+      "byte_equal_to_2748_archived_canonical_body": true,
+      "sha256": "c840b9c18989a2376d132ee6c26b3134e9428671cb1d22921468b0c80a87a0c6"
+    }
+  },
+  "native_candidate_closure": {
+    "candidate_universe_complete": false,
+    "page_id": "3",
+    "raw_candidate_count": 125,
+    "reason_codes": [
+      "physical_opening_candidate_closure_unresolved"
+    ],
+    "resolved_candidate_count": 0,
+    "status": "corroborated"
+  },
+  "python": "3.12.14",
+  "raw_raster_candidate_closure": {
+    "candidate_universe_complete": false,
+    "page_id": "3",
+    "raw_candidate_count": 30,
+    "reason_codes": [
+      "physical_opening_candidate_closure_unresolved"
+    ],
+    "resolved_candidate_count": 21,
+    "status": "corroborated",
+    "unresolved_candidate_ids": [
+      "physical_opening_raw_candidate_1b8da78c3c381badee4a5a2c2e903093",
+      "physical_opening_raw_candidate_47508d3dd60dc6408ae622e1f4b246b6",
+      "physical_opening_raw_candidate_5b57ea86be430eb3a46b9098cc9e5621",
+      "physical_opening_raw_candidate_8cb708bea5fd9afd9306d3b56da955ac",
+      "physical_opening_raw_candidate_92f77d7ed91927ade5244c1fcd4a40e5",
+      "physical_opening_raw_candidate_a5fdb1a216e219b3799fe85c867ec860",
+      "physical_opening_raw_candidate_aa5b9ba957042d616e355e1158df4ddd",
+      "physical_opening_raw_candidate_b6abbd14148c48fe4458fa9aea7d4f51",
+      "physical_opening_raw_candidate_ea4ddcd4324b4530f06bec6aaed53158"
+    ]
+  },
+  "raw_report_controls": {
+    "dbce_first_failure_probe.json": {
+      "sha256": "0ebcf30029d44dc73560cd57bfbe21a22c68379ca44f365b9530cf5f257d577b",
+      "size_bytes": 35061
+    },
+    "dimension_fragment_probe.json": {
+      "sha256": "fa18e1478a75b18758fabd565e818eb989d637ca1d05099238b7127b5c250a55",
+      "size_bytes": 4326
+    },
+    "flank_w2_ancestry.json": {
+      "sha256": "2f4a91bd68a3a59f2bbb5959d9696a98d360f6df258f9c301dfff8b59ff69107",
+      "size_bytes": 8792998
+    },
+    "original_source_stage.json": {
+      "sha256": "6976ba7eeda6db4cc537525caa29be774dfcdd48ed25ea07dcda2a6f13d59380",
+      "size_bytes": 16936977
+    },
+    "selected_source_stage.json": {
+      "sha256": "a81fa1e5987a71c3f8982e9a93b369dc7cbea0e010246b0b813051835c9210fe",
+      "size_bytes": 16937320
+    }
+  },
+  "selected_wall_records": [
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_72e9c558ade6b4d38426",
+        "comparison_mode": "centerline_path_with_lineage",
+        "edge_ids": [
+          "split_2717",
+          "split_2719"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            408.75,
+            624.5
+          ],
+          [
+            408.744006,
+            616.192004
+          ],
+          [
+            410.042608,
+            596.156537
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1583"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_3c9933f91a1a3079fcf3"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_2717",
+          "geometry": [
+            408.75,
+            596.40002441,
+            408.75,
+            616.0
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1583"
+          ]
+        },
+        {
+          "edge_id": "split_2719",
+          "geometry": [
+            408.75,
+            616.32000732,
+            408.75,
+            624.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1583"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [
+        {
+          "edge_id": "split_2718",
+          "geometry": [
+            408.75,
+            616.0,
+            408.75,
+            616.32000732
+          ],
+          "reason_code": "both_endpoints_snapped_to_same_node",
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1583"
+          ]
+        }
+      ],
+      "wall_candidate": {
+        "candidate_id": "wall_3c9933f91a1a3079fcf3",
+        "centerline_pts": [
+          [
+            410.0426078464674,
+            596.1565365977447
+          ],
+          [
+            408.74400634765624,
+            616.1920043928437
+          ],
+          [
+            408.75,
+            624.5
+          ]
+        ],
+        "confidence": 0.4,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_bed506ffa0413610794c",
+          "junc_a77b2f27df068214eca9"
+        ],
+        "face_a_segment_ids": [
+          "split_2717",
+          "split_2719"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "ambiguous",
+          "endpoint"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_3c9933f91a1a3079fcf3"
+    },
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_c0b74191e310cd76ba05",
+        "comparison_mode": "v2_path",
+        "edge_ids": [
+          "split_2715"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            408.75,
+            586.0
+          ],
+          [
+            408.75,
+            596.0
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1583"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_6cbf01ceb337722e0c4c"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_2715",
+          "geometry": [
+            408.75,
+            586.0,
+            408.75,
+            596.0
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1583"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [],
+      "wall_candidate": {
+        "candidate_id": "wall_6cbf01ceb337722e0c4c",
+        "centerline_pts": [
+          [
+            408.75,
+            586.0
+          ],
+          [
+            408.75,
+            596.0
+          ]
+        ],
+        "confidence": 0.4,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_9ed0370e29cf95341384",
+          "junc_bed506ffa0413610794c"
+        ],
+        "face_a_segment_ids": [
+          "split_2715"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "l_corner",
+          "ambiguous"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_6cbf01ceb337722e0c4c"
+    },
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_7d5ea2aeef89c298a272",
+        "comparison_mode": "v2_path",
+        "edge_ids": [
+          "split_1456",
+          "split_1457"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            410.25,
+            341.5
+          ],
+          [
+            410.25,
+            368.75
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1585"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_7d3dcc7ce4afc5c15704"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_1456",
+          "geometry": [
+            410.25,
+            341.5,
+            410.25,
+            349.0
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1585"
+          ]
+        },
+        {
+          "edge_id": "split_1457",
+          "geometry": [
+            410.25,
+            349.0,
+            410.25,
+            368.75
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1585"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [],
+      "wall_candidate": {
+        "candidate_id": "wall_7d3dcc7ce4afc5c15704",
+        "centerline_pts": [
+          [
+            410.25,
+            341.5
+          ],
+          [
+            410.0,
+            349.0
+          ],
+          [
+            410.0833333333333,
+            369.0416666666667
+          ]
+        ],
+        "confidence": 0.4,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_8ba82051772216741131",
+          "junc_4ef35f6b168661091598"
+        ],
+        "face_a_segment_ids": [
+          "split_1456",
+          "split_1457"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "endpoint",
+          "ambiguous"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_end"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_7d3dcc7ce4afc5c15704"
+    },
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_70798701d7034a3189b9",
+        "comparison_mode": "v2_path",
+        "edge_ids": [
+          "split_1459"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            410.25,
+            504.75
+          ],
+          [
+            410.25,
+            531.25
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1585"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_b25b5ffd3a29be53747f"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_1459",
+          "geometry": [
+            410.25,
+            504.75,
+            410.25,
+            531.25
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1585"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [],
+      "wall_candidate": {
+        "candidate_id": "wall_b25b5ffd3a29be53747f",
+        "centerline_pts": [
+          [
+            410.25,
+            504.75
+          ],
+          [
+            410.25,
+            531.25
+          ]
+        ],
+        "confidence": 0.4,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_457f1a0d06cb94772ebc",
+          "junc_86265ee7bbf4da23ba6b"
+        ],
+        "face_a_segment_ids": [
+          "split_1459"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "ambiguous",
+          "l_corner"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_b25b5ffd3a29be53747f"
+    },
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_dcc84487a164d3c872fd",
+        "comparison_mode": "centerline_path_with_lineage",
+        "edge_ids": [
+          "split_1776",
+          "split_1774",
+          "split_1772",
+          "split_1771",
+          "split_1770",
+          "split_1815"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            319.25,
+            191.5
+          ],
+          [
+            324.75,
+            192.5
+          ],
+          [
+            346.25,
+            192.642857
+          ],
+          [
+            426.75,
+            193.5
+          ],
+          [
+            464.0,
+            193.5
+          ],
+          [
+            479.913043,
+            193.866522
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:267",
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_b689beedb69c1be4eae7"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_1770",
+          "geometry": [
+            324.75,
+            193.5,
+            346.25,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1771",
+          "geometry": [
+            346.25,
+            193.5,
+            426.75,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1772",
+          "geometry": [
+            426.75,
+            193.5,
+            436.5,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1774",
+          "geometry": [
+            437.5,
+            193.5,
+            463.5,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1776",
+          "geometry": [
+            464.5,
+            193.5,
+            479.53600247,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1815",
+          "geometry": [
+            319.25,
+            191.5,
+            324.75,
+            191.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:267"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [
+        {
+          "edge_id": "split_1773",
+          "geometry": [
+            436.5,
+            193.5,
+            437.5,
+            193.5
+          ],
+          "reason_code": "both_endpoints_snapped_to_same_node",
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1775",
+          "geometry": [
+            463.5,
+            193.5,
+            464.5,
+            193.5
+          ],
+          "reason_code": "both_endpoints_snapped_to_same_node",
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        }
+      ],
+      "wall_candidate": {
+        "candidate_id": "wall_b689beedb69c1be4eae7",
+        "centerline_pts": [
+          [
+            479.9130434782609,
+            193.86652202954315
+          ],
+          [
+            464.0,
+            193.5
+          ],
+          [
+            437.0,
+            193.5
+          ],
+          [
+            426.75,
+            193.5
+          ],
+          [
+            346.25,
+            192.64285714285714
+          ],
+          [
+            324.75,
+            192.5
+          ],
+          [
+            319.25,
+            191.5
+          ]
+        ],
+        "confidence": 0.4,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_826c3e68e4c6a4152aa2",
+          "junc_8e750ebb0b8f2c845930"
+        ],
+        "face_a_segment_ids": [
+          "split_1776",
+          "split_1774",
+          "split_1772",
+          "split_1771",
+          "split_1770",
+          "split_1815"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "ambiguous",
+          "t_junction"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_6_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_b689beedb69c1be4eae7"
+    },
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_b7acfe9328590802f81e",
+        "comparison_mode": "centerline_path_with_lineage",
+        "edge_ids": [
+          "split_1780",
+          "split_1781",
+          "split_1782",
+          "split_1784",
+          "split_1785"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            479.913043,
+            193.866522
+          ],
+          [
+            510.0,
+            193.5
+          ],
+          [
+            614.5,
+            193.5
+          ],
+          [
+            658.099976,
+            193.152
+          ],
+          [
+            716.75,
+            193.5
+          ],
+          [
+            734.25,
+            194.75
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_44435f10931bfe1d18b4"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_1780",
+          "geometry": [
+            480.46399753,
+            193.5,
+            510.0,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1781",
+          "geometry": [
+            510.0,
+            193.5,
+            614.5,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1782",
+          "geometry": [
+            614.5,
+            193.5,
+            658.0,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1784",
+          "geometry": [
+            658.19995117,
+            193.5,
+            716.75,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        },
+        {
+          "edge_id": "split_1785",
+          "geometry": [
+            716.75,
+            193.5,
+            734.25,
+            193.5
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [
+        {
+          "edge_id": "split_1783",
+          "geometry": [
+            658.0,
+            193.5,
+            658.19995117,
+            193.5
+          ],
+          "reason_code": "both_endpoints_snapped_to_same_node",
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:269"
+          ]
+        }
+      ],
+      "wall_candidate": {
+        "candidate_id": "wall_44435f10931bfe1d18b4",
+        "centerline_pts": [
+          [
+            479.9130434782609,
+            193.86652202954315
+          ],
+          [
+            510.0,
+            193.5
+          ],
+          [
+            614.5,
+            193.5
+          ],
+          [
+            658.0999755851875,
+            193.1520004272461
+          ],
+          [
+            716.75,
+            193.5
+          ],
+          [
+            734.25,
+            194.75
+          ]
+        ],
+        "confidence": 0.4,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_826c3e68e4c6a4152aa2",
+          "junc_ab969e1a040b83e4c137"
+        ],
+        "face_a_segment_ids": [
+          "split_1780",
+          "split_1781",
+          "split_1782",
+          "split_1784",
+          "split_1785"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "ambiguous",
+          "ambiguous"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_5_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:ambiguous_at_end"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_44435f10931bfe1d18b4"
+    }
+  ],
+  "serialized_pair_candidacy_diagnostic": {
+    "diagnostic_only_not_authority": true,
+    "pairs": [
+      {
+        "actual_published_pair_relation": "UNRECORDED",
+        "candidacy": [
+          false,
+          "pair_excluded_no_longitudinal_overlap"
+        ],
+        "candidate": "wall_3c9933f91a1a3079fcf3",
+        "member": "wall_7d3dcc7ce4afc5c15704"
+      },
+      {
+        "actual_published_pair_relation": "UNRECORDED",
+        "candidacy": [
+          false,
+          "pair_excluded_no_longitudinal_overlap"
+        ],
+        "candidate": "wall_3c9933f91a1a3079fcf3",
+        "member": "wall_b25b5ffd3a29be53747f"
+      },
+      {
+        "actual_published_pair_relation": "UNRECORDED",
+        "candidacy": [
+          false,
+          "pair_excluded_no_longitudinal_overlap"
+        ],
+        "candidate": "wall_6cbf01ceb337722e0c4c",
+        "member": "wall_7d3dcc7ce4afc5c15704"
+      },
+      {
+        "actual_published_pair_relation": "UNRECORDED",
+        "candidacy": [
+          false,
+          "pair_excluded_no_longitudinal_overlap"
+        ],
+        "candidate": "wall_6cbf01ceb337722e0c4c",
+        "member": "wall_b25b5ffd3a29be53747f"
+      }
+    ]
+  },
+  "snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+  "source_decode_coverage": {
+    "decoded_pages": [
+      3
+    ],
+    "document_id": "live-source:10109b4b6e85e6e27af81f6399ce4b92",
+    "failed_pages": [],
+    "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+    "state": "partial",
+    "total_pages": 13
+  },
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "SOURCE_QUEUE_BLOCKERS_NO_AUTHORITY_PROMOTION"
+}
