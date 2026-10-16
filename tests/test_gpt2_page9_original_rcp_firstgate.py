@@ -229,7 +229,7 @@ from tools.diag_gpt2_page9_original_rcp_firstgate import (
 @pytest.mark.parametrize("frame,relation",[
     ((0.,0.,30.,30.),"frame_strictly_contains_title"),
     ((10.,10.,30.,30.),"frame_contains_title_on_boundary"),
-    ((14.,14.,28.,28.),"title_contains_original_frame"),
+    ((12.,12.,18.,18.),"title_contains_original_frame"),
     ((15.,0.,25.,20.),"partial_native_overlap"),
     ((20.,10.,40.,30.),"boundary_contact_only"),
     ((40.,40.,70.,70.),"source_geometries_disjoint"),
