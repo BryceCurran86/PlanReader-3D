@@ -18,11 +18,20 @@ import re
 from typing import Mapping, Sequence
 
 from shapely.geometry import Polygon
+from shapely.errors import GEOSException
 
 from pb_migration_contracts import EvidenceResolutionStatus
 
 
 SHA_RE = re.compile(r"[0-9a-f]{64}\Z")
+
+# A syntactically complete proposal is not source-authenticated.
+UNVERIFIED_SOURCE_AUTHORITY = (
+    "cross_sheet_wall_root_equivalence_unverified",
+    "zone_metric_evidence_ring_binding_unverified",
+    "material_occurrence_source_issuer_unverified",
+)
+
 
 
 def _id(value):
@@ -58,6 +67,8 @@ def _area(value):
 
 def check_source_scope(scope: Mapping, records: Sequence[Mapping]) -> tuple[str, ...]:
     """01: source hash, revision, snapshot and decision scope must agree."""
+    if type(records) not in (list, tuple):
+        return ("source_scope_inventory_invalid",)
     if not isinstance(scope, Mapping):
         return ("source_scope_missing",)
     keys = ("document_id", "revision_id", "source_sha256", "snapshot_id", "decision_scope_id")
@@ -67,6 +78,11 @@ def check_source_scope(scope: Mapping, records: Sequence[Mapping]) -> tuple[str,
         if not isinstance(r, Mapping) or any(r.get(k) != scope[k] for k in keys):
             return ("source_scope_conflict",)
     return ()
+
+
+def _positive_finite_length(p: tuple[float, float], q: tuple[float, float]) -> bool:
+    """Source stroke lengths must be finite and positive, without snapping."""
+    return 0 < math.hypot(q[0] - p[0], q[1] - p[1]) < math.inf
 
 
 def check_unique_source_edges(edges: Sequence[Mapping]) -> tuple[str, ...]:
@@ -83,7 +99,7 @@ def check_unique_source_edges(edges: Sequence[Mapping]) -> tuple[str, ...]:
         )):
             return ("source_edge_witness_incomplete",)
         p, q = _point(e.get("p0")), _point(e.get("p1"))
-        if p is None or q is None or p == q:
+        if p is None or q is None or p == q or not _positive_finite_length(p, q):
             return ("source_edge_geometry_invalid",)
         ids.append(e["id"])
         observation_ids.append(e["source_observation_id"])
@@ -292,7 +308,8 @@ def inspect_candidate_finish_zone_bundle(bundle: Mapping) -> dict:
         return {"status": EvidenceResolutionStatus.ABSTAINED.value,
                 "authority_granted": False, "quantity_granted": False,
                 "scope": "shadow_only", "reason_codes": ("shadow_input_invalid",),
-                "checks": {"00_input": ["shadow_input_invalid"]}}
+                "checks": {"00_input": ["shadow_input_invalid"]},
+                "unverified_source_authority": UNVERIFIED_SOURCE_AUTHORITY}
     scope = bundle.get("scope", {})
     floor = bundle.get("floor", {})
     projection = bundle.get("floor_projection", {})
@@ -329,4 +346,5 @@ def inspect_candidate_finish_zone_bundle(bundle: Mapping) -> dict:
               else EvidenceResolutionStatus.CANDIDATE)
     return {"status": status.value, "authority_granted": False, "quantity_granted": False,
             "scope": "shadow_only", "reason_codes": reasons,
-            "checks": {key: list(value) for key, value in sorted(reports.items())}}
+            "checks": {key: list(value) for key, value in sorted(reports.items())},
+            "unverified_source_authority": UNVERIFIED_SOURCE_AUTHORITY}
