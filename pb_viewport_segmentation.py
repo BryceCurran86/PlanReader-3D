@@ -3002,6 +3002,8 @@ def segment_page_viewports(
 ) -> list[SegmentedViewport]:
     if type(source_native_multipath_semantic_frame_shadow) is not bool:
         raise ValueError("source_multipath_frame_shadow_requires_explicit_bool")
+    if source_native_multipath_semantic_frame_shadow and source_connected_table_cell_shadow is not True:
+        raise ValueError("source_multipath_requires_connected_source_cell_guard")
     if type(source_connected_table_cell_shadow) is not bool:
         raise ValueError("source_table_shadow_requires_explicit_bool")
     try:
@@ -3039,6 +3041,7 @@ def segment_page_viewports(
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
+    native_multipath_added: set[tuple[float, float, float, float]] = set()
     if source_native_multipath_semantic_frame_shadow:
         # Keep every source-original frame rival. A real external CAD
         # schedule can be drawn as independently issued line paths.
@@ -3047,6 +3050,7 @@ def segment_page_viewports(
         ):
             if candidate not in frames:
                 frames.append(candidate)
+                native_multipath_added.add(candidate)
     framed, consumed = _frame_resolved_viewports(
         page,
         anchors,
@@ -3068,6 +3072,33 @@ def segment_page_viewports(
             page, anchors, unresolved, framed, calibration,
             page_number=page_number,
         )
+        # A genuine table source frame establishes only TABLE ownership.
+        # It does not independently prove the extent of a neighboring plan.
+        # The rotated side-band rule is geometric partition evidence, never
+        # an automatically valid physical RCP when its separator is newly
+        # recovered from disconnected native CAD paths.
+        if native_multipath_added:
+            unsafe_separator_ids = {
+                v.view_id for v in framed
+                if v.bounding_box is not None
+                and tuple(v.bounding_box) in native_multipath_added
+            }
+            for v in rotated_derived:
+                if (v.provenance or {}).get("separator_view_id") not in unsafe_separator_ids:
+                    continue
+                v.status = ViewportSegmentationStatus.AMBIGUOUS.value
+                v.bounding_box = None
+                v.boundary_source = ViewportBoundarySource.NONE.value
+                v.confidence = 0.0
+                v.notes.append(
+                    "recovered native table frame does not prove neighboring physical plan extent"
+                )
+                v.provenance = {
+                    **v.provenance,
+                    "source_native_multipath_separator_candidate_only": True,
+                    "visual_band_validated": False,
+                    "independent_plan_extent_unproven": True,
+                }
         remaining_unresolved = [
             index for index in unresolved if index not in rotated_consumed
         ]
