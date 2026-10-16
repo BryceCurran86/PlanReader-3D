@@ -124,4 +124,83 @@ def nominate_printed_native_dimension_strokes(page: Any, native_word: Any):
     ))
 
 
-__all__ = ["nominate_printed_native_dimension_strokes"]
+def trace_native_endpoint_tick_candidates_shadow(page: Any, dimension_candidate: dict):
+    """Preserve *original* native perpendicular tick sources at both ends.
+
+    The same physical ink endpoint with a short perpendicular black stroke
+    corroborates the printed dimension-*annotation* source lineage only.
+    It cannot identify a particular structural wall face, room or other
+    PDF sheet, and it cannot certify the figured dimension value.
+    """
+    segment = _rect((
+        min(dimension_candidate["native_segment_pdf_pts"][0],
+            dimension_candidate["native_segment_pdf_pts"][2]),
+        min(dimension_candidate["native_segment_pdf_pts"][1],
+            dimension_candidate["native_segment_pdf_pts"][3]),
+        max(dimension_candidate["native_segment_pdf_pts"][0],
+            dimension_candidate["native_segment_pdf_pts"][2]),
+        max(dimension_candidate["native_segment_pdf_pts"][1],
+            dimension_candidate["native_segment_pdf_pts"][3]),
+    ))
+    # Axis-aligned segments have a zero-width rectangle. Use the exact
+    # finite source endpoints from the candidate; don't normalize an
+    # annotation stroke into a synthetic rectangle.
+    del segment
+    vals = dimension_candidate.get("native_segment_pdf_pts", ())
+    if len(vals) != 4 or not all(
+        isinstance(x, (int, float)) and math.isfinite(x) for x in vals
+    ):
+        return []
+    x0, y0, x1, y1 = (float(v) for v in vals)
+    axis = dimension_candidate.get("line_axis")
+    if axis not in ("native_x", "native_y"):
+        return []
+    responses = []
+    for endpoint in ((x0, y0), (x1, y1)):
+        hits = []
+        for tick in _black_opaque_strokes(page):
+            if tick["source_primitive_id"] == dimension_candidate.get("source_primitive_id"):
+                continue
+            t = tick["native_segment_pdf_pts"]
+            opposite_axis = "native_x" if axis == "native_y" else "native_y"
+            if tick["line_axis"] != opposite_axis:
+                continue
+            if tick["native_segment_length_pdf_pts"] < 7:
+                continue
+            # Strict source intersection only (0.001 pt tolerance to absorb
+            # native finite precision), not nearest drawing or label matching.
+            if axis == "native_y":
+                agrees = (
+                    abs(t[1] - endpoint[1]) <= .001
+                    and min(t[0], t[2]) - .001 <= endpoint[0]
+                    <= max(t[0], t[2]) + .001
+                )
+            else:
+                agrees = (
+                    abs(t[0] - endpoint[0]) <= .001
+                    and min(t[1], t[3]) - .001 <= endpoint[1]
+                    <= max(t[1], t[3]) + .001
+                )
+            if agrees:
+                hits.append({
+                    "native_source_endpoint_pdf_pts": list(endpoint),
+                    "source_dimension_line_candidate_id":
+                        dimension_candidate.get("source_primitive_id"),
+                    "source_tick_candidate_not_structural_wall_face": True,
+                    **tick,
+                })
+        responses.append({
+            "native_endpoint_pdf_pts": list(endpoint),
+            "all_native_perpendicular_tick_candidates": sorted(
+                hits, key=lambda item: (item["source_path_index"],
+                                        item["source_path_item_index"])
+            ),
+            "source_endpoint_is_physical_wall_face_proven": False,
+        })
+    return responses
+
+
+__all__ = [
+    "nominate_printed_native_dimension_strokes",
+    "trace_native_endpoint_tick_candidates_shadow",
+]
