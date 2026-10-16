@@ -75,8 +75,20 @@ Original 16× ink rows on the immutable PDF:
 G17 left faces are y=192.96 / 195.36 (2.40). G17 right faces are y=192.00 /
 195.36 (3.36). A thin leftover stroke near y=192 on the left is not the
 solid wall fill. `_scope_bindings` thickness_tol is `max(0.75, 2.4×0.15)=0.75`.
-Δthickness 0.96 against already-framed 3.36 openings on shared `:269` fails
-`opening_host_frame_aligned_band_geometry_inconsistent`.
+
+The thickness check returns
+`opening_host_frame_aligned_band_geometry_inconsistent` inside the
+discovery loop, before host lookup and before any DISTINCT test. An
+aligned opening outside that tolerance fails the frame even when its
+host is positively `DISTINCT_PHYSICAL_WALLS`. An independent current-main
+replay names the first such opening as
+`physical_opening_existence_91ae06327d4fcc8004a557b116a77820`, origin
+(645.12, 193.68), thickness 3.36, host `wall_44435f10931bfe1d18b4`,
+DISTINCT from dbce host `wall_b689beedb69c1be4eae7`. That DISTINCT
+result does not pass the thickness gate. dbce's own faces are also a
+real step, so dropping the remote context would still leave a
+non-constant band. Do not widen 0.75 and do not skip a context against
+only the selected member.
 
 ## Inference
 
@@ -92,8 +104,10 @@ component member to exist in the ordinary complete wall_scope
 (`wall_id not in records_by_id` returns None). 1215 members stay
 supplemental-only, so a whole-wall frame still cannot seal.
 
-dbce sits on a real thickness step at the west kitchen return. Averaging
-faces or widening thickness_tol would merge two different bands.
+dbce has two separate blockers. The function returns first on an
+aligned 3.36 pt context, and dbce's own flanks are also a real thickness
+step. Averaging faces, widening thickness_tol, or excluding that context
+only because its host is DISTINCT would still not prove one constant band.
 
 ## Proposed change
 
