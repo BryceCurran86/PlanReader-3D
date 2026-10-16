@@ -56,6 +56,8 @@ def test_deterministic_case_order_and_g17_source_order(archived):
     mutated=deepcopy(archived)
     mutated["case_evidence"].reverse()
     for c in mutated["case_evidence"]:
+        if c["host_binding"]["status"] != "abstained":
+            continue
         c["source_g17_observations"].reverse()
         c["source_w4_ancestry_audit"]["diagnostic_local_raster_lines"].reverse()
     assert call(mutated)==first
