@@ -707,6 +707,16 @@ def detect_scale(
     }
     if len(ratio_values | loose_values) > 1:
         return None
+    metric_ratios: set[tuple[int, int]] = set()
+    for match in re.finditer(scale_patterns[3][0], all_text, re.IGNORECASE):
+        millimetres = int(match.group(1))
+        metres = int(match.group(2))
+        if metres <= 0:
+            continue
+        divisor = math.gcd(millimetres, metres)
+        metric_ratios.add((millimetres // divisor, metres // divisor))
+    if len(metric_ratios) > 1:
+        return None
     for pattern, scale_type in scale_patterns:
         match = re.search(pattern, all_text, re.IGNORECASE)
         if match:
@@ -720,12 +730,14 @@ def detect_scale(
                 }
             elif scale_type == "metric":
                 mm = float(match.group(1))
-                m = float(match.group(2)) if match.lastindex >= 2 else 1.0
-                px_per_m = mm / m
+                metres = float(match.group(2)) if match.lastindex and match.lastindex >= 2 else 1.0
+                if metres <= 0:
+                    continue
+                mm_per_m = mm / metres
                 return {
                     "type": "metric",
-                    "mm_per_m": mm,
-                    "px_per_m": px_per_m,
+                    "mm_per_m": mm_per_m,
+                    "px_per_m": mm_per_m,
                     "text": match.group(0),
                 }
     
@@ -893,7 +905,7 @@ def classify_page_offline(
         ]),
         ("Floor Plan", [
             "floor plan", "proposed plan", "general arrangement",
-            "ground floor", "first floor", "level 1", "level 2",
+            "ground floor", "first floor", "level 1 plan", "level 2 plan",
         ]),
         ("Roof Plan", [
             "roof plan", "roof layout",
