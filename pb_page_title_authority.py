@@ -267,8 +267,96 @@ def spans_from_text_dict(payload: Dict[str, Any], pdf_page: Any = None) -> List[
     return out
 
 
+def _split_native_sheet_revision_values(
+    cells: Sequence[Cell], spans: Sequence[Dict[str, Any]],
+) -> List[Cell]:
+    """Respect independently printed DRAWING NUMBER and REVISION columns.
+
+    Large CAD title-block values can have unusually wide spaces that the
+    general text-row grouping joins into e.g. "A502 A". Such a joined value is
+    NOT a sheet number. Split only when the source itself has distinct native
+    value spans, both labelled DRAWING NUMBER and REVISION on the same native
+    title-block field row, and the right value sits under REVISION.
+
+    This recovers literal native text; it never guesses a code from a plan
+    callout or a PDF page index. Ordinary row grouping is unaffected.
+    """
+    labels = [p for cell in cells if (p := parse_label(cell)) is not None]
+    number_labels = [p.cell for p in labels if p.field == "sheet_number"]
+    revision_labels = [p.cell for p in labels if p.field == "revision"]
+    if not number_labels or not revision_labels:
+        return list(cells)
+    original = []
+    for span in spans:
+        raw = str(span.get("text") or "").strip()
+        bbox = tuple(span.get("bbox") or ())
+        if len(bbox) != 4 or not _finite(bbox):
+            continue
+        x0, y0, x1, y1 = (float(v) for v in bbox)
+        if not raw or x1 <= x0 or y1 <= y0:
+            continue
+        original.append((raw, x0, y0, x1, y1, float(span.get("size") or y1-y0)))
+    selected: Dict[int, Tuple[Cell, Cell]] = {}
+    for number in number_labels:
+        for revision in revision_labels:
+            if not (
+                number.x1 < revision.x0
+                and abs(number.yc - revision.yc) <= max(number.height, revision.height)
+            ):
+                continue
+            # Two independent printed labels (not a guessed common header)
+            # constrain the native source word columns.
+            num_words = [
+                row for row in original
+                if sheet_number_shape(row[0])
+                and not re.fullmatch(r"\d{2,6}", row[0])
+                and row[1] >= number.x1 - number.size
+                and row[3] < revision.x0
+                and number.y1 - 0.4 * number.height <= row[2] <= number.y1 + 4 * number.size
+            ]
+            rev_words = [
+                row for row in original
+                if re.fullmatch(r"[A-Z0-9]{1,3}", row[0], re.I)
+                and revision.x0 - revision.size <= row[1] <= revision.x1 + 4 * revision.size
+                and abs(row[2] - revision.y1) <= 4 * revision.size
+            ]
+            if len(num_words) != 1 or len(rev_words) != 1:
+                continue
+            a, b = num_words[0], rev_words[0]
+            if not (
+                a[3] < b[1] and abs((a[2]+a[4])/2-(b[2]+b[4])/2) <=
+                0.6 * max(a[4]-a[2], b[4]-b[2])
+            ):
+                continue
+            for index, merged in enumerate(cells):
+                if (
+                    merged.text == f"{a[0]} {b[0]}"
+                    and abs(merged.x0-a[1]) <= 1.0
+                    and abs(merged.x1-b[3]) <= 1.0
+                    and abs(merged.y0-min(a[2], b[2])) <= 1.0
+                    and abs(merged.y1-max(a[4], b[4])) <= 1.0
+                ):
+                    selected[index] = (
+                        Cell(a[0], a[1], a[2], a[3], a[4], a[5], source=merged.source),
+                        Cell(b[0], b[1], b[2], b[3], b[4], b[5], source=merged.source),
+                    )
+    return [part for index, cell in enumerate(cells)
+            for part in selected.get(index, (cell,))]
+
+
+def _cells_from_native_source_spans(spans: Sequence[Dict[str, Any]]) -> List[Cell]:
+    """One native-source field-grouping path for page and document readers."""
+    cells = [
+        piece
+        for cell in cells_from_spans(spans)
+        for piece in split_label_runs(cell)
+    ]
+    return _split_native_sheet_revision_values(cells, spans)
+
+
 def page_cells(pdf_page: Any) -> List[Cell]:
-    return cells_from_spans(page_spans(pdf_page))
+    """Bind native composite labels/values to actual printed field columns."""
+    return _cells_from_native_source_spans(page_spans(pdf_page))
 
 
 def _visual_size(pdf_page: Any) -> Tuple[float, float]:
@@ -1249,7 +1337,11 @@ def analyse_page(pdf_page: Any, page_no: int, *, spans: Optional[Sequence[Dict[s
     sheets have shown where its title blocks are. Text pages are never OCR'd.
     """
     width, height = _visual_size(pdf_page)
-    cells = cells_from_spans(spans if spans is not None else page_spans(pdf_page))
+    # Always use the same native-source label/value preparation as
+    # page_cells(). Injected spans are still exclusively caller-supplied
+    # native source observations and cannot be replaced by page words.
+    source_spans = spans if spans is not None else page_spans(pdf_page)
+    cells = _cells_from_native_source_spans(source_spans)
     native = analyse_cells(cells, width, height, page_no, "native")
     if allow_ocr and (ocr_engine is not None or ocr_available()):
         native.recovery = _recovery_plan(pdf_page, native, cells, width, height, ocr_engine)
