@@ -96,3 +96,69 @@ ordinary/supplemental evidence-page scopes, and compares only the actual
 topology scope in the existing host parity tool. The owner's snapshot remains
 unassigned until this full producer call reproduces its complete seal. Neither
 matching areas nor an all-page decoder root may fill that missing field.
+
+### Full observed owner call: both complete seals reproduced
+
+The final original replay used decoded pages 1–13, topology page 3 and evidence
+pages 1, 2, 4–13, exactly as the observed full-production caller specifies.
+It issued `source_snapshot_1af5ff4fee2ace6cc3ba88d23737edc2` and reproduced the
+**entire** owner V1 seal
+`2e8333c7ee2642d8b0a6f533e5153d8642e595b554f04de5550fc4394b7e9a5f`
+exactly, including all eight quantity fingerprints, evidence IDs and run ID.
+The archived `ef58f8ae...` seal was independently reproduced in the same run.
+Both source-closed seals were parsed and integrity-verified before comparison.
+
+Both actual producers retain 21 physical objects / 15 hosts / 9 frames / 8
+accepted areas and eight internally verified customer projections. On page 3,
+all 2094 ordinary candidates, both supplemental candidates, their complete
+equivalence evidence, source observation IDs and typed negatives are identical.
+All 15 hosts are source-preserving **unapproved receipt rekeys**. All extra
+evidence-page scopes remain in the full report, without being aliased to the
+baseline page-3-only source or declared unchanged.
+
+`gptmax_original_eight_host_frame_source_scopes_20261017.json` is the compact
+eight-row source handoff: actual old/new snapshot, decision scope, host member
+records, frame selectors/geometry, all original sealed quantity fingerprints,
+and content-addressed references to full competitor scopes. It records the
+replay code commit and source-code SHA256s. The full 243 MB original report is
+retained separately, losslessly compressed, for source review / CI artifact
+comparison. The dedicated workflow replays the same original bytes and checks
+both complete seals on its exact head after publication is authorized.
+
+This resolves the missing source-scope **evidence**, not versioned signed-scope
+consumption or customer approval. The true owner root is `1af5...`; the
+intermediate `7ad8...` replay remains distinct. No source snapshot is inferred
+from a naming pattern or area equality. All migration/customer/new-quantity/
+count/score grants remain false; no ninth area or new frozen match is claimed.
+
+## Current source handoff and validation
+
+Fresh main replay: 21 physical openings, 15 authenticated hosts, 9 complete
+frames, 8 existing signed areas and zero new GPT1 measurement-ready handoffs.
+The source queue remains individual, with all competing evidence retained:
+
+| Physical IDs (suffixes) | First remaining source/geometry gate |
+|---|---|
+| 33d277, 81a45, a68d, b248, ba7f, f819 | Missing authenticated structural host member; original source negatives and 4pt policy remain binding |
+| 4b8c096b, ab431bf4, c3c1e04a | Hosted, unsigned; aligned-fragment positive DISTINCT proof absent |
+| 2b2a91e8 (1215 SGW) | Existing signed area retained; complete wall frame blocked by adjacent unhosted opening |
+| 2c31ccb0 | Existing signed area retained; connected whole-wall edge unproved |
+| dbcec9c3 | Existing signed area retained; aligned-band geometry inconsistent |
+| 00d50eb9, 38c03575, 86236fe3 | Complete frames; door/window filling kind unproved |
+| 8ecb81b6 | Complete frame; source-owned second figured axis absent |
+
+The five other already signed areas do not prove ordered metric axes or a
+complete 3D void. Their accepted figured areas are retained independently.
+Global opening count remains unproved.
+
+123 focused tests pass, including separate decoded/topology/evidence selectors,
+missing/foreign/mutated source receipts, supplemental scope collisions and false
+completeness, rejection of supplemental whole-wall frames, deterministic replay,
+and signed-output workflow path coverage. Ruff F821/F823, provider isolation,
+frozen V2 integrity and truth/production separation checks pass.
+
+An independent technical review of #2861 at `77002c2768d5069e9d2b79c1563198b54f43a7a7`
+reran its 47 tests and reproduced a frame-check gap: moving only native word
+boxes or only trace boxes vertically by 10pt still verifies the rotated frame.
+Review 5551417437 requests full-coordinate unrotated-reference regressions
+before authority promotion. Shared-login COMMENT only, not release approval.
