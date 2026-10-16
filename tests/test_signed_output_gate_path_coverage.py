@@ -1,0 +1,494 @@
+"""Signed-output replay gates must trigger on every module the replayed producer can import.
+
+The Lot16 and Maryborough original-source workflows seal the production output and assert the signed quantities and customer rows.
+A workflow-level ``paths`` filter that names only some modules lets a change to any other module on the same call path merge without
+that replay ever running.  This test derives the import closure of each replay's producer entry points statically (AST, including
+function-level imports) and requires every file in it to match at least one ``pull_request.paths`` pattern of the replay workflow.
+
+It reads workflow text and Python sources only: no benchmark truth, no gold value and no source PDF is used.
+"""
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# project -> (workflow file, producer entry points the workflow executes)
+SIGNED_OUTPUT_REPLAYS = {
+    "lot16": (
+        ".github/workflows/score-gpt3-lot16-1215-opening-local.yml",
+        (
+            "tools/run_gpt3_lot16_original_sealed_score_input.py",
+            "tools/diag_gptmax_source_authority_stages.py",
+            "tools/run_source_closed_project_handoff.py",
+        ),
+    ),
+    "maryborough": (
+        ".github/workflows/test-gpt3-maryborough-original-floor-score-input.yml",
+        (
+            "tools/run_gpt3_maryborough_original_floor_score_input.py",
+            "tools/run_source_closed_project_handoff.py",
+        ),
+    ),
+}
+
+
+def pull_request_paths(workflow_text: str) -> list[str] | None:
+    """``on.pull_request.paths`` patterns, or ``None`` ONLY when an actual PR trigger has no paths filter."""
+    block = re.search(r"^on:\s*\n((?:[ \t]+.*\n|\n)*)", workflow_text, re.M)
+    if not block:
+        raise ValueError("signed-output workflow is missing a readable on: trigger")
+    pr = re.search(r"^  pull_request:[ \t]*\n((?:    .*\n|\n)*)", block.group(1), re.M)
+    if not pr:
+        raise ValueError("signed-output workflow is missing a pull_request trigger")
+    lines = pr.group(1).splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("    paths:"):
+            if not re.fullmatch(r"    paths:[ \t]*", line):
+                raise ValueError("unsupported inline pull_request.paths filter")
+            break
+    else:
+        return None  # no ``paths`` key at all: the PRESENT PR trigger is unfiltered
+    patterns: list[str] = []
+    for line in lines[index + 1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue  # blank lines and comments may sit inside the list
+        item = re.fullmatch(r"      -[ \t]*(.+?)[ \t]*(?:#.*)?", line)
+        if item is None:
+            break  # next key of ``pull_request`` or end of the trigger block
+        patterns.append(item.group(1).strip().strip("'\""))
+    if not patterns:
+        raise ValueError("pull_request.paths is present but no pattern could be read")
+    return patterns
+
+
+def has_paths_ignore(workflow_text: str) -> bool:
+    return re.search(r"^    paths-ignore:", workflow_text, re.M) is not None
+
+
+def path_matches(pattern: str, path: str) -> bool:
+    """GitHub filter glob: ``*`` stays inside one path segment, ``**`` crosses segments."""
+    regex = re.escape(pattern).replace(r"\*\*/", "(?:.*/)?").replace(r"\*\*", ".*").replace(r"\*", "[^/]*")
+    return re.fullmatch(regex, path) is not None
+
+
+def _module_file(name: str, root: Path) -> Path | None:
+    candidate = root.joinpath(*name.split(".")).with_suffix(".py")
+    return candidate if candidate.is_file() else None
+
+
+def _imported_modules(path: Path, root: Path) -> set[str]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        raise ValueError(f"unreadable production import: {path}") from exc
+    names: set[str] = set()
+    package_parts = path.relative_to(root).parent.parts
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                # Relative imports are genuine producer dependencies too:
+                # tools/entry.py: ``from . import helper`` -> tools.helper;
+                # tools/nested/entry.py: ``from .. import helper`` -> tools.helper.
+                if node.level > len(package_parts):
+                    raise ValueError(f"invalid relative production import: {path}")
+                parts = package_parts[:len(package_parts) - node.level + 1]
+                if node.module:
+                    parts += tuple(node.module.split("."))
+                module = ".".join(parts)
+            else:
+                module = node.module or ""
+            if module:
+                names.add(module)
+                names.update(
+                    f"{module}.{alias.name}" for alias in node.names
+                    if alias.name != "*"
+                )
+    return names
+
+
+def import_closure(entries: tuple[str, ...], root: Path) -> set[str]:
+    """Repo-relative POSIX paths of every repo-local ``.py`` file reachable from ``entries`` by import."""
+    seen: set[str] = set()
+    pending = [root / entry for entry in entries]
+    while pending:
+        path = pending.pop()
+        rel = path.relative_to(root).as_posix()
+        if not path.is_file():
+            raise ValueError(f"missing production replay/import entry: {rel}")
+        if rel in seen:
+            continue
+        seen.add(rel)
+        for name in _imported_modules(path, root):
+            target = _module_file(name, root)
+            if target is not None:
+                pending.append(target)
+    return seen
+
+
+def workflow_path_included(patterns: list[str], path: str) -> bool:
+    """Apply GitHub's ordered positive/negative ``paths`` globs.
+
+    A later ``!pattern`` excludes an earlier match, and a later positive
+    pattern may re-include it. Merely finding any matching positive glob
+    would incorrectly certify that the workflow runs for excluded files.
+    """
+    included = False
+    for pattern in patterns:
+        if not pattern or pattern == "!":
+            raise ValueError("invalid pull_request.paths pattern")
+        negative = pattern.startswith("!")
+        actual_pattern = pattern[1:] if negative else pattern
+        if path_matches(actual_pattern, path):
+            included = not negative
+    return included
+
+
+def uncovered(closure: set[str], patterns: list[str] | None) -> list[str]:
+    if patterns is None:
+        return []
+    return sorted(path for path in closure if not workflow_path_included(patterns, path))
+
+
+# A replay step guarded by failure() never runs on ordinary successful
+# source execution and could leave the entire job green without customer proof.
+# Only unconditional-style continuation is acceptable for auxiliary steps.
+_ALLOWED_STEP_CONDITIONS = ("always()", "!cancelled()")
+
+
+def _pull_request_block(workflow_text: str) -> list[str]:
+    block = re.search(r"^on:\s*\n((?:[ \t]+.*\n|\n)*)", workflow_text, re.M)
+    if not block:
+        raise ValueError("signed-output workflow is missing a readable on: trigger")
+    pr = re.search(r"^  pull_request:[ \t]*\n((?:    .*\n|\n)*)", block.group(1), re.M)
+    if not pr:
+        raise ValueError("signed-output workflow is missing a pull_request trigger")
+    return pr.group(1).splitlines()
+
+
+def _trigger_values(lines: list[str], index: int, rest: str) -> list[str]:
+    """Values of ``branches`` / ``types``: an inline ``[a, b]`` list or a block list under the key."""
+    rest = rest.split(" #")[0].strip()
+    if rest.startswith("[") and rest.endswith("]"):
+        return [v.strip().strip("'\"") for v in rest[1:-1].split(",") if v.strip()]
+    if rest:
+        raise ValueError(f"unsupported pull_request trigger value: {rest!r}")
+    values: list[str] = []
+    for line in lines[index + 1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        item = re.fullmatch(r"      -[ \t]*(.+?)[ \t]*(?:#.*)?", line)
+        if item is None:
+            break
+        values.append(item.group(1).strip().strip("'\""))
+    if not values:
+        raise ValueError("pull_request trigger key present but no value could be read")
+    return values
+
+
+def pull_request_trigger_reaches_main(workflow_text: str) -> None:
+    """The PR trigger must fire for pull requests to ``main`` on push, reopen and open.
+
+    ``paths`` coverage proves WHICH files trigger the replay, not that it triggers at all: a ``branches`` filter that excludes
+    ``main`` or a ``types`` filter without ``opened`` / ``synchronize`` would let every production change merge unreplayed.
+    """
+    lines = _pull_request_block(workflow_text)
+    for index, line in enumerate(lines):
+        match = re.fullmatch(r"    (branches|branches-ignore|types):(.*)", line)
+        if match is None:
+            continue
+        key, rest = match.group(1), match.group(2)
+        values = _trigger_values(lines, index, rest)
+        if key == "branches" and not workflow_path_included(values, "main"):
+            raise ValueError(f"pull_request.branches {values} does not include main")
+        if key == "branches-ignore" and any(path_matches(v, "main") for v in values):
+            raise ValueError("pull_request.branches-ignore excludes main")
+        if key == "types" and not {"opened", "synchronize"} <= set(values):
+            raise ValueError(f"pull_request.types {values} must include opened and synchronize")
+
+
+def replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow_text: str) -> None:
+    """No job-level ``if`` / ``continue-on-error``, no ``continue-on-error: true`` anywhere, step conditions only always()-style."""
+    for number, line in enumerate(workflow_text.splitlines(), 1):
+        stripped = line.strip()
+        if re.match(r"^    (if|continue-on-error):", line):
+            raise ValueError(f"line {number}: job-level {stripped.split(':')[0]} can disable or neutralise the replay")
+        if re.match(r"^\s*continue-on-error:[ \t]*(?!false\b)\S", line):
+            raise ValueError(f"line {number}: continue-on-error makes the replay non-blocking")
+        step_if = re.match(r"^\s{6,}if:\s*(.*?)\s*(?:#.*)?$", line)
+        if step_if and step_if.group(1) not in _ALLOWED_STEP_CONDITIONS:
+            raise ValueError(f"line {number}: step condition {step_if.group(1)!r} can skip the replay")
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# the real repository gates
+# ---------------------------------------------------------------------------------------------------------------------------
+
+
+def test_each_signed_output_replay_triggers_on_its_whole_import_closure():
+    problems = {}
+    for project, (workflow, entries) in SIGNED_OUTPUT_REPLAYS.items():
+        text = (ROOT / workflow).read_text(encoding="utf-8")
+        assert not has_paths_ignore(text), f"{workflow} must not use paths-ignore"
+        patterns = pull_request_paths(text)
+        closure = import_closure(entries, ROOT)
+        # sanity: the closure really is the production chain, not an empty parse
+        assert len(closure) > 100, (project, len(closure))
+        assert "pb_source_visibility_authority.py" in closure
+        # An unfiltered trigger (no ``paths`` key) runs on every change; a filtered one must cover the whole closure.
+        missing = uncovered(closure, patterns)
+        if patterns is not None:
+            assert patterns, (project, "empty path filter")
+        if missing:
+            problems[project] = missing[:12] + ([f"... {len(missing) - 12} more"] if len(missing) > 12 else [])
+    assert not problems, (
+        "a change to these modules would merge without the signed-output replay running: " + repr(problems)
+    )
+
+
+def test_signed_output_replays_still_seal_and_verify_the_customer_rows():
+    for project, (workflow, _entries) in SIGNED_OUTPUT_REPLAYS.items():
+        text = (ROOT / workflow).read_text(encoding="utf-8")
+        assert "source_sealed_run.json" in text, project
+        assert "verified_customer_rows.json" in text, project
+        assert "verify_sealed_customer_output" in text, project
+        assert "pull_request:" in text, project
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# synthetic controls for the checker itself (positive / negative / metamorphic)
+# ---------------------------------------------------------------------------------------------------------------------------
+
+
+def _write(root: Path, rel: str, text: str) -> None:
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+
+
+def test_closure_follows_module_level_and_function_level_imports(tmp_path):
+    _write(tmp_path, "tools/entry.py", "import pb_a\nfrom tools import helper\n")
+    _write(tmp_path, "pb_a.py", "def f():\n    import pb_lazy\n")
+    _write(tmp_path, "pb_lazy.py", "from pb_deep import x\n")
+    _write(tmp_path, "pb_deep.py", "x = 1\n")
+    _write(tmp_path, "tools/helper.py", "")
+    _write(tmp_path, "pb_unrelated.py", "")
+    closure = import_closure(("tools/entry.py",), tmp_path)
+    assert closure == {"tools/entry.py", "pb_a.py", "pb_lazy.py", "pb_deep.py", "tools/helper.py"}
+
+
+def test_narrow_filter_is_detected_and_wildcard_filter_passes(tmp_path):
+    closure = {"pb_a.py", "pb_b.py", "tools/run.py"}
+    assert uncovered(closure, ["pb_a.py", "tools/run.py"]) == ["pb_b.py"]
+    assert uncovered(closure, ["pb_*.py", "tools/run.py"]) == []
+    assert uncovered(closure, None) == []  # an unfiltered trigger runs on every change
+    # ``*`` does not cross directories: a top-level pattern must not cover a nested file
+    assert uncovered({"tools/pb_x.py"}, ["pb_*.py"]) == ["tools/pb_x.py"]
+    assert uncovered({"tools/pb_x.py"}, ["tools/*.py"]) == []
+
+
+def test_workflow_paths_parser_reads_only_the_pull_request_filter():
+    text = (
+        "name: X\n\non:\n  push:\n    paths:\n      - 'push_only.py'\n  pull_request:\n    branches: [main]\n"
+        "    paths:\n      - \"pb_*.py\"\n      - 'tools/run.py'\n  workflow_dispatch:\n\njobs:\n  a:\n    runs-on: x\n"
+    )
+    assert pull_request_paths(text) == ["pb_*.py", "tools/run.py"]
+    # comments and blank lines inside the list must not hide the patterns (a comment once made the parser report "unfiltered")
+    commented = (
+        "on:\n  pull_request:\n    branches: [main]\n    paths:\n      # why\n\n      - \"pb_*.py\"  # trailing\n"
+        "      # between\n      - 'tools/run.py'\n  workflow_dispatch:\n"
+    )
+    assert pull_request_paths(commented) == ["pb_*.py", "tools/run.py"]
+    # the same list parsed with CRLF checked-out text
+    assert pull_request_paths(commented.replace("\n", "\r\n").replace("\r\n", "\n")) == ["pb_*.py", "tools/run.py"]
+    # a present-but-unreadable filter is an error, never a silent "unfiltered"
+    import pytest
+    with pytest.raises(ValueError):
+        pull_request_paths("on:\n  pull_request:\n    paths:\n      # nothing\n  workflow_dispatch:\n")
+    assert pull_request_paths("on:\n  pull_request:\n    branches: [main]\n") is None
+    with pytest.raises(ValueError, match="missing a pull_request trigger"):
+        pull_request_paths("on:\n  push:\n    branches: [main]\n")
+    assert has_paths_ignore("on:\n  pull_request:\n    paths-ignore:\n      - 'docs/**'\n")
+
+ 
+def test_missing_or_disguised_pull_request_trigger_fails_closed():
+    import pytest
+
+    for workflow in (
+        "name: Only push\non:\n  push:\n    branches: [main]\n",
+        "name: Manual only\non:\n  workflow_dispatch:\n",
+        "name: Commented-out event\n# pull_request:\non:\n  push:\n",
+        "name: No trigger\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
+    ):
+        with pytest.raises(ValueError, match="missing .*trigger"):
+            pull_request_paths(workflow)
+
+    # Genuinely unfiltered pull requests still run for every file change.
+    assert pull_request_paths("on:\n  pull_request:\n    branches: [main]\n") is None
+
+
+def test_negated_paths_filter_does_not_hide_missing_replay_coverage():
+    closure = {"pb_alpha.py", "pb_beta.py", "tools/run.py"}
+    filters = ["pb_*.py", "tools/run.py", "!pb_beta.py"]
+    assert uncovered(closure, filters) == ["pb_beta.py"]
+    assert uncovered(closure, filters + ["pb_beta.py"]) == []
+    # A trailing exclusion that names an imported source is blocking.
+    assert uncovered(closure, filters + ["pb_beta.py", "!pb_*.py"]) == [
+        "pb_alpha.py", "pb_beta.py"
+    ]
+
+
+def test_inline_workflow_path_filters_must_not_masquerade_as_unfiltered():
+    import pytest
+
+    for text in (
+        "on:\n  pull_request:\n    paths: ['unrelated.py']\n",
+        'on:\n  pull_request:\n    paths: []\n',
+    ):
+        with pytest.raises(ValueError, match="unsupported inline"):
+            pull_request_paths(text)
+
+
+def test_unreadable_import_closure_and_deleted_entry_fail_closed(tmp_path):
+    import pytest
+
+    _write(tmp_path, "tools/entry.py", "import pb_broken\n")
+    _write(tmp_path, "pb_broken.py", "this is not valid python !!!")
+    with pytest.raises(ValueError, match="unreadable production import"):
+        import_closure(("tools/entry.py",), tmp_path)
+    with pytest.raises(ValueError, match="missing production replay/import entry"):
+        import_closure(("tools/absent.py",), tmp_path)
+
+
+def test_import_closure_follows_relative_python_package_imports(tmp_path):
+    _write(tmp_path, "tools/entry.py", "from . import helper\n")
+    _write(tmp_path, "tools/helper.py", "from .nested import child\n")
+    _write(tmp_path, "tools/nested/child.py", "from .. import shared\n")
+    _write(tmp_path, "tools/shared.py", "import pb_added\n")
+    _write(tmp_path, "pb_added.py", "VALUE = 1\n")
+    expected = {
+        "tools/entry.py", "tools/helper.py", "tools/nested/child.py",
+        "tools/shared.py", "pb_added.py",
+    }
+    assert import_closure(("tools/entry.py",), tmp_path) == expected
+    assert uncovered(expected, ["tools/entry.py", "tools/helper.py",
+                                "tools/nested/child.py", "tools/shared.py"]) == [
+        "pb_added.py"
+    ]
+
+
+def test_signed_output_replays_trigger_on_main_pull_requests_and_cannot_be_disabled():
+    for project, (workflow, _entries) in SIGNED_OUTPUT_REPLAYS.items():
+        text = (ROOT / workflow).read_text(encoding="utf-8")
+        pull_request_trigger_reaches_main(text)
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(text)
+
+
+def test_trigger_that_never_reaches_main_pull_requests_is_rejected():
+    import pytest
+
+    base = "on:\n  pull_request:\n{extra}    paths:\n      - 'pb_*.py'\n"
+    for extra in (
+        "    branches: [release]\n",
+        "    branches: ['**', '!main']\n",
+        "    branches: ['main', '!main']\n",
+        "    branches:\n      - '**'\n      - '!main'\n",
+        "    branches:\n      - release\n      - 'hotfix/**'\n",
+        "    branches-ignore: [main]\n",
+        "    types: [closed]\n",
+        "    types: [labeled, synchronize]\n",
+        "    branches: ${{ vars.BRANCHES }}\n",
+    ):
+        with pytest.raises(ValueError):
+            pull_request_trigger_reaches_main(base.format(extra=extra))
+    for extra in (
+        "",
+        "    branches: [main]\n",
+        "    branches:\n      - main\n",
+        "    branches: ['**']\n",
+        "    branches: [release, main]\n",
+        "    branches: ['**', '!main', main]\n",
+        "    types: [opened, synchronize, reopened]\n",
+        "    branches-ignore: [release]\n",
+    ):
+        pull_request_trigger_reaches_main(base.format(extra=extra))  # must not raise
+
+
+def test_a_disabled_or_non_blocking_replay_job_is_rejected():
+    import pytest
+
+    head = "name: X\non:\n  pull_request:\njobs:\n  replay:\n"
+    for body in (
+        "    if: false\n    runs-on: ubuntu-latest\n",
+        "    if: github.event_name == 'workflow_dispatch'\n    runs-on: ubuntu-latest\n",
+        "    continue-on-error: true\n    runs-on: ubuntu-latest\n",
+        "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n        continue-on-error: true\n",
+        "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n        if: ${{ false }}\n",
+        "    runs-on: ubuntu-latest\n    steps:\n      - run: echo stale-replay\n        if: failure()\n",
+    ):
+        with pytest.raises(ValueError):
+            replay_jobs_cannot_be_disabled_or_made_non_blocking(head + body)
+    ok = head + (
+        "    runs-on: ubuntu-latest\n    timeout-minutes: 20\n    steps:\n      - run: echo ok\n"
+        "      - uses: actions/upload-artifact@v4\n        if: always()\n"
+    )
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(ok)  # must not raise
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(
+        head + "    runs-on: x\n    steps:\n      - run: y\n        continue-on-error: false\n"
+    )  # an explicit false is harmless
+    with pytest.raises(ValueError):  # ... but any other value, including an expression, is not
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(
+            head + "    runs-on: x\n    steps:\n      - run: y\n        continue-on-error: ${{ true }}\n"
+        )
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# every pull-request workflow must still fire for pull requests to main
+# ---------------------------------------------------------------------------------------------------------------------------
+
+
+def _has_block_pull_request_trigger(workflow_text: str) -> bool:
+    block = re.search(r"^on:\s*\n((?:[ \t]+.*\n|\n)*)", workflow_text, re.M)
+    return block is not None and re.search(r"^  pull_request:", block.group(1), re.M) is not None
+
+
+def test_every_pull_request_workflow_still_fires_for_pull_requests_to_main():
+    """A workflow written while its change was stacked on another branch can carry ``branches: [<parent branch>]``.
+
+    Merged like that, it silently never runs on a pull request to ``main`` again, while still looking like a gate.  Applies to every
+    workflow with a ``pull_request:`` block, not only the signed-output replays above.
+    """
+    problems = {}
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        if not _has_block_pull_request_trigger(text):
+            continue
+        try:
+            pull_request_trigger_reaches_main(text)
+        except ValueError as error:
+            problems[path.name] = str(error)
+    assert problems == {}, problems
+
+
+def test_a_workflow_limited_to_a_stacking_branch_is_rejected_and_unfiltered_forms_are_not():
+    import pytest
+
+    stacked = "on:\n  pull_request:\n    branches:\n      - gptmax/original-paired-wall-faces-shadow-20261015\n    paths:\n      - 'tools/x.py'\n"
+    assert _has_block_pull_request_trigger(stacked)
+    with pytest.raises(ValueError):
+        pull_request_trigger_reaches_main(stacked)
+    for fine in (
+        "on:\n  pull_request:\n    paths:\n      - 'tools/x.py'\n",
+        "on:\n  pull_request:\n    branches: [main, gptmax/stack]\n",
+        "on:\n  pull_request:\n    branches:\n      - gptmax/stack\n      - main\n",
+    ):
+        assert _has_block_pull_request_trigger(fine)
+        pull_request_trigger_reaches_main(fine)  # must not raise
+    for no_trigger in ("on:\n  workflow_dispatch:\n", "on:\n  push:\n    branches: [release]\n"):
+        assert not _has_block_pull_request_trigger(no_trigger)

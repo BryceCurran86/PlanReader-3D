@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "tools/report_gpt3_selected_two_project_original_evidence.py"
+      - "tools/report_gpt3_four_project_evidence.py"
+      - "tests/test_gpt3_strict_signed_json_ingress.py"
       - "tests/test_gpt3_selected_two_project_original_evidence.py"
       - ".github/workflows/score-gpt3-selected-two-original-projects.yml"
   workflow_dispatch:
@@ -32,8 +34,8 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python -m pytest -q tests/test_gpt3_selected_two_project_original_evidence.py tests/test_gpt3_four_project_evidence.py tests/test_gpt3_original_byte_gated_exact_project.py
-          ruff check --select F821,F823 tools/report_gpt3_selected_two_project_original_evidence.py tests/test_gpt3_selected_two_project_original_evidence.py
+          python -m pytest -q tests/test_gpt3_selected_two_project_original_evidence.py tests/test_gpt3_four_project_evidence.py tests/test_gpt3_original_byte_gated_exact_project.py tests/test_gpt3_strict_signed_json_ingress.py
+          ruff check --select F821,F823 tools/report_gpt3_selected_two_project_original_evidence.py tests/test_gpt3_selected_two_project_original_evidence.py tools/report_gpt3_four_project_evidence.py tests/test_gpt3_strict_signed_json_ingress.py
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
 

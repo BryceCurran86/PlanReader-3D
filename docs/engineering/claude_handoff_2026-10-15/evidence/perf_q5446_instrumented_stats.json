@@ -1,0 +1,291 @@
+{
+ "elapsed_s": 252.81338809999988,
+ "stats": {
+  "commit_calls": 24.0,
+  "commit_seconds": 60.95552099999941,
+  "commit_added_records": 13514181.0,
+  "commit_store_records_max": 12633333,
+  "render_calls": 28.0,
+  "render_seconds": 21.078601199999866,
+  "render_png_bytes": 9726777.0,
+  "scale_calls": 10.0,
+  "scale_cache_hits": 0.0,
+  "scale_seconds": 16.114263900000424,
+  "scale_seconds_uncached": 16.114263900000424,
+  "lineage_bucket_calls": 11406.0,
+  "lineage_bucket_scanned": 7377588.0,
+  "lineage_bucket_seconds": 2.650807399987116,
+  "lineage_bucket_empty": 28.0,
+  "attach_calls": 1.0,
+  "attach_seconds": 5.2667827999998735,
+  "attach_fragments": 11406.0,
+  "attach_sources": 8534.0,
+  "attach_max_sources": 8534,
+  "attach_max_fragments": 11406
+ },
+ "render_distinct_requests_incl_snapshot": 27,
+ "render_requests_repeated_exactly": 1,
+ "render_distinct_requests_ignoring_snapshot": 18,
+ "render_repeats_ignoring_snapshot": 10,
+ "render_seconds_by_key_top": [
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "2",
+    "300.0",
+    "None",
+    "True"
+   ],
+   2.759,
+   3
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "3",
+    "300.0",
+    "None",
+    "True"
+   ],
+   2.367,
+   3
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "4",
+    "300.0",
+    "None",
+    "True"
+   ],
+   2.065,
+   3
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "1",
+    "300.0",
+    "None",
+    "True"
+   ],
+   2.051,
+   3
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "8",
+    "300.0",
+    "None",
+    "True"
+   ],
+   1.576,
+   2
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "7",
+    "300.0",
+    "None",
+    "True"
+   ],
+   1.427,
+   2
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "4",
+    "300.0",
+    "None",
+    "False"
+   ],
+   1.117,
+   1
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "2",
+    "300.0",
+    "None",
+    "False"
+   ],
+   1.089,
+   1
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "1",
+    "300.0",
+    "None",
+    "False"
+   ],
+   0.94,
+   1
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "3",
+    "300.0",
+    "None",
+    "False"
+   ],
+   0.839,
+   1
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "7",
+    "300.0",
+    "None",
+    "False"
+   ],
+   0.798,
+   1
+  ],
+  [
+   [
+    "source_revision_170b8d676c990cec237a331616b47e2e",
+    "8",
+    "300.0",
+    "None",
+    "False"
+   ],
+   0.789,
+   1
+  ]
+ ],
+ "render_png_identical_across_snapshots": true,
+ "render_png_variants_max": 1,
+ "commit_rows_sec_n_callers": [
+  [
+   0.582,
+   293730,
+   "ingest_native_pdf_bytes<ingest_native_pdf_bytes<collect_live_physical_net_wall_claim<_generate_project_handoff_locked"
+  ],
+  [
+   1.663,
+   587118,
+   "publish_derived_observations<ingest_native_pdf_bytes<collect_live_physical_net_wall_claim<_generate_project_handoff_locked"
+  ],
+  [
+   2.201,
+   587179,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   2.742,
+   587240,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   3.334,
+   587301,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   3.811,
+   587362,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   2.874,
+   587423,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   2.434,
+   587484,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   2.984,
+   587545,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   2.805,
+   587606,
+   "publish_derived_observations<augment_with_raster_opening_primitives<compose_live_wall_opening_authority<collect_live_physical_net_wall_claim"
+  ],
+  [
+   3.093,
+   587615,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.743,
+   587624,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   3.005,
+   587636,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   3.122,
+   587648,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.675,
+   587733,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.936,
+   587818,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.41,
+   587829,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.667,
+   587840,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.27,
+   587851,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   4.143,
+   587862,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.343,
+   587917,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   2.061,
+   587972,
+   "publish_derived_observations<augment_with_raster_visible_segments<_from_source_visibility_producer<from_source_visibility_producer"
+  ],
+  [
+   0.464,
+   293730,
+   "ingest_native_pdf_bytes<ingest_native_pdf_bytes<collect_live_ceiling_lining_claims<_generate_project_handoff_locked"
+  ],
+  [
+   1.595,
+   587118,
+   "publish_derived_observations<ingest_native_pdf_bytes<collect_live_ceiling_lining_claims<_generate_project_handoff_locked"
+  ]
+ ],
+ "scale_distinct_page_viewport_snapshot": 10,
+ "scale_distinct_page_viewport": 10,
+ "scale_distinct_snapshots": 1
+}
