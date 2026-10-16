@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 from typing import Any
 
@@ -115,6 +115,49 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
     _require(all(sums[k] == sha for k, sha in indexed.items()),
              "SHA256SUMS and owner receipt disagree")
     return indexed, sums
+
+
+def _exact_execution_pages(value: Any, page_count: int, field: str) -> None:
+    """A claimed all-page execution is not proved by an untyped/subset range."""
+    _require(type(value) is list and all(type(v) is int for v in value),
+             field + " must be canonical page-number array")
+    _require(value == list(range(1, page_count + 1)),
+             field + " does not span the original document exactly")
+
+
+def _source_pages_subset(value: Any, page_count: int, field: str) -> None:
+    _require(type(value) is list and all(type(v) is int for v in value),
+             field + " must contain integer source pages")
+    _require(len(set(value)) == len(value) and all(1 <= v <= page_count for v in value),
+             field + " contains duplicate or out-of-source page")
+
+
+def _original_windows_reference(
+    value: Any,
+    *,
+    project_id: str,
+    terminal: tuple[str, ...],
+    root_segment: str,
+) -> None:
+    """A redacted Windows reference cannot point into a competing project."""
+    _require(type(value) is str and value.startswith("<HOME>\\"),
+             "producer original Windows reference missing redacted owner root")
+    _require("/" not in value and ".." not in PureWindowsPath(value).parts,
+             "malformed private source reference")
+    parts = PureWindowsPath(value).parts
+    expected_suffix = (root_segment, project_id, *terminal)
+    _require(tuple(parts[-len(expected_suffix):]) == expected_suffix,
+             "original source reference points to different project or artifact")
+
+
+def _source_owned_reason_array(value: Any, name: str) -> None:
+    _require(
+        type(value) is list and all(
+            type(v) is str and bool(v) and v == v.strip() for v in value
+        ),
+        name + " contains noncanonical source reason",
+    )
+    _require(len(set(value)) == len(value), name + " duplicates source reasons")
 
 
 def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
@@ -272,6 +315,68 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         _require(type(family_counts) is dict and all(
             type(v) is int and v >= 0 for v in family_counts.values()
         ), "invalid production quantity family counts")
+        # A completed process can still contain source-only candidates; the
+        # producer's own page-scope receipts must agree before any sealing.
+        page_count = primary_pages = summary.get("page_count")
+        _require(type(page_count) is int and page_count > 0,
+                 "invalid original producer source page count")
+        _exact_execution_pages(summary.get("execution_pages"), page_count,
+                               "production execution_pages")
+        _exact_execution_pages(summary.get("semantic_execution_pages"), page_count,
+                               "production semantic_execution_pages")
+        for page_field in (
+            "topology_pages", "room_area_support_pages", "canonical_wall_source_pages"
+        ):
+            _source_pages_subset(summary.get(page_field), page_count, page_field)
+        candidate_page = summary.get("source_positive_partial_page")
+        _require(candidate_page is None or (
+            type(candidate_page) is int and 1 <= candidate_page <= page_count
+        ), "partial source page lies outside authenticated document")
+        _require(type(summary.get("canonical_counts")) is dict
+                 and all(type(v) is int and v >= 0
+                         for v in summary["canonical_counts"].values()),
+                 "canonical diagnostic counts have invalid or negative value")
+        _require(type(summary.get("unresolved_wall_candidate_count")) is int
+                 and summary["unresolved_wall_candidate_count"] >= 0,
+                 "invalid unresolved structural wall candidate count")
+        _require(summary.get("claim_status") in (None, "abstained"),
+                 "owner diagnostic cannot declare source-only firm claim")
+        _require(summary.get("canonical_wall_status") in (
+            None, "candidate", "abstained", "conflict",
+        ), "owner diagnostic cannot promote candidate wall existence")
+        for name in ("claim_reason_codes", "canonical_wall_reason_codes"):
+            _source_owned_reason_array(summary.get(name), name)
+        _require(type(summary.get("topology_mode")) is str
+                 and summary["topology_mode"] in (
+                     "source_classified_scope", "live_authority_all_pages_fallback",
+                 ), "unrecognized source topology scope")
+        _original_windows_reference(
+            summary.get("source_path"), project_id=project_id,
+            terminal=(next(d.name for d in manifest.source_documents
+                           if d.sha256 == summary["source_sha256"]),),
+            root_segment="sources",
+        )
+        source_attempt = _object(
+            root, project_id + "/outputs/source_attempt_preflight.json"
+        )
+        _require(source_attempt.get("project_id") == project_id
+                 and source_attempt.get("source_sha256_at_start")
+                 == summary.get("source_sha256"),
+                 "initial original source-at-start ownership mismatch")
+        _require(source_attempt.get("source_page_count") == page_count,
+                 "source-at-start page count drift")
+        _exact_execution_pages(
+            source_attempt.get("execution_page_numbers"), page_count,
+            "source-at-start original execution pages",
+        )
+        _require(source_attempt.get("family_group") == "all"
+                 and source_attempt.get("topology_mode") == summary["topology_mode"],
+                 "original source-at-start producer scope changed")
+        _require(source_attempt.get("status") == "SOURCE_INPUT_RECORDED_UNSEALED"
+                 and source_attempt.get("sealed_run_file") is None
+                 and source_attempt.get("complete_source_coverage_proven") is False
+                 and source_attempt.get("benchmark_score_granted") is False,
+                 "original source-at-start preflight falsely grants sealed/score status")
         primary_sha = summary.get("source_sha256")
         primary = [doc for doc in manifest.source_documents if doc.sha256 == primary_sha]
         _require(len(primary) == 1, "producer summary lacks original-primary-PDF source SHA")
@@ -298,6 +403,10 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             _require(type(combined) is str and combined
                      and summary.get("combined_run_id"),
                      "sealed project missing run identity")
+            _original_windows_reference(
+                combined, project_id=project_id, terminal=(project_id + ".json",),
+                root_segment="project_outputs",
+            )
             file_path = project_id + "/outputs/" + project_id + ".json"
             payload = _object(root, file_path)
             sealed = sealed_source_closed_run_from_dict(payload)
@@ -317,6 +426,14 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                      and set(files) == set(ids),
                      "family signed-run proof universe incomplete")
             for family in files:
+                _require(type(family) is str and family in family_counts
+                         and family_counts[family] > 0,
+                         "signed family reference is not a nonempty quantity family")
+                _original_windows_reference(
+                    files[family], project_id=project_id,
+                    terminal=("family_runs", family + ".sealed.json"),
+                    root_segment="project_outputs",
+                )
                 relative = project_id + "/outputs/family_runs/" + family + ".sealed.json"
                 family_payload = _object(root, relative)
                 family_seal = sealed_source_closed_run_from_dict(family_payload)
