@@ -3542,6 +3542,18 @@
       "sha256": "c840b9c18989a2376d132ee6c26b3134e9428671cb1d22921468b0c80a87a0c6"
     }
   },
+  "integrated_main_validation": {
+    "code_commit": "7b3c05e07b129d9a18cce3628dbcb9e5d3734739",
+    "evaluator_executed": false,
+    "focused_tests_passed": 261,
+    "local_execution": true,
+    "new_quantity_count": 0,
+    "selected_source_report_byte_identical": true,
+    "selected_source_report_sha256": "a81fa1e5987a71c3f8982e9a93b369dc7cbea0e010246b0b813051835c9210fe",
+    "source_sealed_run_byte_identical": true,
+    "source_snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+    "verified_customer_rows_byte_identical": true
+  },
   "native_candidate_closure": {
     "candidate_universe_complete": false,
     "page_id": "3",

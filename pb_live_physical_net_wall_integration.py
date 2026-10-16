@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
@@ -81,6 +82,10 @@ from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_area_bridge import build_source_room_area_bridge
 from pb_source_room_face_authority import SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_viewport_segmentation import (
+    is_authoritative_derived_viewport,
+    segment_source_page_viewports,
+)
 
 
 LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.3.0"
@@ -217,9 +222,87 @@ def _unique_authenticated_containing_floor_plan_viewport(
             for room in scope_rooms
         ):
             containing[str(viewport_id)] = (x0, y0, x1, y1)
-    if len(containing) != 1:
+    if len(containing) == 1:
+        return next(iter(containing.items()))
+    if selectors:
+        # An existing original authenticated W4 drawing view disagrees
+        # with this room scope. A second reader may not override it.
         return None
-    return next(iter(containing.items()))
+
+    # F.07 now proves physical FLOOR_PLAN drawing regions from original
+    # producer-native text and source geometry even when page-only F.07 is
+    # UNAVAILABLE. Read from the SAME source revision and room snapshot,
+    # never from another independent diagnostic producer or copied view ID.
+    published = source.published_snapshot_for_revision(first.revision_id)
+    if (
+        published is None
+        or published.revision.document_id != first.document_id
+        or published.revision.source_sha256 != first.source_sha256
+        or published.snapshot.snapshot_id != snapshot_id
+    ):
+        return None
+    source_views = segment_source_page_viewports(
+        source,
+        revision_id=first.revision_id,
+        page_id=str(page_id),
+        physical_plan_view_shadow=True,
+    )
+    signed_plan_views = [
+        view for view in source_views
+        if view.view_type == DrawingViewType.FLOOR_PLAN.value
+        and is_authoritative_derived_viewport(view)
+    ]
+    # No first/last-choice selection in a competing drawing-view universe.
+    if len(signed_plan_views) != 1:
+        return None
+    view = signed_plan_views[0]
+    bbox = view.bounding_box
+    provenance = view.provenance or {}
+    if (
+        type(view.view_id) is not str or not view.view_id
+        or type(bbox) not in (tuple, list) or len(bbox) != 4
+        or any(type(v) not in (int, float) for v in bbox)
+        or any(not math.isfinite(float(v)) for v in bbox)
+        or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]
+        or any(
+            provenance.get(key) != value for key, value in (
+                ("document_id", first.document_id),
+                ("revision_id", first.revision_id),
+                ("source_sha256", first.source_sha256),
+                ("snapshot_id", snapshot_id),
+            )
+        )
+        or source.published_snapshot_for_revision(first.revision_id) != published
+    ):
+        return None
+    x0, y0, x1, y1 = tuple(float(v) for v in bbox)
+    for room in scope_rooms:
+        if (
+            room.document_id != first.document_id
+            or room.revision_id != first.revision_id
+            or room.source_sha256 != first.source_sha256
+            or room.snapshot_id != snapshot_id
+            or room.page_id != page_id
+            # A physical room that already owns another viewport is a
+            # competing source address, not a candidate for rebinding.
+            or room.viewport_id not in (None, view.view_id)
+            or type(room.polygon_pdf_pts) not in (tuple, list)
+            or len(room.polygon_pdf_pts) < 3
+        ):
+            return None
+        for point in room.polygon_pdf_pts:
+            if (
+                type(point) not in (tuple, list) or len(point) != 2
+                or any(type(v) not in (int, float) for v in point)
+                or any(not math.isfinite(float(v)) for v in point)
+                or not (x0 <= float(point[0]) <= x1
+                        and y0 <= float(point[1]) <= y1)
+            ):
+                return None
+    # Drawing region admission is NOT room/scale/finish measurement.
+    # The existing PhysicalScaleProducer must find a real native graphic
+    # bar in this exact viewport; without it the result remains ABSTAIN.
+    return view.view_id, (x0, y0, x1, y1)
 
 
 def _merge_documented_room_area_evidence(

@@ -8,6 +8,19 @@ first-failure traces, original report hashes and existing signed quantity IDs.
 Local execution used Python 3.12.14, PyMuPDF 1.28.0, OpenCV 4.14.0 and Shapely
 2.1.2. It is separate from the linked Actions executions.
 
+Integrated-main refresh: the owner subsequently merged #2738, #2809, #2806,
+#2802 and the source/performance stack through #2706. Re-executed selected
+Lot16 source and the actual original collector/sealer/customer verifier at
+`7b3c05e07b129d9a18cce3628dbcb9e5d3734739`. The **entire selected source
+report is byte-identical**, SHA256
+`a81fa1e5987a71c3f8982e9a93b369dc7cbea0e010246b0b813051835c9210fe`,
+and both signed output files remain byte-identical with the hashes below.
+The same snapshot, object IDs, host/frame/measurement decisions and 21/15/9/8
+baseline therefore survive these production merges. The relevant current-main
+source, split-frame, immutable-record/copy, page-text and transaction tests
+pass: **261 tests**. This refresh does not activate the merged default-off
+split-frame experiment.
+
 ## Observed source and signed output
 
 Original architectural PDF SHA256:
@@ -156,7 +169,7 @@ Concrete owned changes made separately:
 | #2795 | `14a5d1b19349176d70ecf8b6ff6890f4e61dffb2` | Repair three inherited workflow copies; run [38835620346](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38835620346). |
 | #2797 | `8359938cdbe5fc1119308a98780f5305f34858a1` | Repair four inherited workflow copies; run [38835629383](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38835629383). |
 | #2803 | `510ab49713e64d83bb70b507e27be6bc9048e2fa` | Retain parent and add main trigger; run [38835638795](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38835638795). |
-| #2804 | `42da25092fb6fcd9ad4b406333619bd1ab6c6d6f` | Restore main alongside parent trigger; run [38835645636](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38835645636). |
+| #2804 | `8b70985170893373adbd96677d483e93d0c16fcd` | Restore main alongside parent trigger, then retarget to main after #2801 and integrate main7b3c05e. Earlier trigger-head run [38835645636](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38835645636) passed; fresh integrated-head run [38839276768](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38839276768) is required. |
 | #2754 | `7421e26d8a5f18ae75dd36f987dcb2a3f8641974` | Address Claude's missing synthetic matrix: 12 source-generated cases; 25 tests pass locally; workflow includes the file; original run [38836360956](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38836360956). |
 
 Six distinct workflow files had 12 stale branch copies in total. Only the
@@ -166,6 +179,29 @@ triggers were retained. Full current-main trigger/source-membership suite:
 dedicated + existing binder/label cases: 25 passed locally; ruff F821/F823 and
 diff checks passed. Actions status is live at the links; a queued or skipped
 required job is not a pass.
+
+All six original workflow-repair runs passed. #2754's six applicable workflows
+also passed, including full CI, both original signed-output replays and
+performance; its two unrelated Item19B checks skipped. Its 12 dedicated cases
+also pass when imported against main7b3c05e's actual source/authority modules.
+For #2804's fresh integration, the source-view/raw-overlay/current trigger
+guard group passes locally: 48 tests; ruff and diff check pass. A previous-head
+green result is not substituted for the new integrated-head Actions gate.
+
+Trigger repair does not remove the source-policy dependency of
+#2791/#2792/#2795/#2797/#2803 on blocked experiment #2776. Its exact-head source job
+[38699699963](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38699699963)
+records a strict old A68 representative/geometry change despite unchanged
+eight signed outputs. The positive-address matrix identifies exactly the
+two shared face selectors `119ef8ca51e38a54cfd660353d490774` and
+`460e69069e159690e0e18ca53dcbeb46`: the additive paired-face candidate changes
+them from old A68 support to ambiguous physical candidates. The new raw
+STACKER hypothesis cannot silently supersede those existing source claims.
+These stacks are not merge-ready merely because a workflow correctly asserts
+the known blocker. Source-authority review must resolve the competing
+physical identity, or the useful diagnostics need a separately reviewed
+clean-main extraction. No old-selector pin or first-candidate election is
+proposed as a repair.
 
 #2748 remains at `815aaa72810cd48e2cb48ce1142cbe1841911ebb`. Claude's requested
 `_graph` signature union depends on their single #2770/#2771/#2805 integration
