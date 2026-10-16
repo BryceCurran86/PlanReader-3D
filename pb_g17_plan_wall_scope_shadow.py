@@ -95,9 +95,14 @@ def _infill_edge_opening_ids(edge,infill_intervals):
     return tuple(owners)
 
 
-def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
+def _graph(segments, *, root, scope_id, tolerance, infill_intervals=(), preserve_overlapping_spans_shadow=False,
+           immutable_exact_endpoints_shadow=False, partition_exact_collinear_overlaps_shadow=False,
+           infill_endpoint_opposition=False):
     graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=tolerance,
-        exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True)
+        exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True,
+        **({"preserve_overlapping_spans_shadow": True} if preserve_overlapping_spans_shadow else {}),
+        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
+        **({"partition_exact_collinear_overlaps_shadow": True} if partition_exact_collinear_overlaps_shadow else {}))
     junctions, relationships = classify_junctions(graph,
         document_id=root["document_id"], page_id=root["page_id"], viewport_id=scope_id)
     deduped, removed = deduplicate_coincident_edges(graph)
@@ -112,6 +117,31 @@ def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
         if r.relationship_type.value == "continues_as"
         and ((r.from_edge_id in infill_edges) != (r.to_edge_id in infill_edges)))
     opposed_ids = {r.relationship_id for r in opposed}
+    whole_edge_opposed = opposed
+    endpoint_opposed = []
+    endpoint_outcomes = []
+    if infill_endpoint_opposition:
+        from pb_g17_infill_endpoint_opposition_shadow import _endpoint_infill_witnesses
+        edges_by_id = {str(e['id']):e for e in deduped['edges']}
+        junctions_by_id = {j.node_id:j for j in junctions}
+        for relationship in relationships:
+            if relationship.relationship_type.value!='continues_as':
+                continue
+            junction = junctions_by_id[relationship.via_junction_id]
+            sides = []
+            for eid in (relationship.from_edge_id,relationship.to_edge_id):
+                edge = edges_by_id.get(eid)
+                sides.append(() if edge is None else _endpoint_infill_witnesses(
+                    edge,junction.position_pt,infill_intervals,tolerance=tolerance))
+            opposed_at_endpoint = bool(sides[0]) != bool(sides[1])
+            endpoint_outcomes.append(dict(relationship_id=relationship.relationship_id,
+                from_edge_endpoint_witnesses=sides[0],to_edge_endpoint_witnesses=sides[1],
+                endpoint_opposition_present=opposed_at_endpoint,
+                whole_edge_opposition_present=relationship.relationship_id in opposed_ids))
+            if opposed_at_endpoint and relationship.relationship_id not in opposed_ids:
+                endpoint_opposed.append(relationship)
+                opposed_ids.add(relationship.relationship_id)
+        opposed = (*opposed,*endpoint_opposed)
     consumed = tuple(r for r in relationships if r.relationship_id not in opposed_ids)
     abstained_chains = []
     identities = None
@@ -134,7 +164,7 @@ def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
                 for eid in sorted(identities[w.candidate_id].edge_ids)))
             for w in sorted(walls, key=lambda w:w.candidate_id))
     # The complete source preparation losses and W3 alternatives remain visible.
-    return {"snap_tolerance_pt":tolerance, "w2_edge_count":len(graph["edges"]),
+    result = {"snap_tolerance_pt":tolerance, "w2_edge_count":len(graph["edges"]),
         "w2_edges":[{"edge_id":str(e["id"]),
             "geometry":tuple(e[k] for k in ("x1","y1","x2","y2")),
             "source_primitive_ids":tuple(sorted(e[LINEAGE_KEY]["source_primitive_ids"]))}
@@ -149,12 +179,28 @@ def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
         "w4_abstained_chains":abstained_chains,
         "w4_identity_unavailable":identities is None,
         "w4_records":[asdict(r) for r in records]}
+    if infill_endpoint_opposition:
+        result.update(source_whole_edge_opposed_continuations=[asdict(r) for r in whole_edge_opposed],
+            source_endpoint_opposed_continuations=[asdict(r) for r in endpoint_opposed],
+            source_endpoint_opposition_outcomes=endpoint_outcomes)
+    return result
 
 
-def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str) -> dict:
+def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str,
+                                     preserve_overlapping_spans_shadow: bool = False,
+                                     immutable_exact_endpoints_shadow: bool = False,
+                                     partition_exact_collinear_overlaps_shadow: bool = False) -> dict:
     """Only original producer and source addresses; never caller evidence bodies."""
     if type(source) is not SourceVisibilityProducer:
         raise TypeError("actual SourceVisibilityProducer required")
+    if type(preserve_overlapping_spans_shadow) is not bool:
+        raise ValueError("overlap preservation shadow must be explicit boolean")
+    if type(immutable_exact_endpoints_shadow) is not bool:
+        raise ValueError("immutable exact endpoint shadow must be explicit boolean")
+    if type(partition_exact_collinear_overlaps_shadow) is not bool:
+        raise ValueError("exact collinear partition shadow must be explicit boolean")
+    if partition_exact_collinear_overlaps_shadow and not (preserve_overlapping_spans_shadow and immutable_exact_endpoints_shadow):
+        raise ValueError("exact collinear partition shadow requires exact source-incidence policies")
     if (type(page_id) is not str or not page_id.isdecimal()
             or int(page_id) < 1 or str(int(page_id)) != page_id):
         raise ValueError("canonical_original_page_address_required")
@@ -262,6 +308,30 @@ def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str) 
             scope_id = stable_contract_id("g17-original-plan-wall-shadow",dict(root,
                 viewport_ownership_id=plan.ownership_id,snap_tolerance_pt=tol))
             report[name] = _graph(segments,root=root,scope_id=scope_id,tolerance=tol)
+        if preserve_overlapping_spans_shadow:
+            guarded_scope = stable_contract_id("g17-original-plan-wall-shadow", dict(root,
+                viewport_ownership_id=plan.ownership_id, snap_tolerance_pt=0.,
+                preserve_overlapping_spans_shadow=True))
+            report["overlap_preserving_exact_w2_w3_w4"] = _graph(segments,
+                root=root,scope_id=guarded_scope,tolerance=0.,preserve_overlapping_spans_shadow=True)
+        if immutable_exact_endpoints_shadow:
+            immutable_scope = stable_contract_id("g17-original-plan-wall-shadow", dict(root,
+                viewport_ownership_id=plan.ownership_id, snap_tolerance_pt=0.,
+                preserve_overlapping_spans_shadow=preserve_overlapping_spans_shadow,
+                immutable_exact_endpoints_shadow=True))
+            report["immutable_endpoint_exact_w2_w3_w4"] = _graph(segments,
+                root=root,scope_id=immutable_scope,tolerance=0.,
+                preserve_overlapping_spans_shadow=preserve_overlapping_spans_shadow,
+                immutable_exact_endpoints_shadow=True)
+        if partition_exact_collinear_overlaps_shadow:
+            partition_scope = stable_contract_id("g17-original-plan-wall-shadow", dict(root,
+                viewport_ownership_id=plan.ownership_id, snap_tolerance_pt=0.,
+                preserve_overlapping_spans_shadow=True, immutable_exact_endpoints_shadow=True,
+                partition_exact_collinear_overlaps_shadow=True))
+            report["partitioned_exact_w2_w3_w4"] = _graph(segments,
+                root=root,scope_id=partition_scope,tolerance=0.,
+                preserve_overlapping_spans_shadow=True,immutable_exact_endpoints_shadow=True,
+                partition_exact_collinear_overlaps_shadow=True)
     opening = source.physical_opening_authority()
     physical = {}
     proof_addresses = {}

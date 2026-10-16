@@ -1,0 +1,94 @@
+COMMAND: <HOME>\Documents\PlanReader_Private_V2_Run\.venv\Scripts\python.exe -u -c import faulthandler, sys, runpy
+f = open(r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_q5446_armstrong32_harlequin/stack_dumps.txt', 'a')
+faulthandler.dump_traceback_later(600, repeat=True, file=f)
+sys.argv = ['run_source_closed_project_handoff', '--pdf', r'<HOME>\Downloads\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\sources\au_qld_q5446_armstrong32_harlequin\Q5446_Standard_Plans_V1_20220320.pdf', '--project-id', 'au_qld_q5446_armstrong32_harlequin',
+            '--family-group', 'all', '--output-dir', r'<HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\project_outputs\au_qld_q5446_armstrong32_harlequin']
+runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)
+
+2026-10-16 17:49:29.869 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+{
+  "benchmark_score_granted": false,
+  "canonical_counts": {
+    "ceilings": 0,
+    "floors": 0,
+    "openings": 0,
+    "rooms": 0,
+    "spaces": 0,
+    "walls": 0
+  },
+  "canonical_wall_reason_codes": [
+    "physical_wall_candidate_scope_complexity_exceeded"
+  ],
+  "canonical_wall_source_pages": [],
+  "canonical_wall_status": "abstained",
+  "ceiling_authority_path": "unavailable",
+  "claim_reason_codes": [
+    "live_physical_net_wall_integration_unavailable",
+    "physical_wall_candidate_scope_complexity_exceeded"
+  ],
+  "claim_status": "abstained",
+  "combined_quantity_count": 0,
+  "combined_run_file": null,
+  "combined_run_id": null,
+  "complete_project_handoff": true,
+  "customer_rows_file": null,
+  "customer_rows_verified": false,
+  "execution_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "family_counts": {
+    "ceiling_area": 0,
+    "floor_area": 0,
+    "floor_finish_area": 0,
+    "opening_area": 0,
+    "opening_count": 0
+  },
+  "family_group": "all",
+  "family_run_files": {},
+  "family_run_ids": {},
+  "frozen_v2_reconciliation_complete": false,
+  "page_count": 10,
+  "project_id": "au_qld_q5446_armstrong32_harlequin",
+  "room_area_support_pages": [],
+  "schema_version": "1.0.0",
+  "semantic_execution_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "source_path": "<HOME>\\Downloads\\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\\sources\\au_qld_q5446_armstrong32_harlequin\\Q5446_Standard_Plans_V1_20220320.pdf",
+  "source_positive_partial_page": null,
+  "source_sha256": "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0",
+  "status": "source_complexity_blocked",
+  "topology_mode": "live_authority_all_pages_fallback",
+  "topology_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "unresolved_wall_candidate_count": 0,
+  "verified_customer_row_count": 0
+}

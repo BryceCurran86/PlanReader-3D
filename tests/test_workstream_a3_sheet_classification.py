@@ -69,6 +69,39 @@ class WorkstreamA3ClassificationTests(unittest.TestCase):
         self.assertEqual(r_elev, "ELEVATION")
         self.assertEqual(t4, "ELEVATION_SURFACE")
 
+    def test_04_two_sheet_roles_abstain_in_either_order(self):
+        forward = classify_sheet_role("FLOOR PLAN\nNORTH ELEVATION")
+        reverse = classify_sheet_role("NORTH ELEVATION\nFLOOR PLAN")
+        self.assertEqual(forward[0], "OTHER_GENERAL")
+        self.assertEqual(reverse[0], "OTHER_GENERAL")
+        self.assertEqual(forward[1], 0.0)
+
+    def test_05_a_reference_line_does_not_change_the_title_role(self):
+        role, _confidence, _discipline, target = classify_sheet_role(
+            "NORTH ELEVATION",
+            "REFER FLOOR PLAN",
+        )
+        self.assertEqual(role, "ELEVATION")
+        self.assertEqual(target, "ELEVATION_SURFACE")
+
+    def test_06_a_word_inside_another_word_is_not_a_role(self):
+        self.assertEqual(classify_sheet_role("RENDERED MASONRY")[0], "OTHER_GENERAL")
+        self.assertEqual(classify_sheet_role("INTERSECTION DETAIL")[0], "OTHER_GENERAL")
+
+    def test_07_door_elevations_stay_a_schedule(self):
+        role, _confidence, _discipline, target = classify_sheet_role("DOOR ELEVATIONS")
+        self.assertEqual(role, "DOOR_WINDOW_SCHEDULE")
+        self.assertEqual(target, "OPENINGS")
+
+    def test_08_a_storey_number_is_not_a_second_sheet_role(self):
+        role = classify_sheet_role("A-201 Reflected Ceiling Plan Level 1")[0]
+        self.assertEqual(role, "REFLECTED_CEILING_PLAN")
+
+    def test_09_two_storeys_abstain_and_one_storey_is_kept(self):
+        self.assertEqual(extract_storey_level("Level 1 and Level 2"), "Unspecified")
+        self.assertEqual(extract_storey_level("Level 2 L02"), "Level 2")
+        self.assertEqual(extract_storey_level("Level 10"), "Level 10")
+
     def test_02_storey_level_extraction(self):
         """Extracts storey and level identifiers correctly."""
         lvl1 = extract_storey_level("A-101 Ground Floor Plan")

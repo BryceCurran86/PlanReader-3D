@@ -1,0 +1,25 @@
+COMMAND: <HOME>\Documents\PlanReader_Private_V2_Run\.venv\Scripts\python.exe -m tools.diag_gpt1_source_pdf_package_preflight --manifest <HOME>\Documents\PlanReader_Private_V2_Run\repo_readonly_snapshot\benchmarks\frozen_holdout\full_plan_v2\projects\au_qld_3laurel\source_manifest.json --source-root <HOME>\Downloads\PlanReader_Four_Job_Windows_Run_Kit_PRIVATE\sources\au_qld_3laurel --output <HOME>\Documents\PlanReader_Private_V2_Run\20261016_172712\preflight\au_qld_3laurel.json
+{
+  "actual_source_package_runtime_complete": true,
+  "benchmark_score_granted": false,
+  "commercial_quantity_publication_granted": false,
+  "expected_source_document_count": 1,
+  "manifest_declares_source_package_complete": true,
+  "project_id": "au_qld_3laurel",
+  "rcp_or_metric_or_finish_authority_granted": false,
+  "source_documents": [
+    {
+      "actual_page_count": 18,
+      "actual_sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+      "actual_size_bytes": 5157446,
+      "expected_page_count": 18,
+      "expected_sha256": "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e",
+      "expected_size_bytes": 5157446,
+      "name": "3LAUREL - Construction Plan Set Rev3 08.05.26.pdf",
+      "role": "architectural_drawings",
+      "status": "VERIFIED"
+    }
+  ],
+  "verified_source_document_count": 1
+}
+

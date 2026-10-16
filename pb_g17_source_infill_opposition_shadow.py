@@ -35,7 +35,10 @@ def _infill_interval(observation,opening):
     return None
 
 
-def build_g17_source_infill_opposition_shadow(source,*,revision_id:str,page_id:str)->dict:
+def build_g17_source_infill_opposition_shadow(source,*,revision_id:str,page_id:str,
+    infill_endpoint_opposition:bool=False)->dict:
+    if type(infill_endpoint_opposition) is not bool:
+        raise TypeError('explicit boolean endpoint shadow mode required')
     if type(source) is not SourceVisibilityProducer:
         raise TypeError('actual SourceVisibilityProducer required')
     pub=source.published_snapshot_for_revision(revision_id)
@@ -45,10 +48,11 @@ def build_g17_source_infill_opposition_shadow(source,*,revision_id:str,page_id:s
     # F.07 depends on native title/figure/room receipts too. A later mutation
     # outside the G17 supports must invalidate the complete source read.
     with source._native_dimension_source_proof_batch(pub,page_id=page_id):
-        return _build(source,baseline=baseline,revision_id=revision_id,page_id=page_id)
+        return _build(source,baseline=baseline,revision_id=revision_id,page_id=page_id,
+            infill_endpoint_opposition=infill_endpoint_opposition)
 
 
-def _build(source,*,baseline,revision_id,page_id):
+def _build(source,*,baseline,revision_id,page_id,infill_endpoint_opposition=False):
     pub=source.published_snapshot_for_revision(revision_id)
     root={k:baseline[k] for k in ('document_id','revision_id','source_sha256','snapshot_id','page_id')}
     result=dict(root,source_viewport_ownership_id=baseline['source_viewport_ownership_id'],
@@ -112,9 +116,10 @@ def _build(source,*,baseline,revision_id,page_id):
     for name in ('default_w2_w3_w4','exact_coordinate_w2_w3_w4'):
         original=baseline[name]
         scope_id=stable_contract_id('g17-infill-opposition-shadow',dict(root,
-            viewport_ownership_id=baseline['source_viewport_ownership_id'],snap_tolerance_pt=original['snap_tolerance_pt']))
+            viewport_ownership_id=baseline['source_viewport_ownership_id'],snap_tolerance_pt=original['snap_tolerance_pt'],
+            **({'infill_endpoint_opposition':True} if infill_endpoint_opposition else {})))
         partition=_graph(segments,root=root,scope_id=scope_id,tolerance=original['snap_tolerance_pt'],
-                         infill_intervals=intervals)
+                         infill_intervals=intervals,infill_endpoint_opposition=infill_endpoint_opposition)
         if partition['w2_edges']!=original['w2_edges']:
             raise RuntimeError('source_infill_experiment_changed_original_w2_geometry')
         result['candidate_partitions'][name]=partition

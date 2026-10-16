@@ -15,10 +15,16 @@ from typing import Any, Dict, List, Optional, Tuple
 SCALE_RE = re.compile(r"(?<!\d)1\s*:\s*(\d{2,4})(?!\d)", re.IGNORECASE)
 
 
+def _scale_denominators(text: str) -> set[int]:
+    return {int(match.group(1)) for match in SCALE_RE.finditer(str(text or ""))}
+
+
 def extract_scale_ratio(text: str) -> Optional[int]:
-    """Extract a scale ratio like 1:100 from text. Returns the denominator or None."""
-    m = SCALE_RE.search(str(text or ""))
-    return int(m.group(1)) if m else None
+    """Return one scale denominator. Two different denominators abstain."""
+    found = _scale_denominators(text)
+    if len(found) != 1:
+        return None
+    return next(iter(found))
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +71,8 @@ def dimension_value_m(raw: str) -> Optional[float]:
 # ---------------------------------------------------------------------------
 _FLOOR_PLAN_KW = [
     "floor plan", "site plan", "ground floor", "first floor",
-    "second floor", "roof plan", "reflected ceiling plan",
-    "basement plan", "upper floor", "lower floor",
+    "second floor", "roof plan", "basement plan",
+    "upper floor", "lower floor",
 ]
 _ELEVATION_KW = [
     "elevation", "external elevation", "internal elevation",
@@ -83,9 +89,9 @@ _SCHEDULE_KW = [
     "specification", "colour schedule", "paint schedule",
 ]
 _TITLE_KW = [
-    "title", "drawing register", "title / drawing register",
-    "project information", "general notes", "location plan",
-    "key plan", "site layout",
+    "drawing register", "drawing index", "drawing schedule",
+    "sheet index", "title sheet", "project information",
+    "general notes", "location plan", "key plan", "site layout",
 ]
 CEILING_KW = [
     "reflected ceiling plan", "rcp", "ceiling plan",
@@ -98,36 +104,78 @@ DRAWING_NUMBER_RE = re.compile(
 )
 
 
+def _keyword_hit(text: str, keyword: str) -> bool:
+    """Match a keyword as its own words, not as part of a longer word."""
+    return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
+
+
+def _reference_line(line: str) -> bool:
+    return line.startswith(("refer ", "see ", "matchline ", "keynote "))
+
+
+def _type_score(text: str, keywords: list[str]) -> int:
+    """Count heading hits without letting a shorter phrase inflate a longer one."""
+    hits = [keyword for keyword in keywords if _keyword_hit(text, keyword)]
+    return sum(
+        1
+        for keyword in hits
+        if not any(keyword != other and keyword in other for other in hits)
+    )
+
+
 def classify_page(text: str) -> str:
-    """Classify a page as Floor Plan, Elevation, Section, Schedule, or Title."""
-    lower = (text or "").lower()
+    """Classify a page from its own text.
+
+    A tied top score abstains. The bare word ``title`` is not a sheet type.
+    A keyword inside another word is not a hit, and a reference line does not vote.
+    """
+    kept: list[str] = []
+    for raw in (text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw).strip().lower()
+        if line and not _reference_line(line):
+            kept.append(line)
+    body = "\n".join(kept)
 
     scores = {
-        "Floor Plan": sum(1 for kw in _FLOOR_PLAN_KW if kw in lower),
-        "Elevation": sum(1 for kw in _ELEVATION_KW if kw in lower),
-        "Section": sum(1 for kw in _SECTION_KW if kw in lower),
-        "Schedule": sum(1 for kw in _SCHEDULE_KW if kw in lower),
-        "Title / Drawing Register": sum(1 for kw in _TITLE_KW if kw in lower),
-        "Reflected Ceiling Plan": sum(1 for kw in CEILING_KW if kw in lower),
+        "Floor Plan": _type_score(body, _FLOOR_PLAN_KW),
+        "Elevation": _type_score(body, _ELEVATION_KW),
+        "Section": _type_score(body, _SECTION_KW),
+        "Schedule": _type_score(body, _SCHEDULE_KW),
+        "Title / Drawing Register": _type_score(body, _TITLE_KW),
+        "Reflected Ceiling Plan": _type_score(body, CEILING_KW),
     }
 
-    best = max(scores, key=scores.get)
-    if scores[best] == 0:
+    best_score = max(scores.values())
+    if best_score <= 0:
         return "Other"
-    return best
+    winners = [name for name, score in scores.items() if score == best_score]
+    if len(winners) != 1:
+        return "Other"
+    return winners[0]
 
 
 def detect_scale_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """Find scale ratio in text and return dict with ratio and confidence."""
-    m = SCALE_RE.search(str(text or ""))
-    if not m:
+    """Find one scale ratio. Two different denominators abstain."""
+    matches = list(SCALE_RE.finditer(str(text or "")))
+    denominators = {int(match.group(1)) for match in matches}
+    if len(denominators) != 1:
         return None
-    ratio = int(m.group(1))
+    ratio = next(iter(denominators))
     confidence = "high" if ratio in (50, 100, 200, 500, 1000) else "medium"
-    return {"ratio": ratio, "denominator": ratio, "text": m.group(0), "confidence": confidence}
+    return {
+        "ratio": ratio,
+        "denominator": ratio,
+        "text": matches[0].group(0),
+        "confidence": confidence,
+    }
 
 
 def detect_drawing_number(text: str) -> Optional[str]:
-    """Extract a drawing number from text."""
-    m = DRAWING_NUMBER_RE.search(str(text or ""))
-    return m.group(1) if m else None
+    """Return one drawing number. Two different numbers abstain."""
+    found: Dict[str, str] = {}
+    for match in DRAWING_NUMBER_RE.finditer(str(text or "")):
+        token = match.group(1)
+        found.setdefault(token.upper(), token)
+    if len(found) != 1:
+        return None
+    return next(iter(found.values()))

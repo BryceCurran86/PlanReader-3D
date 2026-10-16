@@ -1,0 +1,66 @@
+name: DIAG GPT2 Original Source-Owned W4 Room Face First Failure
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_source_owned_plan_face_first_failure.py
+      - tests/test_gpt2_source_owned_plan_face_first_failure.py
+      - .github/workflows/diag-gpt2-source-owned-plan-room-faces.yml
+
+permissions:
+  contents: read
+
+jobs:
+  immutable-source-room-face:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Fail-closed source, competitor and family tests
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt2_source_owned_plan_face_first_failure.py tests/test_gpt2_source_owned_physical_w4_shadow.py
+          ruff check --select F821,F823 tools/diag_gpt2_source_owned_plan_face_first_failure.py tests/test_gpt2_source_owned_plan_face_first_failure.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+      - name: Original immutable Maryborough p11 physical-face first failure
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-source-owned-plan-face
+          git rev-parse HEAD > artifacts/gpt2-source-owned-plan-face/head.txt
+          timeout 1800s python -u -m tools.diag_gpt2_source_owned_plan_face_first_failure \
+            --pdf "$PDF" --sha "$SHA" --page 11 \
+            --output artifacts/gpt2-source-owned-plan-face/original.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/gpt2-source-owned-plan-face/original.json').read_text())
+          assert r['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert r['source_snapshot_preserved'] is True
+          assert r['source_owned_w4_scope_count']==1
+          assert r['new_commercial_quantities']==[]
+          row,=r['scopes']
+          assert row['viewport_view_type']=='floor_finish_plan'
+          assert row['w4_candidate_count']==890
+          assert row['metric_quantity_claim_granted'] is False
+          assert row['physical_cross_sheet_equivalence_granted'] is False
+          assert row['customer_row_claim_granted'] is False
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-source-owned-plan-room-faces
+          path: artifacts/gpt2-source-owned-plan-face
+          retention-days: 14

@@ -8,7 +8,8 @@ candidate canonical objects; they are never silently merged or discarded.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Mapping
 
@@ -19,7 +20,7 @@ from pb_live_external_physical_net_wall_publication import (
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
     BOUNDARY_EVALUATION_EVALUATED,
     PhysicalWallCandidateSelector,
@@ -40,6 +41,10 @@ LIVE_CANONICAL_WALL_FRAME_CONFLICT = "live_canonical_wall_frame_conflict"
 LIVE_CANONICAL_WALL_BOUNDARY_CLEAN_PARTIAL = (
     "live_canonical_wall_boundary_clean_partial"
 )
+LIVE_CANONICAL_WALL_ID_COLLISION_CANDIDATE = (
+    "live_canonical_wall_id_collision_candidate"
+)
+_COLLISION_CANDIDATE_IDENTITY_STATUS = "candidate_canonical_id_collision_unresolved"
 
 
 @dataclass(frozen=True)
@@ -213,6 +218,89 @@ def _make_wall(
         identity_status=identity_status,
         physical_identity_resolved=physical_identity_resolved,
     )
+
+
+def _candidate_membership_is_sound(
+    wall: LiveCanonicalWallObject, member_owners: Mapping[str, int]
+) -> bool:
+    """A candidate wall may be re-keyed only with an exclusive, source-matching lineage."""
+
+    members = tuple(wall.member_wall_candidate_ids)
+    if not members or any(not _clean(member_id) for member_id in members):
+        return False
+    if tuple(member.wall_candidate_id for member in wall.plan_members) != members:
+        return False
+    return all(member_owners[member_id] == 1 for member_id in members)
+
+
+def _localize_candidate_id_collisions(
+    walls: list[LiveCanonicalWallObject],
+    mapping: Mapping[str, str],
+) -> tuple[list[LiveCanonicalWallObject], dict[str, str], bool]:
+    """Keep colliding *candidate* walls instead of discarding the whole page.
+
+    Two candidate canonical objects can legitimately carry one canonical id: the
+    boundary-clean branch keys a wall by ``candidate_identity_id`` and
+    deliberately ignores physical equivalence, so duplicate-geometry edges over
+    the same source primitives share an id. Failing the entire composition for
+    that discards every unrelated wall as well.
+
+    Only groups made exclusively of unresolved candidate walls are localized.
+    Every member of such a group is re-keyed from its own unique member candidate
+    ids (no member keeps the shared id, so no "first wins" tie-break), stays an
+    unresolved candidate with ``physical_identity_resolved=False`` and a distinct
+    identity status, and is never merged, dropped or promoted. A collision that
+    involves any physically resolved wall is left untouched for the global
+    fail-closed guard. So is any colliding wall whose member lineage is not
+    sound (empty, repeated within the wall, shared with another wall, or not
+    matching its plan members): such a mapping must never be silently published.
+    """
+
+    positions: dict[str, list[int]] = {}
+    for index, wall in enumerate(walls):
+        positions.setdefault(wall.canonical_wall_id, []).append(index)
+    colliding = {
+        canonical_id: indexes
+        for canonical_id, indexes in positions.items()
+        if len(indexes) > 1
+    }
+    if not colliding:
+        return walls, dict(mapping), False
+    member_owners = Counter(
+        member_id for wall in walls for member_id in wall.member_wall_candidate_ids
+    )
+    for indexes in colliding.values():
+        if any(walls[index].physical_identity_resolved for index in indexes):
+            return walls, dict(mapping), False
+        if not all(
+            _candidate_membership_is_sound(walls[index], member_owners)
+            for index in indexes
+        ):
+            return walls, dict(mapping), False
+
+    rekeyed = list(walls)
+    remap = dict(mapping)
+    for canonical_id, indexes in colliding.items():
+        for index in indexes:
+            wall = walls[index]
+            member_ids = tuple(sorted(wall.member_wall_candidate_ids))
+            new_id = stable_contract_id(
+                "live_canonical_wall_id_collision_candidate",
+                {
+                    "canonical_wall_id": canonical_id,
+                    "page_id": wall.page_id,
+                    "decision_scope_id": wall.decision_scope_id,
+                    "member_wall_candidate_ids": list(member_ids),
+                },
+            )
+            rekeyed[index] = replace(
+                wall,
+                canonical_wall_id=new_id,
+                identity_status=_COLLISION_CANDIDATE_IDENTITY_STATUS,
+            )
+            for member_id in member_ids:
+                remap[member_id] = new_id
+    return rekeyed, remap, True
 
 
 def compose_live_canonical_walls(
@@ -464,6 +552,16 @@ def compose_live_canonical_walls(
             mapping[member_id] = canonical_id
             unresolved.add(member_id)
 
+    # Colliding unresolved candidates are retained under member-derived ids;
+    # anything else (for example a collision with a physically resolved wall)
+    # still fails closed below.
+    walls, mapping, localized = _localize_candidate_id_collisions(walls, mapping)
+    if localized:
+        # Members are already in ``unresolved``: only unresolved candidate walls
+        # are ever localized, and every candidate path above marks its members.
+        reasons.append(LIVE_CANONICAL_WALL_ID_COLLISION_CANDIDATE)
+        all_pages_resolved = False
+
     # Fail closed on accidental canonical-id collisions.
     ids = [wall.canonical_wall_id for wall in walls]
     if len(ids) != len(set(ids)):
@@ -503,6 +601,7 @@ __all__ = [
     "LIVE_CANONICAL_WALL_EQUIVALENCE_UNAVAILABLE",
     "LIVE_CANONICAL_WALL_FRAME_CONFLICT",
     "LIVE_CANONICAL_WALL_IDENTITY_CANDIDATE",
+    "LIVE_CANONICAL_WALL_ID_COLLISION_CANDIDATE",
     "LIVE_CANONICAL_WALL_PARTIAL",
     "LIVE_CANONICAL_WALL_RESOLVED",
     "LIVE_CANONICAL_WALL_SCHEMA_VERSION",

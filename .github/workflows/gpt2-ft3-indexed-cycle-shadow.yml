@@ -1,0 +1,72 @@
+name: GPT2 Original FT3 Indexed Cycle Shadow
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_ft3_native_cycle_shadow.py
+      - tests/test_gpt2_ft3_native_cycle_shadow.py
+      - .github/workflows/gpt2-ft3-indexed-cycle-shadow.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-page11-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source-negative and integrity tests
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt2_ft3_native_cycle_shadow.py
+          ruff check --select F821,F823 tools/diag_gpt2_ft3_native_cycle_shadow.py tests/test_gpt2_ft3_native_cycle_shadow.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Original Maryborough p11 read-only source component
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          python -m tools.diag_gpt2_ft3_native_cycle_shadow --pdf "$PDF" --sha256 "$SHA" --page 11 --seed d26362i0 --output artifacts/gpt2-ft3-native-cycle.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('artifacts/gpt2-ft3-native-cycle.json').read_text())
+          assert p['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert p['page']==11 and p['seed']=='d26362i0'
+          assert p['status']=='SOURCE_COMPONENT_CANDIDATE'
+          assert 'd26362i0' in p['component_edges']
+          assert p['publication']=='READ_ONLY_NO_AUTHORITY'
+          assert not p['role_granted'] and not p['room_granted'] and not p['quantity_granted']
+          assert sum(b['source_edge_count'] for b in p['exact_native_edge_blocks']) == p['component_edge_count']
+          assert p['component_role_ambiguous'] and not p['role_granted']
+          print('ORIGINAL_FT3_CYCLE_CENSUS',p['component_edge_count'],p['complete_exact_cycle'])
+          print('ORIGINAL_FT3_EXACT_BLOCKS', sorted(b['source_edge_count'] for b in p['exact_native_edge_blocks']),
+                'closed', p['exact_simple_cycle_block_count'])
+          seed=p['seed_incident_exact_cycle_census']
+          assert seed['status'] in ('COMPLETE_EXACT_SOURCE_PATH_CENSUS','INCOMPLETE_SAFETY_BOUND')
+          assert not seed['annotation_or_structural_role_granted']
+          assert seed['source_seed_cycle_count']==len(seed['source_seed_cycles'])
+          assert all('d26362i0' in c['source_edge_ids'] and c['source_edge_count'] >= 3
+                     for c in seed['source_seed_cycles'])
+          print('ORIGINAL_FT3_SEED_EXACT_CYCLES',seed['status'],
+                'count',seed['source_seed_cycle_count'],
+                'lengths',[v['source_edge_count'] for v in seed['source_seed_cycles']])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-ft3-original-native-cycle
+          path: artifacts/gpt2-ft3-native-cycle.json
+          retention-days: 14

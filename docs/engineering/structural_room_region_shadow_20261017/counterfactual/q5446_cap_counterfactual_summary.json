@@ -1,0 +1,298 @@
+[
+ {
+  "page": 1,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 24.6,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 1,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 95.0,
+  "wall_topology_input": "wall topology input 8674 of 47193",
+  "physical_existence_claims": 82,
+  "authenticated_hosts": 1,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1768
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_scope_resolved",
+    "source_room_face_universe_partial"
+   ],
+   "face_records": 43,
+   "abstained_faces": 26
+  }
+ },
+ {
+  "page": 2,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 21.4,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 2,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 74.2,
+  "wall_topology_input": "wall topology input 6570 of 36009",
+  "physical_existence_claims": 70,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1405
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_boundary_unresolved"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 3,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 16.9,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 3,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 55.9,
+  "wall_topology_input": "wall topology input 5013 of 28114",
+  "physical_existence_claims": 22,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1379
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_tiny_or_degenerate"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 4,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 26.5,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 4,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 61.4,
+  "wall_topology_input": "wall topology input 3905 of 39077",
+  "physical_existence_claims": 24,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 946
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_tiny_or_degenerate"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 5,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 7.1,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 5,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 35.9,
+  "wall_topology_input": "wall topology input 4345 of 26192",
+  "physical_existence_claims": 41,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1072
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_scope_resolved",
+    "source_room_face_duplicate_edge_ownership",
+    "source_room_face_universe_partial"
+   ],
+   "face_records": 56,
+   "abstained_faces": 40
+  }
+ },
+ {
+  "page": 6,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 6.9,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 6,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 34.3,
+  "wall_topology_input": "wall topology input 4158 of 24867",
+  "physical_existence_claims": 41,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1014
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_tiny_or_degenerate"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 7,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 11.2,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 7,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 42.5,
+  "wall_topology_input": "wall topology input 6054 of 30067",
+  "physical_existence_claims": 24,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1364
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_duplicate_edge_ownership"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 8,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 9.8,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 8,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 44.0,
+  "wall_topology_input": "wall topology input 6133 of 29301",
+  "physical_existence_claims": 30,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 1438
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_duplicate_edge_ownership"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 9,
+  "mode": "baseline",
+  "exit_code": 1,
+  "seconds": 8.3,
+  "blocker": "physical_wall_candidate_scope_complexity_exceeded"
+ },
+ {
+  "page": 9,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 33.4,
+  "wall_topology_input": "wall topology input 4344 of 22621",
+  "physical_existence_claims": 22,
+  "authenticated_hosts": 0,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": true,
+   "wall_candidate_records": 832
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_duplicate_edge_ownership"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 10,
+  "mode": "baseline",
+  "exit_code": 0,
+  "seconds": 9.8,
+  "physical_existence_claims": 10,
+  "authenticated_hosts": 1,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": false,
+   "wall_candidate_records": 1074
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_scope_unavailable"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ },
+ {
+  "page": 10,
+  "mode": "negatives_withheld",
+  "exit_code": 0,
+  "seconds": 15.6,
+  "wall_topology_input": "wall topology input 2804 of 10130",
+  "physical_existence_claims": 10,
+  "authenticated_hosts": 1,
+  "wall_scope": {
+   "status": "corroborated",
+   "scope_complete": false,
+   "wall_candidate_records": 455
+  },
+  "room_face_scope": {
+   "reason_codes": [
+    "source_room_face_scope_unavailable"
+   ],
+   "face_records": 0,
+   "abstained_faces": 0
+  }
+ }
+]

@@ -1,0 +1,132 @@
+name: GPT MAX Original Same-Root F07 and G17 Authority
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/original-same-root-f07-clean-main-20261015
+    paths:
+      - tools/diag_gptmax_same_root_f07_g17_original.py
+      - tests/test_gptmax_same_root_f07_g17_original.py
+      - tests/test_gptmax_same_root_f07_g17_raw_overlay.py
+      - .github/workflows/test-gptmax-same-root-f07-g17-original.yml
+      - docs/engineering/gptmax_lot16_same_root_f07_g17_20261015.md
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  synthetic-source-view-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_raw_overlay.py
+          ruff check --select F821,F823 tools/diag_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_original.py tests/test_gptmax_same_root_f07_g17_raw_overlay.py
+  sha-pinned-single-original-live-source-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Verify untouched original source and reissue both authorities IN ONE producer
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gptmax_same_root_f07_g17_original.py \
+            --pdf "$PDF" \
+            --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --page-id 3 --output artifacts/lot16-same-root-f07-g17.json
+      - name: Check original source/quantity protection and explicit view status
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/lot16-same-root-f07-g17.json').read_text())
+          assert r['status']=='UNPUBLISHED_ORIGINAL_SAME_ROOT_F07_G17_SOURCE_AUDIT'
+          assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['snapshot_id']=='source_snapshot_3fcb6bc5c44b51d930e9600080501d27'
+          assert r['source_snapshot_preserved'] and r['source_bytes_preserved']
+          assert r['original_customer_receipts_preserved']
+          assert r['original_physical_count']==21
+          assert r['original_hosted_count']==15
+          assert r['original_framed_count']==9
+          assert r['original_signed_quantity_count']==r['original_customer_row_count']==8
+          assert r['raw_candidate_count']==30 and r['raw_unresolved_count']==9
+          overlay=r['original_unresolved_raw_same_root_spatial_audit']
+          assert overlay['status']=='UNPUBLISHED_SAME_ROOT_F07_G17_RAW_GEOMETRY_AUDIT'
+          assert overlay['raw_unresolved_count']==9
+          assert len(overlay['source_view_spatial_classifications'])==9
+          assert sum(x['source_view_geometric_relation_only']=='GEOMETRICALLY_DISJOINT_SAME_ROOT_F07'
+                     for x in overlay['source_view_spatial_classifications'])==4
+          assert sum(x['source_view_geometric_relation_only']=='GEOMETRICALLY_INSIDE_SAME_ROOT_F07'
+                     for x in overlay['source_view_spatial_classifications'])==5
+          assert not overlay['physical_count_granted'] and not overlay['typed_nonplan_proven']
+          # All 21 original producer-proven F07 raster supports are reissued in
+          # the SAME live G17 snapshot; exactly three unresolved raw gaps share
+          # two authentic source members each with an existing physical opening.
+          assert overlay['physical_source_support_receipts_available']
+          assert overlay['source_owned_physical_support_receipt_count']==21
+          assert overlay['overlap_pair_count']==3
+          found={}
+          for row in overlay['source_view_spatial_classifications']:
+              for edge in row['existing_source_owned_physical_support_collisions']:
+                  assert edge['shared_observation_count']==2
+                  assert len(edge['shared_source_observation_ids'])==2
+                  assert not edge['physical_equivalence_or_distinctness_proven']
+                  assert not edge['raw_candidate_closed']
+                  found[row['raw_candidate_id']]=edge['existing_physical_opening_id']
+          assert found=={
+              'physical_opening_raw_candidate_8cb708bea5fd9afd9306d3b56da955ac':
+                  'physical_opening_existence_8ecb81b6524804c80710ec323050be6b',
+              'physical_opening_raw_candidate_aa5b9ba957042d616e355e1158df4ddd':
+                  'physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b',
+              'physical_opening_raw_candidate_b6abbd14148c48fe4458fa9aea7d4f51':
+                  'physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f',
+          }
+          assert all(not x['source_owned_nonplan_role_proven']
+                 and not x['independent_physical_opening_proven']
+                 for x in overlay['source_view_spatial_classifications'])
+          assert r['candidate_universe_complete'] is False
+          assert all(not v for v in r['authority_grants'].values())
+          # The original source actually PROVES a same-root, unique F07 plan.
+          # This exact source-positive regression must never pass on ABSTAIN.
+          assert r['view_result']['status']=='SOURCE_VIEW_CANDIDATE_SAME_ROOT_ONLY'
+          assert r['view_result']['reason']=='cross_family_physical_instance_correspondence_unproven'
+          assert r['view_result']['selected_view_id']=='source_plan_view_67db409f1a44214bbf0766ac'
+          actual=r['view_result']['selected_bbox_pt']
+          expected=[186.60000610351562,98.52000427246094,1128.719970703125,624.8399658203125]
+          assert len(actual)==4 and all(abs(a-b)<0.0001 for a,b in zip(actual,expected))
+          assert sum(x['view_type']=='floor_plan' and x['authoritative']
+                     and x['status']=='derived' and x['source_owned_plan_view_proven']
+                     for x in r['view_result']['views'])==1
+          assert sum(x['view_type']=='legend' and x['status']=='unsupported'
+                     and not x['authoritative']
+                     for x in r['view_result']['views'])==1
+          assert r['view_result']['selected_view_id'] != r['snapshot_id']
+          print({'actual_first_view_stage':r['view_result']['status'],
+                 'reason':r['view_result']['reason'],
+                 'source_snapshot':r['snapshot_id'],
+                 'signed_quantities_unchanged':8})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-same-root-f07-g17
+          path: artifacts/lot16-same-root-f07-g17.json
+          retention-days: 21

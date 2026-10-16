@@ -1,0 +1,235 @@
+{
+  "command": "python RUN_FOUR_JOB_BENCHMARK_V2.py --ref <repo_head> --timeout-min 120 --max-private-gb 10.0 --min-free-commit-gb 3.0",
+  "explanation": "Single primary-PDF project handoffs are partial diagnostics and do not contain independent four-project signed identity maps and complete multi-document source authority. No official V2 evaluator was run.",
+  "files": [
+    {
+      "bytes": 1773,
+      "file": "SOURCE_SHA_VERIFICATION.json",
+      "private_original_sha256": "57907fec71ab88208d9df0b86a4e17b63622c7c7360a04b6e0e61c5d9dd19197",
+      "share_safe_sha256": "57907fec71ab88208d9df0b86a4e17b63622c7c7360a04b6e0e61c5d9dd19197"
+    },
+    {
+      "bytes": 925,
+      "file": "PREFLIGHT_STATUS.json",
+      "private_original_sha256": "4602b9deb7b06b687376eef406c112f0251c6d05c0f6405ce3e0610e2eda4e01",
+      "share_safe_sha256": "5ab9ed9af0b6302d434f8f767f436564bfb01a69887b7a4468af82ce2746bf60"
+    },
+    {
+      "bytes": 1355,
+      "file": "au_qld_lot16_power/source_package_preflight.json",
+      "private_original_sha256": "ea5238e1dd8a0850c3eecae47ff2bc9e2f84dc42b67e02a83aae3cc62557ca30",
+      "share_safe_sha256": "ea5238e1dd8a0850c3eecae47ff2bc9e2f84dc42b67e02a83aae3cc62557ca30"
+    },
+    {
+      "bytes": 1852,
+      "file": "au_qld_lot16_power/preflight.log",
+      "private_original_sha256": "f82c0f3ddb4f3b0881fe52bbe2df545f554523639ee6f60af5733e28afb30bab",
+      "share_safe_sha256": "cfaf52e1b86ffaaeb1309c6dc8072824acac1b756a9de931a402f7f38ee000c0"
+    },
+    {
+      "bytes": 4858,
+      "file": "au_qld_lot16_power/handoff.log",
+      "private_original_sha256": "d4cff8bd42e4278900f205ce6bf2ff801179d13467c210558bbb0989b0ab5c3d",
+      "share_safe_sha256": "ee8416942d76ce0090882b81bb1a6140596f9b80b0c00c472fda63b3d887460f"
+    },
+    {
+      "bytes": 38645,
+      "file": "au_qld_lot16_power/outputs/au_qld_lot16_power.json",
+      "private_original_sha256": "95de5707aeff67e60a30eb694e9b9042f1f5becec535345646445403202f21e1",
+      "share_safe_sha256": "95de5707aeff67e60a30eb694e9b9042f1f5becec535345646445403202f21e1"
+    },
+    {
+      "bytes": 38645,
+      "file": "au_qld_lot16_power/outputs/family_runs/opening_area.sealed.json",
+      "private_original_sha256": "95de5707aeff67e60a30eb694e9b9042f1f5becec535345646445403202f21e1",
+      "share_safe_sha256": "95de5707aeff67e60a30eb694e9b9042f1f5becec535345646445403202f21e1"
+    },
+    {
+      "bytes": 3935,
+      "file": "au_qld_lot16_power/outputs/production_summary.json",
+      "private_original_sha256": "4b034ae0556a4e30d177090875e17377072517e55ac803027ae5795b6029eec7",
+      "share_safe_sha256": "2aa3cb012451efa1ee4ba924e2d7faf049c94d8e0e225bb3211e0db95f64ea1c"
+    },
+    {
+      "bytes": 543,
+      "file": "au_qld_lot16_power/outputs/source_attempt_preflight.json",
+      "private_original_sha256": "5850695147619746707e0cbac037a6dbd34cc85cfd1ce162d9d22e07fc85e68d",
+      "share_safe_sha256": "5850695147619746707e0cbac037a6dbd34cc85cfd1ce162d9d22e07fc85e68d"
+    },
+    {
+      "bytes": 0,
+      "file": "au_qld_lot16_power/outputs/stack_dumps.txt",
+      "private_original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "share_safe_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 880,
+      "file": "au_qld_3laurel/source_package_preflight.json",
+      "private_original_sha256": "37cbbd19c94a7a2f70c92fc90985f006eb2cb2c427112622ec73cbda5d71a705",
+      "share_safe_sha256": "37cbbd19c94a7a2f70c92fc90985f006eb2cb2c427112622ec73cbda5d71a705"
+    },
+    {
+      "bytes": 1365,
+      "file": "au_qld_3laurel/preflight.log",
+      "private_original_sha256": "ca1c48b7614fa1de8ff7bf4360c0b120ec65efc6697b2a689196f8757598e9ca",
+      "share_safe_sha256": "188045b6a147cd73953ea9e2f62bd05777457d3bdd63c1d00807335c6611a7d7"
+    },
+    {
+      "bytes": 4362,
+      "file": "au_qld_3laurel/handoff.log",
+      "private_original_sha256": "0da91eab108335a22e562ad2c9ffefafed08b54321e462322b8945b2efc82530",
+      "share_safe_sha256": "588dd2e2b3d4a3966db5cca60a6e7c5da916e2a2e546ab2392c5608acd273d1c"
+    },
+    {
+      "bytes": 3454,
+      "file": "au_qld_3laurel/outputs/production_summary.json",
+      "private_original_sha256": "365a8dec7910ab0ada943bbb9e01916569ccd95d848b5809717ce473cc00475f",
+      "share_safe_sha256": "57b906009ad03616649efe26bcd3f540430aaf2f82f2dec22c27612a0f00fcc4"
+    },
+    {
+      "bytes": 584,
+      "file": "au_qld_3laurel/outputs/source_attempt_preflight.json",
+      "private_original_sha256": "6ed7f2099fb19c47d79d670d1ebdc6f79235b66c94058c60aa050bdfed2f23dc",
+      "share_safe_sha256": "6ed7f2099fb19c47d79d670d1ebdc6f79235b66c94058c60aa050bdfed2f23dc"
+    },
+    {
+      "bytes": 0,
+      "file": "au_qld_3laurel/outputs/stack_dumps.txt",
+      "private_original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "share_safe_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 896,
+      "file": "au_qld_maryborough_service_station/source_package_preflight.json",
+      "private_original_sha256": "326c5080e984a04a09eea2b8194d0845f16c1a2d7a627f102ee6af6c4ed2279a",
+      "share_safe_sha256": "326c5080e984a04a09eea2b8194d0845f16c1a2d7a627f102ee6af6c4ed2279a"
+    },
+    {
+      "bytes": 1441,
+      "file": "au_qld_maryborough_service_station/preflight.log",
+      "private_original_sha256": "a0976cddb9fb4c93cc6c9fbdf09da729ea1fff9ddc97db20ead1e9af0d71e7c5",
+      "share_safe_sha256": "a485f35680ec20b0a8c928bdbd9b4d3cbf2be646349f9aa811ec69d623438761"
+    },
+    {
+      "bytes": 984,
+      "file": "au_qld_maryborough_service_station/handoff.log",
+      "private_original_sha256": "9ba96756e3f32e93ec3d6d5409adaf61181e18778d6d49847ec1c516f9e7d9b4",
+      "share_safe_sha256": "a9cec97e0057e7cc2c63ba2e138658e5b62dd9f28a9d093e85916e07238cad47"
+    },
+    {
+      "bytes": 1844,
+      "file": "au_qld_maryborough_service_station/outputs/production_summary.json",
+      "private_original_sha256": "3c582acd08cfffcf1da3ad33f14b2b48aee00d38d9067d3761bb48f40b17c43d",
+      "share_safe_sha256": "14f8dc81655d30257ebdc156fdf81dd16a1abb590884dee57d1adcc860612ea7"
+    },
+    {
+      "bytes": 721,
+      "file": "au_qld_maryborough_service_station/outputs/source_attempt_preflight.json",
+      "private_original_sha256": "21db72633d9b80e8b3bb593585d36fcae455014a902461af01c65258106a4278",
+      "share_safe_sha256": "21db72633d9b80e8b3bb593585d36fcae455014a902461af01c65258106a4278"
+    },
+    {
+      "bytes": 0,
+      "file": "au_qld_maryborough_service_station/outputs/stack_dumps.txt",
+      "private_original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "share_safe_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 3172,
+      "file": "au_qld_q5446_armstrong32_harlequin/source_package_preflight.json",
+      "private_original_sha256": "05802e076ffc2985dff59641baf86cd65b45c20d822a27e9957ee7d701cc34ea",
+      "share_safe_sha256": "05802e076ffc2985dff59641baf86cd65b45c20d822a27e9957ee7d701cc34ea"
+    },
+    {
+      "bytes": 3717,
+      "file": "au_qld_q5446_armstrong32_harlequin/preflight.log",
+      "private_original_sha256": "915e1549864479fdfb7574154132a1cc589fc1f0802623d4bbdc3428f7e49313",
+      "share_safe_sha256": "e2edc29dddbeb5acf3599a6f97bdf4a3272e1e064cbbfe3512ec23405dfa9ae8"
+    },
+    {
+      "bytes": 2978,
+      "file": "au_qld_q5446_armstrong32_harlequin/handoff.log",
+      "private_original_sha256": "03fa45bf297669e4bbc5fee2fed95811b63db698df5d3f954930827046e893fd",
+      "share_safe_sha256": "85ec9874fabcc11e1c5bf9bda292a77531106d3b962de5777d64946cede55ab3"
+    },
+    {
+      "bytes": 2003,
+      "file": "au_qld_q5446_armstrong32_harlequin/outputs/production_summary.json",
+      "private_original_sha256": "7d817df0e87100b8c0601e1a66ef9897c81883050b0a990e38c3f48c5ddd0cfe",
+      "share_safe_sha256": "095eb56886e6bb5e065199eabc600a8687298872cda2842ebd6659ab0ff46cba"
+    },
+    {
+      "bytes": 542,
+      "file": "au_qld_q5446_armstrong32_harlequin/outputs/source_attempt_preflight.json",
+      "private_original_sha256": "92429cc65f97a786746d89a578b353e370587851b4ccb6ce8671d3976bdafb3f",
+      "share_safe_sha256": "92429cc65f97a786746d89a578b353e370587851b4ccb6ce8671d3976bdafb3f"
+    },
+    {
+      "bytes": 0,
+      "file": "au_qld_q5446_armstrong32_harlequin/outputs/stack_dumps.txt",
+      "private_original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "share_safe_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "full_suite_publication_status": "UNPUBLISHED",
+  "launcher_version": 2,
+  "limits": {
+    "max_private_gb": 10.0,
+    "min_free_commit_gb": 3.0,
+    "per_project_timeout_min": 120
+  },
+  "official_four_project_coverage_accuracy": null,
+  "per_project_handoff_command": "python -u -c <faulthandler bootstrap> -> tools.run_source_closed_project_handoff --pdf <primary architectural PDF in the private kit> --project-id <id> --family-group all --output-dir <session>/project_outputs/<id>",
+  "project_handoffs": [
+    {
+      "elapsed_s": 310.5,
+      "exit_code": 0,
+      "min_system_free_commit_mb_sampled": 16483.0,
+      "output_folder": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\project_outputs\\au_qld_lot16_power",
+      "peak_private_mb_sampled": 1404.0,
+      "peak_working_set_mb_sampled": 1194.5,
+      "project_id": "au_qld_lot16_power",
+      "single_document_handoff_only": true,
+      "status": "COMPLETED"
+    },
+    {
+      "elapsed_s": 538.4,
+      "exit_code": 0,
+      "min_system_free_commit_mb_sampled": 13446.8,
+      "output_folder": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\project_outputs\\au_qld_3laurel",
+      "peak_private_mb_sampled": 4322.5,
+      "peak_working_set_mb_sampled": 3971.7,
+      "project_id": "au_qld_3laurel",
+      "single_document_handoff_only": true,
+      "status": "COMPLETED"
+    },
+    {
+      "elapsed_s": 480.8,
+      "exit_code": null,
+      "min_system_free_commit_mb_sampled": 4362.4,
+      "output_folder": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\project_outputs\\au_qld_maryborough_service_station",
+      "peak_private_mb_sampled": 12428.6,
+      "peak_working_set_mb_sampled": 5729.7,
+      "project_id": "au_qld_maryborough_service_station",
+      "single_document_handoff_only": true,
+      "status": "MEMORY_LIMIT"
+    },
+    {
+      "elapsed_s": 209.8,
+      "exit_code": 0,
+      "min_system_free_commit_mb_sampled": 11950.0,
+      "output_folder": "<HOME>\\Documents\\PlanReader_Private_V2_Run\\20261016_172712\\project_outputs\\au_qld_q5446_armstrong32_harlequin",
+      "peak_private_mb_sampled": 4913.2,
+      "peak_working_set_mb_sampled": 4722.8,
+      "project_id": "au_qld_q5446_armstrong32_harlequin",
+      "single_document_handoff_only": true,
+      "status": "COMPLETED"
+    }
+  ],
+  "repo_head": "47c8031a3a1bab9b4b679f51ec9034efbe948506",
+  "requested_ref": "47c8031a3a1bab9b4b679f51ec9034efbe948506",
+  "schema": "four_job_owner_machine_run_receipt/1",
+  "session": "20261016_172712",
+  "source_pdf_count": 10,
+  "source_preflight": "VERIFIED"
+}

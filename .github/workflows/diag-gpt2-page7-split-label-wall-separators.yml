@@ -62,6 +62,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_atomic_w2_ancestry.py
           PYTHONPATH=. pytest -q tests/test_gpt2_p7_freezer_original_w2_graph_nodes.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_w2_complete_link_snap_shadow.py
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_directed_cycles.py
           PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
@@ -389,6 +390,27 @@ jobs:
                           for j in end["replayed_original_w3_junction_candidates"])
                       assert end["retained_native_coordinate_cluster_count"] >= 1
           assert freezer_graph_firstgate["new_commercial_quantities"]==[]
+          complete=freezer_graph_firstgate["original_complete_link_snap_counterfactual"]
+          assert complete["status"]=="SOURCE_OWNED_COUNTERFACTUAL_GRAPH_COMPLETE"
+          assert complete["diagnostic_only"]
+          assert not complete["new_source_room_or_metric"]
+          assert not complete["structural_or_annotation_roles_assigned"]
+          assert complete["complete_link_snap_observations"]["enabled"]
+          assert complete["original_source_input_items_preserved"]
+          assert all(
+              n["original_snap_sample_count"] == n["alternative_source_sample_count"]
+              for n in complete["selected_source_node_counterfactuals"]
+          )
+          print("GPT2_FREEZER_COMPLETE_LINK_COUNTERFACTUAL",json.dumps({
+              "original_selected_nodes":complete["original_selected_w2_node_count"],
+              "alternate_nodes":complete["alternate_w2_node_count"],
+              "alternate_premerge_edges":complete["alternate_premerge_w2_edge_count"],
+              "source_complete_link_rejections":complete["complete_link_snap_observations"][
+                  "running_centroid_eligible_joins_rejected"],
+              "selected_node_memberships":complete["selected_source_node_counterfactuals"],
+              "producer_snap_default_unchanged":True,
+              "source_wall_role_granted":False
+          },sort_keys=True))
           snap_inputs=freezer_graph_firstgate["original_all_split_input_snap_provenance"]
           assert snap_inputs["status"]=="ORIGINAL_W2_ALL_SPLIT_ENDPOINT_INPUTS_REPLAY_VERIFIED"
           assert not snap_inputs["new_firm_or_physical_room"]

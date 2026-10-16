@@ -1,0 +1,77 @@
+name: DIAG GPT2 Original-SHA Surviving W2 Graph Span vs Snapped Face
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_native_source_edge_span_census.py
+      - tests/test_gpt2_native_source_edge_span_census.py
+      - .github/workflows/diag-gpt2-original-source-edge-span-census.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-sha-surviving-w2-span:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Shadow W2 lineage fragment invariance and frozen separation
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_native_source_edge_span_census.py tests/test_gpt2_source_owned_plan_face_first_failure.py tests/test_gpt2_source_owned_physical_w4_shadow.py
+          ruff check --select F821,F823 tools/diag_gpt2_native_source_edge_span_census.py tests/test_gpt2_native_source_edge_span_census.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+      - name: Exact original Maryborough W2 source-lineage coverage census
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-original-native-source-span
+          git rev-parse HEAD > artifacts/gpt2-original-native-source-span/head.txt
+          timeout 1800s python -u -m tools.diag_gpt2_source_owned_plan_face_first_failure \
+            --pdf "$PDF" --sha "$SHA" --page 11 \
+            --output artifacts/gpt2-original-native-source-span/original.json
+          python -m tools.diag_gpt2_native_source_edge_span_census \
+            --source-report artifacts/gpt2-original-native-source-span/original.json \
+            --output artifacts/gpt2-original-native-source-span/audit.json
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          source=json.loads(Path('artifacts/gpt2-original-native-source-span/original.json').read_text())
+          audit=json.loads(Path('artifacts/gpt2-original-native-source-span/audit.json').read_text())
+          assert source['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert source['source_snapshot_preserved'] is True
+          assert len(source['scopes'])==1
+          assert source['scopes'][0]['w4_candidate_count']==890
+          assert source['scopes'][0]['source_room_face_record_count']==0
+          assert audit['new_commercial_quantities']==[]
+          assert audit['source_sha256']==source['source_sha256']
+          rows=audit['scopes'][0]['contested_source_edges']
+          assert len(rows)==4, ('expected 4 original shadow contested edge receipts', rows)
+          counts=Counter(row['surviving_w2_span_support_status'] for row in rows)
+          assert counts=={'surviving_w2_single_coverage':2,'surviving_w2_zero_coverage':2}, counts
+          assert all(not row['commercial_projection_allowed'] for row in rows)
+          assert all(not row['original_source_wall_equivalence_granted'] for row in rows)
+          assert all(not row['physical_room_publication_granted'] for row in rows)
+          print('SURVIVING_W2_COVERAGE_CLASSES',dict(counts))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-native-source-contested-span
+          path: artifacts/gpt2-original-native-source-span
+          retention-days: 14
