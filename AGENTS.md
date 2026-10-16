@@ -9,6 +9,7 @@ If this file conflicts with a chat, this file wins.
 2. Trace the affected quantity through the real call path in the playbook.
 3. Prove compliance in the first reply: files read, functions traced, authority boundaries crossed, files that will stay untouched.
 4. Do not start from module names, prior chat claims, or benchmark scores.
+5. Read `docs/engineering/ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md` for the shared working agreement (PR, CI and evidence etiquette) and the ranked first-failing-gate levers. It is a planning index only; this file wins.
 
 Loop for every task: **trace → propose → synthetic proof → shadow run → authority review**.
 
