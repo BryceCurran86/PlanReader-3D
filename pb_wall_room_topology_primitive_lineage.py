@@ -58,6 +58,20 @@ def _record_dedupe_key(record: Mapping[str, Any]) -> str:
     return json.dumps(dict(record), sort_keys=True, default=_json_default, separators=(",", ":"))
 
 
+def _finite_rect(value: Any) -> Optional[Tuple[float, float, float, float]]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    if any(type(item) is bool for item in value):
+        return None
+    try:
+        coords = tuple(float(item) for item in value)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(item) for item in coords):
+        return None
+    return coords
+
+
 def _normalize_attr(value: Any) -> Any:
     if isinstance(value, float):
         return round(value, 9)
@@ -127,6 +141,21 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
         record["clip_known"] = bool(segment["clip_known"])
     elif record["clip_present"]:
         record["clip_known"] = True
+    # Clip shape proof and the drawing sequence number are native identity.
+    # They stay on the lineage record. They do not become live edge fields
+    # and they do not elect a clip when the shape is unproven.
+    if "clip_shape_known" in segment:
+        record["clip_shape_known"] = segment["clip_shape_known"] is True
+    if "clip_exact_rect" in segment:
+        raw_rect = segment.get("clip_exact_rect")
+        record["clip_exact_rect"] = copy.deepcopy(raw_rect)
+        record["clip_exact_rect_present"] = (
+            record.get("clip_shape_known") is True and _finite_rect(raw_rect) is not None
+        )
+    if "sequence_number" in segment:
+        raw_sequence = segment.get("sequence_number")
+        record["sequence_number"] = copy.deepcopy(raw_sequence)
+        record["sequence_number_present"] = type(raw_sequence) is int
     # Priority-1: retain structured path indices and native page coordinates on
     # the source record so later snap/merge cannot erase native span provenance.
     for field in _PATH_INDEX_FIELDS:
