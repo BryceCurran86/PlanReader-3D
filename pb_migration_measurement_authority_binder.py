@@ -62,7 +62,22 @@ def bind_commercial_measurement_authority(
     provider_status = str(meta.get("scale_status") or "").strip().lower()
     provider_scale_id = str(meta.get("scale_id") or "").strip()
     wants_scaled = quantity.authority == MeasurementAuthorityType.PDF_SCALED.value or scaled_mm is not None
-    if wants_scaled and not figured_text and figured_mm is None:
+    if wants_scaled and figured_text is None and figured_mm is None:
+        # A trusted scale cannot prove an absent, malformed, or rounded-zero
+        # measurement was actually made. Reuse the existing numeric resolver;
+        # its PROVISIONAL result checks only the number, not scale authority.
+        scaled_input = resolve_measurement_authority(
+            scaled_mm=scaled_mm, scale_reliable=True,
+        )
+        if (
+            scaled_input.authority_status != AuthorityStatus.PROVISIONAL.value
+            or scaled_input.value_m is None
+            or scaled_input.value_m <= 0.0
+        ):
+            raise MeasurementAuthorityBindingError(
+                "scaled geometry requires a finite positive measured value; "
+                + scaled_input.notes
+            )
         calibration = scale_calibration
         if calibration is None:
             raise MeasurementAuthorityBindingError(
