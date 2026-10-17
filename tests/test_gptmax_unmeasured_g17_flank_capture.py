@@ -244,3 +244,38 @@ def test_default_source_capture_stays_all_or_nothing_for_unmeasured(monkeypatch)
         src,published,"3") == ()
     assert SourceVisibilityProducer._proven_raster_opening_flank_boxes(
         src,published,"3",include_unmeasured_ink_closed_flanks_shadow=True) == ()
+
+
+def test_original_figured_2127_flank_remains_source_eligible_under_new_policy(monkeypatch):
+    # The established compact 2127 HHWW source dimensions make the old
+    # figured-area path eligible; they do NOT prove the entire original
+    # structural flank has two closed painted ends. The new alternate source
+    # detector must be permitted to test the same source box independently.
+    src, published = scope(monkeypatch, area=5.67, missing_area=False)
+    baseline = SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src,published,"3",
+    )
+    option = SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src,published,"3",
+        include_unmeasured_ink_closed_flanks_shadow=True,
+        include_original_partial_jamb_receipts_shadow=True,
+    )
+    assert len(baseline) == 2
+    assert set(baseline) <= set(option[0])
+    assert baseline == (
+        ("horizontal",(0.0,0.0,5.0,2.0)),
+        ("horizontal",(10.0,0.0,15.0,2.0)),
+    )
+    # A nominal source area remains a descriptor/size, not a newly signed
+    # W4 host or quantified opening; the additional option is source-only.
+    assert option[1] == ()
+
+
+def test_2127_optin_source_compiler_includes_dimensional_flanks_and_dedups_terminal():
+    import inspect
+    code=inspect.getsource(
+        SourceVisibilityProducer._augment_with_raster_visible_segments_source_impl)
+    assert "set(flank_boxes) | set(individual_ink_positive_boxes)" in code
+    assert "set(individual_ink_positive_boxes)) - measured_boxes" not in code
+    assert "seg,supplemental," in code
+    assert "ordinary_dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI" in code
