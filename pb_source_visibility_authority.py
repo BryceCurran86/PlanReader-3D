@@ -2304,14 +2304,18 @@ class SourceVisibilityProducer:
             if attempt_key in self._raster_opening_primitive_attempted_pages:
                 continue
 
-            image_regions = self._producer.native_page_image_regions(
+            image_regions, source_frame = self._producer.native_page_image_regions(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
                 snapshot_id=snapshot.snapshot_id,
                 page_id=page_id,
+                include_native_frame=True,
             )
-            if not image_regions:
+            if not image_regions or source_frame.rotation != 0:
+                # Existing raster-opening evidence cannot be registered from
+                # rotated images-only pixels. Preserve the original ABSTAIN
+                # without cloning/redacting/rendering an unusable CAD page.
                 self._raster_opening_primitive_attempted_pages.add(attempt_key)
                 continue
 

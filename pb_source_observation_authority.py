@@ -755,7 +755,8 @@ class SourceObservationProducer:
         source_sha256: str,
         snapshot_id: str,
         page_id: str,
-    ) -> tuple[tuple[float, float, float, float], ...]:
+        include_native_frame: bool = False,
+    ):
         """Return producer-derived embedded-image regions for one source page.
 
         Callers address immutable source lineage only. Image inventory and
@@ -845,7 +846,15 @@ class SourceObservationProducer:
                     if geometry[2] <= geometry[0] or geometry[3] <= geometry[1]:
                         continue
                     regions.add(tuple(round(value, 4) for value in geometry))
-            return tuple(sorted(regions))
+            ordered_regions = tuple(sorted(regions))
+            if include_native_frame:
+                # No embedded image means the old images-only path performed
+                # neither rendering nor frame validation.
+                if not ordered_regions:
+                    return ordered_regions, None
+                # Identical SHA-verified original page/frame as render_native_page_png.
+                return ordered_regions, native_page_frame(page)
+            return ordered_regions
         finally:
             pdf.close()
 
