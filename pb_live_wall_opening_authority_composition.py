@@ -156,6 +156,7 @@ def compose_live_wall_opening_authority(
     revision_id: str,
     page_ids: Sequence[str],
     evidence_page_ids: Sequence[str] = (),
+    include_unmeasured_ink_closed_flanks_shadow: bool = False,
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
@@ -169,6 +170,8 @@ def compose_live_wall_opening_authority(
     """
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
+    if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+        raise TypeError("unmeasured G17 capture shadow must be an explicit boolean")
     revision_id = str(revision_id or "").strip()
     if not revision_id:
         raise ValueError("revision_id must be non-empty")
@@ -194,7 +197,12 @@ def compose_live_wall_opening_authority(
         page_ids=selected_pages,
     )
 
-    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+    wall_factory = (
+        PhysicalWallCandidateProducer.from_source_visibility_unmeasured_g17_flanks_shadow
+        if include_unmeasured_ink_closed_flanks_shadow
+        else PhysicalWallCandidateProducer.from_source_visibility_producer
+    )
+    wall_producer = wall_factory(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
