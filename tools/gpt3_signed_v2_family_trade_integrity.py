@@ -41,10 +41,16 @@ def require_signed_v2_family_trade_integrity(
     this negative commercial guard does not itself authenticate source files.
     Unmapped quantities remain unmapped and are never given benchmark refs.
     """
-    items = {
-        _field(item, "item_id"): item for item in verified_items
-        if _field(item, "denominator_eligible") is True
-    }
+    items: dict[str, Any] = {}
+    for item in verified_items:
+        if _field(item, "denominator_eligible") is not True:
+            continue
+        key = _field(item, "item_id")
+        if type(key) is not str or not key:
+            raise ValueError("eligible frozen item has no exact canonical identity")
+        if key in items:
+            raise ValueError("duplicate eligible frozen item identity in mapped trade veto")
+        items[key] = item
     by_refs: dict[tuple[str, ...], list[Any]] = {}
     for quantity in sealed_quantities:
         refs = tuple(sorted(_field(quantity, "object_identity_refs") or ()))
