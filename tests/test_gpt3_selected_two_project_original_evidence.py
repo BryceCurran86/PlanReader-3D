@@ -28,7 +28,7 @@ def _project(project, *, denominator, matched, missed, extras=0, ids=("q1",)):
         "abstained_outputs": 0,
         "lineage_conflicts": 0,
         "coverage_accuracy": matched / denominator,
-        "precision_adjusted_accuracy": matched / denominator,
+        "precision_adjusted_accuracy": matched / (denominator + extras),
         "produced_items": [],
     }
 
