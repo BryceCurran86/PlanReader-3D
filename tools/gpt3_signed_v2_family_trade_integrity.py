@@ -41,10 +41,16 @@ def require_signed_v2_family_trade_integrity(
     this negative commercial guard does not itself authenticate source files.
     Unmapped quantities remain unmapped and are never given benchmark refs.
     """
-    items = {
-        _field(item, "item_id"): item for item in verified_items
-        if _field(item, "denominator_eligible") is True
-    }
+    items: dict[str, Any] = {}
+    for item in verified_items:
+        if _field(item, "denominator_eligible") is not True:
+            continue
+        key = _field(item, "item_id")
+        if type(key) is not str or not key:
+            raise ValueError("eligible frozen item has no exact canonical identity")
+        if key in items:
+            raise ValueError("duplicate eligible frozen item identity in mapped trade veto")
+        items[key] = item
     by_refs: dict[tuple[str, ...], list[Any]] = {}
     for quantity in sealed_quantities:
         refs = tuple(sorted(_field(quantity, "object_identity_refs") or ()))
@@ -55,7 +61,16 @@ def require_signed_v2_family_trade_integrity(
         if item is None:
             # The unchanged frozen reconciler rejects unknown bound items.
             continue
-        refs = tuple(sorted(_field(binding, "production_object_identity_refs") or ()))
+        raw_refs = _field(binding, "production_object_identity_refs")
+        if (
+            type(raw_refs) not in (list, tuple)
+            or not raw_refs
+            or any(type(ref) is not str or not ref or ref != ref.strip()
+                   for ref in raw_refs)
+            or len(set(raw_refs)) != len(raw_refs)
+        ):
+            raise ValueError("bound production object identity refs are not canonical")
+        refs = tuple(sorted(raw_refs))
         for quantity in by_refs.get(refs, ()):
             family = _field(quantity, "family")
             if (
@@ -95,9 +110,17 @@ def require_signed_v2_family_trade_integrity(
                      if semantic_key.startswith(prefix)),
                     None,
                 )
-                if typed_trade is None:
+                if typed_trade is None or (
+                    semantic_key != semantic_key.strip()
+                    or not any(
+                        semantic_key.startswith(prefix)
+                        and bool(semantic_key[len(prefix):].strip())
+                        and semantic_key[len(prefix):] == semantic_key[len(prefix):].strip()
+                        for prefix, _ in typed_prefixes
+                    )
+                ):
                     raise ValueError(
-                        "mapped opening has no source-owned door/window kind"
+                        "mapped opening has no complete source-owned door/window kind"
                     )
                 if trade != typed_trade:
                     raise ValueError(
