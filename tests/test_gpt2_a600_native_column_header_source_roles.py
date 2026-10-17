@@ -1,0 +1,177 @@
+"""Original A600 column-header proof, not fabricated opening dimensions/count."""
+from pathlib import Path
+import hashlib
+
+import fitz
+import pytest
+
+from pb_source_door_schedule_authority import (
+    SourceDoorScheduleWord as W,
+    _original_source_row_candidates,
+    _original_door_schedule_column_proof,
+    inspect_published_door_schedule,
+)
+from pb_source_visibility_authority import SourceVisibilityProducer
+
+PDF=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+
+
+def _w(b,i,text,x,y,trusted=True):
+    return W(
+        observation_id=f"original:{b}:{i}",
+        page_id="1",partition_id="page:1",
+        block_no=b,line_no=i,word_no=0,
+        literal=text,trusted=trusted,
+        bbox_pdf_pts=(float(x),float(y),float(x)+10.,float(y)+10.),
+    )
+
+
+def _world(*,duplicate_title=False,duplicate_header=False,bad_y=False,
+           untrusted_header=False,duplicate_code=False):
+    source=[
+        _w(1,0,"DOOR",10,480),
+        _w(1,1,"SCHEDULE",10,450),
+        # Separate original drawing-title text: NOT the table caption.
+        _w(90,0,"DOOR",160,500),
+        _w(90,1,"SCHEDULE",160,475),
+        _w(2,0,"WIDTH",40,100,not untrusted_header),
+        _w(2,1,"HEIGHT",40,65,not untrusted_header),
+        _w(2,2,"THICKNESS",40,30,not untrusted_header),
+        _w(3,0,"No.",40,230),
+        _w(3,1,"ROOM",40,190),
+        _w(3,2,"NAME",40,175),
+        _w(3,3,"TYPE",40,155),
+        _w(4,0,"D13",70,300),
+        _w(4,1,"PWD",70,250),
+        _w(4,2,"SINGLE",70,235),
+        _w(4,3,"SWING",70,220),
+        _w(4,4,"920",70,105),
+        _w(4,5,"2040",70,250 if bad_y else 70),
+        _w(4,6,"SOLID",70,170),
+        _w(4,7,"CORE",70,155),
+        _w(4,8,"DOOR",70,140),
+        _w(5,0,"D18",90,300),
+        _w(5,1,"DISPLAY",90,230),
+        _w(5,2,"SHELVING",90,220),
+        _w(5,3,"DOOR",90,210),
+    ]
+    if duplicate_title:
+        source.extend((_w(91,0,"DOOR",5,480),_w(91,1,"SCHEDULE",5,440)))
+    if duplicate_header:
+        source.extend((
+            _w(92,0,"WIDTH",45,100),_w(92,1,"HEIGHT",45,65),
+            _w(92,2,"THICKNESS",45,30),
+        ))
+    if duplicate_code:
+        source.extend((
+            _w(6,0,"D13",110,300),_w(6,1,"SINGLE",110,235),
+            _w(6,2,"SWING",110,220),_w(6,3,"920",110,105),
+            _w(6,4,"2040",110,70),_w(6,5,"DOOR",110,140),
+        ))
+    return tuple(source)
+
+
+def _proof(**kwargs):
+    source=_world(**kwargs)
+    return _original_door_schedule_column_proof(
+        source,_original_source_row_candidates(source)
+    )
+
+
+def test_independent_table_caption_overrides_repeated_drawing_sheet_title():
+    rows,title=_proof()
+    assert title
+    by_code={r.code:r for r in rows}
+    assert set(by_code)=={"D13","D18"}
+    r=by_code["D13"]
+    assert r.status=="source_schedule_row_text_authenticated"
+    assert r.original_body_schedule_title_ids==("original:1:0","original:1:1")
+    assert r.source_title_observation_ids==("original:1:0","original:1:1")
+    assert r.original_width_header_id=="original:2:0"
+    assert r.original_height_header_id=="original:2:1"
+    assert r.original_width_word_id=="original:4:4"
+    assert r.original_height_word_id=="original:4:5"
+    assert r.source_dimension_column_roles_authenticated
+    assert not r.width_height_metric_units_authenticated
+    assert r.default_opening_count is None
+    assert not r.physical_host_or_frame_authenticated
+    assert not r.new_customer_quantity_authority
+    display=by_code["D18"]
+    assert display.status=="source_schedule_row_text_authenticated"
+    assert display.original_width_word_id is None
+    assert display.original_height_word_id is None
+    assert not display.source_dimension_column_roles_authenticated
+
+
+@pytest.mark.parametrize("problem",[
+    {"duplicate_header":True},
+    {"duplicate_title":True},
+])
+def test_competing_original_table_headers_or_titles_fail_closed(problem):
+    rows,title=_proof(**problem)
+    assert not title
+    assert not any(r.source_dimension_column_roles_authenticated for r in rows)
+
+
+def test_wrong_numeric_source_column_can_not_authenticate_2040_height():
+    rows,title=_proof(bad_y=True)
+    assert title
+    r=next(x for x in rows if x.code=="D13")
+    assert r.status=="source_schedule_row_text_authenticated"
+    assert not r.source_dimension_column_roles_authenticated
+    assert r.original_width_word_id=="original:4:4"
+    assert r.original_height_word_id is None
+    assert r.first_unclosed_gate=="source_numeric_columns_unresolved"
+
+
+def test_untrusted_source_header_never_creates_authenticated_dimension_role():
+    rows,title=_proof(untrusted_header=True)
+    assert not title
+    assert not any(r.source_dimension_column_roles_authenticated for r in rows)
+
+
+def test_duplicate_source_code_even_with_valid_dimensions_remains_conflict():
+    rows,title=_proof(duplicate_code=True)
+    assert title
+    candidates=[r for r in rows if r.code=="D13"]
+    assert len(candidates)==2
+    assert all(r.status=="source_schedule_row_duplicate_code_conflict"
+               and not r.source_dimension_column_roles_authenticated
+               for r in candidates)
+
+
+def test_original_a600_two_printed_titles_and_exact_width_height_source_words():
+    data=PDF.read_bytes()
+    assert hashlib.sha256(data).hexdigest()==SHA
+    source=SourceVisibilityProducer(producer_method="original-door-column-readonly",
+                                    producer_version="1")
+    pub=source.ingest_native_pdf_bytes(
+        document_id="original-maryborough",
+        source_bytes=data,source_locator="memory://original-private.pdf",
+        page_ids=("28",),
+    )
+    result=inspect_published_door_schedule(
+        source,revision_id=pub.revision.revision_id,page_id="28",
+    )
+    assert len(result.rows)==28
+    source_rows={x.code:x for x in result.rows}
+    assert source_rows["D13"].original_width_literal=="920"
+    assert source_rows["D13"].original_height_literal=="2040"
+    assert source_rows["D13"].original_width_header_id is not None
+    assert source_rows["D13"].original_height_header_id is not None
+    assert source_rows["D13"].original_width_word_id is not None
+    assert source_rows["D13"].original_height_word_id is not None
+    assert (source_rows["D17"].original_width_literal,
+            source_rows["D17"].original_height_literal)==("800","2000")
+    assert source_rows["D17"].original_width_word_id is not None
+    assert source_rows["D17"].original_height_word_id is not None
+    for n in range(18,28):
+        row=source_rows[f"D{n}"]
+        assert row.original_width_word_id is None
+        assert row.original_height_word_id is None
+        assert row.default_opening_count is None
+        assert not row.new_customer_quantity_authority
+    assert all(not r.width_height_metric_units_authenticated
+               and not r.physical_host_or_frame_authenticated for r in result.rows)
+    assert hashlib.sha256(PDF.read_bytes()).hexdigest()==SHA
