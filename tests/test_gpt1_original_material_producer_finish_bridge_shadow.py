@@ -37,7 +37,7 @@ def area():
 def definition():
     row=SourceMaterialDefinitionRecord(
         "source-definition","doc","rev",SHA,"snapshot","FT3",
-        "Floor finish three","concrete","coating","coating",
+        "Floor finish three","concrete","floor coating","epoxy",
         ("source-definition-text",),("11",),("schedule-viewport",),
     )
     return SourceMaterialDefinitionResult(Status.CORROBORATED,("source",),row)
@@ -46,7 +46,7 @@ def definition():
 def occurrence(code="FT3",box=(2,1,3,2),identifier="occ"):
     return SourceMaterialOccurrenceRecord(
         identifier,"doc","rev",SHA,"snapshot","11","plan-viewport",
-        code,"coating","source-definition",
+        code,"epoxy","source-definition",
         box,code,"material-observation",
         ("source-text-1",),
     )
@@ -113,3 +113,19 @@ def test_original_material_snapshot_drift_cannot_restore_finish():
     result=use_original_semantic_producer_for_finish_shadow(
         area(),scope(),changed,scope_records(occurrence()),(paint(),))
     assert result.status is Status.ABSTAINED
+
+
+def test_actual_source_material_semantics_reject_wall_or_signage_cladding():
+    same=definition()
+    cladding=replace(
+        same.record,
+        description="External signage cladding",
+        finish="wall panel",
+        semantic_finish="signage_cladding",
+    )
+    result=use_original_semantic_producer_for_finish_shadow(
+        area(),scope(),replace(same,record=cladding),
+        scope_records(occurrence()),(paint(),),
+    )
+    assert result.status is Status.ABSTAINED
+    assert result.reason_codes==("original_finish_definition_not_floor_finish",)
