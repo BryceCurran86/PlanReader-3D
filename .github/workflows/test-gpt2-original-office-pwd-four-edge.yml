@@ -1,0 +1,29 @@
+name: TEST GPT2 Original OFFICE PWD Crosssheet Source Walls
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_original_room_four_edge_source_ink_shadow.py"
+      - "tests/test_gpt2_original_office_pwd_four_edge_crosssheet_source.py"
+      - ".github/workflows/test-gpt2-original-office-pwd-four-edge.yml"
+  workflow_dispatch:
+jobs:
+  source-witness-and-open-doorway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original PDF and source negative evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          echo "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_original_office_pwd_four_edge_crosssheet_source.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
