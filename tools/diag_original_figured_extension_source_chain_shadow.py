@@ -96,8 +96,25 @@ def audit_figured_extension_to_source_face(
                 if len(candidates)>=max_witness_lines:
                     return {"status":"native_witness_cap_exceeded",
                             "figured_face_connection_authority":False}
+                # Preserve every geometric rival, but only a rendered solid
+                # stroke can contribute to a physically visible extension.
+                # A zero-opacity/dashed drafting path cannot fill a gap.
+                try:
+                    width=float(path.get("width") or 0)
+                    opacity=float(path.get("stroke_opacity") or 0)
+                    color=tuple(float(x) for x in (path.get("color") or ()))
+                except (TypeError,ValueError,OverflowError):
+                    width,opacity,color=0.,0.,()
+                painted=bool(
+                    math.isfinite(width) and width>0
+                    and math.isfinite(opacity) and 0<opacity<=1
+                    and color and all(math.isfinite(c) and 0<=c<=1 for c in color)
+                    and "s" in str(path.get("type") or "")
+                    and "".join(str(path.get("dashes") or "").split()) in {"[]0",""}
+                )
                 candidates.append({"original_source_item_id":f"d{pi}i{ii}",
                                    "candidate_intersection_interval_pdf_pts":[u,z],
+                                   "source_continuous_rendered_stroke":painted,
                                    "extension_ink_role_verified":False})
     # These intervals may be drafting lines, arrowheads or fixtures. Even
     # an interval-connected chain needs independent original extension
@@ -108,6 +125,15 @@ def audit_figured_extension_to_source_face(
         if a>right:missing.append([right,a])
         right=max(right,b)
     if right<hi:missing.append([right,hi])
+    painted_intervals=sorted(
+        tuple(row["candidate_intersection_interval_pdf_pts"])
+        for row in candidates if row["source_continuous_rendered_stroke"]
+    )
+    painted_missing=[];painted_right=lo
+    for a,b in painted_intervals:
+        if a>painted_right:painted_missing.append([painted_right,a])
+        painted_right=max(painted_right,b)
+    if painted_right<hi:painted_missing.append([painted_right,hi])
     return {
         "status":"native_original_figured_extension_source_candidates",
         "dimension_line_id":original_dimension_line_id,
@@ -120,6 +146,8 @@ def audit_figured_extension_to_source_face(
         "source_intersecting_straight_ink_candidates":candidates,
         "original_uncovered_projection_intervals_pdf_pts":missing,
         "candidate_native_ink_projection_covered":not missing,
+        "original_visible_source_ink_uncovered_projection_intervals_pdf_pts":painted_missing,
+        "source_rendered_extension_candidate_projection_covered":not painted_missing,
         "figured_extension_source_role_proven":False,
         "physical_finished_face_or_wall_role_proven":False,
         "figured_face_connection_authority":False,
