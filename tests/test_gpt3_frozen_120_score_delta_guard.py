@@ -333,3 +333,51 @@ def test_same_input_fingerprint_must_include_identical_source_gate_metadata(chan
     change(new)
     with pytest.raises(ValueError, match="same scoring fingerprint"):
         delta.compare_postscore_ledgers(old, new)
+
+
+def test_score_report_cannot_replace_unrelated_existing_customer_data(tmp_path):
+    old, new = tmp_path/"old.json", tmp_path/"new.json"
+    old.write_text(json.dumps(_fake_ledger()), encoding="utf-8")
+    new.write_text(json.dumps(_fake_ledger(fingerprint="f"*64)), encoding="utf-8")
+    customer = tmp_path / "signed-customer.json"
+    data = '{"source_customer_row": "immutable"}'
+    customer.write_text(data, encoding="utf-8")
+    with pytest.raises(ValueError, match="may not overwrite other evidence"):
+        delta.main([
+            "--before-ledger", str(old), "--after-ledger", str(new),
+            "--output", str(customer),
+        ])
+    assert customer.read_text(encoding="utf-8") == data
+
+
+def test_score_report_can_repeat_to_own_prior_diagnostic(tmp_path):
+    old, new = tmp_path/"old.json", tmp_path/"new.json"
+    out = tmp_path/"comparison.json"
+    old.write_text(json.dumps(_fake_ledger()), encoding="utf-8")
+    new.write_text(json.dumps(_fake_ledger(fingerprint="f"*64)), encoding="utf-8")
+    args = [
+        "--before-ledger", str(old), "--after-ledger", str(new),
+        "--output", str(out),
+    ]
+    assert delta.main(args) == 2
+    first = out.read_bytes()
+    assert delta.main(args) == 2
+    assert out.read_bytes() == first
+    assert json.loads(first)["schema_version"] == "gpt3-postscore-delta-v1"
+
+
+def test_score_report_rejects_existing_binary_artifact_and_symlink(tmp_path):
+    old, new = tmp_path/"old.json", tmp_path/"new.json"
+    old.write_text(json.dumps(_fake_ledger()), encoding="utf-8")
+    new.write_text(json.dumps(_fake_ledger(fingerprint="f"*64)), encoding="utf-8")
+    binary = tmp_path/"signed-v1.bin"
+    binary.write_bytes(b"immutable-binary-data")
+    args = ["--before-ledger", str(old), "--after-ledger", str(new)]
+    with pytest.raises(ValueError, match="may not overwrite other evidence"):
+        delta.main([*args, "--output", str(binary)])
+    assert binary.read_bytes() == b"immutable-binary-data"
+    alias = tmp_path/"alias.json"
+    alias.symlink_to(binary)
+    with pytest.raises(ValueError, match="cannot follow an output symlink"):
+        delta.main([*args, "--output", str(alias)])
+    assert binary.read_bytes() == b"immutable-binary-data"
