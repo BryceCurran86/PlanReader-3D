@@ -24,6 +24,7 @@ relationship strongly enough, the result remains unresolved.
 """
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 import hashlib
 import math
@@ -214,9 +215,82 @@ class CrossViewCeilingFinishResult:
     def records_by_physical_room_id(
         self,
     ) -> Mapping[str, CrossViewCeilingFinishRecord]:
-        return MappingProxyType(
-            {record.physical_room_id: record for record in self.records}
+        # Never expose source receipt aliases or a last-wins room dictionary,
+        # including when a public result dataclass is reconstructed.
+        survivors, _disputed = _quarantine_reused_ceiling_source_ownership(
+            self.records
         )
+        return MappingProxyType({
+            record.physical_room_id: record for record in survivors
+        })
+
+
+def _quarantine_reused_ceiling_source_ownership(
+    records: Sequence[CrossViewCeilingFinishRecord],
+) -> tuple[tuple[CrossViewCeilingFinishRecord, ...], tuple[str, ...]]:
+    """Reject cross-room reuse of exact producer-issued physical source IDs.
+
+    Printed schedule definitions MAY be shared by many rooms. Physical
+    room faces and the exact material-mark / room-label observations may not
+    be shared between distinct rooms. Retain unaffected rows, never choose
+    a first/last candidate, and never mint a room or quantity.
+    """
+    def valid(value: object) -> bool:
+        return type(value) is str and bool(value) and value == value.strip()
+
+    owners: dict[tuple[str, str], set[str]] = defaultdict(set)
+    disputed: set[str] = set()
+    by_physical: dict[str, int] = Counter()
+    fields = (
+        "canonical_room_id",
+        "source_room_face_record_id",
+        "occurrence_record_id",
+        "occurrence_evidence_id",
+    )
+    receipt_fields = (
+        "room_label_observation_ids",
+        "room_label_receipt_ids",
+        "occurrence_observation_ids",
+        "occurrence_receipt_ids",
+    )
+    for record in records:
+        room_id = record.physical_room_id
+        if not valid(room_id):
+            disputed.add(room_id)
+            continue
+        by_physical[room_id] += 1
+        for field in fields:
+            value = getattr(record, field)
+            if valid(value):
+                owners[(field, value)].add(room_id)
+            else:
+                disputed.add(room_id)
+        for field in receipt_fields:
+            raw = getattr(record, field)
+            if not isinstance(raw, (tuple, list)) or not raw:
+                disputed.add(room_id)
+                continue
+            receipts = tuple(raw)
+            if (any(not valid(value) for value in receipts)
+                    or len(set(receipts)) != len(receipts)):
+                disputed.add(room_id)
+                continue
+            for value in receipts:
+                owners[(field, value)].add(room_id)
+
+    disputed.update(
+        room_id for room_id, count in by_physical.items() if count > 1
+    )
+    for physical_ids in owners.values():
+        if len(physical_ids) > 1:
+            disputed.update(physical_ids)
+    return (
+        tuple(
+            record for record in records
+            if record.physical_room_id not in disputed
+        ),
+        tuple(sorted(disputed)),
+    )
 
 
 def _trusted_room_labels_for_pages(
@@ -743,6 +817,13 @@ class CrossViewCeilingFinishProducer:
             unresolved.discard(room.physical_room_id)
 
         records.sort(key=lambda record: record.physical_room_id)
+        surviving_records, disputed_room_ids = (
+            _quarantine_reused_ceiling_source_ownership(records)
+        )
+        if disputed_room_ids:
+            conflict = True
+            unresolved.update(disputed_room_ids)
+        records = list(surviving_records)
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids and not conflict:
             status = EvidenceResolutionStatus.CORROBORATED
