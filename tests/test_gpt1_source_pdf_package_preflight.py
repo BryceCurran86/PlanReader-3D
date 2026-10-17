@@ -9,6 +9,7 @@ import fitz
 import pytest
 
 from tools.diag_gpt1_source_pdf_package_preflight import check_source_pdf_package
+from tests.symlink_test_support import symlink_or_skip
 
 
 def _pdf(path: Path, pages: int = 2):
@@ -130,7 +131,7 @@ def test_symlink_to_external_source_is_not_accepted(tmp_path):
     root.mkdir()
     outside = tmp_path / "external.pdf"
     a = _pdf(outside)
-    (root / a["name"]).symlink_to(outside)
+    symlink_or_skip(root / a["name"], outside)
     result = check_source_pdf_package(
         _manifest(root, [a]), root
     )
@@ -157,7 +158,7 @@ def test_entire_source_root_symlink_rejected(tmp_path):
     a = _pdf(real_root / "architecture.pdf")
     manifest = _manifest(real_root, [a])
     alias = tmp_path / "linked_sources"
-    alias.symlink_to(real_root, target_is_directory=True)
+    symlink_or_skip(alias, real_root, target_is_directory=True)
     with pytest.raises(ValueError, match="symlinked"):
         check_source_pdf_package(manifest, alias)
 

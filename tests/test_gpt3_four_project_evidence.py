@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tools import report_gpt3_four_project_evidence as module
+from tests.symlink_test_support import symlink_or_skip
 
 
 def _dirs(tmp_path: Path) -> dict:
@@ -174,7 +175,7 @@ def test_report_destination_cannot_overwrite_signed_inputs_or_alias(tmp_path):
     assert input_path.read_text(encoding="utf-8") == "unchanged signed bytes"
 
     alias = tmp_path / "alias-to-signed"
-    alias.symlink_to(dirs["sealed_dir"], target_is_directory=True)
+    symlink_or_skip(alias, dirs["sealed_dir"], target_is_directory=True)
     with pytest.raises(ValueError, match="may not overwrite evidence"):
         module.main([*args, "--output", str(alias / "new-report.json")])
     assert not (dirs["sealed_dir"] / "new-report.json").exists()

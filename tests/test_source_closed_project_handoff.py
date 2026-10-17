@@ -15,6 +15,7 @@ from pb_source_floor_plan_page_scope import (
     SourceFloorPlanPageScope,
 )
 from tools import run_source_closed_project_handoff as handoff
+from tests.symlink_test_support import symlink_or_skip
 
 
 def _quantity(quantity_id: str, family: str) -> QuantityEvidence:
@@ -995,7 +996,7 @@ def test_broken_symlink_seal_is_not_treated_as_safe_empty_output(tmp_path, monke
     source.write_bytes(b"one original source")
     output = tmp_path / "shared-output"
     output.mkdir()
-    (output / "project-a.json").symlink_to(tmp_path / "missing-signed-receipt.json")
+    symlink_or_skip(output / "project-a.json", tmp_path / "missing-signed-receipt.json")
     monkeypatch.setattr(
         handoff, "_source_page_scopes",
         lambda *_: pytest.fail("symlink is not clean output"),
@@ -1089,7 +1090,7 @@ def test_unsealed_preflight_and_summary_symlinks_cannot_modify_original_pdf(
     output = tmp_path / "handoff-output"
     output.mkdir()
     poisoned = output / linked_name
-    poisoned.symlink_to(source)
+    symlink_or_skip(poisoned, source)
     monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
 
     def _failed_source(*args, **kwargs):
@@ -1282,11 +1283,11 @@ def test_signed_output_directory_symlink_cannot_redirect_customer_rows(
     other_workspace.mkdir()
     output = tmp_path / "intended-output"
     if unsafe_path == "output_dir":
-        output.symlink_to(other_workspace, target_is_directory=True)
+        symlink_or_skip(output, other_workspace, target_is_directory=True)
     else:
         output.mkdir()
-        (output / "family_runs").symlink_to(
-            other_workspace, target_is_directory=True,
+        symlink_or_skip(
+            output / "family_runs", other_workspace, target_is_directory=True,
         )
     def _do_not_run(*args, **kwargs):
         pytest.fail("symlinked customer seal output must be rejected before source read")

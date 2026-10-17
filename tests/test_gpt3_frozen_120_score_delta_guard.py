@@ -11,6 +11,7 @@ import json
 import pytest
 
 from tools import gpt3_frozen_120_score_delta_guard as delta
+from tests.symlink_test_support import symlink_or_skip
 
 
 @pytest.fixture(autouse=True)
@@ -410,7 +411,7 @@ def test_score_report_rejects_existing_binary_artifact_and_symlink(tmp_path):
         delta.main([*args, "--output", str(binary)])
     assert binary.read_bytes() == b"immutable-binary-data"
     alias = tmp_path/"alias.json"
-    alias.symlink_to(binary)
+    symlink_or_skip(alias, binary)
     with pytest.raises(ValueError, match="cannot follow an output symlink"):
         delta.main([*args, "--output", str(alias)])
     assert binary.read_bytes() == b"immutable-binary-data"

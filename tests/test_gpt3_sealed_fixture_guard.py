@@ -18,6 +18,7 @@ from tools.diag_gpt3_sealed_fixture_guard import (
     FILES,
     verify_archived_package,
 )
+from tests.symlink_test_support import symlink_or_skip
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "docs/engineering/lot16_original_signed_eight_row_20261015"
@@ -161,7 +162,7 @@ def test_unknown_or_duplicate_digest_manifest_path_is_rejected(unsafe, tmp_path)
 
 def test_fixture_root_symlink_is_refused(tmp_path):
     alias = tmp_path / "alias"
-    alias.symlink_to(FIXTURE, target_is_directory=True)
+    symlink_or_skip(alias, FIXTURE, target_is_directory=True)
     with pytest.raises(EvidencePackageError, match="real directory"):
         verify_archived_package(alias)
 
@@ -173,7 +174,7 @@ def test_symlinked_evidence_file_is_refused(filename, tmp_path):
     real = tmp_path / "original"
     real.write_bytes(link.read_bytes())
     link.unlink()
-    link.symlink_to(real)
+    symlink_or_skip(link, real)
     with pytest.raises(EvidencePackageError, match="symlink"):
         verify_archived_package(root)
 

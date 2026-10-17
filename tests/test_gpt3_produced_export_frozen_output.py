@@ -8,6 +8,7 @@ import pytest
 
 from tools import export_gpt3_produced_items as exporter
 from test_gpt3_produced_items_original_source import _source_run
+from tests.symlink_test_support import symlink_or_skip
 
 
 def _fake_repo(tmp_path, monkeypatch):
@@ -114,7 +115,7 @@ def test_dangling_customer_output_symlink_cannot_be_replaced(tmp_path, monkeypat
     source, seal, _, _, _ = _source_run(tmp_path)
     destination = tmp_path / "produced_items.json"
     missing = tmp_path / "other-customer.json"
-    destination.symlink_to(missing)
+    symlink_or_skip(destination, missing)
     with pytest.raises(FileExistsError, match="existing produced-items receipt"):
         exporter.main(_cli_args(source, seal, destination))
     assert destination.is_symlink()

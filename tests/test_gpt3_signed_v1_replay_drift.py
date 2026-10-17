@@ -14,6 +14,7 @@ import pytest
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from pb_customer_output_verification import verify_sealed_customer_output
 from tools import gpt3_signed_v1_replay_drift as drift
+from tests.symlink_test_support import symlink_or_skip
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -228,7 +229,7 @@ def test_v1_replay_cli_rejects_unrelated_json_binary_and_output_symlink(tmp_path
     original = tmp_path / "source.json"
     original.write_text("DO NOT MUTATE", encoding="utf-8")
     alias = tmp_path / "alias.json"
-    alias.symlink_to(original)
+    symlink_or_skip(alias, original)
     with pytest.raises(ValueError, match="cannot follow an output symlink"):
         drift.main(_historical_cli_args(alias))
     assert original.read_text(encoding="utf-8") == "DO NOT MUTATE"
