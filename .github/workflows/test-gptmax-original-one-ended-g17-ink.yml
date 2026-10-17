@@ -1,0 +1,28 @@
+name: GPT MAX original one-ended G17 pixel source
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/strict-original-signed-retention-witness-20261017
+    paths:
+      - pb_raster_unchanged_band_segments.py
+      - pb_source_visibility_authority.py
+      - tests/test_gptmax_original_one_ended_g17_ink.py
+      - .github/workflows/test-gptmax-original-one-ended-g17-ink.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pixel-source-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_one_ended_g17_ink.py tests/test_raster_unchanged_band_segments.py
+          ruff check --select F821,F823 pb_source_visibility_authority.py pb_raster_unchanged_band_segments.py tests/test_gptmax_original_one_ended_g17_ink.py
