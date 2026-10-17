@@ -225,3 +225,133 @@ def test_supplier_replacement_of_rejected_and_returned_stock_does_not_overorder(
     assert receipt["line_status"][0]["outstanding_purchase_quantity"] == "0"
     assert receipt["line_status"][0]["status"] == "RECEIVED"
     assert receipt["signed_source_measurements_changed"] is False
+
+
+def _credit_receipt_book():
+    signed, rows, quote, book = fixtures()
+    procurement = build_procurement_plan(quote, signed, rows, book)
+    pid = procurement["purchase_order_drafts"][0]["po_draft_id"]
+    events = [
+        {"event": "RECORD_PO_SENT", "po_draft_id": pid,
+         "recorded_on": "2026-10-20", "reference": "client-order-sent",
+         "recorded_by": "Client"},
+        {"event": "SHIPMENT_NOTICE", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-21",
+         "reference": "carrier-1", "shipped_quantity": "4"},
+        {"event": "RECEIVE_DELIVERY", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-22",
+         "reference": "delivery-1", "receipt_id": "RECEIPT-1",
+         "accepted_quantity": "3", "rejected_quantity": "1"},
+        {"event": "SUPPLIER_INVOICE", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-23",
+         "reference": "invoice-1", "invoice_id": "INVOICE-1",
+         "gross_amount": "40.00"},
+        {"event": "SUPPLIER_CREDIT_NOTE", "po_draft_id": pid,
+         "recorded_on": "2026-10-24", "reference": "credit-document-1",
+         "credit_id": "CREDIT-1", "invoice_id": "INVOICE-1",
+         "credit_reason": "RETURN", "gross_amount": "10.00"},
+        {"event": "RECORD_SUPPLIER_PAYMENT", "po_draft_id": pid,
+         "recorded_on": "2026-10-25", "reference": "client-transfer-1",
+         "invoice_id": "INVOICE-1", "payment_id": "PAY-1",
+         "amount": "20.00"},
+    ]
+    return procurement, {
+        "schema_version": "gpt3-client-procurement-events-v1",
+        "procurement_fingerprint": procurement["procurement_fingerprint"],
+        "events": events,
+    }
+
+
+def test_supplier_credit_note_offsets_real_invoice_not_source_quantity():
+    procurement, book = _credit_receipt_book()
+    original = json.dumps(procurement, sort_keys=True)
+    result = build_procurement_receipts(procurement, book)
+    assert result["supplier_financial_summary"]["invoiced_gross"] == "40.00"
+    assert result["supplier_financial_summary"]["credited_gross"] == "10.00"
+    assert result["supplier_financial_summary"]["net_invoiced_gross"] == "30.00"
+    assert result["supplier_financial_summary"]["recorded_paid_gross"] == "20.00"
+    assert result["supplier_financial_summary"]["outstanding_payable_gross"] == "10.00"
+    assert result["invoices"][0]["credited_gross"] == "10.00"
+    assert result["invoices"][0]["outstanding_gross"] == "10.00"
+    assert result["line_status"][0]["net_accepted_quantity"] == "3"
+    assert result["credit_notes"][0]["credit_status"] == "CLIENT_RECORDED_NOT_SUPPLIER_VERIFIED"
+    assert result["supplier_credit_notes_verified"] is False
+    assert result["bank_payments_verified"] is False
+    assert result["official_four_project_accuracy"] is None
+    assert result["signed_source_measurements_changed"] is False
+    assert json.dumps(procurement, sort_keys=True) == original
+    assert "credited_gross" in fulfillment_csv(result)
+
+
+@pytest.mark.parametrize("change,expected", [
+    (lambda e: e[4].update(credit_id=""), "canonical"),
+    (lambda e: e[4].update(credit_reason="UNKNOWN"), "typed"),
+    (lambda e: e[4].update(invoice_id="other"), "match"),
+    (lambda e: e[4].update(gross_amount="40.00"), "unpaid"),
+    (lambda e: e[4].update(gross_amount="10.001"), "cents"),
+    (lambda e: e[4].update(recorded_on="2026-10-19"), "predates"),
+])
+def test_credit_rejects_malformed_unbound_excess_or_backdated_events(change, expected):
+    procurement, book = _credit_receipt_book()
+    changed = deepcopy(book)
+    change(changed["events"])
+    with pytest.raises(ValueError, match=expected):
+        build_procurement_receipts(procurement, changed)
+
+
+def test_credit_cannot_cancel_amount_already_paid_or_repeat_credit_identity():
+    procurement, book = _credit_receipt_book()
+    duplicated = deepcopy(book)
+    cloned = deepcopy(duplicated["events"][4])
+    cloned["recorded_on"] = "2026-10-25"
+    duplicated["events"].insert(5, cloned)
+    with pytest.raises(ValueError, match="duplicate supplier credit"):
+        build_procurement_receipts(procurement, duplicated)
+    after_payment = deepcopy(book)
+    old = after_payment["events"].pop(4)
+    old["recorded_on"] = "2026-10-26"
+    old["gross_amount"] = "21.00"
+    after_payment["events"].append(old)
+    with pytest.raises(ValueError, match="unpaid invoiced balance"):
+        build_procurement_receipts(procurement, after_payment)
+
+
+def test_invoice_cannot_be_paid_beyond_credit_adjusted_balance():
+    procurement, book = _credit_receipt_book()
+    altered = deepcopy(book)
+    altered["events"][5]["amount"] = "31.00"
+    with pytest.raises(ValueError, match="exceeds issued invoice"):
+        build_procurement_receipts(procurement, altered)
+
+
+def test_duplicate_shipment_reference_and_receipt_exceeding_shipped_goods_fail():
+    procurement, book = _credit_receipt_book()
+    duplicate = deepcopy(book)
+    original_notice = duplicate["events"][1]
+    original_notice["shipped_quantity"] = "2"
+    clone = deepcopy(original_notice)
+    clone["shipped_quantity"] = "2"
+    duplicate["events"].insert(2, clone)
+    with pytest.raises(ValueError, match="duplicate supplier shipment"):
+        build_procurement_receipts(procurement, duplicate)
+    overreceived = deepcopy(book)
+    overreceived["events"][1]["shipped_quantity"] = "2"
+    with pytest.raises(ValueError, match="exceed supplier-notified"):
+        build_procurement_receipts(procurement, overreceived)
+
+
+def test_return_credit_requires_client_recorded_return_or_rejection():
+    procurement, book = _credit_receipt_book()
+    false_return = deepcopy(book)
+    false_return["events"][2]["accepted_quantity"] = "4"
+    false_return["events"][2]["rejected_quantity"] = "0"
+    with pytest.raises(ValueError, match="requires a recorded rejected or returned"):
+        build_procurement_receipts(procurement, false_return)
+
+
+def test_original_order_send_cannot_precede_customer_approval():
+    procurement, book = _credit_receipt_book()
+    early = deepcopy(book)
+    early["events"][0]["recorded_on"] = "2026-10-19"
+    with pytest.raises(ValueError, match="predates"):
+        build_procurement_receipts(procurement, early)
