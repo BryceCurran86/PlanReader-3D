@@ -228,3 +228,26 @@ def test_source_door_page_address_must_be_canonical_and_never_empty_alias(noncan
             source, revision_id="synthetic-revision",
             page_id=noncanonical,
         )
+
+def test_original_source_page_with_no_native_words_has_no_complete_schedule_claim():
+    doc = fitz.open()
+    doc.new_page(width=220, height=220)
+    raw = doc.tobytes()
+    doc.close()
+    source = SourceVisibilityProducer(
+        producer_method="blank-native-source-schedule",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="blank-no-door-schedule",
+        source_bytes=raw,
+        source_locator="memory://blank-source.pdf",
+        page_ids=("1",),
+    )
+    result = inspect_published_door_schedule(
+        source, revision_id=published.revision.revision_id, page_id="1",
+    )
+    assert result.rows == ()
+    assert not result.complete_source_word_universe
+    assert not result.title_source_trusted
+    assert result.new_opening_counts == result.new_opening_areas_m2 == 0
