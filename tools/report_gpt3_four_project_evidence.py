@@ -236,6 +236,8 @@ def build_four_project_evidence_ledger(
             "manifest_status": manifest.status,
             "publication_status": "UNAVAILABLE",
             "source_sha_verified": False,
+            "missing_original_source_document_count": 0,
+            "missing_original_source_document_roles": [],
             "customer_bijection_verified": False,
             "reconciliation_complete": False,
             "reason_codes": [],
@@ -254,6 +256,13 @@ def build_four_project_evidence_ledger(
             if not path.is_file()
         ]
         if missing:
+            # Share-safe roles, not private filesystem locations, point the
+            # owner at precisely which source handoffs block the project.
+            missing_names = set(missing)
+            roles = sorted(doc.role for doc in manifest.source_documents
+                           if doc.name in missing_names)
+            entry["missing_original_source_document_count"] = len(missing)
+            entry["missing_original_source_document_roles"] = roles
             entry["reason_codes"] = [
                 "original_source_not_supplied_in_this_execution",
                 f"missing_original_file_count:{len(missing)}",
