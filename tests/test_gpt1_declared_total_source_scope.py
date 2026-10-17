@@ -67,3 +67,14 @@ def test_rewritten_nonreconciliation_claims_cannot_enter_area_total_ledger():
         replace(_claim(), binding="physical_floor_owned"),
     ]:
         assert resolve_explicit_floor_area_evidence([altered]) is None
+
+
+def test_malformed_original_source_sha_or_revision_cannot_reconcile_even_if_values_agree():
+    for sha in ("", "A"*64, "g"*64, "0123", True):
+        assert resolve_explicit_floor_area_evidence([
+            _claim(sha=sha), _claim(page=2,sha=sha)
+        ]) is None
+    for rev in ("", " padded ", True, 45):
+        assert resolve_explicit_floor_area_evidence([
+            _claim(revision=rev),_claim(page=2,revision=rev)
+        ]) is None
