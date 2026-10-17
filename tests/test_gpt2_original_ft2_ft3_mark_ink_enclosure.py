@@ -20,7 +20,7 @@ PWD={"left":("d66215i0","d3057i0"),
 
 @pytest.mark.parametrize("edges,code,address",[
     (OFFICE,"FT3",[113,0,0]),
-    (PWD,"FT2",[125,0,0]),
+    (PWD,"FT2",[56,0,0]),
 ])
 def test_original_mark_inside_strict_matched_source_ink_box_not_authenticated(edges,code,address):
     raw=PDF.read_bytes()
