@@ -82,3 +82,12 @@ def test_invalid_schedule_page_scope_never_enables_original_source_mode():
         with pytest.raises(ValueError):
             materials.SourceMaterialSemanticProducer.for_source_native_multipath_schedule_shadow(
                 src,page_ids=ids)
+
+def test_scoped_original_schedule_page_not_in_source_revision_is_not_silent_empty():
+    src, pub = _source_two_pages()
+    material = materials.SourceMaterialSemanticProducer.for_source_native_multipath_schedule_shadow(
+        src, page_ids=("3",))
+    with pytest.raises(ValueError, match="outside_published_source_coverage"):
+        material.publish(pub.revision.revision_id)
+    # No phantom original schedule or physical ceiling result can be issued.
+    assert material.published_plan_viewports() == ()
