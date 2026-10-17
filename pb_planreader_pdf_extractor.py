@@ -707,17 +707,22 @@ class GenericPlanReaderExtractor:
         return False
 
     def extract_sheet_number(self, page_text: str, page_number: int) -> str:
-        """Extract sheet number from drawing title block, or fallback to page index."""
-        m = re.search(
+        """Return one labelled sheet number.
+
+        Two different labelled numbers abstain. A code that is not beside a
+        drawing-number or sheet-number label is not this page's number.
+        """
+        labelled: List[str] = []
+        for match in re.finditer(
             r"(?:drawing\s*no\.?|drg\s*no\.?|sheet\s*no\.?)\s*[:.\-]?\s*([A-Za-z0-9/\-_]+)",
-            page_text,
+            page_text or "",
             re.I,
-        )
-        if m:
-            return m.group(1).strip()
-        m_code = re.search(r"\b([A-Z]{1,4}/\d{1,4}/[A-Za-z0-9\-]+|[A-Z]{1,2}\-?\d{2,3})\b", page_text)
-        if m_code:
-            return m_code.group(1).strip()
+        ):
+            code = match.group(1).strip()
+            if code and code.upper() not in {item.upper() for item in labelled}:
+                labelled.append(code)
+        if len(labelled) == 1:
+            return labelled[0]
         return f"Page-{page_number}"
 
     @staticmethod

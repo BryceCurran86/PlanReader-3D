@@ -49,11 +49,29 @@ def parse_revision_code(text: str) -> Tuple[str, int]:
     if not text:
         return ("0", 0)
 
-    # 1. Match explicit 'Rev A', 'Rev-02', 'Revision B', '_Rev_C'
-    m = re.search(r'rev(?:ision)?[\s\-_]*([a-z0-9]{1,3})', text, re.IGNORECASE)
-    if not m:
-        # 2. Match trailing single letter or number before extension
-        m = re.search(r'[\s\-_]([a-z]|\d{1,3})\.[a-z0-9]+$', text, re.IGNORECASE)
+    # 1. Match explicit 'Rev A', 'Rev-02', 'Revision B', '_Rev_C'.
+    # A separator is required, so "revisions" and "previous" are not codes.
+    # Two different codes abstain.
+    found: Dict[str, Tuple[str, int]] = {}
+    for match in re.finditer(
+        r"(?<![A-Za-z])rev(?:ision)?[\s\-_]+([A-Za-z0-9]{1,3})(?![A-Za-z0-9])",
+        text,
+        re.IGNORECASE,
+    ):
+        code = match.group(1).upper()
+        if code.isdigit():
+            rank = int(code)
+        elif len(code) == 1 and "A" <= code <= "Z":
+            rank = ord(code) - ord("A") + 1
+        else:
+            rank = 1
+        found.setdefault(code, (code, rank))
+    if len(found) > 1:
+        return ("0", 0)
+    if len(found) == 1:
+        return next(iter(found.values()))
+    # 2. Match trailing single letter or number before extension
+    m = re.search(r"[\s\-_]([a-z]|\d{1,3})\.[a-z0-9]+$", text, re.IGNORECASE)
     if m:
         code = m.group(1).upper()
         if code.isdigit():
@@ -67,13 +85,21 @@ def parse_revision_code(text: str) -> Tuple[str, int]:
 
 
 def extract_sheet_number(label: str) -> str:
-    """Extract standard Australian sheet number from page label e.g., 'A-101 Floor Plan' -> 'A-101'."""
+    """Extract one sheet number from a page label.
+
+    ``A-101 Floor Plan`` is ``A-101``. Two different numbers abstain, and the
+    first ordinary word is not a sheet number.
+    """
     if not label:
         return "UNKNOWN"
-    m = re.search(r'([a-z]{1,2}[\s\-_]?\d{3,4}[a-z]?)', label, re.IGNORECASE)
-    if m:
-        return m.group(1).upper().replace(" ", "")
-    return label.split()[0].upper()
+    found: List[str] = []
+    for match in re.finditer(r"([a-z]{1,2}[\s\-_]?\d{3,4}[a-z]?)", label, re.IGNORECASE):
+        code = match.group(1).upper().replace(" ", "")
+        if code not in found:
+            found.append(code)
+    if len(found) == 1:
+        return found[0]
+    return "UNKNOWN"
 
 
 class RevisionAuthorityRegistry:
@@ -108,7 +134,9 @@ class RevisionAuthorityRegistry:
             plabel = str(p.get("page_label") or "")
             fname = str(p.get("file_name") or "")
             sheet = extract_sheet_number(plabel)
-            rev_code, rank = parse_revision_code(fname or plabel)
+            if sheet == "UNKNOWN":
+                sheet = f"UNNUMBERED-{pid}"
+            rev_code, rank = parse_revision_code(plabel)
             records_map.setdefault(sheet, []).append({
                 "page_id": pid,
                 "sheet_number": sheet,
