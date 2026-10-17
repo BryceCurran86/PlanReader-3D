@@ -229,8 +229,20 @@ def inspect_published_door_schedule(
         raise ValueError("source_door_page_not_in_published_source_coverage")
     words=_producer_owned_native_words(producer,published,page_id)
     rows=_original_source_row_candidates(words)
-    title_ok=any(r.source_title_observation_ids and
-                 r.status=="source_schedule_row_text_authenticated" for r in rows)
+    # Schedule TITLE source trust is independent of row trust. A title can
+    # be verified even when every native row remains untrusted. Do not
+    # conflate "no publishable row" with an untrusted original title.
+    title_blocks=defaultdict(list)
+    for word in words:
+        title_blocks[word.block_no].append(word)
+    original_titles=[
+        tuple(block) for block in title_blocks.values()
+        if tuple(word.literal for word in block)==("DOOR","SCHEDULE")
+    ]
+    title_ok=(
+        len(original_titles)==1
+        and all(word.trusted for word in original_titles[0])
+    )
     return SourceDoorScheduleResult(
         source_sha256=published.revision.source_sha256,
         revision_id=published.revision.revision_id,
