@@ -381,3 +381,30 @@ def test_score_report_rejects_existing_binary_artifact_and_symlink(tmp_path):
     with pytest.raises(ValueError, match="cannot follow an output symlink"):
         delta.main([*args, "--output", str(alias)])
     assert binary.read_bytes() == b"immutable-binary-data"
+
+
+@pytest.mark.parametrize("blocked_status", ["MEMORY_LIMIT", "TIMEOUT", "PROCESS_FAILED", "SYSTEM_MEMORY_GUARD"])
+def test_published_target_cannot_claim_score_from_failed_owner_process(blocked_status):
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    new["items"][0]["owner_handoff_status"] = blocked_status
+    with pytest.raises(ValueError, match="stopped owner source process"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+@pytest.mark.parametrize("quantity_id", ["", "   ", " q-id", "q-id ", "\tq-id"])
+def test_published_exact_target_rejects_malformed_machine_quantity_identity(quantity_id):
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    _set_scored(new, 0, "MATCHED_WITHIN_TOLERANCE", quantity_id)
+    with pytest.raises(ValueError, match="matched target requires exact"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_published_target_may_legitimately_lack_owner_machine_receipt():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    _set_scored(new, 0, "MATCHED_WITHIN_TOLERANCE", "source-owned-q")
+    new["items"][0]["owner_handoff_status"] = None
+    result = delta.compare_postscore_ledgers(old, new)
+    assert result["net_additional_correct_items"] == 1
