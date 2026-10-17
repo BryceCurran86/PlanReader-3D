@@ -238,3 +238,89 @@ def audit_gpt2_competing_source_floor_handoffs(
         "unique_source_mark_identity_elected":False,
         "new_firm_quantities":0,
     }
+
+
+def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
+    floor_door_perimeter: dict, finish_door_perimeter: dict, *,
+    source_registration: dict,
+    translation_pdf_pts: tuple[float,float],
+) -> dict:
+    """Two independently SHA-checked doorway-bounded *candidate* perimeters.
+
+    Genuine door interruptions do not have an ink wall across the opening.
+    A virtual closing connector is allowed in this read-only perimeter
+    comparison only when BOTH page-local jamb source chains were separately
+    rechecked from the original immutable PDF. W4 and metric authority remain
+    absent, and the competing original registration is not ranked or elected.
+    """
+    base={
+        "status":"original_doorway_floor_finish_correspondence_abstained",
+        "first_failure":"original_doorway_source_perimeters_not_independently_proven",
+        "physical_room_identity_proven":False,
+        "source_finished_face_verified":False,
+        "source_virtual_door_closure_is_physical_wall":False,
+        "new_firm_quantities":0,
+    }
+    candidates=(floor_door_perimeter,finish_door_perimeter)
+    if any(type(item) is not dict or
+           item.get("status")!="source_jamb_bound_open_door_perimeter_candidate_only"
+           or not item.get("source_jamb_roles_same_sha_rechecked")
+           or not item.get("source_wall_and_jamb_geometry_independently_recomputed")
+           for item in candidates):
+        return base
+    floor,finish=candidates
+    root=floor.get("original_source_sha256")
+    if not root or root!=finish.get("original_source_sha256"):
+        return {**base,"first_failure":"original_cross_sheet_doorway_source_sha_conflict"}
+    if (type(source_registration) is not dict
+            or source_registration.get("status")!=
+                "original_four_edge_ink_correspondence_with_unclosed_doorway"
+            or source_registration.get("original_source_sha256")!=root
+            or source_registration.get("original_floor_page_id")!=
+                floor.get("original_page_1_based")
+            or source_registration.get("original_finish_page_id")!=
+                finish.get("original_page_1_based")):
+        return {**base,"first_failure":"original_cross_sheet_wall_registration_unproven"}
+    if (type(translation_pdf_pts) is not tuple or len(translation_pdf_pts)!=2
+            or any(type(n) not in (int,float) or not math.isfinite(n)
+                   for n in translation_pdf_pts)
+            or tuple(source_registration.get("source_translation_candidate_pdf_pts",()))
+               !=tuple(translation_pdf_pts)):
+        return {**base,"first_failure":"original_competing_translation_not_authenticated"}
+    paired=source_registration.get("original_witnesses",{})
+    if type(paired) is not dict or not paired:
+        return {**base,"first_failure":"original_four_side_witnesses_missing"}
+    actual_floor=set(floor["original_source_perimeter_side_ids"])
+    actual_finish=set(finish["original_source_perimeter_side_ids"])
+    for row in paired.values():
+        if (row.get("floor_source",{}).get("identity") not in actual_floor or
+                row.get("finish_source",{}).get("identity") not in actual_finish):
+            return {**base,"first_failure":"independently_proven_doorway_perimeter_membership_conflict"}
+    fx,fy=translation_pdf_pts
+    finish_vertices={tuple(vertex) for vertex in
+                     finish["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"]}
+    translated={(round(x+fx,3),round(y+fy,3))
+                for x,y in floor["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"]}
+    if translated!=finish_vertices or len(translated)!=len(finish_vertices):
+        return {**base,"first_failure":"source_doorway_bounded_ring_geometry_conflict"}
+    f_gap=[tuple(pt) for pt in floor["source_virtual_door_connector_pdf_pts"]]
+    s_gap=[tuple(pt) for pt in finish["source_virtual_door_connector_pdf_pts"]]
+    transferred={ (round(x+fx,3),round(y+fy,3)) for x,y in f_gap}
+    if transferred!=set(s_gap):
+        return {**base,"first_failure":"source_original_doorway_registration_gap_conflict"}
+    return {
+        **base,
+        "status":"original_source_ink_ring_translation_candidate",
+        "first_failure":"W4_structural_wall_finished_face_and_same_room_issuer",
+        "original_source_sha256":root,
+        "original_floor_page":floor["original_page_1_based"],
+        "original_finish_page":finish["original_page_1_based"],
+        "source_cross_sheet_translation_pdf_pts":[fx,fy],
+        "original_floor_source_ids":tuple(sorted(actual_floor)),
+        "original_finish_source_ids":tuple(sorted(actual_finish)),
+        "source_finishes_perimeter_polygon_pdf_pts":
+            finish["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"],
+        "source_real_door_ink_gap_virtual_closure_only":True,
+        "source_both_original_doorway_jambs_sha_authenticated":True,
+        "geometric_ink_correspondence_only":True,
+    }
