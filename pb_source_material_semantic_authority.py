@@ -1519,6 +1519,10 @@ def _trusted_native_material_schedule_cluster_blocks(
         row for row in candidates
         if row[0] == title_partition_id
         and row[2]
+        # An original code-description pair is not a trusted material role:
+        # do not spend raster OCR or issue a material definition to convert
+        # "GRID" vinyl-faced plaster tiles into an inferred ceiling grid.
+        and not row[4].get("source_semantic_role_unverified", False)
         and all(
             word.page_id == title_page_id
             and word.source_partition_id == title_partition_id
@@ -1528,6 +1532,7 @@ def _trusted_native_material_schedule_cluster_blocks(
     blocked_codes: set[str] = {
         row[3] for row in candidates
         if row[0] != title_partition_id or not row[2]
+        or row[4].get("source_semantic_role_unverified", False)
         or any(
             word.page_id != title_page_id
             or word.source_partition_id != title_partition_id
