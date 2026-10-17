@@ -19,7 +19,15 @@ def records():
         canonical=[{"canonical_opening_id":"canonical-1","area_m2":1.8}],
         quantities=q, customer_rows=deepcopy(q),
         sealed_run={"signature":"complete-original-eight"},
-        customer_verification={"valid":True,"issuer":"original"},
+        customer_verification={
+            "project_id":"original-source-retention",
+            "sealed_quantity_count":8,
+            "valid_quantity_count":8,
+            "abstained_quantity_count":0,
+            "customer_row_count":8,
+            "verified_quantity_ids":[f"old-signed-q-{i}" for i in range(8)],
+            "issuer":"original",
+        },
     )
 
 
@@ -70,3 +78,31 @@ def test_added_new_quantity_does_not_erase_original_but_is_not_firm_authority():
     p=compare_original_g17_release_receipts(a,b)
     assert not p["new_gpt1_metric_authority_granted"]
     assert not p["new_benchmark_match_granted"]
+
+
+@pytest.mark.parametrize("section,mutation", [
+    ("verified_quantity_ids",lambda v:v[:-1]),
+    ("verified_quantity_ids",lambda v:v[:-1]+["unapproved-extra"]),
+    ("valid_quantity_count",lambda v:7),
+    ("customer_row_count",lambda v:7),
+    ("verified_quantity_ids",lambda v:["old-signed-q-0"]*8),
+])
+def test_equal_invalid_customer_verifier_cannot_claim_eight(section,mutation):
+    a=records()
+    a["customer_verification"][section]=mutation(
+        a["customer_verification"][section])
+    assert not compare(a,deepcopy(a))
+
+
+def test_missing_verified_quantity_ids_fails_even_with_signed_area_values():
+    a=records()
+    del a["customer_verification"]["verified_quantity_ids"]
+    assert not compare(a,deepcopy(a))
+
+
+def test_correct_bijection_order_changes_only_when_both_receipts_agree():
+    a=records()
+    b=deepcopy(a)
+    a["customer_verification"]["verified_quantity_ids"].reverse()
+    b["customer_verification"]["verified_quantity_ids"].reverse()
+    assert compare(a,b)

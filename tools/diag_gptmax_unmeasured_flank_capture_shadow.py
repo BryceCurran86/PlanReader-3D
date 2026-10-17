@@ -135,6 +135,26 @@ def _original_eight_firm_customer_retention(original_receipt, updated_receipt, c
         return False
     if len(old) != 8 or len(fresh) < len(old):
         return False
+    # The producer uses the concrete SealedCustomerOutputVerification contract,
+    # NOT a permissive boolean "valid". Two equal *invalid* source verifiers
+    # are not eight original signed/customer identity proofs.
+    verified = original_receipt.get("customer_verification")
+    if not isinstance(verified, dict):
+        return False
+    ids = tuple(sorted(row["quantity_id"] for row in old
+                       if isinstance(row, dict)
+                       and isinstance(row.get("quantity_id"), str)))
+    verified_ids = verified.get("verified_quantity_ids")
+    if (len(ids) != 8 or len(set(ids)) != 8
+            or not isinstance(verified_ids, (tuple, list))
+            or len(verified_ids) != 8
+            or not all(isinstance(v, str) for v in verified_ids)
+            or tuple(sorted(verified_ids)) != ids
+            or type(verified.get("valid_quantity_count")) is not int
+            or verified["valid_quantity_count"] != 8
+            or type(verified.get("customer_row_count")) is not int
+            or verified["customer_row_count"] != 8):
+        return False
     return comparison.get("all_original_issuer_receipts_exact") is True
 
 
