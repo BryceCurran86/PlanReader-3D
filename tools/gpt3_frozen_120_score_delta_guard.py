@@ -108,6 +108,13 @@ def _validate_input_ledger(
             raise ValueError("foreign or duplicate physical target")
         if (row.get("trade_category"), row.get("unit")) != targets[key]:
             raise ValueError("target trade/unit identity drift")
+        if (
+            row.get("first_target_authority_failure") != "NOT_DIAGNOSED"
+            or type(row.get("project_gate_reasons")) is not list
+            or any(type(reason) is not str for reason in row["project_gate_reasons"])
+            or type(row.get("project_evidence_status")) is not str
+        ):
+            raise ValueError("target row invents source authority or lacks typed project gates")
         by_key[key] = row
     if len(by_key) != len(targets):
         raise ValueError("canonical target universe incomplete")
@@ -217,6 +224,12 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
             prior[key]["evaluation_state"] != next_rows[key]["evaluation_state"]
             or prior[key].get("produced_quantity_id")
             != next_rows[key].get("produced_quantity_id")
+            or prior[key].get("project_evidence_status")
+            != next_rows[key].get("project_evidence_status")
+            or prior[key].get("project_gate_reasons")
+            != next_rows[key].get("project_gate_reasons")
+            or prior[key].get("owner_handoff_status")
+            != next_rows[key].get("owner_handoff_status")
             for key in targets
         )
         or before.get("official_coverage_accuracy")
