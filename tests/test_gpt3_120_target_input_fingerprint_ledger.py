@@ -212,11 +212,14 @@ def test_cli_generates_120_unscored_items_without_private_source_files(tmp_path)
 
 
 def _synthetic_published_suite_copy():
+    sizes = (("synthetic-lot16", 27), ("synthetic-laurel", 63),
+             ("synthetic-maryborough", 24), ("synthetic-q5446", 6))
     items = {
-        ("synthetic-project", str(i)): {
-            "state": "MATCHED_WITHIN_TOLERANCE" if i < 3 else "MISSED",
+        (project, str(i)): {
+            "state": "MATCHED_WITHIN_TOLERANCE"
+            if project == "synthetic-lot16" and i < 3 else "MISSED",
         }
-        for i in range(120)
+        for project, n in sizes for i in range(n)
     }
     official = {
         "matched_within_tolerance": 3,
@@ -224,8 +227,10 @@ def _synthetic_published_suite_copy():
         "coverage_accuracy": 3/120,
         "precision_adjusted_accuracy": 3/122,
         "project_results": [
-            {"matched_within_tolerance": 3 if i == 0 else 0,
-             "unsupported_extra": 2 if i == 0 else 0} for i in range(4)
+            {"project_id": project,
+             "matched_within_tolerance": 3 if i == 0 else 0,
+             "unsupported_extra": 2 if i == 0 else 0}
+            for i, (project, _) in enumerate(sizes)
         ],
     }
     report = {
@@ -250,11 +255,28 @@ def test_published_report_score_copy_must_match_exact_official_targets_and_extra
     lambda a,b,c: b.update(unsupported_extra=True),
     lambda a,b,c: b["project_results"][0].update(matched_within_tolerance=2),
     lambda a,b,c: b["project_results"][0].update(unsupported_extra=3),
-    lambda a,b,c: c[("synthetic-project", "0")].update(state="MISSED"),
+    lambda a,b,c: c[("synthetic-lot16", "0")].update(state="MISSED"),
     lambda a,b,c: a.update(coverage_accuracy=float("nan")),
 ])
 def test_published_score_copy_rejects_advertised_accuracy_without_evaluator_parity(tamper):
     report, official, rows = _synthetic_published_suite_copy()
     tamper(report, official, rows)
     with pytest.raises(ValueError):
+        ledger._require_published_suite_summary_parity(report, official, rows)
+
+
+def test_equal_suite_totals_cannot_hide_offsetting_two_project_match_errors():
+    report, official, rows = _synthetic_published_suite_copy()
+    # The official suite numerator remains 3 and every project numerator sum
+    # remains 3, but the claimed 1/2 redistribution is not actual source truth.
+    official["project_results"][0]["matched_within_tolerance"] = 1
+    official["project_results"][1]["matched_within_tolerance"] = 2
+    with pytest.raises(ValueError, match="project match claims"):
+        ledger._require_published_suite_summary_parity(report, official, rows)
+
+
+def test_published_project_result_duplicate_id_cannot_swap_four_project_scores():
+    report, official, rows = _synthetic_published_suite_copy()
+    official["project_results"][1]["project_id"] = official["project_results"][0]["project_id"]
+    with pytest.raises(ValueError, match="project match claims"):
         ledger._require_published_suite_summary_parity(report, official, rows)
