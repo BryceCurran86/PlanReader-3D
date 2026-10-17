@@ -210,6 +210,11 @@ def compare_opening_source_correspondence(original_packets,alternate_packets):
                 packet["physical_opening"]["source_sha256"],packet["page_id"],tuple(sorted(
             (r["observation_kind"],r["source_primitive_ref"],tuple(r["geometry"])) for r in rows)))
     old={p["packet_id"]:signature(p) for p in original_packets}
+    if len(old) != len(original_packets):
+        raise ValueError("duplicate original review packet ID")
+    alternate_ids=[p["packet_id"] for p in alternate_packets]
+    if len(set(alternate_ids)) != len(alternate_ids):
+        raise ValueError("duplicate alternate review packet ID")
     relationships=[]
     for new in alternate_packets:
         sig=signature(new)
