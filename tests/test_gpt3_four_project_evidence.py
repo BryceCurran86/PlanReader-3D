@@ -650,3 +650,37 @@ def test_unmapped_unknown_source_family_remains_unmapped_and_not_misclassified()
         mapped_refs=("different-source-identity",),
     )
     assert module._enforce_mapped_production_family_trade(*fixture) is None
+
+
+def test_missing_original_source_roles_are_source_manifest_owned_and_share_safe(tmp_path):
+    dirs = _dirs(tmp_path)
+    manifests = module.load_suite_manifests(module.FROZEN_ROOT)
+    lot16 = next(m for m in manifests if len(m.source_documents) == 2)
+    result = module.build_four_project_evidence_ledger(**dirs)
+    row = next(x for x in result["projects"] if x["project_id"] == lot16.project_id)
+    assert row["missing_original_source_document_count"] == 2
+    assert row["missing_original_source_document_roles"] == sorted(
+        doc.role for doc in lot16.source_documents
+    )
+    assert all("/" not in role and "\\" not in role
+               for role in row["missing_original_source_document_roles"])
+    assert row["source_sha_verified"] is False
+    assert row["exact_project_report"] is None
+    assert result["official_suite_result"] is None
+
+
+def test_one_supplied_source_does_not_claim_complete_twodoc_source_preflight(tmp_path):
+    dirs = _dirs(tmp_path)
+    manifests = module.load_suite_manifests(module.FROZEN_ROOT)
+    lot16 = next(m for m in manifests if len(m.source_documents) == 2)
+    project = dirs["source_dir"] / lot16.project_id
+    project.mkdir(parents=True)
+    supplied = lot16.source_documents[0]
+    (project / supplied.name).write_bytes(b"%PDF-test-unverified")
+    report = module.build_four_project_evidence_ledger(**dirs)
+    row = next(x for x in report["projects"] if x["project_id"] == lot16.project_id)
+    assert row["missing_original_source_document_count"] == 1
+    assert row["missing_original_source_document_roles"] == [lot16.source_documents[1].role]
+    assert row["source_sha_verified"] is False
+    assert row["publication_status"] == "UNAVAILABLE"
+    assert report["coverage_accuracy"] is None
