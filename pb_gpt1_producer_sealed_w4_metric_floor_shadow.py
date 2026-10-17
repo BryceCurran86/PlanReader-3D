@@ -67,12 +67,6 @@ def _cycle(value: object) -> tuple[tuple[float, float], ...] | None:
     if len(result) < 3 or len(set(result)) != len(result):
         return None
     return min(
-        tuple(result[i:] + result[:i])
-        for i in range(len(result))
-    ) if False else min(
-        tuple(result[(i+j)%len(result)] for j in range(len(result)))
-        for i in range(len(result))
-    ) if False else min(
         variant
         for i in range(len(result))
         for variant in (
@@ -96,9 +90,16 @@ def bind_producer_sealed_w4_metric_floor_shadow(
     """Re-read original producer W4 scope and fail on any duplicated owner."""
     def block(reason):
         return SourceSealedW4MetricFloorShadow(
-            EvidenceResolutionStatus.ABSTAINED,(reason,),
-            str(physical_room_id),"","","",(),(),"","","","","","",
-            None,None
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(reason,),
+            physical_room_id=str(physical_room_id),
+            canonical_room_id="",canonical_floor_id="",
+            source_room_face_record_id="",
+            original_source_face_boundary_wall_ids=(),
+            original_published_boundary_subedges=(),
+            source_sha256="",revision_id="",snapshot_id="",
+            decision_scope_id="",page_id="",viewport_id=None,
+            independent_candidate_metric_area_m2=None,
         )
     if (
         type(rooms) is not LiveCanonicalRoomComposition
