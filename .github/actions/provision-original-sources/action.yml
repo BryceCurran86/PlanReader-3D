@@ -1,0 +1,68 @@
+name: Provision original sources
+description: >
+  Place the owner/client original source PDFs in documents/sources, verified against the frozen source manifests
+  (name, size, SHA-256). Fails closed: a missing token, a missing file, a wrong size or a wrong digest fails the job.
+  See docs/engineering/ORIGINAL_SOURCE_PROVISIONING.md.
+
+inputs:
+  token:
+    description: Read-only token for the private companion repository (pass secrets.ORIGINAL_SOURCES_TOKEN).
+    required: false
+    default: ""
+  repository:
+    description: Private companion repository holding the originals, as owner/name (pass vars.ORIGINAL_SOURCES_REPOSITORY).
+    required: false
+    default: ""
+  ref:
+    description: Branch, tag or commit of the companion repository (pass vars.ORIGINAL_SOURCES_REF). Empty means its default branch.
+    required: false
+    default: ""
+  names:
+    description: Exact manifest file names to provision, one per line. Empty means every document in every frozen manifest.
+    required: false
+    default: ""
+  projects:
+    description: Frozen project ids to provision (used only when names is empty), one per line or comma separated.
+    required: false
+    default: ""
+  allow-missing:
+    description: >
+      Set to "true" only for a job that is able to run without the originals. The step then warns and sets
+      outputs.provisioned=false instead of failing. Default "false": fail closed.
+    required: false
+    default: "false"
+  source-path-prefix:
+    description: Directory inside the companion repository that mirrors documents/sources.
+    required: false
+    default: documents/sources
+
+outputs:
+  provisioned:
+    description: "'true' when every selected file was present or downloaded and verified."
+    value: ${{ steps.provision.outputs.provisioned }}
+
+runs:
+  using: composite
+  steps:
+    - id: provision
+      shell: bash
+      env:
+        ORIGINAL_SOURCES_TOKEN: ${{ inputs.token }}
+        PROVISION_REPOSITORY: ${{ inputs.repository }}
+        PROVISION_REF: ${{ inputs.ref }}
+        PROVISION_NAMES: ${{ inputs.names }}
+        PROVISION_PROJECTS: ${{ inputs.projects }}
+        PROVISION_ALLOW_MISSING: ${{ inputs.allow-missing }}
+        PROVISION_PREFIX: ${{ inputs.source-path-prefix }}
+      run: |
+        set -euo pipefail
+        if [ -n "${ORIGINAL_SOURCES_TOKEN}" ]; then
+          echo "::add-mask::${ORIGINAL_SOURCES_TOKEN}"
+        fi
+        python3 "${{ github.action_path }}/provision.py" \
+          --repository "${PROVISION_REPOSITORY}" \
+          --ref "${PROVISION_REF}" \
+          --names "${PROVISION_NAMES}" \
+          --projects "${PROVISION_PROJECTS}" \
+          --allow-missing "${PROVISION_ALLOW_MISSING}" \
+          --source-path-prefix "${PROVISION_PREFIX}"

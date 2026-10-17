@@ -1,0 +1,53 @@
+name: Provision original sources (smoke test)
+
+# Manual only. Run it once after creating the private companion repository and the ORIGINAL_SOURCES_TOKEN secret
+# (docs/engineering/ORIGINAL_SOURCE_PROVISIONING.md). It proves, on a real runner, that
+#   1. all ten frozen originals download and match their pinned size and SHA-256,
+#   2. the provisioned files are untracked and ignored (nothing can be committed by accident),
+#   3. without a token the same step fails closed instead of passing.
+# It uploads no artifact and prints no token.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provision every frozen original
+        id: provision
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+
+      - name: Check the result
+        run: |
+          set -euo pipefail
+          test "${{ steps.provision.outputs.provisioned }}" = "true"
+          count="$(find documents/sources -maxdepth 1 -type f -name '*.pdf' | wc -l)"
+          echo "provisioned PDFs: ${count}"
+          test "${count}" -eq 10
+          # the files must be untracked and git-ignored, so a stray `git add -A` cannot publish them
+          test -z "$(git status --porcelain)"
+          git check-ignore -q "documents/sources/$(ls documents/sources | head -n 1)"
+
+      - name: Prove the step fails closed without a token
+        env:
+          COMPANION_REPOSITORY: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+        run: |
+          set +e
+          ORIGINAL_SOURCES_TOKEN= python3 .github/actions/provision-original-sources/provision.py \
+            --destination "${RUNNER_TEMP}/empty-sources" \
+            --repository "${COMPANION_REPOSITORY}"
+          rc=$?
+          set -e
+          test "${rc}" -eq 1
+          test ! -e "${RUNNER_TEMP}/empty-sources" || test -z "$(ls -A "${RUNNER_TEMP}/empty-sources")"
