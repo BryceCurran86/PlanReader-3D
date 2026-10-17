@@ -106,7 +106,7 @@ def test_grid_full_cells_and_both_original_support_rail_axes():
     assert out.cut_panel_count_candidate==0
     assert out.total_panel_count_candidate==50
     assert out.coverage_area_m2==50
-    assert all(x>0 for x in out.grid_tee_length_m_by_axis)
+    assert out.grid_tee_length_m_by_axis == (45.0, 40.0)
 
 
 def test_figured_vertical_axis_joins_only_unique_finished_transverse_faces():
