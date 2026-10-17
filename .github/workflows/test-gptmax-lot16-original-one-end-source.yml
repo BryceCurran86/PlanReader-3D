@@ -1,11 +1,12 @@
 name: GPT MAX real original one-end G17 source footprint
 on:
   pull_request:
-    branches: [main, gptmax/strict-original-signed-retention-witness-20261017]
+    branches: [main, gptmax/strict-original-signed-retention-witness-20261017, gptmax/physical-g17-short-source-cell-extent-20261017]
     paths:
       - pb_raster_unchanged_band_segments.py
       - pb_source_visibility_authority.py
-      - tests/test_gptmax_lot16_original_one_end_source.py
+      - tests/test_gptmax_lot16_original_one_end_source.py tests/test_gptmax_lot16_original_2127_external_wall_ink.py
+      - tests/test_gptmax_lot16_original_2127_external_wall_ink.py
       - .github/workflows/test-gptmax-lot16-original-one-end-source.yml
   workflow_dispatch:
 permissions:
