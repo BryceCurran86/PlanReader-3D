@@ -130,7 +130,9 @@ def audit_gpt2_source_material_floor_handoff(
     if (type(original_finish_code) is not str or
             not original_finish_code or original_finish_code.strip()!=original_finish_code):
         return {**result,"first_failure":"original_finish_code_invalid"}
-    root=source_registration.get("original_source_sha256") if isinstance(source_registration,dict) else None
+    if type(source_registration) is not dict:
+        return {**result,"first_failure":"source_cross_sheet_registration_missing"}
+    root=source_registration.get("original_source_sha256")
     if (source_registration.get("status")!="original_source_ink_ring_translation_candidate"
             or root!=definition_selector.source_sha256
             or root!=occurrence_selector.source_sha256
