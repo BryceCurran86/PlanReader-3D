@@ -29,6 +29,7 @@ def _fake_ledger(*, published: bool = False, fingerprint: str = "a" * 64) -> dic
             "trade_category": trade, "unit": unit,
             "evaluation_state": "MISSED" if published else "NOT_EVALUATED",
             "produced_quantity_id": None,
+            "first_target_authority_failure": "NOT_DIAGNOSED",
             "project_evidence_status": ("PROJECT_VERIFIED" if published else "PROJECT_BLOCKED"),
             "project_gate_reasons": [] if published else ["not_scored"],
         })
@@ -298,3 +299,37 @@ def test_unpublished_delta_never_reports_unsupported_extra_or_precision_gain():
     assert result["before_unsupported_extra_count_from_evaluator"] is None
     assert result["after_unsupported_extra_count_from_evaluator"] is None
     assert result["precision_adjusted_percentage_point_change"] is None
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda x: x["items"][0].update(first_target_authority_failure="MISSED"),
+        lambda x: x["items"][0].update(first_target_authority_failure=None),
+        lambda x: x["items"][0].update(project_gate_reasons="gate-string"),
+        lambda x: x["items"][0].update(project_gate_reasons=[False]),
+        lambda x: x["items"][0].update(project_evidence_status=None),
+    ],
+)
+def test_target_inventory_cannot_invent_unpublished_source_authority(damage):
+    before = _fake_ledger()
+    new = _fake_ledger(fingerprint="f"*64)
+    damage(new)
+    with pytest.raises(ValueError, match="target row invents"):
+        delta.compare_postscore_ledgers(before, new)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda x: x["items"][0].update(project_evidence_status="UNAVAILABLE"),
+        lambda x: x["items"][0].update(project_gate_reasons=["fake-new-source-blocker"]),
+        lambda x: x["items"][0].update(owner_handoff_status="MEMORY_LIMIT"),
+    ],
+)
+def test_same_input_fingerprint_must_include_identical_source_gate_metadata(change):
+    old = _fake_ledger()
+    new = deepcopy(old)
+    change(new)
+    with pytest.raises(ValueError, match="same scoring fingerprint"):
+        delta.compare_postscore_ledgers(old, new)
