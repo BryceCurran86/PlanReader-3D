@@ -9,6 +9,12 @@ on:
       - ".github/workflows/test-gpt3-120-target-ledger.yml"
   workflow_dispatch:
 
+# Public standard runners are free; cancel only superseded runs of THIS
+# diagnostic workflow for the SAME PR, never a distinct PR or mandatory CI.
+concurrency:
+  group: test-gpt3-120-target-ledger-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   source-neutral-ledger:
     runs-on: ubuntu-latest
