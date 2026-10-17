@@ -29,6 +29,8 @@ def _fake_ledger(*, published: bool = False, fingerprint: str = "a" * 64) -> dic
             "trade_category": trade, "unit": unit,
             "evaluation_state": "MISSED" if published else "NOT_EVALUATED",
             "produced_quantity_id": None,
+            "project_evidence_status": ("PROJECT_VERIFIED" if published else "PROJECT_BLOCKED"),
+            "project_gate_reasons": [] if published else ["not_scored"],
         })
     return {
         "schema_version": "gpt3-120-target-ledger-v1",
@@ -245,3 +247,54 @@ def test_precision_adjusted_zero_winners_has_no_arbitrary_positive_value():
     new["official_precision_adjusted_accuracy"] = 0.01
     with pytest.raises(ValueError, match="consistent with item states"):
         delta.compare_postscore_ledgers(old, new)
+
+
+def test_published_two_targets_must_not_consume_same_signed_quantity_twice():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    _set_scored(new, 0, "MATCHED_WITHIN_TOLERANCE", "q-duplicate")
+    _set_scored(new, 1, "MATCHED_WITHIN_TOLERANCE", "q-duplicate")
+    with pytest.raises(ValueError, match="matched multiple frozen targets"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_published_target_cannot_hide_unverified_project_customer():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    new["items"][0]["project_evidence_status"] = "PROJECT_BLOCKED"
+    with pytest.raises(ValueError, match="source/customer-verified project"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_published_target_cannot_hide_project_level_source_failure():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    new["items"][0]["project_gate_reasons"] = ["source_sha_unverified"]
+    with pytest.raises(ValueError, match="unresolved project-level gates"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_frozen_postscore_delta_records_integer_extra_precision_separately():
+    old = _fake_ledger(published=True, fingerprint="a"*64)
+    new = _fake_ledger(published=True, fingerprint="b"*64)
+    _set_scored(old, 0, "MATCHED_WITHIN_TOLERANCE", "old-original-q")
+    _set_scored(new, 0, "MATCHED_WITHIN_TOLERANCE", "old-original-q")
+    _set_scored(new, 1, "MATCHED_WITHIN_TOLERANCE", "new-source-q")
+    old["official_precision_adjusted_accuracy"] = 1/125
+    new["official_precision_adjusted_accuracy"] = 2/124
+    result = delta.compare_postscore_ledgers(old, new)
+    assert result["before_unsupported_extra_count_from_evaluator"] == 5
+    assert result["after_unsupported_extra_count_from_evaluator"] == 4
+    assert result["net_additional_correct_items"] == 1
+    assert result["precision_adjusted_percentage_point_change"] == pytest.approx(
+        100*(2/124-1/125)
+    )
+
+
+def test_unpublished_delta_never_reports_unsupported_extra_or_precision_gain():
+    old = _fake_ledger()
+    new = _fake_ledger(fingerprint="f"*64)
+    result = delta.compare_postscore_ledgers(old, new)
+    assert result["before_unsupported_extra_count_from_evaluator"] is None
+    assert result["after_unsupported_extra_count_from_evaluator"] is None
+    assert result["precision_adjusted_percentage_point_change"] is None
