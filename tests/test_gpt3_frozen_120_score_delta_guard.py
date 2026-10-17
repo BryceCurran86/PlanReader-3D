@@ -259,6 +259,39 @@ def test_published_two_targets_must_not_consume_same_signed_quantity_twice():
         delta.compare_postscore_ledgers(old, new)
 
 
+@pytest.mark.parametrize("invalid_id", [123, True, "", " ", " q", "q ", "\tq"])
+def test_published_unresolved_quantity_identity_must_be_canonical_or_null(invalid_id):
+    old = _fake_ledger(published=True, fingerprint="a" * 64)
+    new = _fake_ledger(published=True, fingerprint="b" * 64)
+    new["items"][0].update(evaluation_state="UNRESOLVED", produced_quantity_id=invalid_id)
+    with pytest.raises(ValueError, match="unresolved target requires exact"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+@pytest.mark.parametrize("other_state", ["MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE", "UNRESOLVED"])
+def test_published_unresolved_cannot_reuse_other_target_quantity(other_state):
+    old = _fake_ledger(published=True, fingerprint="a" * 64)
+    new = _fake_ledger(published=True, fingerprint="b" * 64)
+    new["items"][0].update(evaluation_state="UNRESOLVED", produced_quantity_id="same-signed-q")
+    new["items"][1].update(evaluation_state=other_state, produced_quantity_id="same-signed-q")
+    if other_state == "MATCHED_WITHIN_TOLERANCE":
+        new["official_coverage_accuracy"] = 1 / 120
+        new["official_precision_adjusted_accuracy"] = 1 / 120
+    with pytest.raises(ValueError, match="matched multiple frozen targets"):
+        delta.compare_postscore_ledgers(old, new)
+
+
+def test_published_unresolved_can_hold_distinct_exact_id_or_no_id():
+    old = _fake_ledger(published=True, fingerprint="a" * 64)
+    new = _fake_ledger(published=True, fingerprint="b" * 64)
+    new["items"][0].update(evaluation_state="UNRESOLVED", produced_quantity_id="source-q-1")
+    new["items"][1].update(evaluation_state="UNRESOLVED", produced_quantity_id=None)
+    result = delta.compare_postscore_ledgers(old, new)
+    assert result["score_comparison_available"] is True
+    assert result["net_additional_correct_items"] == 0
+    assert result["issuer_authentication_proven_by_this_comparator"] is False
+
+
 def test_published_target_cannot_hide_unverified_project_customer():
     old = _fake_ledger(published=True, fingerprint="a"*64)
     new = _fake_ledger(published=True, fingerprint="b"*64)
