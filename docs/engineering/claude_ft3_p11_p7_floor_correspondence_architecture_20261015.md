@@ -106,7 +106,7 @@ OFFICE in detail (`canonical_floor_id physical_room_floor_surface_980b1ad9cbaebb
 with identical intervals (IoU 1.0). Inside the box: one room label, one finish mark (FT3, margin 54.8 pt), no other finish code;
 placing the same box at the frame-aligned or alias translation fails the wall test on two sides.
 
-![OFFICE box on both sheets](figures_ft3_p11_p7_office_box.png)
+The original OFFICE two-sheet overlay is retained privately with the owner-supplied plan; source-native dimension and geometry evidence remains described in this report.
 
 ### 3.4 Why each FT3 mark cannot yet be bound (all alternatives retained)
 
