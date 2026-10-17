@@ -31,3 +31,15 @@ def test_crossed_or_repeated_source_wall_ring_cannot_be_customer_sealed(ring):
 def test_polygon_invalid_numeric_source_does_not_become_customer_quantity():
     with pytest.raises(SourceClosedRunConflictError,match="polygon"):
         _source_bbox(_floor(((0,0),(float("nan"),2),(2,2),(0,2))))
+
+
+def test_original_two_vertex_closed_wall_trace_abstains_without_geos_exception():
+    # Three PDF points with only two distinct vertices are not a triangle.
+    with pytest.raises(SourceClosedRunConflictError, match="polygon"):
+        _source_bbox(_floor(((0,0),(12,0),(0,0))))
+
+
+def test_extreme_source_coordinate_does_not_escape_as_raw_geos_error():
+    giant=1e308
+    with pytest.raises(SourceClosedRunConflictError, match="polygon"):
+        _source_bbox(_floor(((0,0),(giant,giant),(giant,0),(0,giant))))
