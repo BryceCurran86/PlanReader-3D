@@ -218,6 +218,19 @@ def audit_gpt2_w4_material_to_gpt1(
         "original_ft_material_definition_id":
             material_result["original_material_definition_id"],
         "original_finish_code":material_result["original_finish_code"],
+        # FT2 tile is laid on the EXPOSED room floor, never underneath the
+        # walls. The printed 92mm wall widths bracket the already-clear
+        # room figure; neither add nor subtract them again. An internal
+        # finished-face W4 boundary must still be independently issued.
+        "floor_finish_measurement_boundary_basis":(
+            "inside_finished_wall_faces" if material_result["original_finish_code"]=="FT2"
+            else "material_specific_finished_face_authority_required"
+        ),
+        "FT2_exclude_wall_footprint":material_result["original_finish_code"]=="FT2",
+        "FT2_92mm_wall_widths_already_outside_clear_figures":(
+            material_result["original_finish_code"]=="FT2"
+        ),
+        "original_D13_threshold_finish_area_verified":False,
         "source_finish_mark_record_ids":
             material_result["original_mark_source_record_ids"],
         "source_original_floor_page":w4_result["original_floor_page"],
