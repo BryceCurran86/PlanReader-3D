@@ -1,0 +1,137 @@
+"""Independent A120 legend row source provenance; no false ceiling authority."""
+import hashlib
+from pathlib import Path
+
+import fitz
+import pytest
+
+from pb_source_material_semantic_authority import (
+    _TrustedTextWord,
+    _native_multirow_material_definition_candidates as source_rows,
+    SourceMaterialSemanticProducer,
+)
+from pb_source_visibility_authority import SourceVisibilityProducer
+
+PDF=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+
+
+def _word(*, block, line, index, literal, partition="original_source_p9"):
+    return _TrustedTextWord(
+        observation_id=f"native:{partition}:{block}:{line}:{index}",
+        page_id="9",source_partition_id=partition,
+        text=literal,bbox=(10.,20.,30.,40.),
+        block_no=block,line_no=line,word_no=index,
+        trusted=False,reason_codes=("original_text_unverified",),
+    )
+
+
+def _original_p9_legend_words(page):
+    return tuple(
+        _TrustedTextWord(
+            observation_id=f"original_p9:{w[5]}:{w[6]}:{w[7]}",
+            page_id="9",
+            source_partition_id="original_p9_native_partition",
+            text=str(w[4]),
+            bbox=tuple(float(x) for x in w[:4]),
+            block_no=int(w[5]),line_no=int(w[6]),word_no=int(w[7]),
+            trusted=False,reason_codes=("native_pdf_text_unverified",),
+        )
+        for w in page.get_text("words")
+        if int(w[5]) in (5,307,308)
+    )
+
+
+def test_original_a120_grid_true_ceiling_definition_has_separate_source_lines():
+    raw=PDF.read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==SHA
+    with fitz.open(stream=raw,filetype="pdf") as d:
+        candidates=source_rows(_original_p9_legend_words(d[8]))
+        rows={code:(owned,item) for _,_,owned,code,item in candidates}
+        assert "GRID" in rows
+        owned,item=rows["GRID"]
+        assert len({r.block_no for r in owned})==1
+        assert {r.line_no for r in owned}=={4,5}
+        assert owned[0].text=="GRID"
+        assert "VINYL FACED PLASTER TILE 600x1200" in item["description"]
+        assert item["code"]=="GRID"
+        assert {r.observation_id for r in owned}=={
+            f"original_p9:{r.block_no}:{r.line_no}:{r.word_no}" for r in owned
+        }
+        assert all(not r.trusted for r in owned)
+        assert "CLD3" not in rows  # Separate signage cladding schedule block.
+    assert hashlib.sha256(PDF.read_bytes()).hexdigest()==SHA
+
+
+def test_original_legend_multiple_code_lines_are_distinct_untrusted_source_rows():
+    with fitz.open(stream=PDF.read_bytes(),filetype="pdf") as d:
+        rows=source_rows(_original_p9_legend_words(d[8]))
+        codes=[code for _,_,_,code,_ in rows]
+        assert len(codes)==len(set(codes))
+        assert "GRID" in codes
+        assert "FPB" in codes
+        assert "WFPB" in codes
+        for _,_,words,code,_ in rows:
+            assert len({w.source_partition_id for w in words})==1
+            assert len({w.block_no for w in words})==1
+            assert words[0].text==code
+            assert not any(w.trusted for w in words)
+        assert all("original_p9:" in w.observation_id
+                   for _,_,words,_,_ in rows for w in words)
+
+
+def test_synthetic_two_code_lines_positive_and_cladding_not_ceiling():
+    words=tuple(
+        _word(block=3,line=i,index=j,literal=t)
+        for i,line in enumerate([
+            ["GRID"],["VINYL","FACED","PLASTER","TILE","600x1200"],
+            ["IPF1"],["13mm","FLUSH-SET","PLASTERBOARD","CEILING","LININGS"],
+            ["CLD3"],["BY","OTHERS","SIGNAGE","CLADDING"],
+        ])
+        for j,t in enumerate(line)
+    )
+    candidates=source_rows(words)
+    d={code:item for _,_,_,code,item in candidates}
+    assert "GRID" in d and "IPF1" in d
+    assert "CLD3" not in d
+    assert "600x1200" in d["GRID"]["description"]
+
+
+def test_duplicate_codes_and_broken_source_lineage_abstain():
+    duplicated=tuple(
+        _word(block=1,line=i,index=j,literal=t)
+        for i,line in enumerate([
+            ["GRID"],["VINYL","FACED","TILE"],["GRID"],
+            ["VINYL","FACED","TILE"],["IPF1"],["PLASTERBOARD","CEILING"],
+        ]) for j,t in enumerate(line)
+    )
+    result=source_rows(duplicated)
+    assert all(code!="GRID" for _,_,_,code,_ in result)
+
+    broken=(
+        _word(block=2,line=0,index=0,literal="GRID"),
+        _word(block=2,line=2,index=0,literal="VINYL"),
+        _word(block=2,line=3,index=0,literal="IPF1"),
+        _word(block=2,line=4,index=0,literal="PLASTERBOARD"),
+    )
+    assert all(code!="GRID" for _,_,_,code,_ in source_rows(broken))
+
+    duplicate_word_index=(
+        _word(block=5,line=0,index=0,literal="GRID"),
+        _word(block=5,line=1,index=0,literal="VINYL"),
+        _word(block=5,line=1,index=0,literal="FACED"),
+        _word(block=5,line=2,index=0,literal="IPF1"),
+        _word(block=5,line=3,index=0,literal="PLASTERBOARD"),
+    )
+    assert source_rows(duplicate_word_index)==()
+
+
+def test_new_material_producer_shadow_is_explicit_and_default_off():
+    src=SourceVisibilityProducer(producer_method="source-test",producer_version="1")
+    normal=SourceMaterialSemanticProducer.from_source_visibility_producer(src)
+    shadow=SourceMaterialSemanticProducer.for_native_multirow_material_shadow(src)
+    assert normal._source_native_multirow_material_shadow is False
+    assert shadow._source_native_multirow_material_shadow is True
+    assert normal.published_occurrence_results()==shadow.published_occurrence_results()==()
+    with pytest.raises(TypeError):
+        SourceMaterialSemanticProducer(src)
