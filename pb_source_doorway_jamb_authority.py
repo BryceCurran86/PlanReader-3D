@@ -37,6 +37,12 @@ def audit_native_source_doorway_jamb_chain(
     base={
         "original_primitive_paths":dict(zip(
             ("left_wall","right_wall","left_jamb","right_jamb"),rows)),
+        # dNNiMM path IDs restart on every source page. Keep the native PDF
+        # page scope explicit; this local geometric diagnostic does NOT verify
+        # the document SHA, revision, snapshot, or cross-sheet room identity.
+        "original_pdf_page_index_zero_based":page.number,
+        "original_document_sha_verified_here":False,
+        "cross_sheet_room_correspondence_proved":False,
         "native_ink_contact_proved":False,
         "original_structural_host_authenticated":False,
         "finished_wall_face_binding_proved":False,
