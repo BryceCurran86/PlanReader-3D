@@ -183,3 +183,35 @@ def test_missing_independent_figured_dimensional_witnesses_do_not_acquire_m2():
     )
     assert out.status is Status.ABSTAINED
     assert out.independent_candidate_metric_area_m2 is None
+
+
+def test_equal_area_sheared_polygon_cannot_borrow_original_source_wall_edges():
+    from shapely.geometry import Polygon
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    original=_metric_candidate(room)
+    highest_y=max(y for x,y in original.metric_vertices_mm)
+    sheared=tuple(
+        (x+100. if y==highest_y else x,y)
+        for x,y in original.metric_vertices_mm
+    )
+    assert abs(Polygon(sheared).area-Polygon(original.metric_vertices_mm).area)<1e-6
+    result=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,replace(original,metric_vertices_mm=sheared),
+        physical_room_id=room.physical_room_id,
+    )
+    assert result.status is Status.ABSTAINED
+    assert result.reason_codes==("original_w4_figured_metric_side_direction_conflict",)
+
+
+def test_two_source_edges_cannot_reuse_one_figured_side_identity():
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    original=_metric_candidate(room)
+    reused=(original.source_side_ids[0],)*len(original.source_side_ids)
+    result=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,replace(original,source_side_ids=reused),
+        physical_room_id=room.physical_room_id,
+    )
+    assert result.status is Status.ABSTAINED
+    assert result.reason_codes==("original_w4_independent_metric_source_side_identity_conflict",)
