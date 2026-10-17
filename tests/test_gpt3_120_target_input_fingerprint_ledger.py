@@ -209,3 +209,46 @@ def test_cli_generates_120_unscored_items_without_private_source_files(tmp_path)
         ledger.main([
             "--evidence-report", str(report_path), "--output", str(report_path),
         ])
+
+
+@pytest.mark.parametrize("stage_file", [
+    "au_qld_3laurel/outputs/production_summary.json",
+    "au_qld_3laurel/outputs/source_attempt_preflight.json",
+    "au_qld_maryborough_service_station/outputs/production_summary.json",
+    "au_qld_q5446_armstrong32_harlequin/outputs/production_summary.json",
+])
+def test_same_owner_process_status_cannot_hide_changed_original_unsealed_producer_stage(
+    tmp_path, stage_file,
+):
+    report = _blocked_report(tmp_path)
+    owner = _original_owner_receipt()
+    first = ledger.build_120_target_ledger(
+        report, owner_receipt=owner, producer_head=owner["repo_head"],
+    )
+    newer = deepcopy(owner)
+    changed = [row for row in newer["files"] if row["file"] == stage_file]
+    assert len(changed) == 1
+    changed[0]["share_safe_sha256"] = "d"*64 if changed[0]["share_safe_sha256"] != "d"*64 else "e"*64
+    after = ledger.build_120_target_ledger(
+        report, owner_receipt=newer, producer_head=owner["repo_head"],
+        previous_input_fingerprint=first["input_fingerprint"],
+    )
+    assert after["input_fingerprint"] != first["input_fingerprint"]
+    assert after["repeat_evaluation_advice"] == "CHANGED_INPUTS_OR_UNPROVEN_COMPARISON"
+    assert after["evaluated_target_count"] == 0
+
+
+def test_owner_suppressed_perf_only_metadata_does_not_change_stage_fingerprint(tmp_path):
+    report = _blocked_report(tmp_path)
+    owner = _original_owner_receipt()
+    first = ledger.build_120_target_ledger(
+        report, owner_receipt=owner, producer_head=owner["repo_head"],
+    )
+    newer = deepcopy(owner)
+    newer["project_handoffs"][0]["peak_private_mb_sampled"] = 999999
+    newer["project_handoffs"][0]["elapsed_s"] = 99999
+    second = ledger.build_120_target_ledger(
+        report, owner_receipt=newer, producer_head=owner["repo_head"],
+        previous_input_fingerprint=first["input_fingerprint"],
+    )
+    assert first["input_fingerprint"] == second["input_fingerprint"]
