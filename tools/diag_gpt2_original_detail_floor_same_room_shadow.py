@@ -71,6 +71,7 @@ def audit_original_detail_vs_main_source_room_candidate(
     original_detail_figure_face_receipt: dict,
     source_room_literal: str,
     original_door_code_literal: str,
+    original_detail_finish_code_literal: str,
 ) -> dict:
     """Original same-room candidates: wall axes, mark ownership, view type."""
     if (type(original_pdf) is not bytes
@@ -78,8 +79,10 @@ def audit_original_detail_vs_main_source_room_candidate(
         raise ValueError("original_same_room_source_sha_mismatch")
     if (type(source_room_literal) is not str or not source_room_literal
             or type(original_door_code_literal) is not str
-            or not original_door_code_literal):
-        raise ValueError("source_room_and_door_literals_required")
+            or not original_door_code_literal
+            or type(original_detail_finish_code_literal) is not str
+            or not original_detail_finish_code_literal):
+        raise ValueError("source_room_door_and_finish_literals_required")
     face=original_detail_figure_face_receipt
     if (type(face) is not dict or
             face.get("status")!="original_figured_face_source_rivals_only"
@@ -87,6 +90,16 @@ def audit_original_detail_vs_main_source_room_candidate(
             or face.get("original_detail_page_1_based")!=original_detail_page
             or not face.get("original_source_candidate_face_families")):
         raise ValueError("original_source_figured_face_rival_receipt_required")
+    # The source printed finish mark in the local PROP. <room> PLAN
+    # must independently agree with the specifically requested finish
+    # code; its meaning, glyph integrity and finished surface remain
+    # separately authenticated by the material producer.
+    raw_figure_marks=face.get("source_original_detail_figure_receipt",
+                              {}).get("original_room_and_finish_mark_candidates")
+    if raw_figure_marks is None:
+        raw_figure_marks=face.get("original_room_and_finish_mark_candidates")
+    # A pure native diagnostic may legitimately omit the wrapped original
+    # figured receipt; its source mark must then be checked directly below.
     floor_graph=audit_original_room_edge_graph(
         original_pdf,source_sha256=source_sha256,
         page_1_based=original_floor_page,
@@ -104,6 +117,16 @@ def audit_original_detail_vs_main_source_room_candidate(
         dw=_original_word(detail,original_detail_room_word_address)
         fd=_original_word(floor,original_floor_door_word_address)
         dd=_original_word(detail,original_detail_door_word_address)
+        # Inspect both independently printed native plan material and
+        # door labels, not only the page-level schedule code FT2.
+        marks_from_figure=raw_figure_marks
+        if (not isinstance(marks_from_figure,(tuple,list))
+                or len(marks_from_figure)!=2
+                or marks_from_figure[0].get("original_literal_untrusted")!=
+                    source_room_literal
+                or marks_from_figure[1].get("original_literal_untrusted")!=
+                    original_detail_finish_code_literal):
+            raise ValueError("original_detail_room_or_finish_mark_mismatch")
         labels=(
             (fw,source_room_literal,"floor_room"),
             (dw,source_room_literal,"detail_room"),
@@ -194,6 +217,8 @@ def audit_original_detail_vs_main_source_room_candidate(
         "original_page_rotations_degrees":original_rotations,
         "source_original_plan_caption_evidence":caption,
         "source_original_room_and_door_word_candidates":marks,
+        "original_detail_finish_literal_source_candidate":
+            original_detail_finish_code_literal,
         "original_source_plan_words_inside_own_physical_ink_candidates":True,
         "original_source_door_word_intersects_printed_top_boundary":True,
         "source_original_room_ink_graph":floor_graph,
