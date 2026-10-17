@@ -22,6 +22,8 @@ on:
       - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
       - "tests/test_gpt2_non_simple_original_face_ring_forensics.py"
       - "tests/test_gpt2_native_source_parent_w4_ancestry.py"
+      - "tools/diag_gpt2_abstained_face_counterparts.py"
+      - "tests/test_gpt2_abstained_face_counterparts.py"
       - "tools/diag_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_split_face_collinear_first_gates.py"
@@ -66,6 +68,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_directed_cycles.py
           PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_abstained_face_counterparts.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
         run: |
@@ -627,6 +630,9 @@ jobs:
               diagnose_original_w4_address_collisions,
               inspect_native_source_parent_w4_ancestry,
           )
+          from tools.diag_gpt2_abstained_face_counterparts import (
+              inspect_unpublished_source_face_counterparts,
+          )
           from tools.diag_gpt2_competing_grid_label_paths import (
               inspect_exact_grid_competing_label_paths,
           )
@@ -697,6 +703,35 @@ jobs:
                   )
                   for candidate in label_scope.split_face_candidates
               ]
+              # Read original withheld source faces BEFORE claiming an absent
+              # opposite-side physical owner. Additive first-gate receipts only.
+              for first_gate in split_component_gates:
+                  original_missing = tuple(first_gate.get(
+                      "original_external_grid_atomic_w2_first_gates_diagnostic_only",
+                      (),
+                  ) or ())
+                  first_gate["unpublished_original_source_face_counterpart_candidates"] = [
+                      inspect_unpublished_source_face_counterparts(
+                          room_scope,
+                          wall_id=entry["original_w4_wall_id"],
+                          atomic_edge=entry["original_atomic_wall_edge_pdf_pts"],
+                          known_component_face_ids=tuple(
+                              first_gate.get(
+                                  "connected_component_source_face_ids_diagnostic_only",
+                                  (),
+                              )
+                          ),
+                      )
+                      for entry in original_missing[:4]
+                  ]
+                  first_gate["counterpart_query_truncated"] = len(original_missing) > 4
+                  assert all(
+                      candidate["candidate_only_no_second_side_authority"]
+                      and not candidate["second_physical_source_face_authenticated"]
+                      for candidate in first_gate[
+                          "unpublished_original_source_face_counterpart_candidates"
+                      ]
+                  )
               # Existing exact two-sided W4 GRID source receipts explain why
               # a component connects multiple genuine native room labels.
               # No geometry, wall role, label owner or quantity is inferred.
