@@ -76,3 +76,19 @@ def test_source_projection_vs_true_contact_validation_is_fail_closed():
                 max_source_paths=100)
         assert r["status"]=="native_source_path_cap_exceeded"
         assert not r["figured_face_connection_authority"]
+
+def test_explicit_face_endpoint_projection_is_not_nearest_selection():
+    import fitz
+    from tools.diag_original_figured_extension_source_chain_shadow import (
+        audit_all_original_figured_extension_endpoint_hypotheses as all_hypotheses,
+    )
+    pdf=fitz.open(); page=pdf.new_page(width=400,height=400)
+    page.draw_line((100,20),(100,100),color=(0,0,0),width=.48)
+    page.draw_line((80,20),(160,20),color=(0,0,0),width=.48)
+    out=all_hypotheses(
+        page,original_dimension_line_id="d0i0",original_face_line_id="d1i0")
+    assert len(out["all_four_source_endpoint_hypotheses"])==4
+    assert not out["source_figure_endpoint_identity_elected"]
+    assert not out["original_figure_metric_or_room_width_issued"]
+    assert out["new_firm_quantities"]==0
+    pdf.close()
