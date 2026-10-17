@@ -1,0 +1,34 @@
+name: TEST GPT2 Private Original Source Public CI Separation
+
+on:
+  pull_request:
+    paths:
+      - tests/conftest.py
+      - tests/test_gpt2_public_ci_private_original_source_policy.py
+      - .github/workflows/ci.yml
+      - .github/workflows/test-gpt2-private-original-ci-policy.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  absent-private-source-synthetic-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install pytest
+      - name: Verify private PDF not present in public checkout
+        run: |
+          set -euo pipefail
+          test ! -f documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+      - name: Synthetic selection and adversarial source policy tests
+        env:
+          PYTHONPATH: .
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+        run: python -m pytest -q -rs tests/test_gpt2_public_ci_private_original_source_policy.py
