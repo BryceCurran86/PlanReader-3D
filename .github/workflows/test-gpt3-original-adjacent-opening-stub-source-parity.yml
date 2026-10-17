@@ -1,0 +1,59 @@
+name: GPT3 Original Lot16 Adjacent Opening Stub Source Parity
+on:
+  pull_request:
+    paths:
+      - pb_physical_opening_authority.py
+      - tests/test_physical_opening_candidate_structure_v1.py
+      - .github/workflows/test-gpt3-original-adjacent-opening-stub-source-parity.yml
+concurrency:
+  group: gpt3-adjacent-stub-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install test dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original source and scoped cache negative tests
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum --check
+          PYTHONPATH=. python -m pytest -q tests/test_physical_opening_candidate_structure_v1.py tests/test_semantic_conflict_diagnostic_v1.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - name: Exact source differential with unchanged original PDF and no historical 23-opening assertion
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          cp tools/diag_gptmax_source_authority_stages.py /tmp/gpt3-adjacent-source-retention.py
+          git worktree add --detach /tmp/gpt3-adjacent-gap-baseline '${{ github.event.pull_request.base.sha }}'
+          ( cd /tmp/gpt3-adjacent-gap-baseline &&
+            PYTHONPATH=. python -u /tmp/gpt3-adjacent-source-retention.py --pdf "$PDF" --page-id 3 --source-all-pages --output /tmp/gpt3-original-before.json )
+          PYTHONPATH=. python -u /tmp/gpt3-adjacent-source-retention.py --pdf "$PDF" --page-id 3 --source-all-pages --output /tmp/gpt3-original-after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('/tmp/gpt3-original-before.json').read_text())
+          after=json.loads(Path('/tmp/gpt3-original-after.json').read_text())
+          sha='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert before['source_sha256']==after['source_sha256']==sha
+          assert before['primitive_safety_cap']==after['primitive_safety_cap']==20_000
+          def normalize(value):
+              if isinstance(value,dict):
+                  return {k:(sorted(v) if k in ('void_reason_codes','opening_void_reason_codes') else normalize(v)) for k,v in value.items()}
+              if isinstance(value,list):
+                  return [normalize(v) for v in value]
+              return value
+          assert normalize(before)==normalize(after), 'original Lot16 opening/host/frame source authority changed'
+          assert 'quantities' not in after
+          print({'original_adjacent_stub_openings_hosts_frames_unchanged':True,'summary':after['summary']})
+          PY
