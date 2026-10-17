@@ -28,13 +28,14 @@ def test_original_office_d15_exact_jamb_chain_not_physical_room_or_door_count():
 
 
 def _fixture(*,right_jamb_x=150.,gray=False,right_wall_start=150.,
-             right_wall_width=.48,right_jamb_width=.96):
+             right_wall_width=.48,right_jamb_width=.96, left_wall_opacity=1.,
+             right_wall_opacity=1., left_jamb_opacity=1.,right_jamb_opacity=1.):
     doc=fitz.open()
     page=doc.new_page(width=400,height=300)
-    page.draw_line((20,100),(50,100),color=(0,0,0),width=.48)
-    page.draw_line((right_wall_start,100),(280,100),color=(0,0,0),width=right_wall_width)
-    page.draw_line((50,92),(50,100),color=(.5,.5,.5) if gray else (0,0,0),width=.96)
-    page.draw_line((right_jamb_x,92),(right_jamb_x,100),color=(0,0,0),width=right_jamb_width)
+    page.draw_line((20,100),(50,100),color=(0,0,0),width=.48,stroke_opacity=left_wall_opacity)
+    page.draw_line((right_wall_start,100),(280,100),color=(0,0,0),width=right_wall_width,stroke_opacity=right_wall_opacity)
+    page.draw_line((50,92),(50,100),color=(.5,.5,.5) if gray else (0,0,0),width=.96,stroke_opacity=left_jamb_opacity)
+    page.draw_line((right_jamb_x,92),(right_jamb_x,100),color=(0,0,0),width=right_jamb_width,stroke_opacity=right_jamb_opacity)
     return doc,page
 
 
@@ -90,3 +91,18 @@ def test_original_pwd_d13_independent_native_jamb_source_chain():
         assert r["source_door_schedule_size_binding_granted"] is False
         assert r["source_physical_floor_ring_closed"] is False
         assert r["new_quantities"]==0
+
+@pytest.mark.parametrize("kwargs,reason", [
+    ({"left_wall_opacity":0.}, "invisible_or_invalid_original_stroke_opacity"),
+    ({"right_jamb_opacity":0.}, "invisible_or_invalid_original_stroke_opacity"),
+    ({"right_wall_opacity":.5}, "competing_original_stroke_opacity_roles"),
+    ({"right_jamb_opacity":.5}, "competing_original_stroke_opacity_roles"),
+])
+def test_source_black_but_invisible_or_unequally_painted_doorways_abstain(kwargs, reason):
+    doc, page = _fixture(**kwargs)
+    evidence = audit(page, left_wall_id="d0i0", right_wall_id="d1i0",
+                     left_jamb_id="d2i0", right_jamb_id="d3i0")
+    assert evidence["status"] == reason
+    assert evidence["new_quantities"] == 0
+    assert not evidence["native_ink_contact_proved"]
+    doc.close()
