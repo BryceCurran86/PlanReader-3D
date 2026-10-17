@@ -18,6 +18,7 @@ from pb_gpt1_original_material_producer_finish_bridge_shadow import (
 )
 from pb_gpt1_source_producer_floor_finish_pipeline_shadow import (
     diagnose_source_producer_floor_finish_handoff_shadow,
+    reconcile_source_producer_finish_batch_shadow,
 )
 from test_gpt1_producer_figured_area_ring_bridge_shadow import (
     original_ring,original_producer_area,original_canonical_floor,
@@ -158,3 +159,53 @@ def test_a_missing_room_issuer_produces_first_failure_not_an_invented_number():
     assert out.first_failure_code == (
         "source_producer_figured_ring_inputs_unavailable"
     )
+
+
+def test_one_original_ft_plan_occurrence_cannot_be_used_for_two_rooms():
+    first=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    assert first.status is Status.CANDIDATE
+    second=replace(
+        first,physical_room_id="another-physical-room",
+        source_room_face_record_id="another-source-face",
+        canonical_floor_id="another-floor",
+        existing_room_area_quantity_id="another-original-signed-room-area",
+    )
+    for order in ((first,second),(second,first)):
+        batch=reconcile_source_producer_finish_batch_shadow(order)
+        assert batch.status is Status.CONFLICT
+        assert len(batch.records)==2
+        assert all(r.status is Status.ABSTAINED for r in batch.records)
+        assert all(r.candidate_finish_area_m2 is None for r in batch.records)
+        assert batch.quarantined_physical_room_ids==(
+            "another-physical-room","physical-room-one",
+        )
+
+
+def test_one_source_signed_area_cannot_fund_two_different_ft_occurrences():
+    first=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    second=replace(
+        first,physical_room_id="another-physical-room",
+        source_room_face_record_id="another-source-face",
+        canonical_floor_id="another-floor",
+        source_finish_occurrence_id="independently-painted-mark",
+    )
+    batch=reconcile_source_producer_finish_batch_shadow((first,second))
+    assert batch.status is Status.CONFLICT
+    assert all(r.status is Status.ABSTAINED for r in batch.records)
+
+
+def test_distinct_original_area_and_material_receipts_keep_independent_candidates():
+    first=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    second=replace(
+        first,physical_room_id="another-physical-room",
+        source_room_face_record_id="another-source-face",
+        canonical_floor_id="another-floor",
+        existing_room_area_quantity_id="another-original-signed-room-area",
+        source_finish_occurrence_id="independently-painted-mark",
+    )
+    batch=reconcile_source_producer_finish_batch_shadow((second,first))
+    assert batch.status is Status.CANDIDATE
+    assert len(batch.records)==2
+    assert all(r.status is Status.CANDIDATE for r in batch.records)
+    assert batch.quarantined_physical_room_ids==()
+    assert batch.diagnostic_only
