@@ -744,3 +744,29 @@ def test_owner_diagnostic_cannot_replace_historical_lot16_signed_customer_rows()
             "--receipt-root", str(_ROOT), "--output", str(original),
         ])
     assert _sha(original) == digest_before
+
+
+def test_running_archived_receipt_assembler_import_may_leave_untrusted_bytecode(tmp_path):
+    root = _copy(tmp_path)
+    cache = root / "__pycache__"
+    cache.mkdir()
+    pyc = cache / "assemble_receipts.cpython-313.pyc"
+    pyc.write_bytes(b"synthetic-transient-interpreter-bytecode-not-source-evidence")
+    result = audit.verify_owner_four_job_receipts(root)
+    assert result["independently_verified_sha256sums_entries"] == 31
+    assert result["official_publication_status"] == "UNPUBLISHED"
+    assert result["independently_rehashed_original_private_pdf_bytes"] is False
+
+
+@pytest.mark.parametrize("filename", [
+    "__pycache__/private_source.cpython-313.pyc",
+    "__pycache__/assemble_receipts.cpython-313.pdf",
+    "unknown_unindexed_original.pdf",
+])
+def test_transient_compiler_exception_never_bypasses_real_unindexed_source(tmp_path, filename):
+    root = _copy(tmp_path)
+    target = root / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"synthetic-competing-original-data")
+    with pytest.raises(ValueError, match="unindexed artifact"):
+        audit.verify_owner_four_job_receipts(root)
