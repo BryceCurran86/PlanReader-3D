@@ -102,6 +102,21 @@ def _require_published_suite_summary_parity(
         raise ValueError("published exact 120 target result universe incomplete")
     matched = sum(row["state"] == "MATCHED_WITHIN_TOLERANCE"
                   for row in item_results.values())
+    # The original evaluator consumes one produced quantity at most once.
+    # Even an UNRESOLVED row may carry an exact ID when its value is None;
+    # no two frozen targets may claim the same identified sealed quantity.
+    source_ids = []
+    for row in item_results.values():
+        state, qid = row["state"], row.get("produced_quantity_id")
+        if state in ("MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"):
+            if type(qid) is not str or not qid or qid != qid.strip():
+                raise ValueError("published matched target lacks canonical produced identity")
+        elif qid is not None and (type(qid) is not str or not qid or qid != qid.strip()):
+            raise ValueError("published unresolved target has invalid produced identity")
+        if qid is not None:
+            source_ids.append(qid)
+    if len(source_ids) != len(set(source_ids)):
+        raise ValueError("published target quantity identity reused across frozen items")
     extras = official.get("unsupported_extra")
     if type(extras) is not int or extras < 0:
         raise ValueError("published evaluator unsupported-extra count malformed")
