@@ -25,6 +25,27 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _require_exact_ceiling_finish_semantic(
+    *,
+    semantic_key: object,
+    canonical_ceiling_id: str,
+    finish_code: object,
+    semantic_finish: object,
+) -> None:
+    if (
+        type(semantic_key) is not str
+        or type(finish_code) is not str or not finish_code
+        or finish_code != finish_code.strip()
+        or type(semantic_finish) is not str or not semantic_finish
+        or semantic_finish != semantic_finish.strip()
+        or semantic_key
+        != f"ceiling_lining:{canonical_ceiling_id}:{finish_code}:{semantic_finish}"
+    ):
+        raise SourceClosedRunConflictError(
+            "ceiling quantity semantic key conflicts with exact source finish"
+        )
+
+
 def build_live_ceiling_lining_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -124,6 +145,16 @@ def build_live_ceiling_lining_source_traces(
         figured_ids = tuple(sorted(original_figured_ids))
 
         canonical_ceiling_id = _clean(quantity.input_entity_ids[0])
+        # A finish-specific canonical ceiling must retain the original
+        # printed code AND semantic material at commercial publication.
+        # Rebinding a source-supported GRID quantity as IPF1 or another
+        # ceiling, even with identical m², is not independent source proof.
+        _require_exact_ceiling_finish_semantic(
+            semantic_key=quantity.semantic_key,
+            canonical_ceiling_id=canonical_ceiling_id,
+            finish_code=metadata.get("finish_code"),
+            semantic_finish=metadata.get("semantic_finish"),
+        )
         ceiling = ceilings.get(canonical_ceiling_id)
         if ceiling is None:
             raise SourceClosedRunConflictError(
