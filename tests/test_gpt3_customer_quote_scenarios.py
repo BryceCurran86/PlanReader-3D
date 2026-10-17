@@ -1,0 +1,73 @@
+"""Price scenarios are actual client rate alternatives, never benchmark scores."""
+from copy import deepcopy
+
+import pytest
+
+from tools import gpt3_customer_quote_scenarios as scenarios
+from tests.test_gpt3_verified_customer_quote import fixture
+
+
+def bundle(rate_book):
+    budget = deepcopy(rate_book)
+    premium = deepcopy(rate_book)
+    premium["rates"][0]["material"] = "200.00"
+    return {
+        "schema_version": "gpt3-client-scenarios-v1",
+        "baseline": "Budget",
+        "scenarios": [
+            {"name": "Premium", "client_rates": premium},
+            {"name": "Budget", "client_rates": budget},
+        ],
+        "budgets": {"Budget": "100000", "Premium": "100000"},
+    }
+
+
+def test_genuine_archived_eight_are_repriced_as_two_alternatives():
+    signed, rows, rates = fixture()
+    result = scenarios.build_scenario_comparison(signed, rows, bundle(rates))
+    assert result["publication_status"] == "SCENARIOS_PRICED"
+    assert result["official_four_project_accuracy"] is None
+    assert len(result["comparison"]) == 2
+    budget, premium = result["comparison"]
+    assert budget["scenario"] == "Budget" and premium["scenario"] == "Premium"
+    assert budget["total_vs_baseline"] == "0.00"
+    assert float(premium["total_vs_baseline"]) > 0
+    assert len(premium["rate_only_changed_items"]) == 8
+    assert all(row["budget_remaining"] is not None for row in result["comparison"])
+    assert "scenario" in scenarios.scenario_csv(result)
+
+
+def test_unpriced_alternative_does_not_become_zero_or_budget_win():
+    signed, rows, rates = fixture()
+    inputs = bundle(rates)
+    inputs["scenarios"][0]["client_rates"]["rates"] = []
+    result = scenarios.build_scenario_comparison(signed, rows, inputs)
+    assert result["publication_status"] == "SCENARIOS_INCOMPLETE"
+    premium = result["comparison"][1]
+    assert premium["total"] is None
+    assert premium["budget_remaining"] is None
+    assert result["supplier_rate_requests"][0]["family"] == "opening_area"
+    assert len(result["supplier_rate_requests"][0]["unpriced_quantity_ids"]) == 8
+
+
+def test_scenario_cannot_switch_to_a_different_project_or_currency():
+    signed, rows, rates = fixture()
+    inputs = bundle(rates)
+    inputs["scenarios"][0]["client_rates"]["currency"] = "USD"
+    with pytest.raises(ValueError, match="one currency"):
+        scenarios.build_scenario_comparison(signed, rows, inputs)
+    inputs = bundle(rates)
+    inputs["scenarios"][0]["client_rates"]["project_id"] = "au_qld_maryborough_service_station"
+    with pytest.raises(ValueError, match="does not match"):
+        scenarios.build_scenario_comparison(signed, rows, inputs)
+
+
+def test_budget_must_be_exact_decimal_and_names_owned():
+    signed, rows, rates = fixture()
+    inputs = bundle(rates)
+    inputs["budgets"] = {"Ghost": "100"}
+    with pytest.raises(ValueError, match="baseline/budget"):
+        scenarios.build_scenario_comparison(signed, rows, inputs)
+    inputs["budgets"] = {"Budget": "NaN"}
+    with pytest.raises(ValueError, match="finite"):
+        scenarios.build_scenario_comparison(signed, rows, inputs)
