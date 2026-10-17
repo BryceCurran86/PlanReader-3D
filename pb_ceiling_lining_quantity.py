@@ -127,6 +127,11 @@ def iter_explicit_ceiling_finish_matches(page_text: str) -> tuple[str, ...]:
     return tuple(matches)
 
 
+def _original_page_no_or_none(page_no: object) -> Optional[int]:
+    """Do not serialize a guessed/truncated original source page."""
+    return page_no if type(page_no) is int and page_no > 0 else None
+
+
 def _base_context_blockers(
     *,
     context: ProviderContext,
@@ -154,10 +159,16 @@ def _base_context_blockers(
         ViewportResolutionStatus.DERIVED,
     ):
         blockers.append("viewport_unresolved")
-    if int(page_no) not in context.trusted_page_numbers():
+    # A page number is an original source scope, not an alias that may
+    # be rounded down or converted from True, a string or a floating value.
+    if type(page_no) is not int or page_no <= 0:
+        blockers.append("page_not_owned")
+    elif page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
     mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and int(mapped_page) != int(page_no):
+    if mapped_page is not None and (
+        type(mapped_page) is not int or mapped_page != page_no
+    ):
         blockers.append("viewport_page_mismatch")
     return tuple(dict.fromkeys(blockers))
 
@@ -255,7 +266,7 @@ def resolve_ceiling_finish_entity(
             metadata={
                 "scope_entity_id": scope,
                 "viewport_id": viewport.viewport_id,
-                "page_no": int(page_no),
+                "page_no": _original_page_no_or_none(page_no),
             },
         )
 
@@ -271,7 +282,7 @@ def resolve_ceiling_finish_entity(
             metadata={
                 "scope_entity_id": scope,
                 "viewport_id": viewport.viewport_id,
-                "page_no": int(page_no),
+                "page_no": _original_page_no_or_none(page_no),
                 "finish_descriptors": tuple(sorted(descriptors)),
             },
         )
@@ -288,7 +299,7 @@ def resolve_ceiling_finish_entity(
             metadata={
                 "scope_entity_id": scope,
                 "viewport_id": viewport.viewport_id,
-                "page_no": int(page_no),
+                "page_no": _original_page_no_or_none(page_no),
                 "finish_descriptor": descriptor,
                 "source_methods": tuple(sorted(source_methods)),
             },
@@ -304,7 +315,7 @@ def resolve_ceiling_finish_entity(
         metadata={
             "scope_entity_id": scope,
             "viewport_id": viewport.viewport_id,
-            "page_no": int(page_no),
+            "page_no": _original_page_no_or_none(page_no),
             "finish_descriptor": descriptor,
             "source_methods": tuple(sorted(source_methods)),
         },
@@ -401,21 +412,13 @@ def _validate_area_quantity(
     if _clean(meta.get("viewport_id")) != viewport.viewport_id:
         blockers.append("upstream_area_coordinate_frame_mismatch")
     raw_area_page = meta.get("page_no")
-    if type(raw_area_page) not in (int, str) or (
-        isinstance(raw_area_page, str) and (
-            not raw_area_page or raw_area_page != raw_area_page.strip()
-            or not raw_area_page.isdecimal()
-        )
-    ):
+    # Upstream area metadata is issued by an original page-scoped quantity
+    # producer, never by a display string or a numerically coerced page alias.
+    # This protects the already-FIRM area input to provisional ceiling m².
+    if type(raw_area_page) is not int or raw_area_page <= 0:
         blockers.append("upstream_area_page_unbound")
-    else:
-        try:
-            area_page = int(raw_area_page)
-        except (TypeError, ValueError, OverflowError):
-            blockers.append("upstream_area_page_unbound")
-        else:
-            if area_page != int(page_no):
-                blockers.append("upstream_area_page_mismatch")
+    elif raw_area_page != _original_page_no_or_none(page_no):
+        blockers.append("upstream_area_page_mismatch")
 
     blockers.extend(
         _base_context_blockers(
@@ -447,7 +450,7 @@ def _abstention(
         "source_sha256": context.source_sha256,
         "revision_id": context.current_revision_id,
         "viewport_id": viewport.viewport_id,
-        "page_no": int(page_no),
+        "page_no": _original_page_no_or_none(page_no),
         "area_quantity_id": area_quantity.quantity_id if area_quantity is not None else None,
         "finish_entity_id": finish_entity.candidate_entity_id if finish_entity is not None else None,
         "blockers": list(reasons),
@@ -483,7 +486,7 @@ def _abstention(
         metadata={
             "source_sha256": context.source_sha256,
             "revision_id": context.current_revision_id,
-            "page_no": int(page_no),
+            "page_no": _original_page_no_or_none(page_no),
             "viewport_id": viewport.viewport_id,
             "shadow_only": True,
             "commercial_projection_allowed": False,
@@ -574,7 +577,7 @@ def build_ceiling_lining_quantity(
         "finish_entity_id": finish_entity.candidate_entity_id,
         "source_sha256": context.source_sha256,
         "revision_id": context.current_revision_id,
-        "page_no": int(page_no),
+        "page_no": _original_page_no_or_none(page_no),
         "viewport_id": viewport.viewport_id,
     }
     return QuantityEvidence(
@@ -602,7 +605,7 @@ def build_ceiling_lining_quantity(
         metadata={
             "source_sha256": context.source_sha256,
             "revision_id": context.current_revision_id,
-            "page_no": int(page_no),
+            "page_no": _original_page_no_or_none(page_no),
             "viewport_id": viewport.viewport_id,
             "scope_entity_id": scope,
             "upstream_area_quantity_id": area_quantity.quantity_id,
