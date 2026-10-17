@@ -157,6 +157,23 @@ def test_project_gate_output_never_overwrites_frozen_reference(tmp_path, monkeyp
     assert frozen_reference.read_bytes() == b"unchanged gold"
 
 
+def test_project_gate_rejects_protected_input_before_source_read(tmp_path, monkeypatch):
+    manifest, original, sealed, identity, _sha = _fixtures(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        module, "build_original_byte_gated_project_report",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("source must not be read")),
+    )
+    for protected in (manifest, original, sealed, identity):
+        before = protected.read_bytes()
+        with pytest.raises(ValueError, match="may not overwrite protected evidence"):
+            module.main([
+                "--manifest", str(manifest), "--source", str(original),
+                "--sealed-run", str(sealed), "--identity-map", str(identity),
+                "--output", str(protected),
+            ])
+        assert protected.read_bytes() == before
+
+
 @pytest.mark.parametrize("side", ["sealed", "identity"])
 def test_partial_signed_source_envelope_cannot_pass_original_byte_gate(tmp_path, monkeypatch, side):
     manifest, original, sealed, identity, _sha = _fixtures(
@@ -407,3 +424,59 @@ def test_project_only_strict_json_accepts_normal_nested_original_source_receipt(
     assert module._strict_original_json_object(sealed)["source_sha256s"] == [sha]
     assert module._strict_original_json_object(identity)["source_sha256s"] == [sha]
     assert not module._strict_original_json_object(sealed).get("quantities")
+
+
+def test_exact_project_cli_rejects_overwriting_unrelated_json_before_pdf_io(tmp_path, monkeypatch):
+    output = tmp_path / "source_customer.json"
+    data = '{"customer":"signed-original"}'
+    output.write_text(data, encoding="utf-8")
+    # If the output is unsafe, not a single original PDF or sealed file is read.
+    monkeypatch.setattr(module, "build_original_byte_gated_project_report",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("must not run")))
+    args = [
+        "--manifest", str(tmp_path/"manifest.json"),
+        "--sealed-run", str(tmp_path/"source_sealed_run.json"),
+        "--identity-map", str(tmp_path/"map.json"),
+        "--source", str(tmp_path/"private-source.pdf"),
+        "--output", str(output),
+    ]
+    with pytest.raises(ValueError, match="cannot overwrite unrelated evidence"):
+        module.main(args)
+    assert output.read_text(encoding="utf-8") == data
+
+
+def test_exact_project_cli_rejects_nonreport_json_and_symlink_destinations(tmp_path, monkeypatch):
+    data = tmp_path/"binary"
+    data.write_bytes(b"unchanged-binary-source")
+    monkeypatch.setattr(module, "build_original_byte_gated_project_report",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("must not run")))
+    args = [
+        "--manifest", str(tmp_path/"manifest.json"),
+        "--sealed-run", str(tmp_path/"source_sealed_run.json"),
+        "--identity-map", str(tmp_path/"map.json"),
+        "--source", str(tmp_path/"original.pdf"),
+    ]
+    with pytest.raises(ValueError, match="cannot overwrite unrelated evidence"):
+        module.main([*args, "--output", str(data)])
+    link = tmp_path/"output.json"
+    link.symlink_to(data)
+    with pytest.raises(ValueError, match="cannot follow output symlinks"):
+        module.main([*args, "--output", str(link)])
+    assert data.read_bytes() == b"unchanged-binary-source"
+
+
+def test_exact_project_cli_does_not_replace_partial_lookalike_diagnostic(tmp_path, monkeypatch):
+    output = tmp_path/"lookalike.json"
+    content = '{"project_id":"synthetic","publication_status":"UNPUBLISHED","score_claim":false}'
+    output.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(module, "build_original_byte_gated_project_report",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("must not run")))
+    args = [
+        "--manifest", str(tmp_path/"manifest.json"),
+        "--sealed-run", str(tmp_path/"sealed.json"),
+        "--identity-map", str(tmp_path/"identity.json"),
+        "--source", str(tmp_path/"original.pdf"), "--output", str(output),
+    ]
+    with pytest.raises(ValueError, match="cannot overwrite unrelated evidence"):
+        module.main(args)
+    assert output.read_text(encoding="utf-8") == content

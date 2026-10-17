@@ -267,6 +267,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    # Protected originals and the immutable frozen tree must reject with the
+    # pre-existing gate even when their contents are not diagnostic JSON.
+    protected_inputs = (args.manifest, args.sealed_run, args.identity_map, *args.source)
+    if (args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
+            or any(args.output.resolve() == p.resolve() for p in protected_inputs)):
+        raise ValueError("original-byte project report may not overwrite protected evidence")
+    # Validate output *before* reading potentially huge original PDF bytes.
+    # A diagnostic must never replace an unrelated source or customer artifact.
+    if args.output.is_symlink():
+        raise ValueError("original-byte project report cannot follow output symlinks")
+    if args.output.exists():
+        try:
+            existing = _strict_original_json_object(args.output)
+        except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            raise ValueError("original-byte project report cannot overwrite unrelated evidence") from exc
+        required_report_fields = {
+            "project_id", "publication_status", "score_claim",
+            "reconciliation_complete", "original_source_sha_verified",
+            "source_sha256s", "reason_codes", "project_evaluation",
+        }
+        if (
+            not required_report_fields.issubset(existing)
+            or type(existing.get("project_id")) is not str
+            or existing.get("publication_status") not in (
+                "PUBLISHED", "UNPUBLISHED",
+                "PROJECT_ONLY_FOUR_PROJECT_SUITE_UNPUBLISHED",
+            )
+            or type(existing.get("score_claim")) is not bool
+            or type(existing.get("source_sha256s")) is not list
+        ):
+            raise ValueError("original-byte project report cannot overwrite unrelated evidence")
     report = build_original_byte_gated_project_report(
         manifest_path=args.manifest, sealed_run_path=args.sealed_run,
         identity_map_path=args.identity_map, original_files=args.source,
