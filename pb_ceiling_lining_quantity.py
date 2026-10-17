@@ -231,6 +231,17 @@ def resolve_ceiling_finish_entity(
             EvidenceResolutionStatus.ABSTAINED,
         ):
             blockers.append("finish_evidence_already_blocked")
+        # A copied status/string must never carry nonfinite, boolean or
+        # out-of-range source confidence into a positive ceiling scope.
+        try:
+            confidence = (
+                float(atom.confidence)
+                if type(atom.confidence) in (int, float) else float("nan")
+            )
+        except (TypeError, ValueError, OverflowError):
+            confidence = float("nan")
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            blockers.append("finish_source_confidence_invalid")
 
         descriptor = _finish_descriptor(atom.raw_text)
         if descriptor is None:
