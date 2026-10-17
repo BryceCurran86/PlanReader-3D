@@ -31,7 +31,7 @@ def _original_ceiling_simple_bbox(
     quantity_id: str,
 ) -> tuple[float, float, float, float]:
     """Negative geometry veto only; no ceil finish or source area derived."""
-    if len(points) < 3 or any(
+    if type(points) not in (tuple, list) or len(points) < 3 or any(
         type(p) not in (tuple, list) or len(p) != 2 or
         any(type(v) not in (int, float) or not math.isfinite(float(v)) for v in p)
         for p in points
