@@ -119,6 +119,24 @@ def _context_matches(
     viewport: ViewportEvidence,
     page_no: int,
 ) -> bool:
+    # The exact page and revision scope must be established *before* any
+    # canonical room receives CORROBORATED status. int(1.9), bool and a
+    # stale context are not independent page/revision evidence.
+    if (
+        type(page_no) is not int or page_no <= 0
+        or type(room_index.page_no) is not int
+        or room_index.page_no <= 0
+        or not context.revision_id or not context.current_revision_id
+        or context.revision_id != context.current_revision_id
+        or page_no not in context.trusted_page_numbers()
+        or viewport.viewport_id not in context.trusted_viewport_ids()
+    ):
+        return False
+    mapped_page = context.page_for_viewport(viewport.viewport_id)
+    if mapped_page is not None and mapped_page != page_no:
+        return False
+    if document.page_ids and viewport.page_id not in document.page_ids:
+        return False
     if room_index.document_id != context.document_id:
         return False
     if document.document_id != context.document_id:
@@ -133,7 +151,7 @@ def _context_matches(
         return False
     if room_index.page_id != viewport.page_id:
         return False
-    if int(room_index.page_no) != int(page_no):
+    if room_index.page_no != page_no:
         return False
     return True
 
