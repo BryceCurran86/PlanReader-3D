@@ -166,6 +166,19 @@ def _source_bbox(
         raise SourceClosedRunConflictError(
             f"canonical floor polygon is degenerate: {floor.canonical_floor_id}"
         )
+    # A positive shoelace answer does not prove original enclosing wall ink:
+    # a bowtie/self-crossing floor can still have an arbitrary positive m².
+    # Veto only. Do not derive a new polygon, source role, or metric value.
+    from shapely.geometry import Polygon
+    ring = tuple(zip(xs, ys))
+    if (
+        len(set(ring)) != len(ring)
+        or not Polygon(ring).is_valid
+        or not Polygon(ring).exterior.is_simple
+    ):
+        raise SourceClosedRunConflictError(
+            f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
+        )
     return bbox
 
 
