@@ -80,6 +80,13 @@ def audit_native_source_doorway_jamb_chain(
         return {**base,"status":"competing_nonstructural_paint_ink"}
     if not all(row["original_stroke_width_pdf_pt"]>0 for row in rows):
         return {**base,"status":"unpainted_primitive"}
+    # PDF strokes can have perfectly black RGB paint but ZERO transparency:
+    # invisible drafting paths must never authenticate a real doorway.
+    if not all(0 < row["original_opacity"] <= 1 for row in rows):
+        return {**base,"status":"invisible_or_invalid_original_stroke_opacity"}
+    if (not _near(l["original_opacity"],r["original_opacity"],.001)
+            or not _near(lj["original_opacity"],rj["original_opacity"],.001)):
+        return {**base,"status":"competing_original_stroke_opacity_roles"}
     # Opposing source elements must have matching drawing roles: the two
     # wall fragments are one painted line family and the independent two
     # jamb returns are another. Sharing only black color is insufficient.
