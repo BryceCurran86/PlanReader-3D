@@ -10,7 +10,7 @@ it cannot establish a physical opening, host, frame axes, metric units or count.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import re
 
@@ -34,6 +34,7 @@ class SourceDoorScheduleWord:
     word_no: int
     literal: str
     trusted: bool
+    bbox_pdf_pts: tuple[float,float,float,float] = (0.,0.,0.,0.)
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,12 @@ class SourceDoorScheduleRow:
     complete_native_row_text_trusted: bool
     status: str
     first_unclosed_gate: str
+    original_width_header_id: str | None = None
+    original_height_header_id: str | None = None
+    original_width_word_id: str | None = None
+    original_height_word_id: str | None = None
+    original_body_schedule_title_ids: tuple[str,...] = ()
+    source_dimension_column_roles_authenticated: bool = False
     width_height_metric_units_authenticated: bool = False
     physical_host_or_frame_authenticated: bool = False
     default_opening_count: int | None = None
@@ -136,6 +143,7 @@ def _producer_owned_native_words(
             word_no=receipt.word_no,
             literal=str(resolved.trusted_text) if verified else receipt.raw_text,
             trusted=verified,
+            bbox_pdf_pts=bbox,
         ))
     return tuple(sorted(rows,key=lambda w:(
         w.block_no,w.line_no,w.word_no,w.observation_id)))
