@@ -71,7 +71,7 @@ def test_false_original_cap_is_rejected():
             a,b,dpi=300,original_source_jambs=(("vertical",box,38*72/300),))
 
 
-@pytest.mark.parametrize("mode",[None,1,300.0,"300",0])
+@pytest.mark.parametrize("mode",[None,-1,300.0,"300",0,True])
 def test_source_dpi_requires_exact_positive_integer(mode):
     a,b=_image_and_flank()
     with pytest.raises(ValueError):
@@ -121,3 +121,18 @@ def test_actual_original_b248_048pt_jamb_run_does_not_qualify():
             ("vertical",(604.8,191.76,607.44,197.52),197.52),
         ))
     assert rows==()
+
+
+def test_positive_integer_low_dpi_is_an_allowed_source_render_parameter():
+    # This checks only the typed DPI gate, not whether a 1 DPI raster can
+    # physically provide a >=4pt source-ink band.
+    a,b=_image_and_flank()
+    assert detect_original_jamb_anchored_ink_segments(
+        a,b,dpi=1,original_source_jambs=()) == ()
+
+
+def test_bool_dpi_cannot_enter_original_jamb_source_geometry():
+    a,b=_image_and_flank()
+    with pytest.raises(ValueError, match="positive integer"):
+        detect_original_jamb_anchored_ink_segments(
+            a,b,dpi=True,original_source_jambs=())
