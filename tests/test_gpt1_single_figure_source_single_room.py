@@ -17,7 +17,9 @@ def _run(first_ev,second_ev):
             "room-a":_entity("room-a",ids=("room-ev",first_ev.evidence_id)),
             "room-b":_entity("room-b",ids=("room-ev",second_ev.evidence_id)),
         },
-        context=_context(),document=_document(ids=("room-ev",first_ev.evidence_id,second_ev.evidence_id)),
+        context=_context(),document=_document(ids=tuple(dict.fromkeys(
+            ("room-ev",first_ev.evidence_id,second_ev.evidence_id)
+        ))),
         viewport=_viewport(),page_no=1,
         explicit_area_evidence_by_room_id={
             "room-a":first_ev,"room-b":second_ev,
