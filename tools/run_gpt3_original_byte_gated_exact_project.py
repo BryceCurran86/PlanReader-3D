@@ -276,9 +276,20 @@ def main(argv: list[str] | None = None) -> int:
             existing = _strict_original_json_object(args.output)
         except (OSError, ValueError, TypeError, UnicodeError) as exc:
             raise ValueError("original-byte project report cannot overwrite unrelated evidence") from exc
-        if existing.get("project_id") is None or (
-            existing.get("publication_status") not in ("PUBLISHED", "UNPUBLISHED")
-            or "score_claim" not in existing
+        required_report_fields = {
+            "project_id", "publication_status", "score_claim",
+            "reconciliation_complete", "original_source_sha_verified",
+            "source_sha256s", "reason_codes", "project_evaluation",
+        }
+        if (
+            not required_report_fields.issubset(existing)
+            or type(existing.get("project_id")) is not str
+            or existing.get("publication_status") not in (
+                "PUBLISHED", "UNPUBLISHED",
+                "PROJECT_ONLY_FOUR_PROJECT_SUITE_UNPUBLISHED",
+            )
+            or type(existing.get("score_claim")) is not bool
+            or type(existing.get("source_sha256s")) is not list
         ):
             raise ValueError("original-byte project report cannot overwrite unrelated evidence")
     report = build_original_byte_gated_project_report(
