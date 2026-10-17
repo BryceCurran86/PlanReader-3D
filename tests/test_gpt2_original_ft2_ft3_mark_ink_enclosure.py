@@ -108,3 +108,50 @@ def test_noncanonical_original_word_address_cannot_become_trusted_mark():
     assert not result["unique_native_code_word_in_enclosure"]
     assert result["malformed_same_code_source_words"] == 1
     assert not result["physical_source_floor_owner_authenticated"]
+
+def test_duplicate_native_mark_addresses_cannot_count_as_one_source_occurrence():
+    mark_words=[
+        (20,20,30,30,"FT3",113,0,0),
+        (40,20,50,30,"FT3",113,0,0),
+    ]
+    result=census(mark_words,code="FT3",bbox=(10,10,35,35))
+    assert len(result["in_enclosure_candidates"])==1
+    assert result["duplicate_original_mark_addresses"]==1
+    assert not result["unique_native_code_word_in_enclosure"]
+    assert not result["physical_source_floor_owner_authenticated"]
+
+
+def test_competing_source_room_boxes_cannot_claim_same_original_finish_mark(monkeypatch):
+    from tools import diag_original_finish_mark_in_room_ink_shadow as module
+    def fake_source_receipt(_pdf,*,source_side_pairs,**kwargs):
+        return {
+            "status":"source_ink_bounded_finish_mark_candidate_only",
+            "source_mark_word_evidence":{
+                "in_enclosure_candidates":[{
+                    "original_source_word_address":[113,0,0],
+                    "strict_containment_candidate":True,
+                }],
+                "unique_native_code_word_in_enclosure":True,
+            },
+            "new_firm_quantities":0,
+        }
+    monkeypatch.setattr(module,"audit_original_floor_finish_mark_enclosure_candidate",
+                        fake_source_receipt)
+    payload=b"%PDF-gpt2-owner-neutral-fixture"
+    from hashlib import sha256
+    result=module.audit_competing_original_finish_mark_ownership(
+        payload,expected_sha256=sha256(payload).hexdigest(),
+        floor_page=1,finish_page=2,finish_code_literal="FT3",
+        candidate_enclosures=(
+            {"source_side_pairs":{"A":("a","b")},"translation":(78.,0.)},
+            {"source_side_pairs":{"B":("c","d")},"translation":(43.92,0.)},
+        ),
+    )
+    assert result["status"]=="original_finish_mark_competing_room_owners"
+    assert result["cross_room_duplicate_native_mark_addresses"]==[[113,0,0]]
+    assert all(
+        not item["candidate_source_evidence"]["source_mark_word_evidence"][
+            "unique_native_code_word_in_enclosure"]
+        for item in result["all_original_candidate_enclosures"]
+    )
+    assert result["new_firm_quantities"]==0
