@@ -287,7 +287,7 @@ def test_supplier_credit_note_offsets_real_invoice_not_source_quantity():
     (lambda e: e[4].update(credit_id=""), "canonical"),
     (lambda e: e[4].update(credit_reason="UNKNOWN"), "typed"),
     (lambda e: e[4].update(invoice_id="other"), "match"),
-    (lambda e: e[4].update(gross_amount="40.00"), "unpaid"),
+    (lambda e: e[4].update(gross_amount="41.00"), "unpaid"),
     (lambda e: e[4].update(gross_amount="10.001"), "cents"),
     (lambda e: e[4].update(recorded_on="2026-10-19"), "predates"),
 ])
