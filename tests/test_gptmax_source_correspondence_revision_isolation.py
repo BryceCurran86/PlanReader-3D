@@ -19,12 +19,19 @@ def _packet(oid="opening-a", document="document-a", revision="revision-a"):
             "document_id": document,
             "revision_id": revision,
             "source_sha256": "a" * 64,
+            "snapshot_id": "snapshot-a",
+            "page_id": "page-3",
             "source_observation_ids": ["source-1"],
         },
         "source_lineage": {
             "source_proof_closed": True,
             "observations": [{
                 "observation_id": "source-1",
+                "document_id": document,
+                "revision_id": revision,
+                "source_sha256": "a" * 64,
+                "snapshot_id": "snapshot-a",
+                "page_id": "page-3",
                 "observation_kind": "raster",
                 "source_primitive_ref": "original-ink",
                 "geometry": [10, 20, 30, 40],
@@ -97,3 +104,24 @@ def test_duplicate_observation_rows_cannot_substitute_for_missing_root():
     altered["source_lineage"]["observations"] *= 2
     result = compare_opening_source_correspondence([altered], [altered])
     assert result[0]["exact_source_support_original_ids"] == []
+
+
+@pytest.mark.parametrize("mutation", [
+    ("physical_opening", "page_id", "page-4"),
+    ("source_lineage", "page_id", "page-4"),
+    ("source_lineage", "document_id", "different-document"),
+    ("source_lineage", "revision_id", "different-revision"),
+    ("source_lineage", "source_sha256", "b" * 64),
+    ("source_lineage", "snapshot_id", "different-snapshot"),
+])
+def test_source_issuer_and_page_contradictions_never_match_exact_support(mutation):
+    old = _packet()
+    forged = deepcopy(old)
+    where, field, value = mutation
+    if where == "physical_opening":
+        forged["physical_opening"][field] = value
+    else:
+        forged["source_lineage"]["observations"][0][field] = value
+    result = compare_opening_source_correspondence([old], [forged])
+    assert result[0]["exact_source_support_original_ids"] == []
+    assert result[0]["physical_identity_alias_granted"] is False
