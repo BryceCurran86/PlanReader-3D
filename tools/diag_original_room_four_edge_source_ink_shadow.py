@@ -31,12 +31,33 @@ def _line(drawings, identity):
     ends=sorted(((x,y),(X,Y)))
     color=entry.get("color")
     width=entry.get("width")
-    if color is None or width is None:
+    opacity=entry.get("stroke_opacity")
+    dashes=entry.get("dashes")
+    painting=entry.get("type")
+    if (color is None or width is None or opacity is None
+            or type(dashes) is not str or type(painting) is not str):
         raise ValueError("native_source_ink_style_required")
+    try:
+        color_values=tuple(float(v) for v in color)
+        width_value=float(width)
+        opacity_value=float(opacity)
+    except (ValueError, TypeError, OverflowError):
+        raise ValueError("native_source_ink_style_required") from None
+    # A fill-only, dashed or transparent construction path is not a
+    # rendered continuous physical edge, regardless of endpoint match.
+    if (not color_values or any(not math.isfinite(v) or not 0<=v<=1
+                                for v in color_values)
+            or not math.isfinite(width_value) or width_value<=0
+            or not math.isfinite(opacity_value) or not 0<opacity_value<=1
+            or "s" not in painting or "".join(dashes.split()) not in {"[]0",""}):
+        raise ValueError("unrendered_or_dashed_original_source_edge")
     return {
         "identity":identity,"ends":ends,
-        "stroke_width":round(float(width),3),
-        "source_color":tuple(round(float(v),5) for v in color),
+        "stroke_width":round(width_value,3),
+        "source_color":tuple(round(v,5) for v in color_values),
+        "stroke_opacity":round(opacity_value,6),
+        "source_paint_type":painting,
+        "original_source_continuous_painted_stroke":True,
     }
 
 
@@ -77,7 +98,8 @@ def audit_source_enclosure_correspondence(
             dx,dy=expected_translation_pdf_pts
             translated=sorted((round(x+dx,3),round(y+dy,3)) for x,y in a["ends"])
             if (translated!=b["ends"] or a["source_color"]!=b["source_color"]
-                    or a["stroke_width"]!=b["stroke_width"]):
+                    or a["stroke_width"]!=b["stroke_width"]
+                    or a["stroke_opacity"]!=b["stroke_opacity"]):
                 raise ValueError("source_side_ink_or_translation_conflict")
             pairs[side]={"floor_source":a,"finish_source":b,
                           "matched_original_ink_only":True,
@@ -108,3 +130,62 @@ def audit_source_enclosure_correspondence(
             "source_finished_face_and_area_verified":False,
             "new_firm_quantities":0,
         }
+
+def audit_competing_original_enclosure_registrations(
+    original_pdf_bytes: bytes, *, expected_sha256: str,
+    floor_page_1_based: int, finish_page_1_based: int,
+    candidates: tuple[dict, ...],
+    max_native_paths: int = 120000,
+) -> dict:
+    """Compare ALL supplied source-side registration hypotheses, elect none.
+
+    Every candidate contains explicit independent path-item owners and its
+    original-source translation. The result is a negative-evidence ledger;
+    even one source-ink winner does not grant W4 or physical room identity.
+    """
+    if type(candidates) is not tuple or not candidates or len(candidates)>32:
+        raise ValueError("bounded_explicit_source_registration_universe_required")
+    seen=set()
+    outcomes=[]
+    for candidate in candidates:
+        if type(candidate) is not dict or set(candidate)!={"side_pairs","translation"}:
+            raise ValueError("exact_source_registration_candidate_fields_required")
+        pairs=candidate["side_pairs"]
+        translation=candidate["translation"]
+        if type(pairs) is not dict or set(pairs)!=set(_ROLES):
+            raise ValueError("four_explicit_original_edge_pair_candidates_required")
+        key=(tuple((side,pairs[side]) for side in _ROLES),str(translation))
+        if key in seen:
+            raise ValueError("duplicate_original_registration_candidate")
+        seen.add(key)
+        try:
+            result=audit_source_enclosure_correspondence(
+                original_pdf_bytes,expected_sha256=expected_sha256,
+                floor_page_1_based=floor_page_1_based,
+                finish_page_1_based=finish_page_1_based,
+                original_side_pairs=pairs,
+                expected_translation_pdf_pts=translation,
+                max_native_paths=max_native_paths,
+            )
+        except ValueError as exc:
+            # Preserve the rival and its first negative gate instead of
+            # discarding it or swapping in the numerically nearest winner.
+            result={"status":"source_registration_rejected",
+                    "first_unclosed_gate":str(exc),"new_firm_quantities":0}
+        outcomes.append({"original_candidate_index":len(outcomes),
+                         "translation":translation,
+                         "source_side_pairs":pairs,
+                         "source_evidence":result})
+    accepted=[row for row in outcomes if row["source_evidence"].get("status")==
+              "original_four_edge_ink_correspondence_with_unclosed_doorway"]
+    return {
+        "status":("competing_original_source_registrations" if len(accepted)>1
+                  else "one_original_ink_registration_candidate" if accepted
+                  else "no_original_ink_registration_candidate"),
+        "all_original_registration_evidence":outcomes,
+        "source_ink_positive_candidate_count":len(accepted),
+        "cross_sheet_physical_room_identity_issued":False,
+        "original_source_structural_wall_issuer_granted":False,
+        "original_source_door_gap_closed":False,
+        "new_firm_quantities":0,
+    }
