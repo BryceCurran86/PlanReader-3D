@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -72,8 +73,9 @@ def _original_sha_gate(
         if (
             not isinstance(name, str) or not name
             or Path(name).name != name or name in expected
-            or not isinstance(sha, str) or len(sha) != 64
-            or type(size) is not int or size < 0
+            or type(sha) is not str or len(sha) != 64
+            or any(char not in "0123456789abcdef" for char in sha)
+            or type(size) is not int or size <= 0
         ):
             return False, ["source_manifest_document_universe_invalid"], []
         expected[name] = (sha, size)
@@ -127,8 +129,9 @@ def build_original_byte_gated_project_report(
     manifest_sha_before = _sha256(manifest_path)
     manifest = _strict_original_json_object(manifest_path)
     project_id = manifest.get("project_id")
-    if not isinstance(project_id, str) or not project_id:
-        raise ValueError("frozen project manifest has invalid project identity")
+    if (type(project_id) is not str or
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", project_id) is None):
+        raise ValueError("frozen project manifest has invalid canonical project identity")
     # Never accept a caller-written or fixture manifest as benchmark authority.
     canonical_manifest = (
         FROZEN_ROOT / "projects" / project_id / "source_manifest.json"
