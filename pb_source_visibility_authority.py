@@ -1981,6 +1981,14 @@ class SourceVisibilityProducer:
         ):
             raise ValueError("G17 shadow requires one canonical source page")
         page = page_ids[0]
+        # A still-byte-valid ORIGINAL PDF can belong to an obsolete source
+        # revision. The optional new G17 ink-policy may never publish such
+        # stale wall/host observations into the active physical source root.
+        # This check deliberately precedes rendering and the attempt cache.
+        if self._producer.current_revision_id(
+            published.revision.document_id
+        ) != str(revision_id):
+            raise ValueError("original G17 source revision superseded or unauthenticated")
         decoded = {str(int(p)) for p in published.coverage.decoded_pages}
         if page not in decoded or int(page) in published.coverage.failed_pages:
             raise ValueError(OBSERVATION_UNAVAILABLE)
