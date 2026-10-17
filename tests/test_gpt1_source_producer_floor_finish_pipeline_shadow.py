@@ -18,6 +18,7 @@ from pb_gpt1_original_material_producer_finish_bridge_shadow import (
 )
 from pb_gpt1_source_producer_floor_finish_pipeline_shadow import (
     diagnose_source_producer_floor_finish_handoff_shadow,
+    diagnose_source_producer_floor_finish_with_w4_shadow,
     reconcile_source_producer_finish_batch_shadow,
 )
 from test_gpt1_producer_figured_area_ring_bridge_shadow import (
@@ -209,3 +210,30 @@ def test_distinct_original_area_and_material_receipts_keep_independent_candidate
     assert all(r.status is Status.CANDIDATE for r in batch.records)
     assert batch.quarantined_physical_room_ids==()
     assert batch.diagnostic_only
+
+
+def test_manual_original_room_claim_never_stands_in_for_sealed_w4_authority():
+    from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
+    kwargs=valid_kwargs()
+    # A caller can make plausible area/material/W4 frame candidate records,
+    # but may not mint the runtime-sealed W4 room face authority binding.
+    fabricated=LiveCanonicalRoomComposition(
+        Status.CANDIDATE,("caller-claimed-physical-wall",),(),(),
+    )
+    result=diagnose_source_producer_floor_finish_with_w4_shadow(
+        canonical_rooms=fabricated,**kwargs,
+    )
+    assert result.status is Status.ABSTAINED
+    assert result.first_failure_code=="original_w4_physical_room_not_unique"
+    assert result.candidate_finish_area_m2 is None
+    assert result.existing_room_area_quantity_id is None
+
+
+def test_explicit_w4_opt_in_requires_a_real_canonical_room_composition():
+    result=diagnose_source_producer_floor_finish_with_w4_shadow(
+        canonical_rooms=None,**valid_kwargs(),
+    )
+    assert result.status is Status.ABSTAINED
+    assert result.first_failure_code==(
+        "gpt1_original_producer_w4_room_composition_unavailable"
+    )
