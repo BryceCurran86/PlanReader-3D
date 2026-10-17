@@ -173,7 +173,7 @@ class OpeningHostFrameEvidence:
     opening_identity_id: str
     host_binding_record_id: str
     host_wall_id: str
-    whole_wall_frame_id: str
+    whole_wall_frame_id: str | None
     whole_wall_candidate_ids: tuple[str, ...]
     source_observation_ids: tuple[str, ...]
     origin_pt: tuple[float, float]
@@ -1229,7 +1229,7 @@ class OpeningHostFrameProducer:
             selector=frame_selector, record_id=frame_id,
             opening_identity_id=binding.opening_identity_id,
             host_binding_record_id=binding.record_id, host_wall_id=binding.host_wall_id,
-            whole_wall_frame_id=frame_id,
+            whole_wall_frame_id=None,
             whole_wall_candidate_ids=proof.bands[0].member_ids,
             source_observation_ids=tuple(sorted(opening.source_observation_ids)),
             origin_pt=geometry.origin, axis_unit=geometry.axis, normal_unit=geometry.normal,
