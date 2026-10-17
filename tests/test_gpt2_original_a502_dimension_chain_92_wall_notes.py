@@ -84,3 +84,51 @@ def test_original_minor_figure_cannot_reuse_wrong_tick_or_borrow_another_label()
     with pytest.raises(ValueError,match="original_figure_text_outside_arrowhead_interval"):
         audit(original,expected_sha256=SHA,page_1_based=26,
               vertical=VERTICAL,horizontal={**HORIZONTAL,"short_before":bad})
+
+
+@pytest.mark.skipif(not PDF.exists(),reason="private original PDF and SHA required")
+def test_printed_92_wall_notes_flank_the_figure_but_do_not_elect_finished_face():
+    from tools.diag_gpt2_original_figured_detail_plan_shadow import (
+        audit_original_figured_detail_plan_pair,
+    )
+    from tools.diag_gpt2_original_figured_face_rivals_shadow import (
+        audit_original_figured_detail_face_rivals,
+        audit_original_figured_wall_note_alignment,
+    )
+    original=PDF.read_bytes()
+    figured=audit_original_figured_detail_plan_pair(
+        original,expected_sha256=SHA,page_1_based=26,
+        first_dimension=VERTICAL["main"],
+        second_dimension=HORIZONTAL["main"],
+        original_room_word_address=(15,0,0),
+        original_finish_word_address=(14,1,0),
+        plan_enclosure_bbox_pdf_pts=(200.,1740.,495.,2220.))
+    rivals=audit_original_figured_detail_face_rivals(
+        original,source_sha256=SHA,original_figure_receipt=figured,
+        page_1_based=26,competing_original_wall_face_families=(
+            {"family_id":"candidate-main-figure-faces",
+             "left":"d514i0","right":"d498i0",
+             "top":"d487i0","bottom":"d511i0"},
+            {"family_id":"candidate-inward-face-strokes",
+             "left":"d1125i0","right":"d1132i0",
+             "top":"d1137i0","bottom":"d1129i0"},
+        ))
+    chain=audit(original,expected_sha256=SHA,page_1_based=26,
+                vertical=VERTICAL,horizontal=HORIZONTAL)
+    result=audit_original_figured_wall_note_alignment(rivals,chain)
+    assert result["status"]=="original_orthogonal_wall_note_and_face_rivals_candidate_only"
+    assert result["source_original_dimension_chains"]["vertical"][
+        "original_main_figure_mm"]==3570
+    assert result["source_original_dimension_chains"]["horizontal"][
+        "original_main_figure_mm"]==2200
+    families=result["all_original_inner_outer_face_alignment_candidates"]
+    assert len(families)==2
+    assert families[0]["source_both_printed_long_figures_terminate_at_this_family"]
+    assert not families[1]["source_both_printed_long_figures_terminate_at_this_family"]
+    assert families[1]["source_wall_note_to_figured_face_residual_x_pdf_pts"]==[
+        2.16,-2.16]
+    assert families[1]["source_wall_note_to_figured_face_residual_y_pdf_pts"]==[
+        2.4,-2.16]
+    assert result["source_FT2_area_m2_candidate_not_signed"]==7.854
+    assert not result["source_net_finished_face_authenticated"]
+    assert result["new_firm_quantities"]==0
