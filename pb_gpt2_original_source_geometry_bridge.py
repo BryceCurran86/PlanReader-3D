@@ -14,6 +14,9 @@ from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_gr
 from tools.diag_gpt2_original_figured_detail_plan_shadow import (
     audit_original_figured_detail_plan_pair,
 )
+from tools.diag_gpt2_original_native_dimension_chain_shadow import (
+    audit_original_native_orthogonal_dimension_chains,
+)
 from tools.diag_gpt2_original_figured_face_rivals_shadow import (
     audit_original_figured_detail_face_rivals,
 )
@@ -68,6 +71,36 @@ class GPT2OriginalSourceGeometryBridge:
         if page_1_based not in decoded:
             raise ValueError("original_source_page_outside_producer_coverage")
         return published,raw
+
+    def original_native_amenity_dimension_chains(
+        self, *, revision_id: str, detail_page_1_based: int,
+        source_vertical_dimension_segments: dict,
+        source_horizontal_dimension_segments: dict,
+    ) -> dict:
+        """Reissue native arrowhead-to-arrowhead figured chains from source.
+
+        Unlike copying a '92 mm wall thickness' nominal text, this reads
+        the two actual short-figure arrow intervals surrounding each main
+        figured span directly from the sealed SourceVisibilityProducer.
+        The result intentionally cannot pick an internal finished wall or
+        promote a floor/ceiling m² quantity.
+        """
+        published,raw=self._source_revision(
+            revision_id,page_1_based=detail_page_1_based)
+        out=audit_original_native_orthogonal_dimension_chains(
+            raw,expected_sha256=published.revision.source_sha256,
+            page_1_based=detail_page_1_based,
+            vertical=source_vertical_dimension_segments,
+            horizontal=source_horizontal_dimension_segments,
+        )
+        return {
+            **out,
+            "source_document_id":published.revision.document_id,
+            "source_revision_id":revision_id,
+            "source_snapshot_id":published.snapshot.snapshot_id,
+            "source_figured_chain_material_or_finished_face_issuer":False,
+            "new_firm_quantities":0,
+        }
 
     def original_figured_detail_plan_candidate(
         self, *, revision_id: str, detail_page_1_based: int,
