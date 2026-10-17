@@ -118,11 +118,14 @@ def test_grid_full_cells_and_both_original_support_rail_axes():
 def test_figured_vertical_axis_joins_only_unique_finished_transverse_faces():
     dim=SourceFiguredAxis("original-3570",3570,"vertical",
                          (157.68,1774.64),(157.68,2179.52),
-                         ("terminal-1","terminal-2"),"26")
+                         ("terminal-1","terminal-2"),"26",
+                         source_sha256=SHA,revision_id="rev")
     a=SourceStructuralFaceStroke("face-top",(200,1774.64),(300,1774.64),
-                                 "physical-wall-top","finished_inner_face","style-1")
+                                 "physical-wall-top","finished_inner_face","style-1",
+                                 source_sha256=SHA,revision_id="rev",page_id="26")
     b=SourceStructuralFaceStroke("face-bottom",(200,2179.52),(300,2179.52),
-                                 "physical-wall-bottom","finished_inner_face","style-1")
+                                 "physical-wall-bottom","finished_inner_face","style-1",
+                                 source_sha256=SHA,revision_id="rev",page_id="26")
     r=source_figured_terminal_wall_faces_shadow(dim,(a,b))
     assert r.status is Status.CANDIDATE
     assert r.uniquely_bound_face_ids==("face-top","face-bottom")
