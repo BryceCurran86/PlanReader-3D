@@ -1275,6 +1275,13 @@ def _native_multirow_material_definition_candidates(
             owned = tuple(
                 word for _, members in line_records[pos:end] for word in members
             )
+            # Signage-contract cladding is a separate non-ceiling service,
+            # even when its PDF text block contains a valid source code.
+            # Preserve it in source observations, never in this ceiling
+            # material-row candidate producer.
+            description_words = {w.text.strip().upper() for w in owned[1:]}
+            if {"SIGNAGE", "CLADDING"} <= description_words:
+                continue
             candidate = _material_definition_candidate(owned)
             if candidate is not None and candidate[0] == code:
                 candidates.append((partition_id, block_no, owned, code, candidate[1]))
