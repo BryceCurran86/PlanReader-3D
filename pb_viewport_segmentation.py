@@ -2965,10 +2965,45 @@ def segment_source_page_viewports(
     )
 
 
+def _native_multipath_semantic_frame_candidates_shadow(
+    page: Any, anchors: Sequence[_TitleAnchor],
+) -> list[tuple[float, float, float, float]]:
+    """Default-unwired native line-built CAD table candidates only.
+
+    Native source grid reconstruction is a candidate *universe*, not a
+    selector. Only a source-closed component with exactly ONE classified
+    semantic title geometrically contained can join existing F.07 frame
+    rivals. All existing candidate frames remain. No nearby caption, room
+    label, project ID, quantity or inferred missing segment can elect it.
+    """
+    from tools.diag_native_multipath_cad_grid_source_shadow import (
+        audit_native_multipath_orthogonal_grid_components,
+    )
+    evidence = audit_native_multipath_orthogonal_grid_components(page)
+    if not evidence.get("source_line_universe_complete"):
+        return []
+    new = []
+    for grid in evidence["candidate_native_grids"]:
+        frame = tuple(grid["native_component_witness"]["native_bbox_pdf_pts"])
+        titles = [
+            a for a in anchors
+            if a.view_type in _SEMANTIC_TABLE_VIEW_TYPES
+            and _bbox_contains(frame, a.bbox)
+        ]
+        if len(titles) == 1:
+            new.append(frame)
+    return sorted(set(new))
+
+
 def segment_page_viewports(
     page: Any, *, page_number: int,
     source_connected_table_cell_shadow: bool = False,
+    source_native_multipath_semantic_frame_shadow: bool = False,
 ) -> list[SegmentedViewport]:
+    if type(source_native_multipath_semantic_frame_shadow) is not bool:
+        raise ValueError("source_multipath_frame_shadow_requires_explicit_bool")
+    if source_native_multipath_semantic_frame_shadow and source_connected_table_cell_shadow is not True:
+        raise ValueError("source_multipath_requires_connected_source_cell_guard")
     if type(source_connected_table_cell_shadow) is not bool:
         raise ValueError("source_table_shadow_requires_explicit_bool")
     try:
@@ -3006,6 +3041,16 @@ def segment_page_viewports(
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
+    native_multipath_added: set[tuple[float, float, float, float]] = set()
+    if source_native_multipath_semantic_frame_shadow:
+        # Keep every source-original frame rival. A real external CAD
+        # schedule can be drawn as independently issued line paths.
+        for candidate in _native_multipath_semantic_frame_candidates_shadow(
+            page, anchors,
+        ):
+            if candidate not in frames:
+                frames.append(candidate)
+                native_multipath_added.add(candidate)
     framed, consumed = _frame_resolved_viewports(
         page,
         anchors,
@@ -3027,6 +3072,33 @@ def segment_page_viewports(
             page, anchors, unresolved, framed, calibration,
             page_number=page_number,
         )
+        # A genuine table source frame establishes only TABLE ownership.
+        # It does not independently prove the extent of a neighboring plan.
+        # The rotated side-band rule is geometric partition evidence, never
+        # an automatically valid physical RCP when its separator is newly
+        # recovered from disconnected native CAD paths.
+        if native_multipath_added:
+            unsafe_separator_ids = {
+                v.view_id for v in framed
+                if v.bounding_box is not None
+                and tuple(v.bounding_box) in native_multipath_added
+            }
+            for v in rotated_derived:
+                if (v.provenance or {}).get("separator_view_id") not in unsafe_separator_ids:
+                    continue
+                v.status = ViewportSegmentationStatus.AMBIGUOUS.value
+                v.bounding_box = None
+                v.boundary_source = ViewportBoundarySource.NONE.value
+                v.confidence = 0.0
+                v.notes.append(
+                    "recovered native table frame does not prove neighboring physical plan extent"
+                )
+                v.provenance = {
+                    **v.provenance,
+                    "source_native_multipath_separator_candidate_only": True,
+                    "visual_band_validated": False,
+                    "independent_plan_extent_unproven": True,
+                }
         remaining_unresolved = [
             index for index in unresolved if index not in rotated_consumed
         ]
