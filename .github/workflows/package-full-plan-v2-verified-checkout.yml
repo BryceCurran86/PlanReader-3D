@@ -3,33 +3,52 @@ on:
   pull_request:
     paths:
       - ".github/workflows/package-full-plan-v2-verified-checkout.yml"
+      - "scripts/verify_public_source_free_checkout.py"
+      - "tests/test_verify_public_source_free_checkout.py"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-v2-checkout-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   snapshot-public-repository-only:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Archive tracked checkout without Git credentials or runtime secrets
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify source-free public archive policy in synthetic tests
+        env:
+          PYTHONPATH: .
+        run: python -m unittest -q tests.test_verify_public_source_free_checkout
+      - name: Check frozen truth integrity and package tracked CODE only
         shell: bash
         run: |
           set -euo pipefail
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           git archive --format=tar.gz --output="$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" HEAD
           git rev-parse HEAD > "$RUNNER_TEMP/checkout-head-sha.txt"
+          python scripts/verify_public_source_free_checkout.py \
+            --archive "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" \
+            --output "$RUNNER_TEMP/source-free-archive-receipt.json"
           sha256sum "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" > "$RUNNER_TEMP/archive-sha256.txt"
-          tar -tzf "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" | grep -F "benchmarks/frozen_holdout/full_plan_v2/manifest.json"
-          tar -tzf "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" | grep -F "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
           test -s "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - name: Publish only verified source-free CODE transfer
+        uses: actions/upload-artifact@v4
         with:
-          name: full-plan-v2-public-checkout-only
+          name: full-plan-v2-source-free-public-checkout-only
           path: |
             ${{ runner.temp }}/planreader-v2-public-checkout.tar.gz
             ${{ runner.temp }}/checkout-head-sha.txt
             ${{ runner.temp }}/archive-sha256.txt
+            ${{ runner.temp }}/source-free-archive-receipt.json
           retention-days: 3
           if-no-files-found: error
