@@ -176,6 +176,11 @@ def measure_figured_wall_lining_shadow(
         if (opening.opening_height_mm > heights[opening.host_source_side_id]
                 or all_receipts.intersection(opening.host_binding_evidence_ids)
                 or all_receipts.intersection(opening.physical_frame_evidence_ids)
+                or all_receipts.intersection(opening.original_host_axis_witness_ids)
+                or set(opening.original_host_axis_witness_ids).intersection(
+                    (*opening.host_binding_evidence_ids,
+                     *opening.physical_frame_evidence_ids)
+                )
                 or set(opening.host_binding_evidence_ids).intersection(
                     opening.physical_frame_evidence_ids)):
             return block("source_figured_wall_opening_frame_or_height_conflict")
