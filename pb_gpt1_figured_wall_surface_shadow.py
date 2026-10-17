@@ -97,6 +97,13 @@ def measure_figured_wall_lining_shadow(
     if (type(wall_heights) not in (tuple, list)
             or type(openings) not in (tuple, list)):
         return block("source_figured_wall_inputs_untrusted")
+    if (
+        measured.source_side_ids != tuple(side.source_side_id for side in ring)
+        or measured.source_segment_ids != tuple(sorted(
+            segment for side in ring for segment in side.source_segment_ids
+        ))
+    ):
+        return block("source_figured_wall_side_lineage_mismatch")
     metric_points = measured.metric_vertices_mm
     side_lengths = {}
     for i, side in enumerate(ring):
