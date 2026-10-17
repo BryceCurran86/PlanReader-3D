@@ -117,13 +117,7 @@ class ParsedOpeningLabel:
 
     @property
     def area_m2(self) -> Optional[float]:
-        if len(self.dimension_values_mm) != 2:
-            return None
-        return (
-            float(self.dimension_values_mm[0])
-            * float(self.dimension_values_mm[1])
-            / 1_000_000.0
-        )
+        return _area_from_dimension_values(self.dimension_values_mm)
 
 
 @dataclass(frozen=True)
@@ -320,9 +314,24 @@ def _resolve_owned_dimension_values_mm(
 
 
 def _area_from_dimension_values(values: Sequence[float]) -> Optional[float]:
-    if len(values) != 2:
+    # A hostile/malformed producer packet must not turn NaN, bool, enormous
+    # numbers or a single door callout into a physical opening area.
+    if not isinstance(values, (tuple, list)) or len(values) != 2:
         return None
-    return float(values[0]) * float(values[1]) / 1_000_000.0
+    if any(type(value) not in (int, float) for value in values):
+        return None
+    try:
+        width, height = (float(value) for value in values)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        not math.isfinite(width) or not math.isfinite(height)
+        or not (_MIN_OPENING_DIMENSION_MM <= width <= _MAX_OPENING_DIMENSION_MM)
+        or not (_MIN_OPENING_DIMENSION_MM <= height <= _MAX_OPENING_DIMENSION_MM)
+    ):
+        return None
+    area = width * height / 1_000_000.0
+    return area if math.isfinite(area) and area > 0.0 else None
 
 def _line(record: SourceObservationRecord) -> Optional[tuple[float, float, float, float]]:
     if len(record.geometry) != 4:
