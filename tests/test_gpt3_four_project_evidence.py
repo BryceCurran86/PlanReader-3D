@@ -704,8 +704,10 @@ def test_manual_row_with_machine_source_reference_still_rejected_by_v1_verifier(
         (old / "source_sealed_run.json").read_text(encoding="utf-8")
     ))
     customers = json.loads((old / "verified_customer_rows.json").read_text(encoding="utf-8"))
-    automated = dict(customers[0])
-    automated.pop("quantity_id", None)
-    # Embedded signed provenance must not be treated as a manual row.
+    automated = {
+        "description": "Damaged automated estimator row",
+        "commercial_projection_provenance": {"adapter": "commercial_takeoff"},
+    }
+    # Embedded machine adapter claim with no quantity cannot be treated as manual.
     with pytest.raises((ValueError, CustomerOutputVerificationError)):
-        verify_sealed_customer_output(sealed, [*customers[1:], automated])
+        verify_sealed_customer_output(sealed, [*customers, automated])
