@@ -220,6 +220,148 @@ def _original_source_row_candidates(
     )
 
 
+
+def _original_door_schedule_column_proof(
+    words: tuple[SourceDoorScheduleWord, ...],
+    rows: tuple[SourceDoorScheduleRow, ...],
+) -> tuple[tuple[SourceDoorScheduleRow, ...], bool]:
+    """Distinguish original table title from repeated drawing title.
+
+    An exact printed WIDTH/HEIGHT/THICKNESS native header block plus a
+    distinct No./ROOM NAME/TYPE header column prove the real schedule
+    table's source coordinate frame. The table's caption must be uniquely
+    BEFORE the headers in the same original native axis as the rows.
+    Actual numeric column ink must overlap its own header projection, not
+    a different column or a nearer label. No plan host, metric unit, count
+    or door size quantity is inferred.
+    """
+    by_block=defaultdict(list)
+    for w in words:
+        by_block[w.block_no].append(w)
+    headers=[
+        tuple(block) for block in by_block.values()
+        if all(sum(w.literal==code for w in block)==1
+               for code in ("WIDTH","HEIGHT","THICKNESS"))
+    ]
+    first_columns=[
+        tuple(block) for block in by_block.values()
+        if all(sum(w.literal==code for w in block)==1
+               for code in ("No.","ROOM","NAME","TYPE"))
+    ]
+    captions=[
+        tuple(block) for block in by_block.values()
+        if tuple(w.literal for w in block)==("DOOR","SCHEDULE")
+    ]
+    if len(headers)!=1 or len(first_columns)!=1 or not rows:
+        return rows,False
+    header=headers[0]
+    first=first_columns[0]
+    if not all(w.trusted for w in header+first):
+        # Header identity can remain a source candidate but not source-
+        # authenticated row authority when original PDF text is untrusted.
+        headers_trusted=False
+    else:
+        headers_trusted=True
+    width=next(w for w in header if w.literal=="WIDTH")
+    height=next(w for w in header if w.literal=="HEIGHT")
+    header_x=min(w.bbox_pdf_pts[0] for w in header)
+    head_right=max(w.bbox_pdf_pts[2] for w in header)
+    first_x=min(w.bbox_pdf_pts[0] for w in first)
+    first_right=max(w.bbox_pdf_pts[2] for w in first)
+    # Both source-native header groups must occupy the SAME original
+    # table-header x band; no nearest-caption or expected sheet position.
+    same_header_band = (
+        max(header_x,first_x) < min(head_right,first_right)
+    )
+    candidates=[
+        title for title in captions
+        if max(w.bbox_pdf_pts[2] for w in title)
+           < min(header_x,first_x)
+    ]
+    if len(candidates)!=1 or not same_header_band:
+        return rows,False
+    caption=candidates[0]
+    title_ids=tuple(w.observation_id for w in caption)
+    table_trusted=(
+        headers_trusted and all(w.trusted for w in caption)
+    )
+    new=[]
+    for row in rows:
+        members=by_block.get(row.native_block_no,())
+        if not members:
+            new.append(row)
+            continue
+        row_x=min(w.bbox_pdf_pts[0] for w in members)
+        row_in_table=row_x>max(head_right,first_right)
+        if not row_in_table:
+            new.append(replace(row,
+                status="source_schedule_row_table_scope_conflict",
+                first_unclosed_gate="original_source_table_column_scope",
+            ))
+            continue
+        matched={}
+        for key,literal,column in (
+            ("width",row.original_width_literal,width),
+            ("height",row.original_height_literal,height),
+        ):
+            if literal is None:
+                continue
+            # Column source words must have exact original literal,
+            # same original native table block, downstream x, and a
+            # strictly positive projection onto their own HEADER band.
+            rivals=[
+                word for word in members
+                if word.literal==literal
+                and word.bbox_pdf_pts[0]>column.bbox_pdf_pts[2]
+                and min(word.bbox_pdf_pts[3],column.bbox_pdf_pts[3])
+                    > max(word.bbox_pdf_pts[1],column.bbox_pdf_pts[1])
+            ]
+            if len(rivals)==1:
+                matched[key]=rivals[0]
+        both_printed=(row.original_width_literal is not None and
+                      row.original_height_literal is not None)
+        geometry_verified=(both_printed and
+                           "width" in matched and "height" in matched and
+                           matched["width"].observation_id!=matched["height"].observation_id)
+        accepted_row=table_trusted and row.complete_native_row_text_trusted
+        first_gate=(
+            "original_schedule_title_or_row_word_trust"
+            if not accepted_row else
+            "source_numeric_columns_unresolved"
+            if both_printed and not geometry_verified else
+            "source_dimensions_not_printed_or_unique_physical_host"
+            if not both_printed else
+            "source_dimension_units_and_unique_physical_opening_host"
+        )
+        new.append(replace(
+            row,
+            original_body_schedule_title_ids=title_ids,
+            source_title_observation_ids=title_ids,
+            original_width_header_id=width.observation_id,
+            original_height_header_id=height.observation_id,
+            original_width_word_id=(
+                matched["width"].observation_id if "width" in matched else None
+            ),
+            original_height_word_id=(
+                matched["height"].observation_id if "height" in matched else None
+            ),
+            source_dimension_column_roles_authenticated=bool(
+                table_trusted and row.complete_native_row_text_trusted
+                and geometry_verified
+            ),
+            status=(
+                "source_schedule_row_text_authenticated" if accepted_row
+                else "source_schedule_row_text_unverified"
+            ) if row.status!="source_schedule_row_duplicate_code_conflict"
+            else row.status,
+            first_unclosed_gate=(
+                row.first_unclosed_gate if row.status==
+                "source_schedule_row_duplicate_code_conflict"
+                else first_gate
+            ),
+        ))
+    return tuple(new),table_trusted
+
 def inspect_published_door_schedule(
     producer: SourceVisibilityProducer, *,
     revision_id: str, page_id: str,
@@ -236,20 +378,8 @@ def inspect_published_door_schedule(
     if int(page_id) not in {int(x) for x in published.coverage.decoded_pages}:
         raise ValueError("source_door_page_not_in_published_source_coverage")
     words=_producer_owned_native_words(producer,published,page_id)
-    rows=_original_source_row_candidates(words)
-    # Schedule TITLE source trust is independent of row trust. A title can
-    # be verified even when every native row remains untrusted. Do not
-    # conflate "no publishable row" with an untrusted original title.
-    title_blocks=defaultdict(list)
-    for word in words:
-        title_blocks[word.block_no].append(word)
-    original_titles=[
-        tuple(block) for block in title_blocks.values()
-        if tuple(word.literal for word in block)==("DOOR","SCHEDULE")
-    ]
-    title_ok=(
-        len(original_titles)==1
-        and all(word.trusted for word in original_titles[0])
+    rows,title_ok=_original_door_schedule_column_proof(
+        words,_original_source_row_candidates(words),
     )
     return SourceDoorScheduleResult(
         source_sha256=published.revision.source_sha256,
