@@ -569,7 +569,11 @@ def _raster_segment_receipt_matches_parent(
         elif len(parts) == 5:
             prefix, render_sha, identity_version, full_sha, index = parts
             if (receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
-                    or identity_version != UNCHANGED_BAND_IDENTITY_VERSION
+                    or identity_version not in (
+                        UNCHANGED_BAND_IDENTITY_VERSION,
+                        ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+                        ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+                    )
                     or full_sha != receipt.visibility_render_sha256
                     or len(full_sha) != 64
                     or any(c not in '0123456789abcdef' for c in full_sha)):
