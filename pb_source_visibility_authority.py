@@ -867,12 +867,16 @@ class SourceVisibilityProducer:
         full = self._producer.render_native_page_png(**args)
         # Do not turn mismatched original source render frames into a cache hit.
         # The caller still owns the existing render-contradiction ABSTAIN.
+        result = (image, full)
         if (image[1] == full[1] and image[2] == full[2]
                 and isinstance(image[0], bytes) and isinstance(full[0], bytes)):
-            self._g17_original_render_pair_cache[key] = (image, full)
+            self._g17_original_render_pair_cache[key] = result
             while len(self._g17_original_render_pair_cache) > 1:
                 self._g17_original_render_pair_cache.popitem(last=False)
-        return (image, full)
+        # The first successful lookup must return the EXACT cached immutable
+        # pair, not a reconstructed outer tuple. Downstream source listeners
+        # and the retention comparator depend on stable per-scope identity.
+        return result
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
