@@ -21,6 +21,5 @@ def test_alias_page_types_cannot_claim_original_rcp_area(bad_page):
 
 
 def test_missing_page_is_not_coerced_into_other_viewport():
-    context=_context()
-    object.__setattr__(context,"viewport_page_ownership",(("vp-floor-1",2),))
+    context=_context(viewport_page_ownership=(("vp-floor-1",2),))
     assert "viewport_page_mismatch" in _blockers(context=context)
