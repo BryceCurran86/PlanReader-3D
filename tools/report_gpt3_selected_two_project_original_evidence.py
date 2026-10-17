@@ -107,6 +107,12 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("original source path universe must be an exact nonempty list")
     originals = [Path(value) for value in original_values]
+    all_inputs = [*paths.values(), *originals]
+    # Every original PDF, signed V1, independent map, customer output and
+    # exact frozen report is a distinct evidence role. An aliased file path
+    # can collapse before/after SHA tracking into one dictionary key.
+    if len({path.resolve() for path in all_inputs}) != len(all_inputs):
+        raise ValueError("selected original source and signed evidence roles alias one file")
     raw_manifest = _json_object(paths["manifest"])
     project_id = raw_manifest.get("project_id")
     if type(project_id) is not str or not project_id or project_id != project_id.strip():
