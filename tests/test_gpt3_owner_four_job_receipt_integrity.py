@@ -632,3 +632,39 @@ def test_old_original_owner_source_sha_preflight_is_not_independent_private_pdf_
         assert status["fresh_customer_bijection"] == "NOT_VERIFIED"
         assert status["frozen_project_manifest"] == "INCOMPLETE"
         assert project["official_project_score"] is None
+
+
+def test_owner_receipt_diagnostic_can_repeat_only_its_own_report(tmp_path):
+    report = tmp_path / "readiness.json"
+    args = ["--receipt-root", str(_ROOT), "--output", str(report)]
+    assert audit.main(args) == 2
+    original = report.read_bytes()
+    assert audit.main(args) == 2
+    assert report.read_bytes() == original
+
+
+def test_owner_receipt_diagnostic_must_never_overwrite_customer_or_binary(tmp_path):
+    evidence = tmp_path / "customer_rows.json"
+    original = b'{"customer_quantity_id":"original-stays"}\n'
+    evidence.write_bytes(original)
+    with pytest.raises(ValueError, match="cannot replace unrelated evidence"):
+        audit.main([
+            "--receipt-root", str(_ROOT), "--output", str(evidence),
+        ])
+    assert evidence.read_bytes() == original
+    evidence.write_bytes(b"sealed-binary-do-not-replace")
+    with pytest.raises(ValueError, match="cannot replace unrelated evidence"):
+        audit.main(["--receipt-root", str(_ROOT), "--output", str(evidence)])
+    assert evidence.read_bytes() == b"sealed-binary-do-not-replace"
+
+
+def test_owner_receipt_diagnostic_rejects_existing_symlink_even_outside_sources(tmp_path):
+    target = tmp_path / "original_synthetic_customer.json"
+    target.write_text("DO NOT TOUCH", encoding="utf-8")
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(target)
+    with pytest.raises(ValueError, match="cannot follow output symlinks"):
+        audit.main([
+            "--receipt-root", str(_ROOT), "--output", str(alias),
+        ])
+    assert target.read_text(encoding="utf-8") == "DO NOT TOUCH"
