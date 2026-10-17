@@ -27,6 +27,31 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _source_floor_area_simple_bbox(
+    points: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    *,
+    quantity_id: str,
+) -> tuple[float, float, float, float]:
+    """Reject invalid original floor topology; never infer m² from the bbox."""
+    ring = tuple(points)
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring = ring[:-1]
+    if len(ring) < 3 or len(set(ring)) != len(ring):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring is not simple: {quantity_id}"
+        )
+    from shapely.geometry import Polygon
+    polygon = Polygon(ring)
+    if (
+        not polygon.is_valid or not polygon.exterior.is_simple
+        or not math.isfinite(polygon.area) or polygon.area <= 0.0
+    ):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring is not simple: {quantity_id}"
+        )
+    return polygon.bounds
+
+
 def build_live_floor_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -214,7 +239,11 @@ def build_live_floor_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor source polygon is invalid: {quantity.quantity_id}"
             )
-        source_bbox = (min(xs), min(ys), max(xs), max(ys))
+        # A positive shoelace ring may still cross itself. Do not seal
+        # a geometric physical floor quantity from that non-physical source.
+        source_bbox = _source_floor_area_simple_bbox(
+            checked, quantity_id=quantity.quantity_id
+        )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
