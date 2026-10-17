@@ -39,6 +39,9 @@ from pb_raster_unchanged_band_segments import (
     UNCHANGED_BAND_IDENTITY_VERSION,
     UNCHANGED_BAND_DETECTOR_VERSION,
     detect_unchanged_terminal_band_segments,
+    detect_original_one_ended_ink_band_segments,
+    ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+    ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
     band_segment_already_observed,
 )
 from pb_raster_opening_source_primitives import (
@@ -2118,60 +2121,45 @@ class SourceVisibilityProducer:
                     supplemental = tuple(s for s in supplemental
                         if any(_unchanged_segment_inside_flank(s, box,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
+                    # Keep the existing normal two-ended source band family
+                    # byte-for-byte and index-for-index. Short opening flanks
+                    # have ONE original jamb end, so the ordinary detector's
+                    # second-end closure cannot legitimately nominate them.
+                    extra_one_ended = ()
                     if include_unmeasured_ink_closed_flanks_shadow:
-                        # Pixel-endpoint-inclusive ORIGINAL paint support can
-                        # exceed 4pt when centre-to-centre W2 geometry is short
-                        # (e.g. seventeen 300DPI cells). Never alter the
-                        # 4pt minimum or any measured/default flank. Only
-                        # source-closed, independently ink-positive UNMEASURED
-                        # G17 flanks can add an original painted-cell segment.
                         measured_boxes = set(self._proven_raster_opening_flank_boxes(
                             published, page_id,
                         ))
-                        unmeasured_boxes = tuple(sorted(
+                        source_owned_new_boxes = tuple(sorted(
                             set(flank_boxes) - measured_boxes
                         ))
-                        if unmeasured_boxes:
-                            inclusive = detect_unchanged_terminal_band_segments(
+                        if source_owned_new_boxes:
+                            nominal = detect_original_one_ended_ink_band_segments(
                                 image_png, full_png,
                                 dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                registration_scale=(self.raster_opening_registration_scale(
-                                    published.revision.revision_id, page_id) or (1.0, 1.0)),
-                                shadow_inclusive_source_cells=True,
+                                source_closed_flank_boxes=source_owned_new_boxes,
                             )
-                            existing_keys = {
-                                (s.orientation, s.pixel_geometry, s.geometry_pt)
-                                for s in supplemental
-                            }
-                            # Append only; each existing source segment retains
-                            # its old producer index and source identity.
-                            extra = []
-                            for segment in inclusive:
-                                key = (segment.orientation, segment.pixel_geometry,
-                                       segment.geometry_pt)
-                                if key in existing_keys:
-                                    continue
-                                if not _axis_aligned_geometry_fully_covered_by_rect_union(
-                                    segment.geometry_pt, image_regions
-                                ):
-                                    continue
-                                if band_segment_already_observed(
-                                    segment, segments,
-                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                    ordinary_dpi=RASTER_RENDER_DPI,
-                                ):
-                                    continue
-                                if not any(_unchanged_segment_inside_flank(
-                                    segment, box,
-                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                ) for box in unmeasured_boxes):
-                                    continue
-                                extra.append(segment)
-                                existing_keys.add(key)
-                            supplemental = (*supplemental, *extra)
+                            extra_one_ended = tuple(seg for seg in nominal
+                                if _axis_aligned_geometry_fully_covered_by_rect_union(
+                                    seg.geometry_pt, image_regions)
+                                and not band_segment_already_observed(
+                                    seg,segments,dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                    ordinary_dpi=RASTER_RENDER_DPI)
+                                and any(_unchanged_segment_inside_flank(
+                                    seg, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                                ) for box in source_owned_new_boxes))
                     families.append((supplemental, hashlib.sha256(image_png).hexdigest(),
                         RASTER_OPENING_PRIMITIVE_RENDER_DPI, UNCHANGED_BAND_IDENTITY_VERSION,
                         UNCHANGED_BAND_DETECTOR_VERSION, hashlib.sha256(full_png).hexdigest()))
+                    if extra_one_ended:
+                        # Separate producer-issued family: do not mislabel an
+                        # observed ONE-ended original jamb as a two-end band.
+                        # All previous source identity indices stay unchanged.
+                        families.append((extra_one_ended, hashlib.sha256(image_png).hexdigest(),
+                            RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                            ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+                            ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
+                            hashlib.sha256(full_png).hexdigest()))
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
