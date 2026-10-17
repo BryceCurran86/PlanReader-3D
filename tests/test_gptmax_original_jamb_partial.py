@@ -80,6 +80,8 @@ def test_source_dpi_requires_exact_positive_integer(mode):
 
 
 def _original():
+    if not PDF.is_file():
+        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: requires SHA-verified Lot16 PDF; not a passing source validation")
     raw=PDF.read_bytes()
     assert sha256(raw).hexdigest()==SHA
     pdf=fitz.open(stream=raw,filetype="pdf")

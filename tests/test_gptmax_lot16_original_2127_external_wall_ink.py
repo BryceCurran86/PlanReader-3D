@@ -32,6 +32,8 @@ RIGHT = ("horizontal", (836.4, 426.48, 949.68, 429.36))
 
 @pytest.fixture(scope="module")
 def original_page3_images():
+    if not ORIGINAL.is_file():
+        pytest.skip("PRIVATE ORIGINAL SOURCE UNAVAILABLE: requires SHA-verified Lot16 PDF; not a passing source validation")
     original_bytes = ORIGINAL.read_bytes()
     assert sha256(original_bytes).hexdigest() == SHA256
     source = fitz.open(stream=original_bytes, filetype="pdf")
