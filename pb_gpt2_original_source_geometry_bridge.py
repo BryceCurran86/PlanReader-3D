@@ -11,6 +11,9 @@ from __future__ import annotations
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_cross_view_ceiling_finish_authority import _source_bytes
 from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_graph
+from tools.diag_gpt2_original_figured_detail_plan_shadow import (
+    audit_original_figured_detail_plan_pair,
+)
 from tools.diag_gpt2_original_room_doorway_ancestry_shadow import (
     audit_gpt2_original_room_doorway_ancestry_pair,
 )
@@ -59,6 +62,39 @@ class GPT2OriginalSourceGeometryBridge:
         if page_1_based not in decoded:
             raise ValueError("original_source_page_outside_producer_coverage")
         return published,raw
+
+    def original_figured_detail_plan_candidate(
+        self, *, revision_id: str, detail_page_1_based: int,
+        first_dimension: dict, second_dimension: dict,
+        original_room_word_address: tuple[int,int,int],
+        original_finish_word_address: tuple[int,int,int],
+        plan_enclosure_bbox_pdf_pts: tuple[float,float,float,float],
+    ) -> dict:
+        """Independently printed figured mm plus native arrowhead witnesses.
+
+        A diagnostic area is genuine arithmetic derived from original
+        figured source text, but can NEVER be used to identify a room or
+        finish without existing W4 source-face and physical-room proof.
+        """
+        published,raw=self._source_revision(
+            revision_id,page_1_based=detail_page_1_based)
+        result=audit_original_figured_detail_plan_pair(
+            raw,expected_sha256=published.revision.source_sha256,
+            page_1_based=detail_page_1_based,
+            first_dimension=first_dimension,second_dimension=second_dimension,
+            original_room_word_address=original_room_word_address,
+            original_finish_word_address=original_finish_word_address,
+            plan_enclosure_bbox_pdf_pts=plan_enclosure_bbox_pdf_pts,
+        )
+        return {
+            **result,
+            "source_document_id":published.revision.document_id,
+            "source_revision_id":revision_id,
+            "source_snapshot_id":published.snapshot.snapshot_id,
+            "metric_figured_area_candidate_only":True,
+            "original_detail_to_main_floor_W4_binding_granted":False,
+            "new_firm_quantities":0,
+        }
 
     def original_room_ink_graph(
         self, *, revision_id: str, page_1_based: int,
