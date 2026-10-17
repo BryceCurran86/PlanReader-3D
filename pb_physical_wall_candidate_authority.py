@@ -975,27 +975,26 @@ def _segment_is_authenticated_vector_frame_edge(
 
 
 def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> bool:
-    """True only for producer-authenticated terminal-band source geometry.
+    """Only the exact producer-issued raster ID grammar is local G17 ink.
 
-    These observations are deliberately excluded from the canonical page-wide
-    W2/W3/W4 graph. They exist solely to support a later opening-local raster
-    host proposition, preventing additive source capture from re-splitting or
-    rekeying unrelated wall topology.
+    The old substring test could treat an unrelated W2 primitive ID with
+    `:<G17 family>:` appearing elsewhere as an opening-local source wall,
+    dropping it from the ordinary W4 competitor universe. This is an
+    identity/provenance boundary, not a heuristic physical role decision.
     """
-    source_id = str(segment.get("id") or "")
-    # The source visibility producer issues independent namespace versions for
-    # a two-ended band, a one-ended original G17 flank and an end-anchored
-    # partial flank. None is a complete page-wide structural wall. Route all
-    # three only through the existing explicitly INCOMPLETE opening-local W4
-    # universe; otherwise new original paint can rekey OLD hosted walls.
-    # Match the exact source namespace token, not a label or nearby geometry.
-    return any(
-        f":{version}:" in source_id
-        for version in (
-            UNCHANGED_BAND_IDENTITY_VERSION,
-            ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
-            ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
-        )
+    source_id = segment.get("id")
+    if type(source_id) is not str:
+        return False
+    fields = source_id.split(":")
+    if (len(fields) != 5 or fields[0] != "raster_segment"
+            or not fields[1] or not fields[3]
+            or not fields[4].isdecimal()
+            or str(int(fields[4])) != fields[4]):
+        return False
+    return fields[2] in (
+        UNCHANGED_BAND_IDENTITY_VERSION,
+        ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+        ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
     )
 
 

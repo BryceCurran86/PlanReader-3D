@@ -71,3 +71,24 @@ def test_no_mutation_of_original_source_observations():
     ordinary, local=_partition_opening_local_supplemental_segments([segment])
     assert ordinary==[] and local==[original]
     assert segment==original
+
+
+@pytest.mark.parametrize("source", (
+    "visible:raster_segment:image:original_g17_one_end_paint_v1:full:0",
+    "native:original_g17_jamb_partial_paint_v1:inner:0",
+    "raster_segment:image:original_g17_one_end_paint_v1:full:0:EXTRA",
+    "raster_segment:image:original_g17_jamb_partial_paint_v1:full:00",
+    "raster_segment:image:original_g17_jamb_partial_paint_v1:full:-1",
+    "raster_segment:image:original_g17_one_end_paint_v1::0",
+    "raster_segment::original_g17_jamb_partial_paint_v1:full:0",
+    "raster_segment:image:normal-ink-version:original_g17_one_end_paint_v1:0",
+))
+def test_source_version_string_not_at_original_issuer_field_never_steals_w4_wall(source):
+    assert not _is_opening_local_supplemental_segment({"id":source})
+
+
+def test_typed_ordinary_wall_injected_with_g17_label_remains_canonical():
+    unrelated={"id":"native:structural-wall:original_g17_one_end_paint_v1:0",
+               "source_observation_id":"original-native"}
+    canonical, supplemental=_partition_opening_local_supplemental_segments([unrelated])
+    assert canonical==[unrelated] and not supplemental
