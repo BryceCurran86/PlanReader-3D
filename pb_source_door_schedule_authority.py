@@ -256,12 +256,14 @@ def _original_door_schedule_column_proof(
         return rows,False
     header=headers[0]
     first=first_columns[0]
-    if not all(w.trusted for w in header+first):
-        # Header identity can remain a source candidate but not source-
-        # authenticated row authority when original PDF text is untrusted.
-        headers_trusted=False
-    else:
-        headers_trusted=True
+    # Trust source column words individually. The native CAD header block
+    # can also contain unrelated paint/hardware notes; those words must not
+    # overwrite the genuine WIDTH/HEIGHT column glyph/clip receipts.
+    required_header=tuple(w for w in header if w.literal in
+                          {"WIDTH","HEIGHT","THICKNESS"})
+    required_first=tuple(w for w in first if w.literal in
+                         {"No.","ROOM","NAME","TYPE"})
+    headers_trusted=all(w.trusted for w in (*required_header,*required_first))
     width=next(w for w in header if w.literal=="WIDTH")
     height=next(w for w in header if w.literal=="HEIGHT")
     header_x=min(w.bbox_pdf_pts[0] for w in header)
@@ -327,7 +329,23 @@ def _original_door_schedule_column_proof(
             table_trusted and row.complete_native_row_text_trusted
             and row.status!="source_schedule_row_duplicate_code_conflict"
         )
+        # Column authority is narrower than whole descriptive row trust.
+        # Only the native Dxx cell and independently sourced numeric cells,
+        # paired with their original trusted headers, are needed to prove
+        # their printed column identity. Untrusted adjacent hardware/finish
+        # notes remain a separate full-row semantic veto. Never promote a
+        # duplicate original code or invent physical dimensions/host/count.
+        code_words=[w for w in members if w.literal==row.code]
+        numeric_fields_trusted=(
+            table_trusted
+            and row.status!="source_schedule_row_duplicate_code_conflict"
+            and len(code_words)==1 and code_words[0].trusted
+            and geometry_verified
+            and matched["width"].trusted and matched["height"].trusted
+        )
         first_gate=(
+            "remaining_original_schedule_notes_or_physical_host"
+            if numeric_fields_trusted and not accepted_row else
             "original_schedule_title_or_row_word_trust"
             if not accepted_row else
             "source_numeric_columns_unresolved"
@@ -349,7 +367,7 @@ def _original_door_schedule_column_proof(
                 matched["height"].observation_id if "height" in matched else None
             ),
             source_dimension_column_roles_authenticated=bool(
-                accepted_row and geometry_verified
+                numeric_fields_trusted
             ),
             status=(
                 "source_schedule_row_text_authenticated" if accepted_row
