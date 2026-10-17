@@ -37,10 +37,17 @@ def _source_floor_area_simple_bbox(
         raise SourceClosedRunConflictError(
             f"original floor source ring is not a typed coordinate list: {quantity_id}"
         )
+    def finite_source_coordinate(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return False
+
     if any(
         type(point) not in (tuple, list) or len(point) != 2
-        or any(type(value) not in (int, float)
-               or not math.isfinite(float(value)) for value in point)
+        or any(not finite_source_coordinate(value) for value in point)
         for point in points
     ):
         raise SourceClosedRunConflictError(
