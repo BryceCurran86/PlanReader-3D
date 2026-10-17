@@ -4,7 +4,29 @@ from copy import deepcopy
 import pytest
 
 from tools import gpt3_customer_quote_scenarios as scenarios
-from tests.test_gpt3_verified_customer_quote import fixture
+import json
+from pathlib import Path
+
+def fixture():
+    root = Path(__file__).resolve().parents[1]
+    folder = root / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+    sealed = json.loads((folder / "source_sealed_run.json").read_text(encoding="utf-8"))
+    rows = json.loads((folder / "verified_customer_rows.json").read_text(encoding="utf-8"))
+    rates = {
+        "schema_version": "gpt3-client-rates-v1", "project_id": sealed["project_id"],
+        "currency": "AUD", "issued_on": "2026-10-17", "expires_on": "2026-11-17",
+        "include_manual_allowances": False, "manual_allowances": [],
+        "rates": [{
+            "scope": "family", "key": "opening_area", "unit": "m2",
+            "material": "40", "labour": "20", "plant": "10", "subcontract": "5",
+            "markup_pct": "15", "waste_pct": "2", "labour_hours_per_unit": "1.25",
+        }],
+        "adjustments": {
+            "overhead_pct": "5", "contingency_pct": "2",
+            "discount_pct": "0", "tax_pct": "10",
+        },
+    }
+    return sealed, rows, rates
 
 
 def bundle(rate_book):
