@@ -57,3 +57,4 @@ jobs:
           tests/test_gpt1_producer_figured_area_ring_bridge_shadow.py
           tests/test_gpt1_source_producer_floor_finish_pipeline_shadow.py
           tests/test_gpt1_native_stroke_pair_census.py
+          tests/test_gpt1_producer_sealed_w4_metric_floor_shadow.py
