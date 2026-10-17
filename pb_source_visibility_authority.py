@@ -2407,11 +2407,21 @@ class SourceVisibilityProducer:
         # nearest/first support or a caller-narrowed candidate universe.
         candidates = physical._raster_framed_candidates_for(records[0], tuple(records))
         openings = {}
+        # Only selectors that independently re-prove the exact original
+        # physical identity may address that opening. Selecting min() over
+        # ALL source members can choose a G17 support member whose own
+        # existence proposition is unresolved or conflicting.
+        original_positive_selectors: dict[str, list[str]] = {}
         for oid in sorted({oid for c in candidates for oid in c.source_observation_ids}):
             result = physical.prove_existence(selectors[oid])
             opening = result.existence_record
-            if result.status is EvidenceResolutionStatus.CORROBORATED and opening is not None:
+            if (result.status is EvidenceResolutionStatus.CORROBORATED
+                    and opening is not None):
+                prior = openings.get(opening.record_id)
+                if prior is not None and prior != opening:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                 openings[opening.record_id] = opening
+                original_positive_selectors.setdefault(opening.record_id, []).append(oid)
         by_id = {r.observation_id: r for r in records}
         boxes = set()
         from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
@@ -2438,11 +2448,12 @@ class SourceVisibilityProducer:
                 from pb_opening_local_g17_wall_shadow import (
                     build_opening_local_g17_wall_shadow,
                 )
-                original_selector = selectors.get(
-                    min(opening.source_observation_ids)
-                )
-                if original_selector is None:
+                trusted_addresses = tuple(sorted(
+                    original_positive_selectors.get(opening.record_id, ())
+                ))
+                if not trusted_addresses:
                     continue
+                original_selector = selectors[trusted_addresses[0]]
                 ink = build_opening_local_g17_wall_shadow(
                     self, original_selector,
                     original_ink_render_cache_shadow=True,

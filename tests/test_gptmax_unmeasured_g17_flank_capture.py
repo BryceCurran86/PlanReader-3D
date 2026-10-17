@@ -145,3 +145,61 @@ def test_capture_flag_must_be_explicit_boolean(monkeypatch, invalid):
             source_visibility_producer=src_real, revision_id="revision",
             page_ids=("3",), include_unmeasured_ink_closed_flanks_shadow=invalid,
         )
+
+
+def test_first_source_support_is_not_a_valid_existence_selector(monkeypatch):
+    # The original physical producer can re-prove one source observation but
+    # abstain on another member of the SAME existing G17 source support set.
+    # Never select the lexical first unproven observation.
+    src, published = scope(monkeypatch)
+    physical = src.physical_opening_authority()
+    original = physical.prove_existence
+    physical.prove_existence = (
+        lambda selector: Obj(status=Status.ABSTAINED, existence_record=None)
+        if selector.observation_id == "e1" else original(selector)
+    )
+    examined = []
+    def authentic_ink(source, selector, **kwargs):
+        examined.append(selector.observation_id)
+        return Obj(physical_opening_id="physical-one",
+                   flanks=(Obj(source_ink_supported=True),
+                           Obj(source_ink_supported=True)))
+    monkeypatch.setattr(g17, "build_opening_local_g17_wall_shadow", authentic_ink)
+    result = SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src, published, "3", include_unmeasured_ink_closed_flanks_shadow=True,
+    )
+    assert examined == ["e2"]
+    assert len(result) == 2
+
+
+def test_no_own_source_positive_existence_never_nominates_a_wall(monkeypatch):
+    src, published = scope(monkeypatch)
+    physical=src.physical_opening_authority()
+    physical.prove_existence = lambda selector: Obj(
+        status=Status.ABSTAINED, existence_record=None)
+    monkeypatch.setattr(g17, "build_opening_local_g17_wall_shadow",
+                        lambda *args, **kwargs: pytest.fail(
+                            "unproven source selectors must not enter paint check"))
+    assert SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src, published, "3",
+        include_unmeasured_ink_closed_flanks_shadow=True,
+    ) == ()
+
+
+def test_source_selector_conflict_for_same_record_fails_closed(monkeypatch):
+    src, published = scope(monkeypatch)
+    physical=src.physical_opening_authority()
+    original=physical.prove_existence
+    def contradict(selector):
+        if selector.observation_id == "e2":
+            return Obj(status=Status.CORROBORATED,
+                       existence_record=Obj(
+                           record_id="physical-one",
+                           source_observation_ids=("foreign-source",)))
+        return original(selector)
+    physical.prove_existence=contradict
+    with pytest.raises(RuntimeError):
+        SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+            src, published, "3",
+            include_unmeasured_ink_closed_flanks_shadow=True,
+        )
