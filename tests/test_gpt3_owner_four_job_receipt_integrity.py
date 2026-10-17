@@ -490,8 +490,11 @@ def test_original_signed_lot16_customer_and_family_are_not_relabelled_firm():
     assert lot16["derived_sealed_quantity_count"] == 8
     assert lot16["verified_customer_rows_in_run"] == 0
     assert lot16["earliest_verified_project_execution_gate"] == (
-        "customer_rows_not_verified_for_fresh_source_run"
+        "multidocument_original_source_production_not_complete"
     )
+    assert lot16["original_source_package_document_count"] == 2
+    assert lot16["producer_primary_source_document_count"] == 1
+    assert lot16["fresh_customer_bijection_verified"] is False
     assert set(audit_result["cross_semantic_signed_object_claims_for_review"]) == set(_PROJECTS)
     assert all(audit_result["cross_semantic_signed_object_claims_for_review"][pid] == []
                for pid in _PROJECTS)
@@ -569,3 +572,23 @@ def test_owner_lot16_snapshot_rekeys_never_implicitly_authorize_commercial_reuse
     assert all(row["issuer_attestation_required"] for row in replay["quantity_differences"])
     assert not replay["historical_v1_byte_exact"]
     assert replay["publication_status"] == "DIAGNOSTIC_UNPUBLISHED"
+
+
+def test_original_source_preflight_does_not_masquerade_as_all_pdf_producer_execution():
+    receipt = audit.verify_owner_four_job_receipts(_ROOT)
+    rows = {row["project_id"]: row for row in receipt["projects"]}
+    assert rows["au_qld_lot16_power"]["original_source_package_document_count"] == 2
+    assert rows["au_qld_lot16_power"]["producer_primary_source_document_count"] == 1
+    assert rows["au_qld_lot16_power"]["earliest_verified_project_execution_gate"] == (
+        "multidocument_original_source_production_not_complete"
+    )
+    assert rows["au_qld_q5446_armstrong32_harlequin"][
+        "original_source_package_document_count"
+    ] == 6
+    assert rows["au_qld_q5446_armstrong32_harlequin"][
+        "earliest_verified_project_execution_gate"
+    ] == "source_producer_unsealed:source_complexity_blocked"
+    assert rows["au_qld_maryborough_service_station"][
+        "earliest_verified_project_execution_gate"
+    ] == "owner_process_stopped:MEMORY_LIMIT"
+    assert receipt["official_four_project_coverage_accuracy"] is None
