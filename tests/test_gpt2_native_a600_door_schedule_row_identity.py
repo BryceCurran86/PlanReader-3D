@@ -57,12 +57,9 @@ def test_misleading_missing_height_or_multiple_row_ids_abstains():
     assert not _row_candidates([
         _word(2,i,t) for i,t in enumerate(["D11","D12","SINGLE","SWING","820","2040"])
     ])
-    rows=_row_candidates([
+    assert not _row_candidates([
         _word(3,i,t) for i,t in enumerate(["D11","SINGLE","SITTING","820","2040"])
     ])
-    assert len(rows)==1
-    assert rows[0]["source_door_kind_candidate"]=="other_source_door_candidate"
-    assert not rows[0]["source_row_has_single_swing_literals"]
 
 
 def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
