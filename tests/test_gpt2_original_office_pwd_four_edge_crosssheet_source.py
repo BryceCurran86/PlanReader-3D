@@ -9,6 +9,7 @@ from tools.diag_original_room_four_edge_source_ink_shadow import (
 
 SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+pytestmark=pytest.mark.skipif(not SOURCE.is_file(), reason="private original Maryborough PDF unavailable in merge CI; original SHA-positive review required")
 OFFICE={
     "left":("d52239i0","d2657i0"),
     "right":("d66216i0","d3058i0"),
