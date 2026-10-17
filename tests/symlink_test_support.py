@@ -34,4 +34,4 @@ def symlink_or_skip(link, target, *, target_is_directory: bool = False) -> None:
     except (OSError, NotImplementedError) as exc:
         if not _os_refused_symlink(exc):
             raise
-        pytest.skip(f"OS refused to create symlink: {exc}")
+        pytest.skip(f"OS refused to create symlink {link}: {exc}")

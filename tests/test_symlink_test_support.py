@@ -37,9 +37,11 @@ def _windows_privilege_not_held():
 def test_os_refusal_skips_with_the_os_error_as_reason(tmp_path, monkeypatch, make_exc):
     exc = make_exc()
     monkeypatch.setattr(os, "symlink", _refusing_symlink(exc))
+    link = tmp_path / "link"
     with pytest.raises(pytest.skip.Exception) as skipped:
-        symlink_or_skip(tmp_path / "link", tmp_path / "target")
+        symlink_or_skip(link, tmp_path / "target")
     assert "OS refused to create symlink" in skipped.value.msg
+    assert str(link) in skipped.value.msg
     assert str(exc) in skipped.value.msg
 
 

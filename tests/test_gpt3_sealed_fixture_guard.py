@@ -20,7 +20,7 @@ from tools.diag_gpt3_sealed_fixture_guard import (
 )
 from tests.symlink_test_support import symlink_or_skip
 
-ROOT =Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "docs/engineering/lot16_original_signed_eight_row_20261015"
 CUSTOMER = "production/verified_customer_rows.json"
 MAPPING = "identity_map_with_1215.json"
