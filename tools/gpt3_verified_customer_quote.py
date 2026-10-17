@@ -327,6 +327,13 @@ def build_verified_customer_quote(
     return report
 
 
+def _csv_text(value: Any) -> Any:
+    """Prevent signed labels/client names being evaluated as formulas by spreadsheets."""
+    if type(value) is str and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 def quote_csv(report: Mapping[str, Any]) -> str:
     """Source-identifiable machine rows, no raw PDF or provenance note leaks."""
     columns = (
@@ -340,8 +347,11 @@ def quote_csv(report: Mapping[str, Any]) -> str:
     writer = csv.DictWriter(buffer, fieldnames=columns)
     writer.writeheader()
     for line in report["items"]:
-        writer.writerow({"project_id": report["project_id"],
-                         **{key: line.get(key) for key in columns if key != "project_id"}})
+        writer.writerow({"project_id": _csv_text(report["project_id"]),
+                         **{key: (_csv_text(line.get(key)) if key not in (
+                             "physical_quantity", "cost_amount", "sell_amount", "labour_hours"
+                         ) else line.get(key))
+                            for key in columns if key != "project_id"}})
     return buffer.getvalue()
 
 
@@ -349,7 +359,15 @@ def compare_verified_quotes(before: Mapping[str, Any], after: Mapping[str, Any])
     """Reveal price changes without presenting rate-only changes as measured gains."""
     for quote in (before, after):
         if quote.get("schema_version") != "gpt3-client-verified-quote-v1":
-            raise ValueError("only authenticated-format GPT3 quote reports can be compared")
+            raise ValueError("only canonical-format GPT3 quote reports can be compared")
+        copy = dict(quote)
+        claimed = copy.pop("quote_fingerprint", None)
+        actual = hashlib.sha256(json.dumps(
+            copy, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")).hexdigest()
+        if type(claimed) is not str or claimed != actual:
+            raise ValueError("quote contents differ from its canonical fingerprint")
     if before.get("project_id") != after.get("project_id"):
         raise ValueError("quote comparison cannot combine projects")
     older = {row["quantity_id"]: row for row in before["items"]}
