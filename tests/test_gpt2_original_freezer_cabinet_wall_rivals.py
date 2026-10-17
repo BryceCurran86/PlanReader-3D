@@ -76,3 +76,37 @@ def test_missing_actual_source_path_sha_and_bounded_universe_abstain():
         audit(raw+b"altered",**BASE)
     with pytest.raises(ValueError,match="missing_original_frontage_source_pair"):
         audit(raw,**{**BASE,"inner_front_source_ids":("d999999i0","d62620i0")})
+
+
+
+def test_synthetic_access_door_vs_manufactured_casing_remains_unproven():
+    doc=fitz.open()
+    for offset in (0,78):
+        doc.new_page(width=350,height=250)
+        p=doc[-1]
+        for x,y1,y2 in [
+            (100.,30.,100.),(100.,108.,170.),
+            (108.,30.,100.),(108.,108.,170.),
+        ]:
+            p.draw_line((x+offset,y1),(x+offset,y2),
+                        width=.48,color=(0,0,0))
+    doc.new_page(width=350,height=250)
+    doc[-1].insert_text((30,40),"D17 SLIDING DOOR")
+    doc[-1].insert_text((30,75),"D18 MANUFACTURER DISPLAY SHELVING DOOR")
+    data=doc.tobytes()
+    doc.close()
+    receipt=audit(data,
+        expected_sha256=hashlib.sha256(data).hexdigest(),
+        floor_page=1,finish_page=2,schedule_page=3,
+        original_floor_bbox=(0.,0.,300.,230.),
+        original_finish_bbox=(0.,0.,330.,230.),
+        inner_front_source_ids=("d0i0","d1i0"),
+        outer_case_source_ids=("d2i0","d3i0"),
+        access_door_code="D17",
+        manufacturer_door_codes=("D18",),
+        expected_translation_pdf_pts=(78.,0.),
+    )
+    assert receipt["original_ink_column_separation_pdf_pts"]==8.
+    assert not receipt["physical_source_room_enclosed"]
+    assert not receipt["source_metric_wall_or_opening_width_proven"]
+    assert receipt["display_door_count_default_one_forbidden"]
