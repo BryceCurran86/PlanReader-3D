@@ -119,6 +119,26 @@ def _one_source_policy(pdf, digest, *, shadow, elevation_witness_shadow=False):
 
 
 
+def _original_eight_firm_customer_retention(original_receipt, updated_receipt, comparison):
+    """Never infer the eight original FIRM rows from area numbers alone.
+
+    This is a strict A/B source+customer equivalence flag, NOT official
+    frozen benchmark correctness or approval of a newly identified opening.
+    """
+    if (not isinstance(original_receipt, dict)
+            or not isinstance(updated_receipt, dict)
+            or not isinstance(comparison, dict)):
+        return False
+    old = original_receipt.get("quantities")
+    fresh = updated_receipt.get("quantities")
+    if not isinstance(old, list) or not isinstance(fresh, list):
+        return False
+    if len(old) != 8 or len(fresh) < len(old):
+        return False
+    return comparison.get("all_original_issuer_receipts_exact") is True
+
+
+
 def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
                   elevation_witness_shadow: bool = False) -> dict:
     if type(elevation_witness_shadow) is not bool:
@@ -144,25 +164,6 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
          for t in comp.opening_bindings),
         key=lambda row: row["opening_id"],
     )
-def _original_eight_firm_customer_retention(original_receipt, updated_receipt, comparison):
-    """Never infer the eight original FIRM rows from area numbers alone.
-
-    This is a strict A/B source+customer equivalence flag, NOT official
-    frozen benchmark correctness or approval of a newly identified opening.
-    """
-    if (not isinstance(original_receipt, dict)
-            or not isinstance(updated_receipt, dict)
-            or not isinstance(comparison, dict)):
-        return False
-    old = original_receipt.get("quantities")
-    fresh = updated_receipt.get("quantities")
-    if not isinstance(old, list) or not isinstance(fresh, list):
-        return False
-    if len(old) != 8 or len(fresh) < len(old):
-        return False
-    return comparison.get("all_original_issuer_receipts_exact") is True
-
-
     return {
         "status": "original_source_ink_closed_g17_capture_counterfactual",
         "source_sha256": expected_sha256,
