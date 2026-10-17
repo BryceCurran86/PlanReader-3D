@@ -233,3 +233,42 @@ def test_v1_replay_cli_rejects_unrelated_json_binary_and_output_symlink(tmp_path
     with pytest.raises(ValueError, match="cannot follow an output symlink"):
         drift.main(_historical_cli_args(alias))
     assert original.read_text(encoding="utf-8") == "DO NOT MUTATE"
+
+
+def test_historical_v1_replay_ignores_unrelated_manual_estimator_row():
+    archived, newer, customers = _fixtures()
+    manual = {"description": "Manual estimator adjustment", "unit": "each", "quantity": 2}
+    output = drift.inspect_signed_v1_replay(
+        archived_run=archived, candidate_run=newer,
+        archived_customer_rows=[*customers, manual],
+    )
+    assert output["archived_customer_verified"] is True
+    assert output["historical_quantity_count"] == 8
+    assert output["candidate_customer_verified"] is False
+    assert output["new_firm_quantities_authorized"] == 0
+
+
+def test_v1_replay_candidate_customer_count_excludes_manual_without_masking_signed_provenance():
+    archived, _, customers = _fixtures()
+    manual = {"description": "Manual quote line outside automated projection"}
+    out = drift.inspect_signed_v1_replay(
+        archived_run=archived, candidate_run=archived,
+        archived_customer_rows=[*customers, manual],
+        candidate_customer_rows=[*customers, manual],
+    )
+    assert out["archived_customer_verified"] is True
+    assert out["candidate_customer_verified"] is True
+    assert out["historical_v1_byte_exact"] is True
+    assert out["safe_to_reuse_archived_customers_with_candidate"] is False
+
+
+def test_v1_replay_damaged_automated_row_not_masked_by_manual_row_exclusion():
+    archived, newer, customers = _fixtures()
+    with pytest.raises(Exception):
+        drift.inspect_signed_v1_replay(
+            archived_run=archived, candidate_run=newer,
+            archived_customer_rows=[
+                *customers,
+                {"commercial_projection_provenance": {"adapter": "commercial_takeoff"}},
+            ],
+        )
