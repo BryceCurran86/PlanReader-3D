@@ -181,6 +181,16 @@ def build_120_target_ledger(
         raise ValueError("producer head must be an exact lowercase 40-char commit")
     if owner_receipt is not None and not isinstance(owner_receipt, dict):
         raise ValueError("owner run receipt must be a JSON object")
+    if owner_receipt is not None:
+        # Owner-run repo_head is itself an exact producer identity; requiring
+        # a redundant CLI flag otherwise falsely labels repeat work unknown.
+        receipt_head = owner_receipt.get("repo_head")
+        if type(receipt_head) is not str or not _SHA.fullmatch(receipt_head):
+            raise ValueError("owner receipt lacks canonical exact producer head")
+        if producer_head is None:
+            producer_head = receipt_head
+        elif producer_head != receipt_head:
+            raise ValueError("producer commit conflicts with owner-run receipt")
     owner_statuses: dict[str, str] = {}
     if owner_receipt is not None:
         owner_rows = owner_receipt.get("project_handoffs")
