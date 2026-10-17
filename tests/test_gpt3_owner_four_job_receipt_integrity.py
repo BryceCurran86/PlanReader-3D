@@ -695,12 +695,14 @@ def test_owner_audit_fingerprint_pins_unchanged_old_eight_and_frozen_source_file
     assert set(originals) == {"source_sealed_run.json", "verified_customer_rows.json"}
     assert originals == {name: _sha(archive / name) for name in originals}
     frozen = result["frozen_source_evaluator_file_sha256s"]
-    assert len(frozen) == 7
+    assert len(frozen) == 11
     assert all(len(digest) == 64 for digest in frozen.values())
     assert "evaluator.py" in frozen
     assert "sealed_reconciliation.py" in frozen
     assert "manifest.json" in frozen
     assert "projects/au_qld_lot16_power/source_manifest.json" in frozen
+    assert "projects/au_qld_lot16_power/reference_takeoff.json" in frozen
+    assert len([key for key in frozen if key.endswith("/reference_takeoff.json")]) == 4
     assert len(result["reconciled_derived_artifact_fingerprint"]) == 64
     assert result["official_four_project_coverage_accuracy"] is None
 
