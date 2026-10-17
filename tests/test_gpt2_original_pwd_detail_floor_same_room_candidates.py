@@ -82,6 +82,8 @@ def test_source_pwd_plan_distinguished_from_four_inset_elevations_and_two_faces(
             receipt["source_original_room_and_door_word_candidates"]]==[
         "PWD","PWD","D13","D13"]
     assert receipt["original_page_rotations_degrees"]==(90,90)
+    assert receipt["original_source_plan_words_inside_own_physical_ink_candidates"]
+    assert receipt["original_source_door_word_intersects_printed_top_boundary"]
     assert len(receipt["source_all_figured_inner_outer_axis_correspondence_candidates"])==2
     geometries=receipt["source_all_figured_inner_outer_axis_correspondence_candidates"]
     assert all(row["source_original_axes_relative_disagreement"]<.01
@@ -104,6 +106,13 @@ def test_wrong_native_room_label_or_moved_pdf_fails_before_w4_identity():
         audit_original_detail_vs_main_source_room_candidate(
             raw,source_sha256=SHA,original_detail_figure_face_receipt=rivals,
             **{**INPUT,"original_detail_door_word_address":(15,0,0)},
+        )
+    # Exact D13 is ALSO printed elsewhere in the same original A502
+    # sheet, but belongs to an elevation, not the PROP. PWD PLAN inset.
+    with pytest.raises(ValueError,match="original_plan_word_or_door_boundary_not_source_owned"):
+        audit_original_detail_vs_main_source_room_candidate(
+            raw,source_sha256=SHA,original_detail_figure_face_receipt=rivals,
+            **{**INPUT,"original_detail_door_word_address":(48,0,0)},
         )
     with pytest.raises(ValueError,match="original_same_room_source_sha_mismatch"):
         audit_original_detail_vs_main_source_room_candidate(
