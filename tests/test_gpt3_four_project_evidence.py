@@ -651,3 +651,148 @@ def test_unmapped_unknown_source_family_remains_unmapped_and_not_misclassified()
         mapped_refs=("different-source-identity",),
     )
     assert module._enforce_mapped_production_family_trade(*fixture) is None
+
+
+def test_manual_estimator_rows_do_not_change_verified_automated_customer_bijection(tmp_path):
+    import json
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    root = Path(__file__).resolve().parents[1]
+    source = root / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+    sealed = sealed_source_closed_run_from_dict(json.loads(
+        (source / "source_sealed_run.json").read_text(encoding="utf-8")
+    ))
+    originals = json.loads(
+        (source / "verified_customer_rows.json").read_text(encoding="utf-8")
+    )
+    manual = {"description": "Manual estimator note", "trade": "review", "amount": 200}
+    mixed = [*originals, manual]
+    path = tmp_path / "customer.json"
+    path.write_text(json.dumps(mixed), encoding="utf-8")
+    parsed = module._json_customer_rows(path, allow_manual=True)
+    verified = verify_sealed_customer_output(sealed, parsed)
+    assert verified.customer_row_count == 8
+    assert module._verify_customer_counts(sealed, verified, parsed) is None
+    assert len(parsed) == 9
+    assert sealed.fingerprint == sealed_source_closed_run_from_dict(
+        json.loads((source / "source_sealed_run.json").read_text(encoding="utf-8"))
+    ).fingerprint
+
+
+@pytest.mark.parametrize("bad", [
+    {"quantity_id": "", "description": "not a manual row"},
+    {"quantity_id": None, "description": "not a manual row"},
+    {"commercial_projection_provenance": {}, "description": "damaged"},
+])
+def test_manual_row_exclusion_cannot_hide_damaged_automated_identity(tmp_path, bad):
+    import json
+    path = tmp_path / "customer.json"
+    path.write_text(json.dumps([bad]), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical quantity identity"):
+        module._json_customer_rows(path, allow_manual=True)
+
+
+def test_manual_row_with_machine_source_reference_still_rejected_by_v1_verifier(tmp_path):
+    import json
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from pb_customer_output_verification import (
+        verify_sealed_customer_output, CustomerOutputVerificationError,
+    )
+    root = Path(__file__).resolve().parents[1]
+    old = root / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+    sealed = sealed_source_closed_run_from_dict(json.loads(
+        (old / "source_sealed_run.json").read_text(encoding="utf-8")
+    ))
+    customers = json.loads((old / "verified_customer_rows.json").read_text(encoding="utf-8"))
+    automated = {
+        "description": "Damaged automated estimator row",
+        "commercial_projection_provenance": {"adapter": "commercial_takeoff"},
+    }
+    # Embedded machine adapter claim with no quantity cannot be treated as manual.
+    with pytest.raises((ValueError, CustomerOutputVerificationError)):
+        verify_sealed_customer_output(sealed, [*customers, automated])
+
+
+def test_manual_input_option_never_weakens_default_machine_only_reader(tmp_path):
+    import json
+    path = tmp_path / "mixed-rows.json"
+    path.write_text(json.dumps([
+        {"quantity_id": "machine-q"},
+        {"notes": "genuine manual estimator note"},
+    ]), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical quantity identity"):
+        module._json_customer_rows(path)
+    accepted = module._json_customer_rows(path, allow_manual=True)
+    assert len(accepted) == 2
+    assert accepted[0]["quantity_id"] == "machine-q"
+    assert "quantity_id" not in accepted[1]
+
+
+def test_missing_original_source_roles_are_source_manifest_owned_and_share_safe(tmp_path):
+    dirs = _dirs(tmp_path)
+    manifests = module.load_suite_manifests(module.FROZEN_ROOT)
+    lot16 = next(m for m in manifests if len(m.source_documents) == 2)
+    result = module.build_four_project_evidence_ledger(**dirs)
+    row = next(x for x in result["projects"] if x["project_id"] == lot16.project_id)
+    assert row["missing_original_source_document_count"] == 2
+    assert row["missing_original_source_document_roles"] == sorted(
+        doc.role for doc in lot16.source_documents
+    )
+    assert all("/" not in role and "\\" not in role
+               for role in row["missing_original_source_document_roles"])
+    assert row["source_sha_verified"] is False
+    assert row["exact_project_report"] is None
+    assert result["official_suite_result"] is None
+
+
+def test_one_supplied_source_does_not_claim_complete_twodoc_source_preflight(tmp_path):
+    dirs = _dirs(tmp_path)
+    manifests = module.load_suite_manifests(module.FROZEN_ROOT)
+    lot16 = next(m for m in manifests if len(m.source_documents) == 2)
+    project = dirs["source_dir"] / lot16.project_id
+    project.mkdir(parents=True)
+    supplied = lot16.source_documents[0]
+    (project / supplied.name).write_bytes(b"%PDF-test-unverified")
+    report = module.build_four_project_evidence_ledger(**dirs)
+    row = next(x for x in report["projects"] if x["project_id"] == lot16.project_id)
+    assert row["missing_original_source_document_count"] == 1
+    assert row["missing_original_source_document_roles"] == [lot16.source_documents[1].role]
+    assert row["source_sha_verified"] is False
+    assert row["publication_status"] == "UNAVAILABLE"
+    assert report["coverage_accuracy"] is None
+
+
+def test_signed_and_customer_dependency_roster_only_after_full_original_source_gate(
+    tmp_path, monkeypatch,
+):
+    dirs = _dirs(tmp_path)
+    manifest = module.load_suite_manifests(module.FROZEN_ROOT)[0]
+    src = dirs["source_dir"] / manifest.project_id
+    src.mkdir(parents=True)
+    for doc in manifest.source_documents:
+        (src / doc.name).write_bytes(b"%PDF-source-neutral-test")
+    # Bypass only the original SHA gate in a synthetic fixture; production
+    # cannot label these untrusted bytes as a real source.
+    monkeypatch.setattr(module, "_original_sha_gate",
+                        lambda m, files: (True, [], [d.sha256 for d in manifest.source_documents]))
+    result = module.build_four_project_evidence_ledger(**dirs)
+    target = next(row for row in result["projects"] if row["project_id"] == manifest.project_id)
+    assert target["source_sha_verified"] is True
+    assert target["reconciliation_input_presence_status"] == "MISSING"
+    assert target["missing_signed_reconciliation_artifacts"] == [
+        "sealed_run", "identity_map", "customer_rows"
+    ]
+    assert target["customer_bijection_verified"] is False
+    assert target["reconciliation_complete"] is False
+    assert result["coverage_accuracy"] is None
+
+
+def test_unavailable_source_never_claims_signed_files_missing_or_verified(tmp_path):
+    report = module.build_four_project_evidence_ledger(**_dirs(tmp_path))
+    for target in report["projects"]:
+        assert target["source_sha_verified"] is False
+        assert target["reconciliation_input_presence_status"] == "NOT_CHECKED_SOURCE_UNAVAILABLE"
+        assert target["missing_signed_reconciliation_artifacts"] == []
+        assert target["exact_project_report"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
