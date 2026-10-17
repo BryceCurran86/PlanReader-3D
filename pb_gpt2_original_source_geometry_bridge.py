@@ -20,6 +20,7 @@ from tools.diag_gpt2_original_native_dimension_chain_shadow import (
 from tools.diag_gpt2_original_figured_face_rivals_shadow import (
     audit_original_figured_detail_face_rivals,
     audit_original_figured_wall_note_alignment,
+    audit_original_ft2_internal_wall_face_basis,
 )
 from tools.diag_gpt2_original_detail_floor_same_room_shadow import (
     audit_original_detail_vs_main_source_room_candidate,
@@ -214,8 +215,10 @@ class GPT2OriginalSourceGeometryBridge:
                 original_horizontal_dimension_chain,
         )
         result=audit_original_figured_wall_note_alignment(faces,notes)
+        ft2_inside_face=audit_original_ft2_internal_wall_face_basis(faces,notes)
         return {
             **result,
+            "source_FT2_inside_finished_wall_face_takeoff_basis":ft2_inside_face,
             "original_source_sha256":published.revision.source_sha256,
             "source_document_id":published.revision.document_id,
             "source_revision_id":revision_id,
