@@ -132,3 +132,55 @@ def test_new_shadow_w4_scope_never_waives_original_scope_parity():
     assert p["original_authority"]["walls"]["new_ids"]==["wall-source:shadow:3"]
     assert p["original_authority"]["walls"]["original_exact"]
     assert not p["new_host_or_frame_authority_granted"]
+
+
+def test_real_unresolved_original_g17_source_selector_is_a_ledger_row_not_a_host():
+    a=receipt()
+    a["hosts"].append({
+        "opening_identity_id":None,
+        "representative_observation_id":"source-original-a68-negative",
+        "page_id":None, "record_id":None,"host_wall_id":None,
+        "status":"ABSTAINED", "reason_codes":["ambiguous-original-wall"],
+        "member_wall_candidate_ids":[],
+    })
+    b=deepcopy(a)
+    result=compare_original_g17_release_receipts(a,b)
+    assert result["original_authority"]["hosts"]["original_count"]==3
+    assert result["original_authority"]["hosts"]["original_exact"]
+    assert not result["new_host_or_frame_authority_granted"]
+
+
+def test_unresolved_a68_original_source_election_change_is_not_retention():
+    a=receipt()
+    a["hosts"].append({
+        "opening_identity_id":None,
+        "representative_observation_id":"source-original-a68-negative",
+        "record_id":None,"host_wall_id":None,
+        "status":"ABSTAINED", "reason_codes":["missing-role"],
+    })
+    b=deepcopy(a)
+    b["hosts"][-1]["representative_observation_id"]="source-changed-a68"
+    result=compare_original_g17_release_receipts(a,b)
+    assert not result["original_authority"]["hosts"]["original_exact"]
+    assert result["original_authority"]["hosts"]["lost_original_ids"]==[
+        "unresolved_source_selector:source-original-a68-negative"]
+
+
+def test_unresolved_selector_cannot_smuggle_positive_structural_host():
+    a=receipt()
+    a["hosts"].append({
+        "opening_identity_id":None,
+        "representative_observation_id":"source-original-negative",
+        "record_id":"borrowed-host","host_wall_id":"neighbour-wall",
+    })
+    with pytest.raises(ValueError,match="carries host grant"):
+        compare_original_g17_release_receipts(a,deepcopy(a))
+
+
+def test_same_unresolved_original_source_selector_duplicates_fail_closed():
+    a=receipt()
+    row={"opening_identity_id":None,"representative_observation_id":"s1",
+         "record_id":None,"host_wall_id":None}
+    a["hosts"].extend((deepcopy(row),deepcopy(row)))
+    with pytest.raises(ValueError,match="duplicate"):
+        compare_original_g17_release_receipts(a,deepcopy(a))
