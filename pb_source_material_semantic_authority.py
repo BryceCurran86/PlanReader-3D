@@ -1877,6 +1877,10 @@ class SourceMaterialSemanticProducer:
 
         published, source_bytes = self._source_bytes(revision_id)
         if published is None or source_bytes is None:
+            if self._source_native_schedule_page_ids:
+                # Explicit source evidence requested; absent revision is not a
+                # valid empty definition universe.
+                raise ValueError("original_schedule_source_revision_unavailable")
             self._published_revisions.add(revision_id)
             return self.authority()
 
@@ -1913,6 +1917,8 @@ class SourceMaterialSemanticProducer:
         try:
             for page_number in sorted(decoded_pages):
                 if page_number < 1 or page_number > pdf.page_count:
+                    if str(page_number) in self._source_native_schedule_page_ids:
+                        raise ValueError("original_schedule_page_outside_actual_pdf")
                     continue
                 page = pdf.load_page(page_number - 1)
                 page_words = trusted_words.get(str(page_number), ())
