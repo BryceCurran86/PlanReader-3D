@@ -179,7 +179,11 @@ def _original_source_row_candidates(
         strings=tuple(w.literal for w in source_words)
         if not strings or not _DOOR_CODE.fullmatch(strings[0]):
             continue
-        if "DOOR" not in strings and "SWING" not in strings:
+        # Native door schedule rows may describe a SLIDING or FIXED panel
+        # without repeating the literal DOOR. Preserve it as a candidate,
+        # but require the independently authenticated table before use.
+        if not ({"DOOR","SWING","SLIDING","DISPLAY","SHELVING","AUTOMATED"}
+                & set(strings)):
             continue
         if sum(_DOOR_CODE.fullmatch(x) is not None for x in strings)!=1:
             continue
@@ -275,12 +279,19 @@ def _original_door_schedule_column_proof(
     same_header_band = (
         max(header_x,first_x) < min(head_right,first_right)
     )
+    # Width and height describe independent original table columns.
+    # Overlapping native source header bands permit one number to inherit
+    # both roles, so those headers cannot issue column authority.
+    different_numeric_columns = not (
+        max(width.bbox_pdf_pts[1],height.bbox_pdf_pts[1]) <
+        min(width.bbox_pdf_pts[3],height.bbox_pdf_pts[3])
+    )
     candidates=[
         title for title in captions
         if max(w.bbox_pdf_pts[2] for w in title)
            < min(header_x,first_x)
     ]
-    if len(candidates)!=1 or not same_header_band:
+    if len(candidates)!=1 or not same_header_band or not different_numeric_columns:
         return rows,False
     caption=candidates[0]
     title_ids=tuple(w.observation_id for w in caption)
@@ -301,19 +312,14 @@ def _original_door_schedule_column_proof(
                 first_unclosed_gate="original_source_table_column_scope",
             ))
             continue
+        # Actual column geometry, not lexical first-two-number position,
+        # elects the *printed* numeric candidate. This handles independent
+        # hardware/specification numbers and prevents thickness becoming height.
         matched={}
-        for key,literal,column in (
-            ("width",row.original_width_literal,width),
-            ("height",row.original_height_literal,height),
-        ):
-            if literal is None:
-                continue
-            # Column source words must have exact original literal,
-            # same original native table block, downstream x, and a
-            # strictly positive projection onto their own HEADER band.
+        for key,column in (("width",width),("height",height)):
             rivals=[
                 word for word in members
-                if word.literal==literal
+                if _NUMERIC.fullmatch(word.literal) is not None
                 and word.bbox_pdf_pts[0]>column.bbox_pdf_pts[2]
                 and min(word.bbox_pdf_pts[3],column.bbox_pdf_pts[3])
                     > max(word.bbox_pdf_pts[1],column.bbox_pdf_pts[1])
@@ -322,9 +328,10 @@ def _original_door_schedule_column_proof(
                 matched[key]=rivals[0]
         both_printed=(row.original_width_literal is not None and
                       row.original_height_literal is not None)
-        geometry_verified=(both_printed and
-                           "width" in matched and "height" in matched and
-                           matched["width"].observation_id!=matched["height"].observation_id)
+        geometry_verified=(
+            "width" in matched and "height" in matched
+            and matched["width"].observation_id!=matched["height"].observation_id
+        )
         accepted_row=(
             table_trusted and row.complete_native_row_text_trusted
             and row.status!="source_schedule_row_duplicate_code_conflict"
@@ -360,6 +367,15 @@ def _original_door_schedule_column_proof(
             source_title_observation_ids=title_ids,
             original_width_header_id=width.observation_id,
             original_height_header_id=height.observation_id,
+            # In this validated table, source-authoritative printed width and
+            # height are from independent column cells; lexical numeric
+            # candidates alone cannot survive into the source-issued row.
+            original_width_literal=(
+                matched["width"].literal if "width" in matched else None
+            ),
+            original_height_literal=(
+                matched["height"].literal if "height" in matched else None
+            ),
             original_width_word_id=(
                 matched["width"].observation_id if "width" in matched else None
             ),
