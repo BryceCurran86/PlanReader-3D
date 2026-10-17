@@ -29,6 +29,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install source-neutral test requirements
-        run: python -m pip install -e '.[dev]'
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Run archived signed customer pricing tests
-        run: python -m pytest -q tests/test_gpt3_verified_customer_quote.py tests/test_gpt3_customer_quote_scenarios.py
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_verified_customer_quote.py tests/test_gpt3_customer_quote_scenarios.py
