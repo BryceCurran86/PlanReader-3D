@@ -106,8 +106,13 @@ jobs:
           PY
           node --check /tmp/planreader_floor_mapper_v131.js
 
-      - name: Run all tests
-        run: PYTHONPATH=. pytest -q tests/
+      - name: Run all available-source and synthetic tests (report private source omissions)
+        env:
+          # Public checkout must never carry private customer PDFs. This is
+          # explicitly a SOURCE-UNAVAILABLE run, not a passing original-
+          # drawing verification; SHA-provisioned workflows test the original.
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+        run: PYTHONPATH=. pytest -q -rs tests/
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)
         run: python tests/ci_smoke.py
