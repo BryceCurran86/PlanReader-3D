@@ -12,6 +12,7 @@ from pb_source_closed_run_export import (
     SourceClosedRunConflictError,
     seal_source_closed_run,
 )
+from tests.symlink_test_support import symlink_or_skip
 
 
 SHA_A = "a" * 64
@@ -194,7 +195,7 @@ def test_combiner_cannot_replace_dangling_signed_output_symlink(tmp_path):
     source = _one_source_for_cli(tmp_path)
     output = tmp_path / "combined.json"
     missing = tmp_path / "missing-earlier-receipt.json"
-    output.symlink_to(missing)
+    symlink_or_skip(output, missing)
     with pytest.raises(FileExistsError, match="existing signed combined customer run"):
         cli.main(_combine_args(source, output))
     assert output.is_symlink()

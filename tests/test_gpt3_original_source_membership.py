@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from tools.diag_gpt3_original_source_membership import compare_source_membership, main
+from tests.symlink_test_support import symlink_or_skip
 
 
 def _report():
@@ -148,7 +149,7 @@ def test_cli_never_overwrites_source_evidence_even_through_symlink(tmp_path, mon
     baseline.write_text(payload, encoding="utf-8")
     candidate.write_text(payload, encoding="utf-8")
     alias = tmp_path / "alias.json"
-    alias.symlink_to(baseline)
+    symlink_or_skip(alias, baseline)
     output = {"baseline": baseline, "candidate": candidate, "baseline_symlink": alias}[target]
     monkeypatch.setattr(sys, "argv", [
         "source-diff", "--baseline", str(baseline),

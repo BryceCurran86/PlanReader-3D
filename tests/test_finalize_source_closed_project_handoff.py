@@ -8,6 +8,7 @@ from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from tools import finalize_source_closed_project_handoff as finalizer
+from tests.symlink_test_support import symlink_or_skip
 
 
 SHA = "a" * 64
@@ -159,7 +160,7 @@ def test_finalizer_rejects_dangling_finalized_output_symlink(tmp_path):
     output = tmp_path / "destination"
     output.mkdir()
     link = output / "project-a.json"
-    link.symlink_to(tmp_path / "missing-original.json")
+    symlink_or_skip(link, tmp_path / "missing-original.json")
     with pytest.raises(FileExistsError, match="existing finalized customer run"):
         finalizer.finalize_split_project_handoff(
             project_id="project-a", input_dir=tmp_path, output_dir=output,
@@ -174,7 +175,7 @@ def test_finalizer_rejects_redirected_output_directory(tmp_path):
     foreign = tmp_path / "other-customer"
     foreign.mkdir()
     output = tmp_path / "redirect"
-    output.symlink_to(foreign, target_is_directory=True)
+    symlink_or_skip(output, foreign, target_is_directory=True)
     with pytest.raises(FileExistsError, match="directory cannot be a symlink"):
         finalizer.finalize_split_project_handoff(
             project_id="project-a", input_dir=tmp_path, output_dir=output,
