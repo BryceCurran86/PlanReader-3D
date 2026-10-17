@@ -119,6 +119,26 @@ def _one_source_policy(pdf, digest, *, shadow, elevation_witness_shadow=False):
 
 
 
+def _original_eight_firm_customer_retention(original_receipt, updated_receipt, comparison):
+    """Never infer the eight original FIRM rows from area numbers alone.
+
+    This is a strict A/B source+customer equivalence flag, NOT official
+    frozen benchmark correctness or approval of a newly identified opening.
+    """
+    if (not isinstance(original_receipt, dict)
+            or not isinstance(updated_receipt, dict)
+            or not isinstance(comparison, dict)):
+        return False
+    old = original_receipt.get("quantities")
+    fresh = updated_receipt.get("quantities")
+    if not isinstance(old, list) or not isinstance(fresh, list):
+        return False
+    if len(old) != 8 or len(fresh) < len(old):
+        return False
+    return comparison.get("all_original_issuer_receipts_exact") is True
+
+
+
 def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
                   elevation_witness_shadow: bool = False) -> dict:
     if type(elevation_witness_shadow) is not bool:
@@ -159,8 +179,18 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         "opt_in_authenticated_host_count": sum(x["host_proven"] for x in rows),
         "opt_in_opening_host_rows": rows,
         "retained_original_source_bytes": True,
-        "original_quantity_receipt_retention_proven": parity["original_authority"]["quantities"]["original_exact"],
-        "original_8_signed_areas_proven_unchanged": parity["original_authority"]["quantities"]["original_exact"],
+        # Do not call a quantity-row-only equality a sealed old-eight proof.
+        # Full old W4 scope, source snapshot, hosts, frames, canonical
+        # identities AND exact customer rows/seals must all be retained.
+        "original_quantity_receipt_retention_proven": (
+            parity["original_authority"]["quantities"]["original_exact"]
+            and parity["signed_customer_exact"]["customer_rows"]
+            and parity["signed_customer_exact"]["sealed_run"]
+            and parity["signed_customer_exact"]["customer_verification"]
+        ),
+        "original_8_signed_areas_proven_unchanged": _original_eight_firm_customer_retention(
+            old_receipt, new_receipt, parity,
+        ),
         "new_metric_handoff_granted": False,
         "new_signed_area_granted": False,
         "new_benchmark_match_granted": False,
