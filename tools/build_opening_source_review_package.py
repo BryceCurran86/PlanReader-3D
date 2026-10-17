@@ -46,8 +46,12 @@ def build_opening_source_review_package(report,output):
     content["review.html"]=template.replace("__OPENING_REVIEW_DATA__",safe_json).encode()
     queue=[]
     for branch in ("original","alternate"):
+        seen_packet_ids=set()
         for packet in report[branch+"_opening_review_packets"]:
             identity=packet["packet_id"]
+            if identity in seen_packet_ids:
+                raise ValueError("duplicate source packet address in review export")
+            seen_packet_ids.add(identity)
             if not isinstance(identity,str) or not identity.startswith("opening_source_review_shadow_") or any(
                     c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in identity):
                 raise ValueError("unsafe source packet address")

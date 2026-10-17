@@ -133,6 +133,16 @@ def test_multi_page_recovery_keeps_original_issuer_and_builds_portable_package(t
         from hashlib import sha256
         assert all(sha256(archive.read(r["path"])).hexdigest()==r["sha256"] for r in manifest["entries"])
     with pytest.raises(ValueError):build_opening_source_review_package(report,tmp_path/"source.pdf")
+    from copy import deepcopy
+    forged=deepcopy(report)
+    forged["alternate_opening_review_packets"]=list(forged["alternate_opening_review_packets"])
+    assert forged["alternate_opening_review_packets"]
+    forged["alternate_opening_review_packets"].append(
+        deepcopy(forged["alternate_opening_review_packets"][0]))
+    rejected=tmp_path/"duplicate-packet.zip"
+    with pytest.raises(ValueError,match="duplicate source packet address"):
+        build_opening_source_review_package(forged,rejected)
+    assert not rejected.exists()
 
 
 def test_missing_original_source_parent_is_first_review_evidence_gate(monkeypatch):
