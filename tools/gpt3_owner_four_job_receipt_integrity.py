@@ -30,6 +30,10 @@ _REQUIRED_FILES = frozenset({
     "RUN_RECEIPT.json", "SOURCE_SHA_VERIFICATION.json", "PREFLIGHT_STATUS.json",
 })
 _SOURCE_SUCCESS = "VERIFIED"
+_HISTORICAL_LOT16_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+)
 
 
 def _require(ok: bool, reason: str) -> None:
@@ -484,10 +488,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                 # archived commercial history using the established reader.
                 # This does NOT reissue source scope or allow old customer rows
                 # to be projected against a rekeyed fresh V1 fingerprint.
-                historical_dir = (
-                    Path(__file__).resolve().parents[1]
-                    / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
-                )
+                historical_dir = _HISTORICAL_LOT16_ROOT
                 historical_lot16_input_sha256s = {
                     name: _digest(historical_dir / name)
                     for name in ("source_sealed_run.json", "verified_customer_rows.json")
@@ -718,8 +719,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--receipt-root", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args(argv)
-    if args.output.resolve().is_relative_to(args.receipt_root.resolve()) or (
-        args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
+    if (
+        args.output.resolve().is_relative_to(args.receipt_root.resolve())
+        or args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
+        or args.output.resolve().is_relative_to(_HISTORICAL_LOT16_ROOT.resolve())
     ):
         raise ValueError("derived receipt diagnostic cannot overwrite evidence")
     if args.output.is_symlink():
@@ -734,7 +737,7 @@ def main(argv: list[str] | None = None) -> int:
     result = verify_owner_four_job_receipts(args.receipt_root)
     _write_readiness_report(
         args.output, json.dumps(result, indent=2, sort_keys=True) + "\n",
-        protected_roots=(args.receipt_root, FROZEN_ROOT),
+        protected_roots=(args.receipt_root, FROZEN_ROOT, _HISTORICAL_LOT16_ROOT),
     )
     print(json.dumps({
         "official_publication_status": result["official_publication_status"],
