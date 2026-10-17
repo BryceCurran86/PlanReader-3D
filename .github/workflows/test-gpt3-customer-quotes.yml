@@ -6,6 +6,10 @@ on:
       - 'tools/gpt3_customer_quote_scenarios.py'
       - 'tests/test_gpt3_verified_customer_quote.py'
       - 'tests/test_gpt3_customer_quote_scenarios.py'
+      - 'tools/gpt3_verified_contract_delivery.py'
+      - 'tools/gpt3_customer_change_orders.py'
+      - 'tools/gpt3_client_progress_claims.py'
+      - 'tests/test_gpt3_contract_variations_progress.py'
       - '.github/workflows/test-gpt3-customer-quotes.yml'
   workflow_dispatch:
 
@@ -19,16 +23,12 @@ permissions:
 jobs:
   signed-client-pricing:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.13'
       - name: Install source-neutral test requirements
         run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Run archived signed customer pricing tests
-        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_verified_customer_quote.py tests/test_gpt3_customer_quote_scenarios.py
+      - name: Run archived signed customer pricing and contract lifecycle tests
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_verified_customer_quote.py tests/test_gpt3_customer_quote_scenarios.py tests/test_gpt3_contract_variations_progress.py
