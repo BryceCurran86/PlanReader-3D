@@ -205,3 +205,21 @@ def test_reversed_wall_roles_cannot_fabricate_native_gap_or_count():
     assert not evidence["native_ink_contact_proved"]
     assert evidence["new_quantities"]==evidence["new_physical_opening_count"]==0
     doc.close()
+
+def test_same_native_path_ids_on_different_pdf_pages_never_gain_shared_room_identity():
+    doc,page=_fixture()
+    second=doc.new_page(width=800,height=800)
+    second.draw_line((20,100),(50,100),color=(0,0,0),width=.48)
+    second.draw_line((150,100),(280,100),color=(0,0,0),width=.48)
+    second.draw_line((50,92),(50,100),color=(0,0,0),width=.96)
+    second.draw_line((150,92),(150,100),color=(0,0,0),width=.96)
+    args=dict(left_wall_id="d0i0",right_wall_id="d1i0",
+              left_jamb_id="d2i0",right_jamb_id="d3i0")
+    a,b=audit(page,**args),audit(second,**args)
+    assert a["native_ink_contact_proved"] and b["native_ink_contact_proved"]
+    assert a["original_pdf_page_index_zero_based"]==0
+    assert b["original_pdf_page_index_zero_based"]==1
+    assert not a["cross_sheet_room_correspondence_proved"]
+    assert not b["original_document_sha_verified_here"]
+    assert a["new_quantities"] == b["new_quantities"] == 0
+    doc.close()
