@@ -62,7 +62,7 @@ def test_original_pwd_figured_figure_cannot_borrow_a_door_or_grid_source_arrow()
     with pytest.raises(ValueError,match="source_figure_arrowhead_endpoint_not_bound"):
         audit(b,expected_sha256=SHA,**{**ARGS,"first_dimension":bad})
     bad={**WIDTH,"label_address":(1,1,0)}
-    with pytest.raises(ValueError,match="duplicate_original_dimension_word"):
+    with pytest.raises(ValueError,match="original_figure_not_printed_on_own_dimension_line"):
         audit(b,expected_sha256=SHA,**{**ARGS,"second_dimension":bad})
 
 
