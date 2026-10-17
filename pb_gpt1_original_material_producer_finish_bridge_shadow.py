@@ -9,6 +9,7 @@ This composition does not elevate source statuses or publish a quantity.
 from __future__ import annotations
 from dataclasses import dataclass
 from shapely.geometry import box
+from pb_cross_view_floor_finish_authority import _definition_is_floor_finish
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_material_semantic_authority import (
     SourceMaterialDefinitionResult, SourceMaterialOccurrenceScopeResult,
@@ -72,6 +73,8 @@ def use_original_semantic_producer_for_finish_shadow(
         or not defrow.source_page_ids or not defrow.source_viewport_ids
     ):
         return block("original_finish_definition_source_lineage_conflict")
+    if not _definition_is_floor_finish(defrow):
+        return block("original_finish_definition_not_floor_finish")
     owned={};seen_text=set()
     for record in paint_receipts:
         if (
