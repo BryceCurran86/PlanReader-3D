@@ -192,17 +192,23 @@ def audit_all_original_figured_extension_endpoint_hypotheses(
                 "original_face_endpoint_index":face_terminal,
                 "source_evidence":candidate,
             })
-    covered=[
+    geometrically_covered=[
         x for x in candidates
         if x["source_evidence"].get("candidate_native_ink_projection_covered")
     ]
+    rendered_covered=[
+        x for x in candidates
+        if x["source_evidence"].get(
+            "source_rendered_extension_candidate_projection_covered")
+    ]
     return {
-        "status":("competing_original_extension_endpoint_candidates"
-                  if len(covered)>1
-                  else "single_source_ink_extension_candidate_only"
-                  if covered else "original_extension_source_incomplete"),
+        "status":("competing_original_rendered_extension_candidates"
+                  if len(rendered_covered)>1
+                  else "single_rendered_extension_candidate_only"
+                  if rendered_covered else "original_extension_source_incomplete"),
         "all_four_source_endpoint_hypotheses":candidates,
-        "candidate_covered_hypothesis_count":len(covered),
+        "candidate_covered_hypothesis_count":len(geometrically_covered),
+        "source_rendered_candidate_hypothesis_count":len(rendered_covered),
         "source_figure_endpoint_identity_elected":False,
         "original_figure_metric_or_room_width_issued":False,
         "physical_finished_face_or_wall_role_proven":False,
