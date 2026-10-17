@@ -114,7 +114,13 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
              "SHA256SUMS universe differs from archived derived receipt")
     # No extra arbitrary artifact may be smuggled into an otherwise hash-valid
     # share-safe owner archive. SHA256SUMS itself is the only unlisted hash file.
-    expected_tree = set(sums) | {"SHA256SUMS"}
+    # The original archive has one unindexed repository-only byte policy.
+    # Require its exact harmless contents; never interpret other unindexed
+    # data files as acceptable to hide source/customer receipts.
+    byte_policy = _safe_file(root, ".gitattributes")
+    _require(byte_policy.read_bytes() == b"* -text\\n",
+             "original receipt byte-preservation policy changed")
+    expected_tree = set(sums) | {"SHA256SUMS", ".gitattributes"}
     _require(not any(node.is_symlink() for node in root.rglob("*")),
              "untrusted symlink found in derived source receipt package")
     actual_tree = {
