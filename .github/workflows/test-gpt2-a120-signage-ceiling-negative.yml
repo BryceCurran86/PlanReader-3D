@@ -1,0 +1,35 @@
+name: TEST GPT2 A120 Signage Cladding Not Ceiling
+
+on:
+  pull_request:
+    paths:
+      - pb_cross_view_ceiling_finish_authority.py
+      - tests/test_gpt2_a120_signage_cladding_not_ceiling.py
+      - .github/workflows/test-gpt2-a120-signage-ceiling-negative.yml
+  workflow_dispatch:
+
+jobs:
+  original-cladding-not-ceiling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify original private PDF source
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          test -f "$PDF" || { echo 'BLOCKED: original private source is not provisioned'; exit 1; }
+          echo "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  $PDF" | sha256sum -c
+      - name: Run source cladding negative and consumer regression
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt2_a120_signage_cladding_not_ceiling.py tests/test_cross_view_ceiling_finish_authority.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
