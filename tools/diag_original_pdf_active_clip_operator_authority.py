@@ -28,17 +28,20 @@ def _original_source_operators(content:bytes, *, max_bytes:int=16_000_000):
     if type(content) is not bytes or not content or len(content)>max_bytes:
         return None
     size=len(content); i=0; out=[]
+    previous_scalar=None
     while i<size:
         b=content[i]
         if b in _WHITE or b in b"[]{}":
             i+=1
             continue
         if b==ord("%"):
+            previous_scalar=None
             i+=1
             while i<size and content[i] not in b"\r\n":
                 i+=1
             continue
         if b==ord("("):
+            previous_scalar=None
             depth=1;i+=1
             while i<size and depth:
                 ch=content[i]
@@ -52,6 +55,7 @@ def _original_source_operators(content:bytes, *, max_bytes:int=16_000_000):
             if depth:return None
             continue
         if b==ord("<"):
+            previous_scalar=None
             if i+1<size and content[i+1]==ord("<"):
                 i+=2
                 continue
@@ -69,6 +73,7 @@ def _original_source_operators(content:bytes, *, max_bytes:int=16_000_000):
                 continue
             return None
         if b==ord("/"):
+            previous_scalar=None
             i+=1
             while i<size and content[i] not in _WHITE and content[i] not in _DELIMS:
                 i+=1
@@ -82,8 +87,18 @@ def _original_source_operators(content:bytes, *, max_bytes:int=16_000_000):
             return None
         token=content[start:i]
         # The interpreter only needs graphics/text control operators.
-        if token in (b"q",b"Q",b"W",b"W*",b"BT",b"ET",b"BI",b"ID",b"EI",b"BX",b"EX"):
+        if token == b"Tr":
+            # Text rendering mode is an actual graphics operator with one
+            # integer operand. 3 is invisible, and 4..7 add the text
+            # outlines to the current PDF clipping path on ET. Ignoring
+            # it would falsely authenticate words outside W/W* clips.
+            if previous_scalar in (b"0",b"1",b"2"):
+                out.append(b"Tr_safe")
+            else:
+                out.append(b"Tr_unsupported")
+        elif token in (b"q",b"Q",b"W",b"W*",b"BT",b"ET",b"BI",b"ID",b"EI",b"BX",b"EX"):
             out.append(token)
+        previous_scalar=token
     return tuple(out)
 
 
@@ -99,9 +114,15 @@ def original_content_has_unclipped_text_blocks(
     open_text=False
     text_count=0
     clip_count=0
+    text_render_mode_count=0
     for op in ops:
         if op in (b"BI",b"ID",b"EI",b"BX",b"EX"):
             return False,{"reason":"unsupported_graphics_or_inline_image_operator"}
+        if op==b"Tr_unsupported" or (op==b"Tr_safe" and not open_text):
+            return False,{"reason":"text_rendering_mode_source_clip_or_state_unresolved"}
+        if op==b"Tr_safe":
+            text_render_mode_count+=1
+            continue
         # Valid PDF graphics-state and clip operators cannot execute inside
         # a BT/ET text object. Reject malformed ancestry rather than
         # accidentally treating an invalid Q as permission to unclip text.
@@ -139,6 +160,7 @@ def original_content_has_unclipped_text_blocks(
         "reason":"all_original_text_objects_outside_active_clip",
         "original_source_text_object_count":text_count,
         "original_raw_clipping_operator_count":clip_count,
+        "original_nonclipping_text_render_mode_count":text_render_mode_count,
         "original_qQ_scopes_balanced":True,
         "source_text_semantic_or_quantity_authority":False,
     }
