@@ -195,12 +195,24 @@ def detect_original_one_ended_ink_band_segments(
         if (not solid or not unchanged
                 or painted_cells*72.0/dpi < _MIN_LINE_LENGTH_PT):
             continue
+        # A source-authenticated 17-cell G17 jamb is 4.08pt of actual
+        # ORIGINAL ink, although 17 pixel centre addresses span just 3.84pt.
+        # If and ONLY if the cell-coverage minimum passes but the centre-span
+        # fails the unchanged 4pt source threshold, emit that exact ink-cell
+        # outer extent (half a cell at each end). This is observed physical
+        # pixel footprint, not an interpolated or guessed wall extension.
+        # Longer already-accepted opening flanks retain their old coordinates
+        # byte-for-byte. The historic two-ended detector is NEVER changed.
+        cell_edge_extent = (
+            (painted_cells - 1) * 72.0 / dpi < _MIN_LINE_LENGTH_PT
+        )
+        inset = 0.5 if cell_edge_extent else 0.0
         if axis=="horizontal":
             mid=(y0+y1)/2.0
-            line=(float(x0),mid,float(x1),mid)
+            line=(float(x0)-inset,mid,float(x1)+inset,mid)
         else:
             mid=(x0+x1)/2.0
-            line=(mid,float(y0),mid,float(y1))
+            line=(mid,float(y0)-inset,mid,float(y1)+inset)
         geometry=tuple(round(v*72.0/dpi,6) for v in line)
         found.add(UnchangedRasterBandSegment(
             line,geometry,axis,(x0,y0,x1,y1)))
