@@ -34,6 +34,11 @@ def _exact_index(rows, field):
 def compare_original_g17_release_receipts(original, alternate):
     """Strict, source-neutral comparison; rekeys are reported, not blessed."""
     categories = (
+        # Original page/F.07 W4 issuer authority must be sealed before any
+        # new G17 source fragments can be treated as separate wall records.
+        # A host may remain unchanged while its actual W4 role/equivalence
+        # and source identity have silently drifted under the opt-in source.
+        ("walls", "decision_scope_id"),
         ("hosts", "opening_identity_id"),
         ("frames", "opening_identity_id"),
         ("canonical", "canonical_opening_id"),
