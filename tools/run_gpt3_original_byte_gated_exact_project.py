@@ -72,8 +72,9 @@ def _original_sha_gate(
         if (
             not isinstance(name, str) or not name
             or Path(name).name != name or name in expected
-            or not isinstance(sha, str) or len(sha) != 64
-            or type(size) is not int or size < 0
+            or type(sha) is not str or len(sha) != 64
+            or any(char not in "0123456789abcdef" for char in sha)
+            or type(size) is not int or size <= 0
         ):
             return False, ["source_manifest_document_universe_invalid"], []
         expected[name] = (sha, size)
