@@ -431,6 +431,8 @@ class OpeningHostBindingProducer:
         supplemental_wall_candidate_authority: Optional[
             PhysicalWallCandidateAuthority
         ] = None,
+        source_fragment_roles_shadow: bool = False,
+        reconcile_all_source_scopes_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _BINDING_PRODUCER_SEAL:
@@ -452,6 +454,13 @@ class OpeningHostBindingProducer:
                 "supplemental_wall_candidate_authority must be producer-owned"
             )
         self._opening = physical_opening_authority
+        if type(source_fragment_roles_shadow) is not bool:
+            raise TypeError("source fragment roles shadow must be an explicit boolean")
+        self._source_fragment_roles_shadow = source_fragment_roles_shadow
+        if type(reconcile_all_source_scopes_shadow) is not bool:
+            raise TypeError("source scope reconciliation shadow must be an explicit boolean")
+        self._reconcile_all_source_scopes_shadow = (
+            reconcile_all_source_scopes_shadow or source_fragment_roles_shadow)
         self._universe = host_wall_universe_authority
         self._supplemental_wall_authority = supplemental_wall_candidate_authority
         self._results: dict[_BindingKey, OpeningHostBindingResult] = {}
@@ -469,6 +478,8 @@ class OpeningHostBindingProducer:
         supplemental_wall_candidate_authority: Optional[
             PhysicalWallCandidateAuthority
         ] = None,
+        source_fragment_roles_shadow: bool = False,
+        reconcile_all_source_scopes_shadow: bool = False,
     ) -> "OpeningHostBindingProducer":
         return cls(
             physical_opening_authority,
@@ -476,6 +487,8 @@ class OpeningHostBindingProducer:
             supplemental_wall_candidate_authority=(
                 supplemental_wall_candidate_authority
             ),
+            source_fragment_roles_shadow=source_fragment_roles_shadow,
+            reconcile_all_source_scopes_shadow=reconcile_all_source_scopes_shadow,
             _seal=_BINDING_PRODUCER_SEAL,
         )
 
@@ -717,7 +730,8 @@ class OpeningHostBindingProducer:
                                     if (
                                         supplemental_resolution.status
                                         is EvidenceResolutionStatus.CORROBORATED
-                                        and not supplemental_resolution.bands
+                                        and (not supplemental_resolution.bands
+                                             or self._reconcile_all_source_scopes_shadow)
                                     ):
                                         # The canonical wall universe may already
                                         # own one real G17 flank. The opening-local
@@ -733,6 +747,8 @@ class OpeningHostBindingProducer:
                                                 tuple(supplemental.records),
                                                 host_source_observation_ids,
                                                 tuple(supplemental.source_observation_ids),
+                                                **({"source_fragment_roles_shadow": True}
+                                                   if self._source_fragment_roles_shadow else {}),
                                             )
                                         )
                                     if (
@@ -3050,6 +3066,7 @@ def _resolve_opening_local_mixed_scope_source_band(
     supplemental_records: Sequence[PhysicalWallCandidateRecord],
     ordinary_source_observation_ids: Sequence[str],
     supplemental_source_observation_ids: Sequence[str],
+    *, source_fragment_roles_shadow: bool = False,
 ) -> _HostBandResolution:
     """Recover opposite G17 flanks across two source-authenticated W4 scopes.
 
@@ -3061,12 +3078,23 @@ def _resolve_opening_local_mixed_scope_source_band(
     unchanged exact source-primitive/face/end/chain resolver. No consumer input,
     nearest-wall rule, global W4 mutation, completeness claim or frame grant.
     """
+    if type(source_fragment_roles_shadow) is not bool:
+        raise TypeError("source fragment roles shadow must be an explicit boolean")
     selected: dict[str, PhysicalWallCandidateRecord] = {}
     supplemental_ids: set[str] = set()
     candidate_owner: dict[str, str] = {}
     for supplement, records in ((False, ordinary_records), (True, supplemental_records)):
         for record in records:
-            if not _candidate_host_roles(record, opening):
+            roles = _candidate_host_roles(record, opening)
+            if not roles and source_fragment_roles_shadow:
+                # Nominate local chain fragments without flattening the whole
+                # candidate. The unchanged resolver below still requires exact
+                # primitive ancestry, G17 face/end closure and local ownership.
+                points = record.wall_candidate.centerline_pts
+                roles = tuple(role for start, end in zip(points, points[1:])
+                    for role in _host_roles_from_axis_data(
+                        _source_line_axis_data((*start, *end), opening), opening))
+            if not roles:
                 continue
             wall_id = str(record.wall_candidate_id)
             # One opening-local proposition cannot count the same W4 address

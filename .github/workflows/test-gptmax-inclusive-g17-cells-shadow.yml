@@ -1,0 +1,31 @@
+name: GPT MAX G17 original inclusive painted cells
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/source-owned-g17-render-pair-cache-20261017
+    paths:
+      - pb_source_visibility_authority.py
+      - tests/test_gptmax_original_inclusive_unmeasured_source_capture.py
+      - docs/engineering/gptmax_inclusive_unmeasured_flank_source_20261017.md
+      - .github/workflows/test-gptmax-inclusive-g17-cells-shadow.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authentic-source-cell-negatives:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt pytest ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_gptmax_original_inclusive_unmeasured_source_capture.py \
+            tests/test_raster_unchanged_band_segments.py
+          ruff check --select F821,F823 pb_source_visibility_authority.py \
+            tests/test_gptmax_original_inclusive_unmeasured_source_capture.py

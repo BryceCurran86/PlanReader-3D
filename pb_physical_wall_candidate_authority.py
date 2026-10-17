@@ -69,7 +69,12 @@ from pb_source_visibility_authority import (
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
-from pb_raster_unchanged_band_segments import UNCHANGED_BAND_IDENTITY_VERSION
+from pb_raster_unchanged_band_segments import (
+    UNCHANGED_BAND_IDENTITY_VERSION,
+    ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+    OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS,
+)
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
@@ -971,15 +976,23 @@ def _segment_is_authenticated_vector_frame_edge(
 
 
 def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> bool:
-    """True only for producer-authenticated terminal-band source geometry.
+    """Only the exact producer-issued raster ID grammar is local G17 ink.
 
-    These observations are deliberately excluded from the canonical page-wide
-    W2/W3/W4 graph. They exist solely to support a later opening-local raster
-    host proposition, preventing additive source capture from re-splitting or
-    rekeying unrelated wall topology.
+    The old substring test could treat an unrelated W2 primitive ID with
+    `:<G17 family>:` appearing elsewhere as an opening-local source wall,
+    dropping it from the ordinary W4 competitor universe. This is an
+    identity/provenance boundary, not a heuristic physical role decision.
     """
-    source_id = str(segment.get("id") or "")
-    return f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in source_id
+    source_id = segment.get("id")
+    if type(source_id) is not str:
+        return False
+    fields = source_id.split(":")
+    if (len(fields) != 5 or fields[0] != "raster_segment"
+            or not fields[1] or not fields[3]
+            or not fields[4].isdecimal()
+            or str(int(fields[4])) != fields[4]):
+        return False
+    return fields[2] in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
 
 
 def _partition_opening_local_supplemental_segments(
@@ -3042,7 +3055,10 @@ def _assemble_scope_result(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     excluded_boundary_primitives: Sequence[ExcludedBoundaryPrimitive] = (),
     authenticated_frame_edge_primitive_count: int = 0,
+    opening_local_exact_source_endpoints_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
+    if type(opening_local_exact_source_endpoints_shadow) is not bool:
+        raise TypeError("exact G17 local W2 shadow must be explicit boolean")
     scope_id = selector.decision_scope_id
     # Source-proven face protection is DIAGNOSTIC ONLY until the original
     # Lot16/W4 candidate, host and frame identity preservation is proved.
@@ -3064,7 +3080,14 @@ def _assemble_scope_result(
         topology_segments,
         proven_wall_strips,
     )
-    graph = build_wall_graph_for_viewport(graph_segments)
+    if opening_local_exact_source_endpoints_shadow:
+        graph = build_wall_graph_for_viewport(
+            graph_segments, gap_snap_tolerance_pt=0.0,
+            exact_endpoint_index_shadow=True,
+            exact_split_parent_lineage_shadow=True,
+        )
+    else:
+        graph = build_wall_graph_for_viewport(graph_segments)
     try:
         typed_semantic_evidence_atoms = tuple(
             collect_source_lineage_grid_evidence(
@@ -3374,6 +3397,7 @@ def _build_opening_local_supplemental_scope_result(
     resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
+    opening_local_exact_source_endpoints_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     """Assemble only supplemental terminal-band W4 candidates.
 
@@ -3438,6 +3462,7 @@ def _build_opening_local_supplemental_scope_result(
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
+        opening_local_exact_source_endpoints_shadow=opening_local_exact_source_endpoints_shadow,
     )
     if result.status is not EvidenceResolutionStatus.CORROBORATED:
         return result
@@ -3483,6 +3508,14 @@ def _build_authenticated_viewport_scope_results(
             decision_scope_id=page_scope_id,
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
+        )
+        # Viewport scopes consume the same original W2/W3/W4 structural
+        # universe as page scopes. Opening-local ink families are NOT
+        # canonical wall inputs, even when a source-owned F.07 viewport
+        # happens to fully contain the observation. Preserve the source
+        # opening family only in the incomplete supplemental scope.
+        page_segments, _supplemental = _partition_opening_local_supplemental_segments(
+            page_segments,
         )
     except WallPageFrameUnresolved:
         return ()
@@ -3720,6 +3753,21 @@ class PhysicalWallCandidateProducer:
         )
 
     @classmethod
+    def from_opening_local_exact_g17_source_shadow(
+        cls, source_visibility_producer, *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Original-source exact W2 only inside an incomplete G17 W4 scope."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+            supplemental_only=True,
+            opening_local_exact_source_endpoints_shadow=True,
+        )
+
+    @classmethod
     def from_source_owned_plan_view_shadow(
         cls,
         source_visibility_producer,
@@ -3785,12 +3833,49 @@ class PhysicalWallCandidateProducer:
         *,
         page_ids: Optional[Sequence[str]] = None,
     ):
+        """Historical source producer interface; no additional caller inputs."""
         return cls._from_source_visibility_producer(
             source_visibility_producer,
             page_ids=page_ids,
             include_authenticated_viewports=False,
             include_page_scopes=True,
             supplemental_only=False,
+        )
+
+    @classmethod
+    def from_source_revision_shadow(cls,source_visibility_producer,*,revision_id,page_ids=None):
+        """Address one current source root without visiting unrelated revisions."""
+        return cls._from_source_visibility_producer(source_visibility_producer,
+            page_ids=page_ids,include_authenticated_viewports=False,
+            include_page_scopes=True,supplemental_only=False,
+            selected_revision_id=revision_id)
+
+    @classmethod
+    def from_opening_local_source_revision_shadow(cls,source_visibility_producer,*,
+            revision_id,page_ids=None,exact_endpoints_shadow=False):
+        if type(exact_endpoints_shadow) is not bool:
+            raise TypeError("source endpoint policy must be explicit bool")
+        return cls._from_source_visibility_producer(source_visibility_producer,
+            page_ids=page_ids,include_authenticated_viewports=False,
+            include_page_scopes=True,supplemental_only=True,
+            opening_local_exact_source_endpoints_shadow=exact_endpoints_shadow,
+            selected_revision_id=revision_id)
+
+    @classmethod
+    def from_source_visibility_unmeasured_g17_flanks_shadow(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Separate source-owned opt-in capture without altering production API."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+            supplemental_only=False,
+            include_unmeasured_ink_closed_flanks_shadow=True,
         )
 
     @classmethod
@@ -3803,6 +3888,9 @@ class PhysicalWallCandidateProducer:
         include_page_scopes: bool,
         supplemental_only: bool,
         physical_plan_view_shadow: bool = False,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
+        opening_local_exact_source_endpoints_shadow: bool = False,
+        selected_revision_id: Optional[str] = None,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -3815,6 +3903,17 @@ class PhysicalWallCandidateProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
             )
+
+        if type(opening_local_exact_source_endpoints_shadow) is not bool:
+            raise TypeError("G17 local exact source policy must be a boolean")
+        if opening_local_exact_source_endpoints_shadow and not supplemental_only:
+            raise ValueError("G17 exact endpoints cannot enter complete W4")
+        if selected_revision_id is not None:
+            chosen=source_visibility_producer.published_snapshot_for_revision(selected_revision_id)
+            if (type(selected_revision_id) is not str or chosen is None
+                    or source_visibility_producer._producer.current_revision_id(
+                        chosen.revision.document_id)!=selected_revision_id):
+                raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 
         selected_page_ids: Optional[set[str]] = None
         if page_ids is not None:
@@ -3834,6 +3933,8 @@ class PhysicalWallCandidateProducer:
         for revision_id in tuple(
             sorted(source_visibility_producer._published_by_revision)
         ):
+            if selected_revision_id is not None and revision_id!=selected_revision_id:
+                continue
             pre_augmented = source_visibility_producer._published_by_revision[
                 revision_id
             ]
@@ -3847,9 +3948,14 @@ class PhysicalWallCandidateProducer:
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
             if not physical_plan_view_shadow:
-                # The ordinary production W4 source path retains its
-                # existing producer-owned raster augmentation unchanged.
-                source_visibility_producer.augment_with_raster_visible_segments(
+                # Default production never sets the shadow flag. The opt-in
+                # still relies on the original source producer, not user ink.
+                source_capture = (
+                    source_visibility_producer.augment_with_unmeasured_g17_flanks_source_shadow
+                    if include_unmeasured_ink_closed_flanks_shadow
+                    else source_visibility_producer.augment_with_raster_visible_segments
+                )
+                source_capture(
                     revision_id,
                     page_ids=(
                         tuple(
@@ -3870,6 +3976,8 @@ class PhysicalWallCandidateProducer:
 
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
+        if selected_revision_id is not None:
+            published_by_revision={selected_revision_id:published_by_revision[selected_revision_id]}
         store = source_visibility_producer._producer._store
         scopes: dict[_ScopeKey, PhysicalWallCandidateScopeResult] = {}
 
@@ -3928,6 +4036,11 @@ class PhysicalWallCandidateProducer:
                         resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
+                        **(
+                            {"opening_local_exact_source_endpoints_shadow": True}
+                            if supplemental_only and opening_local_exact_source_endpoints_shadow
+                            else {}
+                        ),
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,

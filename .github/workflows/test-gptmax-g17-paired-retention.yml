@@ -1,0 +1,23 @@
+name: GPT MAX original G17 strict issuer receipt comparison
+on:
+  pull_request:
+    branches: [main, gptmax/guard-g17-shadow-policy-reuse-20261017]
+    paths:
+      - tools/diag_gptmax_unmeasured_flank_capture_shadow.py
+      - tests/test_gptmax_g17_paired_retention.py
+      - .github/workflows/test-gptmax-g17-paired-retention.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-issuer-negatives:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt pytest
+      - run: PYTHONPATH=. python -m pytest -q tests/test_gptmax_g17_paired_retention.py

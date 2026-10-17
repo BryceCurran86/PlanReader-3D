@@ -1,0 +1,35 @@
+name: GPT MAX original source G17 one-page render reuse
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/ink-closed-unmeasured-flank-shadow-20261017
+    paths:
+      - pb_source_visibility_authority.py
+      - pb_opening_local_g17_wall_shadow.py
+      - tests/test_gptmax_g17_original_render_pair_cache.py
+      - tests/test_gptmax_unmeasured_g17_flank_capture.py
+      - .github/workflows/test-gptmax-g17-original-render-cache-shadow.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  immutable-render-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt pytest ruff
+      - run: |
+          PYTHONPATH=.:tests pytest -q \
+            tests/test_gptmax_g17_original_render_pair_cache.py \
+            tests/test_gptmax_unmeasured_g17_flank_capture.py \
+            tests/test_opening_local_g17_wall_shadow.py
+          ruff check --select F821,F823 \
+            pb_source_visibility_authority.py \
+            pb_opening_local_g17_wall_shadow.py \
+            tests/test_gptmax_g17_original_render_pair_cache.py
