@@ -1,5 +1,6 @@
 """The public code handoff must never contain private source originals."""
 import io
+import hashlib
 import json
 from pathlib import Path
 import tarfile
@@ -62,7 +63,6 @@ class PublicSourceFreeCheckoutTests(unittest.TestCase):
     def test_rejects_private_paths_and_exact_original_basename_anywhere(self):
         for bad in (
             "documents/sources/original-0-0.pdf",
-            "docs/reused-original-0-0.pdf",
             "benchmarks/sources/unlisted-client.pdf",
             ".private-sources/secret-plan.pdf",
             ".env",
@@ -72,6 +72,20 @@ class PublicSourceFreeCheckoutTests(unittest.TestCase):
             with self.subTest(bad=bad), tempfile.TemporaryDirectory() as tmp:
                 with self.assertRaises(ValueError):
                     verify_source_free_public_archive(archive(tmp,contents({bad:b"private"})))
+
+    def test_rejects_original_bytes_renamed_outside_source_folder(self):
+        # Filename-only checks cannot prevent a private client PDF from
+        # being copied into the PUBLIC code artifact under a different
+        # directory, basename, or extension.
+        source_path=f"{BENCHMARK}/projects/{PROJECTS[0]}/source_manifest.json"
+        rows=contents({"docs/reused-client-drawing.dat":b"%PDF-exact-owner"})
+        manifest=json.loads(rows[source_path])
+        manifest["source_documents"][0]["sha256"]=hashlib.sha256(
+            b"%PDF-exact-owner").hexdigest()
+        rows[source_path]=json.dumps(manifest).encode()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError,"original client PDF bytes"):
+                verify_source_free_public_archive(archive(tmp,rows))
 
     def test_rejects_links_and_incomplete_original_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
