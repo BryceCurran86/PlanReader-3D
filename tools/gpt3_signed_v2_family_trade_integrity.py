@@ -95,9 +95,17 @@ def require_signed_v2_family_trade_integrity(
                      if semantic_key.startswith(prefix)),
                     None,
                 )
-                if typed_trade is None:
+                if typed_trade is None or (
+                    semantic_key != semantic_key.strip()
+                    or not any(
+                        semantic_key.startswith(prefix)
+                        and bool(semantic_key[len(prefix):].strip())
+                        and semantic_key[len(prefix):] == semantic_key[len(prefix):].strip()
+                        for prefix, _ in typed_prefixes
+                    )
+                ):
                     raise ValueError(
-                        "mapped opening has no source-owned door/window kind"
+                        "mapped opening has no complete source-owned door/window kind"
                     )
                 if trade != typed_trade:
                     raise ValueError(
