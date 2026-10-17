@@ -184,6 +184,7 @@ def _point_pairs_to_segment_dicts(
     id_prefix: str = "split",
     source_segments: Sequence[Dict[str, Any]] | None = None,
     source_parent_indexes: Sequence[int] | None = None,
+    retain_native_clip_sequence_shadow: bool = False,
 ) -> List[Dict[str, Any]]:
     """Rebuild historical split dicts, plus additive plural lineage when sources exist.
 
@@ -210,6 +211,7 @@ def _point_pairs_to_segment_dicts(
     return attach_lineage_to_split_fragments(
         pairs, source_segments, id_prefix=id_prefix,
         source_parent_indexes=source_parent_indexes,
+        retain_native_clip_sequence_shadow=retain_native_clip_sequence_shadow,
     )
 
 
@@ -719,6 +721,7 @@ def build_wall_graph_for_viewport(
     immutable_exact_endpoints_shadow: bool = False,
     partition_exact_collinear_overlaps_shadow: bool = False,
     complete_link_snap_shadow: bool = False,
+    retain_native_clip_sequence_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -757,6 +760,8 @@ def build_wall_graph_for_viewport(
         raise ValueError("exact endpoint index shadow requires zero tolerance")
     if type(exact_split_parent_lineage_shadow) is not bool:
         raise ValueError("exact split parent lineage shadow must be explicit boolean")
+    if type(retain_native_clip_sequence_shadow) is not bool:
+        raise ValueError("native clip sequence shadow must be explicit boolean")
     if type(preserve_overlapping_spans_shadow) is not bool:
         raise ValueError("overlap preservation shadow must be explicit boolean")
     if type(complete_link_snap_shadow) is not bool:
@@ -781,6 +786,7 @@ def build_wall_graph_for_viewport(
     split_segment_dicts = _point_pairs_to_segment_dicts(
         split_pairs, source_segments=structural_segments,
         source_parent_indexes=parent_indexes,
+        retain_native_clip_sequence_shadow=retain_native_clip_sequence_shadow,
     )
     if partition_exact_collinear_overlaps_shadow:
         from pb_wall_room_topology_collinear_partition_shadow import partition_exact_collinear_fragments

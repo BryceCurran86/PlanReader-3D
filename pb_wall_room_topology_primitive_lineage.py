@@ -59,6 +59,20 @@ def _record_dedupe_key(record: Mapping[str, Any]) -> str:
     return json.dumps(dict(record), sort_keys=True, default=_json_default, separators=(",", ":"))
 
 
+def _finite_rect(value: Any) -> Optional[Tuple[float, float, float, float]]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    if any(type(item) is bool for item in value):
+        return None
+    try:
+        coords = tuple(float(item) for item in value)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(item) for item in coords):
+        return None
+    return coords
+
+
 def _normalize_attr(value: Any) -> Any:
     if isinstance(value, float):
         return round(value, 9)
@@ -101,7 +115,11 @@ def field_is_present(segment: Mapping[str, Any], field: str) -> bool:
     return value is not None
 
 
-def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
+def source_record_from_segment(
+    segment: Mapping[str, Any],
+    *,
+    retain_native_clip_sequence_shadow: bool = False,
+) -> Dict[str, Any]:
     raw_id = segment.get("id")
     source_id = None if raw_id in (None, "") else str(raw_id)
     record: Dict[str, Any] = {
@@ -128,14 +146,37 @@ def source_record_from_segment(segment: Mapping[str, Any]) -> Dict[str, Any]:
         record["clip_known"] = bool(segment["clip_known"])
     elif record["clip_present"]:
         record["clip_known"] = True
+    # Opt-in only. extract_native_page emits these on every segment, so the
+    # default record shape must stay unchanged. They never become live edge
+    # fields and they do not elect a clip when the shape is unproven.
+    if type(retain_native_clip_sequence_shadow) is not bool:
+        raise TypeError("retain_native_clip_sequence_shadow must be an explicit boolean")
+    if retain_native_clip_sequence_shadow and "clip_shape_known" in segment:
+        record["clip_shape_known"] = segment["clip_shape_known"] is True
+    if retain_native_clip_sequence_shadow and "clip_exact_rect" in segment:
+        raw_rect = segment.get("clip_exact_rect")
+        record["clip_exact_rect"] = copy.deepcopy(raw_rect)
+        record["clip_exact_rect_present"] = (
+            record.get("clip_shape_known") is True and _finite_rect(raw_rect) is not None
+        )
+    if retain_native_clip_sequence_shadow and "sequence_number" in segment:
+        raw_sequence = segment.get("sequence_number")
+        record["sequence_number"] = copy.deepcopy(raw_sequence)
+        record["sequence_number_present"] = type(raw_sequence) is int
     # Priority-1: retain structured path indices and native page coordinates on
     # the source record so later snap/merge cannot erase native span provenance.
     for field in _PATH_INDEX_FIELDS:
         if field in segment and segment.get(field) is not None:
-            try:
-                record[field] = int(segment[field])
-            except (TypeError, ValueError):
-                record[field] = segment[field]
+            raw_index = segment[field]
+            # bool is an int subclass. int(True) == 1 would invent a path index.
+            # That refusal stays in the same opt-in shadow as the new fields.
+            if retain_native_clip_sequence_shadow and type(raw_index) is bool:
+                record[field] = raw_index
+            else:
+                try:
+                    record[field] = int(raw_index)
+                except (TypeError, ValueError):
+                    record[field] = raw_index
     coords_available = all(field in segment for field in _PAGE_COORD_FIELDS)
     page_coords_present = False
     if coords_available:
@@ -185,13 +226,22 @@ def _attribute_status_from_records(records: Sequence[Mapping[str, Any]]) -> Tupl
     return status, conflicts
 
 
-def lineage_from_source_segments(segments: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+def lineage_from_source_segments(
+    segments: Sequence[Mapping[str, Any]],
+    *,
+    retain_native_clip_sequence_shadow: bool = False,
+) -> Dict[str, Any]:
+    if type(retain_native_clip_sequence_shadow) is not bool:
+        raise TypeError("retain_native_clip_sequence_shadow must be an explicit boolean")
     records: List[Dict[str, Any]] = []
     seen_keys = set()
     ids: List[str] = []
     seen_ids = set()
     for segment in segments:
-        record = source_record_from_segment(segment)
+        record = source_record_from_segment(
+            segment,
+            retain_native_clip_sequence_shadow=retain_native_clip_sequence_shadow,
+        )
         key = _record_dedupe_key(record)
         if key not in seen_keys:
             seen_keys.add(key)
@@ -591,14 +641,20 @@ class _ParentLineageBuilder:
     order; ids are de-duplicated and sorted), so equal parent sets share one payload.  Callers receive deep copies.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, retain_native_clip_sequence_shadow: bool = False) -> None:
+        if type(retain_native_clip_sequence_shadow) is not bool:
+            raise TypeError("retain_native_clip_sequence_shadow must be an explicit boolean")
+        self._retain_native_clip_sequence_shadow = retain_native_clip_sequence_shadow
         self._source: Dict[int, Tuple[Dict[str, Any], str]] = {}
         self._payload: Dict[frozenset, Dict[str, Any]] = {}
 
     def _record(self, segment: Mapping[str, Any]) -> Tuple[Dict[str, Any], str]:
         entry = self._source.get(id(segment))
         if entry is None:
-            record = source_record_from_segment(segment)
+            record = source_record_from_segment(
+                segment,
+                retain_native_clip_sequence_shadow=self._retain_native_clip_sequence_shadow,
+            )
             entry = (record, _record_dedupe_key(record))
             self._source[id(segment)] = entry
         return entry
@@ -646,6 +702,7 @@ def attach_lineage_to_split_fragments(
     *,
     id_prefix: str = "split",
     source_parent_indexes: Sequence[int] | None = None,
+    retain_native_clip_sequence_shadow: bool = False,
 ) -> List[Dict[str, Any]]:
     """Rebuild the historical split-dict shape plus additive plural lineage.
 
@@ -668,7 +725,9 @@ def attach_lineage_to_split_fragments(
 
     prefilters: Dict[Tuple[Any, ...], _BoxPrefilter] = {}
     source_prefilter: Optional[_BoxPrefilter] = None
-    lineage_builder = _ParentLineageBuilder()
+    lineage_builder = _ParentLineageBuilder(
+        retain_native_clip_sequence_shadow=retain_native_clip_sequence_shadow,
+    )
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
