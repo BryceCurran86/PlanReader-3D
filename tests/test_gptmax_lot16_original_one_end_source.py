@@ -104,4 +104,6 @@ def test_original_33d_is_painted_17_cells_with_no_invented_outer_cap():
     assert len(segment)==1
     assert segment[0].pixel_support_bounds == (2421,1507,2437,1516)
     assert (2437-2421+1)*72/300==pytest.approx(4.08)
-    assert segment[0].geometry_pt[2]-segment[0].geometry_pt[0]==pytest.approx(3.84)
+    assert segment[0].geometry_pt[2]-segment[0].geometry_pt[0]==pytest.approx(4.08)
+    assert segment[0].pixel_geometry[0]==pytest.approx(2420.5)
+    assert segment[0].pixel_geometry[2]==pytest.approx(2437.5)

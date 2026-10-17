@@ -41,14 +41,36 @@ def source(cells,*,axis="horizontal",overpaint=None):
         a,b,dpi=300,source_closed_flank_boxes=(box,))
 
 
-def test_seventeen_original_cells_are_408pt_but_not_384pt_geometry():
+def test_seventeen_original_cells_retain_their_full_408pt_ink_extent():
     rows=source(17)
     assert len(rows)==1
     assert _MIN_LINE_LENGTH_PT==4.0
     assert rows[0].pixel_support_bounds[2]-rows[0].pixel_support_bounds[0]==16
     assert 17*72/300>=_MIN_LINE_LENGTH_PT
     assert (17-1)*72/300<_MIN_LINE_LENGTH_PT
+    assert rows[0].geometry_pt[2]-rows[0].geometry_pt[0]==pytest.approx(4.08)
+    assert rows[0].pixel_geometry[0]==23.5
+    assert rows[0].pixel_geometry[2]==40.5
     assert ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION.startswith("original_g17_one_end")
+
+
+@pytest.mark.parametrize("axis",["horizontal","vertical"])
+def test_old_long_source_line_endpoints_are_unchanged(axis):
+    rows=source(21,axis=axis)
+    assert len(rows)==1
+    line=rows[0].pixel_geometry
+    along=(line[0],line[2]) if axis=="horizontal" else (line[1],line[3])
+    assert along[1]-along[0]==pytest.approx(20.0)
+
+
+def test_repaired_four_point_span_is_not_an_invented_outer_jamb():
+    r=source(17)[0]
+    # Only the actual source-painted pixel cells are expanded. The physical
+    # wall-role and the downstream W4/host source end still need proof.
+    x0,y0,x1,y1=r.pixel_support_bounds
+    assert r.pixel_geometry[0]==x0-0.5
+    assert r.pixel_geometry[2]==x1+0.5
+    assert r.geometry_pt[2]-r.geometry_pt[0]<_MIN_LINE_LENGTH_PT+0.2
 
 
 @pytest.mark.parametrize("cells",[0,9,16])
@@ -69,7 +91,7 @@ def test_unrelated_native_paint_at_outer_border_is_not_bridge_authority():
     assert len(source(17,overpaint="outer_edge"))==1
 
 
-@pytest.mark.parametrize("value",[None,1,"300",300.0,0])
+@pytest.mark.parametrize("value",[None,-1,"300",300.0,0,True])
 def test_invalid_original_dpi_rejected(value):
     a,b,box=draw(17)
     with pytest.raises(ValueError):
