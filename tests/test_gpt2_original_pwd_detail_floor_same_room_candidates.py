@@ -57,6 +57,7 @@ INPUT={
     "original_detail_door_word_address":(14,0,0),
     "source_room_literal":"PWD",
     "original_door_code_literal":"D13",
+    "original_detail_finish_code_literal":"FT2",
 }
 
 
@@ -82,6 +83,7 @@ def test_source_pwd_plan_distinguished_from_four_inset_elevations_and_two_faces(
             receipt["source_original_room_and_door_word_candidates"]]==[
         "PWD","PWD","D13","D13"]
     assert receipt["original_page_rotations_degrees"]==(90,90)
+    assert receipt["original_detail_finish_literal_source_candidate"]=="FT2"
     assert receipt["original_source_plan_words_inside_own_physical_ink_candidates"]
     assert receipt["original_source_door_word_intersects_printed_top_boundary"]
     assert len(receipt["source_all_figured_inner_outer_axis_correspondence_candidates"])==2
@@ -113,6 +115,13 @@ def test_wrong_native_room_label_or_moved_pdf_fails_before_w4_identity():
         audit_original_detail_vs_main_source_room_candidate(
             raw,source_sha256=SHA,original_detail_figure_face_receipt=rivals,
             **{**INPUT,"original_detail_door_word_address":(48,0,0)},
+        )
+    # A real "PWD" caption and D13 doorway cannot borrow the printed
+    # floor finish from an unrelated FT code on an elevation or schedule.
+    with pytest.raises(ValueError,match="original_detail_room_or_finish_mark_mismatch"):
+        audit_original_detail_vs_main_source_room_candidate(
+            raw,source_sha256=SHA,original_detail_figure_face_receipt=rivals,
+            **{**INPUT,"original_detail_finish_code_literal":"IPF1"},
         )
     with pytest.raises(ValueError,match="original_same_room_source_sha_mismatch"):
         audit_original_detail_vs_main_source_room_candidate(
