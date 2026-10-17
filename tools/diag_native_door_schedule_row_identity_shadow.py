@@ -47,7 +47,10 @@ def _row_candidates(source_words):
     for block,words in blocks.items():
         txt=[w["raw_literal_untrusted"] for w in words]
         codes=[x for x in txt if _DOOR_CODE.fullmatch(x)]
-        if len(codes)!=1:
+        if len(codes)!=1 or txt[0]!=codes[0]:
+            # The source schedule row's first native cell owns its code.
+            # A specification paragraph may contain D3 and DOOR words but
+            # is not a door row (actual A600 general notes demonstrate it).
             continue
         # A standalone Dxx printed plan/detail label is not itself a
         # schedule row. The exact source-native block must contain actual
