@@ -178,19 +178,19 @@ def _find_tag_near(
     words: Sequence[TextWord],
     max_dist_pt: float = 120.0,
 ) -> Tuple[str, str]:
-    best_dist = max_dist_pt + 1.0
-    best_tag = ""
-    best_class = ""
+    found: List[Tuple[str, str]] = []
     for w in words:
         cls = _classify_tag(w.text)
         if not cls:
             continue
-        d = math.hypot(w.cx - cx, w.cy - cy)
-        if d < best_dist:
-            best_dist = d
-            best_tag = w.text.strip().upper()
-            best_class = cls
-    return best_tag, best_class
+        if math.hypot(w.cx - cx, w.cy - cy) > max_dist_pt:
+            continue
+        item = (w.text.strip().upper(), cls)
+        if item not in found:
+            found.append(item)
+    if len(found) == 1:
+        return found[0]
+    return "", ""
 
 
 def _canonical_wall_direction(seg: Segment) -> Tuple[float, float, float, float]:
