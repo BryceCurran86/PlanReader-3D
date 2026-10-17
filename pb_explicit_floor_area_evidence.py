@@ -385,7 +385,9 @@ def _native_area_word_addresses(native_words, block_no, row):
     candidates = []
     for index, (line_id, words) in enumerate(lines):
         tokens = tuple(w for _n, w in words)
-        if tokens[:len(target)] != target:
+        if tuple(token.casefold() for token in tokens[:len(target)]) != tuple(
+            token.casefold() for token in target
+        ):
             continue
         remaining = words[len(target):]
         if remaining:
