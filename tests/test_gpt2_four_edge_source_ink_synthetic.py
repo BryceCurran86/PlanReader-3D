@@ -6,8 +6,15 @@ from tools.diag_original_room_four_edge_source_ink_shadow import (
     audit_source_enclosure_correspondence as audit,
 )
 
-SIDE={role:(f"d{i}i0",f"d{i}i0") for i,role in enumerate(
+# Original source contract requires eight DISTINCT path/item owners across
+# both sheets. The second page carries four unrelated source paths before
+# its real wall edges, matching the owner's independent PDF path ancestry.
+SIDE={role:(f"d{i}i0",f"d{i+4}i0") for i,role in enumerate(
     ("left","right","bottom","top_partial"))}
+
+def _unrelated_source_paths(page):
+    for x in (2,4,6,8):
+        page.draw_line((x,2),(x+1,2),color=(.5,.5,.5),width=.18)
 
 
 def _pdf():
@@ -15,6 +22,8 @@ def _pdf():
     for offset in (0,78):
         d.new_page(width=320,height=220)
         p=d[-1]
+        if offset:
+            _unrelated_source_paths(p)
         sides=[
             ((20+offset,30),(20+offset,150)),
             ((130+offset,30),(130+offset,150)),
@@ -69,6 +78,8 @@ def test_stroke_style_mismatch_between_source_sheets_never_publishes_room_link()
     doc=fitz.open()
     for offset, opacity in ((0,1.),(78,.5)):
         page=doc.new_page(width=400,height=220)
+        if offset:
+            _unrelated_source_paths(page)
         for a,b in [((20,30),(20,150)),((130,30),(130,150)),
                     ((20,150),(130,150)),((65,30),(130,30))]:
             page.draw_line((a[0]+offset,a[1]),(b[0]+offset,b[1]),
@@ -100,6 +111,8 @@ def test_left_anchored_original_top_partial_has_gap_on_right_not_false_wall():
     d=fitz.open()
     for offset in (0,78):
         p=d.new_page(width=320,height=220)
+        if offset:
+            _unrelated_source_paths(p)
         for a,b in (
             ((20,30),(20,150)),
             ((130,30),(130,150)),
