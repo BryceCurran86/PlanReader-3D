@@ -93,3 +93,15 @@ def test_budget_must_be_exact_decimal_and_names_owned():
     inputs["budgets"] = {"Budget": "NaN"}
     with pytest.raises(ValueError, match="finite"):
         scenarios.build_scenario_comparison(signed, rows, inputs)
+
+
+def test_supplier_rate_request_is_source_family_linked_and_not_a_zero_bid():
+    signed, rows, rates = fixture()
+    inputs = bundle(rates)
+    inputs["scenarios"][0]["client_rates"]["rates"] = []
+    report = scenarios.build_scenario_comparison(signed, rows, inputs)
+    csv_text = scenarios.supplier_rfq_csv(report)
+    assert "CLIENT_SUPPLIER_RATE_REQUIRED_NOT_ZERO" in csv_text
+    assert "opening_area" in csv_text
+    assert "m2" in csv_text
+    assert report["comparison"][1]["total"] is None
