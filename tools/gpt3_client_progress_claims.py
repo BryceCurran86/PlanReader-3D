@@ -266,7 +266,7 @@ def build_progress_claim(
     # Overpayment from fresh cash is rejected; a legitimate approved
     # negative variation after payment can instead create a refund liability.
     if new_cash > max(net_to_date - previous_cash, Decimal("0")):
-        raise ValueError("new customer receipts exceed payable outstanding balance")
+        raise ValueError("new customer receipts total exceeds payable outstanding balance")
     if received > net_to_date and client_credit_note == 0 and not any(
         Decimal(row["summary"].get("client_credit_note_in_period", "0")) > 0
         for row in previous_claims
