@@ -96,8 +96,15 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
                 raise ValueError("shipment notice belongs to unknown ordered line")
             qty = _positive(row.get("shipped_quantity"), "supplier announced shipment quantity")
             existing = notices.get(key, Decimal("0"))
-            if existing + qty > Decimal(lines[key]["ordered_quantity"]):
-                raise ValueError("announced shipment exceeds ordered purchase quantity")
+            state = lines[key]
+            # Replacements of already rejected/returned supplier goods are
+            # allowed; they are still NOT extra client purchase demand.
+            replacement_allowance = (
+                state["rejected_delivery_quantity"]
+                + state["returned_after_acceptance_quantity"]
+            )
+            if existing + qty > Decimal(state["ordered_quantity"]) + replacement_allowance:
+                raise ValueError("announced shipment exceeds approved order plus returned/rejected replacements")
             notices[key] = existing + qty
         elif kind == "RECEIVE_DELIVERY":
             key = (pid, _id(row.get("requisition_id"), "receipt requisition"))
@@ -112,9 +119,14 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             if accepted + rejected <= 0:
                 raise ValueError("delivery record requires a positive handled quantity")
             state = lines[key]
-            handled = state["accepted_receipt_quantity"] + state["rejected_delivery_quantity"] + accepted + rejected
-            if handled > Decimal(state["ordered_quantity"]):
-                raise ValueError("delivery receipts exceed client-ordered quantity")
+            if (
+                accepted + rejected > Decimal(state["ordered_quantity"])
+                or (
+                    state["accepted_receipt_quantity"] + accepted
+                    - state["returned_after_acceptance_quantity"]
+                ) > Decimal(state["ordered_quantity"])
+            ):
+                raise ValueError("net accepted goods exceed client-ordered quantity")
             state["accepted_receipt_quantity"] += accepted
             state["rejected_delivery_quantity"] += rejected
         elif kind == "RETURN_ACCEPTED":
