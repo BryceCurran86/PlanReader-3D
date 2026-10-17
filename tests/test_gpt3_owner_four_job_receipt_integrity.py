@@ -668,3 +668,18 @@ def test_owner_receipt_diagnostic_rejects_existing_symlink_even_outside_sources(
             "--receipt-root", str(_ROOT), "--output", str(alias),
         ])
     assert target.read_text(encoding="utf-8") == "DO NOT TOUCH"
+
+
+def test_3laurel_completed_source_page_traversal_is_not_source_closed_authority():
+    receipt = audit.verify_owner_four_job_receipts(_ROOT)
+    by_id = {entry["project_id"]: entry for entry in receipt["projects"]}
+    laurel = by_id["au_qld_3laurel"]
+    assert laurel["producer_process_completed"] is True
+    assert laurel["authority_stage_statuses"]["all_original_documents_processed"] == (
+        "ONE_SOURCE_ALL_PAGES_EXECUTED_NOT_AUTHENTICATED"
+    )
+    assert laurel["authority_stage_statuses"]["signed_v1_quantity_receipt"] == (
+        "NOT_AVAILABLE"
+    )
+    assert laurel["four_job_official_target_item_results_available"] is False
+    assert laurel["official_project_score"] is None
