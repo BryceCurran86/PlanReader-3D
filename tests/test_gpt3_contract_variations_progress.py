@@ -243,8 +243,10 @@ def test_pending_variation_may_be_approved_after_first_progress_claim():
     first = build_progress_claim(contract, quote, draft_changes, sealed, customers, [],
         claim_input(contract, draft_changes, 1, "100", "0", "0", "20",
                     "2026-10-25"))
+    after_first_approval = variation_book(contract, approved=True)
+    after_first_approval["events"][-1]["recorded_on"] = "2026-10-26"
     approved_changes = build_change_register(
-        contract, quote, variation_book(contract, approved=True))
+        contract, quote, after_first_approval)
     second = build_progress_claim(contract, quote, approved_changes, sealed,
         customers, [first], claim_input(contract, approved_changes, 2,
             "100", "80", "100", "80", "2026-11-10"))
