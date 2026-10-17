@@ -273,6 +273,20 @@ def _validate_explicit_area(
     entity: EntityEvidence,
 ) -> tuple[str, ...]:
     blockers: list[str] = []
+    # A schedule dimension, finish mark or arbitrary source annotation with a
+    # numeric normalized_value is not a room-area EvidenceAtom. Both original
+    # documented room producers issue exactly explicit_room_area.
+    if type(evidence.kind) is not str or evidence.kind != "explicit_room_area":
+        blockers.append("explicit_area_source_kind_mismatch")
+    # Room-area production has two source-owned dimension issuers. The
+    # vector_text method remains a legacy evidence contract, but unknown
+    # caller methods cannot silently mint a FIRM room area.
+    if type(evidence.method) is not str or evidence.method not in {
+        "authenticated_same_view_figured_dimensions",
+        "authenticated_cross_view_figured_dimensions",
+        "vector_text",
+    }:
+        blockers.append("explicit_area_source_method_untrusted")
     if evidence.evidence_id not in document.evidence_ids:
         blockers.append("explicit_area_evidence_not_owned_by_document")
     if evidence.evidence_id not in entity.evidence_ids:
