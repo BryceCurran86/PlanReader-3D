@@ -19,12 +19,29 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 
 SOURCE_SHA = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
 
-def _exact_index(rows, field):
+def _exact_index(rows, field, *, preserve_unresolved_source_selector=False):
+    """Index real producer identities, retaining ABSTAIN source selectors.
+
+    A not-yet-physical G17 representative legitimately has NO opening ID.
+    Throwing away that trace would erase the first a68/2127 ambiguity, while
+    treating null as an invented physical identity would manufacture a host.
+    """
     if not isinstance(rows, list):
         raise ValueError("original issuer rows must be a list")
     index = {}
     for row in rows:
         key = row.get(field) if isinstance(row, dict) else None
+        if key is None and preserve_unresolved_source_selector:
+            # Only a NEGATIVE/ABSTAIN host entry may use its producer-owned
+            # original source observation address as an audit ledger key.
+            # This is never a physical opening identity or customer row.
+            if (row.get("record_id") is not None
+                    or row.get("host_wall_id") is not None):
+                raise ValueError("unresolved original selector carries host grant")
+            representative = row.get("representative_observation_id")
+            if not isinstance(representative, str) or not representative:
+                raise ValueError("unresolved original selector source missing")
+            key = "unresolved_source_selector:" + representative
         if not isinstance(key, str) or not key or key in index:
             raise ValueError("duplicate or malformed original issuer identity")
         index[key] = row
@@ -46,8 +63,10 @@ def compare_original_g17_release_receipts(original, alternate):
     )
     checks = {}
     for section, key in categories:
-        first = _exact_index(original.get(section), key)
-        second = _exact_index(alternate.get(section), key)
+        first = _exact_index(original.get(section), key,
+            preserve_unresolved_source_selector=(section == "hosts"))
+        second = _exact_index(alternate.get(section), key,
+            preserve_unresolved_source_selector=(section == "hosts"))
         missing = sorted(set(first) - set(second))
         extra = sorted(set(second) - set(first))
         changed = sorted(k for k in set(first)&set(second)
