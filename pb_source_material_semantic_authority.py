@@ -1715,6 +1715,10 @@ class SourceMaterialSemanticProducer:
             else None
         )
         self._plan_viewports: dict[tuple[str, str], SegmentedViewport] = {}
+        # Unlike a consumer-supplied schedule bounding box, these are the
+        # original F07 schedule scopes used by THIS source publisher.
+        self._schedule_viewports: dict[tuple[str, str], SegmentedViewport] = {}
+        self._schedule_scope_rejections: dict[tuple[str, str], str] = {}
         self._plan_ownership_ids: dict[tuple[str, str], str] = {}
         self._plan_text_results: dict[
             tuple[str, str, str, str, str], RasterTextCorroborationResult
@@ -1793,6 +1797,21 @@ class SourceMaterialSemanticProducer:
     def published_plan_viewports(self) -> tuple[SegmentedViewport, ...]:
         """Actual F.07 products consumed by this isolated producer."""
         return tuple(self._plan_viewports[k] for k in sorted(self._plan_viewports))
+
+    def published_source_schedule_viewports(self) -> tuple[SegmentedViewport, ...]:
+        """Exact trusted, producer-consumed F07 source schedule scopes.
+
+        This is not a physical RCP polygon, material occurrence or m2.
+        A schedule only appears here after the material producer has checked
+        its independently published source viewport and complete text.
+        """
+        return tuple(self._schedule_viewports[k]
+                     for k in sorted(self._schedule_viewports))
+
+    def published_source_schedule_rejections(self) -> tuple[tuple[str,str,str], ...]:
+        """All unresolved opt-in original schedule scopes, deterministic."""
+        return tuple((*key,self._schedule_scope_rejections[key])
+                     for key in sorted(self._schedule_scope_rejections))
 
     def published_plan_text_corroboration_results(
         self,
@@ -2003,6 +2022,25 @@ class SourceMaterialSemanticProducer:
                 ):
                     continue
                 sibling_non_overlapping = validate_non_overlapping_viewports(viewports)
+                if str(page_number) in self._source_native_schedule_page_ids:
+                    schedule_candidates=tuple(v for v in viewports
+                        if v.view_type in _SCHEDULE_VIEW_TYPES
+                        and not _is_explicit_non_material_schedule(v))
+                    if not schedule_candidates:
+                        self._schedule_scope_rejections[
+                            (str(page_number),"source-schedule-not-detected")
+                        ]="original_native_schedule_viewport_unavailable"
+                        schedule_universe_complete=False
+                        schedule_universe_reasons.append(
+                            SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
+                        )
+                    for candidate in schedule_candidates:
+                        if not _viewport_is_authoritative(
+                            candidate,sibling_non_overlapping=sibling_non_overlapping
+                        ):
+                            self._schedule_scope_rejections[
+                                (str(page_number),candidate.view_id)
+                            ]="original_native_schedule_viewport_unresolved"
                 authoritative = tuple(
                     viewport
                     for viewport in viewports
@@ -2064,6 +2102,10 @@ class SourceMaterialSemanticProducer:
                     )
                     if viewport.view_type in _SCHEDULE_VIEW_TYPES:
                         if not text_complete or not lines:
+                            if str(page_number) in self._source_native_schedule_page_ids:
+                                self._schedule_scope_rejections[
+                                    (str(page_number),viewport.view_id)
+                                ]="original_native_schedule_words_unverified"
                             schedule_universe_complete = False
                             schedule_universe_reasons.append(
                                 SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
@@ -2080,6 +2122,10 @@ class SourceMaterialSemanticProducer:
                                 )
                             )
                             continue
+                        if str(page_number) in self._source_native_schedule_page_ids:
+                            self._schedule_viewports[
+                                (str(page_number),viewport.view_id)
+                            ]=viewport
                         text = "\n".join(line[0] for line in lines)
                         line_evidence = {
                             line[0]: line[2]
