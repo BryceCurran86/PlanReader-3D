@@ -69,11 +69,11 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          PYTHONPATH=. python -m tools.report_gpt3_four_project_evidence \\
-            --source-dir documents/sources \\
-            --sealed-dir /tmp/gpt3-empty-seal \\
-            --identity-map-dir /tmp/gpt3-empty-map \\
-            --customer-dir /tmp/gpt3-empty-customer \\
+          PYTHONPATH=. python -m tools.report_gpt3_four_project_evidence \
+            --source-dir documents/sources \
+            --sealed-dir /tmp/gpt3-empty-seal \
+            --identity-map-dir /tmp/gpt3-empty-map \
+            --customer-dir /tmp/gpt3-empty-customer \
             --output /tmp/gpt3-real-source-package-ledger.json
           code=$?
           set -e
