@@ -50,3 +50,36 @@ def test_one_original_measure_reissued_with_different_value_also_quarantines_bot
     original=_explicit_area(7.5,evidence_id="same-original-measure")
     rows=_run(original,replace(original,normalized_value=13.5))
     assert all(row.abstained for row in rows)
+
+
+def test_reissued_same_original_figured_pair_under_new_area_evidence_id_abstains():
+    original=_explicit_area(
+        7.5,evidence_id="area-source-a",
+        metadata={"figured_dimension_ids":["axis-horizontal-1","axis-vertical-1"]},
+    )
+    reissued=_explicit_area(
+        7.5,evidence_id="area-source-b",
+        metadata={"figured_dimension_ids":["axis-vertical-1","axis-horizontal-1"]},
+    )
+    for first,second in ((original,reissued),(reissued,original)):
+        results=_run(first,second)
+        assert len(results)==2
+        assert all(row.abstained for row in results)
+        assert all(
+            "original_area_evidence_owned_by_multiple_rooms" in row.blocking_reasons
+            for row in results
+        )
+
+
+def test_one_shared_figure_axis_is_not_an_identical_room_area_measurement():
+    first=_explicit_area(
+        7.5,evidence_id="area-source-a",
+        metadata={"figured_dimension_ids":["axis-horizontal-common","vertical-a"]},
+    )
+    second=_explicit_area(
+        8.5,evidence_id="area-source-b",
+        metadata={"figured_dimension_ids":["axis-horizontal-common","vertical-b"]},
+    )
+    results=_run(first,second)
+    assert len(results)==2
+    assert not any(row.abstained for row in results)
