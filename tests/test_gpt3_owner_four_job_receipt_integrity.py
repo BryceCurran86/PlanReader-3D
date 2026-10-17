@@ -721,3 +721,24 @@ def test_owner_audit_changes_fingerprint_when_untrusted_derived_receipts_are_reh
         after["historical_lot16_v1_and_customer_file_sha256s"]
     )
     assert after["official_publication_status"] == "UNPUBLISHED"
+
+
+def test_owner_diagnostic_cannot_write_into_historical_lot16_signed_archive():
+    archive = audit._HISTORICAL_LOT16_ROOT
+    target = archive / "SOURCE_RECONCILIATION_DIAGNOSTIC_DO_NOT_CREATE.json"
+    assert not target.exists()
+    with pytest.raises(ValueError, match="cannot overwrite evidence"):
+        audit.main([
+            "--receipt-root", str(_ROOT), "--output", str(target),
+        ])
+    assert not target.exists()
+
+
+def test_owner_diagnostic_cannot_replace_historical_lot16_signed_customer_rows():
+    original = audit._HISTORICAL_LOT16_ROOT / "verified_customer_rows.json"
+    digest_before = _sha(original)
+    with pytest.raises(ValueError, match="cannot overwrite evidence"):
+        audit.main([
+            "--receipt-root", str(_ROOT), "--output", str(original),
+        ])
+    assert _sha(original) == digest_before
