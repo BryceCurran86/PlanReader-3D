@@ -17,6 +17,9 @@ from tools.diag_gpt2_original_figured_detail_plan_shadow import (
 from tools.diag_gpt2_original_figured_face_rivals_shadow import (
     audit_original_figured_detail_face_rivals,
 )
+from tools.diag_gpt2_original_detail_floor_same_room_shadow import (
+    audit_original_detail_vs_main_source_room_candidate,
+)
 from tools.diag_gpt2_original_room_doorway_ancestry_shadow import (
     audit_gpt2_original_room_doorway_ancestry_pair,
 )
@@ -138,6 +141,66 @@ class GPT2OriginalSourceGeometryBridge:
             "source_original_detail_figure_receipt":figure,
             "source_finished_net_area_m2":None,
             "source_canonical_room_same_identity_issued":False,
+            "new_firm_quantities":0,
+        }
+
+    def original_amenity_detail_vs_floor_source_candidates(
+        self, *, revision_id: str,
+        detail_page_1_based: int,
+        floor_page_1_based: int,
+        first_dimension: dict, second_dimension: dict,
+        detail_room_word_address: tuple[int,int,int],
+        detail_finish_word_address: tuple[int,int,int],
+        detail_plan_enclosure_bbox_pdf_pts: tuple[float,float,float,float],
+        detail_wall_face_family_candidates: tuple[dict,...],
+        original_floor_wall_path_ids: tuple[str,...],
+        original_floor_room_word_address: tuple[int,int,int],
+        original_floor_door_word_address: tuple[int,int,int],
+        original_detail_door_word_address: tuple[int,int,int],
+        room_literal: str, door_literal: str,
+    ) -> dict:
+        """Original figure + true source face families + named plan caption.
+
+        This replays the original producer's bytes and revision twice; it
+        takes no caller-prepared "proven" material or physical-room receipt.
+        Similar geometry/room labels never bypass W4 face membership.
+        """
+        published,raw=self._source_revision(
+            revision_id,page_1_based=floor_page_1_based)
+        other,_=self._source_revision(
+            revision_id,page_1_based=detail_page_1_based)
+        if published.revision.source_sha256!=other.revision.source_sha256:
+            raise ValueError("independent_source_amenity_detail_root_conflict")
+        rivals=self.original_figured_detail_face_rival_census(
+            revision_id=revision_id,detail_page_1_based=detail_page_1_based,
+            first_dimension=first_dimension,second_dimension=second_dimension,
+            original_room_word_address=detail_room_word_address,
+            original_finish_word_address=detail_finish_word_address,
+            plan_enclosure_bbox_pdf_pts=detail_plan_enclosure_bbox_pdf_pts,
+            competing_original_wall_face_families=
+                detail_wall_face_family_candidates,
+        )
+        result=audit_original_detail_vs_main_source_room_candidate(
+            raw,source_sha256=published.revision.source_sha256,
+            original_floor_page=floor_page_1_based,
+            original_detail_page=detail_page_1_based,
+            floor_source_edge_ids=original_floor_wall_path_ids,
+            original_floor_room_word_address=original_floor_room_word_address,
+            original_detail_room_word_address=detail_room_word_address,
+            original_floor_door_word_address=original_floor_door_word_address,
+            original_detail_door_word_address=original_detail_door_word_address,
+            original_detail_figure_face_receipt=rivals,
+            source_room_literal=room_literal,
+            original_door_code_literal=door_literal,
+        )
+        return {
+            **result,
+            "source_document_id":published.revision.document_id,
+            "source_revision_id":revision_id,
+            "source_snapshot_id":published.snapshot.snapshot_id,
+            "source_original_figure_and_face_ancestry":rivals,
+            "source_main_floor_room_W4_issuer_granted":False,
+            "source_detail_to_physical_room_identity_issued":False,
             "new_firm_quantities":0,
         }
 
