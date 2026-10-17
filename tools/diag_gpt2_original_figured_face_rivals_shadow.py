@@ -125,18 +125,21 @@ def audit_original_figured_detail_face_rivals(
             y1=faces["bottom"]["original_source_coordinate_pdf_pt"]
             if not (x0<x1 and y0<y1):
                 raise ValueError("source_wall_face_competitor_rectangle_inverted")
-            # Each source fragment should visibly reach a corner or side of
-            # the proposed rectangle. An unrelated dimension/grid stroke
-            # elsewhere on the page cannot own a boundary merely because
-            # its x or y ordinate matches.
-            def touches(source,values):
+            # Some original A502 drafting faces terminate 1.2pt SHORT
+            # of the adjacent face. The missing ink is a first failure to
+            # retain, not permission to snap a corner or silently discard
+            # a competing original wall-family.
+            def corner_gaps(source,values):
                 a,b=source["original_source_interval_pdf_pts"]
-                return any(a<=v<=b for v in values)
-            if (not touches(faces["left"],(y0,y1))
-                    or not touches(faces["right"],(y0,y1))
-                    or not touches(faces["top"],(x0,x1))
-                    or not touches(faces["bottom"],(x0,x1))):
-                raise ValueError("source_face_role_intervals_not_connected_to_rectangle")
+                return [round(max(a-v,0.,v-b),3) for v in values]
+            gaps={
+                "left":corner_gaps(faces["left"],(y0,y1)),
+                "right":corner_gaps(faces["right"],(y0,y1)),
+                "top":corner_gaps(faces["top"],(x0,x1)),
+                "bottom":corner_gaps(faces["bottom"],(x0,x1)),
+            }
+            any_open=any(v>0 for gaps_for_role in gaps.values()
+                         for v in gaps_for_role)
             interval_x=x1-x0
             interval_y=y1-y0
             residual_x=[
@@ -154,6 +157,8 @@ def audit_original_figured_detail_face_rivals(
                 "original_page_1_based":page_1_based,
                 "original_source_sha256":source_sha256,
                 "source_original_four_face_records":faces,
+                "source_corner_unpainted_gaps_pdf_pts":gaps,
+                "source_full_four_edge_ring_uninterrupted":not any_open,
                 "original_source_native_bbox_pdf_pts":[x0,y0,x1,y1],
                 "source_original_figure_endpoint_residual_x_pdf_pts":residual_x,
                 "source_original_figure_endpoint_residual_y_pdf_pts":residual_y,
