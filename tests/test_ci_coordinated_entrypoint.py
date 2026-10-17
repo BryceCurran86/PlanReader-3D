@@ -20,7 +20,7 @@ def test_public_required_ci_trigger_and_check_context_stay_unchanged():
     test=doc["jobs"]["test"]
     assert test["strategy"]["matrix"]["python-version"]==["3.13","3.14"]
     assert "github.event_name != 'workflow_dispatch'" in test["if"]
-    steps="\\n".join(str(v) for v in test["steps"])
+    steps="\n".join(str(v) for v in test["steps"])
     assert "pytest -q tests/" in steps
     for guard in ("check_private_original_source_additions.py",
                   "check_provider_gold_isolation.py",
@@ -64,7 +64,7 @@ def test_source_neutral_readiness_has_no_private_token_or_false_accuracy():
 def test_focus_is_not_an_alternative_to_required_full_matrix():
     d=workflow()
     assert d["jobs"]["focused"]["if"] != d["jobs"]["test"]["if"]
-    tests="\\n".join(str(x) for x in d["jobs"]["focused"]["steps"])
+    tests="\n".join(str(x) for x in d["jobs"]["focused"]["steps"])
     assert "test_ci_coordinated_entrypoint.py" in tests
     assert "test_full_plan_v2_readiness_report.py" in tests
     assert "test_opening_host_source_candidate_witness.py" in tests
