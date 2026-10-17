@@ -42,6 +42,7 @@ class FiguredPolygonMetricShadow:
     diagnostic_only: bool = True
     source_side_ids: tuple[str, ...] = ()
     source_segment_ids: tuple[str, ...] = ()
+    source_vertices_pdf_pts: tuple[tuple[float, float], ...] = ()
 
 
 def _finite_positive(value: object) -> float | None:
@@ -234,4 +235,5 @@ def measure_figured_room_edge_chain_shadow(
         source_sha256, revision_id, page_id, physical_room_id,
         source_side_ids=tuple(side.source_side_id for side in sides),
         source_segment_ids=tuple(sorted(source_segment_ids)),
+        source_vertices_pdf_pts=tuple(starts),
     )
