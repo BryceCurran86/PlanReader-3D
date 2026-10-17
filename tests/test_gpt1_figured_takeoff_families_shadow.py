@@ -255,3 +255,31 @@ def test_leaf_size_cannot_substitute_for_structural_opening_reveal():
     r=measure_source_figured_opening_reveals_shadow(door)
     assert r.status is Status.ABSTAINED
     assert r.candidate_reveal_surface_m2 is None
+
+
+def test_two_source_valid_openings_cannot_overlap_one_wall_host_interval():
+    vertices=((0,0),(10,0),(10,5),(0,5))
+    ring=tuple(FiguredPhysicalSide(
+        f"side-{i}",vertices[i],vertices[(i+1)%4],(f"ink-{i}",))
+        for i in range(4))
+    backed=replace(metric(),
+                   source_side_ids=tuple(f"side-{i}" for i in range(4)),
+                   source_segment_ids=tuple(f"ink-{i}" for i in range(4)),
+                   source_vertices_pdf_pts=vertices)
+    heights=tuple(DocumentedWallHeight(f"side-{i}",3000,(f"height-{i}",),SHA,"rev","7")
+                  for i in range(4))
+    first=DocumentedWallOpening(
+        "door-1","side-0",1000,2100,"area-1",
+        ("host-1",),("frame-1",),SHA,"rev","7",2.1,
+        0,1000,("axis-1-left","axis-1-right"),
+    )
+    second=replace(
+        first,physical_opening_id="door-2",source_opening_area_id="area-2",
+        host_binding_evidence_ids=("host-2",),
+        physical_frame_evidence_ids=("frame-2",),
+        host_axis_start_mm=500,host_axis_end_mm=1500,
+        original_host_axis_witness_ids=("axis-2-left","axis-2-right"),
+    )
+    out=measure_figured_wall_lining_shadow(ring,backed,heights,(first,second))
+    assert out.status is Status.ABSTAINED
+    assert out.reason_codes==("source_figured_wall_opening_host_interval_overlap",)
