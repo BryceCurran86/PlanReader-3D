@@ -133,15 +133,25 @@ def resolve_explicit_floor_area_evidence(
     # An unbound overall-area claim cannot borrow another declaration's
     # source SHA, revision or page if one input has no original receipt.
     # All unscoped legacy declarations may still reconcile with one another.
+    def valid_area_m2(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return math.isfinite(numeric) and numeric > 0.0
+
     if any(
         type(item) is not ExplicitFloorAreaEvidence
         or item.authority != DECLARED_FLOOR_AREA_AUTHORITY
         or item.binding != DECLARED_FLOOR_AREA_BINDING
-        or type(item.area_m2) not in (int, float)
-        or not math.isfinite(float(item.area_m2))
-        or item.area_m2 <= 0
-        or any(type(p) is not int or p <= 0 for p in item.source_pages)
+        or not valid_area_m2(item.area_m2)
+        or type(item.source_pages) not in (tuple, list)
         or not item.source_pages
+        or any(type(p) is not int or p <= 0 for p in item.source_pages)
+        or type(item.raw_evidence) not in (tuple, list)
+        or any(type(text) is not str or not text for text in item.raw_evidence)
         or (item.source_sha256 is not None and (
             type(item.source_sha256) is not str
             or re.fullmatch(r"[0-9a-f]{64}", item.source_sha256) is None
