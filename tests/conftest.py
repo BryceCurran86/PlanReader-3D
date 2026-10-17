@@ -66,12 +66,6 @@ def _code_uses_original_source(
     for constant in code.co_consts:
         if isinstance(constant, str) and _MARYBOROUGH_ORIGINAL_NAME in constant:
             return True
-        if isinstance(constant, types.CodeType):
-            if any(
-                isinstance(value, str) and _MARYBOROUGH_ORIGINAL_NAME in value
-                for value in constant.co_consts
-            ):
-                return True
     for name in code.co_names:
         val = globals_map.get(name)
         if isinstance(val, Path) and val.name == _MARYBOROUGH_ORIGINAL_NAME:
