@@ -43,3 +43,8 @@ def test_extreme_source_coordinate_does_not_escape_as_raw_geos_error():
     giant=1e308
     with pytest.raises(SourceClosedRunConflictError, match="polygon"):
         _source_bbox(_floor(((0,0),(giant,giant),(giant,0),(0,giant))))
+
+
+def test_unrepresentable_large_integer_original_floor_point_abstains():
+    with pytest.raises(SourceClosedRunConflictError, match="polygon"):
+        _source_bbox(_floor(((0,0),(10**1000,0),(1,1),(0,1))))
