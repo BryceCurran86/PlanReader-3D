@@ -44,3 +44,10 @@ def test_unrepresentably_large_original_ceiling_geometry_never_crashes_customer_
     ring=((0.,0.),(huge,huge),(huge,0.),(0.,huge))
     with pytest.raises(SourceClosedRunConflictError,match="ceiling polygon"):
         _bbox(ring)
+
+
+@pytest.mark.parametrize("source_ring", [None, True, 5, "not-a-ring", {"x": 1}])
+def test_untyped_original_ceiling_polygon_abstains_without_raw_exception(source_ring):
+    with pytest.raises(SourceClosedRunConflictError, match="ceiling polygon"):
+        _bbox(source_ring)
+
