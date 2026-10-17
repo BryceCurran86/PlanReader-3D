@@ -28,7 +28,7 @@ jobs:
       - name: Verify source-free public archive policy in synthetic tests
         env:
           PYTHONPATH: .
-        run: python -m unittest -q tests.test_verify_public_source_free_checkout
+        run: python -m unittest discover -s tests -p test_verify_public_source_free_checkout.py -q
       - name: Check frozen truth integrity and package tracked CODE only
         shell: bash
         run: |
@@ -36,7 +36,7 @@ jobs:
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           git archive --format=tar.gz --output="$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" HEAD
           git rev-parse HEAD > "$RUNNER_TEMP/checkout-head-sha.txt"
-          python scripts/verify_public_source_free_checkout.py \
+          PYTHONPATH=. python scripts/verify_public_source_free_checkout.py \
             --archive "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" \
             --output "$RUNNER_TEMP/source-free-archive-receipt.json"
           sha256sum "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" > "$RUNNER_TEMP/archive-sha256.txt"
