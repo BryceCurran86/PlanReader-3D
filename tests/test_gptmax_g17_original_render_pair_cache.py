@@ -106,3 +106,31 @@ def test_default_opening_reader_signature_refuses_forged_cache_flag():
         build_opening_local_g17_wall_shadow(
             source, selector, original_ink_render_cache_shadow="enabled",
         )
+
+
+def test_first_source_render_returns_the_exposed_cached_exact_pair():
+    producer, scope, calls = fixture()
+    first = producer._original_g17_render_pair_shadow(**scope)
+    key = tuple(scope[name] for name in (
+        "document_id", "revision_id", "source_sha256",
+        "snapshot_id", "page_id", "dpi",
+    ))
+    assert first is producer._g17_original_render_pair_cache[key]
+    assert producer._original_g17_render_pair_shadow(**scope) is first
+    assert calls == [("3", True), ("3", False)]
+
+
+def test_invalid_original_render_is_never_cached_or_reused():
+    producer, scope, calls = fixture()
+    underlying = producer._producer.render_native_page_png
+    def bad_full(**kwargs):
+        data, parent, frame = underlying(**kwargs)
+        if not kwargs.get("images_only"):
+            return "non-bytes", parent, frame
+        return data, parent, frame
+    producer._producer.render_native_page_png = bad_full
+    a = producer._original_g17_render_pair_shadow(**scope)
+    b = producer._original_g17_render_pair_shadow(**scope)
+    assert a is not b
+    assert producer._g17_original_render_pair_cache == {}
+    assert len(calls) == 4
