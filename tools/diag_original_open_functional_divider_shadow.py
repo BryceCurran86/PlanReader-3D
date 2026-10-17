@@ -125,6 +125,17 @@ def audit_original_open_functional_divider(
             "original_north_open_span_pdf_pts":gap,
             "open_passage_functional_zone_connection_candidate":gap>0,
             "source_connected_floor_space_candidate_only":gap>0,
+            # Explicit original PDF-space corridor through which the two
+            # functional zones remain connected at the divider's north tip.
+            # A vertical partition cannot close this gap without INVENTING
+            # missing ink between its start and the shared north edge.
+            "source_unclosed_north_passage_bbox_pdf_pts":(
+                [xl,north_y,xr,dividers[0]["y_start"]] if gap>0 else None
+            ),
+            "source_missing_north_divider_segments_pdf_pts":(
+                [[[dv["x"],north_y],[dv["x"],dv["y_start"]]]
+                 for dv in dividers] if gap>0 else []
+            ),
             "source_connected_floor_space_structural_topology_proven":False,
             "original_competing_divider_face_separation_pdf_pts":round(xr-xl,3),
             "opposite_side_original_same_finish_marks":marks,
