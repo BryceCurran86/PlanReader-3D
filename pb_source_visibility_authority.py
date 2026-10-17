@@ -39,6 +39,16 @@ from pb_raster_unchanged_band_segments import (
     UNCHANGED_BAND_IDENTITY_VERSION,
     UNCHANGED_BAND_DETECTOR_VERSION,
     detect_unchanged_terminal_band_segments,
+    detect_original_one_ended_ink_band_segments,
+    ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+    ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_DETECTOR_VERSION,
+    ORIGINAL_G17_EXACT_ONE_END_IDENTITY_VERSION,
+    ORIGINAL_G17_EXACT_PARTIAL_IDENTITY_VERSION,
+    OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS,
+    band_segment_exactly_observed,
+    detect_original_jamb_anchored_ink_segments,
     band_segment_already_observed,
 )
 from pb_raster_opening_source_primitives import (
@@ -563,7 +573,7 @@ def _raster_segment_receipt_matches_parent(
         elif len(parts) == 5:
             prefix, render_sha, identity_version, full_sha, index = parts
             if (receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
-                    or identity_version != UNCHANGED_BAND_IDENTITY_VERSION
+                    or identity_version not in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
                     or full_sha != receipt.visibility_render_sha256
                     or len(full_sha) != 64
                     or any(c not in '0123456789abcdef' for c in full_sha)):
@@ -756,7 +766,15 @@ class SourceVisibilityProducer:
     exposed. Ordinary consumers receive read-only producer-owned authorities.
     """
 
-    def __init__(self, *, producer_method: str, producer_version: str) -> None:
+    def __init__(self, *, producer_method: str, producer_version: str,
+                 raster_paired_outer_faces_shadow: bool = False,
+                 exact_g17_nomination_shadow: bool = False) -> None:
+        if type(raster_paired_outer_faces_shadow) is not bool:
+            raise ValueError("raster paired outer faces shadow must be explicit boolean")
+        self._raster_paired_outer_faces_shadow = raster_paired_outer_faces_shadow
+        if type(exact_g17_nomination_shadow) is not bool:
+            raise ValueError("exact G17 nomination shadow must be explicit boolean")
+        self._exact_g17_nomination_shadow = exact_g17_nomination_shadow
         self._producer = SourceObservationProducer(
             producer_method=producer_method,
             producer_version=producer_version,
@@ -776,6 +794,7 @@ class SourceVisibilityProducer:
         # producer's store/receipt maps, so later producer-owned augmentation is
         # visible without rebuilding opening candidate caches.
         self._physical_opening_authority_cache = None
+        self._physical_source_capture_authority_cache = None
         # Scoped original-page proof; never persistent source permission.
         self._native_dimension_proof_batch = None
         # Physical scale is likewise source-owned and selector-keyed. Reuse one
@@ -813,7 +832,66 @@ class SourceVisibilityProducer:
         self._native_paint_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_page_text_dirs_cache: OrderedDict = OrderedDict()
+        # Exactly one immutable original G17 page render pair. Bound to source
+        # revision+snapshot+page+DPI; never reusable after augmentation or
+        # across independent SourceVisibilityProducer instances. Opt-in only.
+        self._g17_original_render_pair_cache: OrderedDict = OrderedDict()
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
+
+    def _original_g17_render_pair_shadow(
+        self, *, document_id: str, revision_id: str,
+        source_sha256: str, snapshot_id: str, page_id: str, dpi: int,
+    ):
+        """Reuse ORIGINAL immutable image/full render once per exact source scope.
+
+        This is a bounded source-performance cache, not a provider substitute,
+        visibility receipt, structural wall, host, opening or quantity proof.
+        The original parent, frame and immutable PDF SHA are rechecked even on
+        hits. No caller pixels, geometry or semantic metadata are accepted.
+        """
+        if type(dpi) is not int or dpi <= 0:
+            raise ValueError("original G17 render DPI must be positive integer")
+        published = self.published_snapshot_for_revision(revision_id)
+        if (published is None
+                or published.revision.document_id != document_id
+                or published.revision.source_sha256 != source_sha256
+                or published.snapshot.snapshot_id != snapshot_id
+                or type(page_id) is not str or not page_id.isdecimal()
+                or str(int(page_id)) != page_id or int(page_id) < 1):
+            raise ValueError("original G17 render selector foreign or stale")
+        # This read is tied to the producer's actually decoded source page;
+        # a caller may NOT use the original PDF hash to render a page which
+        # was never authenticated in this revision or was marked failed.
+        if (int(page_id) not in published.coverage.decoded_pages
+                or int(page_id) in published.coverage.failed_pages):
+            raise ValueError("original G17 render page not decoded successfully")
+        original = self._producer._store.source_bytes_by_revision.get(revision_id)
+        if not original or hashlib.sha256(original).hexdigest() != source_sha256:
+            raise ValueError("original G17 immutable PDF SHA mismatch")
+        key = (document_id, revision_id, source_sha256, snapshot_id, page_id, dpi)
+        cached = self._g17_original_render_pair_cache.get(key)
+        if cached is not None:
+            self._g17_original_render_pair_cache.move_to_end(key)
+            return cached
+        args = dict(
+            document_id=document_id, revision_id=revision_id,
+            source_sha256=source_sha256, snapshot_id=snapshot_id,
+            page_id=page_id, dpi=float(dpi), include_native_frame=True,
+        )
+        image = self._producer.render_native_page_png(**args, images_only=True)
+        full = self._producer.render_native_page_png(**args)
+        # Do not turn mismatched original source render frames into a cache hit.
+        # The caller still owns the existing render-contradiction ABSTAIN.
+        result = (image, full)
+        if (image[1] == full[1] and image[2] == full[2]
+                and isinstance(image[0], bytes) and isinstance(full[0], bytes)):
+            self._g17_original_render_pair_cache[key] = result
+            while len(self._g17_original_render_pair_cache) > 1:
+                self._g17_original_render_pair_cache.popitem(last=False)
+        # The first successful lookup must return the EXACT cached immutable
+        # pair, not a reconstructed outer tuple. Downstream source listeners
+        # and the retention comparator depend on stable per-scope identity.
+        return result
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
@@ -1100,8 +1178,10 @@ class SourceVisibilityProducer:
         except BaseException:
             # A failed transaction cannot leave stale positive opening/page
             # proofs available to a later caller after damaged source evidence.
-            physical = self._physical_opening_authority_cache
-            if physical is not None:
+            for physical in (self._physical_opening_authority_cache,
+                             self._physical_source_capture_authority_cache):
+                if physical is None:
+                    continue
                 # The failure can occur after candidate and negative
                 # snapshot evidence have been cached. Evict every affected
                 # source-dependent memo, not just positive page proofs.
@@ -1308,6 +1388,8 @@ class SourceVisibilityProducer:
             self._physical_opening_authority_cache = (
                 PhysicalOpeningAuthority.from_source_visibility_producer(self)
             )
+        if getattr(self._physical_opening_authority_cache, "_raster_paired_outer_faces_shadow", False) != self._raster_paired_outer_faces_shadow:
+            raise RuntimeError("original raster source policy changed after authority creation")
         return self._physical_opening_authority_cache
 
     def physical_scale_producer(self):
@@ -1875,14 +1957,132 @@ class SourceVisibilityProducer:
         *,
         page_ids: Sequence[str] | None = None,
     ) -> PublishedVisibleSourceSnapshot:
-        """Add source-bound raster visible segments where native visibility is absent.
+        """Production entry: historical exact source API and identity policy."""
+        return self._augment_with_raster_visible_segments_source_impl(
+            revision_id, page_ids=page_ids,
+        )
 
-        Callers may optionally address source pages, but cannot supply pixels,
-        line segments, DPI, detector thresholds, marks, counts, or expected
-        quantities. Rendering, detection, geometry, and lineage remain
-        producer-owned.
+    def augment_with_unmeasured_g17_flanks_source_shadow(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+    ) -> PublishedVisibleSourceSnapshot:
+        """Produce one new source-ink-closed G17 capture in an isolated page.
+
+        A previous ordinary or alternate page raster capture cannot silently
+        be reused for this stronger source policy: the historical attempt
+        marker does not encode which policy generated the source snapshot.
+        Treat that reuse as a hard failure, NEVER an empty shadow result or
+        a false claim that the new source wall has been investigated.
         """
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        if (
+            not isinstance(page_ids, (list, tuple))
+            or len(page_ids) != 1
+            or type(page_ids[0]) is not str
+            or not page_ids[0].isdecimal()
+            or str(int(page_ids[0])) != page_ids[0]
+            or int(page_ids[0]) < 1
+        ):
+            raise ValueError("G17 shadow requires one canonical source page")
+        page = page_ids[0]
+        # A still-byte-valid ORIGINAL PDF can belong to an obsolete source
+        # revision. The optional new G17 ink-policy may never publish such
+        # stale wall/host observations into the active physical source root.
+        # This check deliberately precedes rendering and the attempt cache.
+        if self._producer.current_revision_id(
+            published.revision.document_id
+        ) != str(revision_id):
+            raise ValueError("original G17 source revision superseded or unauthenticated")
+        decoded = {str(int(p)) for p in published.coverage.decoded_pages}
+        if page not in decoded or int(page) in published.coverage.failed_pages:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        if (str(revision_id), page) in self._raster_visibility_attempted_pages:
+            raise RuntimeError(
+                "G17 shadow requires a fresh source producer: "
+                "prior raster page capture has a different or unknown policy"
+            )
+        return self._augment_with_raster_visible_segments_source_impl(
+            revision_id, page_ids=(page,),
+            include_unmeasured_ink_closed_flanks_shadow=True,
+        )
 
+    def fork_native_source_shadow(
+        self, revision_id: str, *,
+        raster_paired_outer_faces_shadow: bool = False,
+        exact_g17_nomination_shadow: bool = False,
+        include_revision_ancestry_shadow: bool = False,
+    ):
+        """Replay an independent source policy without rewriting this issuer.
+
+        The fork has its own observation store, receipts, current snapshots and
+        physical authorities. It reingests immutable original bytes using the
+        original source locator and decoded-page addressing; no serialized wall,
+        physical opening, signature or caller geometry is imported or aliased.
+        Source roots after augmentation must remain explicitly distinct.
+        """
+        if any(type(flag) is not bool for flag in (
+                raster_paired_outer_faces_shadow, exact_g17_nomination_shadow,
+                include_revision_ancestry_shadow)):
+            raise ValueError("source fork policies require explicit booleans")
+        published = self.published_snapshot_for_revision(revision_id)
+        if (published is None or self._producer.current_revision_id(
+                published.revision.document_id) != revision_id):
+            raise ValueError("source fork requires the current authenticated revision")
+        revision = published.revision
+        if revision.supersedes_revision_id is not None and not include_revision_ancestry_shadow:
+            raise ValueError("source fork requires original revision ancestry replay")
+        store = self._producer._store
+        lineage = []
+        cursor = revision
+        seen = set()
+        while cursor is not None:
+            if (cursor.revision_id in seen or cursor.document_id != revision.document_id
+                    or cursor.producer_method != revision.producer_method
+                    or cursor.producer_version != revision.producer_version):
+                raise ValueError("source fork revision ancestry is contradictory")
+            seen.add(cursor.revision_id)
+            payload = store.source_bytes_by_revision.get(cursor.revision_id)
+            coverage = store.coverage_by_revision.get(cursor.revision_id)
+            if type(payload) is not bytes or hashlib.sha256(payload).hexdigest() != cursor.source_sha256:
+                raise ValueError("source fork original bytes unavailable or changed")
+            if coverage is None or not coverage.decoded_pages or coverage.failed_pages:
+                raise ValueError("source fork requires successfully decoded original pages")
+            lineage.append((cursor, payload, tuple(sorted(coverage.decoded_pages))))
+            parent = cursor.supersedes_revision_id
+            cursor = None if parent is None else store.revisions.get(parent)
+            if parent is not None and cursor is None:
+                raise ValueError("source fork revision ancestor unavailable")
+        fork = SourceVisibilityProducer(
+            producer_method=revision.producer_method,
+            producer_version=revision.producer_version,
+            raster_paired_outer_faces_shadow=raster_paired_outer_faces_shadow,
+            exact_g17_nomination_shadow=exact_g17_nomination_shadow,
+        )
+        for ancestor, payload, decoded in reversed(lineage):
+            replay = fork.ingest_native_pdf_bytes(
+                document_id=ancestor.document_id, source_bytes=payload,
+                source_locator=ancestor.source_locator, page_ids=decoded)
+            if (replay.revision.revision_id != ancestor.revision_id
+                    or replay.revision.supersedes_revision_id != ancestor.supersedes_revision_id):
+                raise ValueError("source fork revision ancestry changed during native replay")
+        if self.published_snapshot_for_revision(revision_id) is not published:
+            raise RuntimeError("source fork mutated original issuer")
+        return fork, replay
+
+    def _augment_with_raster_visible_segments_source_impl(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
+    ) -> PublishedVisibleSourceSnapshot:
+        """Original raster-visible source capture; shadow gate only if explicit."""
+        if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+            raise TypeError("unmeasured G17 flank capture must be an explicit boolean")
         published = self._published_by_revision.get(str(revision_id))
         if published is None:
             raise ValueError(OBSERVATION_UNAVAILABLE)
@@ -2016,13 +2216,108 @@ class SourceVisibilityProducer:
                     # proven raster-opening support inventory. Unrelated raster
                     # table/furniture bands must not perturb the ordinary W4
                     # graph simply because they contain solid paint.
-                    flank_boxes = self._proven_raster_opening_flank_boxes(published, page_id)
+                    if include_unmeasured_ink_closed_flanks_shadow:
+                        flank_boxes, partial_source_jambs, individual_ink_positive_boxes = self._proven_raster_opening_flank_boxes(
+                            published, page_id,
+                            include_unmeasured_ink_closed_flanks_shadow=True,
+                            include_original_partial_jamb_receipts_shadow=True,
+                        )
+                    else:
+                        flank_boxes = self._proven_raster_opening_flank_boxes(
+                            published, page_id,
+                        )
+                        partial_source_jambs = ()
+                        individual_ink_positive_boxes = ()
                     supplemental = tuple(s for s in supplemental
                         if any(_unchanged_segment_inside_flank(s, box,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
+                    # Keep the existing normal two-ended source band family
+                    # byte-for-byte and index-for-index. Short opening flanks
+                    # have ONE original jamb end, so the ordinary detector's
+                    # second-end closure cannot legitimately nominate them.
+                    extra_one_ended = ()
+                    new_band_duplicate = (
+                        band_segment_exactly_observed
+                        if self._exact_g17_nomination_shadow
+                        else band_segment_already_observed
+                    )
+                    if include_unmeasured_ink_closed_flanks_shadow:
+                        # IMPORTANT: a compact original HHWW label (e.g.
+                        # 2127 STACKER = 2100 x 2700mm) may authoritatively
+                        # provide nominal dimensions while the actual WALL
+                        # flanks still have just ONE original G17 jamb end.
+                        # Earlier shadow subtracted every already-dimensioned
+                        # opening, making those exact physical openings
+                        # impossible to recover with the new source detector.
+                        # Keep both previously figured source flanks and each
+                        # independently G17-ink-positive unmeasured flank in
+                        # the opt-in SOURCE inventory. Full original RGB and
+                        # local end/role proof remain mandatory below.
+                        source_owned_new_boxes = tuple(sorted(
+                            set(flank_boxes) | set(individual_ink_positive_boxes)
+                        ))
+                        if source_owned_new_boxes:
+                            nominal = detect_original_one_ended_ink_band_segments(
+                                image_png, full_png,
+                                dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                source_closed_flank_boxes=source_owned_new_boxes,
+                            )
+                            extra_one_ended = tuple(seg for seg in nominal
+                                if _axis_aligned_geometry_fully_covered_by_rect_union(
+                                    seg.geometry_pt, image_regions)
+                                and not new_band_duplicate(
+                                    seg,segments,dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                    ordinary_dpi=RASTER_RENDER_DPI)
+                                # Historical measured two-ended 300DPI bands
+                                # are already producer-issued source. Never
+                                # create a SECOND W2 identity for the same
+                                # original wall just because this alternate
+                                # G17 detector can see its paint as well.
+                                and not band_segment_already_observed(
+                                    seg,supplemental,
+                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                    ordinary_dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI)
+                                and any(_unchanged_segment_inside_flank(
+                                    seg, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                                ) for box in source_owned_new_boxes))
                     families.append((supplemental, hashlib.sha256(image_png).hexdigest(),
                         RASTER_OPENING_PRIMITIVE_RENDER_DPI, UNCHANGED_BAND_IDENTITY_VERSION,
                         UNCHANGED_BAND_DETECTOR_VERSION, hashlib.sha256(full_png).hexdigest()))
+                    if extra_one_ended:
+                        # Separate producer-issued family: do not mislabel an
+                        # observed ONE-ended original jamb as a two-end band.
+                        # All previous source identity indices stay unchanged.
+                        families.append((extra_one_ended, hashlib.sha256(image_png).hexdigest(),
+                            RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                            (ORIGINAL_G17_EXACT_ONE_END_IDENTITY_VERSION
+                             if self._exact_g17_nomination_shadow
+                             else ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION),
+                            ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
+                            hashlib.sha256(full_png).hexdigest()))
+                    if partial_source_jambs:
+                        # Independent original G17 endcaps; a changed pixel
+                        # stops the run. Never bridge the unpainted interval.
+                        partial = detect_original_jamb_anchored_ink_segments(
+                            image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                            original_source_jambs=partial_source_jambs,
+                        )
+                        partial = tuple(seg for seg in partial
+                            if _axis_aligned_geometry_fully_covered_by_rect_union(
+                                seg.geometry_pt, image_regions)
+                            and not new_band_duplicate(
+                                seg, segments,
+                                dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                ordinary_dpi=RASTER_RENDER_DPI))
+                        if partial:
+                            families.append((
+                                partial, hashlib.sha256(image_png).hexdigest(),
+                                RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                (ORIGINAL_G17_EXACT_PARTIAL_IDENTITY_VERSION
+                                 if self._exact_g17_nomination_shadow
+                                 else ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION),
+                                ORIGINAL_G17_JAMB_PARTIAL_DETECTOR_VERSION,
+                                hashlib.sha256(full_png).hexdigest(),
+                            ))
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
@@ -2194,9 +2489,43 @@ class SourceVisibilityProducer:
         self._raster_visibility_attempted_pages.update(completed_attempts)
         return updated
 
-    def _proven_raster_opening_flank_boxes(self, published, page_id):
-        """Nominate source capture only; never supply a host or completeness."""
+    def _proven_raster_opening_flank_boxes(
+        self, published, page_id, *,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
+        include_original_partial_jamb_receipts_shadow: bool = False,
+    ):
+        """Nominate real source paint into raster capture, never a host or count.
+
+        The default figured-area nomination stays byte-for-byte unchanged.
+        Explicit shadow scope may also nominate otherwise unmeasured flanks,
+        but ONLY after the original producer has independently re-proven both
+        closed G17 face/end groups and solid unchanged source ink. This changes
+        a shadow source snapshot and is not a commercial promotion.
+        """
+        if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+            raise TypeError("unmeasured G17 flank capture must be an explicit boolean")
+        if type(include_original_partial_jamb_receipts_shadow) is not bool:
+            raise TypeError("partial original G17 receipt flag must be boolean")
+        if (include_original_partial_jamb_receipts_shadow
+                and not include_unmeasured_ink_closed_flanks_shadow):
+            raise ValueError("partial G17 original source requires opt-in")
+        partial_jambs = set()
+        individual_ink_positive_boxes = set()
         physical = self.physical_opening_authority()
+        if self._raster_paired_outer_faces_shadow and not include_unmeasured_ink_closed_flanks_shadow:
+            # Preserve the original 21/15/9/8 production-source capture
+            # semantics when the paired-face hypothesis is observation-only.
+            # For a deliberately isolated EXTRA G17 ink capture, the caller
+            # explicitly selects the new opening policy and must separately
+            # reprove complete old customer/physical issuer retention.
+            if self._physical_source_capture_authority_cache is None:
+                from pb_physical_opening_authority import PhysicalOpeningAuthority
+                self._physical_source_capture_authority_cache = (
+                    PhysicalOpeningAuthority.from_source_visibility_producer(
+                        self, raster_paired_outer_faces_shadow=False
+                    )
+                )
+            physical = self._physical_source_capture_authority_cache
         visibility = self.authority()
         # The existing source compiler reauthenticates the *complete* isolated
         # snapshot in one batch. A seed addresses that inventory; it does not
@@ -2214,16 +2543,26 @@ class SourceVisibilityProducer:
         selectors = {r.observation_id: replace(seed_selector, observation_id=r.observation_id)
                      for r in records}
         if not records:
-            return ()
+            return ((), (), ()) if include_original_partial_jamb_receipts_shadow else ()
         # Enumerate all raw candidates from the existing compiler, not a
         # nearest/first support or a caller-narrowed candidate universe.
         candidates = physical._raster_framed_candidates_for(records[0], tuple(records))
         openings = {}
+        # Only selectors that independently re-prove the exact original
+        # physical identity may address that opening. Selecting min() over
+        # ALL source members can choose a G17 support member whose own
+        # existence proposition is unresolved or conflicting.
+        original_positive_selectors: dict[str, list[str]] = {}
         for oid in sorted({oid for c in candidates for oid in c.source_observation_ids}):
             result = physical.prove_existence(selectors[oid])
             opening = result.existence_record
-            if result.status is EvidenceResolutionStatus.CORROBORATED and opening is not None:
+            if (result.status is EvidenceResolutionStatus.CORROBORATED
+                    and opening is not None):
+                prior = openings.get(opening.record_id)
+                if prior is not None and prior != opening:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                 openings[opening.record_id] = opening
+                original_positive_selectors.setdefault(opening.record_id, []).append(oid)
         by_id = {r.observation_id: r for r in records}
         boxes = set()
         from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
@@ -2235,10 +2574,70 @@ class SourceVisibilityProducer:
             # geometry, role, host choice or any detector threshold.
             results = tuple(labels.publish_scope(selectors[oid])
                 for oid in opening.source_observation_ids if oid in selectors)
-            if not any(r.status is EvidenceResolutionStatus.CORROBORATED
-                       and r.evidence is not None and r.evidence.area_m2 is not None
-                       for r in results):
-                continue
+            has_source_issued_area = any(
+                r.status is EvidenceResolutionStatus.CORROBORATED
+                and r.evidence is not None and r.evidence.area_m2 is not None
+                for r in results
+            )
+            if not has_source_issued_area:
+                if not include_unmeasured_ink_closed_flanks_shadow:
+                    continue
+                # The extra source capture is NOT controlled by an opening
+                # label, benchmark item, or a guessed wall. It depends on the
+                # exact producer-issued G17 physical identity and a separate
+                # original-pixel source test. No partial flank may enter W2.
+                from pb_opening_local_g17_wall_shadow import (
+                    build_opening_local_g17_wall_shadow,
+                )
+                trusted_addresses = tuple(sorted(
+                    original_positive_selectors.get(opening.record_id, ())
+                ))
+                if not trusted_addresses:
+                    continue
+                original_selector = selectors[trusted_addresses[0]]
+                ink = build_opening_local_g17_wall_shadow(
+                    self, original_selector,
+                    original_ink_render_cache_shadow=True,
+                )
+                if (ink.physical_opening_id != opening.record_id
+                        or len(ink.flanks) != 2):
+                    continue
+                if include_original_partial_jamb_receipts_shadow:
+                    for flank in ink.flanks:
+                        support = [by_id[oid] for oid in flank.source_observation_ids
+                                   if oid in by_id]
+                        faces = [r for r in support
+                                 if r.observation_kind == RASTER_WALL_BAND_FACE]
+                        ends = [r for r in support
+                                if r.observation_kind == RASTER_WALL_BAND_END]
+                        if len(support) != 3 or len(faces) != 2 or len(ends) != 1:
+                            continue
+                        a, b = (tuple(float(v) for v in x.geometry) for x in faces)
+                        cap = tuple(float(v) for v in ends[0].geometry)
+                        if (a[1] == a[3] and b[1] == b[3]
+                                and a[0] == b[0] and a[2] == b[2]
+                                and a[1] != b[1]):
+                            off = sorted((a[1], b[1]))
+                            if (cap[0] != cap[2] or cap[0] not in (a[0],a[2])
+                                    or sorted((cap[1],cap[3])) != off):
+                                continue
+                            item=("horizontal",(a[0],off[0],a[2],off[1]),cap[0])
+                        elif (a[0] == a[2] and b[0] == b[2]
+                                and a[1] == b[1] and a[3] == b[3]
+                                and a[0] != b[0]):
+                            off = sorted((a[0], b[0]))
+                            if (cap[1] != cap[3] or cap[1] not in (a[1],a[3])
+                                    or sorted((cap[0],cap[2])) != off):
+                                continue
+                            item=("vertical",(off[0],a[1],off[1],a[3]),cap[1])
+                        else:
+                            continue
+                        if flank.source_ink_supported:
+                            individual_ink_positive_boxes.add((item[0],item[1]))
+                        else:
+                            partial_jambs.add(item)
+                if not all(flank.source_ink_supported for flank in ink.flanks):
+                    continue
             faces = [by_id[oid].geometry for oid in opening.source_observation_ids
                      if by_id[oid].observation_kind == RASTER_WALL_BAND_FACE]
             grouped = {}
@@ -2252,6 +2651,12 @@ class SourceVisibilityProducer:
                     a, b = sorted(offsets)
                     box = (lo, a, hi, b) if axis == 'horizontal' else (a, lo, b, hi)
                     boxes.add((axis, box))
+        if include_original_partial_jamb_receipts_shadow:
+            return (
+                tuple(sorted(boxes)),
+                tuple(sorted(partial_jambs)),
+                tuple(sorted(individual_ink_positive_boxes)),
+            )
         return tuple(sorted(boxes))
 
     def augment_with_raster_opening_primitives(

@@ -1,0 +1,52 @@
+name: GPT MAX source-ink closed G17 capture shadow
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - pb_source_visibility_authority.py
+      - pb_physical_wall_candidate_authority.py
+      - pb_live_wall_opening_authority_composition.py
+      - tests/test_gptmax_unmeasured_g17_flank_capture.py
+      - tools/diag_gptmax_unmeasured_flank_capture_shadow.py
+      - .github/workflows/test-gptmax-unmeasured-g17-flank-shadow.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-neutral:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt pytest ruff
+      - run: |
+          PYTHONPATH=.:tests pytest -q tests/test_gptmax_unmeasured_g17_flank_capture.py
+          ruff check --select F821,F823 pb_source_visibility_authority.py pb_physical_wall_candidate_authority.py pb_live_wall_opening_authority_composition.py tests/test_gptmax_unmeasured_g17_flank_capture.py tools/diag_gptmax_unmeasured_flank_capture_shadow.py
+  original-opt-in-page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify original source immutable SHA
+        run: echo '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844  documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum -c -
+      - name: Recompute only changed opt-in G17 source capture on page 3
+        run: |
+          mkdir -p artifacts
+          PYTHONPATH=. python tools/diag_gptmax_unmeasured_flank_capture_shadow.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --output artifacts/opt-in-g17-capture.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opt-in-g17-capture-head
+          path: artifacts/

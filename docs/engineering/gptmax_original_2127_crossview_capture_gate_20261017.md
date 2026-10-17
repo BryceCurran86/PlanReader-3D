@@ -1,0 +1,9 @@
+# Original-source G17 topology page versus cross-sheet supporting elevation
+
+*The same original 13-page Arcadia Lot16 PDF* contains the 2127 STACKER in p3 FLOOR PLAN and its corresponding assembly in p5 ELEVATION 4. The user has independently confirmed these are the same external wall, with the stacker in the DINING/LIVING elevation and the AC unit to the right. The source SHA is `10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844`.
+
+**First broken stage**: after the source-owned physical-opening producer, the opt-in wall composition previously passed `(*selected_pages,*evidence_pages)` into `from_source_visibility_unmeasured_g17_flanks_shadow`. That producer calls the deliberately single-page source capture. A valid plan+elevation request `selected_pages=('3',), evidence_pages=('5',)` therefore failed at the original page-count guard *before opening host/frame binding*. Broadening the G17 gate to an elevation would be invalid.
+
+**Correction**: perform the original G17 capture on the ONE selected floor-plan page only, then use the unchanged ordinary wall factory across the plan and all evidence pages. Original G17 opening-local paint stays out of BOTH canonical page and viewport W4 and enters the separately source-issued incomplete supplemental wall scope. The source selector's SHA, revision, snapshot and explicit one-plan-page policy remain fail-closed. No heading/label similarity, source frame rekey, user geometry, new host or benchmark truth is inferred.
+
+**Still open**: actual original 2127 left W4 physical source-member proof, original a68 shared-pier representative conflict and complete 2127 host frame; other G17 original structural membership and equiv relation gaps. CI must compare full original 21/15/9/8 and all old signed customer receipts before any production merge. Pending billing queue is not a passing test.
