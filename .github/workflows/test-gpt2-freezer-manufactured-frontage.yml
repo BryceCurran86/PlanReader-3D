@@ -1,0 +1,29 @@
+name: TEST GPT2 Original Freezer Manufacturer Frontage
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_original_freezer_manufactured_frontage_owner_shadow.py"
+      - "tests/test_gpt2_original_freezer_cabinet_wall_rivals.py"
+      - ".github/workflows/test-gpt2-freezer-manufactured-frontage.yml"
+  workflow_dispatch:
+jobs:
+  original-freezer-source-first:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original source wall conflicts and manufacturer-door negatives
+        env:
+          PYTHONPATH: .
+        run: |
+          echo "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_original_freezer_cabinet_wall_rivals.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
