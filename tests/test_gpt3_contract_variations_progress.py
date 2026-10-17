@@ -265,3 +265,47 @@ def test_mutated_claim_chain_or_variation_event_history_is_not_reusable():
         build_progress_claim(contract, quote, approved, sealed, customers, [modified],
             claim_input(contract, approved, 2, "100", "50", "0", "50",
                         "2026-11-10"))
+
+
+def test_approved_removed_scope_after_paid_claim_creates_explicit_credit_note():
+    sealed, customers, _, quote, _, contract = inputs()
+    empty_book = {
+        "schema_version": "gpt3-client-variations-v1",
+        "contract_id": contract["contract_id"],
+        "contract_fingerprint": contract["contract_fingerprint"],
+        "currency": contract["currency"],
+        "events": [],
+    }
+    initial_variations = build_change_register(contract, quote, empty_book)
+    first = build_progress_claim(
+        contract, quote, initial_variations, sealed, customers, [],
+        claim_input(contract, initial_variations, 1, "100", "100", "0",
+                    "100", "2026-10-25",
+                    receipts=[{
+                        "receipt_id": "CLIENT-REMIT-001",
+                        "amount": "20.00", "received_on": "2026-10-25",
+                        "reference": "Secure client bank ref",
+                    }]),
+    )
+    removal_book = deepcopy(empty_book)
+    removal_book["events"] = [{
+        "event": "PROPOSE", "variation_id": "CLIENT-CREDIT-001",
+        "recorded_on": "2026-10-26", "scope_type": "REMOVED_SCOPE",
+        "description": "Contract reduction", "related_signed_quantity_ids": [],
+        "net_ex_tax": "-25.00", "tax_pct": "10",
+    }, {
+        "event": "APPROVE", "variation_id": "CLIENT-CREDIT-001",
+        "recorded_on": "2026-10-27", "actor": "Client",
+        "reference": "External approval reference",
+    }]
+    updated_variations = build_change_register(contract, quote, removal_book)
+    credit = build_progress_claim(
+        contract, quote, updated_variations, sealed, customers, [first],
+        claim_input(contract, updated_variations, 2, "100", "100", "100",
+                    "100", "2026-10-28"),
+    )
+    assert credit["summary"]["amount_due_from_this_claim"] == "0.00"
+    assert float(credit["summary"]["client_credit_note_in_period"]) > 0
+    assert float(credit["summary"]["net_invoiced_to_date"]) < float(
+        first["summary"]["net_invoiced_to_date"])
+    assert credit["original_pdf_remeasured"] is False
