@@ -109,7 +109,13 @@ def _aging(claims: list[dict], cash: Decimal, as_of: Any) -> dict:
     """Allocate recorded receipts FIFO across net claims without inventing cash."""
     buckets = {"CURRENT": Decimal("0"), "OVERDUE_1_30": Decimal("0"),
                "OVERDUE_31_60": Decimal("0"), "OVERDUE_61_PLUS": Decimal("0")}
-    remaining_cash = cash
+    # A client-approved reduction creates a credit note, not negative
+    # new cash. Apply both cash received and the issued credits oldest-first.
+    credits = sum(
+        (Decimal(claim["summary"].get("client_credit_note_in_period", "0"))
+         for claim in claims), Decimal("0")
+    )
+    remaining_cash = cash + credits
     aging = []
     for claim in claims:
         balance = Decimal(claim["summary"]["amount_due_from_this_claim"])
@@ -130,7 +136,8 @@ def _aging(claims: list[dict], cash: Decimal, as_of: Any) -> dict:
         })
     return {
         "outstanding_by_age": {key: _money(value) for key, value in buckets.items()},
-        "per_claim": aging, "unallocated_cash": _money(remaining_cash),
+        "per_claim": aging,
+        "customer_credit_or_overpayment_pending_allocation": _money(remaining_cash),
     }
 
 
@@ -198,8 +205,9 @@ def build_progress_claim(
         if previous_claims else Decimal("0")
     )
     gross_delta = gross_to_date - prior_gross
-    if gross_delta < 0:
-        raise ValueError("progress earnings cannot decrease")
+    # Newly APPROVED removed-scope variations may produce a negative
+    # commercial delta even while every physical/milestone progress %
+    # stays nondecreasing. Represent this as an explicit credit note.
     withheld_total = (gross_to_date * retention / HUNDRED).quantize(
         CENT, rounding=ROUND_HALF_UP)
     past_withheld = (
@@ -231,14 +239,19 @@ def build_progress_claim(
         Decimal(previous_claims[-1]["summary"]["deposit_credit_applied_to_date"])
         if previous_claims else Decimal("0")
     )
-    current_due = gross_delta - retention_delta + release_delta - deposit
-    if current_due < 0:
+    pre_deposit_due = gross_delta - retention_delta + release_delta
+    if deposit > max(pre_deposit_due, Decimal("0")):
         raise ValueError("client deposit credit cannot exceed positive payable value")
+    signed_client_due = pre_deposit_due - deposit
+    current_due = max(signed_client_due, Decimal("0"))
+    client_credit_note = max(-signed_client_due, Decimal("0"))
     prior_invoiced = (
         Decimal(previous_claims[-1]["summary"]["net_invoiced_to_date"])
         if previous_claims else Decimal("0")
     )
-    net_to_date = prior_invoiced + current_due
+    net_to_date = prior_invoiced + signed_client_due
+    if net_to_date < 0:
+        raise ValueError("client credits exceed cumulative previously billed liability")
     old_receipts = [
         row for prior in previous_claims for row in prior["new_receipts"]
     ]
@@ -248,7 +261,16 @@ def build_progress_claim(
     added_receipts = _receipts(new_claim.get("new_receipts"), claim_date, receipt_ids)
     all_receipts = old_receipts + added_receipts
     received = sum((Decimal(row["amount"]) for row in all_receipts), Decimal("0"))
-    if received > net_to_date:
+    previous_cash = sum((Decimal(row["amount"]) for row in old_receipts), Decimal("0"))
+    new_cash = received - previous_cash
+    # Overpayment from fresh cash is rejected; a legitimate approved
+    # negative variation after payment can instead create a refund liability.
+    if new_cash > max(net_to_date - previous_cash, Decimal("0")):
+        raise ValueError("new customer receipts exceed payable outstanding balance")
+    if received > net_to_date and client_credit_note == 0 and not any(
+        Decimal(row["summary"].get("client_credit_note_in_period", "0")) > 0
+        for row in previous_claims
+    ):
         raise ValueError("customer receipt total exceeds verified claim liability")
     due_date = claim_date + timedelta(days=contract["payment_terms_days"])
     if type(new_claim.get("release_retention_reference")) not in (str, type(None)):
@@ -305,9 +327,15 @@ def build_progress_claim(
             "deposit_credit_applied_in_period": _money(deposit),
             "deposit_credit_applied_to_date": _money(past_deposit + deposit),
             "amount_due_from_this_claim": _money(current_due),
+            "client_credit_note_in_period": _money(client_credit_note),
+            "client_credit_notes_to_date": _money(
+                sum((Decimal(row["summary"].get("client_credit_note_in_period", "0"))
+                     for row in previous_claims), Decimal("0")) + client_credit_note),
             "net_invoiced_to_date": _money(net_to_date),
             "recorded_cash_received_to_date": _money(received),
-            "outstanding_receivable": _money(net_to_date - received),
+            "outstanding_receivable": _money(max(net_to_date - received, Decimal("0"))),
+            "client_refund_or_overpayment_to_reconcile": _money(
+                max(received - net_to_date, Decimal("0"))),
             "unearned_approved_contract_value": _money(
                 Decimal(variation_register["committed_client_contract_gross"]) - gross_to_date),
         },
@@ -363,8 +391,10 @@ def progress_csv(report: Mapping[str, Any]) -> str:
         ("RETENTION_RELEASED_IN_PERIOD", "retention_released_in_period"),
         ("DEPOSIT_CREDIT_IN_PERIOD", "deposit_credit_applied_in_period"),
         ("AMOUNT_DUE_THIS_CLAIM", "amount_due_from_this_claim"),
+        ("CLIENT_CREDIT_NOTE_THIS_PERIOD", "client_credit_note_in_period"),
         ("CASH_RECORDED_TO_DATE", "recorded_cash_received_to_date"),
         ("OUTSTANDING_RECEIVABLE", "outstanding_receivable"),
+        ("CLIENT_REFUND_TO_RECONCILE", "client_refund_or_overpayment_to_reconcile"),
     ):
         emit({**base, "row_type": "PAYMENT_SUMMARY", "reference": label,
               "gross_amount": report["summary"][key],
