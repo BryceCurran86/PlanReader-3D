@@ -1,4 +1,8 @@
 name: GPT MAX Original G17 Drawing Wall Scope
+
+concurrency:
+  group: test-gptmax-g17-plan-wall-scope-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

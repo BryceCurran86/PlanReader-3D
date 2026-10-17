@@ -1,4 +1,8 @@
 name: GPT MAX Original Candidate Per-Source Membership
+
+concurrency:
+  group: test-gptmax-original-candidate-membership-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     paths:

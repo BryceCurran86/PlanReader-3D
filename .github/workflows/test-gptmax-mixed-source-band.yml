@@ -1,4 +1,8 @@
 name: GPT MAX Mixed G17 Source Band Safety
+
+concurrency:
+  group: test-gptmax-mixed-source-band-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     paths:

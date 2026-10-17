@@ -1,4 +1,8 @@
 name: GPT MAX Lot16 Host Frame Dimensions GPT1 Gate
+
+concurrency:
+  group: test-gptmax-lot16-host-frame-gpt1-gate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

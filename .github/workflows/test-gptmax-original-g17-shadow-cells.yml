@@ -1,4 +1,8 @@
 name: GPT MAX Original G17 Shadow Inclusive Source Cells
+
+concurrency:
+  group: test-gptmax-original-g17-shadow-cells-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

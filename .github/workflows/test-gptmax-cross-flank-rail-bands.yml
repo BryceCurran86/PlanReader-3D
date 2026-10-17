@@ -1,4 +1,8 @@
 name: GPT MAX Original Cross-Flank Pixel Wall-Rail Alternatives
+
+concurrency:
+  group: test-gptmax-cross-flank-rail-bands-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     paths:

@@ -1,4 +1,8 @@
 name: GPT MAX Original G17 Two-Flank W3 Jamb Source Review
+
+concurrency:
+  group: test-gptmax-g17-jamb-pair-source-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

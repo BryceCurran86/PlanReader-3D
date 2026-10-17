@@ -1,4 +1,8 @@
 name: GPT MAX G17 Source-Only Retention Audit
+
+concurrency:
+  group: test-gptmax-g17-source-only-retention-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

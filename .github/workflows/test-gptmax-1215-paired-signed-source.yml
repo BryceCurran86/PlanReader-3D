@@ -1,4 +1,8 @@
 name: GPT MAX Lot16 Paired Original Signed Source
+
+concurrency:
+  group: test-gptmax-1215-paired-signed-source-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     paths:

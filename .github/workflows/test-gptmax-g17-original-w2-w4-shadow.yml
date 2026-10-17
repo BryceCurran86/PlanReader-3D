@@ -1,4 +1,8 @@
 name: GPT MAX Original G17 Isolated W2 W3 W4 Source Geometry
+
+concurrency:
+  group: test-gptmax-g17-original-w2-w4-shadow-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

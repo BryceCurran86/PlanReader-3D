@@ -1,4 +1,8 @@
 name: GPT MAX Original Opening Role Text Audit
+
+concurrency:
+  group: test-gptmax-original-opening-role-audit-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

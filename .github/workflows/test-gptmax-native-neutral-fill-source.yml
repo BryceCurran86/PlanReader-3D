@@ -1,4 +1,8 @@
 name: GPT MAX Original Table And Dimension Native Opening Opposition
+
+concurrency:
+  group: test-gptmax-native-neutral-fill-source-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     paths:
