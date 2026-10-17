@@ -26,6 +26,27 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _require_exact_floor_finish_semantic(
+    semantic_key: object,
+    *,
+    canonical_floor_id: str,
+    finish_code: object,
+    semantic_finish: object,
+) -> None:
+    if (
+        type(semantic_key) is not str
+        or type(finish_code) is not str or not finish_code
+        or finish_code != finish_code.strip()
+        or type(semantic_finish) is not str or not semantic_finish
+        or semantic_finish != semantic_finish.strip()
+        or semantic_key !=
+        f"floor_finish_area:{canonical_floor_id}:{finish_code}:{semantic_finish}"
+    ):
+        raise SourceClosedRunConflictError(
+            "floor finish semantic identity disagrees with original source code"
+        )
+
+
 def build_live_floor_finish_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -100,6 +121,17 @@ def build_live_floor_finish_area_source_traces(
             )
 
         floor_id = _clean(quantity.input_entity_ids[0])
+        # The exact physical floor and source-owned printed material code
+        # must agree with the quantity's immutable semantic identity.
+        metadata_for_semantic = (
+            quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        )
+        _require_exact_floor_finish_semantic(
+            quantity.semantic_key,
+            canonical_floor_id=floor_id,
+            finish_code=metadata_for_semantic.get("finish_code"),
+            semantic_finish=metadata_for_semantic.get("semantic_finish"),
+        )
         floor = floors_by_id.get(floor_id)
         if floor is None:
             raise SourceClosedRunConflictError(
