@@ -215,10 +215,17 @@ def _validate_common(
         ViewportResolutionStatus.DERIVED,
     ):
         blockers.append("viewport_unresolved")
-    if page_no not in context.trusted_page_numbers():
+    # Python's True == 1 and int(1.9) == 1 are not evidence that a
+    # floor belongs to an authenticated original page. Figured-area
+    # publication bypasses scale checks, so enforce the scope here too.
+    if type(page_no) is not int or page_no <= 0:
+        blockers.append("page_not_owned")
+    elif page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
     mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and int(mapped_page) != int(page_no):
+    if mapped_page is not None and (
+        type(mapped_page) is not int or mapped_page != page_no
+    ):
         blockers.append("viewport_page_mismatch")
     if room.source_page:
         try:
