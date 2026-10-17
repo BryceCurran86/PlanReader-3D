@@ -223,3 +223,29 @@ def test_missing_or_duplicate_native_word_receipt_never_binds_to_other_area():
     ]
     assert _native_area_word_addresses(original_words + competing, 0, row) is None
     assert _native_area_word_addresses(original_words, 1, row) is None
+
+
+def test_original_word_receipts_respect_text_case_without_proximity_join():
+    from pb_explicit_floor_area_evidence import (
+        _native_area_word_addresses, extract_declared_component_floor_areas,
+    )
+    row, = extract_declared_component_floor_areas(
+        "Ground Lounge area: 17.25m²",
+        source_page=1, source_block_id="original-native-block",
+    )
+    words = [
+        (0., 0., 1., 1., "Ground", 3, 2, 0),
+        (1., 0., 2., 1., "Lounge", 3, 2, 1),
+        (2., 0., 3., 1., "area:", 3, 2, 2),
+        (3., 0., 4., 1., "17.25m²", 3, 2, 3),
+    ]
+    found = _native_area_word_addresses(words, 3, row)
+    assert found == (
+        ((3, 2, 0), (3, 2, 1), (3, 2, 2)),
+        ((3, 2, 3),),
+    )
+    # One word with a different native source label is not a provenance
+    # match, even if the numeric m² would be identical.
+    rival = list(words)
+    rival[1] = (1., 0., 2., 1., "Study", 3, 2, 1)
+    assert _native_area_word_addresses(rival, 3, row) is None
