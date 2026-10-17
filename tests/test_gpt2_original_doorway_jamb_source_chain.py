@@ -215,7 +215,8 @@ def test_same_native_path_ids_on_different_pdf_pages_never_gain_shared_room_iden
     second.draw_line((150,92),(150,100),color=(0,0,0),width=.96)
     args=dict(left_wall_id="d0i0",right_wall_id="d1i0",
               left_jamb_id="d2i0",right_jamb_id="d3i0")
-    a,b=audit(page,**args),audit(second,**args)
+    # PyMuPDF invalidates an older Page handle when a new page is inserted.
+    a,b=audit(doc[0],**args),audit(doc[1],**args)
     assert a["native_ink_contact_proved"] and b["native_ink_contact_proved"]
     assert a["original_pdf_page_index_zero_based"]==0
     assert b["original_pdf_page_index_zero_based"]==1
