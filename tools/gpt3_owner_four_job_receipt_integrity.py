@@ -697,6 +697,15 @@ def main(argv: list[str] | None = None) -> int:
         args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
     ):
         raise ValueError("derived receipt diagnostic cannot overwrite evidence")
+    if args.output.is_symlink():
+        raise ValueError("derived receipt diagnostic cannot follow output symlinks")
+    if args.output.exists():
+        try:
+            previous = _json_object(args.output)
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError("derived receipt diagnostic cannot replace unrelated evidence") from exc
+        if previous.get("schema_version") != "gpt3-derived-owner-receipt-audit-v1":
+            raise ValueError("derived receipt diagnostic cannot replace unrelated evidence")
     result = verify_owner_four_job_receipts(args.receipt_root)
     _write_readiness_report(
         args.output, json.dumps(result, indent=2, sort_keys=True) + "\n",
