@@ -56,6 +56,8 @@ def test_damage_outside_cached_openings_page_is_checked_before_cache_hit(warm):
     rows=source.authority().authenticated_visible_observations(published)
     observation_id = next(key for key,row in rows if row.page_id=='2')
     key=(published.snapshot.snapshot_id,observation_id)
+    if key not in source._producer._store.observations:
+        key=(published.snapshot.snapshot_id, source._visibility_receipts[key])
     original=source._producer._store.observations[key]
     source._producer._store.observations[key]=replace(original,
         geometry=tuple(value+1 for value in original.geometry))
@@ -184,7 +186,7 @@ def test_cached_opening_proofs_use_published_snapshot_order_not_index_order(monk
     assert len(source_ids) > 1
     monkeypatch.setattr(
         type(authoritative), "authenticated_visible_observations",
-        lambda self, snapshot: tuple(reversed(original_index)),
+        lambda self, snapshot, **_kwargs: tuple(reversed(original_index)),
     )
     witnessed = []
 

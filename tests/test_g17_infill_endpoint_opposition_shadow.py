@@ -102,6 +102,8 @@ def test_mid_read_source_damage_aborts_endpoint_partition(monkeypatch,damage):
         r=original(*args,**kwargs)
         if damage=='native':
             key=(pub.snapshot.snapshot_id,pub.visible_observation_ids[0]);store=source._producer._store
+            if key not in store.observations:
+                key=(key[0], source._visibility_receipts[key])
             store.observations[key]=replace(store.observations[key],geometry=(1.,2.,3.,4.))
         else:
             key=(pub.snapshot.snapshot_id,pub.raster_opening_primitive_observation_ids[0])

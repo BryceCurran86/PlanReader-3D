@@ -7,6 +7,7 @@ lineage check is unchanged.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import io
 import math
 
@@ -256,4 +257,53 @@ def test_rotated_page_clip_outside_native_frame_is_rejected_even_if_inside_displ
             dpi=300.0,
             clip_pt=(20.0, 220.0, 60.0, 240.0),
         )
+
+
+def test_repeated_render_does_not_rescan_snapshot_observations() -> None:
+    producer, published = _ingest()
+    producer.render_native_page_png(**_kwargs(published), dpi=72)
+    calls = {"n": 0}
+    original = producer._store.observations.get
+
+    def counting(key, default=None):
+        calls["n"] += 1
+        if default is None:
+            return original(key)
+        return original(key, default)
+
+    producer._store.observations.get = counting
+    again, _parent = producer.render_native_page_png(**_kwargs(published), dpi=72)
+    assert calls["n"] == 0
+    assert again
+
+
+def test_page_text_is_traced_once_for_the_same_page(monkeypatch) -> None:
+    producer, published = _ingest()
+    calls = {"n": 0}
+    original = fitz.Page.get_texttrace
+
+    def wrapped(page, *args, **kwargs):
+        calls["n"] += 1
+        return original(page, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "get_texttrace", wrapped)
+    source = producer._store.source_bytes_by_revision[published.revision.revision_id]
+    first = producer.page_text_facts(source, 1)
+    second = producer.page_text_facts(source, 1)
+    assert first is second
+    assert calls["n"] == 1
+    other = producer.page_text_facts(source, 1)
+    assert other is first
+    assert calls["n"] == 1
+
+
+def test_replaced_page_parent_is_not_reused() -> None:
+    producer, published = _ingest()
+    producer.render_native_page_png(**_kwargs(published), dpi=72)
+    parents = producer._native_page_parent_records(published.snapshot, "1")
+    assert len(parents) == 1
+    key = (published.snapshot.snapshot_id, parents[0].observation_id)
+    producer._store.observations[key] = replace(parents[0], page_id="9")
+    with pytest.raises(ValueError, match="native_pdf_page"):
+        producer.render_native_page_png(**_kwargs(published), dpi=72)
 
