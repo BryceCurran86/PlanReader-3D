@@ -46,23 +46,23 @@ def normalize_opening_tag(text: str) -> Optional[NormalizedOpeningTag]:
     """
     if not text:
         return None
-    m = _TAG_RE.fullmatch(text.strip()) or _TAG_RE.search(text)
-    if not m:
+    found: list[tuple[str, str, str]] = []
+    for match in _TAG_RE.finditer(text):
+        prefix = match.group("prefix").upper()
+        number = int(match.group("number"))
+        if number <= 0:
+            continue
+        if prefix in {"W", "WIN", "WINDOW"}:
+            canonical, trade = f"W{number}", "windows"
+        else:
+            canonical, trade = f"D{number}", "doors"
+        item = (canonical, trade, match.group(0))
+        if item[:2] not in {(row[0], row[1]) for row in found}:
+            found.append(item)
+    if len(found) != 1:
         return None
-
-    prefix = m.group("prefix").upper()
-    number = int(m.group("number"))
-    if number <= 0:
-        return None
-
-    if prefix in {"W", "WIN", "WINDOW"}:
-        canonical = f"W{number}"
-        trade = "windows"
-    else:
-        canonical = f"D{number}"
-        trade = "doors"
-
-    return NormalizedOpeningTag(tag=canonical, trade_type=trade, raw_text=m.group(0))
+    canonical, trade, raw = found[0]
+    return NormalizedOpeningTag(tag=canonical, trade_type=trade, raw_text=raw)
 
 
 def find_explicit_opening_tags(text: str) -> list[NormalizedOpeningTag]:

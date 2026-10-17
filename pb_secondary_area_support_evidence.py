@@ -114,12 +114,15 @@ def _text_blocks(page: Any) -> list[_TextBlock]:
 
 
 def _zone_type(text: str) -> Optional[str]:
-    """Return a canonical secondary-area type from explicit source text only."""
+    """Return one secondary-area type. Two different types abstain."""
+    found: list[str] = []
     if re.search(r"\bveranda(?:h)?\b", text, re.IGNORECASE):
-        return "verandah"
+        found.append("verandah")
     for zone_type in ("alfresco", "porch", "patio"):
         if re.search(rf"\b{zone_type}\b", text, re.IGNORECASE):
-            return zone_type
+            found.append(zone_type)
+    if len(found) == 1:
+        return found[0]
     return None
 
 
@@ -136,12 +139,18 @@ def _support_kind(text: str) -> Optional[str]:
     if re.match(r"^\s*\d{1,2}\s*[.)]", normalized):
         return None
 
-    noun_match = re.search(
+    nouns = []
+    for noun_match in re.finditer(
         r"\b(poles?|columns?|pillars?|posts?|piers?)\b",
         normalized,
         re.IGNORECASE,
-    )
-    if noun_match is None:
+    ):
+        noun = noun_match.group(1).lower()
+        if noun.endswith("s"):
+            noun = noun[:-1]
+        if noun not in nouns:
+            nouns.append(noun)
+    if len(nouns) != 1:
         return None
 
     has_spec = bool(
@@ -155,10 +164,7 @@ def _support_kind(text: str) -> Optional[str]:
     if not has_spec:
         return None
 
-    noun = noun_match.group(1).lower()
-    if noun.endswith("s"):
-        noun = noun[:-1]
-    return noun
+    return nouns[0]
 
 
 def _bay_chains(dimension_chains: Sequence[Any]) -> list[_BayChain]:

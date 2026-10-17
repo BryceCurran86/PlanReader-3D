@@ -87,12 +87,14 @@ def _quantity_candidates(records: List[Tuple[str, BBox, int]]) -> List[Tuple[flo
         lower = text.lower()
         if "overall" not in lower or "quantity" not in lower:
             continue
-        match = re.search(r"(\d+(?:\.\d+)?)\s*$", text)
-        if not match:
+        numbers = []
+        for match in re.finditer(r"(\d+(?:\.\d+)?)", text):
+            value = float(match.group(1))
+            if value > 0 and value not in numbers:
+                numbers.append(value)
+        if len(numbers) != 1:
             continue
-        value = float(match.group(1))
-        if value > 0:
-            quantities.append((value, bbox))
+        quantities.append((numbers[0], bbox))
     return quantities
 
 
