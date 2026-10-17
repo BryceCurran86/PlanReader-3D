@@ -1,0 +1,40 @@
+name: TEST GPT2 F07 Opt-in Original Semantic Cell Ownership
+
+on:
+  pull_request:
+    paths:
+      - pb_viewport_segmentation.py
+      - tests/test_gpt2_f07_optin_source_connected_semantic_cells.py
+      - .github/workflows/test-gpt2-f07-optin-semantic-connected-cells.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-false-schedule-and-existing-viewports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source branch head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install source test prerequisites
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original SHA pinned F07 default parity and opt-in shadow regression
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_f07_optin_source_connected_semantic_cells.py tests/test_gpt2_external_schedule_frame_provenance.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
