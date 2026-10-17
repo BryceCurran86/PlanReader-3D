@@ -294,75 +294,83 @@ def parse_dimension(text: str, allow_slash: bool = True) -> Tuple[Optional[int],
 
 
 def extract_mark(text: str) -> str:
-    """Extract a structurally valid door/window mark from arbitrary text."""
+    """Extract one door/window mark. Two different marks abstain."""
     if not text:
         return ""
-    m = _MARK_SEARCH_RE.search(text.upper())
-    if not m:
+    marks = {
+        match.group(1).upper()
+        for match in _MARK_SEARCH_RE.finditer(str(text).upper())
+        if _is_opening_mark(match.group(1).upper())
+    }
+    if len(marks) != 1:
         return ""
-    mark = m.group(1).upper()
-    return mark if _is_opening_mark(mark) else ""
+    return next(iter(marks))
 
 
 def detect_header(words: Sequence[str]) -> Dict[str, Any]:
     mapping: Dict[str, Any] = {}
+    hits: Dict[str, List[Tuple[int, str, str]]] = {
+        "mark": [],
+        "dims": [],
+        "width": [],
+        "height": [],
+        "count": [],
+        "desc": [],
+    }
+
+    for i, w in enumerate(words):
+        w_clean = w.strip().lower()
+        if not w_clean:
+            continue
+        col_basis, col_source = _infer_column_basis(w)
+        if w_clean in _HEADER_MARK_KEYWORDS:
+            hits["mark"].append((i, "", ""))
+            continue
+        if (
+            w_clean in _HEADER_DIMS_KEYWORDS
+            or any(kw in w_clean for kw in _HEADER_DIMS_KEYWORDS)
+        ):
+            hits["dims"].append((i, col_basis, col_source))
+            continue
+        if (
+            w_clean in _HEADER_WIDTH_KEYWORDS
+            or any(kw in w_clean for kw in _HEADER_WIDTH_KEYWORDS)
+        ):
+            hits["width"].append((i, col_basis, col_source))
+            continue
+        if (
+            "sill" not in w_clean
+            and (
+                w_clean in _HEADER_HEIGHT_KEYWORDS
+                or any(kw in w_clean for kw in _HEADER_HEIGHT_KEYWORDS)
+            )
+        ):
+            hits["height"].append((i, col_basis, col_source))
+            continue
+        if w_clean in _HEADER_COUNT_KEYWORDS:
+            hits["count"].append((i, "", ""))
+            continue
+        if w_clean in _HEADER_DESC_KEYWORDS:
+            hits["desc"].append((i, "", ""))
+            continue
+
     width_basis = ""
     width_basis_source = ""
     height_basis = ""
     height_basis_source = ""
     dims_basis = ""
     dims_basis_source = ""
-
-    for i, w in enumerate(words):
-        w_clean = w.strip().lower()
-        if not w_clean:
+    for role, columns in hits.items():
+        if len(columns) != 1:
             continue
-        if w_clean in _HEADER_MARK_KEYWORDS and "mark" not in mapping:
-            mapping["mark"] = i
-            continue
-
-        col_basis, col_source = _infer_column_basis(w)
-
-        if "dims" not in mapping:
-            is_dims = (
-                w_clean in _HEADER_DIMS_KEYWORDS
-                or any(kw in w_clean for kw in _HEADER_DIMS_KEYWORDS)
-            )
-            if is_dims:
-                mapping["dims"] = i
-                dims_basis = col_basis
-                dims_basis_source = col_source
-                continue
-
-        if "width" not in mapping:
-            is_width = (
-                w_clean in _HEADER_WIDTH_KEYWORDS
-                or any(kw in w_clean for kw in _HEADER_WIDTH_KEYWORDS)
-            )
-            if is_width:
-                mapping["width"] = i
-                width_basis = col_basis
-                width_basis_source = col_source
-                continue
-
-        if "height" not in mapping:
-            is_height = (
-                w_clean in _HEADER_HEIGHT_KEYWORDS
-                or any(kw in w_clean for kw in _HEADER_HEIGHT_KEYWORDS)
-            )
-            if is_height:
-                mapping["height"] = i
-                height_basis = col_basis
-                height_basis_source = col_source
-                continue
-
-        if "count" not in mapping and w_clean in _HEADER_COUNT_KEYWORDS:
-            mapping["count"] = i
-            continue
-
-        if "desc" not in mapping and w_clean in _HEADER_DESC_KEYWORDS:
-            mapping["desc"] = i
-            continue
+        index, basis, source = columns[0]
+        mapping[role] = index
+        if role == "width":
+            width_basis, width_basis_source = basis, source
+        elif role == "height":
+            height_basis, height_basis_source = basis, source
+        elif role == "dims":
+            dims_basis, dims_basis_source = basis, source
 
     basis, basis_source = _resolve_dimension_basis(
         width_basis, width_basis_source,
