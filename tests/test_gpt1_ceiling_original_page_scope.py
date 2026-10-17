@@ -58,3 +58,38 @@ def test_corrupted_page_yields_blocked_provisional_ceiling_quantity_not_exceptio
         assert result.abstained
         assert result.value is None
         assert result.metadata["page_no"] is None
+
+
+def test_upstream_documented_area_cannot_relabel_original_page_by_coercion():
+    from dataclasses import replace
+    from pb_ceiling_lining_quantity import build_ceiling_lining_quantity
+    from tests.test_c15_ceiling_lining_quantity import (
+        _area_quantity, _finish_atom, SCOPE_ID,
+    )
+    original=_area_quantity()
+    for incorrect in (True,1.0,1.5,"1",None):
+        metadata=dict(original.metadata)
+        metadata["page_no"]=incorrect
+        forged=replace(original,metadata=metadata)
+        result=build_ceiling_lining_quantity(
+            scope_entity_id=SCOPE_ID,area_quantity=forged,
+            finish_evidence_atoms=(_finish_atom(),),
+            context=_context(),document=_document(),viewport=_viewport(),
+            page_no=1,
+        )
+        assert result.abstained and result.value is None
+        assert "upstream_area_page_unbound" in result.blocking_reasons
+
+
+def test_original_upstream_integer_page_still_reuses_documented_area_provisionally():
+    from pb_ceiling_lining_quantity import build_ceiling_lining_quantity
+    from tests.test_c15_ceiling_lining_quantity import (
+        _area_quantity, _finish_atom, SCOPE_ID,
+    )
+    actual=build_ceiling_lining_quantity(
+        scope_entity_id=SCOPE_ID,area_quantity=_area_quantity(),
+        finish_evidence_atoms=(_finish_atom(),),
+        context=_context(),document=_document(),viewport=_viewport(),page_no=1,
+    )
+    assert not actual.abstained
+    assert actual.value == _area_quantity().value
