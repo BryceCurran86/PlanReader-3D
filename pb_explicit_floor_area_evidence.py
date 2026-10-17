@@ -370,6 +370,42 @@ def reconcile_declared_component_area_total(
 
 
 
+
+def _native_area_word_addresses(native_words, block_no, row):
+    """Find exact lexical source words for one unbound area claim."""
+    by_line: dict[int, list[tuple[int, str]]] = {}
+    for word in native_words:
+        if len(word) >= 8 and word[5] == block_no and type(word[4]) is str:
+            by_line.setdefault(int(word[6]), []).append((int(word[7]), word[4]))
+    lines = tuple(
+        (number, tuple(sorted(words)))
+        for number, words in sorted(by_line.items())
+    )
+    target = tuple((row.label + " AREA:").split())
+    candidates = []
+    for index, (line_id, words) in enumerate(lines):
+        tokens = tuple(w for _n, w in words)
+        if tokens[:len(target)] != target:
+            continue
+        remaining = words[len(target):]
+        if remaining:
+            value_line, value_words = line_id, remaining
+        elif index + 1 < len(lines):
+            value_line, value_words = lines[index + 1]
+        else:
+            continue
+        match = _COMPONENT_AREA_VALUE_RE.fullmatch(
+            " ".join(text for _n, text in value_words)
+        )
+        if match is None or float(match.group("value")) != row.area_m2:
+            continue
+        candidates.append((
+            tuple((block_no, line_id, n) for n, _ in words[:len(target)]),
+            tuple((block_no, value_line, n) for n, _ in value_words),
+        ))
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def extract_unbound_component_areas_from_original_pdf(
     source_pdf_bytes: bytes,
     *,
