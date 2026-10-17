@@ -36,6 +36,7 @@ def test_exact_original_p11_raw_clipped_drawing_not_text_no_guessed_rotation():
         assert ok
         assert receipt["original_source_text_object_count"]==257
         assert receipt["original_raw_clipping_operator_count"]==93
+        assert receipt["original_nonclipping_text_render_mode_count"]==78
         assert source_page_all_native_text_unclipped(page)
         assert not receipt["source_text_semantic_or_quantity_authority"]
     assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()==SOURCE_SHA
@@ -199,3 +200,47 @@ def test_raw_clip_source_cache_invalidates_when_pdf_content_changes(monkeypatch)
         )
         assert blocked==(TEXT_CLIP_STATE_UNRESOLVED,)
     d.close()
+
+
+
+@pytest.mark.parametrize("text_mode", [3,4,5,6,7,8,-1])
+def test_text_clip_or_invisible_render_mode_never_grants_source_visibility(text_mode):
+    # Text clipping modes are independent of W/W* clip-path operators.
+    stream=(
+        b"q BT /F1 10 Tf "+str(text_mode).encode()+b" Tr "
+        b"(FT3) Tj ET BT (FT2) Tj ET Q"
+    )
+    operators=_original_source_operators(stream)
+    assert b"Tr_unsupported" in operators
+    assert not original_content_has_unclipped_text_blocks(stream)[0]
+
+
+def test_safe_original_tr0_tr2_retained_but_not_render_source_authority():
+    content=b"q BT /F1 10 Tf 0 Tr (FT2) Tj ET BT 2 Tr (FT3) Tj ET Q"
+    op=_original_source_operators(content)
+    assert op.count(b"Tr_safe")==2
+    okay,proof=original_content_has_unclipped_text_blocks(content)
+    assert okay
+    assert proof["original_nonclipping_text_render_mode_count"]==2
+    assert proof["source_text_semantic_or_quantity_authority"] is False
+
+
+def test_render_mode_inside_string_comment_hex_or_name_is_never_executed():
+    content=(
+        b"q BT /Tr (7 Tr) Tj <34205472> Tj "
+        b"% 5 Tr is comment\n"
+        b"2 Tr (FT3) Tj ET Q"
+    )
+    ops=_original_source_operators(content)
+    assert ops.count(b"Tr_safe")==1
+    assert b"Tr_unsupported" not in ops
+    assert original_content_has_unclipped_text_blocks(content)[0]
+
+
+def test_unbound_or_outside_text_rendering_operator_fails_closed():
+    for content in (
+        b"q 2 Tr BT (FT2) Tj ET Q",
+        b"q BT unknown Tr (FT3) Tj ET Q",
+        b"q BT Tr (FT3) Tj ET Q",
+    ):
+        assert not original_content_has_unclipped_text_blocks(content)[0]
