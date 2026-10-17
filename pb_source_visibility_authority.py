@@ -2166,17 +2166,19 @@ class SourceVisibilityProducer:
                     # second-end closure cannot legitimately nominate them.
                     extra_one_ended = ()
                     if include_unmeasured_ink_closed_flanks_shadow:
-                        measured_boxes = set(self._proven_raster_opening_flank_boxes(
-                            published, page_id,
-                        ))
-                        # Each original G17 flank independently painted and
-                        # jamb-closed may be retained as SOURCE ink even when
-                        # its neighbour's entire band is interrupted. A
-                        # partial or missing second flank cannot grant a host
-                        # or fabricate complete W4 physical wall equivalence.
+                        # IMPORTANT: a compact original HHWW label (e.g.
+                        # 2127 STACKER = 2100 x 2700mm) may authoritatively
+                        # provide nominal dimensions while the actual WALL
+                        # flanks still have just ONE original G17 jamb end.
+                        # Earlier shadow subtracted every already-dimensioned
+                        # opening, making those exact physical openings
+                        # impossible to recover with the new source detector.
+                        # Keep both previously figured source flanks and each
+                        # independently G17-ink-positive unmeasured flank in
+                        # the opt-in SOURCE inventory. Full original RGB and
+                        # local end/role proof remain mandatory below.
                         source_owned_new_boxes = tuple(sorted(
-                            (set(flank_boxes) |
-                             set(individual_ink_positive_boxes)) - measured_boxes
+                            set(flank_boxes) | set(individual_ink_positive_boxes)
                         ))
                         if source_owned_new_boxes:
                             nominal = detect_original_one_ended_ink_band_segments(
@@ -2190,6 +2192,15 @@ class SourceVisibilityProducer:
                                 and not band_segment_already_observed(
                                     seg,segments,dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
                                     ordinary_dpi=RASTER_RENDER_DPI)
+                                # Historical measured two-ended 300DPI bands
+                                # are already producer-issued source. Never
+                                # create a SECOND W2 identity for the same
+                                # original wall just because this alternate
+                                # G17 detector can see its paint as well.
+                                and not band_segment_already_observed(
+                                    seg,supplemental,
+                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                    ordinary_dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI)
                                 and any(_unchanged_segment_inside_flank(
                                     seg, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI
                                 ) for box in source_owned_new_boxes))
