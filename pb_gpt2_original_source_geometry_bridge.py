@@ -19,6 +19,7 @@ from tools.diag_gpt2_original_native_dimension_chain_shadow import (
 )
 from tools.diag_gpt2_original_figured_face_rivals_shadow import (
     audit_original_figured_detail_face_rivals,
+    audit_original_figured_wall_note_alignment,
 )
 from tools.diag_gpt2_original_detail_floor_same_room_shadow import (
     audit_original_detail_vs_main_source_room_candidate,
@@ -174,6 +175,55 @@ class GPT2OriginalSourceGeometryBridge:
             "source_original_detail_figure_receipt":figure,
             "source_finished_net_area_m2":None,
             "source_canonical_room_same_identity_issued":False,
+            "new_firm_quantities":0,
+        }
+
+    def original_amenity_figured_wall_note_face_handoff(
+        self, *, revision_id: str, detail_page_1_based: int,
+        first_dimension: dict, second_dimension: dict,
+        original_room_word_address: tuple[int,int,int],
+        original_finish_word_address: tuple[int,int,int],
+        plan_enclosure_bbox_pdf_pts: tuple[float,float,float,float],
+        competing_original_wall_face_families: tuple[dict,...],
+        original_vertical_dimension_chain: dict,
+        original_horizontal_dimension_chain: dict,
+    ) -> dict:
+        """Return all original wall-finish rivals plus TRUE arrow-tip chain.
+
+        This is a source-only constraint set for GPT1: no unit calibration,
+        guessed 92mm stud wall, automatic inner/outer election or published
+        customer finish area. Re-reads original bytes and both independent
+        source diagnostic issuers from the same immutable revision.
+        """
+        published,_=self._source_revision(
+            revision_id,page_1_based=detail_page_1_based)
+        faces=self.original_figured_detail_face_rival_census(
+            revision_id=revision_id,detail_page_1_based=detail_page_1_based,
+            first_dimension=first_dimension,second_dimension=second_dimension,
+            original_room_word_address=original_room_word_address,
+            original_finish_word_address=original_finish_word_address,
+            plan_enclosure_bbox_pdf_pts=plan_enclosure_bbox_pdf_pts,
+            competing_original_wall_face_families=
+                competing_original_wall_face_families,
+        )
+        notes=self.original_native_amenity_dimension_chains(
+            revision_id=revision_id,detail_page_1_based=detail_page_1_based,
+            source_vertical_dimension_segments=
+                original_vertical_dimension_chain,
+            source_horizontal_dimension_segments=
+                original_horizontal_dimension_chain,
+        )
+        result=audit_original_figured_wall_note_alignment(faces,notes)
+        return {
+            **result,
+            "original_source_sha256":published.revision.source_sha256,
+            "source_document_id":published.revision.document_id,
+            "source_revision_id":revision_id,
+            "source_snapshot_id":published.snapshot.snapshot_id,
+            "original_dimension_and_face_rivals":faces,
+            "original_true_arrow_tip_dimension_chains":notes,
+            "source_finished_net_floor_m2_issued":None,
+            "physical_room_same_identity_issued":False,
             "new_firm_quantities":0,
         }
 
