@@ -544,3 +544,28 @@ def test_other_unindexed_git_like_policy_is_not_whitelisted(tmp_path):
     (root / ".gitignore").write_text("private-files\n", encoding="utf-8")
     with pytest.raises(ValueError, match="unindexed artifact"):
         audit.verify_owner_four_job_receipts(root)
+
+
+def test_owner_lot16_live_v1_is_checked_against_historical_customer_provenance():
+    result = audit.verify_owner_four_job_receipts(_ROOT)
+    comparison = result["historical_lot16_v1_source_customer_retention"]
+    assert comparison["historical_quantity_count"] == 8
+    assert comparison["candidate_quantity_count"] == 8
+    assert comparison["archived_customer_verified"] is True
+    assert comparison["candidate_customer_verified"] is False
+    assert comparison["safe_to_reuse_archived_customers_with_candidate"] is False
+    assert comparison["source_issuer_scope_attestation_proven"] is False
+    assert comparison["new_firm_quantities_authorized"] == 0
+    assert comparison["receipt_status_counts"] == {
+        "SNAPSHOT_RECEIPT_REKEY_UNATTESTED": 8
+    }
+    assert result["official_four_project_coverage_accuracy"] is None
+
+
+def test_owner_lot16_snapshot_rekeys_never_implicitly_authorize_commercial_reuse():
+    result = audit.verify_owner_four_job_receipts(_ROOT)
+    replay = result["historical_lot16_v1_source_customer_retention"]
+    assert len(replay["quantity_differences"]) == 8
+    assert all(row["issuer_attestation_required"] for row in replay["quantity_differences"])
+    assert not replay["historical_v1_byte_exact"]
+    assert replay["publication_status"] == "DIAGNOSTIC_UNPUBLISHED"
