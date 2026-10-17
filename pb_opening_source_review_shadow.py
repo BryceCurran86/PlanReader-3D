@@ -201,9 +201,12 @@ def compare_opening_source_correspondence(original_packets,alternate_packets):
         lineage=packet["source_lineage"]
         if not lineage or not lineage["source_proof_closed"] or not packet["physical_opening"]:
             return None
-        roots=set(packet["physical_opening"]["source_observation_ids"])
+        source_roots=packet["physical_opening"]["source_observation_ids"]
+        if not source_roots or len(source_roots)!=len(set(source_roots)):
+            return None
+        roots=set(source_roots)
         rows=[r for r in lineage["observations"] if r["observation_id"] in roots]
-        if len(rows)!=len(roots):
+        if len(rows)!=len(roots) or {r["observation_id"] for r in rows}!=roots:
             return None
         return (packet["physical_opening"]["document_id"],
                 packet["physical_opening"]["revision_id"],
