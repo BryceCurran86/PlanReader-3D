@@ -12,6 +12,9 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_cross_view_ceiling_finish_authority import _source_bytes
 from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_graph
 from tools.diag_gpt2_source_rcp_geometry_shadow import audit_original_rcp_ceiling_ink
+from pb_gpt2_w4_rcp_source_handoff import (
+    audit_gpt2_w4_original_rcp_ceiling_handoff,
+)
 from pb_gpt2_w4_original_floor_handoff import (
     audit_gpt2_w4_bound_original_floor,
     audit_gpt2_w4_material_to_gpt1,
@@ -206,4 +209,45 @@ class GPT2OriginalSourceGeometryBridge:
             "source_original_snapshot_id":published.snapshot.snapshot_id,
             "new_firm_quantities":0,
             "floor_finish_quantity_granted":False,
+        }
+
+
+    def original_rcp_ceiling_source_handoff_for_gpt1(
+        self, *, revision_id: str,
+        original_floor_page_1_based: int,
+        source_floor_rcp_correspondence: dict,
+        original_rcp_ink: dict,
+        original_rcp_material: dict,
+        canonical_rooms,
+        physical_room_id: str,
+    ) -> dict:
+        """Bind original A120-only ceiling geometry to one sealed W4 room.
+
+        The A120 perimeter/m² is independent of p7 floor m². The source
+        ceiling area is ALWAYS absent until GPT1 uses independently measured
+        physical ceiling zones. No source-pdf scale is guessed.
+        """
+        published,_=self._source_revision(
+            revision_id,page_1_based=original_floor_page_1_based)
+        if (type(source_floor_rcp_correspondence) is not dict
+                or source_floor_rcp_correspondence.get("original_source_sha256")!=
+                    published.revision.source_sha256):
+            raise ValueError("source_floor_to_RCP_original_root_mismatch")
+        w4=audit_gpt2_w4_bound_original_floor(
+            source_floor_rcp_correspondence,canonical_rooms=canonical_rooms,
+            physical_room_id=physical_room_id)
+        result=audit_gpt2_w4_original_rcp_ceiling_handoff(
+            w4,independently_registered_rcp=source_floor_rcp_correspondence,
+            original_rcp_ink=original_rcp_ink,
+            original_rcp_material=original_rcp_material,
+        )
+        return {
+            "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
+            "source_w4_room_face_claim":w4,
+            "source_original_rcp_ceiling_input_for_gpt1":result,
+            "source_original_document_id":published.revision.document_id,
+            "source_original_revision_id":revision_id,
+            "source_original_snapshot_id":published.snapshot.snapshot_id,
+            "source_ceiling_area_m2":None,
+            "new_firm_quantities":0,
         }
