@@ -137,7 +137,7 @@ def _source_bbox(
     try:
         xs = [float(point[0]) for point in points]
         ys = [float(point[1]) for point in points]
-    except (TypeError, ValueError, IndexError) as exc:
+    except (TypeError, ValueError, IndexError, OverflowError) as exc:
         raise SourceClosedRunConflictError(
             f"canonical floor polygon is invalid: {floor.canonical_floor_id}"
         ) from exc
