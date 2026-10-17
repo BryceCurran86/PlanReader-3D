@@ -52,6 +52,23 @@ def _source_dimension(page, *, label_address, line_id, first_ticks, last_ticks):
             arrowheads.append(tick)
         if (arrowheads[-1]["ends"]==arrowheads[-2]["ends"]):
             raise ValueError("duplicate_original_figure_arrowhead_geometry")
+        other_points=[]
+        for arrow in arrowheads[-2:]:
+            tip=[p for p in arrow["ends"] if p!=endpoint]
+            if len(tip)!=1:
+                raise ValueError("source_figure_arrowhead_not_nonzero")
+            other_points.append(tip[0])
+        vectors=[(pt[0]-endpoint[0],pt[1]-endpoint[1])
+                 for pt in other_points]
+        if (vectors[0][0]*vectors[1][0]+vectors[0][1]*vectors[1][1]>=0
+                or (ends[0][1]==ends[1][1]
+                    and (vectors[0][1]==0 or vectors[1][1]==0))
+                or (ends[0][0]==ends[1][0]
+                    and (vectors[0][0]==0 or vectors[1][0]==0))):
+            # Both printed arrow ticks must independently point away from
+            # their own terminal. Two coincident or collinear dimension
+            # strokes must not counterfeit actual original end marks.
+            raise ValueError("original_figure_arrowhead_direction_conflict")
     word=_word_at(page.get_text("words"),label_address)
     text=str(word[4])
     if re.fullmatch(r"[1-9][0-9]{1,5}",text) is None:
