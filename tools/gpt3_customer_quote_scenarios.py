@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from tools.gpt3_verified_customer_quote import (
-    _decimal, _money, _write_new, build_verified_customer_quote,
+    _csv_text, _decimal, _money, _write_new, build_verified_customer_quote,
 )
 from tools.report_gpt3_four_project_evidence import _read_json_without_duplicate_keys
 
@@ -150,7 +150,27 @@ def scenario_csv(report: Mapping[str, Any]) -> str:
     writer = csv.DictWriter(handle, fieldnames=columns)
     writer.writeheader()
     for row in report["comparison"]:
-        writer.writerow({key: row.get(key) for key in columns})
+        writer.writerow({key: _csv_text(row.get(key)) if key == "scenario"
+                         else row.get(key) for key in columns})
+    return handle.getvalue()
+
+
+def supplier_rfq_csv(report: Mapping[str, Any]) -> str:
+    """Supplier price requests for missing signed families, never zero prices."""
+    columns = ("project_id", "family", "unit",
+               "source_quantity_ids", "requested_input", "currency")
+    handle = io.StringIO(newline="")
+    writer = csv.DictWriter(handle, fieldnames=columns)
+    writer.writeheader()
+    for row in report["supplier_rate_requests"]:
+        writer.writerow({
+            "project_id": _csv_text(report["project_id"]),
+            "family": _csv_text(row["family"]),
+            "unit": _csv_text(row["unit"]),
+            "source_quantity_ids": ";".join(row["unpriced_quantity_ids"]),
+            "requested_input": row["request"],
+            "currency": report["currency"],
+        })
     return handle.getvalue()
 
 
@@ -160,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--customers", type=Path, required=True)
     p.add_argument("--scenario-books", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--format", choices=("json", "csv"), default="json")
+    p.add_argument("--format", choices=("json", "csv", "rfq-csv"), default="json")
     args = p.parse_args(argv)
     inputs = (args.sealed_run, args.customers, args.scenario_books)
     report = build_scenario_comparison(
@@ -169,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         _read_json_without_duplicate_keys(args.scenario_books),
     )
     body = (scenario_csv(report) if args.format == "csv" else
+            supplier_rfq_csv(report) if args.format == "rfq-csv" else
             json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n")
     _write_new(args.output, body, inputs)
     print(json.dumps({
