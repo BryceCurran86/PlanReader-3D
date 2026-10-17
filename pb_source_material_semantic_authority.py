@@ -1208,6 +1208,74 @@ def _material_definition_candidate(
     return candidates[0]
 
 
+def _native_multirow_material_definition_candidates(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[
+    tuple[str, int, tuple[_TrustedTextWord, ...], str, dict[str, object]], ...
+]:
+    """Opt-in CAD-exported multi-code material-legend source row ownership.
+
+    One native text block can encode code, description, code, description in
+    distinct original source lines. A whole-block parser rightfully abstains
+    because many codes occur. Independently issue CANDIDATE rows only when
+    a code occupies its own complete source line and is followed by one or
+    more *original immediately subsequent* native description lines.
+    Ambiguous repeated codes, broken word ordinals or missing semantics
+    abstain. Every returned row holds ONLY its original source word IDs.
+    Producer visibility, schedule-title and raster gates still apply later.
+    """
+    import re
+
+    grouped = _group_native_material_block_words(words)
+    candidates = []
+    code_pattern = re.compile(r"^[A-Z]{2,4}(?:\d{1,4})?$")
+    stopwords = frozenset({"CODE", "TYPE", "ROOM", "WALL", "FLOOR", "DOOR", "NOTE", "FIRE"})
+    for (partition_id, block_no), block_words in sorted(grouped.items()):
+        line_records: list[tuple[int, tuple[_TrustedTextWord, ...]]] = []
+        by_line: dict[int, list[_TrustedTextWord]] = {}
+        for word in block_words:
+            by_line.setdefault(int(word.line_no), []).append(word)
+        for line_id in sorted(by_line):
+            members = tuple(sorted(by_line[line_id], key=lambda w: (w.word_no, w.bbox[0], w.observation_id)))
+            indexes = [int(w.word_no) for w in members]
+            if (not indexes or len(set(indexes)) != len(indexes)
+                    or indexes != list(range(indexes[0], indexes[-1] + 1))):
+                line_records = []
+                break
+            line_records.append((line_id, members))
+        if not line_records:
+            continue
+        code_rows = []
+        for pos, (line_id, line_words) in enumerate(line_records):
+            if len(line_words) != 1:
+                continue
+            token = line_words[0].text.strip()
+            if code_pattern.fullmatch(token) and token not in stopwords:
+                code_rows.append((pos, token))
+        if len(code_rows) < 2:
+            continue  # Existing one-code-block path owns such rows.
+        codes = [token for _, token in code_rows]
+        for pos, code in code_rows:
+            if codes.count(code) != 1:
+                continue
+            end = next((other for other, _ in code_rows if other > pos), len(line_records))
+            # A valid source row has an immediately adjacent description; a
+            # code must never borrow material semantics across a missing line.
+            if pos + 1 >= end or line_records[pos + 1][0] != line_records[pos][0] + 1:
+                continue
+            if any(line_records[i + 1][0] != line_records[i][0] + 1
+                   for i in range(pos, end - 1)):
+                continue
+            owned = tuple(
+                word for _, members in line_records[pos:end] for word in members
+            )
+            candidate = _material_definition_candidate(owned)
+            if candidate is None or candidate[0] != code:
+                continue
+            candidates.append((partition_id, block_no, owned, candidate[0], candidate[1]))
+    return tuple(candidates)
+
+
 def _raw_material_definition_candidates(
     words: Sequence[_TrustedTextWord],
 ) -> tuple[
@@ -1339,6 +1407,7 @@ def _trusted_native_material_schedule_cluster_blocks(
     published: object,
     raster: RasterTextCorroborationProducer,
     words: Sequence[_TrustedTextWord],
+    source_native_multirow_material_shadow: bool = False,
 ) -> tuple[tuple[_TrustedScheduleBlock, ...], tuple[str, ...]]:
     """Authenticate split native material-definition rows under one schedule title.
 
@@ -1360,7 +1429,11 @@ def _trusted_native_material_schedule_cluster_blocks(
     # read-only scan and already required to contain >=2 rows by this lane.
     # Avoid *all* OCR work on impossible one-row/empty clusters while keeping
     # identical rejection semantics, even for an otherwise trusted title.
+    if type(source_native_multirow_material_shadow) is not bool:
+        raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
     candidates = _raw_material_definition_candidates(words)
+    if source_native_multirow_material_shadow:
+        candidates = (*candidates, *_native_multirow_material_definition_candidates(words))
     if len(candidates) < 2:
         return (), ()
 
@@ -1693,11 +1766,15 @@ class SourceMaterialSemanticProducer:
         *,
         _seal: object = None,
         _physical_plan_page_ids: tuple[str, ...] = (),
+        _source_native_multirow_material_shadow: bool = False,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
+        if type(_source_native_multirow_material_shadow) is not bool:
+            raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
+        self._source_native_multirow_material_shadow = _source_native_multirow_material_shadow
         self._source = source_visibility_producer
         self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             source_visibility_producer
@@ -1732,6 +1809,18 @@ class SourceMaterialSemanticProducer:
         source_visibility_producer: SourceVisibilityProducer,
     ) -> "SourceMaterialSemanticProducer":
         return cls(source_visibility_producer, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_native_multirow_material_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+    ) -> "SourceMaterialSemanticProducer":
+        """Explicit opt-in original multi-code native CAD legend source path."""
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_multirow_material_shadow=True,
+        )
 
     @classmethod
     def for_physical_plan_view_shadow(
@@ -1889,6 +1978,8 @@ class SourceMaterialSemanticProducer:
                         published=published,
                         raster=raster,
                         words=page_words,
+                        **({"source_native_multirow_material_shadow": True}
+                           if self._source_native_multirow_material_shadow else {}),
                     )
                 )
                 incomplete_definition_codes.update(cluster_blocked_codes)
