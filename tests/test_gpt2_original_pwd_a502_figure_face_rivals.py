@@ -63,7 +63,11 @@ def test_original_pwd_outer_figure_and_real_competing_inner_face_bounds():
         2.4,-2.16]
     # Genuine outer strokes have unpainted/split corners: no closing snap.
     assert not outside["source_full_four_edge_ring_uninterrupted"]
-    assert inside["source_full_four_edge_ring_uninterrupted"]
+    # Both outer and inner original top walls stop at the real D13
+    # opening; apparent coordinates do not make a closed physical room.
+    assert not inside["source_full_four_edge_ring_uninterrupted"]
+    assert outside["source_corner_unpainted_gaps_pdf_pts"]["top"][1]>0
+    assert inside["source_corner_unpainted_gaps_pdf_pts"]["top"][1]>0
     assert out["original_source_figured_area_m2_candidate_not_signed"]==7.854
     assert not out["unique_finished_net_face_role_authenticated"]
     assert not out["source_A502_to_A110_physical_room_issuer_granted"]
