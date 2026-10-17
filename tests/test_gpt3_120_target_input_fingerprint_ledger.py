@@ -209,3 +209,43 @@ def test_cli_generates_120_unscored_items_without_private_source_files(tmp_path)
         ledger.main([
             "--evidence-report", str(report_path), "--output", str(report_path),
         ])
+
+
+def test_120_target_ledger_output_rejects_unrelated_customer_artifact(tmp_path):
+    report = _blocked_report(tmp_path)
+    evidence = tmp_path / "source_evidence.json"
+    evidence.write_text(json.dumps(report), encoding="utf-8")
+    customer = tmp_path / "customer_rows.json"
+    body = '{"source_customer": "do-not-overwrite"}'
+    customer.write_text(body, encoding="utf-8")
+    with pytest.raises(ValueError, match="cannot overwrite unrelated original evidence"):
+        ledger.main([
+            "--evidence-report", str(evidence), "--output", str(customer),
+        ])
+    assert customer.read_text(encoding="utf-8") == body
+
+
+def test_120_target_ledger_can_repeat_only_own_audit_output(tmp_path):
+    evidence = tmp_path / "source_evidence.json"
+    evidence.write_text(json.dumps(_blocked_report(tmp_path)), encoding="utf-8")
+    target = tmp_path / "gpt3-ledger.json"
+    args = ["--evidence-report", str(evidence), "--output", str(target)]
+    assert ledger.main(args) == 2
+    first = target.read_bytes()
+    assert ledger.main(args) == 2
+    assert target.read_bytes() == first
+
+
+def test_120_target_ledger_output_rejects_binary_or_symlink(tmp_path):
+    evidence = tmp_path / "source_evidence.json"
+    evidence.write_text(json.dumps(_blocked_report(tmp_path)), encoding="utf-8")
+    raw = tmp_path / "sealed.bin"
+    raw.write_bytes(b"immutable-original")
+    args = ["--evidence-report", str(evidence)]
+    with pytest.raises(ValueError, match="cannot overwrite unrelated"):
+        ledger.main([*args, "--output", str(raw)])
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(raw)
+    with pytest.raises(ValueError, match="cannot follow output symlinks"):
+        ledger.main([*args, "--output", str(alias)])
+    assert raw.read_bytes() == b"immutable-original"
