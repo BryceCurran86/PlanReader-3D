@@ -10,6 +10,7 @@ def project(pid, sealed_id, fp, quantity):
         "matched_within_tolerance": 0, "matched_outside_tolerance": 0,
         "missed": 1, "partial": 0, "unresolved": 0, "unsupported_extra": 0,
         "abstained_outputs": 0, "lineage_conflicts": 0,
+        "coverage_accuracy": 0.0, "precision_adjusted_accuracy": 0.0,
     }
 
 
