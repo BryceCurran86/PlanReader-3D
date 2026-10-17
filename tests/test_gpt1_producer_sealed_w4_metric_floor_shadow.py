@@ -158,3 +158,25 @@ def test_wrong_original_revision_does_not_alias_proven_room_face():
     )
     assert out.status is Status.ABSTAINED
     assert out.reason_codes==("original_w4_source_room_face_lineage_conflict",)
+
+
+def test_revised_metric_value_cannot_borrow_original_producer_wall_authority():
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    altered=replace(_metric_candidate(room),candidate_area_m2=999.)
+    out=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,altered,physical_room_id=room.physical_room_id,
+    )
+    assert out.status is Status.ABSTAINED
+    assert out.reason_codes==("original_w4_independent_metric_ring_area_conflict",)
+
+
+def test_missing_independent_figured_dimensional_witnesses_do_not_acquire_m2():
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    spoof=replace(_metric_candidate(room),source_figure_ids=("only-one",))
+    out=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,spoof,physical_room_id=room.physical_room_id,
+    )
+    assert out.status is Status.ABSTAINED
+    assert out.independent_candidate_metric_area_m2 is None
