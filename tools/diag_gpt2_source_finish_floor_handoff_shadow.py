@@ -97,6 +97,8 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
         "original_finish_source_ids":tuple(sorted(finish_ids)),
         "source_finishes_perimeter_polygon_pdf_pts":
             finish_ring["vertices_pdf_pts"],
+        "source_floor_perimeter_polygon_pdf_pts":
+            floor_ring["vertices_pdf_pts"],
         "geometric_ink_correspondence_only":True,
     }
 
@@ -329,6 +331,8 @@ def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
         "original_finish_source_ids":tuple(sorted(actual_finish)),
         "source_finishes_perimeter_polygon_pdf_pts":
             finish["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"],
+        "source_floor_perimeter_polygon_pdf_pts":
+            floor["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"],
         "source_real_door_ink_gap_virtual_closure_only":True,
         "source_both_original_doorway_jambs_sha_authenticated":True,
         "geometric_ink_correspondence_only":True,
