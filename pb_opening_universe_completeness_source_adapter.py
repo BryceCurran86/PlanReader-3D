@@ -39,6 +39,26 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
+def _validated_scope_page_ids(page_ids: Sequence[str]) -> tuple[str, ...]:
+    """Reject ambiguous caller page scopes before invoking source authorities.
+
+    A string is not a page-id sequence; coercing integers, bytes or duplicate
+    entries into source selectors can silently change the claimed universe.
+    """
+    if isinstance(page_ids, (str, bytes)) or not isinstance(page_ids, Sequence):
+        raise TypeError("page_ids must be a sequence of page-id strings")
+    pages = tuple(page_ids)
+    if not pages:
+        raise ValueError("page_ids must not be empty")
+    if any(type(page_id) is not str for page_id in pages):
+        raise TypeError("each page_id must be a string")
+    if any(not page_id or page_id != page_id.strip() for page_id in pages):
+        raise ValueError("page_ids must be nonempty and unpadded")
+    if len(set(pages)) != len(pages):
+        raise ValueError("page_ids must be unique")
+    return pages
+
+
 class _RealVisiblePrimitive:
     """Adapter over one producer-owned, clip-verified visible segment."""
 
@@ -92,6 +112,7 @@ def build_source_authenticated_opening_universe_completeness(
     `semantic_enumeration_complete=False` whenever a source snapshot exists.
     """
 
+    page_ids = _validated_scope_page_ids(page_ids)
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
 
@@ -183,6 +204,8 @@ def build_semantic_opening_inventory_completeness(
     Caller compatibility flags are never used as authority.
     """
 
+    if page_ids is not None:
+        page_ids = _validated_scope_page_ids(page_ids)
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
 

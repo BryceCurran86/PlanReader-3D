@@ -1,0 +1,33 @@
+name: TEST GPT3 Historical V1 Replay Issuer Gates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/gpt3_signed_v1_replay_drift.py"
+      - "tests/test_gpt3_signed_v1_replay_drift.py"
+      - ".github/workflows/test-gpt3-v1-replay-issuer-gates.yml"
+  workflow_dispatch:
+
+jobs:
+  archived-source-customer-v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify real original V1 and source-neutral issuer drift negatives
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_signed_v1_replay_drift.py
+      - name: Enforce frozen V2 and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py

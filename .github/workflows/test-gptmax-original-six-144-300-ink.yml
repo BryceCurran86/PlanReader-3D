@@ -1,0 +1,78 @@
+name: GPT MAX Original Six 144 And 300 DPI Source Ink
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_original_six_144_300_source.py
+      - tests/test_gptmax_original_six_144_300_source.py
+      - docs/engineering/gptmax_original_six_144_300_w4_20261017.md
+      - .github/workflows/test-gptmax-original-six-144-300-ink.yml
+  push:
+    branches: [main]
+    paths:
+      - tools/diag_gptmax_original_six_144_300_source.py
+      - tests/test_gptmax_original_six_144_300_source.py
+      - docs/engineering/gptmax_original_six_144_300_w4_20261017.md
+      - .github/workflows/test-gptmax-original-six-144-300-ink.yml
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: '1'
+jobs:
+  original-g17-w4-cross-resolution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Negative cross-resolution source-integrity proof
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_original_six_144_300_source.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_six_144_300_source.py tests/test_gptmax_original_six_144_300_source.py
+      - name: Run original SHA-pinned six physical sources across 144/300DPI
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA=10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_original_six_144_300_source.py \
+            --pdf "$PDF" --sha256 "$SHA" \
+            --output artifacts/gptmax-original-six-144-300-ink-w4.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gptmax-original-six-144-300-ink-w4.json").read_text())
+          assert r["status"]=="original_unhosted_g17_144_300_source_cross_resolution_shadow"
+          assert r["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert r["source_snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
+          assert r["decision_scope_id"]=="wall-source:page-3"
+          assert (r["original_physical_openings"],r["original_authenticated_hosts"],
+                  r["original_complete_frames"],r["original_signed_area_count"],
+                  r["original_customer_verified_count"])==(21,15,9,8,8)
+          assert r["original_source_signed_customer_evidence_unchanged"]
+          assert r["original_w4_candidates_examined"]>=2000
+          assert len(r["all_six_original_cross_resolution_rows"])==6
+          assert not any(r[k] for k in (
+             "physical_wall_role_granted","host_granted","frame_granted",
+             "ordered_dimensions_granted","opening_count_granted",
+             "new_firm_quantity_granted"))
+          source=r["complete_original_source_pixel_and_w4_competitor_evidence"]
+          assert source["original_144_render_dpi"]==144
+          assert source["original_g17_render_dpi"]==300
+          assert source["complete_wall_universe_proven"] is False
+          assert all(not source[k] for k in ("physical_wall_role_granted",
+             "cross_source_equivalence_granted","host_granted","metric_quantity_granted"))
+          print("Original source matched 144/300 edges",sum(row[
+                "original_144dpi_paint_matched_edges"] for row in r[
+                "all_six_original_cross_resolution_rows"]))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-six-144-300-w4-ink
+          path: artifacts/gptmax-original-six-144-300-ink-w4.json
+          retention-days: 21

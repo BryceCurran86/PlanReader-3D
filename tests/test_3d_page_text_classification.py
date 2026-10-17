@@ -139,6 +139,45 @@ def test_registration_sheet_index_heading_beats_listed_floor_plans():
     assert floor_type == "Floor Plan"
 
 
+def test_two_sheet_headings_abstain_in_either_order():
+    forward, _confidence, evidence = weighted_page_type(
+        "FLOOR PLAN\nNORTH ELEVATION",
+        "mixed.pdf",
+        "",
+    )
+    reverse, _reverse_confidence, _reverse_evidence = weighted_page_type(
+        "NORTH ELEVATION\nFLOOR PLAN",
+        "mixed.pdf",
+        "",
+    )
+    assert forward == reverse == "Other"
+    assert evidence == "competing page headings"
+    title_type, title_confidence, title_evidence = weighted_page_type(
+        "NOTES",
+        "mixed.pdf",
+        "FLOOR PLAN\nNORTH ELEVATION",
+    )
+    assert title_type == "Other"
+    assert title_confidence == 0
+    assert title_evidence == "competing title block headings"
+
+
+def test_door_elevations_remain_a_schedule_for_registration():
+    page_type, _confidence, _evidence = weighted_page_type("DOOR ELEVATIONS", "elev.pdf", "")
+    assert page_type == "Door / Window Schedule"
+
+
+def test_two_labelled_sheet_numbers_and_two_scales_abstain():
+    from pb_page_registration_v1225 import _candidate_code, _unique_revision, _unique_scale
+
+    assert _candidate_code("DRAWING NO A-205\nSHEET NO A-301") == ""
+    assert _candidate_code("DRAWING NO A-205 | DRAWING NO A-205") == "A-205"
+    assert _unique_scale("SCALE 1:100\nDETAIL 1:20") == ""
+    assert _unique_scale("SCALE 1:100") == "1:100"
+    assert _unique_revision("REV A\nREV B") == ""
+    assert _unique_revision("REV B") == "B"
+
+
 class _OfflinePage:
     class _Rect:
         width = 200

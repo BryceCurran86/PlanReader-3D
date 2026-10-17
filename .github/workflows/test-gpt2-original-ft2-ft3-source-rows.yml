@@ -1,0 +1,39 @@
+name: TEST GPT2 Original Floor Finish Schedule Native Rows
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_original_native_finish_schedule_row_source_shadow.py
+      - tests/test_gpt2_original_ft2_ft3_sameblock_schedule_source.py
+      - .github/workflows/test-gpt2-original-ft2-ft3-source-rows.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-maryborough-ft2-ft3-source-rows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact original source branch head
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original FT2 FT3 same-block and WT1 non-floor evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_original_ft2_ft3_sameblock_schedule_source.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py

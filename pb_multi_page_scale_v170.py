@@ -47,19 +47,20 @@ class PageScaleRecord:
 
 
 def extract_scale_ratio_from_text(text: str) -> Optional[int]:
-    """Parse common Australian/international drawing scale strings e.g., '1:100', '1:50', '1/100 @ A1'."""
+    """Parse one drawing scale. Two different denominators abstain."""
     if not text:
         return None
-    # Look for patterns like 1:100, 1:50, 1/200, SCALE 1:100
-    m = re.search(r'(?:scale\s*)?1\s*[:/]\s*(\d{2,5})', text, re.IGNORECASE)
-    if m:
+    found: set[int] = set()
+    for match in re.finditer(r"(?:scale\s*)?1\s*[:/]\s*(\d{2,5})", text, re.IGNORECASE):
         try:
-            val = int(m.group(1))
-            if 5 <= val <= 10000:
-                return val
+            value = int(match.group(1))
         except ValueError:
-            pass
-    return None
+            continue
+        if 5 <= value <= 10000:
+            found.add(value)
+    if len(found) != 1:
+        return None
+    return next(iter(found))
 
 
 def calculate_m_per_pt_from_px_per_m(px_per_m: float, render_zoom: float = 2.0) -> float:

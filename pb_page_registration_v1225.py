@@ -50,8 +50,7 @@ _TYPE_RULES: Dict[str, Tuple[str, ...]] = {
     "Landscape / Civil": ("landscape plan", "civil plan", "stormwater", "pavement plan"),
 }
 
-# More specific types win ties.  A generic word like "section" elsewhere on a
-# floor-plan sheet must never beat a title-block "LEVEL 03 PARTITION PLAN".
+# Historical specificity order. Equal scores abstain; this list does not pick a winner.
 _TYPE_PRIORITY = [
     "Reflected Ceiling Plan", "Door / Window Schedule", "Finishes Schedule",
     "Render / Artist's Impression", "Floor Plan", "Roof Plan", "Elevation", "Section",
@@ -211,15 +210,43 @@ def _registration_input_signature(
     ).hexdigest()
 
 
+_LABELLED_SHEET_RE = re.compile(
+    r"(?:DRAWING|DWG|SHEET)\s*(?:NO\.?|NUMBER|#)?\s*[:\-]?\s*([A-Z][A-Z0-9._-]{1,14}\d[A-Z0-9._-]*)",
+    re.I,
+)
+
+
+def _unique_scale(text: Any) -> str:
+    """Return one printed scale. Two different denominators abstain."""
+    found = {int(match.group(1)) for match in _SCALE_RE.finditer(str(text or ""))}
+    if len(found) != 1:
+        return ""
+    return f"1:{next(iter(found))}"
+
+
+def _unique_revision(text: Any) -> str:
+    """Return one printed revision token. Two different tokens abstain."""
+    found = {match.group(1).upper() for match in _REV_RE.finditer(str(text or ""))}
+    if len(found) != 1:
+        return ""
+    return next(iter(found))
+
+
 def _candidate_code(text: Any) -> str:
-    """Pick a drawing/sheet number while rejecting finish/door/detail tags."""
+    """Pick a drawing/sheet number while rejecting finish/door/detail tags.
+
+    Two different labelled sheet numbers abstain. The first code in the text
+    is not a winner.
+    """
     raw = str(text or "")
-    labelled = re.search(
-        r"(?:DRAWING|DWG|SHEET)\s*(?:NO\.?|NUMBER|#)?\s*[:\-]?\s*([A-Z][A-Z0-9._-]{1,14}\d[A-Z0-9._-]*)",
-        raw,
-        re.I,
-    )
-    candidates = [labelled.group(1)] if labelled else []
+    labelled = []
+    for match in _LABELLED_SHEET_RE.finditer(raw):
+        code = match.group(1).upper().strip(" ._-:")
+        if code and code not in labelled:
+            labelled.append(code)
+    if len(labelled) > 1:
+        return ""
+    candidates = list(labelled)
     candidates.extend(match.group(1) for match in _DRAWING_CODE_RE.finditer(raw))
     for value in candidates:
         code = value.upper().strip(" ._-:")
@@ -291,16 +318,60 @@ def title_block_evidence(pdf_page: Any) -> Dict[str, Any]:
     code = _candidate_code(text)
     if not code:
         code = _candidate_code("\n".join(line["text"] for line in lines[-12:]))
-    scale_match = _SCALE_RE.search(text)
-    revision = (_REV_RE.search(text).group(1).upper() if _REV_RE.search(text) else "")
     return {
         "text": text,
         "lines": lines,
         "drawing_no": code,
-        "scale": f"1:{int(scale_match.group(1))}" if scale_match else "",
-        "revision": revision,
+        "scale": _unique_scale(text),
+        "revision": _unique_revision(text),
         "full_text": full_text,
     }
+
+
+def _reference_line(line: str) -> bool:
+    return line.startswith(("refer ", "see ", "matchline ", "keynote "))
+
+
+def _voting_text(value: Any) -> str:
+    """Sheet text with reference lines removed so a cross-reference cannot vote."""
+    lines = []
+    for raw in str(value or "").splitlines():
+        line = _low(raw)
+        if line and not _reference_line(line):
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _phrase_present(text: str, phrase: str) -> bool:
+    if phrase == "rcp":
+        return re.search(r"\brcp\b", text) is not None
+    return phrase in text
+
+
+def _kept_phrase_hits(text: str) -> List[Tuple[str, str]]:
+    """Phrase hits on one text, without a shorter phrase inside a longer hit."""
+    matched = [
+        (name, phrase)
+        for name, phrases in _TYPE_RULES.items()
+        for phrase in phrases
+        if _phrase_present(text, phrase)
+    ]
+    return [
+        (name, phrase)
+        for name, phrase in matched
+        if not any(phrase != other and phrase in other for _name, other in matched)
+    ]
+
+
+def _heading_types(text: Any) -> set[str]:
+    """Distinct sheet types named by this page's own non-reference lines."""
+    found: set[str] = set()
+    for raw in str(text or "").splitlines():
+        line = _low(raw)
+        if not line or _reference_line(line):
+            continue
+        found.update(name for name, _phrase in _kept_phrase_hits(line))
+    return found
 
 
 def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "") -> Tuple[str, int, str]:
@@ -308,22 +379,26 @@ def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "
 
     ``file_name`` is accepted so existing callers keep working. It is not
     evidence: a PDF named like a floor plan must not type an elevation, and
-    it must not type a page whose own text has no sheet heading.
+    it must not type a page whose own text has no sheet heading. Two sheet
+    types on the page's own lines abstain. ``_TYPE_PRIORITY`` is not a winner.
     """
     del file_name
     if _sheet_index_heading(title_block) or (not _low(title_block) and _sheet_index_heading(full_text)):
         return "Title / Drawing Register", 90, "sheet index heading"
-    sources = [(_low(title_block), 12, "title block"), (_low(full_text), 2, "page text")]
+    title_types = _heading_types(title_block)
+    if len(title_types) > 1:
+        return "Other", 0, "competing title block headings"
+    if not title_types and len(_heading_types(full_text)) > 1:
+        return "Other", 0, "competing page headings"
+    sources = [(_voting_text(title_block), 12, "title block"), (_voting_text(full_text), 2, "page text")]
     scores: Dict[str, int] = {name: 0 for name in _TYPE_RULES}
     evidence: Dict[str, List[str]] = {name: [] for name in _TYPE_RULES}
-    for name, phrases in _TYPE_RULES.items():
-        for haystack, weight, source_name in sources:
-            for phrase in phrases:
-                if phrase in haystack:
-                    scores[name] += weight + min(3, len(phrase) // 8)
-                    evidence[name].append(f"{source_name}: {phrase}")
+    for haystack, weight, source_name in sources:
+        for name, phrase in _kept_phrase_hits(haystack):
+            scores[name] += weight + min(3, len(phrase) // 8)
+            evidence[name].append(f"{source_name}: {phrase}")
     # A title-block plan/elevation heading should dominate reference bubbles.
-    tb = _low(title_block)
+    tb = _voting_text(title_block)
     if "partition plan" in tb or "unit plan" in tb or "floor plan" in tb or "general arrangement" in tb:
         scores["Floor Plan"] += 20
     if "reflected ceiling" in tb or re.search(r"\brcp\b", tb):
@@ -332,12 +407,15 @@ def weighted_page_type(full_text: Any, file_name: Any = "", title_block: Any = "
         scores["Elevation"] += 18
     if "finish" in tb and "schedule" in tb:
         scores["Finishes Schedule"] += 22
-    best = max(_TYPE_PRIORITY, key=lambda name: (scores.get(name, 0), -_TYPE_PRIORITY.index(name)))
-    score = scores.get(best, 0)
-    if score <= 0:
+    best_score = max(scores.values(), default=0)
+    if best_score <= 0:
         return "Other", 0, "No reliable sheet-title evidence"
+    winners = [name for name, score in scores.items() if score == best_score]
+    if len(winners) != 1:
+        return "Other", 0, "tied sheet types"
+    best = winners[0]
     runner_up = max((value for name, value in scores.items() if name != best), default=0)
-    confidence = max(0, min(100, 55 + score * 3 - runner_up * 2))
+    confidence = max(0, min(100, 55 + best_score * 3 - runner_up * 2))
     return best, confidence, "; ".join(evidence.get(best, [])[:4])
 
 
