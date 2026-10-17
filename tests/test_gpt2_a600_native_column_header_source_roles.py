@@ -251,3 +251,38 @@ def test_original_source_page_with_no_native_words_has_no_complete_schedule_clai
     assert not result.complete_source_word_universe
     assert not result.title_source_trusted
     assert result.new_opening_counts == result.new_opening_areas_m2 == 0
+
+def test_hardware_number_before_width_does_not_replace_original_column_value():
+    words=(
+        *_world(),
+        _w(4,9,"45",70,190),
+    )
+    # The printed 45 belongs to a different source column/description.
+    # It must not replace the actual numeric WIDTH 920, HEIGHT 2040.
+    result, table = _original_door_schedule_column_proof(
+        words, _original_source_row_candidates(words)
+    )
+    row=next(r for r in result if r.code=="D13")
+    assert table
+    assert row.source_dimension_column_roles_authenticated
+    assert (row.original_width_literal,row.original_height_literal)==("920","2040")
+
+
+def test_sliding_source_row_without_repeat_door_token_is_preserved_as_candidate():
+    source=(
+        *_world(),
+        _w(8,0,"D17",100,300),
+        _w(8,1,"COOLROOM",100,235),
+        _w(8,2,"SLIDING",100,220),
+        _w(8,3,"800",100,105),
+        _w(8,4,"2000",100,70),
+    )
+    rows,table=_original_door_schedule_column_proof(
+        source,_original_source_row_candidates(source))
+    assert table
+    row=next(x for x in rows if x.code=="D17")
+    assert row.original_width_literal=="800"
+    assert row.original_height_literal=="2000"
+    assert row.source_dimension_column_roles_authenticated
+    assert row.default_opening_count is None
+    assert not row.new_customer_quantity_authority
