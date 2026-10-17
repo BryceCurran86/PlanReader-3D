@@ -1325,6 +1325,29 @@ def _text_clip_reasons(
     native_word: Optional[Mapping[str, object]] = None,
     source_raw_no_active_text_clip_shadow: bool = False,
 ) -> tuple[str, ...]:
+    # Opt-in original /Rotate source text only: test the actual PDF source
+    # operator ancestry BEFORE materializing an expensive 27k-path clip
+    # graph. When the direct source proof does not pass, retain ABSTAIN.
+    # The legacy/default and non-rotated paths remain unchanged.
+    if source_raw_no_active_text_clip_shadow and int(getattr(page, "rotation", 0) or 0) != 0:
+        if _native_word_is_present(page, native_word):
+            from tools.diag_original_pdf_active_clip_operator_authority import (
+                source_page_all_native_text_unclipped,
+            )
+            import hashlib
+            try:
+                digest = hashlib.sha256(bytes(page.read_contents() or b"")).hexdigest()
+                xobjects = tuple(page.get_xobjects() or ())
+                key = ("original_raw_unclipped_text_v2", digest, xobjects)
+                cache = _page_cache(page)
+                if key not in cache:
+                    cache[key] = bool(source_page_all_native_text_unclipped(page))
+                if cache[key]:
+                    return ()
+            except (TypeError, ValueError, AttributeError, RuntimeError):
+                pass
+        return (TEXT_CLIP_STATE_UNRESOLVED,)
+
     model = _clip_model(page)
     has_clip_operator = _page_content_has_clip_operator(page)
     if model is None or has_clip_operator is None:
@@ -1337,35 +1360,6 @@ def _text_clip_reasons(
         return (TEXT_CLIP_STATE_UNRESOLVED,)
     try:
         if int(getattr(page, "rotation", 0) or 0) != 0:
-            # Unlike rotation parity of two handles of the same PDF,
-            # raw PDF q/Q/W/BT operator ancestry is direct source evidence.
-            # The original content stream must prove that EVERY text object
-            # is outside a graphics clipping scope; unknown Form XObjects,
-            # nested clips, inline image data and malformed ops ABSTAIN.
-            # The existing glyph/paint/OCG/native-word gates still apply.
-            if source_raw_no_active_text_clip_shadow and _native_word_is_present(page, native_word):
-                from tools.diag_original_pdf_active_clip_operator_authority import (
-                    source_page_all_native_text_unclipped,
-                )
-                # The source is immutable after producer ingestion, but
-                # the read-only source check must also resist mutable test
-                # handles: key its memo to the actual content bytes, not just
-                # page number. This avoids rescanning tens of thousands of
-                # original CAD paths for every one of the page's text words.
-                import hashlib
-                try:
-                    source_digest = hashlib.sha256(
-                        bytes(page.read_contents() or b"")
-                    ).hexdigest()
-                    xobjects = tuple(page.get_xobjects() or ())
-                except Exception:
-                    return (TEXT_CLIP_STATE_UNRESOLVED,)
-                cache = _page_cache(page)
-                key = ("raw_no_active_clip", source_digest, xobjects)
-                if key not in cache:
-                    cache[key] = bool(source_page_all_native_text_unclipped(page))
-                if cache[key]:
-                    return ()
             return (TEXT_CLIP_STATE_UNRESOLVED,)
         bbox = _rect_tuple(subject_bbox)
     except (TypeError, ValueError):
