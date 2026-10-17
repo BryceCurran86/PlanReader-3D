@@ -11,6 +11,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  synthetic-source-lineage-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify provenance and physical quantity abstentions without private PDFs
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_source_owned_a600_door_schedule_receipt.py -k 'not test_original_a600_full_producer_receipt_census_keeps_all_28_source_rows'
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
   original-a600-source-owned-door-receipts:
     runs-on: ubuntu-latest
     timeout-minutes: 50
