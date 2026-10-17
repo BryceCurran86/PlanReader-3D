@@ -133,9 +133,22 @@ def audit_competing_original_finish_mark_ownership(
             or len(candidate_enclosures)>32):
         raise ValueError("bounded_original_finish_enclosures_required")
     evidence=[]
+    distinct=[]
     for index, item in enumerate(candidate_enclosures):
         if type(item) is not dict or set(item)!={"source_side_pairs","translation"}:
             raise ValueError("explicit_original_finish_candidate_fields_required")
+        # Duplicate registration input is not evidence for two separate
+        # original rooms. The same box submitted twice must never fabricate
+        # a source-owner competition, nor be counted as two material zones.
+        pairs=item["source_side_pairs"]
+        translation=item["translation"]
+        if type(pairs) is not dict or type(translation) is not tuple:
+            raise ValueError("explicit_original_finish_candidate_fields_required")
+        key=(tuple((role,pairs[role]) for role in sorted(pairs)),
+             tuple(float(v) for v in translation))
+        if key in distinct:
+            raise ValueError("duplicated_original_finish_enclosure_candidate")
+        distinct.append(key)
         try:
             receipt=audit_original_floor_finish_mark_enclosure_candidate(
                 original_pdf,expected_sha256=expected_sha256,
