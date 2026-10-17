@@ -118,7 +118,7 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
     # Require its exact harmless contents; never interpret other unindexed
     # data files as acceptable to hide source/customer receipts.
     byte_policy = _safe_file(root, ".gitattributes")
-    _require(byte_policy.read_bytes() == b"* -text\\n",
+    _require(byte_policy.read_bytes() == b"* -text\n",
              "original receipt byte-preservation policy changed")
     expected_tree = set(sums) | {"SHA256SUMS", ".gitattributes"}
     _require(not any(node.is_symlink() for node in root.rglob("*")),
