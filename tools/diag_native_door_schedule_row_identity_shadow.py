@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 import re
 
-_DOOR_CODE=re.compile(r"^D[1-9][0-9]*$",re.ASCII)
+_DOOR_CODE=re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$",re.ASCII)
 _DIGITS=re.compile(r"^[1-9][0-9]*$",re.ASCII)
 
 
