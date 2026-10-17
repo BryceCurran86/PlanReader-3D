@@ -404,11 +404,12 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                  and summary["topology_mode"] in (
                      "source_classified_scope", "live_authority_all_pages_fallback",
                  ), "unrecognized source topology scope")
+        primary_sha = summary.get("source_sha256")
+        primary = [doc for doc in manifest.source_documents if doc.sha256 == primary_sha]
+        _require(len(primary) == 1, "producer summary lacks original-primary-PDF source SHA")
         _original_windows_reference(
             summary.get("source_path"), project_id=project_id,
-            terminal=(next(d.name for d in manifest.source_documents
-                           if d.sha256 == summary["source_sha256"]),),
-            root_segment="sources",
+            terminal=(primary[0].name,), root_segment="sources",
         )
         source_attempt = _object(
             root, project_id + "/outputs/source_attempt_preflight.json"
@@ -431,9 +432,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                  and source_attempt.get("complete_source_coverage_proven") is False
                  and source_attempt.get("benchmark_score_granted") is False,
                  "original source-at-start preflight falsely grants sealed/score status")
-        primary_sha = summary.get("source_sha256")
-        primary = [doc for doc in manifest.source_documents if doc.sha256 == primary_sha]
-        _require(len(primary) == 1, "producer summary lacks original-primary-PDF source SHA")
+
         _require(summary.get("page_count") == primary[0].page_count,
                  "producer summary source page count changed")
         _require(summary.get("family_group") == "all",
