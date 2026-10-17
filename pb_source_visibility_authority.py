@@ -2118,7 +2118,7 @@ class SourceVisibilityProducer:
                     # table/furniture bands must not perturb the ordinary W4
                     # graph simply because they contain solid paint.
                     if include_unmeasured_ink_closed_flanks_shadow:
-                        flank_boxes, partial_source_jambs = self._proven_raster_opening_flank_boxes(
+                        flank_boxes, partial_source_jambs, individual_ink_positive_boxes = self._proven_raster_opening_flank_boxes(
                             published, page_id,
                             include_unmeasured_ink_closed_flanks_shadow=True,
                             include_original_partial_jamb_receipts_shadow=True,
@@ -2128,6 +2128,7 @@ class SourceVisibilityProducer:
                             published, page_id,
                         )
                         partial_source_jambs = ()
+                        individual_ink_positive_boxes = ()
                     supplemental = tuple(s for s in supplemental
                         if any(_unchanged_segment_inside_flank(s, box,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
@@ -2140,8 +2141,14 @@ class SourceVisibilityProducer:
                         measured_boxes = set(self._proven_raster_opening_flank_boxes(
                             published, page_id,
                         ))
+                        # Each original G17 flank independently painted and
+                        # jamb-closed may be retained as SOURCE ink even when
+                        # its neighbour's entire band is interrupted. A
+                        # partial or missing second flank cannot grant a host
+                        # or fabricate complete W4 physical wall equivalence.
                         source_owned_new_boxes = tuple(sorted(
-                            set(flank_boxes) - measured_boxes
+                            (set(flank_boxes) |
+                             set(individual_ink_positive_boxes)) - measured_boxes
                         ))
                         if source_owned_new_boxes:
                             nominal = detect_original_one_ended_ink_band_segments(
@@ -2384,6 +2391,7 @@ class SourceVisibilityProducer:
                 and not include_unmeasured_ink_closed_flanks_shadow):
             raise ValueError("partial G17 original source requires opt-in")
         partial_jambs = set()
+        individual_ink_positive_boxes = set()
         physical = self.physical_opening_authority()
         visibility = self.authority()
         # The existing source compiler reauthenticates the *complete* isolated
@@ -2402,7 +2410,7 @@ class SourceVisibilityProducer:
         selectors = {r.observation_id: replace(seed_selector, observation_id=r.observation_id)
                      for r in records}
         if not records:
-            return ((), ()) if include_original_partial_jamb_receipts_shadow else ()
+            return ((), (), ()) if include_original_partial_jamb_receipts_shadow else ()
         # Enumerate all raw candidates from the existing compiler, not a
         # nearest/first support or a caller-narrowed candidate universe.
         candidates = physical._raster_framed_candidates_for(records[0], tuple(records))
@@ -2463,8 +2471,6 @@ class SourceVisibilityProducer:
                     continue
                 if include_original_partial_jamb_receipts_shadow:
                     for flank in ink.flanks:
-                        if flank.source_ink_supported:
-                            continue
                         support = [by_id[oid] for oid in flank.source_observation_ids
                                    if oid in by_id]
                         faces = [r for r in support
@@ -2493,7 +2499,10 @@ class SourceVisibilityProducer:
                             item=("vertical",(off[0],a[1],off[1],a[3]),cap[1])
                         else:
                             continue
-                        partial_jambs.add(item)
+                        if flank.source_ink_supported:
+                            individual_ink_positive_boxes.add((item[0],item[1]))
+                        else:
+                            partial_jambs.add(item)
                 if not all(flank.source_ink_supported for flank in ink.flanks):
                     continue
             faces = [by_id[oid].geometry for oid in opening.source_observation_ids
@@ -2510,7 +2519,11 @@ class SourceVisibilityProducer:
                     box = (lo, a, hi, b) if axis == 'horizontal' else (a, lo, b, hi)
                     boxes.add((axis, box))
         if include_original_partial_jamb_receipts_shadow:
-            return tuple(sorted(boxes)), tuple(sorted(partial_jambs))
+            return (
+                tuple(sorted(boxes)),
+                tuple(sorted(partial_jambs)),
+                tuple(sorted(individual_ink_positive_boxes)),
+            )
         return tuple(sorted(boxes))
 
     def augment_with_raster_opening_primitives(
