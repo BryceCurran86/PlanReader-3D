@@ -1877,37 +1877,26 @@ class SourceVisibilityProducer:
             visible_observation_ids=tuple(sorted(set(visible_ids))),
             text_observation_ids=tuple(sorted({item[0] for item in text_receipts})),
         )
-        source_authority = self._producer.authority()
+        store = self._producer._store
         for visible_id in published.visible_observation_ids:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=visible_id,
-                )
+            observation = store.observations.get(
+                (published.snapshot.snapshot_id, visible_id)
             )
-            if result.observation is None or len(result.observation.derivation_parent_ids) != 1:
+            if observation is None or len(observation.derivation_parent_ids) != 1:
+                raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: visible receipt missing parent")
+            parent_id = observation.derivation_parent_ids[0]
+            if (published.snapshot.snapshot_id, parent_id) not in store.observations:
                 raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: visible receipt missing parent")
             self._visibility_receipts[
                 (published.snapshot.snapshot_id, visible_id)
-            ] = result.observation.derivation_parent_ids[0]
+            ] = parent_id
 
         for observation_id, receipt in text_receipts:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+            observation = store.observations.get(
+                (published.snapshot.snapshot_id, observation_id)
             )
-            observation = result.observation
             if (
                 observation is None
-                or result.status != EvidenceResolutionStatus.CORROBORATED
                 or observation.observation_kind != "native_pdf_word"
                 or observation.origin_kind != "native"
                 or observation.observation_id != receipt.parent_observation_id
@@ -1929,6 +1918,18 @@ class SourceVisibilityProducer:
                     f"{PRODUCER_INTEGRITY_FAILURE}: text integrity receipt differs"
                 )
             self._text_integrity_receipts[key] = receipt
+
+        # The committed records and receipts are the source. The raw page
+        # decode and the derived page used to build them are not read again.
+        source_sha = published.revision.source_sha256
+        for cache_key in [
+            key for key in self._producer._native_page_decode_cache if key[0] == source_sha
+        ]:
+            self._producer._native_page_decode_cache.pop(cache_key, None)
+        for cache_key in [
+            key for key in self._visibility_page_cache if key[0] == source_sha
+        ]:
+            self._visibility_page_cache.pop(cache_key, None)
 
         self._published_by_revision[published.revision.revision_id] = published
         return published
@@ -1953,21 +1954,16 @@ class SourceVisibilityProducer:
         if published is None:
             raise ValueError(OBSERVATION_UNAVAILABLE)
 
-        source_authority = self._producer.authority()
         old_snapshot_id = published.snapshot.snapshot_id
         pages_with_visible: set[str] = set()
+        store = self._producer._store
         for observation_id in published.visible_observation_ids:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=old_snapshot_id,
-                    observation_id=observation_id,
+            observation = store.observations.get((old_snapshot_id, observation_id))
+            if observation is None:
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: visible observation missing"
                 )
-            )
-            if result.observation is not None:
-                pages_with_visible.add(str(result.observation.page_id))
+            pages_with_visible.add(str(observation.page_id))
 
         snapshot = published.snapshot
         visible_ids = list(published.visible_observation_ids)
