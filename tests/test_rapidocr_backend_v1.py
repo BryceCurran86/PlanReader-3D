@@ -227,3 +227,108 @@ def test_whitespace_only_detections_filtered(monkeypatch: pytest.MonkeyPatch) ->
     backend = RapidOCRBackend()
     lines = backend.extract_lines(Image.new("RGB", (50, 50), "white"))
     assert [l.text for l in lines] == ["W-1"]
+
+
+class _RecognitionEngine:
+    def __init__(self, txts, scores):
+        self.use_det = True
+        self.calls: list[bool | None] = []
+        self.txts = txts
+        self.scores = scores
+
+    def __call__(self, array, use_det=None):
+        self.calls.append(use_det)
+        self.use_det = True if use_det is None else bool(use_det)
+        return types.SimpleNamespace(txts=self.txts, scores=self.scores, boxes=None)
+
+    def update_params(self, **kwargs):
+        if "use_det" in kwargs and kwargs["use_det"] is not None:
+            self.use_det = bool(kwargs["use_det"])
+
+
+def _install_recognition_engine(monkeypatch: pytest.MonkeyPatch, engine: _RecognitionEngine) -> None:
+    class FakeRapidOCR:
+        def __init__(self):
+            return None
+
+        def __call__(self, *args, **kwargs):
+            return engine(*args, **kwargs)
+
+    # The backend caches one engine. Hand it the scripted instance directly.
+    monkeypatch.setattr(RapidOCRBackend, "_get_engine", lambda self: engine)
+    mod_rapidocr = types.ModuleType("rapidocr")
+    mod_rapidocr.RapidOCR = FakeRapidOCR
+    mod_rapidocr.__version__ = "test-1.0.0"
+    monkeypatch.setitem(sys.modules, "rapidocr", mod_rapidocr)
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.ModuleType("onnxruntime"))
+
+
+def test_recognition_only_keeps_every_reading_and_restores_detector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _RecognitionEngine(("3600", "2400"), (0.91, 0.88))
+    _install_recognition_engine(monkeypatch, engine)
+    backend = RapidOCRBackend()
+    image = Image.new("RGB", (80, 24), "white")
+
+    lines = backend.extract_lines(image, dpi=300, detect=False)
+
+    assert [line.text for line in lines] == ["3600", "2400"]
+    assert engine.calls == [False]
+    assert engine.use_det is True
+
+    engine.txts = ("W-1",)
+    engine.scores = (0.95,)
+    engine.calls.clear()
+    # The next page search must still be able to request detection. This
+    # scripted engine has no boxes, so the detection call abstains.
+    assert backend.extract_lines(image, dpi=300) == ()
+    assert engine.calls == [None]
+    assert engine.use_det is True
+
+
+def test_isolated_word_reader_does_not_run_the_page_detector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pb_cross_view_room_area_authority import _single_isolated_ocr_reading
+
+    engine = _RecognitionEngine(("3600",), (0.99,))
+    _install_recognition_engine(monkeypatch, engine)
+    backend = RapidOCRBackend()
+
+    reading = _single_isolated_ocr_reading(
+        backend,
+        Image.new("RGB", (80, 24), "white"),
+        dpi=450,
+    )
+
+    assert reading == "3600"
+    assert engine.calls == [False]
+    assert engine.use_det is True
+
+
+def test_isolated_word_reader_abstains_on_two_readings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pb_cross_view_room_area_authority import _single_isolated_ocr_reading
+
+    engine = _RecognitionEngine(("3600", "2400"), (0.99, 0.99))
+    _install_recognition_engine(monkeypatch, engine)
+    backend = RapidOCRBackend()
+
+    reading = _single_isolated_ocr_reading(
+        backend,
+        Image.new("RGB", (80, 24), "white"),
+        dpi=300,
+    )
+
+    assert reading is None
+
+
+def test_empty_image_skips_the_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _RecognitionEngine(("3600",), (0.99,))
+    _install_recognition_engine(monkeypatch, engine)
+    backend = RapidOCRBackend()
+
+    assert backend.extract_lines(Image.new("RGB", (0, 10), "white"), detect=False) == ()
+    assert engine.calls == []

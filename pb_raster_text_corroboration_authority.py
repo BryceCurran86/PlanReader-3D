@@ -452,7 +452,9 @@ def _producer_owned_ocr_target(
     source_bytes = source_producer._store.source_bytes_by_revision.get(str(revision_id))
     if (
         source_bytes is None
-        or hashlib.sha256(source_bytes).hexdigest() != str(source_sha256)
+        or not source_producer._store.source_bytes_match_revision(
+            str(revision_id), source_bytes, str(source_sha256)
+        )
     ):
         return word_bbox, 0
     try:
@@ -463,20 +465,18 @@ def _producer_owned_ocr_target(
         return word_bbox, 0
 
     try:
-        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        facts = source_producer.page_text_facts(source_bytes, page_number)
+        if facts is None:
+            return word_bbox, 0
+        rawdict, traces, rotation_matrix = facts
         try:
-            if page_number > int(pdf.page_count):
-                return word_bbox, 0
-            page = pdf.load_page(page_number - 1)
-            rawdict = page.get_text("rawdict") or {}
-            traces = tuple(page.get_texttrace() or ())
             line = rawdict["blocks"][int(block_no)]["lines"][int(line_no)]
             native_direction = _point2(line.get("dir"))
             if native_direction is None:
                 return word_bbox, 0
 
-            origin = fitz.Point(0.0, 0.0) * page.rotation_matrix
-            endpoint = fitz.Point(*native_direction) * page.rotation_matrix
+            origin = fitz.Point(0.0, 0.0) * rotation_matrix
+            endpoint = fitz.Point(*native_direction) * rotation_matrix
             display_dx = float(endpoint.x - origin.x)
             display_dy = float(endpoint.y - origin.y)
             magnitude = math.hypot(display_dx, display_dy)
@@ -647,7 +647,7 @@ def _producer_owned_ocr_target(
                 return word_bbox, 0
             return trace_bbox, rotation_degrees
         finally:
-            pdf.close()
+            pass
     except Exception:
         return word_bbox, 0
 

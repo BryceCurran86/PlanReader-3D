@@ -10,6 +10,7 @@ equal-privilege Python code.
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Iterator, MutableMapping
 import dataclasses
 from dataclasses import dataclass, replace
 import hashlib
@@ -47,6 +48,8 @@ PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
+# Representation cache only. Lookups stay the same above and below this size.
+_SNAPSHOT_FLATTEN_MIN = 4096
 
 
 @dataclass(frozen=True)
@@ -274,6 +277,211 @@ class PublishedSourceSnapshot:
     snapshot: ProducerSnapshotRecord
 
 
+class _Layer:
+    __slots__ = ("parent", "values", "deleted", "frozen")
+
+    def __init__(self, parent: "_Layer | None") -> None:
+        self.parent = parent
+        self.values: dict[str, Any] = {}
+        self.deleted: set[str] = set()
+        self.frozen = False
+
+
+class _Snap:
+    __slots__ = ("layer", "count", "flat")
+
+    def __init__(self, layer: _Layer, count: int) -> None:
+        self.layer = layer
+        self.count = count
+        self.flat: dict[str, Any] | None = None
+
+
+class _SnapshotChainMap(MutableMapping[tuple[str, str], Any]):
+    """Per-snapshot view of one shared record chain.
+
+    A derived snapshot keeps the parent layer and stores only its own writes.
+    Replacing or deleting one snapshot cannot change any other snapshot.
+    """
+
+    def __init__(self) -> None:
+        self._snaps: dict[str, _Snap] = {}
+        self._logical = 0
+
+    def has_snapshot(self, snapshot_id: str) -> bool:
+        return snapshot_id in self._snaps
+
+    def open_snapshot(self, snapshot_id: str) -> None:
+        if snapshot_id in self._snaps:
+            raise KeyError(snapshot_id)
+        self._snaps[snapshot_id] = _Snap(_Layer(None), 0)
+
+    def fork(self, snapshot_id: str, parent_snapshot_id: str) -> None:
+        if snapshot_id in self._snaps:
+            raise KeyError(snapshot_id)
+        parent = self._snaps.get(parent_snapshot_id)
+        if parent is None:
+            raise KeyError(parent_snapshot_id)
+        parent.layer.frozen = True
+        self._snaps[snapshot_id] = _Snap(_Layer(parent.layer), parent.count)
+        self._logical += parent.count
+
+    def ensure_flat(self, snapshot_id: str) -> dict[str, Any] | None:
+        """Return this snapshot's flat record view, building it if needed.
+
+        A later write clears the view, so the same dict object means no write
+        has landed since it was built.
+        """
+
+        snap = self._snaps.get(snapshot_id)
+        if snap is None:
+            return None
+        if snap.flat is None:
+            snap.flat = _materialize(snap.layer)
+        return snap.flat
+
+    def retain_flats(self, keep: set[str]) -> None:
+        for snapshot_id, snap in self._snaps.items():
+            if snapshot_id not in keep:
+                snap.flat = None
+        for snapshot_id in keep:
+            snap = self._snaps.get(snapshot_id)
+            if snap is None or snap.flat is not None or snap.count < _SNAPSHOT_FLATTEN_MIN:
+                continue
+            snap.flat = _materialize(snap.layer)
+
+    def stored_entry_count(self) -> int:
+        total = 0
+        seen: set[int] = set()
+        for snap in self._snaps.values():
+            layer: _Layer | None = snap.layer
+            while layer is not None and id(layer) not in seen:
+                seen.add(id(layer))
+                total += len(layer.values)
+                layer = layer.parent
+        return total
+
+    def __getitem__(self, key: tuple[str, str]) -> Any:
+        snapshot_id, observation_id = key
+        try:
+            snap = self._snaps[snapshot_id]
+        except KeyError:
+            raise KeyError(key) from None
+        if snap.flat is not None:
+            try:
+                return snap.flat[observation_id]
+            except KeyError:
+                raise KeyError(key) from None
+        found, value = _find(snap.layer, observation_id)
+        if not found:
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key: tuple[str, str], value: Any) -> None:
+        snapshot_id, observation_id = key
+        try:
+            snap = self._snaps[snapshot_id]
+        except KeyError:
+            raise KeyError(key) from None
+        existed = _contains(snap, observation_id)
+        layer = _writable(snap)
+        layer.deleted.discard(observation_id)
+        layer.values[observation_id] = value
+        if not existed:
+            snap.count += 1
+            self._logical += 1
+
+    def __delitem__(self, key: tuple[str, str]) -> None:
+        snapshot_id, observation_id = key
+        try:
+            snap = self._snaps[snapshot_id]
+        except KeyError:
+            raise KeyError(key) from None
+        if not _contains(snap, observation_id):
+            raise KeyError(key)
+        layer = _writable(snap)
+        layer.values.pop(observation_id, None)
+        layer.deleted.add(observation_id)
+        snap.count -= 1
+        self._logical -= 1
+
+    def __iter__(self) -> Iterator[tuple[str, str]]:
+        for snapshot_id, snap in self._snaps.items():
+            flat = snap.flat if snap.flat is not None else _materialize(snap.layer)
+            for observation_id in flat:
+                yield (snapshot_id, observation_id)
+
+    def __len__(self) -> int:
+        return self._logical
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, tuple) or len(key) != 2:
+            return False
+        snapshot_id, observation_id = key
+        snap = self._snaps.get(snapshot_id)
+        if snap is None:
+            return False
+        return _contains(snap, observation_id)
+
+
+def _find(layer: _Layer | None, observation_id: str) -> tuple[bool, Any]:
+    while layer is not None:
+        if observation_id in layer.deleted:
+            return False, None
+        value = layer.values.get(observation_id)
+        if value is not None or observation_id in layer.values:
+            return True, layer.values[observation_id]
+        layer = layer.parent
+    return False, None
+
+
+def _contains(snap: _Snap, observation_id: str) -> bool:
+    if snap.flat is not None:
+        return observation_id in snap.flat
+    found, _value = _find(snap.layer, observation_id)
+    return found
+
+
+def _writable(snap: _Snap) -> _Layer:
+    layer = snap.layer
+    if layer.frozen:
+        layer = _Layer(layer)
+        snap.layer = layer
+    snap.flat = None
+    return layer
+
+
+def _materialize(layer: _Layer | None) -> dict[str, Any]:
+    layers: list[_Layer] = []
+    while layer is not None:
+        layers.append(layer)
+        layer = layer.parent
+    flat: dict[str, Any] = {}
+    for item in reversed(layers):
+        for observation_id in item.deleted:
+            flat.pop(observation_id, None)
+        flat.update(item.values)
+    return flat
+
+
+def committed_record_is_trusted(store: "_SourceObservationStore", snapshot_id: str, record: "SourceObservationRecord", expected: str | None) -> bool:
+    """True when this object is still the record committed for this snapshot.
+
+    A replaced object misses. The payload hash is not recomputed for the
+    committed object, matching a verified-cache hit.
+    """
+
+    if record is None or expected is None:
+        return False
+    if record.observation_payload_sha256 != expected:
+        return False
+    if id(record) not in store.committed_record_ids:
+        return False
+    return all(
+        (snapshot_id, parent_id) in store.observations
+        for parent_id in record.derivation_parent_ids
+    )
+
+
 class _SourceObservationStore:
     def __init__(self) -> None:
         self.generation = 0
@@ -295,8 +503,11 @@ class _SourceObservationStore:
             str, tuple[ProducerSnapshotRecord, frozenset[str]]
         ] = {}
         self.source_snapshot_by_revision: dict[str, str] = {}
-        self.observations: dict[tuple[str, str], SourceObservationRecord] = {}
-        self.record_fingerprints: dict[tuple[str, str], str] = {}
+        # Derived snapshots share unchanged records. Each snapshot stores only
+        # its own writes, and a write on one snapshot cannot change another.
+        self.observations: _SnapshotChainMap = _SnapshotChainMap()
+        self.record_fingerprints: _SnapshotChainMap = _SnapshotChainMap()
+        self.committed_record_ids: set[int] = set()
         # Verified read cache bound to exact immutable store object identities.
         # Replacing a revision, snapshot, record, or fingerprint invalidates the
         # entry automatically; parent lineage presence is still checked on use.
@@ -310,6 +521,14 @@ class _SourceObservationStore:
                 SourceObservationAuthorityResult,
             ],
         ] = {}
+        # One authenticated visible-universe read for the snapshot currently
+        # being proved. Object identity, not a timer, decides reuse. A replaced
+        # record, receipt, or parent misses this cache and is revalidated.
+        self.visible_authentication_cache: dict[str, tuple] = {}
+        # One checked snapshot, shared by later page reads. The flat dicts are
+        # the records themselves; a write clears them. This does not retain a
+        # bound copy of every page.
+        self.visible_page_index: dict[str, tuple] = {}
 
     def source_bytes_match_revision(
         self,
@@ -350,6 +569,31 @@ class _SourceObservationStore:
     def next_generation(self) -> int:
         self.generation += 1
         return self.generation
+
+
+def _observation_ids_with_derived(
+    parent_ids: tuple[str, ...],
+    derived_ids: Sequence[str],
+) -> tuple[str, ...]:
+    """Sorted union. Parent ids are already sorted. Equal ids stay once."""
+
+    known = set(parent_ids)
+    extra = sorted({observation_id for observation_id in derived_ids if observation_id not in known})
+    if not extra:
+        return parent_ids
+    if not parent_ids:
+        return tuple(extra)
+    merged: list[str] = []
+    index = 0
+    count = len(parent_ids)
+    for observation_id in extra:
+        while index < count and parent_ids[index] < observation_id:
+            merged.append(parent_ids[index])
+            index += 1
+        merged.append(observation_id)
+    if index < count:
+        merged.extend(parent_ids[index:])
+    return tuple(merged)
 
 
 def _record_payload(record: SourceObservationRecord) -> dict[str, object]:
@@ -531,6 +775,132 @@ class SourceObservationProducer:
         while len(self._native_page_decode_cache) > _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES:
             self._native_page_decode_cache.popitem(last=False)
 
+    def _native_page_for_read(
+        self, revision_id: str, source_sha256: str, page_number: int
+    ) -> Optional[_NativePageDecodeCacheEntry]:
+        """The cached native decode, or one fresh decode of the stored source bytes.
+
+        Visibility publication releases its page decodes once the records are
+        stored, so a later reader decodes the exact retained bytes again. The
+        fresh decode is not cached (the release is the memory bound). Missing or
+        mismatched source bytes return None; callers treat that as no decode.
+        """
+
+        cached = self._cached_native_page(source_sha256, page_number)
+        if cached is not None:
+            return cached
+        source_bytes = self._store.source_bytes_by_revision.get(str(revision_id))
+        if source_bytes is None:
+            return None
+        if hashlib.sha256(source_bytes).hexdigest() != str(source_sha256):
+            return None
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception:
+            return None
+        try:
+            if not 1 <= int(page_number) <= int(pdf.page_count):
+                return None
+            return _decode_native_page_for_cache(pdf, int(page_number))
+        finally:
+            pdf.close()
+
+    def _retained_source_pdf(self, source_bytes: bytes) -> fitz.Document:
+        """Reuse one open document for these exact source bytes.
+
+        A different bytes object closes the previous document. Callers still
+        render and read text from that document; they do not keep a second copy.
+        """
+
+        cached = getattr(self, "_source_pdf_document", None)
+        if cached is not None and cached[0] is source_bytes:
+            return cached[1]
+        if cached is not None:
+            try:
+                cached[1].close()
+            except Exception:
+                pass
+            self._source_pdf_document = None
+            self._source_page_text_facts = None
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        self._source_pdf_document = (source_bytes, pdf)
+        self._source_page_text_facts = None
+        return pdf
+
+    def page_text_facts(self, source_bytes: bytes, page_number: int):
+        """Return one page's rawdict, text trace, and rotation, read once.
+
+        The tuple is owned by this producer. A later page replaces it. The
+        bytes object must be the ingested source; a replacement misses.
+        """
+
+        page_number = int(page_number)
+        cached = getattr(self, "_source_page_text_facts", None)
+        if (
+            cached is not None
+            and cached[0] is source_bytes
+            and cached[1] == page_number
+        ):
+            return cached[2]
+        pdf = self._retained_source_pdf(source_bytes)
+        if page_number < 1 or page_number > int(pdf.page_count):
+            return None
+        page = pdf.load_page(page_number - 1)
+        rawdict = page.get_text("rawdict") or {}
+        traces = tuple(page.get_texttrace() or ())
+        matrix = page.rotation_matrix
+        rotation = fitz.Matrix(
+            matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
+        )
+        facts = (rawdict, traces, rotation)
+        self._source_page_text_facts = (source_bytes, page_number, facts)
+        return facts
+
+    def _native_page_parent_records(self, snapshot, page_id: str) -> list:
+        """Find native page parents once per unchanged snapshot flat view."""
+
+        observations = self._store.observations
+        snaps = getattr(observations, "_snaps", None)
+        if snaps is None:
+            by_page: dict[str, list] = {}
+            for observation_id in snapshot.observation_ids:
+                record = observations.get((snapshot.snapshot_id, observation_id))
+                if (
+                    record is not None
+                    and record.observation_kind == "native_pdf_page"
+                    and record.origin_kind == "native"
+                    and not record.derivation_parent_ids
+                ):
+                    by_page.setdefault(record.page_id, []).append(record)
+            return list(by_page.get(str(page_id), ()))
+        snap = snaps.get(snapshot.snapshot_id)
+        flat = None if snap is None else snap.flat
+        cached = getattr(self, "_native_page_parent_index", None)
+        if (
+            cached is not None
+            and cached[0] is snapshot
+            and cached[1] is flat
+            and flat is not None
+        ):
+            return list(cached[2].get(str(page_id), ()))
+        by_page: dict[str, list] = {}
+        for observation_id in snapshot.observation_ids:
+            record = self._store.observations.get((snapshot.snapshot_id, observation_id))
+            if (
+                record is not None
+                and record.observation_kind == "native_pdf_page"
+                and record.origin_kind == "native"
+                and not record.derivation_parent_ids
+            ):
+                by_page.setdefault(record.page_id, []).append(record)
+        flat_now = self._store.observations.ensure_flat(snapshot.snapshot_id)
+        self._native_page_parent_index = (
+            snapshot,
+            flat_now,
+            {key: tuple(value) for key, value in by_page.items()},
+        )
+        return list(by_page.get(str(page_id), ()))
+
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
 
@@ -626,17 +996,7 @@ class SourceObservationProducer:
         ):
             raise ValueError(SNAPSHOT_MISMATCH)
 
-        page_parents: list[SourceObservationRecord] = []
-        for observation_id in snapshot.observation_ids:
-            record = self._store.observations.get((snapshot_id, observation_id))
-            if (
-                record is not None
-                and record.observation_kind == "native_pdf_page"
-                and record.origin_kind == "native"
-                and record.page_id == page_id
-                and not record.derivation_parent_ids
-            ):
-                page_parents.append(record)
+        page_parents = self._native_page_parent_records(snapshot, page_id)
 
         if len(page_parents) != 1:
             raise ValueError(
@@ -660,7 +1020,7 @@ class SourceObservationProducer:
             raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
 
         try:
-            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            pdf = self._retained_source_pdf(source_bytes)
         except Exception as exc:
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: stored PDF no longer decodes"
@@ -736,11 +1096,8 @@ class SourceObservationProducer:
                 )
             png_bytes = pix.tobytes("png")
         finally:
-            try:
-                if "scratch" in locals() and scratch is not None:
-                    scratch.close()
-            finally:
-                pdf.close()
+            if "scratch" in locals() and scratch is not None:
+                scratch.close()
 
         if include_native_frame:
             assert native_frame is not None
@@ -1173,6 +1530,32 @@ class SourceObservationProducer:
             snapshot=replace(snapshot),
         )
 
+    def _fresh_derived_records(
+        self,
+        base_snapshot_id: str,
+        derived_records: Sequence[SourceObservationRecord],
+    ) -> list[SourceObservationRecord]:
+        """Records this generation actually adds.
+
+        An id already stored on the base snapshot with the same payload stays
+        the base object. A different payload is a producer integrity failure.
+        """
+
+        fresh: list[SourceObservationRecord] = []
+        for record in derived_records:
+            key = (base_snapshot_id, record.observation_id)
+            if key not in self._store.observations:
+                fresh.append(record)
+                continue
+            prior = self._store.observations[key]
+            if prior is record:
+                continue
+            if _record_payload(prior) != _record_payload(record):
+                raise ProducerIntegrityError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id differs"
+                )
+        return fresh
+
     def publish_derived_observation(
         self,
         *,
@@ -1233,17 +1616,9 @@ class SourceObservationProducer:
             },
             digest_chars=32,
         )
-        # Share the immutable base records instead of cloning every one of them
-        # into each derived generation. A record's payload hash covers content
-        # only (never snapshot_id or producer_generation), so the same frozen
-        # object is valid in every snapshot that contains it. The snapshot-bound
-        # view is re-bound at the public resolve() boundary, which already
-        # returns a fresh defensive copy. Per-snapshot store entries, snapshot
-        # ids, fingerprints and tamper isolation are unchanged.
-        inherited = [
-            self._store.observations[(base_snapshot_id, obs_id)]
-            for obs_id in base.observation_ids
-        ]
+        # The base snapshot's records stay where they were committed. This
+        # generation stores only the new record. Reads re-bind the shared
+        # object to the snapshot being resolved.
         derived = SourceObservationRecord(
             observation_id=derived_id,
             document_id=document_id,
@@ -1267,24 +1642,15 @@ class SourceObservationProducer:
         derived = _clone_observation(
             derived, observation_payload_sha256=_content_sha256(_record_payload(derived))
         )
-        records = [*inherited, derived]
-        ids = [r.observation_id for r in records]
-        if len(ids) != len(set(ids)):
-            by_id: dict[str, SourceObservationRecord] = {}
-            for record in records:
-                prior = by_id.get(record.observation_id)
-                if prior is not None and _record_payload(prior) != _record_payload(record):
-                    raise ProducerIntegrityError(
-                        f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id differs"
-                    )
-                by_id[record.observation_id] = record
-            records = list(by_id.values())
+        fresh = self._fresh_derived_records(base_snapshot_id, (derived,))
         snapshot = ProducerSnapshotRecord(
             snapshot_id=snapshot_id,
             document_id=document_id,
             revision_id=revision_id,
             source_sha256=revision.source_sha256,
-            observation_ids=tuple(sorted(r.observation_id for r in records)),
+            observation_ids=_observation_ids_with_derived(
+                base.observation_ids, (derived.observation_id,)
+            ),
             producer_method=self._producer_method,
             producer_version=self._producer_version,
             producer_generation=generation,
@@ -1294,7 +1660,78 @@ class SourceObservationProducer:
             revision=revision,
             coverage=coverage,
             snapshot=snapshot,
-            records=records,
+            records=fresh,
+            source_bytes=self._store.source_bytes_by_revision[revision_id],
+            mark_source_snapshot=False,
+        )
+        return replace(snapshot)
+
+    def fork_derived_snapshot(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        base_snapshot_id: str,
+        derived_observation_ids: Sequence[str],
+    ) -> ProducerSnapshotRecord:
+        """Open one child snapshot that stores no new records.
+
+        A native visible line keeps the native segment's stored geometry.
+        The child snapshot is the visibility generation; it does not copy
+        that line. The snapshot id hashes the derived (visible) observation ids
+        exactly as publish_derived_observations does for the same ids, so every
+        id issued from this snapshot (host bindings, quantities, run
+        fingerprints) is unchanged. The snapshot itself keeps the base
+        observation id set because the visible lines are read views of native
+        records, not stored records.
+        """
+
+        current = self._store.current_revision_by_document.get(document_id)
+        if current != revision_id:
+            raise ValueError(f"{STALE_REVISION}: revision is not current")
+        base = self._store.snapshots.get(base_snapshot_id)
+        if (
+            base is None
+            or base.revision_id != revision_id
+            or base.document_id != document_id
+        ):
+            raise ValueError(f"{SNAPSHOT_MISMATCH}: base snapshot mismatch")
+        derived_ids = [str(observation_id) for observation_id in derived_observation_ids]
+        if not derived_ids:
+            raise ValueError("derived_observation_ids must be non-empty")
+        if len(derived_ids) != len(set(derived_ids)):
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: duplicate batch observation id"
+            )
+        revision = self._store.revisions[revision_id]
+        coverage = self._store.coverage_by_revision[revision_id]
+        generation = self._store.next_generation()
+        snapshot_id = stable_contract_id(
+            "source_snapshot",
+            {
+                "revision_id": revision_id,
+                "base_snapshot_id": base_snapshot_id,
+                "derived_observation_ids": tuple(sorted(derived_ids)),
+                "generation": generation,
+            },
+            digest_chars=32,
+        )
+        snapshot = ProducerSnapshotRecord(
+            snapshot_id=snapshot_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=revision.source_sha256,
+            observation_ids=base.observation_ids,
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+            parent_snapshot_id=base_snapshot_id,
+        )
+        self._commit(
+            revision=revision,
+            coverage=coverage,
+            snapshot=snapshot,
+            records=(),
             source_bytes=self._store.source_bytes_by_revision[revision_id],
             mark_source_snapshot=False,
         )
@@ -1428,17 +1865,9 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        # Share the immutable base records instead of cloning every one of them
-        # into each derived generation. A record's payload hash covers content
-        # only (never snapshot_id or producer_generation), so the same frozen
-        # object is valid in every snapshot that contains it. The snapshot-bound
-        # view is re-bound at the public resolve() boundary, which already
-        # returns a fresh defensive copy. Per-snapshot store entries, snapshot
-        # ids, fingerprints and tamper isolation are unchanged.
-        inherited = [
-            self._store.observations[(base_snapshot_id, obs_id)]
-            for obs_id in base.observation_ids
-        ]
+        # The base snapshot's records stay where they were committed. This
+        # generation stores only records it actually adds. Reads re-bind a
+        # shared object to the snapshot being resolved.
         derived_records: list[SourceObservationRecord] = []
         for item in prepared:
             record = SourceObservationRecord(
@@ -1469,30 +1898,14 @@ class SourceObservationProducer:
             )
             derived_records.append(record)
 
-        records = [*inherited, *derived_records]
-        ids = [record.observation_id for record in records]
-        if len(ids) != len(set(ids)):
-            by_id: dict[str, SourceObservationRecord] = {}
-            for record in records:
-                prior = by_id.get(record.observation_id)
-                if (
-                    prior is not None
-                    and _record_payload(prior) != _record_payload(record)
-                ):
-                    raise ProducerIntegrityError(
-                        f"{PRODUCER_INTEGRITY_FAILURE}: "
-                        "duplicate observation id differs"
-                    )
-                by_id[record.observation_id] = record
-            records = list(by_id.values())
-
+        fresh = self._fresh_derived_records(base_snapshot_id, derived_records)
         snapshot = ProducerSnapshotRecord(
             snapshot_id=snapshot_id,
             document_id=document_id,
             revision_id=revision_id,
             source_sha256=revision.source_sha256,
-            observation_ids=tuple(
-                sorted(record.observation_id for record in records)
+            observation_ids=_observation_ids_with_derived(
+                base.observation_ids, derived_ids
             ),
             producer_method=self._producer_method,
             producer_version=self._producer_version,
@@ -1503,7 +1916,7 @@ class SourceObservationProducer:
             revision=revision,
             coverage=coverage,
             snapshot=snapshot,
-            records=records,
+            records=fresh,
             source_bytes=self._store.source_bytes_by_revision[revision_id],
             mark_source_snapshot=False,
         )
@@ -1520,6 +1933,7 @@ class SourceObservationProducer:
         mark_source_snapshot: bool,
     ) -> None:
         staged: dict[tuple[str, str], SourceObservationRecord] = {}
+        parent_id = snapshot.parent_snapshot_id
         for record in records:
             key = (snapshot.snapshot_id, record.observation_id)
             prior = staged.get(key)
@@ -1527,10 +1941,40 @@ class SourceObservationProducer:
                 raise ProducerIntegrityError(
                     f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id differs"
                 )
+            if parent_id is not None:
+                inherited = self._store.observations.get((parent_id, record.observation_id))
+                if inherited is not None:
+                    if (
+                        inherited is not record
+                        and _record_payload(inherited) != _record_payload(record)
+                    ):
+                        raise ProducerIntegrityError(
+                            f"{PRODUCER_INTEGRITY_FAILURE}: duplicate observation id differs"
+                        )
+                    continue
             staged[key] = record
+        if parent_id is not None and (
+            not self._store.observations.has_snapshot(parent_id)
+            or not self._store.record_fingerprints.has_snapshot(parent_id)
+        ):
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: base snapshot records are missing"
+            )
         self._store.revisions[revision.revision_id] = revision
         self._store.current_revision_by_document[revision.document_id] = revision.revision_id
-        stored_source_bytes = bytes(source_bytes)
+        existing_source_bytes = self._store.source_bytes_by_revision.get(
+            revision.revision_id
+        )
+        # bytes is immutable. Republishing the object already stored for this
+        # revision must not allocate or rehash a second copy of the PDF.
+        # A bytearray or a different object is still copied before the hash check.
+        if (
+            isinstance(source_bytes, bytes)
+            and existing_source_bytes is source_bytes
+        ):
+            stored_source_bytes = source_bytes
+        else:
+            stored_source_bytes = bytes(source_bytes)
         if not self._store.source_bytes_match_revision(
             revision.revision_id,
             stored_source_bytes,
@@ -1546,17 +1990,24 @@ class SourceObservationProducer:
             snapshot,
             frozenset(snapshot.observation_ids),
         )
+        if parent_id is not None:
+            self._store.observations.fork(snapshot.snapshot_id, parent_id)
+            self._store.record_fingerprints.fork(snapshot.snapshot_id, parent_id)
+        else:
+            self._store.observations.open_snapshot(snapshot.snapshot_id)
+            self._store.record_fingerprints.open_snapshot(snapshot.snapshot_id)
         for key, record in staged.items():
             self._store.observations[key] = record
             self._store.record_fingerprints[key] = record.observation_payload_sha256
+            self._store.committed_record_ids.add(id(record))
 
-        # The producer just created these immutable records and computed their
-        # payload fingerprints before this atomic commit. Seed the identity-bound
-        # verified read cache from that exact committed object instead of making
-        # the first downstream consumer immediately JSON-serialize and hash the
-        # same payload again. Any later record/revision/snapshot replacement
-        # changes object identity, misses this cache, and triggers the normal
-        # full integrity revalidation path in SourceObservationAuthority.resolve.
+        # Seed the verified-read cache only for records this snapshot writes.
+        # Inherited records stay on the base snapshot. A later read trusts the
+        # committed object while its identity is unchanged, and hashes again
+        # when that object is replaced. Any later record/revision/snapshot
+        # replacement changes object identity, misses this cache, and triggers
+        # the normal full integrity revalidation path in
+        # SourceObservationAuthority.resolve.
         # Revision and snapshot values are frozen and identical for every
         # record in this atomic commit. Clone each once instead of repeating
         # the same dataclass copy for every observation in large CAD pages.
@@ -1600,6 +2051,14 @@ class SourceObservationProducer:
             for historic_key in tuple(self._store.verified_resolution_cache):
                 if historic_key[0] not in keep_snapshot_ids:
                     self._store.verified_resolution_cache.pop(historic_key, None)
+        keep_snapshot_ids = {
+            snapshot.snapshot_id,
+            self._store.source_snapshot_by_revision.get(revision.revision_id),
+        }
+        if snapshot.parent_snapshot_id:
+            keep_snapshot_ids.add(snapshot.parent_snapshot_id)
+        self._store.observations.retain_flats(keep_snapshot_ids)
+        self._store.record_fingerprints.retain_flats(keep_snapshot_ids)
         if mark_source_snapshot:
             self._store.source_snapshot_by_revision[revision.revision_id] = snapshot.snapshot_id
 
@@ -1687,14 +2146,17 @@ class SourceObservationAuthority:
                 observation=_bind_record_to_snapshot(record, snapshot),
             )
 
-        actual = _content_sha256(_record_payload(record))
-        if expected is None or expected != actual or record.observation_payload_sha256 != actual:
-            self._store.verified_resolution_cache.pop(key, None)
-            return self._integrity_failure()
-        for parent_id in record.derivation_parent_ids:
-            if (selector.snapshot_id, parent_id) not in self._store.observations:
+        if not committed_record_is_trusted(
+            self._store, selector.snapshot_id, record, expected
+        ):
+            actual = _content_sha256(_record_payload(record))
+            if expected is None or expected != actual or record.observation_payload_sha256 != actual:
                 self._store.verified_resolution_cache.pop(key, None)
-                return self._blocked(LINEAGE_UNAVAILABLE)
+                return self._integrity_failure()
+            for parent_id in record.derivation_parent_ids:
+                if (selector.snapshot_id, parent_id) not in self._store.observations:
+                    self._store.verified_resolution_cache.pop(key, None)
+                    return self._blocked(LINEAGE_UNAVAILABLE)
         result = SourceObservationAuthorityResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=SOURCE_OBSERVATION_EXISTS,
