@@ -133,3 +133,26 @@ def test_multi_page_recovery_keeps_original_issuer_and_builds_portable_package(t
         from hashlib import sha256
         assert all(sha256(archive.read(r["path"])).hexdigest()==r["sha256"] for r in manifest["entries"])
     with pytest.raises(ValueError):build_opening_source_review_package(report,tmp_path/"source.pdf")
+
+
+def test_missing_original_source_parent_is_first_review_evidence_gate(monkeypatch):
+    import pb_opening_source_review_shadow as review
+    source, composition, *_ = _fixture()
+    authentic = review.opening_source_lineage_packet
+
+    def unresolved(*args, **kwargs):
+        lineage = authentic(*args, **kwargs)
+        if lineage is None:
+            return None
+        return {**lineage, "source_proof_closed": False,
+                "unresolved_parent_ids": ("missing-parent",)}
+
+    monkeypatch.setattr(review, "opening_source_lineage_packet", unresolved)
+    packets = review.build_opening_review_packets(source, composition)
+    positive = [p for p in packets if p["physical_opening"] is not None]
+    assert positive
+    assert all(p["next_required_evidence"][0] == "original_source_parent_lineage"
+               for p in positive)
+    assert all(p["source_lineage"]["unresolved_parent_ids"] == ("missing-parent",)
+               and not p["takeoff_eligible"] and not p["deduction_authority"]
+               for p in positive)
