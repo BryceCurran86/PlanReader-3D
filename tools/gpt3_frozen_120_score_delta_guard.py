@@ -146,10 +146,13 @@ def _validate_input_ledger(
                 raise ValueError("published target lacks source/customer-verified project evidence")
             if row.get("project_gate_reasons") != []:
                 raise ValueError("published target retains unresolved project-level gates")
+            if row.get("owner_handoff_status") not in (None, "COMPLETED"):
+                raise ValueError("published project cannot contain stopped owner source process")
             if row["evaluation_state"] in (
                 "MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"
             ) and (type(row.get("produced_quantity_id")) is not str
-                    or not row["produced_quantity_id"]):
+                    or not row["produced_quantity_id"].strip()
+                    or row["produced_quantity_id"] != row["produced_quantity_id"].strip()):
                 raise ValueError("matched target requires exact produced quantity identity")
             if row["evaluation_state"] in (
                 "MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"
