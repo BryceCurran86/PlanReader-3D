@@ -73,3 +73,12 @@ def test_synthetic_swapped_original_marks_and_tampered_source_abstain():
         audit(raw+b"tampered",**options)
     with pytest.raises(ValueError,match="original_source_stroke_missing"):
         audit(raw,**{**options,"shared_north_source_id":"d99999i0"})
+
+def test_unrendered_source_north_ink_is_not_wall_or_section_authority():
+    import fitz
+    from tools.diag_original_open_functional_divider_shadow import _native_line
+    d=fitz.open();p=d.new_page()
+    p.draw_line((20,30),(100,30),color=(0,0,0),width=.48,stroke_opacity=0.)
+    with pytest.raises(ValueError,match="original_divider_paint_ink_untrusted"):
+        _native_line(p.get_drawings(),"d0i0")
+    d.close()
