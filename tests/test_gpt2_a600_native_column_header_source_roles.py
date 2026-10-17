@@ -215,3 +215,16 @@ def test_untrusted_numerical_word_blocks_source_column_authentication():
     assert not row.source_dimension_column_roles_authenticated
     assert row.original_width_word_id=="original:4:4"
     assert row.first_unclosed_gate=="original_schedule_title_or_row_word_trust"
+
+@pytest.mark.parametrize("noncanonical", ["028", "00", "+28", "28 ", " 28",
+                                         "٢٨", "28.0", "", 28, True])
+def test_source_door_page_address_must_be_canonical_and_never_empty_alias(noncanonical):
+    source = SourceVisibilityProducer(
+        producer_method="source-door-page-identity",
+        producer_version="1",
+    )
+    with pytest.raises(ValueError, match="exact_door_source_revision_and_page_required"):
+        inspect_published_door_schedule(
+            source, revision_id="synthetic-revision",
+            page_id=noncanonical,
+        )
