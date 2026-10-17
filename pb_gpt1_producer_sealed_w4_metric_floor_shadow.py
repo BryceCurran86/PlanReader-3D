@@ -110,6 +110,11 @@ def bind_producer_sealed_w4_metric_floor_shadow(
         or type(metric_room.candidate_area_m2) is not float
         or not math.isfinite(metric_room.candidate_area_m2)
         or metric_room.candidate_area_m2 <= 0
+        or type(metric_room.source_figure_ids) is not tuple
+        or len(metric_room.source_figure_ids) < 2
+        or len(set(metric_room.source_figure_ids)) != len(metric_room.source_figure_ids)
+        or any(type(v) is not str or not v or v != v.strip()
+               for v in metric_room.source_figure_ids)
         or type(physical_room_id) is not str or not physical_room_id
         or physical_room_id != physical_room_id.strip()
     ):
@@ -164,6 +169,19 @@ def bind_producer_sealed_w4_metric_floor_shadow(
         != (room.source_sha256,room.revision_id,room.page_id)
     ):
         return block("original_w4_source_room_face_lineage_conflict")
+    from shapely.geometry import Polygon
+    try:
+        metric_shape = Polygon(metric_room.metric_vertices_mm)
+        if (
+            not metric_shape.is_valid or metric_shape.area <= 0
+            or not math.isclose(
+                metric_shape.area / 1_000_000.0,
+                metric_room.candidate_area_m2, rel_tol=1e-9, abs_tol=1e-9,
+            )
+        ):
+            return block("original_w4_independent_metric_ring_area_conflict")
+    except (TypeError,ValueError,OverflowError):
+        return block("original_w4_independent_metric_ring_area_conflict")
     source_polygon = _cycle(original.polygon_pdf_pts)
     if (
         source_polygon is None
