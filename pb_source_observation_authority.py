@@ -775,6 +775,88 @@ class SourceObservationProducer:
         while len(self._native_page_decode_cache) > _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES:
             self._native_page_decode_cache.popitem(last=False)
 
+    def _retained_source_pdf(self, source_bytes: bytes) -> fitz.Document:
+        """Reuse one open document for these exact source bytes.
+
+        A different bytes object closes the previous document. Callers still
+        render and read text from that document; they do not keep a second copy.
+        """
+
+        cached = getattr(self, "_source_pdf_document", None)
+        if cached is not None and cached[0] is source_bytes:
+            return cached[1]
+        if cached is not None:
+            try:
+                cached[1].close()
+            except Exception:
+                pass
+            self._source_pdf_document = None
+            self._source_page_text_facts = None
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        self._source_pdf_document = (source_bytes, pdf)
+        self._source_page_text_facts = None
+        return pdf
+
+    def page_text_facts(self, source_bytes: bytes, page_number: int):
+        """Return one page's rawdict, text trace, and rotation, read once.
+
+        The tuple is owned by this producer. A later page replaces it. The
+        bytes object must be the ingested source; a replacement misses.
+        """
+
+        page_number = int(page_number)
+        cached = getattr(self, "_source_page_text_facts", None)
+        if (
+            cached is not None
+            and cached[0] is source_bytes
+            and cached[1] == page_number
+        ):
+            return cached[2]
+        pdf = self._retained_source_pdf(source_bytes)
+        if page_number < 1 or page_number > int(pdf.page_count):
+            return None
+        page = pdf.load_page(page_number - 1)
+        rawdict = page.get_text("rawdict") or {}
+        traces = tuple(page.get_texttrace() or ())
+        matrix = page.rotation_matrix
+        rotation = fitz.Matrix(
+            matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f
+        )
+        facts = (rawdict, traces, rotation)
+        self._source_page_text_facts = (source_bytes, page_number, facts)
+        return facts
+
+    def _native_page_parent_records(self, snapshot, page_id: str) -> list:
+        """Find native page parents once per unchanged snapshot flat view."""
+
+        snap = self._store.observations._snaps.get(snapshot.snapshot_id)
+        flat = None if snap is None else snap.flat
+        cached = getattr(self, "_native_page_parent_index", None)
+        if (
+            cached is not None
+            and cached[0] is snapshot
+            and cached[1] is flat
+            and flat is not None
+        ):
+            return list(cached[2].get(str(page_id), ()))
+        by_page: dict[str, list] = {}
+        for observation_id in snapshot.observation_ids:
+            record = self._store.observations.get((snapshot.snapshot_id, observation_id))
+            if (
+                record is not None
+                and record.observation_kind == "native_pdf_page"
+                and record.origin_kind == "native"
+                and not record.derivation_parent_ids
+            ):
+                by_page.setdefault(record.page_id, []).append(record)
+        flat_now = self._store.observations.ensure_flat(snapshot.snapshot_id)
+        self._native_page_parent_index = (
+            snapshot,
+            flat_now,
+            {key: tuple(value) for key, value in by_page.items()},
+        )
+        return list(by_page.get(str(page_id), ()))
+
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
 
@@ -870,17 +952,7 @@ class SourceObservationProducer:
         ):
             raise ValueError(SNAPSHOT_MISMATCH)
 
-        page_parents: list[SourceObservationRecord] = []
-        for observation_id in snapshot.observation_ids:
-            record = self._store.observations.get((snapshot_id, observation_id))
-            if (
-                record is not None
-                and record.observation_kind == "native_pdf_page"
-                and record.origin_kind == "native"
-                and record.page_id == page_id
-                and not record.derivation_parent_ids
-            ):
-                page_parents.append(record)
+        page_parents = self._native_page_parent_records(snapshot, page_id)
 
         if len(page_parents) != 1:
             raise ValueError(
@@ -904,7 +976,7 @@ class SourceObservationProducer:
             raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
 
         try:
-            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            pdf = self._retained_source_pdf(source_bytes)
         except Exception as exc:
             raise ProducerIntegrityError(
                 f"{PRODUCER_INTEGRITY_FAILURE}: stored PDF no longer decodes"
@@ -980,11 +1052,8 @@ class SourceObservationProducer:
                 )
             png_bytes = pix.tobytes("png")
         finally:
-            try:
-                if "scratch" in locals() and scratch is not None:
-                    scratch.close()
-            finally:
-                pdf.close()
+            if "scratch" in locals() and scratch is not None:
+                scratch.close()
 
         if include_native_frame:
             assert native_frame is not None
