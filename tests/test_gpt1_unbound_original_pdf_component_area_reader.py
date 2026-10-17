@@ -170,3 +170,56 @@ def test_native_source_text_cropped_out_of_actual_page_is_not_a_candidate():
     result = _read(payload)
     assert all(row.label != "EXCLUDED" for row in result)
     assert all(row.binding == "unbound" for row in result)
+
+
+def test_source_area_rows_carry_exact_native_label_and_value_word_addresses():
+    rows = _read(_source())
+    assert len(rows) == 2
+    assert all(row.source_label_word_addresses for row in rows)
+    assert all(row.source_value_word_addresses for row in rows)
+    for row in rows:
+        assert all(a[0] == row.source_label_word_addresses[0][0] for a in
+                   (*row.source_label_word_addresses, *row.source_value_word_addresses))
+        assert all(a[1] >= 0 and a[2] >= 0 for a in
+                   (*row.source_label_word_addresses, *row.source_value_word_addresses))
+        assert row.binding == "unbound"
+
+
+def test_native_word_ids_correspond_to_real_source_glyph_words_not_invented_labels():
+    payload = _source()
+    document = fitz.open(stream=payload, filetype="pdf")
+    try:
+        page_words = {
+            (int(w[5]), int(w[6]), int(w[7])): w[4]
+            for w in document[0].get_text("words")
+        }
+        for row in _read(payload):
+            label = " ".join(page_words[a] for a in row.source_label_word_addresses)
+            value = " ".join(page_words[a] for a in row.source_value_word_addresses)
+            assert label.casefold() == (row.label + " AREA:").casefold()
+            assert value.replace("m²", "m2").lower().endswith("m2")
+            assert float(value.replace("m²", "m2").lower().split("m2")[0]) == row.area_m2
+    finally:
+        document.close()
+
+
+def test_missing_or_duplicate_native_word_receipt_never_binds_to_other_area():
+    from pb_explicit_floor_area_evidence import (
+        _native_area_word_addresses, extract_declared_component_floor_areas,
+    )
+    row, = extract_declared_component_floor_areas(
+        "OFFICE AREA: 12.50m2", source_page=1, source_block_id="source-block-1"
+    )
+    original_words = [
+        (1., 1., 2., 2., "OFFICE", 0, 0, 0),
+        (2., 1., 3., 2., "AREA:", 0, 0, 1),
+        (4., 1., 5., 2., "12.50m2", 0, 0, 2),
+    ]
+    assert _native_area_word_addresses(original_words, 0, row) is not None
+    competing = [
+        (1., 3., 2., 4., "OFFICE", 0, 1, 0),
+        (2., 3., 3., 4., "AREA:", 0, 1, 1),
+        (4., 3., 5., 4., "12.50m2", 0, 1, 2),
+    ]
+    assert _native_area_word_addresses(original_words + competing, 0, row) is None
+    assert _native_area_word_addresses(original_words, 1, row) is None
