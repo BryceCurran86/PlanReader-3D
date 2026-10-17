@@ -97,7 +97,7 @@ def _json_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
+def _json_customer_rows(path: Path, *, allow_manual: bool = False) -> list[dict[str, Any]]:
     value = _read_json_without_duplicate_keys(path)
     if type(value) is not list or any(type(row) is not dict for row in value):
         raise ValueError("customer projection must be a JSON array of objects")
@@ -105,7 +105,12 @@ def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
     # rows may carry the quantity ID in structured provenance or strict notes
     # rather than in a top-level optional column. Full provenance validity is
     # checked independently by verify_sealed_customer_output below.
-    if any(not _customer_quantity_id(row) for row in value):
+    # Manual estimator rows do not contribute to source-closed bijection.
+    # Malformed automated rows with damaged provenance still fail closed.
+    if any(not _customer_quantity_id(row) and (
+        not allow_manual or "quantity_id" in row
+        or row.get("commercial_projection_provenance") is not None
+    ) for row in value):
         raise ValueError("automated customer row lacks canonical quantity identity")
     return value
 
@@ -138,13 +143,14 @@ def _verify_customer_counts(sealed: Any, verified: Any, customer_rows: list[dict
         raise ValueError("duplicate or conflicting signed quantity identities")
     # Match the identity source actually accepted by the V1 verifier; a
     # top-level-only lookup would reject valid database-row projections.
-    customer_ids = [_customer_quantity_id(row) for row in customer_rows]
+    customer_ids = [qid for row in customer_rows
+                    if (qid := _customer_quantity_id(row))]
     if (
         verified.project_id != sealed.project_id
         or verified.sealed_quantity_count != len(sealed.quantities)
         or verified.valid_quantity_count != len(valid)
         or verified.abstained_quantity_count != len(abstained)
-        or verified.customer_row_count != len(customer_rows)
+        or verified.customer_row_count != len(customer_ids)
         or len(customer_ids) != len(set(customer_ids))
         or set(customer_ids) != valid
         or set(verified.verified_quantity_ids) != valid
@@ -236,7 +242,11 @@ def build_four_project_evidence_ledger(
             "manifest_status": manifest.status,
             "publication_status": "UNAVAILABLE",
             "source_sha_verified": False,
+            "missing_original_source_document_count": 0,
+            "missing_original_source_document_roles": [],
             "customer_bijection_verified": False,
+            "reconciliation_input_presence_status": "NOT_CHECKED_SOURCE_UNAVAILABLE",
+            "missing_signed_reconciliation_artifacts": [],
             "reconciliation_complete": False,
             "reason_codes": [],
             "exact_project_report": None,
@@ -254,6 +264,12 @@ def build_four_project_evidence_ledger(
             if not path.is_file()
         ]
         if missing:
+            missing_names = set(missing)
+            entry["missing_original_source_document_count"] = len(missing)
+            entry["missing_original_source_document_roles"] = sorted(
+                doc.role for doc in manifest.source_documents
+                if doc.name in missing_names
+            )
             entry["reason_codes"] = [
                 "original_source_not_supplied_in_this_execution",
                 f"missing_original_file_count:{len(missing)}",
@@ -283,12 +299,15 @@ def build_four_project_evidence_ledger(
             ) if not path.is_file()
         ]
         if missing_evidence:
+            entry["reconciliation_input_presence_status"] = "MISSING"
+            entry["missing_signed_reconciliation_artifacts"] = missing_evidence
             entry["reason_codes"] = [
                 "signed_production_evidence_unavailable",
                 *("missing:" + name for name in missing_evidence),
             ]
             continue
 
+        entry["reconciliation_input_presence_status"] = "PRESENT_UNVERIFIED"
         try:
             signed_hashes = {
                 path: _sha256(path)
@@ -306,7 +325,7 @@ def build_four_project_evidence_ledger(
                 or set(mapping.source_sha256s) != actual_hashes
             ):
                 raise ValueError("source envelope or project identity mismatch")
-            customer_rows = _json_customer_rows(customer_path)
+            customer_rows = _json_customer_rows(customer_path, allow_manual=True)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
             _enforce_mapped_production_family_trade(manifest, sealed, mapping)
@@ -333,6 +352,7 @@ def build_four_project_evidence_ledger(
                 sealed, project_id=project_id, seen=seen_signed_quantity_ids,
             )
             entry["customer_bijection_verified"] = True
+            entry["reconciliation_input_presence_status"] = "INDEPENDENTLY_VERIFIED"
             entry["reconciliation_complete"] = True
             entry["exact_project_report"] = exact
             if manifest.status != "VERIFIED" or not manifest.source_package_complete:
@@ -349,6 +369,7 @@ def build_four_project_evidence_ledger(
                 completed_by_project[project_id] = True
         except (OSError, UnicodeError, TypeError, ValueError, RuntimeError, KeyError) as exc:
             entry["publication_status"] = "CONFLICT"
+            entry["reconciliation_input_presence_status"] = "REJECTED"
             entry["reconciliation_complete"] = False
             entry["exact_project_report"] = None
             entry["reason_codes"] = ["signed_evidence_reconciliation_rejected", type(exc).__name__]
