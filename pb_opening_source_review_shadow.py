@@ -161,6 +161,7 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
         if opening is None or opening.record_id!=trace.opening_identity_id:
             raise ValueError("review opening failed original source authentication")
         axes=labels.ordered_compact_axes_shadow(selector)
+        lineage=opening_source_lineage_packet(source,selector)
         canonical=build_nominal_opening_canonical_shadow(source,selector)
         binding=composition.binding_selectors.get(opening.record_id)
         local=None if binding is None else frames.local_source_frame_shadow(
@@ -169,6 +170,8 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
             source_fragment_roles_shadow=source_fragment_roles_shadow)
         whole=frame_traces.get(opening.record_id)
         blockers=[]
+        if lineage is None or not lineage["source_proof_closed"]:
+            blockers.append("original_source_parent_lineage")
         if not trace.host_wall_id: blockers.append("source_owned_unique_host")
         if whole is None or not whole.record_id: blockers.append("connected_whole_wall_frame")
         if axes.evidence is None: blockers.append("owned_ordered_nominal_dimensions")
@@ -182,7 +185,7 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
             "nominal_axes":asdict(axes),
             "figured_label":asdict(labels.publish_scope(selector)),
             "canonical_nominal_review":None if canonical is None else canonical.to_dict(),
-            "source_lineage":opening_source_lineage_packet(source,selector),
+            "source_lineage":lineage,
             "next_required_evidence":blockers,
             "takeoff_eligible":False,"deduction_authority":False}
         own=set(opening.source_observation_ids)
