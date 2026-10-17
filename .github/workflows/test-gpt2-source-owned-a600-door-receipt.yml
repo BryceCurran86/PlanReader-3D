@@ -1,0 +1,40 @@
+name: TEST GPT2 Source-Owned A600 Door Schedule Receipts
+
+on:
+  pull_request:
+    paths:
+      - pb_source_door_schedule_authority.py
+      - tests/test_gpt2_source_owned_a600_door_schedule_receipt.py
+      - .github/workflows/test-gpt2-source-owned-a600-door-receipt.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-a600-source-owned-door-receipts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact checkout and source SHA
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          echo "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" | sha256sum --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original A600 28 source rows plus adversarial provenance
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_source_owned_a600_door_schedule_receipt.py
+          python -m pytest -q tests/test_signed_output_gate_path_coverage.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
