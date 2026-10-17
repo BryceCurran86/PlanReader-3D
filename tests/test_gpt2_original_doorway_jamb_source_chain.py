@@ -116,3 +116,37 @@ def test_dashed_dimensional_ink_cannot_counterfeit_original_source_doorway():
     assert not evidence["native_ink_contact_proved"]
     assert evidence["new_quantities"] == 0
     doc.close()
+
+def test_vertical_native_wall_and_horizontal_jambs_preserve_exact_source_contact():
+    # Reflection in the diagonal is a metamorhic 90-degree wall-axis test:
+    # source intervals change axes, but no physical wall is guessed.
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=400)
+    page.draw_line((100,20),(100,50),color=(0,0,0),width=.48)
+    page.draw_line((100,150),(100,280),color=(0,0,0),width=.48)
+    page.draw_line((92,50),(100,50),color=(0,0,0),width=.96)
+    page.draw_line((92,150),(100,150),color=(0,0,0),width=.96)
+    result = audit(page, left_wall_id="d0i0", right_wall_id="d1i0",
+                   left_jamb_id="d2i0", right_jamb_id="d3i0")
+    assert result["status"] == "exact_original_native_jamb_endpoint_chain_candidate"
+    assert result["source_native_wall_run_axis"] == "native_y"
+    assert result["source_native_unbridged_wall_gap_pdf_pts"] == [50., 150.]
+    assert result["source_native_jamb_separation_pdf_pt"] == 100.
+    assert not result["source_door_schedule_size_binding_granted"]
+    assert result["new_quantities"] == 0
+    doc.close()
+
+
+def test_jamb_return_on_opposite_side_is_still_exact_but_not_extra_authority():
+    doc = fitz.open()
+    page = doc.new_page(width=400, height=400)
+    page.draw_line((20,100),(50,100),color=(0,0,0),width=.48)
+    page.draw_line((150,100),(280,100),color=(0,0,0),width=.48)
+    page.draw_line((50,100),(50,108),color=(0,0,0),width=.96)
+    page.draw_line((150,100),(150,108),color=(0,0,0),width=.96)
+    result = audit(page, left_wall_id="d0i0",right_wall_id="d1i0",
+                   left_jamb_id="d2i0",right_jamb_id="d3i0")
+    assert result["native_ink_contact_proved"]
+    assert result["source_native_jamb_crosswall_interval_pdf_pts"] == [100.,108.]
+    assert result["new_quantities"] == 0
+    doc.close()
