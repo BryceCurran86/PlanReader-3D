@@ -426,6 +426,52 @@ jobs:
           )
           assert any(node["original_producer_snap_sample_count"]==20
               for node in snap_inputs["selected_original_node_rows"])
+          ink=snap_ink=freezer_graph_firstgate["original_indexed_native_parent_ink_firstgate"]
+          assert ink["status"]=="INDEXED_ORIGINAL_SOURCE_LOOKUPS_REPORTED_NO_ROLE"
+          assert ink["diagnostic_only"]
+          assert not ink["source_structural_wall_role_granted"]
+          assert not ink["room_or_metric_published"]
+          assert ink["distinct_producer_source_parent_record_count"]==len(
+              ink["original_indexed_parent_receipts"]
+          )
+          print("GPT2_FREEZER_ORIGINAL_INDEXED_INK_CROSSCHECK",json.dumps({
+              "original_native_parent_count":ink["distinct_producer_source_parent_record_count"],
+              "native_parent_statuses":[{
+                  "id":row["original_native_primitive_id"],
+                  "status":row["independent_original_pdf_source_status"],
+                  "metadata":row["independent_original_pdf_ink_evidence"],
+              } for row in ink["original_indexed_parent_receipts"]],
+              "new_wall_role":False,
+          },sort_keys=True))
+          assert all(
+              not receipt["original_split_input_graphic_style_receipt"][
+                  "physical_wall_or_annotation_role_granted"]
+              for node in snap_inputs["selected_original_node_rows"]
+              for receipt in node["all_original_split_endpoint_receipts"]
+          )
+          print("GPT2_FREEZER_ORIGINAL_SPLIT_GRAPHIC_STATE",json.dumps([
+              {
+                  "node":node["original_w2_node_id"],
+                  "count":node["original_producer_snap_sample_count"],
+                  "style_statuses":[{
+                      "split":row["original_split_segment_id"],
+                      "endpoint":row["original_split_endpoint"],
+                      "status":row["original_split_input_graphic_style_receipt"]["status"],
+                      "source_styles":[{
+                          "source_id":style["original_primitive_id"],
+                          "stroke":style["source_stroke"],
+                          "stroke_present":style["source_stroke_present"],
+                          "width":style["source_width"],
+                          "fill":style["source_fill"],
+                          "fill_present":style["source_fill_present"],
+                          "layer":style["source_layer"],
+                          "clip_known":style["source_clip_known"],
+                      } for style in row["original_split_input_graphic_style_receipt"][
+                          "source_style_records"]]
+                  } for row in node["all_original_split_endpoint_receipts"]]
+              } for node in snap_inputs["selected_original_node_rows"]
+              if node["original_producer_snap_sample_count"]==20
+          ],sort_keys=True))
           print("GPT2_FREEZER_ALL_20_ORIGINAL_SNAP_INPUTS",json.dumps([
               {
                   "node_id": node["original_w2_node_id"],

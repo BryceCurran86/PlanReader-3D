@@ -198,6 +198,99 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
     }
 
 
+def _indexed_original_source_style_receipts(lineage):
+    """Audit original split-parent graphic state without electing physical ink.
+
+    Source-style conflicts are preserved as competing records; neither RGB
+    nor layer/width is a source-owned wall-role decision.
+    """
+    from copy import deepcopy
+
+    if not isinstance(lineage, dict):
+        return {
+            "status": "ORIGINAL_SPLIT_LINEAGE_UNAVAILABLE",
+            "original_indexed_source_ids": [],
+            "source_record_ids_missing_from_inventory": [],
+            "competing_record_id_conflicts": [],
+            "source_style_records": [],
+            "physical_wall_or_annotation_role_granted": False,
+        }
+    ids = lineage.get("source_primitive_ids")
+    records = lineage.get("source_records")
+    if not isinstance(ids, (tuple, list)) or not isinstance(records, (tuple, list)):
+        return {
+            "status": "ORIGINAL_SPLIT_LINEAGE_UNAVAILABLE",
+            "original_indexed_source_ids": [],
+            "source_record_ids_missing_from_inventory": [],
+            "competing_record_id_conflicts": [],
+            "source_style_records": [],
+            "physical_wall_or_annotation_role_granted": False,
+        }
+    original_ids = sorted({str(v) for v in ids if isinstance(v, str) and v})
+    observed = []
+    malformed = []
+    for n, rec in enumerate(records):
+        if not isinstance(rec, dict) or not isinstance(rec.get("id"), str) or not rec["id"]:
+            malformed.append(n)
+            continue
+        # All fields come from the original source producer's signed split
+        # ancestry, rather than from the post-split fabricated live sentinels.
+        evidence = {
+            "original_primitive_id": rec["id"],
+            "native_path_index": rec.get("path_index"),
+            "native_item_index": rec.get("item_index"),
+            "native_edge_index": rec.get("edge_index"),
+            "original_native_kind": rec.get("kind"),
+            "source_kind_present": bool(rec.get("kind_present")),
+            "source_stroke_present": bool(rec.get("stroke_present")),
+            "source_stroke": deepcopy(rec.get("stroke")),
+            "source_fill_present": bool(rec.get("fill_present")),
+            "source_fill": deepcopy(rec.get("fill")),
+            "source_width_present": bool(rec.get("width_present")),
+            "source_width": rec.get("width"),
+            "source_layer_present": bool(rec.get("layer_present")),
+            "source_layer": rec.get("layer"),
+            "source_dashes_present": bool(rec.get("dashes_present")),
+            "source_dashes": rec.get("dashes"),
+            "source_clip_known": rec.get("clip_known"),
+            "source_clip_present": bool(rec.get("clip_present")),
+            "original_native_page_coords_present": bool(rec.get("page_coords_present")),
+            "original_native_geometry": [
+                deepcopy(rec.get(key)) for key in ("x1", "y1", "x2", "y2")
+            ],
+            "style_is_not_structural_or_drafting_role": True,
+        }
+        observed.append(evidence)
+    found_ids = {item["original_primitive_id"] for item in observed}
+    by_id = {}
+    for row in observed:
+        by_id.setdefault(row["original_primitive_id"], []).append(row)
+    conflicts = sorted(
+        k for k, values in by_id.items()
+        if len(values) > 1 and any(v != values[0] for v in values[1:])
+    )
+    missing = sorted(set(original_ids) - found_ids)
+    extra = sorted(found_ids - set(original_ids))
+    # Same-content duplicate source records are retained, not dereferenced to
+    # a single invented original wall or source-role owner.
+    status = (
+        "ORIGINAL_SPLIT_SOURCE_STYLE_INCOMPLETE"
+        if missing or extra or malformed or not original_ids else
+        "ORIGINAL_SPLIT_SOURCE_STYLE_CONFLICT"
+        if conflicts else "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    )
+    return {
+        "status": status,
+        "original_indexed_source_ids": original_ids,
+        "source_record_ids_missing_from_inventory": missing,
+        "unindexed_source_record_ids": extra,
+        "malformed_original_source_record_ordinals": malformed,
+        "competing_record_id_conflicts": conflicts,
+        "source_style_records": observed,
+        "physical_wall_or_annotation_role_granted": False,
+    }
+
+
 def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
                                                      selected_node_ids):
     """Replay W2's exact splitter and running-centroid assignments, no edits.
@@ -239,8 +332,12 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
         ):
             if target not in assigned:
                 continue
+            style = _indexed_original_source_style_receipts(
+                item.get("primitive_lineage")
+            )
             assigned[target].append({
                 "original_split_segment_id": item["id"],
+                "original_split_input_graphic_style_receipt": style,
                 "original_split_endpoint": endpoint,
                 "original_native_split_endpoint_pdf_pts": coords,
                 "original_source_primitive_ids": list(
@@ -273,6 +370,12 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
         } for key, recs in sorted(groups.items())]
         rows.append({
             "original_w2_node_id": node_id,
+            "original_split_inputs_without_complete_style_receipts": [
+                f"{rec['original_split_segment_id']}:{rec['original_split_endpoint']}"
+                for rec in receipts
+                if rec["original_split_input_graphic_style_receipt"]["status"]
+                    != "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+            ],
             "original_snapped_position_pdf_pts": [node["x"], node["y"]],
             "original_producer_snap_sample_count": node["samples"],
             "all_input_samples_independently_recovered": True,
@@ -286,6 +389,108 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
         "original_split_segment_count": len(split),
         "selected_original_node_rows": rows,
         "new_firm_or_physical_room": False,
+        "diagnostic_only": True,
+    }
+
+
+def verify_original_indexed_split_parent_ink(drawings, selected_node_rows):
+    """Cross-check SOURCE ancestry directly against original indexed PDF ink.
+
+    Native original vector parent corroboration is NOT a structural wall role.
+    Retain every conflict/unavailable parent; no nearest-source substitution.
+    """
+    from tools.diag_gpt2_native_w2_ink_source_role import (
+        read_native_ink_receipt,
+    )
+    if not isinstance(drawings, (tuple, list)) or not drawings:
+        raise ValueError("original_native_ink_universe_unavailable")
+    report, visited = [], set()
+    for node in selected_node_rows:
+        for endpoint in node["all_original_split_endpoint_receipts"]:
+            style = endpoint["original_split_input_graphic_style_receipt"]
+            for original in style["source_style_records"]:
+                native_id = original["original_primitive_id"]
+                source_coords = original["original_native_geometry"]
+                identity = (
+                    native_id,
+                    tuple(str(v) for v in source_coords),
+                )
+                if identity in visited:
+                    continue
+                visited.add(identity)
+                row = {
+                    "original_native_primitive_id": native_id,
+                    "original_producer_source_edge_pdf_pts": (
+                        [source_coords[:2], source_coords[2:]]
+                        if len(source_coords) == 4 else None
+                    ),
+                    "independent_original_pdf_source_status": "UNAVAILABLE",
+                    "independent_original_pdf_ink_evidence": None,
+                    "source_wall_or_annotation_role_granted": False,
+                }
+                if (len(source_coords) != 4 or
+                    not original["original_native_page_coords_present"]):
+                    row["independent_original_pdf_source_status"] = (
+                        "PRODUCER_NATIVE_COORDS_UNAVAILABLE"
+                    )
+                else:
+                    try:
+                        source_edge = (
+                            source_coords[:2], source_coords[2:]
+                        )
+                        ink = read_native_ink_receipt(
+                            drawings, native_id, source_edge,
+                        )
+                    except (ValueError, TypeError, IndexError, KeyError,
+                            OverflowError) as error:
+                        row["independent_original_pdf_source_status"] = (
+                            "INDEXED_SOURCE_LOOKUP_UNAVAILABLE"
+                        )
+                        row["independent_original_pdf_lookup_error_type"] = (
+                            type(error).__name__
+                        )
+                    else:
+                        native = ink["native_source_edge_pdf_pts"]
+                        raw = [source_coords[:2], source_coords[2:]]
+                        # A shorter forged source-record geometry can be
+                        # fully contained in a true original line; that is
+                        # NOT an exact original parent geometry match.
+                        same = (
+                            (math.dist(native[0], raw[0]) <= 1e-4
+                             and math.dist(native[1], raw[1]) <= 1e-4)
+                            or
+                            (math.dist(native[0], raw[1]) <= 1e-4
+                             and math.dist(native[1], raw[0]) <= 1e-4)
+                        )
+                        row["independent_original_pdf_source_status"] = (
+                            "INDEXED_ORIGINAL_INK_EXACT_GEOMETRY"
+                            if same and ink["native_stroke_fully_covers_atomic_wall_candidate"]
+                            else "INDEXED_SOURCE_GEOMETRY_CONFLICT"
+                        )
+                        row["independent_original_pdf_ink_evidence"] = {
+                            "native_source_edge_pdf_pts": ink["native_source_edge_pdf_pts"],
+                            "original_native_paint_metadata_candidate_only":
+                                ink["original_native_paint_metadata_candidate_only"],
+                            "original_native_primitive_ref":
+                                ink["original_native_primitive_ref"],
+                            "native_element_kind": ink["native_element_kind"],
+                            "source_ink_not_physical_role": True,
+                        }
+                report.append(row)
+    report.sort(key=lambda x: (
+        x["original_native_primitive_id"],
+        str(x["original_producer_source_edge_pdf_pts"]),
+    ))
+    return {
+        "status": "INDEXED_ORIGINAL_SOURCE_LOOKUPS_REPORTED_NO_ROLE",
+        "distinct_producer_source_parent_record_count": len(report),
+        "original_indexed_parent_receipts": report,
+        "original_indexed_parent_sources_all_correlated": bool(report) and all(
+            x["independent_original_pdf_source_status"]
+            == "INDEXED_ORIGINAL_INK_EXACT_GEOMETRY" for x in report
+        ),
+        "source_structural_wall_role_granted": False,
+        "room_or_metric_published": False,
         "diagnostic_only": True,
     }
 
@@ -452,6 +657,13 @@ def replay_original_page7_graph(*, source, published, source_bytes,
         graph=graph, scoped_inputs=candidates,
         selected_node_ids=selected_node_ids,
     )
+    # Only original indexed drawing items, from the same SHA-verified bytes,
+    # may corroborate original producer parent IDs. No visible-PDF guesses.
+    with fitz.open(stream=source_bytes, filetype="pdf") as original_doc:
+        native_drawings = original_doc[page_no - 1].get_drawings()
+        indexed_ink = verify_original_indexed_split_parent_ink(
+            native_drawings, snap_input_census["selected_original_node_rows"]
+        )
     guarded = audit_original_complete_link_counterfactual(
         scoped_inputs=candidates,
         original_snap_input_census=snap_input_census,
@@ -459,6 +671,7 @@ def replay_original_page7_graph(*, source, published, source_bytes,
     )
     return {
         **result,
+        "original_indexed_native_parent_ink_firstgate": indexed_ink,
         "original_complete_link_snap_counterfactual": guarded,
         "original_all_split_input_snap_provenance": snap_input_census,
         "original_source_sha256": published.revision.source_sha256,

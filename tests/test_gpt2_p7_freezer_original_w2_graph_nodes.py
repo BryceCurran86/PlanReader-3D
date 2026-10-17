@@ -272,3 +272,245 @@ def test_original_all_split_input_rejects_foreign_selected_nodes_and_sample_drif
     graph["nodes"][0]["samples"] += 1
     with pytest.raises(ValueError,match="original_snap_node_centroid_or_sample_drift"):
         inspect(graph=graph,scoped_inputs=inputs,selected_node_ids=(0,))
+
+
+
+def test_original_source_graphic_style_preserves_all_competing_parent_records():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts,
+    )
+    source = {
+        "source_primitive_ids": ["d2i0", "d1i0"],
+        "source_records": [
+            {"id": "d1i0", "kind": "line", "kind_present": True,
+             "stroke_present": True, "stroke": (0.,0.,0.),
+             "width_present": True, "width": .48,
+             "fill_present": False, "layer_present": True, "layer": "WALL",
+             "page_coords_present": True,
+             "x1": 0., "y1": 0., "x2": 1., "y2": 0.},
+            {"id": "d2i0", "kind": "line", "kind_present": True,
+             "stroke_present": False, "fill_present": True,
+             "fill": (1.,1.,1.), "width_present": False,
+             "page_coords_present": True,
+             "x1": 0., "y1": 0., "x2": 1., "y2": 0.},
+        ],
+    }
+    initial = repr(source)
+    result = _indexed_original_source_style_receipts(source)
+    assert result["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    assert result["original_indexed_source_ids"] == ["d1i0", "d2i0"]
+    assert not result["source_record_ids_missing_from_inventory"]
+    assert len(result["source_style_records"]) == 2
+    assert result["source_style_records"][0]["source_stroke_present"]
+    assert not result["source_style_records"][1]["source_stroke_present"]
+    assert result["source_style_records"][1]["source_fill"] == (1.,1.,1.)
+    assert not result["physical_wall_or_annotation_role_granted"]
+    assert repr(source) == initial
+
+
+def test_original_source_graphic_style_conflicts_and_foreign_parent_fail_closed():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts as style,
+    )
+    records = [
+        {"id": "d1i0", "width_present": True, "width": .24},
+        {"id": "d1i0", "width_present": True, "width": .48},
+    ]
+    result = style({"source_primitive_ids": ["d1i0"], "source_records": records})
+    assert result["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_CONFLICT"
+    assert result["competing_record_id_conflicts"] == ["d1i0"]
+    assert len(result["source_style_records"]) == 2
+    result = style({"source_primitive_ids": ["foreign"], "source_records": records})
+    assert result["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_INCOMPLETE"
+    assert result["source_record_ids_missing_from_inventory"] == ["foreign"]
+    assert result["unindexed_source_record_ids"] == ["d1i0"]
+    assert not result["physical_wall_or_annotation_role_granted"]
+
+
+def test_missing_original_graphics_is_unknown_not_absent_paint():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts as style,
+    )
+    for raw in (None, {}, {"source_primitive_ids": ["d1i0"],
+                            "source_records": [{"id": None}]}):
+        result = style(raw)
+        assert result["status"] != "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+        assert not result["physical_wall_or_annotation_role_granted"]
+
+
+def test_real_split_input_trace_reports_source_styles_without_electing_roles():
+    from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        inspect_all_original_snap_inputs_for_selected_nodes as inspect,
+    )
+    source = [_original_stage_a_source(0.,0.,10.,0.,"source_style_positive")]
+    graph = build_wall_graph_for_viewport(source)
+    before = repr(source)
+    report = inspect(graph=graph,scoped_inputs=source,selected_node_ids=(0,))
+    node = report["selected_original_node_rows"][0]
+    assert node["all_input_samples_independently_recovered"]
+    assert node["original_split_inputs_without_complete_style_receipts"] == []
+    receipt = node["all_original_split_endpoint_receipts"][0][
+        "original_split_input_graphic_style_receipt"
+    ]
+    assert receipt["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    assert receipt["original_indexed_source_ids"] == ["source_style_positive"]
+    assert not receipt["physical_wall_or_annotation_role_granted"]
+    assert repr(source) == before
+
+
+
+def test_source_graphic_receipts_reorder_preserves_original_style_candidates():
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        _indexed_original_source_style_receipts as style,
+    )
+    records=[
+        {"id":"d10i0","stroke_present":True,"stroke":[.5,.5,.5]},
+        {"id":"d20i0","stroke_present":True,"stroke":[0.,0.,0.]},
+    ]
+    before=repr(records)
+    a=style({"source_primitive_ids":["d20i0","d10i0"],
+             "source_records":records})
+    b=style({"source_primitive_ids":["d10i0","d20i0"],
+             "source_records":list(reversed(records))})
+    assert a["status"] == b["status"] == "ORIGINAL_SPLIT_SOURCE_STYLE_RECEIPTS_COMPLETE"
+    assert a["original_indexed_source_ids"]==b["original_indexed_source_ids"]
+    assert {x["original_primitive_id"]: x["source_stroke"]
+            for x in a["source_style_records"]} == {
+        x["original_primitive_id"]: x["source_stroke"]
+        for x in b["source_style_records"]
+    }
+    a["source_style_records"][0]["source_stroke"][0] = 77
+    assert repr(records) == before
+    assert all(not x["style_is_not_structural_or_drafting_role"] is False
+               for x in b["source_style_records"])
+    assert not b["physical_wall_or_annotation_role_granted"]
+
+
+
+def test_independent_original_indexed_parent_ink_matches_producer_source_geometry():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    originals=[{"type":"s","color":(0.,0.,0.),"width":.48,
+                "items":[("l",fitz.Point(0,0),fitz.Point(10,0))]}]
+    style={
+        "original_primitive_id":"d0i0",
+        "original_native_geometry":[0.,0.,10.,0.],
+        "original_native_page_coords_present":True,
+    }
+    node=[{"all_original_split_endpoint_receipts":[
+        {"original_split_input_graphic_style_receipt":{
+            "source_style_records":[style]}}
+    ]}]
+    before=repr(originals)
+    result=verify(originals,node)
+    assert result["original_indexed_parent_sources_all_correlated"]
+    assert result["distinct_producer_source_parent_record_count"]==1
+    assert result["original_indexed_parent_receipts"][0][
+        "independent_original_pdf_source_status"] == (
+        "INDEXED_ORIGINAL_INK_EXACT_GEOMETRY"
+    )
+    assert not result["source_structural_wall_role_granted"]
+    assert repr(originals)==before
+
+
+def test_independent_native_source_rejects_foreign_and_noncollinear_original_parent():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    ink=[{"type":"s","items":[
+        ("l",fitz.Point(0,0),fitz.Point(10,0))]}]
+    def record(identity,coords,present=True):
+        return {
+            "original_primitive_id":identity,
+            "original_native_geometry":coords,
+            "original_native_page_coords_present":present,
+        }
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[
+                record("d0i0",[0.,1.,10.,1.]),
+                record("d999i0",[0.,0.,10.,0.]),
+                record("d0i0",[None,None,None,None],False),
+            ]
+        }}]}]
+    result=verify(ink,node)
+    statuses={q["independent_original_pdf_source_status"] for q in
+              result["original_indexed_parent_receipts"]}
+    assert statuses=={
+        "INDEXED_SOURCE_GEOMETRY_CONFLICT",
+        "INDEXED_SOURCE_LOOKUP_UNAVAILABLE",
+        "PRODUCER_NATIVE_COORDS_UNAVAILABLE",
+    }
+    assert not result["original_indexed_parent_sources_all_correlated"]
+    assert not result["room_or_metric_published"]
+
+
+def test_original_split_ink_reversal_does_not_invent_second_physical_wall():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    ink=[{"type":"f","fill":(1.,1.,1.),"items":[
+        ("l",fitz.Point(10,0),fitz.Point(0,0))]}]
+    rec={"original_primitive_id":"d0i0",
+         "original_native_geometry":[0.,0.,10.,0.],
+         "original_native_page_coords_present":True}
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[rec,rec]}}]}]
+    result=verify(ink,node)
+    assert result["distinct_producer_source_parent_record_count"]==1
+    assert result["original_indexed_parent_sources_all_correlated"]
+    assert result["original_indexed_parent_receipts"][0][
+        "independent_original_pdf_ink_evidence"][
+        "original_native_paint_metadata_candidate_only"]["native_fill_color"] == [1.,1.,1.]
+    assert not result["source_structural_wall_role_granted"]
+
+
+
+def test_native_long_line_must_not_correlate_underspecified_source_record():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    drawings=[{"type":"s","items":[("l",fitz.Point(0,0),fitz.Point(20,0))]}]
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[{
+                "original_primitive_id":"d0i0",
+                "original_native_geometry":[5.,0.,15.,0.],
+                "original_native_page_coords_present":True,
+            }]
+        }}]}]
+    result=verify(drawings,node)
+    receipt=result["original_indexed_parent_receipts"][0]
+    assert receipt["independent_original_pdf_source_status"] == "INDEXED_SOURCE_GEOMETRY_CONFLICT"
+    assert not result["original_indexed_parent_sources_all_correlated"]
+    assert not receipt["source_wall_or_annotation_role_granted"]
+
+
+
+def test_original_indexed_rectangle_side_retained_without_claiming_structural_ink():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    rect=fitz.Rect(0,0,10,5)
+    drawings=[{"type":"f","fill":(1.,1.,1.),"items":[("re",rect)]}]
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[{
+                "original_primitive_id":"d0i0e2",
+                "original_native_geometry":[0.,5.,10.,5.],
+                "original_native_page_coords_present":True,
+            }]}}]}]
+    got=verify(drawings,node)
+    assert got["original_indexed_parent_sources_all_correlated"]
+    receipt=got["original_indexed_parent_receipts"][0]
+    assert receipt["independent_original_pdf_source_status"]=="INDEXED_ORIGINAL_INK_EXACT_GEOMETRY"
+    assert receipt["independent_original_pdf_ink_evidence"]["native_element_kind"]=="re"
+    assert not got["source_structural_wall_role_granted"]
