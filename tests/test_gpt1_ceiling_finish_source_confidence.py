@@ -11,7 +11,10 @@ from tests.test_c15_ceiling_lining_quantity import (
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -0.1, 1.1, True, "0.9"])
 def test_malformed_ceiling_source_confidence_does_not_pass_as_corrob_finish(bad):
-    atom=replace(_finish_atom(),confidence=bad)
+    atom=_finish_atom()
+    # A normal EvidenceAtom constructor rejects malformed confidence. Forge
+    # an impossible downstream receipt to exercise this independent consumer.
+    object.__setattr__(atom,"confidence",bad)
     result=resolve_ceiling_finish_entity(
         evidence_atoms=(atom,),scope_entity_id=SCOPE_ID,
         context=_context(),document=_document(),
