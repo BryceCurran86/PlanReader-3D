@@ -72,6 +72,9 @@ class SourceDoorScheduleResult:
     all_original_source_codes: tuple[str, ...]
     title_source_trusted: bool
     complete_source_word_universe: bool
+    # Source-visible Dxx code rows that failed parsing remain explicit
+    # blockers instead of disappearing from the claimed schedule universe.
+    unparsed_original_door_codes: tuple[str, ...] = ()
     new_opening_counts: int = 0
     new_opening_areas_m2: int = 0
 
@@ -415,8 +418,33 @@ def inspect_published_door_schedule(
     if int(page_id) not in {int(x) for x in published.coverage.decoded_pages}:
         raise ValueError("source_door_page_not_in_published_source_coverage")
     words=_producer_owned_native_words(producer,published,page_id)
+    candidate_rows=_original_source_row_candidates(words)
+    # Count all native code-bearing blocks before lexical row filtering.
+    # A Dxx header with unrecognised hardware/description is negative
+    # evidence, not permission to claim a complete schedule census.
+    source_blocks=defaultdict(list)
+    for word in words:
+        source_blocks[word.block_no].append(word)
+    code_blocks=defaultdict(list)
+    for block, members in source_blocks.items():
+        if members and _DOOR_CODE.fullmatch(members[0].literal):
+            code_blocks[members[0].literal].append(block)
+    candidates_by_block={row.native_block_no:row for row in candidate_rows}
+    unparsed_codes=tuple(sorted(
+        code for code, blocks in code_blocks.items()
+        if any(block not in candidates_by_block for block in blocks)
+    ))
+    # A second D-code source block with unparseable description must not
+    # leave the first parsed block masquerading as a unique scheduled door.
+    rows_with_conflicts=tuple(
+        replace(row,
+            status="source_schedule_row_duplicate_code_conflict",
+            first_unclosed_gate="duplicate_original_source_door_rows")
+        if len(code_blocks[row.code])>1 else row
+        for row in candidate_rows
+    )
     rows,title_ok=_original_door_schedule_column_proof(
-        words,_original_source_row_candidates(words),
+        words,rows_with_conflicts,
     )
     return SourceDoorScheduleResult(
         source_sha256=published.revision.source_sha256,
@@ -424,10 +452,10 @@ def inspect_published_door_schedule(
         snapshot_id=published.snapshot.snapshot_id,
         page_id=page_id,
         rows=rows,
-        all_original_source_codes=tuple(sorted({r.code for r in rows})),
+        all_original_source_codes=tuple(sorted(code_blocks)),
         title_source_trusted=title_ok,
-        # A page with no returned original words cannot claim a complete
-        # source-owned door schedule; do not equate empty OCR/observation
-        # output with a verified empty original schedule.
-        complete_source_word_universe=bool(words),
+        # The input universe may be complete but schedule row recognition
+        # must also be complete for an authoritative door *table* census.
+        complete_source_word_universe=bool(words) and not unparsed_codes,
+        unparsed_original_door_codes=unparsed_codes,
     )
