@@ -67,6 +67,8 @@ def build_live_ceiling_lining_source_traces(
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     seen_source_ids: set[str] = set()
+    original_mark_owners: dict[str, str] = {}
+    occurrence_owners: dict[str, str] = {}
     for quantity in claim.ceiling_lining_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -210,6 +212,51 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling quantity lacks semantic support lineage: "
                 f"{quantity.quantity_id}"
             )
+
+        # The RCP mark must be an authentic recorded source observation,
+        # distinct from the producer's occurrence and dictionary IDs.
+        # All issuer identities are original strings, never coerced labels.
+        source_issuer_fields = (
+            "finish_occurrence_record_id",
+            "finish_occurrence_evidence_id",
+            "finish_definition_record_id",
+            "finish_code",
+            "semantic_finish",
+        )
+        if any(
+            type(metadata.get(key)) is not str
+            or not metadata[key]
+            or metadata[key] != metadata[key].strip()
+            for key in source_issuer_fields
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling material issuer receipt is malformed: {quantity.quantity_id}"
+            )
+        mark_id = metadata["finish_occurrence_evidence_id"]
+        occurrence_id = metadata["finish_occurrence_record_id"]
+        if (
+            mark_id not in quantity.evidence_ids
+            or mark_id not in ceiling.evidence_ids
+            or quantity.semantic_key != (
+                f"ceiling_lining:{canonical_ceiling_id}:"
+                f"{metadata['finish_code']}:{metadata['semantic_finish']}"
+            )
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling material occurrence source receipt mismatch: {quantity.quantity_id}"
+            )
+        # Never allow the same physical source mark to be rekeyed as two
+        # independently measured ceiling areas during customer sealing.
+        for original_id, owners in (
+            (mark_id, original_mark_owners),
+            (occurrence_id, occurrence_owners),
+        ):
+            earlier = owners.get(original_id)
+            if earlier is not None and earlier != canonical_ceiling_id:
+                raise SourceClosedRunConflictError(
+                    f"original RCP material mark has competing ceilings: {original_id}"
+                )
+            owners[original_id] = canonical_ceiling_id
 
         if _clean(metadata.get("row_role")) != "ceiling_area":
             raise SourceClosedRunConflictError(
