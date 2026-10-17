@@ -47,8 +47,10 @@ def metric(points=((0,0),(10000,0),(10000,5000),(0,5000)), area=50.0):
 
 
 def test_figured_wall_gross_net_opening_and_skirting():
+    pdf_vertices=((0,0),(10,0),(10,5),(0,5))
     ring=tuple(
-        FiguredPhysicalSide(f"side-{i}",(0,i),(0,i+1),(f"ink-{i}",))
+        FiguredPhysicalSide(f"side-{i}",pdf_vertices[i],
+                            pdf_vertices[(i+1)%4],(f"ink-{i}",))
         for i in range(4)
     )
     heights=tuple(DocumentedWallHeight(f"side-{i}",3000,(f"height-{i}",),SHA,"rev","7")
@@ -60,7 +62,8 @@ def test_figured_wall_gross_net_opening_and_skirting():
     )
     backed=replace(metric(),
                    source_side_ids=tuple(f"side-{i}" for i in range(4)),
-                   source_segment_ids=tuple(f"ink-{i}" for i in range(4)))
+                   source_segment_ids=tuple(f"ink-{i}" for i in range(4)),
+                   source_vertices_pdf_pts=pdf_vertices)
     measured=measure_figured_wall_lining_shadow(ring,backed,heights,(door,))
     assert measured.status is Status.CANDIDATE
     assert measured.candidate_perimeter_m==30.0
@@ -217,8 +220,10 @@ def test_figured_opening_reveals_keep_door_and_window_sills_distinct():
 
 
 def test_hosted_opening_cannot_deduct_without_existing_source_signed_area():
-    ring=tuple(FiguredPhysicalSide(f"side-{i}",(0,i),(0,i+1),(f"ink-{i}",))
-               for i in range(4))
+    pdf_vertices=((0,0),(10,0),(10,5),(0,5))
+    ring=tuple(FiguredPhysicalSide(
+        f"side-{i}",pdf_vertices[i],pdf_vertices[(i+1)%4],(f"ink-{i}",))
+        for i in range(4))
     heights=tuple(DocumentedWallHeight(f"side-{i}",3000,(f"height-{i}",),SHA,"rev","7")
                   for i in range(4))
     baseline=DocumentedWallOpening(
@@ -228,7 +233,8 @@ def test_hosted_opening_cannot_deduct_without_existing_source_signed_area():
     for candidate in (baseline,replace(baseline,published_original_opening_area_m2=1.5)):
         backed=replace(metric(),
                        source_side_ids=tuple(f"side-{i}" for i in range(4)),
-                       source_segment_ids=tuple(f"ink-{i}" for i in range(4)))
+                       source_segment_ids=tuple(f"ink-{i}" for i in range(4)),
+                   source_vertices_pdf_pts=pdf_vertices)
         result=measure_figured_wall_lining_shadow(ring,backed,heights,(candidate,))
         assert result.status is Status.ABSTAINED
         assert result.candidate_net_lining_m2 is None
