@@ -434,3 +434,80 @@ def test_historical_original_lot16_eight_has_no_crosssemantic_false_alert():
     receipt = audit.verify_owner_four_job_receipts(_ROOT)
     assertions = receipt["cross_semantic_signed_object_claims_for_review"]
     assert assertions["au_qld_lot16_power"] == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        ("owner-session-bad", "RUN_RECEIPT.json",
+         lambda x: x.update(session="../../confidential")),
+        ("owner-preflight-foreign-path", "PREFLIGHT_STATUS.json",
+         lambda x: x[0].update(report=x[0]["report"].replace(
+             "au_qld_lot16_power.json", "au_qld_3laurel.json"))),
+        ("owner-preflight-wrong-session", "PREFLIGHT_STATUS.json",
+         lambda x: x[0].update(report=x[0]["report"].replace(
+             "20261016_172712", "20261016_172713"))),
+        ("owner-preflight-unredacted", "PREFLIGHT_STATUS.json",
+         lambda x: x[0].update(report="C:\\Users\\private\\project.json")),
+        ("owner-output-folder-other-project", "RUN_RECEIPT.json",
+         lambda x: x["project_handoffs"][0].update(
+             output_folder=x["project_handoffs"][0]["output_folder"].replace(
+                 "\\project_outputs\\au_qld_lot16_power",
+                 "\\project_outputs\\au_qld_3laurel"))),
+        ("owner-output-folder-bad-session", "RUN_RECEIPT.json",
+         lambda x: x["project_handoffs"][0].update(
+             output_folder=x["project_handoffs"][0]["output_folder"].replace(
+                 "20261016_172712", "20261016_172715"))),
+        ("owner-output-folder-not-redacted", "RUN_RECEIPT.json",
+         lambda x: x["project_handoffs"][0].update(output_folder="C:\\private\\lot16")),
+        ("producer-sealed-source-status", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(status="candidate")),
+        ("producer-unsealed-fake-status", "au_qld_3laurel/outputs/production_summary.json",
+         lambda x: x.update(status="sealed")),
+        ("producer-unsealed-fake-runid", "au_qld_3laurel/outputs/production_summary.json",
+         lambda x: x.update(combined_run_id="source_closed_run_forged")),
+        ("producer-family-positive-no-receipt", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(family_run_files={}, family_run_ids={})),
+        ("producer-family-name-mismatch", "au_qld_lot16_power/outputs/production_summary.json",
+         lambda x: x.update(family_run_files={"opening_count":
+               x["family_run_files"]["opening_area"]},
+               family_run_ids={"opening_count":x["family_run_ids"]["opening_area"]})),
+    ],
+    ids=lambda x: x[0] if type(x) is tuple else None,
+)
+def test_owner_execution_session_and_seal_family_universe_negatives(
+    tmp_path, mutation,
+):
+    _, relative, change = mutation
+    _expect_semantic_conflict(tmp_path, relative, change)
+
+
+def test_original_signed_lot16_customer_and_family_are_not_relabelled_firm():
+    audit_result = audit.verify_owner_four_job_receipts(_ROOT)
+    assert audit_result["official_four_project_precision_adjusted_accuracy"] is None
+    by_project = {row["project_id"]: row for row in audit_result["projects"]}
+    lot16 = by_project["au_qld_lot16_power"]
+    assert lot16["derived_sealed_quantity_count"] == 8
+    assert lot16["verified_customer_rows_in_run"] == 0
+    assert lot16["earliest_verified_project_execution_gate"] == (
+        "customer_rows_not_verified_for_fresh_source_run"
+    )
+    assert set(audit_result["cross_semantic_signed_object_claims_for_review"]) == set(_PROJECTS)
+    assert all(audit_result["cross_semantic_signed_object_claims_for_review"][pid] == []
+               for pid in _PROJECTS)
+
+
+def test_cross_semantic_claims_ignore_raw_evidence_order_not_identity():
+    from types import SimpleNamespace
+    def record(qid, family, refs):
+        return SimpleNamespace(
+            quantity_id=qid, family=family, source_sha256="f"*64,
+            revision_id="rev", object_identity_refs=refs,
+        )
+    claims = audit._cross_semantic_source_claims([
+        record("a", "floor_area", ("B", "A")),
+        record("b", "floor_finish_area", ("A", "B")),
+    ])
+    assert len(claims) == 1
+    assert claims[0]["signed_quantity_ids"] == ["a", "b"]
+    assert claims[0]["canonical_object_refs"] == ["A", "B"]
