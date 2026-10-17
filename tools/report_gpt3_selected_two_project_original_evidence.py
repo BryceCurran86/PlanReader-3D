@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
 from pathlib import Path
 import tempfile
 from typing import Any, Mapping, Sequence
@@ -107,9 +109,21 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("original source path universe must be an exact nonempty list")
     originals = [Path(value) for value in original_values]
+    all_inputs = [*paths.values(), *originals]
+    if len({path.resolve() for path in all_inputs}) != len(all_inputs):
+        raise ValueError("selected original source and signed evidence roles alias one file")
+    # Distinct path names can still be hardlinks to the same evidence inode.
+    # Do not read confidential original PDF bytes during this check.
+    for index, path in enumerate(all_inputs):
+        if path.is_file() and any(
+            prior.is_file() and path.samefile(prior)
+            for prior in all_inputs[:index]
+        ):
+            raise ValueError("selected original source and signed evidence roles alias one file")
     raw_manifest = _json_object(paths["manifest"])
     project_id = raw_manifest.get("project_id")
-    if type(project_id) is not str or not project_id or project_id != project_id.strip():
+    if (type(project_id) is not str or
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", project_id) is None):
         raise ValueError("frozen project identity is invalid")
     canonical_manifest = (
         FROZEN_ROOT / "projects" / project_id / "source_manifest.json"
@@ -222,6 +236,31 @@ def build_selected_two_project_development_evidence(
     project_ids = [r["project_id"] for r in projects]
     if len(set(project_ids)) != 2:
         raise ValueError("two selected projects cannot reuse one source identity")
+    for field in ("sealed_run_id", "sealed_run_fingerprint"):
+        values = [project.get(field) for project in projects]
+        if (any(type(value) is not str or not value for value in values)
+            or len(set(values)) != 2):
+            raise ValueError("two selected projects must have independently sealed run identities")
+
+    states = ("matched_within_tolerance", "matched_outside_tolerance",
+              "missed", "partial", "unresolved")
+    for project in projects:
+        for name in ("denominator", "unsupported_extra", *states):
+            value = project.get(name)
+            if type(value) is not int or value < 0:
+                raise ValueError("selected project has malformed exact scorer counts")
+        denominator = project["denominator"]
+        if denominator == 0 or sum(project[name] for name in states) != denominator:
+            raise ValueError("selected project target states do not partition frozen denominator")
+        for field, expected in (
+            ("coverage_accuracy", project["matched_within_tolerance"] / denominator),
+            ("precision_adjusted_accuracy", project["matched_within_tolerance"] /
+             (denominator + project["unsupported_extra"])),
+        ):
+            actual = project.get(field)
+            if (type(actual) not in (float, int) or not math.isfinite(actual)
+                or not math.isclose(actual, expected, rel_tol=0, abs_tol=1e-12)):
+                raise ValueError("selected project copied scoring percentage disagrees with item counts")
 
     seen_quantities: set[str] = set()
     for project in projects:
@@ -255,14 +294,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     entries = [_json_object(path) for path in args.entry]
-    report = build_selected_two_project_development_evidence(entries)
+    # Output safety is a preflight: do not scan confidential originals
+    # or run the frozen scorer until the output location is verified.
     output = args.output
-    if output.is_symlink() or output.exists() or any(
+    if output.is_symlink() or output.exists() or output.resolve().is_relative_to(FROZEN_ROOT.resolve()) or any(
         output.resolve() == Path(value).resolve()
         for entry in entries for key, value in entry.items()
         if key != "original_files"
     ):
-        raise FileExistsError("source development report must be a new file")
+        raise FileExistsError("source development report must be a new file outside frozen inputs")
+    report = build_selected_two_project_development_evidence(entries)
     output.parent.mkdir(parents=True, exist_ok=True)
     temp: Path | None = None
     try:

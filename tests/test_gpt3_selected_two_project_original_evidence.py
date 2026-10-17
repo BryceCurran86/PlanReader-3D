@@ -1,6 +1,7 @@
 """The two-project signed development audit never publishes full Plan V2."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -14,7 +15,7 @@ def _project(project, *, denominator, matched, missed, extras=0, ids=("q1",)):
         "original_source_sha_verified": True,
         "source_sha256s": ["a" * 64],
         "sealed_run_id": "sealed:" + project,
-        "sealed_run_fingerprint": "b" * 64,
+        "sealed_run_fingerprint": hashlib.sha256(project.encode("utf-8")).hexdigest(),
         "customer_quantity_ids": list(ids),
         "customer_bijection_verified": True,
         "reconciliation_complete": True,
@@ -28,7 +29,7 @@ def _project(project, *, denominator, matched, missed, extras=0, ids=("q1",)):
         "abstained_outputs": 0,
         "lineage_conflicts": 0,
         "coverage_accuracy": matched / denominator,
-        "precision_adjusted_accuracy": matched / denominator,
+        "precision_adjusted_accuracy": matched / (denominator + extras),
         "produced_items": [],
     }
 
