@@ -134,13 +134,16 @@ def measure_source_figured_ceiling_grid_shadow(
         for axis in (0, 1):
             total_length = 0.0
             if axis == 0:
-                coords = (origin[0]+ix*dx for ix in range(ix0, ix1+1))
+                coords = (origin[0]+ix*dx for ix in range(ix0+1, ix1))
                 edges = (LineString([(x, y0-1), (x, y1+1)]) for x in coords)
             else:
-                coords = (origin[1]+iy*dy for iy in range(iy0, iy1+1))
+                coords = (origin[1]+iy*dy for iy in range(iy0+1, iy1))
                 edges = (LineString([(x0-1, y), (x1+1, y)]) for y in coords)
             for line in edges:
-                total_length += line.intersection(local).length
+                # The exact physical boundary is an edge trim, not a tee.
+                total_length += line.intersection(local).difference(
+                    local.boundary
+                ).length
             axis_lengths.append(total_length / 1000.0)
         if (
             not math.isclose(area, local.area, rel_tol=1e-8, abs_tol=1e-4)
