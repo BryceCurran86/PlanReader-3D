@@ -683,3 +683,41 @@ def test_3laurel_completed_source_page_traversal_is_not_source_closed_authority(
     )
     assert laurel["four_job_official_target_item_results_available"] is False
     assert laurel["official_project_score"] is None
+
+
+def test_owner_audit_fingerprint_pins_unchanged_old_eight_and_frozen_source_files():
+    result = audit.verify_owner_four_job_receipts(_ROOT)
+    originals = result["historical_lot16_v1_and_customer_file_sha256s"]
+    archive = (
+        Path(__file__).resolve().parents[1]
+        / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+    )
+    assert set(originals) == {"source_sealed_run.json", "verified_customer_rows.json"}
+    assert originals == {name: _sha(archive / name) for name in originals}
+    frozen = result["frozen_source_evaluator_file_sha256s"]
+    assert len(frozen) == 7
+    assert all(len(digest) == 64 for digest in frozen.values())
+    assert "evaluator.py" in frozen
+    assert "sealed_reconciliation.py" in frozen
+    assert "manifest.json" in frozen
+    assert "projects/au_qld_lot16_power/source_manifest.json" in frozen
+    assert len(result["reconciled_derived_artifact_fingerprint"]) == 64
+    assert result["official_four_project_coverage_accuracy"] is None
+
+
+def test_owner_audit_changes_fingerprint_when_untrusted_derived_receipts_are_rehashed(tmp_path):
+    before = audit.verify_owner_four_job_receipts(_ROOT)
+    root = _copy(tmp_path)
+    original = "au_qld_lot16_power/outputs/production_summary.json"
+    _mutate(root, original, lambda x: x["claim_reason_codes"].append(
+        "synthetic_new_source_reason_not_a_quantity"
+    ))
+    _recalculate_synthetic_derived_receipts(root)
+    after = audit.verify_owner_four_job_receipts(root)
+    assert before["reconciled_derived_artifact_fingerprint"] != (
+        after["reconciled_derived_artifact_fingerprint"]
+    )
+    assert before["historical_lot16_v1_and_customer_file_sha256s"] == (
+        after["historical_lot16_v1_and_customer_file_sha256s"]
+    )
+    assert after["official_publication_status"] == "UNPUBLISHED"
