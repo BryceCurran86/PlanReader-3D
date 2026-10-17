@@ -71,3 +71,19 @@ def test_repeat_wall_as_jamb_and_loose_tolerance_fail_closed():
             left_jamb_id="d2i0",right_jamb_id="d3i0",
             exact_native_tolerance_pt=2.5)
     doc.close()
+
+
+def test_original_pwd_d13_independent_native_jamb_source_chain():
+    raw=PDF.read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==SHA
+    with fitz.open(stream=raw,filetype="pdf") as doc:
+        r=audit(doc[6],left_wall_id="d52626i0",right_wall_id="d52631i0",
+                left_jamb_id="d69501i0",right_jamb_id="d69499i0")
+        assert r["status"]=="exact_original_native_jamb_endpoint_chain_candidate"
+        assert r["native_ink_contact_proved"]
+        assert r["source_native_unbridged_wall_gap_pdf_pts"]==[386.64,443.28]
+        assert abs(r["source_native_jamb_separation_pdf_pt"]-56.64)<.001
+        assert r["source_native_jamb_crosswall_interval_pdf_pts"]==[1376.72,1383.2]
+        assert r["source_door_schedule_size_binding_granted"] is False
+        assert r["source_physical_floor_ring_closed"] is False
+        assert r["new_quantities"]==0
