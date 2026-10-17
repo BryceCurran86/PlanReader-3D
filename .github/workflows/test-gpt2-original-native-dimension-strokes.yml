@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-original-native-dimension-strokes.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "pb_source_native_dimension_stroke_shadow.py"
+      - "tests/test_gpt2_source_native_dimension_stroke_shadow.py"
+      - ".github/workflows/test-gpt2-original-native-dimension-strokes.yml"
   workflow_dispatch:
 
 jobs:

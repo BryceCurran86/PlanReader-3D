@@ -3,6 +3,11 @@ name: DIAG GPT2 Original Amenities Mixed Plan Inset
 on:
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_gpt2_original_mixed_amenities_insets.py"
+      - "tests/test_gpt2_original_mixed_amenities_insets.py"
+      - ".github/workflows/diag-gpt2-original-mixed-amenities-insets.yml"
   pull_request:
     paths:
       - tools/diag_gpt2_original_mixed_amenities_insets.py

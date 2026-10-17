@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-pwd-dimension-face-competitors.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_source_dimension_face_competitors_shadow.py"
+      - "tests/test_gpt2_source_dimension_face_competitors_shadow.py"
+      - ".github/workflows/test-gpt2-pwd-dimension-face-competitors.yml"
   workflow_dispatch:
 
 jobs:

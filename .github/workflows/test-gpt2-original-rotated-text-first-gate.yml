@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-original-rotated-text-first-gate.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_original_rotated_text_first_gate_delta_shadow.py"
+      - "tests/test_gpt2_original_rotated_text_first_gate_delta_shadow.py"
+      - ".github/workflows/test-gpt2-original-rotated-text-first-gate.yml"
   workflow_dispatch:
 
 jobs:

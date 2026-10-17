@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-a120-f07-real-table-whatif.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_gpt2_a120_multipath_frame_whatif_shadow.py"
+      - "tests/test_gpt2_a120_multipath_frame_whatif_shadow.py"
+      - ".github/workflows/test-gpt2-a120-f07-real-table-whatif.yml"
   workflow_dispatch:
 
 jobs:

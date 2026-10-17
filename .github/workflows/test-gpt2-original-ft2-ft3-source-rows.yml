@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-original-ft2-ft3-source-rows.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_original_native_finish_schedule_row_source_shadow.py"
+      - "tests/test_gpt2_original_ft2_ft3_sameblock_schedule_source.py"
+      - ".github/workflows/test-gpt2-original-ft2-ft3-source-rows.yml"
   workflow_dispatch:
 
 jobs:
