@@ -54,6 +54,39 @@ def test_page_proof_checks_every_page_and_keeps_one_page():
         store.observations[key] = prior
 
 
+def test_second_page_bind_does_not_walk_the_store_again():
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    first = authority.authenticated_visible_observations(
+        published, bind_page_id="1"
+    )
+    store = source._producer._store
+    original = store.observations.get
+    calls = {"n": 0}
+
+    def counting(key, default=None):
+        calls["n"] += 1
+        if default is None:
+            return original(key)
+        return original(key, default)
+
+    store.observations.get = counting
+    second = authority.authenticated_visible_observations(
+        published, bind_page_id="2"
+    )
+    assert calls["n"] == 0
+    assert {record.page_id for _observation_id, record in first} == {"1"}
+    assert {record.page_id for _observation_id, record in second} == {"2"}
+    full = tuple(
+        (observation_id, record)
+        for observation_id, record in authority.authenticated_visible_observations(
+            published
+        )
+        if record.page_id == "2"
+    )
+    assert second == full
+
+
 def test_second_visible_authentication_reuses_the_bound_rows():
     source, published, _ = _source(page_count=2)
     authority = source.authority()

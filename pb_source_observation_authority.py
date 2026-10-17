@@ -325,6 +325,20 @@ class _SnapshotChainMap(MutableMapping[tuple[str, str], Any]):
         self._snaps[snapshot_id] = _Snap(_Layer(parent.layer), parent.count)
         self._logical += parent.count
 
+    def ensure_flat(self, snapshot_id: str) -> dict[str, Any] | None:
+        """Return this snapshot's flat record view, building it if needed.
+
+        A later write clears the view, so the same dict object means no write
+        has landed since it was built.
+        """
+
+        snap = self._snaps.get(snapshot_id)
+        if snap is None:
+            return None
+        if snap.flat is None:
+            snap.flat = _materialize(snap.layer)
+        return snap.flat
+
     def retain_flats(self, keep: set[str]) -> None:
         for snapshot_id, snap in self._snaps.items():
             if snapshot_id not in keep:
@@ -511,6 +525,10 @@ class _SourceObservationStore:
         # being proved. Object identity, not a timer, decides reuse. A replaced
         # record, receipt, or parent misses this cache and is revalidated.
         self.visible_authentication_cache: dict[str, tuple] = {}
+        # One checked snapshot, shared by later page reads. The flat dicts are
+        # the records themselves; a write clears them. This does not retain a
+        # bound copy of every page.
+        self.visible_page_index: dict[str, tuple] = {}
 
     def source_bytes_match_revision(
         self,

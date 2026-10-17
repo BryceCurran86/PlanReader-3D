@@ -2878,6 +2878,66 @@ class SourceVisibilityAuthority:
         # shared, so the universe is not cloned again.
         return (*rows,)
 
+    def _remember_page_index(
+        self, store, snapshot_id, snapshot, published, page_ids, receipts
+    ) -> None:
+        observations = store.observations.ensure_flat(snapshot_id)
+        fingerprints = store.record_fingerprints.ensure_flat(snapshot_id)
+        if observations is None or fingerprints is None:
+            store.visible_page_index.pop(snapshot_id, None)
+            return
+        store.visible_page_index[snapshot_id] = (
+            published,
+            snapshot,
+            observations,
+            fingerprints,
+            {page_id: tuple(ids) for page_id, ids in page_ids.items()},
+            tuple(receipts),
+        )
+
+    def _reusable_page_rows(
+        self, store, snapshot_id, snapshot, published, bind_page_id: str
+    ):
+        cached = store.visible_page_index.get(snapshot_id)
+        if cached is None:
+            return None
+        (
+            cached_published,
+            cached_snapshot,
+            observations,
+            fingerprints,
+            ids_by_page,
+            receipts,
+        ) = cached
+        if cached_published is not published or cached_snapshot is not snapshot:
+            return None
+        observation_snap = store.observations._snaps.get(snapshot_id)
+        fingerprint_snap = store.record_fingerprints._snaps.get(snapshot_id)
+        if (
+            observation_snap is None
+            or fingerprint_snap is None
+            or observation_snap.flat is not observations
+            or fingerprint_snap.flat is not fingerprints
+        ):
+            return None
+        for observation_id, parent, raster in receipts:
+            if (
+                self._visibility_receipts.get((snapshot_id, observation_id))
+                is not parent
+                or self._raster_visibility_receipts.get(
+                    (snapshot_id, observation_id)
+                )
+                is not raster
+            ):
+                return None
+        return tuple(
+            (
+                observation_id,
+                _bind_record_to_snapshot(observations[observation_id], snapshot),
+            )
+            for observation_id in ids_by_page.get(bind_page_id, ())
+        )
+
     def authenticated_visible_observations(
         self,
         published: "PublishedVisibleSourceSnapshot",
@@ -2920,11 +2980,16 @@ class SourceVisibilityAuthority:
         ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
 
-        # A page proof still checks every visible observation. It keeps a
-        # bound copy only for the page being proved, and drops any earlier
-        # document-wide bound copies before that work continues.
+        # A page proof still checks every visible observation. After one
+        # successful check, a later page keeps a bound copy of that page only
+        # while the snapshot's records and receipts are still the same objects.
         if bind_page_id is not None:
             store.visible_authentication_cache.pop(snapshot_id, None)
+            reused_page = self._reusable_page_rows(
+                store, snapshot_id, snapshot, published, str(bind_page_id)
+            )
+            if reused_page is not None:
+                return reused_page
         else:
             reused = self._reusable_visible_rows(
                 store, snapshot_id, snapshot, published
@@ -2978,6 +3043,8 @@ class SourceVisibilityAuthority:
 
         rows: list[tuple[str, object]] = []
         identity: list[tuple] = []
+        page_ids: dict[str, list[str]] = {}
+        receipts: list[tuple] = []
         for observation_id in published.visible_observation_ids:
             observation_id = str(observation_id)
             expected_parent = self._visibility_receipts.get(
@@ -3063,10 +3130,10 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
 
-            if (
-                bind_page_id is not None
-                and str(observation.page_id) != str(bind_page_id)
-            ):
+            page_key = str(observation.page_id)
+            page_ids.setdefault(page_key, []).append(observation_id)
+            receipts.append((observation_id, expected_parent, raster_receipt))
+            if bind_page_id is not None and page_key != str(bind_page_id):
                 continue
             bound = _bind_record_to_snapshot(observation, snapshot)
             rows.append((observation_id, bound))
@@ -3078,6 +3145,9 @@ class SourceVisibilityAuthority:
                 parent,
                 page_parent,
             ))
+        self._remember_page_index(
+            store, snapshot_id, snapshot, published, page_ids, receipts
+        )
         if bind_page_id is not None:
             return tuple(rows)
         store.visible_authentication_cache.clear()
