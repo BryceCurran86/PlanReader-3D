@@ -56,3 +56,29 @@ def test_duplicate_original_issuer_fails_closed(section):
     a=receipt(); a[section].append(deepcopy(a[section][0]))
     with pytest.raises(ValueError,match="duplicate"):
         compare_original_g17_release_receipts(a,receipt())
+
+
+def test_paired_origins_use_exact_same_source_locator_and_page(monkeypatch):
+    # No source authority may be compared across different input locators.
+    # The only intended experiment variable is the alternative G17 policy.
+    import tools.diag_gptmax_unmeasured_flank_capture_shadow as module
+
+    class Captured(Exception):
+        pass
+
+    receipts=[]
+    class Producer:
+        def __init__(self, **kwargs):
+            pass
+        def ingest_native_pdf_bytes(self, **kwargs):
+            receipts.append(kwargs)
+            raise Captured()
+
+    monkeypatch.setattr(module, "SourceVisibilityProducer", Producer)
+    for changed in (False,True):
+        with pytest.raises(Captured):
+            module._one_source_policy(b"one-original", "a"*64, shadow=changed)
+    assert len(receipts)==2
+    assert receipts[0] == receipts[1]
+    assert receipts[0]["page_ids"] == (3,)
+    assert receipts[0]["source_locator"] == "memory://gptmax-original-lot16-page-3.pdf"
