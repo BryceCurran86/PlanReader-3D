@@ -209,6 +209,15 @@ def audit_original_room_edge_graph(
             "source_sha256":source_sha256,
             "page_1_based":page_1_based,
             "original_native_edge_ids":tuple(sorted(source_edge_ids)),
+            # Keep every literal path/item endpoint in a typed, deterministic
+            # receipt so a second physical doorway stage can reconstruct the
+            # exact printed (open) path, not guess a closure from the bbox.
+            "original_native_edges":tuple(
+                {"source_id":ident,
+                 "endpoints_pdf_pts":edges[ident]["ends"],
+                 "source_ink_length_pdf_pt":edges[ident]["length_pdf_pt"]}
+                for ident in sorted(edges)
+            ),
             "native_components":tuple(details),
             "interior_stroke_intersections_and_overlaps":tuple(conflicts),
             "native_candidate_ring_count":rings,
