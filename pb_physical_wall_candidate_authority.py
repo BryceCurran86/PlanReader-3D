@@ -3501,6 +3501,14 @@ def _build_authenticated_viewport_scope_results(
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
         )
+        # Viewport scopes consume the same original W2/W3/W4 structural
+        # universe as page scopes. Opening-local ink families are NOT
+        # canonical wall inputs, even when a source-owned F.07 viewport
+        # happens to fully contain the observation. Preserve the source
+        # opening family only in the incomplete supplemental scope.
+        page_segments, _supplemental = _partition_opening_local_supplemental_segments(
+            page_segments,
+        )
     except WallPageFrameUnresolved:
         return ()
     if physical_plan_view_shadow:
