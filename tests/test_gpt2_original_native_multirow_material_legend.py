@@ -27,18 +27,29 @@ def _word(*, block, line, index, literal, partition="original_source_p9"):
 
 
 def _original_p9_legend_words(page):
+    # PyMuPDF 1.26 and 1.28 assign different block ordinals to the same
+    # PDF content. Locate the original *complete source block*, not a
+    # version-specific extracted block number; preserve actual native IDs.
+    words=page.get_text("words")
+    by_block={}
+    for w in words:
+        by_block.setdefault(int(w[5]),[]).append(w)
+    selected=set()
+    for block,rows in by_block.items():
+        tokens={str(w[4]) for w in rows}
+        if ({"GRID","VINYL","PLASTER","600x1200"} <= tokens
+                or "IPF1" in tokens or "CLD3" in tokens):
+            selected.add(block)
     return tuple(
         _TrustedTextWord(
             observation_id=f"original_p9:{w[5]}:{w[6]}:{w[7]}",
             page_id="9",
             source_partition_id="original_p9_native_partition",
-            text=str(w[4]),
-            bbox=tuple(float(x) for x in w[:4]),
+            text=str(w[4]),bbox=tuple(float(x) for x in w[:4]),
             block_no=int(w[5]),line_no=int(w[6]),word_no=int(w[7]),
             trusted=False,reason_codes=("native_pdf_text_unverified",),
         )
-        for w in page.get_text("words")
-        if int(w[5]) in (5,307,308)
+        for w in words if int(w[5]) in selected
     )
 
 
@@ -51,7 +62,8 @@ def test_original_a120_grid_true_ceiling_definition_has_separate_source_lines():
         assert "GRID" in rows
         owned,item=rows["GRID"]
         assert len({r.block_no for r in owned})==1
-        assert {r.line_no for r in owned}=={4,5}
+        assert len({r.line_no for r in owned})==2
+        assert owned[1].line_no==owned[0].line_no+1
         assert owned[0].text=="GRID"
         assert "VINYL FACED PLASTER TILE 600x1200" in item["description"]
         assert item["code"]=="GRID"
@@ -190,7 +202,7 @@ def test_same_original_source_block_does_not_grant_grid_ceiling_metric():
                if r[3]=="GRID"]
         assert len(owned)==1
         _partition,_block,words,code,item=owned[0]
-        assert {word.block_no for word in words}=={5}
+        assert len({word.block_no for word in words})==1
         assert not all(word.trusted for word in words)
         assert item["source_semantic_role_unverified"]
         assert item["source_material_issuer_granted"] is False
