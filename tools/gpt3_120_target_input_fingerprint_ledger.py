@@ -88,7 +88,8 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
     dispositions = {"COMPLETED", "TIMEOUT", "MEMORY_LIMIT",
                     "SYSTEM_MEMORY_GUARD", "ERROR", "FAILED"}
     for row in handoffs:
-        if type(row) is not dict or row.get("status") not in dispositions:
+        if (type(row) is not dict or type(row.get("status")) is not str
+            or row["status"] not in dispositions):
             raise ValueError("unrecognized owner source production disposition")
         code = row.get("exit_code")
         if (
