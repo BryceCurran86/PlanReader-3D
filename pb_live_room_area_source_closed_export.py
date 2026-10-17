@@ -46,6 +46,7 @@ def _firm_room_area_quantities(
 
     out: list[QuantityEvidence] = []
     seen_ids: set[str] = set()
+    figured_pair_owner: dict[tuple[str, str], str] = {}
     for quantity in claim.room_area_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -121,6 +122,28 @@ def _firm_room_area_quantities(
             raise SourceClosedRunConflictError(
                 f"room-area quantity must reference exactly one source room: {quantity_id}"
             )
+        metadata = _quantity_metadata(quantity)
+        axes = metadata.get("figured_dimension_ids")
+        # Reissuing the same *pair* of exact native figured axes with a new
+        # area evidence/quantity ID does not prove a second physical room.
+        # This is a final commercial safeguard independent of the producer
+        # batch-index protection.
+        if axes is not None:
+            if (
+                type(axes) not in (tuple, list) or len(axes) != 2
+                or any(type(v) is not str or not v or v != v.strip() for v in axes)
+                or axes[0] == axes[1]
+            ):
+                raise SourceClosedRunConflictError(
+                    f"room-area original figured pair invalid: {quantity_id}"
+                )
+            pair = tuple(sorted(axes))
+            prior = figured_pair_owner.get(pair)
+            if prior is not None and prior != quantity.input_entity_ids[0]:
+                raise SourceClosedRunConflictError(
+                    f"one original figured pair claimed by competing rooms: {pair}"
+                )
+            figured_pair_owner[pair] = quantity.input_entity_ids[0]
         out.append(quantity)
 
     return tuple(sorted(out, key=lambda item: item.quantity_id))
