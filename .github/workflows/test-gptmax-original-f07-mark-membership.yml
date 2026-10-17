@@ -1,4 +1,8 @@
 name: GPT MAX Original F07 Mark Membership
+
+concurrency:
+  group: test-gptmax-original-f07-mark-membership-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     branches: [main]

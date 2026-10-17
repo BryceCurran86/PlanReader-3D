@@ -1,4 +1,8 @@
 name: GPT MAX Original Native Text Paint Partition Audit
+
+concurrency:
+  group: test-gptmax-native-paint-partition-shadow-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   pull_request:
     paths:
