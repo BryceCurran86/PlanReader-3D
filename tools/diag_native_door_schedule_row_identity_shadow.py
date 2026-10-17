@@ -34,6 +34,12 @@ def _raw_words(page):
 
 
 def _row_candidates(source_words):
+    """Enumerate every unique printed Dxx row, including non-swing doors.
+
+    A source schedule can include automated sliding, glazed entry, coolroom
+    contractor and partition-system doors. Do NOT silently exclude rows
+    that lack SINGLE/SWING, or assume numeric width/height for D01.
+    """
     blocks=defaultdict(list)
     for w in source_words:
         blocks[w["native_text_block"]].append(w)
@@ -41,49 +47,53 @@ def _row_candidates(source_words):
     for block,words in blocks.items():
         txt=[w["raw_literal_untrusted"] for w in words]
         codes=[x for x in txt if _DOOR_CODE.fullmatch(x)]
-        if not codes or "SINGLE" not in txt or "SWING" not in txt:
+        if len(codes)!=1:
             continue
-        # The original source table row, not nearest number, must own a single
-        # printed door identifier and exactly one machine-readable WIDTH and
-        # HEIGHT field. The two numeric fields sit after SINGLE, SWING in the
-        # original producer word reading order.
-        if len(codes)!=1:continue
-        idx=txt.index("SWING")
-        nums=[(i,t) for i,t in enumerate(txt[idx+1:],idx+1)
-              if _DIGITS.fullmatch(t)]
-        if len(nums)<2:continue
+        if "AUTOMATED" in txt and "SLIDING" in txt:
+            kind="automated_double_sliding_candidate"
+        elif "PARTITION" in txt and "SYSTEM" in txt:
+            kind="partition_system_single_swing" if "SWING" in txt else "partition_system_candidate"
+        elif "SOLID" in txt and "CORE" in txt:
+            kind="solid_core_single_swing" if "SWING" in txt else "solid_core_candidate"
+        elif "COOLROOM" in txt and "CONTRACTOR" in txt:
+            kind="coolroom_contractor_candidate"
+        elif "ALUMINIUM" in txt and "GLASS" in txt:
+            kind="aluminium_framed_glass_candidate"
+        else:
+            kind="other_source_single_swing" if "SINGLE" in txt and "SWING" in txt else "other_source_door_candidate"
+        start=txt.index("SWING")+1 if "SWING" in txt else txt.index(codes[0])+1
+        nums=[(i,t) for i,t in enumerate(txt[start:],start) if _DIGITS.fullmatch(t)]
+        # The first two source-row numbers may be width and height only
+        # when BOTH are printed. No inferred count/standard dimensions.
+        dimensions=nums[:2] if len(nums)>=2 else []
+        original_width=dimensions[0][1] if dimensions else None
+        original_height=dimensions[1][1] if dimensions else None
         rows.append({
             "source_native_text_block":block,
             "schedule_door_code_literal_untrusted":codes[0],
-            "source_label_occurrences":[
-                w for w in words if w["raw_literal_untrusted"]==codes[0]
-            ],
+            "source_label_occurrences":[w for w in words
+                if w["raw_literal_untrusted"]==codes[0]],
             "source_original_row_words":words,
-            "source_row_has_single_swing_literals":True,
-            "source_width_word_literal_untrusted":nums[0][1],
-            "source_height_word_literal_untrusted":nums[1][1],
-            "source_width_word_address":next(
-                w["original_native_text_address"] for w in words
-                if w["raw_literal_untrusted"]==nums[0][1]
+            "source_row_has_single_swing_literals":"SINGLE" in txt and "SWING" in txt,
+            "source_width_word_literal_untrusted":original_width,
+            "source_height_word_literal_untrusted":original_height,
+            "source_width_word_address":(
+                words[dimensions[0][0]]["original_native_text_address"]
+                if dimensions else None
             ),
-            "source_height_word_address":next(
-                w["original_native_text_address"] for w in words
-                if w["raw_literal_untrusted"]==nums[1][1]
+            "source_height_word_address":(
+                words[dimensions[1][0]]["original_native_text_address"]
+                if dimensions else None
             ),
-            "source_door_kind_candidate":(
-                "partition_system_single_swing"
-                if "PARTITION" in txt and "SYSTEM" in txt
-                else "solid_core_single_swing"
-                if "SOLID" in txt and "CORE" in txt
-                else "other_source_single_swing"
-            ),
-            "source_height_derived_from_explicit_row_not_default":True,
+            "source_door_kind_candidate":kind,
+            "source_height_derived_from_explicit_row_not_default":bool(dimensions),
+            "source_dimensions_missing_or_untrusted":not bool(dimensions),
             "source_door_height_units_authenticated":False,
             "native_pdf_glyph_clip_paint_row_authenticated":False,
             "schedule_row_semantics_source_verified":False,
         })
-    return sorted(rows,key=lambda row:(row["schedule_door_code_literal_untrusted"],row["source_native_text_block"]))
-
+    return sorted(rows,key=lambda row:(
+        row["schedule_door_code_literal_untrusted"],row["source_native_text_block"]))
 
 def audit_original_door_schedule_row_candidates(
     schedule_page, *, other_plan_pages=(),
