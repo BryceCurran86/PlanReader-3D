@@ -127,6 +127,11 @@ def iter_explicit_ceiling_finish_matches(page_text: str) -> tuple[str, ...]:
     return tuple(matches)
 
 
+def _original_page_no_or_none(page_no: object) -> Optional[int]:
+    """Do not serialize a guessed/truncated original source page."""
+    return page_no if type(page_no) is int and page_no > 0 else None
+
+
 def _base_context_blockers(
     *,
     context: ProviderContext,
@@ -261,7 +266,7 @@ def resolve_ceiling_finish_entity(
             metadata={
                 "scope_entity_id": scope,
                 "viewport_id": viewport.viewport_id,
-                "page_no": int(page_no),
+                "page_no": _original_page_no_or_none(page_no),
             },
         )
 
@@ -277,7 +282,7 @@ def resolve_ceiling_finish_entity(
             metadata={
                 "scope_entity_id": scope,
                 "viewport_id": viewport.viewport_id,
-                "page_no": int(page_no),
+                "page_no": _original_page_no_or_none(page_no),
                 "finish_descriptors": tuple(sorted(descriptors)),
             },
         )
@@ -294,7 +299,7 @@ def resolve_ceiling_finish_entity(
             metadata={
                 "scope_entity_id": scope,
                 "viewport_id": viewport.viewport_id,
-                "page_no": int(page_no),
+                "page_no": _original_page_no_or_none(page_no),
                 "finish_descriptor": descriptor,
                 "source_methods": tuple(sorted(source_methods)),
             },
@@ -310,7 +315,7 @@ def resolve_ceiling_finish_entity(
         metadata={
             "scope_entity_id": scope,
             "viewport_id": viewport.viewport_id,
-            "page_no": int(page_no),
+            "page_no": _original_page_no_or_none(page_no),
             "finish_descriptor": descriptor,
             "source_methods": tuple(sorted(source_methods)),
         },
@@ -420,7 +425,7 @@ def _validate_area_quantity(
         except (TypeError, ValueError, OverflowError):
             blockers.append("upstream_area_page_unbound")
         else:
-            if area_page != int(page_no):
+            if area_page != _original_page_no_or_none(page_no):
                 blockers.append("upstream_area_page_mismatch")
 
     blockers.extend(
@@ -453,7 +458,7 @@ def _abstention(
         "source_sha256": context.source_sha256,
         "revision_id": context.current_revision_id,
         "viewport_id": viewport.viewport_id,
-        "page_no": int(page_no),
+        "page_no": _original_page_no_or_none(page_no),
         "area_quantity_id": area_quantity.quantity_id if area_quantity is not None else None,
         "finish_entity_id": finish_entity.candidate_entity_id if finish_entity is not None else None,
         "blockers": list(reasons),
@@ -489,7 +494,7 @@ def _abstention(
         metadata={
             "source_sha256": context.source_sha256,
             "revision_id": context.current_revision_id,
-            "page_no": int(page_no),
+            "page_no": _original_page_no_or_none(page_no),
             "viewport_id": viewport.viewport_id,
             "shadow_only": True,
             "commercial_projection_allowed": False,
@@ -580,7 +585,7 @@ def build_ceiling_lining_quantity(
         "finish_entity_id": finish_entity.candidate_entity_id,
         "source_sha256": context.source_sha256,
         "revision_id": context.current_revision_id,
-        "page_no": int(page_no),
+        "page_no": _original_page_no_or_none(page_no),
         "viewport_id": viewport.viewport_id,
     }
     return QuantityEvidence(
@@ -608,7 +613,7 @@ def build_ceiling_lining_quantity(
         metadata={
             "source_sha256": context.source_sha256,
             "revision_id": context.current_revision_id,
-            "page_no": int(page_no),
+            "page_no": _original_page_no_or_none(page_no),
             "viewport_id": viewport.viewport_id,
             "scope_entity_id": scope,
             "upstream_area_quantity_id": area_quantity.quantity_id,
