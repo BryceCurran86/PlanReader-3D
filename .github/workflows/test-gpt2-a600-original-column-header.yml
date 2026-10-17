@@ -1,0 +1,57 @@
+name: TEST GPT2 Original A600 Width Height Column Authority
+
+on:
+  pull_request:
+    paths:
+      - pb_source_door_schedule_authority.py
+      - tests/test_gpt2_a600_native_column_header_source_roles.py
+      - .github/workflows/test-gpt2-a600-original-column-header.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  source-numeric-column-synthetic-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Duplicate titles, headers and malformed column positions
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_a600_native_column_header_source_roles.py -k 'not test_original_a600_two_printed_titles_and_exact_width_height_source_words'
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
+  original-private-sha-column-witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original private PDF SHA must be provisioned
+        run: |
+          set -euo pipefail
+          echo "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" | sha256sum --check
+      - name: Original A600 column/header/door receipts and frozen guards
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_a600_native_column_header_source_roles.py tests/test_gpt2_source_owned_a600_door_schedule_receipt.py
+          python -m pytest -q tests/test_signed_output_gate_path_coverage.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
