@@ -37,6 +37,7 @@ class OriginalPhysicalFloorToFinishScope:
     finish_support_source_ids: tuple[str,...]
     wall_owners: tuple[OriginalTwoSheetBoundaryOwner,...]
     original_finish_room_polygon_pts: tuple[tuple[float,float], ...]
+    source_room_face_record_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class PhysicalFloorFinishCorrespondenceShadow:
     producer_snapshot_id: str
     decision_scope_id: str
     diagnostic_only: bool = True
+    source_room_face_record_id: str = ""
+    original_room_page_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -141,6 +144,8 @@ def resolve_source_physical_floor_correspondence_shadow(
         or not _ids(scope.finish_support_source_ids)
         or not _ids((scope.producer_snapshot_id,scope.decision_scope_id))
         or type(scope.canonical_floor_id) is not str or not scope.canonical_floor_id
+        or type(scope.source_room_face_record_id) is not str
+        or not scope.source_room_face_record_id
         or type(scope.original_room_page_id) is not str
         or scope.original_room_page_id != metric_room.page_id
         or type(scope.original_finish_page_id) is not str
@@ -192,6 +197,8 @@ def resolve_source_physical_floor_correspondence_shadow(
         tuple(tuple(p) for p in scope.original_finish_room_polygon_pts),
         scope.original_finish_page_id,scope.source_sha256,
         scope.revision_id,scope.producer_snapshot_id,scope.decision_scope_id,
+        source_room_face_record_id=scope.source_room_face_record_id,
+        original_room_page_id=scope.original_room_page_id,
     )
 
 
