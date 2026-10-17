@@ -115,6 +115,8 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
     # No extra arbitrary artifact may be smuggled into an otherwise hash-valid
     # share-safe owner archive. SHA256SUMS itself is the only unlisted hash file.
     expected_tree = set(sums) | {"SHA256SUMS"}
+    _require(not any(node.is_symlink() for node in root.rglob("*")),
+             "untrusted symlink found in derived source receipt package")
     actual_tree = {
         file.relative_to(root).as_posix()
         for file in root.rglob("*") if file.is_file()
