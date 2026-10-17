@@ -581,6 +581,10 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             observed_gate = "owner_process_stopped:" + state
         elif not is_sealed:
             observed_gate = "source_producer_unsealed:" + str(summary.get("status"))
+        elif len(manifest.source_documents) > 1:
+            # A checksum preflight for every original document is not proof
+            # the *producer* actually processed more than its primary PDF.
+            observed_gate = "multidocument_original_source_production_not_complete"
         else:
             observed_gate = "customer_rows_not_verified_for_fresh_source_run"
         rows.append({
@@ -589,6 +593,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             "frozen_manifest_status": manifest.status,
             "process_status": state,
             "producer_status": summary.get("status"),
+            "original_source_package_document_count": len(manifest.source_documents),
+            "producer_primary_source_document_count": 1,
+            "fresh_customer_bijection_verified": False,
             "earliest_verified_project_execution_gate": observed_gate,
             "derived_sealed_quantity_count": count,
             "signed_run_verified_against_derived_bytes": is_sealed,
