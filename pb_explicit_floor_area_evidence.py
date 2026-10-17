@@ -371,12 +371,29 @@ def reconcile_declared_component_area_total(
 
 
 
-def _native_area_word_addresses(native_words, block_no, row):
+def _native_area_word_addresses(native_words, block_no, row, source_block_bbox=None):
     """Find exact lexical source words for one unbound area claim."""
     by_line: dict[int, list[tuple[int, str]]] = {}
     for word in native_words:
-        if len(word) >= 8 and word[5] == block_no and type(word[4]) is str:
-            by_line.setdefault(int(word[6]), []).append((int(word[7]), word[4]))
+        if len(word) < 8 or word[5] != block_no or type(word[4]) is not str:
+            continue
+        try:
+            x0, y0, x1, y1 = (float(v) for v in word[:4])
+            if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+                continue
+            if source_block_bbox is not None and (
+                x0 < source_block_bbox[0] - 1e-3
+                or y0 < source_block_bbox[1] - 1e-3
+                or x1 > source_block_bbox[2] + 1e-3
+                or y1 > source_block_bbox[3] + 1e-3
+            ):
+                continue
+            line_id, word_id = int(word[6]), int(word[7])
+            if line_id < 0 or word_id < 0:
+                continue
+        except (TypeError, ValueError, OverflowError):
+            continue
+        by_line.setdefault(line_id, []).append((word_id, word[4]))
     lines = tuple(
         (number, tuple(sorted(words)))
         for number, words in sorted(by_line.items())
@@ -485,7 +502,7 @@ def extract_unbound_component_areas_from_original_pdf(
                     revision_id=revision_id,
                 )
                 for row in rows:
-                    addresses = _native_area_word_addresses(original_words, block_index, row)
+                    addresses = _native_area_word_addresses(original_words, block_index, row, bbox)
                     if addresses is None:
                         continue
                     labels, values = addresses
