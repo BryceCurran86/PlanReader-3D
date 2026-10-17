@@ -72,3 +72,28 @@ def test_duplicate_alternate_packets_cannot_repeat_same_review_identity():
     alternate = _packet("alternate")
     with pytest.raises(ValueError, match="duplicate alternate"):
         compare_opening_source_correspondence([_packet()], [alternate, deepcopy(alternate)])
+
+
+def test_empty_original_roots_never_establish_exact_correspondence():
+    original = _packet()
+    altered = deepcopy(original)
+    altered["packet_id"] = "another"
+    altered["physical_opening"]["source_observation_ids"] = []
+    altered["source_lineage"]["observations"] = []
+    result = compare_opening_source_correspondence([altered], [deepcopy(altered)])
+    assert result[0]["exact_source_support_original_ids"] == []
+
+
+def test_duplicate_parent_roots_cannot_establish_exact_correspondence():
+    altered = _packet()
+    altered["physical_opening"]["source_observation_ids"] = ["source-1", "source-1"]
+    result = compare_opening_source_correspondence([altered], [altered])
+    assert result[0]["exact_source_support_original_ids"] == []
+
+
+def test_duplicate_observation_rows_cannot_substitute_for_missing_root():
+    altered = _packet()
+    altered["physical_opening"]["source_observation_ids"] = ["source-1", "source-2"]
+    altered["source_lineage"]["observations"] *= 2
+    result = compare_opening_source_correspondence([altered], [altered])
+    assert result[0]["exact_source_support_original_ids"] == []
