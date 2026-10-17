@@ -675,8 +675,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             FROZEN_ROOT / "evaluator.py",
             FROZEN_ROOT / "sealed_reconciliation.py",
             *(
-                FROZEN_ROOT / "projects" / project / "source_manifest.json"
+                FROZEN_ROOT / "projects" / project / name
                 for project in sorted(frozen_by_id)
+                for name in ("source_manifest.json", "reference_takeoff.json")
             ),
         )
     }
