@@ -26,7 +26,20 @@ def _native_line(paths,source_id):
     a,b=it[1:3]
     nums=[round(float(v),3) for v in (a.x,a.y,b.x,b.y)]
     if not all(math.isfinite(v) for v in nums):raise ValueError("finite_original_ink_required")
-    return nums,round(float(paths[i].get("width") or 0),3)
+    parent=paths[i]
+    try:
+        width=float(parent.get("width") or 0)
+        opacity=float(parent.get("stroke_opacity") or 0)
+        color=tuple(float(v) for v in (parent.get("color") or ()))
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("original_divider_paint_ink_untrusted") from None
+    if (not math.isfinite(width) or width<=0
+            or not math.isfinite(opacity) or not 0<opacity<=1
+            or not color or any(not math.isfinite(c) or not 0<=c<=1 for c in color)
+            or "s" not in str(parent.get("type") or "")
+            or "".join(str(parent.get("dashes") or "").split()) not in {"[]0",""}):
+        raise ValueError("original_divider_paint_ink_untrusted")
+    return nums,round(width,3),tuple(round(c,5) for c in color),round(opacity,6)
 
 
 def audit_original_open_functional_divider(
@@ -55,18 +68,23 @@ def audit_original_open_functional_divider(
             return {"status":"source_scope_cap_exceeded",
                     "structural_room_split_authenticated":False,
                     "new_firm_quantities":0}
-        roof,width=_native_line(drawings,shared_north_source_id)
+        roof,width,north_color,north_opacity=_native_line(
+            drawings,shared_north_source_id)
         faces=[_native_line(drawings,ref) for ref in two_competing_divider_face_ids]
         x,y,X,Y=roof
         if y!=Y or x==X or width<=0:
             raise ValueError("shared_original_north_ink_not_horizontal")
         north_y=y
         dividers=[]
-        for (xx,yy,XX,YY),weight in faces:
+        for (xx,yy,XX,YY),weight,color,opacity in faces:
             if xx!=XX or yy==YY or weight<=0:
                 raise ValueError("original_divider_face_not_vertical")
             dividers.append({"x":xx,"y_start":min(yy,YY),
-                             "y_end":max(yy,YY),"width":weight})
+                             "y_end":max(yy,YY),"width":weight,
+                             "source_color":color,"source_opacity":opacity})
+        if (dividers[0]["source_color"]!=dividers[1]["source_color"]
+                or dividers[0]["source_opacity"]!=dividers[1]["source_opacity"]):
+            raise ValueError("original_competing_divider_paint_roles_conflict")
         if (dividers[0]["y_start"]!=dividers[1]["y_start"]
                 or dividers[0]["y_end"]!=dividers[1]["y_end"]
                 or dividers[0]["width"]!=dividers[1]["width"]
@@ -95,6 +113,7 @@ def audit_original_open_functional_divider(
         if (marks[0]["original_word_bbox_pdf_pts"][2]>=xl
                 or marks[1]["original_word_bbox_pdf_pts"][0]<=xr
                 or any(z["original_word_bbox_pdf_pts"][1]<dividers[0]["y_start"]
+                       or z["original_word_bbox_pdf_pts"][3]>dividers[0]["y_end"]
                        for z in marks)):
             raise ValueError("original_mark_not_in_opposing_partition_sections")
         gap=round(dividers[0]["y_start"]-north_y,3)
@@ -104,6 +123,9 @@ def audit_original_open_functional_divider(
             "original_shared_north_source":shared_north_source_id,
             "original_divider_face_source_ids":list(two_competing_divider_face_ids),
             "original_north_open_span_pdf_pts":gap,
+            "open_passage_functional_zone_connection_candidate":gap>0,
+            "source_connected_floor_space_candidate_only":gap>0,
+            "source_connected_floor_space_structural_topology_proven":False,
             "original_competing_divider_face_separation_pdf_pts":round(xr-xl,3),
             "opposite_side_original_same_finish_marks":marks,
             "source_wall_structural_role_issued":False,
