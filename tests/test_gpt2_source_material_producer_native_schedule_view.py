@@ -116,3 +116,13 @@ def test_source_grid_drawing_titles_are_not_ceiling_material_mark_occurrences(dr
     assert materials._source_owned_material_codes_in_line(
         "GRID", {"GRID": {}}
     ) == ("GRID",)
+
+def test_native_schedule_receipt_not_minted_from_unscoped_original_page():
+    src,pub=_source_two_pages()
+    producer=materials.SourceMaterialSemanticProducer.for_source_native_multipath_schedule_shadow(
+        src,page_ids=("2",))
+    producer.publish(pub.revision.revision_id)
+    assert producer.published_source_schedule_viewports()==()
+    assert producer.published_source_schedule_rejections()
+    assert all(len(item)==3 for item in producer.published_source_schedule_rejections())
+    assert producer.published_plan_viewports()==()
