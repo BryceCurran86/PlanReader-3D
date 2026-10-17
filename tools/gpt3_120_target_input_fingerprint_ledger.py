@@ -82,11 +82,31 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
         stable_files.append((path, sha))
     if len({row[0] for row in stable_files}) != len(stable_files):
         raise ValueError("duplicate source/sealed artifact in owner receipt")
+    handoffs = receipt.get("project_handoffs")
+    if type(handoffs) is not list:
+        raise ValueError("owner machine handoff status universe unavailable")
+    # These are the exact statuses emitted by four_job_windows_launcher:
+    # a successful process exits 0; a failed process exits nonzero; and
+    # blocked/unavailable project attempts have no OS process exit code.
+    dispositions = {"COMPLETED", "PROCESS_FAILED", "TIMEOUT", "MEMORY_LIMIT",
+                    "SYSTEM_MEMORY_GUARD", "PRIMARY_SOURCE_UNAVAILABLE"}
+    for row in handoffs:
+        if (type(row) is not dict or type(row.get("status")) is not str
+            or row["status"] not in dispositions):
+            raise ValueError("unrecognized owner source production disposition")
+        status = row["status"]
+        code = row.get("exit_code")
+        if (
+            (status == "COMPLETED" and (type(code) is not int or code != 0))
+            or (status == "PROCESS_FAILED" and (type(code) is not int or code == 0))
+            or (status not in {"COMPLETED", "PROCESS_FAILED"} and code is not None)
+        ):
+            raise ValueError("owner source completion and process exit code conflict")
     return {
         "repo_head": receipt.get("repo_head"),
         "handoff_results": sorted(
             (row["project_id"], row["status"], row.get("exit_code"))
-            for row in receipt["project_handoffs"]
+            for row in handoffs
         ),
         "source_preflight_and_sealed_artifact_hashes": sorted(stable_files),
     }
