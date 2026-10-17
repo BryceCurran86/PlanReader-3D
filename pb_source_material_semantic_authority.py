@@ -1288,11 +1288,18 @@ def _native_multirow_material_definition_candidates(
             # The trusted native schedule consumer will re-run its existing
             # semantic proof and ABSTAIN unless independently validated.
             description = " ".join(w.text.strip() for w in owned[1:]).strip()
-            independent_semantic = semantic_finish_from_schedule_entry({
-                "status": "Confirmed",
-                "description": description, "substrate": "", "finish": "",
-            })
-            if not independent_semantic or len(description) < 4:
+            # A material *noun* in original description is sufficient to
+            # preserve a raw SOURCE candidate, not to assign that noun a
+            # ceiling/floor role or publish a material. The generic semantic
+            # classifier intentionally cannot infer vinyl-faced plaster
+            # ceiling tiles from the standalone legend code GRID, so using
+            # it here loses an authentic printed source row.
+            has_material_noun = re.search(
+                r"\b(?:TILE|TILES|PLASTER|PLASTERBOARD|PANEL|CLADDING|"
+                r"METAL|CARPET|VINYL|PAINT|COATING|CONCRETE|BOARD)\b",
+                description.upper(),
+            ) is not None
+            if not has_material_noun or len(description) < 4:
                 continue
             candidates.append((
                 partition_id, block_no, owned, code,
