@@ -49,6 +49,11 @@ def _row_candidates(source_words):
         codes=[x for x in txt if _DOOR_CODE.fullmatch(x)]
         if len(codes)!=1:
             continue
+        # A standalone Dxx printed plan/detail label is not itself a
+        # schedule row. The exact source-native block must contain actual
+        # door semantics, not merely a familiar code.
+        if "DOOR" not in txt and "SWING" not in txt:
+            continue
         if "AUTOMATED" in txt and "SLIDING" in txt:
             kind="automated_double_sliding_candidate"
         elif "PARTITION" in txt and "SYSTEM" in txt:
