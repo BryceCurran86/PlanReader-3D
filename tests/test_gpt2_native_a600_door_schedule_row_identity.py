@@ -49,15 +49,20 @@ def test_native_fixture_870_does_not_get_assigned_as_d13_width():
 
 
 def test_misleading_missing_height_or_multiple_row_ids_abstains():
-    assert not _row_candidates([
+    rows=_row_candidates([
         _word(1,i,t) for i,t in enumerate(["D11","SINGLE","SWING","820"])
     ])
+    assert len(rows)==1 and rows[0]["source_dimensions_missing_or_untrusted"]
+    assert rows[0]["source_height_word_literal_untrusted"] is None
     assert not _row_candidates([
         _word(2,i,t) for i,t in enumerate(["D11","D12","SINGLE","SWING","820","2040"])
     ])
-    assert not _row_candidates([
+    rows=_row_candidates([
         _word(3,i,t) for i,t in enumerate(["D11","SINGLE","SITTING","820","2040"])
     ])
+    assert len(rows)==1
+    assert rows[0]["source_door_kind_candidate"]=="other_source_door_candidate"
+    assert not rows[0]["source_row_has_single_swing_literals"]
 
 
 def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
@@ -68,6 +73,8 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
         by_code={row["schedule_door_code_literal_untrusted"]:row
                  for row in result["all_original_schedule_row_candidates"]}
         expected={
+            "D01":(None,None),
+            "D02":("900","2050"),
             "D03":("920","2040"),
             "D04":("600","1700"),
             "D05":("600","1700"),
@@ -79,6 +86,10 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
             "D11":("820","2040"),
             "D12":("820","2040"),
             "D13":("920","2040"),
+            "D14":("920","2040"),
+            "D15":("920","2040"),
+            "D16":("800","2000"),
+            "D28":("920","2040"),
         }
         for code,(width,height) in expected.items():
             assert code in by_code
@@ -86,17 +97,24 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
                     by_code[code]["source_height_word_literal_untrusted"]) == (width,height)
             assert not by_code[code]["schedule_row_semantics_source_verified"]
             expected_kind=(
-                "partition_system_single_swing" if code in ("D04","D05","D06")
+                "automated_double_sliding_candidate" if code=="D01"
+                else "aluminium_framed_glass_candidate" if code=="D02"
+                else "partition_system_single_swing" if code in ("D04","D05","D06")
+                else "coolroom_contractor_candidate" if code=="D16"
                 else "solid_core_single_swing"
             )
             assert by_code[code]["source_door_kind_candidate"]==expected_kind
-            assert by_code[code]["source_height_derived_from_explicit_row_not_default"]
+            assert by_code[code]["source_height_derived_from_explicit_row_not_default"] == (code!="D01")
+            assert by_code[code]["source_dimensions_missing_or_untrusted"] == (code=="D01")
             assert not by_code[code]["source_door_height_units_authenticated"]
         comparison={r["original_door_label_literal_not_trusted"]:r
                     for r in result["original_plan_tag_and_schedule_comparisons"]}
         for code in expected:
             assert comparison[code]["unique_source_row_candidate_but_not_authority"]
-            assert comparison[code]["original_plan_label_competitors"]
+            # Original plan tags can be absent from the deliberately
+            # page-scoped three-plan universe; a source schedule row must
+            # survive without inventing a plan host.
+            assert comparison[code]["default_count_1_not_permitted"]
             assert not comparison[code]["source_width_height_signed_to_opening"]
             assert comparison[code]["default_count_1_not_permitted"]
         assert result["new_authoritative_opening_areas"]==0
