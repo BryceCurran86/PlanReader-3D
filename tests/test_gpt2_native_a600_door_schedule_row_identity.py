@@ -89,6 +89,17 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
             "D14":("920","2040"),
             "D15":("920","2040"),
             "D16":("800","2000"),
+            "D17":("800","2000"),
+            "D18":(None,None),
+            "D19":(None,None),
+            "D20":(None,None),
+            "D21":(None,None),
+            "D22":(None,None),
+            "D23":(None,None),
+            "D24":(None,None),
+            "D25":(None,None),
+            "D26":(None,None),
+            "D27":(None,None),
             "D28":("920","2040"),
         }
         for code,(width,height) in expected.items():
@@ -101,11 +112,19 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
                 else "aluminium_framed_glass_candidate" if code=="D02"
                 else "partition_system_single_swing" if code in ("D04","D05","D06")
                 else "coolroom_contractor_candidate" if code=="D16"
+                else "coolroom_sliding_door_candidate" if code=="D17"
+                else "coolroom_display_shelving_door_candidate"
+                if code in tuple(f"D{i}" for i in range(18,28))
                 else "solid_core_single_swing"
             )
             assert by_code[code]["source_door_kind_candidate"]==expected_kind
-            assert by_code[code]["source_height_derived_from_explicit_row_not_default"] == (code!="D01")
-            assert by_code[code]["source_dimensions_missing_or_untrusted"] == (code=="D01")
+            unmeasured=code=="D01" or code in tuple(f"D{i}" for i in range(18,28))
+            assert by_code[code]["source_height_derived_from_explicit_row_not_default"] == (not unmeasured)
+            assert by_code[code]["source_dimensions_missing_or_untrusted"] == unmeasured
+            assert by_code[code]["display_shelving_door_not_room_wall_assumed"] == (
+                code in tuple(f"D{i}" for i in range(18,28))
+            )
+            assert not by_code[code]["source_physical_room_perimeter_door_proven"]
             assert not by_code[code]["source_door_height_units_authenticated"]
         comparison={r["original_door_label_literal_not_trusted"]:r
                     for r in result["original_plan_tag_and_schedule_comparisons"]}
