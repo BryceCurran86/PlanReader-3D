@@ -446,3 +446,20 @@ def test_exact_project_cli_rejects_nonreport_json_and_symlink_destinations(tmp_p
     with pytest.raises(ValueError, match="cannot follow output symlinks"):
         module.main([*args, "--output", str(link)])
     assert data.read_bytes() == b"unchanged-binary-source"
+
+
+def test_exact_project_cli_does_not_replace_partial_lookalike_diagnostic(tmp_path, monkeypatch):
+    output = tmp_path/"lookalike.json"
+    content = '{"project_id":"synthetic","publication_status":"UNPUBLISHED","score_claim":false}'
+    output.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(module, "build_original_byte_gated_project_report",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("must not run")))
+    args = [
+        "--manifest", str(tmp_path/"manifest.json"),
+        "--sealed-run", str(tmp_path/"sealed.json"),
+        "--identity-map", str(tmp_path/"identity.json"),
+        "--source", str(tmp_path/"original.pdf"), "--output", str(output),
+    ]
+    with pytest.raises(ValueError, match="cannot overwrite unrelated evidence"):
+        module.main(args)
+    assert output.read_text(encoding="utf-8") == content
