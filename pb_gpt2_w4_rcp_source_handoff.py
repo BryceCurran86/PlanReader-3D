@@ -11,6 +11,10 @@ import math
 
 from shapely.geometry import Polygon
 
+from pb_gpt2_w4_original_floor_handoff import (
+    audit_gpt2_w4_bound_original_floor,
+)
+
 
 def _valid_polygon(v):
     if type(v) not in (list,tuple) or len(v)<3:
@@ -26,10 +30,11 @@ def _valid_polygon(v):
 
 
 def audit_gpt2_w4_original_rcp_ceiling_handoff(
-    w4_room_result: dict, *,
-    independently_registered_rcp: dict,
+    *, independently_registered_rcp: dict,
     original_rcp_ink: dict,
     original_rcp_material: dict,
+    canonical_rooms,
+    physical_room_id: str,
 ) -> dict:
     """Source-only A120 ceiling zone binding to a sealed W4 physical room.
 
@@ -45,11 +50,16 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
         "original_ceiling_measurement_source":"reflected_ceiling_plan",
         "new_firm_quantities":0,
     }
-    if (type(w4_room_result) is not dict or
-            w4_room_result.get("status")!="source_original_floor_W4_face_candidate_only"
+    # Re-execute the exact sealed W4 producer-face binding. A caller-made
+    # dict with copied "W4 verified" booleans is never a valid W4 issuer.
+    w4_room_result=audit_gpt2_w4_bound_original_floor(
+        independently_registered_rcp,canonical_rooms=canonical_rooms,
+        physical_room_id=physical_room_id)
+    if (w4_room_result.get("status")!="source_original_floor_W4_face_candidate_only"
             or not w4_room_result.get("w4_room_face_source_identity_proven")
             or not w4_room_result.get("source_w4_wall_ownership_authenticated")):
-        return blocked
+        return {**blocked,"first_failure":w4_room_result.get("first_failure",
+            "original_W4_room_not_independently_authenticated")}
     if (type(independently_registered_rcp) is not dict or
             independently_registered_rcp.get("status")!=
                 "original_source_ink_ring_translation_candidate"
