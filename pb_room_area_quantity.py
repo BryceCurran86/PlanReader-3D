@@ -78,6 +78,7 @@ def _polygon_area(points: Sequence[tuple[float, float]]) -> float:
         # An original room face must be one simple positive-area polygon.
         # Shoelace alone can report positive m² for crossing/inside-out ink.
         # This is a veto on existing source geometry, not a new polygon issuer.
+        from shapely.errors import GEOSException
         from shapely.geometry import Polygon
         physical_ring = Polygon(original)
         if (
@@ -92,7 +93,7 @@ def _polygon_area(points: Sequence[tuple[float, float]]) -> float:
             - original[(i + 1) % len(original)][0] * original[i][1]
             for i in range(len(original))
         )
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, GEOSException):
         return 0.0
     return abs(total) / 2.0 if math.isfinite(total) else 0.0
 
