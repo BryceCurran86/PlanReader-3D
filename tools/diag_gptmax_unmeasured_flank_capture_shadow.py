@@ -14,6 +14,7 @@ from pb_live_physical_opening_void_composition import compose_live_physical_open
 from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
 
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -178,6 +179,40 @@ def _original_eight_firm_customer_retention(original_receipt, updated_receipt, c
 
 
 
+def _source_unique_original_opening_host_rows(traces):
+    """One original physical opening can have many source selectors, not many hosts."""
+    rows = []
+    identities = {}
+    for trace in traces:
+        physical = trace.opening_identity_id
+        supported = (
+            isinstance(physical, str) and bool(physical)
+            and trace.status is EvidenceResolutionStatus.CORROBORATED
+            and isinstance(trace.record_id, str) and bool(trace.record_id)
+            and isinstance(trace.host_wall_id, str) and bool(trace.host_wall_id)
+            and bool(trace.member_wall_candidate_ids)
+        )
+        row = {
+            "opening_id": physical,
+            "representative_observation_id": trace.representative_observation_id,
+            "host_proven": supported,
+            "first_reasons": list(trace.reason_codes),
+            "host_members": list(trace.member_wall_candidate_ids),
+            "host_wall_id": trace.host_wall_id,
+            "host_binding_record_id": trace.record_id,
+        }
+        rows.append(row)
+        if isinstance(physical, str) and physical:
+            identities.setdefault(physical, []).append(row)
+    duplicate_ids = sorted(k for k, v in identities.items() if len(v) > 1)
+    unique_hosts = sum(
+        len(v) == 1 and v[0]["host_proven"] for v in identities.values()
+    )
+    rows.sort(key=lambda r: (
+        str(r["opening_id"] or ""), str(r["representative_observation_id"])))
+    return rows, len(identities), unique_hosts, duplicate_ids
+
+
 def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
                   elevation_witness_shadow: bool = False) -> dict:
     if type(elevation_witness_shadow) is not bool:
@@ -197,11 +232,8 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         raise RuntimeError("different source SHA in paired policy")
     if any(x.page_id not in ("3", None) for x in comp.opening_bindings):
         raise RuntimeError("nonplan opening introduced")
-    rows = sorted(
-        ({"opening_id": t.opening_identity_id, "host_proven": bool(t.record_id),
-          "first_reasons": list(t.reason_codes), "host_members": list(t.member_wall_candidate_ids)}
-         for t in comp.opening_bindings),
-        key=lambda row: row["opening_id"],
+    rows, physical_count, host_count, duplicate_physical_ids = (
+        _source_unique_original_opening_host_rows(comp.opening_bindings)
     )
     return {
         "status": "original_source_ink_closed_g17_capture_counterfactual",
@@ -214,8 +246,10 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         "separate_elevation_witness_page_5":elevation_witness_shadow,
         "old_source_snapshot_may_differ": True,
         "old_21_15_9_8_source_baseline_NOT_replayed_or_assumed": True,
-        "opt_in_physical_opening_count": len(rows),
-        "opt_in_authenticated_host_count": sum(x["host_proven"] for x in rows),
+        "opt_in_physical_opening_count": physical_count,
+        "opt_in_authenticated_host_count": host_count,
+        "duplicate_original_physical_source_ids": duplicate_physical_ids,
+        "unresolved_original_selectors_not_counted_as_openings": True,
         "opt_in_opening_host_rows": rows,
         "retained_original_source_bytes": True,
         # Do not call a quantity-row-only equality a sealed old-eight proof.
