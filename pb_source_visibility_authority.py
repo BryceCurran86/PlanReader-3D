@@ -848,8 +848,15 @@ class SourceVisibilityProducer:
                 or published.revision.document_id != document_id
                 or published.revision.source_sha256 != source_sha256
                 or published.snapshot.snapshot_id != snapshot_id
-                or not isinstance(page_id, str) or not page_id.isdecimal()):
+                or type(page_id) is not str or not page_id.isdecimal()
+                or str(int(page_id)) != page_id or int(page_id) < 1):
             raise ValueError("original G17 render selector foreign or stale")
+        # This read is tied to the producer's actually decoded source page;
+        # a caller may NOT use the original PDF hash to render a page which
+        # was never authenticated in this revision or was marked failed.
+        if (int(page_id) not in published.coverage.decoded_pages
+                or int(page_id) in published.coverage.failed_pages):
+            raise ValueError("original G17 render page not decoded successfully")
         original = self._producer._store.source_bytes_by_revision.get(revision_id)
         if not original or hashlib.sha256(original).hexdigest() != source_sha256:
             raise ValueError("original G17 immutable PDF SHA mismatch")

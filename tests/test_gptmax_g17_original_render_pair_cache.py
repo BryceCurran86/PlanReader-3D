@@ -20,6 +20,7 @@ def fixture():
     published = Obj(
         revision=Obj(document_id="doc", revision_id=revision, source_sha256=digest),
         snapshot=Obj(snapshot_id=snapshot),
+        coverage=Obj(decoded_pages=(3,4), failed_pages=()),
     )
     producer._published_by_revision[revision] = published
     producer._producer._store.source_bytes_by_revision[revision] = source
@@ -134,3 +135,30 @@ def test_invalid_original_render_is_never_cached_or_reused():
     assert a is not b
     assert producer._g17_original_render_pair_cache == {}
     assert len(calls) == 4
+
+
+@pytest.mark.parametrize("page_id", ["0", "03", "-3", "", " 3 ", "5"])
+def test_unchosen_or_noncanonical_original_source_page_must_not_be_rendered(page_id):
+    producer, scope, calls = fixture()
+    with pytest.raises(ValueError, match="stale|not decoded"):
+        producer._original_g17_render_pair_shadow(**{**scope,"page_id":page_id})
+    assert calls == []
+
+
+def test_original_decode_failure_forbids_cached_and_fresh_page_paint():
+    producer, scope, calls = fixture()
+    producer._original_g17_render_pair_shadow(**scope)
+    published = producer._published_by_revision[scope["revision_id"]]
+    published.coverage.failed_pages = (3,)
+    with pytest.raises(ValueError,match="not decoded"):
+        producer._original_g17_render_pair_shadow(**scope)
+    assert calls == [("3",True),("3",False)]
+
+
+def test_render_scope_does_not_borrow_unauthenticated_page_from_same_pdf():
+    producer, scope, calls = fixture()
+    published = producer._published_by_revision[scope["revision_id"]]
+    published.coverage.decoded_pages = (3,)
+    with pytest.raises(ValueError,match="not decoded"):
+        producer._original_g17_render_pair_shadow(**{**scope,"page_id":"4"})
+    assert calls == []
