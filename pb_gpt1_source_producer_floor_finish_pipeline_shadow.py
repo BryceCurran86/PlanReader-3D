@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pb_cross_view_room_area_authority import CrossViewRoomAreaResult
 from pb_same_view_room_area_authority import SameViewRoomAreaResult
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceComposition
+from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
 from pb_source_material_semantic_authority import (
     SourceMaterialDefinitionResult,SourceMaterialOccurrenceScopeResult,
 )
@@ -256,7 +257,6 @@ def diagnose_source_producer_floor_finish_with_w4_shadow(
     original sealed SourceRoomFaceAuthority scope with its actual W4 ownership.
     The returned result stays CANDIDATE and never signs commercial quantities.
     """
-    from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
     from pb_gpt1_producer_sealed_w4_metric_floor_shadow import (
         bind_producer_sealed_w4_metric_floor_shadow,
     )
