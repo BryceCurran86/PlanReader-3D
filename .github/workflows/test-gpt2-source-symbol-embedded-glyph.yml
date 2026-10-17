@@ -1,0 +1,40 @@
+name: TEST GPT2 Original Embedded Symbol Glyph Source Proof
+
+on:
+  pull_request:
+    paths:
+      - pb_pdf_text_integrity_authority.py
+      - tests/test_gpt2_symbol_source_optin_native_word_integrity.py
+      - .github/workflows/test-gpt2-source-symbol-embedded-glyph.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-glyph-true-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact original branch head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install original source glyph test dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt fonttools
+      - name: Assert no skipped positive embedded glyph source proof
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q -rs tests/test_gpt2_symbol_source_optin_native_word_integrity.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
