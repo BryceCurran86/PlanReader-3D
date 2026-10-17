@@ -8,6 +8,7 @@ This composition does not elevate source statuses or publish a quantity.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from shapely.geometry import box
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_material_semantic_authority import (
     SourceMaterialDefinitionResult, SourceMaterialOccurrenceScopeResult,
@@ -19,6 +20,7 @@ from pb_gpt1_original_crosssheet_finish_binding_shadow import (
     AuthenticatedFloorFinishPlanMark,
     PhysicalFloorFinishCandidate,
     bind_source_finish_mark_to_corresponded_floor_shadow,
+    _safe_polygon,
 )
 
 
@@ -95,6 +97,9 @@ def use_original_semantic_producer_for_finish_shadow(
             return block("original_native_paint_clip_receipt_unverified")
         seen_text.update(record.source_text_observation_ids)
         owned[record.original_source_occurrence_id]=record
+    support=_safe_polygon(correspondence.finish_support_polygon_pts)
+    if support is None:
+        return block("source_material_original_support_perimeter_unavailable")
     marks=[]
     seen_occurrence=set()
     for occurrence in occurrence_scope.records:
@@ -108,11 +113,16 @@ def use_original_semantic_producer_for_finish_shadow(
             or occurrence.code!=defrow.code
             or occurrence.semantic_finish!=defrow.semantic_finish
         ):
-            # A different definition must not be classified by this one.
-            # The complete scope is preserved, not silently thrown away;
-            # its other original marks may still compete geometrically.
+            # Other authenticated material marks on the same sheet can be
+            # legitimate distinct rooms. Only an actual competing mark INSIDE
+            # this exact physical room must defeat this one-material claim.
             if occurrence.page_id == correspondence.original_finish_page_id:
-                return block("source_material_competing_definition_in_finish_scope")
+                try:
+                    other=box(*map(float,occurrence.bbox_pdf_pts))
+                except (TypeError,ValueError,OverflowError):
+                    return block("source_material_competing_mark_geometry_invalid")
+                if support.contains(other):
+                    return block("source_material_competing_definition_in_finish_scope")
             continue
         if (
             (occurrence.source_sha256,occurrence.revision_id,
