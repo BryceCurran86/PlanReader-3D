@@ -78,7 +78,7 @@ Status: still **report only, no production change**. Option A (#2680) is indepen
 
 - 130 free ends on 114 candidates. 110 candidates lie fully inside the DERIVED plan frame; 4 sit in the title-block strip below it (y 798–819), are 10–33 pt long and are built from non-native, raster-derived primitives with no layer (logo or text strokes).
 - The free ends are mostly **near-misses, not dangling walls**: the nearest other-wall centerline is a median 2.06 pt away (37 ends within 1 pt, 78 within 3 pt, all 114 within 6 pt). They are wall-face contacts typed `ENDPOINT`, or symbol and dimension graphics.
-- A render of the page with the free ends marked shows them on dimension strings and ticks, the compass symbol, the scale bar, title-block text, door and fixture details, and a minority of real wall ends at openings. (`3laurel_p3_wall_authority_gate_trace/evidence/page_free_ends_overview.png`: red = free ends of tainted candidates, blue = the DERIVED frame.)
+- A render of the page with the free ends marked shows them on dimension strings and ticks, the compass symbol, the scale bar, title-block text, door and fixture details, and a minority of real wall ends at openings. (Original page overlay retained only in the authorized private source workspace; red marks were tainted free ends, blue was the derived frame.)
 - Source layer class of **all 1,559** candidates (layers read from the PDF's optional-content names; descriptive only):
 
 | class | candidates | tainted | ambiguous in equivalence | equivalence representatives |
@@ -106,8 +106,8 @@ Status: still **report only, no production change**. Option A (#2680) is indepen
 
 ### 9.4 The extra host is a false positive (observed, rendered)
 
-- The one additional authenticated host is opening `…733d836d…` (`jamb_bounded_two_face_interruption`, x 899–909, y ≈ 509). Its four host-wall candidates are 11 pt lines, all on layer `Service_Gas.Bottled`: the tops of **two gas-cylinder symbols** hanging below the garage wall. (`evidence/false_host_gas_cylinders.png`; the red lines are the four host-wall candidates.) The 114-candidate taint was accidentally preventing this false host.
-- The host production already binds (`…63281952…`, four members on `Enclosure_WallExternal`, a sliding door between the Alfresco and Living areas) is a genuine wall opening. That judgement is from the render, not an authority. (`evidence/genuine_host_sliding_door.png`.)
+- The one additional authenticated host is opening `…733d836d…` (`jamb_bounded_two_face_interruption`, x 899–909, y ≈ 509). Its four host-wall candidates are 11 pt lines, all on layer `Service_Gas.Bottled`: the tops of **two gas-cylinder symbols** hanging below the garage wall. (Original private overlay previously used red lines for four host-wall candidates.) The 114-candidate taint was accidentally preventing this false host.
+- The host production already binds (`…63281952…`, four members on `Enclosure_WallExternal`, a sliding door between the Alfresco and Living areas) is a genuine wall opening. That judgement is from the render, not an authority. (Original source image remains private.)
 - Restricting the relaxation to wall-named layers retains 25 more candidates and adds **no** host.
 
 ### 9.5 Scale is a second, independent blocker (observed)
