@@ -14,7 +14,10 @@ def _job(name: str) -> str:
     text = WORKFLOW.read_text(encoding="utf-8")
     marker = f"  {name}:\n"
     assert text.count(marker) == 1
-    return text.split(marker, 1)[1].split("\n  ", 1)[0]
+    import re
+    tail = text.split(marker, 1)[1]
+    next_job = re.search(r"(?m)^  [a-z][a-z0-9_-]*:\\s*$", tail)
+    return tail[:next_job.start()] if next_job else tail
 
 
 def test_public_pr_only_executes_source_neutral_project_tests():
