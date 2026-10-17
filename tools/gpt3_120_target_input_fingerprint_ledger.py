@@ -132,6 +132,20 @@ def _require_published_suite_summary_parity(
         sum(row["unsupported_extra"] for row in project_rows) != extras
     ):
         raise ValueError("published suite totals disagree with project results")
+    by_project: dict[str, int] = {}
+    for (project_id, _), item in item_results.items():
+        by_project[project_id] = by_project.get(project_id, 0) + (
+            item["state"] == "MATCHED_WITHIN_TOLERANCE"
+        )
+    # Equal suite totals do not justify swapping one project winner with
+    # another. Project ID and each exact numerator must remain paired.
+    if len(by_project) != 4 or any(
+        type(row.get("project_id")) is not str
+        or row["project_id"] not in by_project
+        or row["matched_within_tolerance"] != by_project[row["project_id"]]
+        for row in project_rows
+    ) or len({row["project_id"] for row in project_rows}) != 4:
+        raise ValueError("published project match claims disagree with exact target states")
 
 
 def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
