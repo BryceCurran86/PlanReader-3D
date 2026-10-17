@@ -37,3 +37,25 @@ def test_same_original_id_with_altered_confidence_still_conflicts():
     atom=_finish_atom()
     rival=replace(atom,confidence=0.5)
     assert "ceiling_source_evidence_identity_conflict" in _result(atom,rival).reason_codes
+
+
+def test_one_original_material_mark_cannot_bind_to_two_ceiling_scopes():
+    original=_finish_atom()
+    reused=replace(original,metadata={"scope_entity_id":"other-physical-room"})
+    for order in ((original,reused),(reused,original)):
+        result=_result(*order)
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert "ceiling_source_evidence_identity_conflict" in result.reason_codes
+
+
+def test_unrelated_other_scope_with_independent_original_id_is_ignored():
+    original=_finish_atom()
+    unrelated=replace(
+        original,evidence_id="independent-source-mark",
+        metadata={"scope_entity_id":"other-physical-room"},
+        raw_text="CEILING FINISH: acoustic mineral fibre grid",
+    )
+    for order in ((original,unrelated),(unrelated,original)):
+        result=_result(*order)
+        assert result.status is EvidenceResolutionStatus.CORROBORATED
+        assert result.evidence_ids == (original.evidence_id,)
