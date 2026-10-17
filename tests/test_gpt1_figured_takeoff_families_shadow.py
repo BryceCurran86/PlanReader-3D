@@ -208,6 +208,7 @@ def test_figured_opening_reveals_keep_door_and_window_sills_distinct():
         "physical-open-1","door",1000,2000,100,
         "width","height","depth","host-wall",
         ("host-evidence",),("frame-evidence",),SHA,"rev","7",
+        original_dimension_basis="source_structural_rough_opening",
     )
     a=measure_source_figured_opening_reveals_shadow(door)
     b=measure_source_figured_opening_reveals_shadow(
@@ -241,3 +242,14 @@ def test_hosted_opening_cannot_deduct_without_existing_source_signed_area():
         result=measure_figured_wall_lining_shadow(ring,backed,heights,(candidate,))
         assert result.status is Status.ABSTAINED
         assert result.candidate_net_lining_m2 is None
+
+def test_leaf_size_cannot_substitute_for_structural_opening_reveal():
+    door=DocumentedPhysicalOpeningFrame(
+        "physical-open-1","door",920,2040,100,
+        "door-leaf-width","leaf-height","wall-depth","host-wall",
+        ("host-evidence",),("frame-evidence",),SHA,"rev","7",
+        original_dimension_basis="schedule_door_leaf",
+    )
+    r=measure_source_figured_opening_reveals_shadow(door)
+    assert r.status is Status.ABSTAINED
+    assert r.candidate_reveal_surface_m2 is None
