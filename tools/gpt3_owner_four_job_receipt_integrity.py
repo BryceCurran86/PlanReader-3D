@@ -133,19 +133,12 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
         file.relative_to(root).as_posix()
         for file in root.rglob("*") if file.is_file()
     }
-    # Other repository tests may import the original SHA-indexed
-    # assemble_receipts.py and cause Python to emit a transient .pyc beside
-    # it. Such bytecode is not owner receipt evidence; never read/verify it,
-    # but do not mistake this one predictable runner byproduct for a private
-    # source file. All other unindexed paths (including any PDF) still fail.
-    allowed_bytecode = {
-        name for name in actual_tree - expected_tree
-        if name.startswith("__pycache__/assemble_receipts.cpython-")
-        and name.endswith(".pyc")
-        and name.count("/") == 1
-        and (root / name).stat().st_size <= 512 * 1024
-    }
-    _require(actual_tree - allowed_bytecode == expected_tree,
+    # CPython bytecode is not in the owner's SHA-indexed receipt universe.
+    # Never whitelist a .pyc by its filename and size: arbitrary untrusted
+    # source bytes could be hidden behind that name. Test runners should use
+    # PYTHONDONTWRITEBYTECODE=1 or an import cache outside this archive.
+    # Even interpreter-generated caches are unverified and must fail closed.
+    _require(actual_tree == expected_tree,
              "unindexed artifact in original share-safe receipt package")
     _require(all(sums[k] == sha for k, sha in indexed.items()),
              "SHA256SUMS and owner receipt disagree")
