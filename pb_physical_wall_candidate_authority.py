@@ -866,6 +866,69 @@ def filtered_wall_topology_source_segment_count(
     )
 
 
+def repeated_raster_drafting_motif_wall_ids(
+    records: Sequence[PhysicalWallCandidateRecord],
+) -> frozenset[str]:
+    """W4 walls that are the raster leftover of a repeated drafting motif.
+
+    Raster-visible segments are injected without a source path_index, so the
+    pre-topology singleton motif filter cannot see them as one-segment paths.
+    This census reuses that filter's orthogonal repeat count and span
+    fraction on the already-assembled W4 records. The fraction is applied to
+    the repeated family's own along-axis occupancy, not a page or viewport
+    bbox, so unrelated sheet content cannot mint or revoke a motif. It never
+    deletes primitives, never rekeys split IDs, never binds a dimension
+    annotation, and never classifies a unique short return, a unique aligned
+    competitor, or a repeated family of genuine wall-length fragments as a
+    motif. The census never writes PhysicalEquivalenceClass. Eight 28 pt
+    pieces at pitch 130 remain a motif under the occupancy rule; that is a
+    typed unsigned residual. Default production must not treat repetition
+    or a missing identity relation as DISTINCT_PHYSICAL_WALLS.
+    """
+    families: dict[tuple[float, float], list[tuple[str, float, float, tuple[float, float], tuple[float, float]]]] = {}
+    for record in records:
+        identity = record.physical_identity
+        primitives = tuple(str(item) for item in identity.source_primitive_ids)
+        if not primitives or any(not item.startswith("raster_segment:") for item in primitives):
+            continue
+        points = tuple(record.wall_candidate.centerline_pts or ())
+        if len(points) != 2:
+            continue
+        start = (float(points[0][0]), float(points[0][1]))
+        end = (float(points[1][0]), float(points[1][1]))
+        length = math.hypot(end[0] - start[0], end[1] - start[1])
+        if not math.isfinite(length) or length <= 0.0:
+            continue
+        angle = math.degrees(math.atan2(end[1] - start[1], end[0] - start[0])) % 180.0
+        signature = (round(length, 2), round(angle, 1))
+        families.setdefault(signature, []).append(
+            (record.wall_candidate_id, length, angle, start, end)
+        )
+
+    motif_ids: set[str] = set()
+    for members in families.values():
+        if len(members) < _REPEATED_MOTIF_ORTHOGONAL_REPEAT_MIN:
+            continue
+        alongs: list[float] = []
+        for _wall_id, _length, angle, start, end in members:
+            axis = math.radians(angle)
+            cosine = math.cos(axis)
+            sine = math.sin(axis)
+            alongs.append(start[0] * cosine + start[1] * sine)
+            alongs.append(end[0] * cosine + end[1] * sine)
+        occupancy = max(alongs) - min(alongs)
+        if not math.isfinite(occupancy) or occupancy <= 0.0:
+            continue
+        limit = occupancy * _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION
+        for wall_id, length, angle, _start, _end in members:
+            if not _is_orthogonal_angle(angle):
+                continue
+            if length > limit:
+                continue
+            motif_ids.add(wall_id)
+    return frozenset(motif_ids)
+
+
 def _segment_geometry(segment: Mapping[str, object]) -> Line:
     return (
         float(segment["x1"]),
