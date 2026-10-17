@@ -99,3 +99,45 @@ quantity and does not create a frozen benchmark identity. Using `--format csv`
 cannot substitute for retaining the signed JSON source run and full verifier
 receipts. Quote comparisons use signed fingerprints; a different fingerprint
 requires independent issuer adjudication rather than being treated as new work.
+
+## Compare real client pricing scenarios
+
+After a signed takeoff is verified, price the **same physical quantity IDs**
+under multiple private client rate policies. The baseline is explicitly named,
+and each scenario independently supplies all percentages, project ID, currency,
+dates and per-unit rates. This is a cost-planning calculation, not a remeasurement.
+
+```sh
+python -m tools.gpt3_customer_quote_scenarios \
+  --sealed-run /secure/project/source_sealed_run.json \
+  --customers /secure/project/verified_customer_rows.json \
+  --scenario-books /secure/project/scenarios.json \
+  --output /secure/project/scenario-comparison.json --format json
+```
+
+Scenario-book shape:
+
+```json
+{
+  "schema_version": "gpt3-client-scenarios-v1",
+  "baseline": "Standard",
+  "budgets": {"Standard": "100000", "Premium": "120000"},
+  "scenarios": [
+    {"name": "Standard", "client_rates": "<FULL gpt3-client-rates-v1 object>"},
+    {"name": "Premium", "client_rates": "<FULL gpt3-client-rates-v1 object>"}
+  ]
+}
+```
+
+The quoted placeholder above means the actual client rate-book object, not the
+literal string. Additional exports are `--format csv` (scenario totals and
+budget differences) and `--format rfq-csv` (unpriced signed source families,
+units, quantity IDs and supplier input requests). An unpriced alternative
+has **null total**, not an artificial lowest-price advantage.
+
+Quote CSV exports include verified item rows, manually authored allowances in
+their own role, priced subtotal, overhead, contingency, discount, tax and a
+grand total **only when every signed quantity has a client price**. Those rows
+retain the quote fingerprint for downstream reconciliation. Never treat manual
+allowances as original drawing measurements.
+
