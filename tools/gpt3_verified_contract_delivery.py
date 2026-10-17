@@ -7,6 +7,8 @@ measurements, call frozen V2 scoring, or certify progress/completion.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
@@ -17,7 +19,8 @@ from typing import Any, Mapping
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from pb_customer_output_verification import verify_sealed_customer_output
 from tools.gpt3_verified_customer_quote import (
-    _currency, _decimal, _money, _number, _write_new, compare_verified_quotes,
+    _csv_text, _currency, _decimal, _money, _number, _write_new,
+    compare_verified_quotes,
 )
 from tools.report_gpt3_four_project_evidence import _read_json_without_duplicate_keys
 
@@ -360,6 +363,64 @@ def build_quote_revision_history(
     return result
 
 
+def contract_csv(contract: Mapping[str, Any]) -> str:
+    """Customer-importable priced packages, programme, scope and acceptance."""
+    columns = ("row_type", "contract_id", "reference", "description", "source_quantity_ids",
+               "unit_quantities", "share_pct", "due_on", "gross_value",
+               "status", "quote_fingerprint", "contract_fingerprint")
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns)
+    writer.writeheader()
+    shared = {
+        "contract_id": contract["contract_id"],
+        "quote_fingerprint": contract["quote_fingerprint"],
+        "contract_fingerprint": contract["contract_fingerprint"],
+    }
+    def emit(row: dict) -> None:
+        writer.writerow({
+            key: _csv_text(row.get(key)) if key in (
+                "row_type", "contract_id", "reference", "description",
+                "source_quantity_ids", "unit_quantities", "due_on",
+                "status", "quote_fingerprint", "contract_fingerprint"
+            ) else row.get(key)
+            for key in columns
+        })
+    for package in contract["packages"]:
+        emit({**shared, "row_type": "SIGNED_SOURCE_WORK_PACKAGE",
+              "reference": package["package_id"],
+              "description": package["description"],
+              "source_quantity_ids": ";".join(package["source_quantity_ids"]),
+              "unit_quantities": json.dumps(package["physical_quantities_by_unit"], sort_keys=True),
+              "gross_value": package["priced_line_total"],
+              "status": "QUOTED_SOURCE_LINE_WORK"})
+    for row in contract["milestones"]:
+        emit({**shared, "row_type": "CLIENT_PROGRAMME_MILESTONE",
+              "reference": row["id"], "description": row["description"],
+              "share_pct": row["share_pct"], "due_on": row["due_on"],
+              "gross_value": row["scheduled_value"], "status": row["status"]})
+    for label, lines in (("SCOPE_INCLUSION", contract["inclusions"]),
+                         ("SCOPE_EXCLUSION", contract["exclusions"])):
+        for item in lines:
+            emit({**shared, "row_type": label, "description": item})
+    emit({**shared, "row_type": "CLIENT_CONTRACT_TOTAL",
+          "gross_value": contract["contract_value_including_quote_tax"],
+          "status": contract["acceptance"]["status"]})
+    return output.getvalue()
+
+
+def quote_revisions_csv(history: Mapping[str, Any]) -> str:
+    """Client revision history never attributes a rate delta to new geometry."""
+    columns = ("version", "effective_on", "quote_fingerprint",
+               "signed_run_fingerprint", "priced_total",
+               "change_since_previous", "customer_acceptance_required")
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns)
+    writer.writeheader()
+    for row in history["revisions"]:
+        writer.writerow({key: row.get(key) for key in columns})
+    return output.getvalue()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sealed-run", required=True, type=Path)
@@ -368,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--policy", type=Path)
     parser.add_argument("--revisions", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--format", choices=("json", "csv"), default="json")
     args = parser.parse_args(argv)
     if bool(args.revisions) == bool(args.quote and args.policy):
         raise ValueError("choose --revisions or both --quote and --policy")
@@ -386,10 +448,12 @@ def main(argv: list[str] | None = None) -> int:
             _read_json_without_duplicate_keys(args.quote), source,
             customers, _read_json_without_duplicate_keys(args.policy),
         )
-    _write_new(
-        args.output, json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n",
-        tuple(sources),
+    body = (
+        quote_revisions_csv(result) if args.format == "csv" and args.revisions
+        else contract_csv(result) if args.format == "csv"
+        else json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n"
     )
+    _write_new(args.output, body, tuple(sources))
     print(json.dumps({
         "project_id": result["project_id"],
         "schema_version": result["schema_version"],
