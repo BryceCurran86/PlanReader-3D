@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import fitz
+import pytest
 from pb_cross_view_ceiling_finish_authority import _definition_is_ceiling_finish
 from pb_source_material_semantic_authority import SourceMaterialDefinitionRecord
 
@@ -67,3 +68,16 @@ def test_material_code_or_room_label_cannot_override_signage_cladding():
     assert _definition_is_ceiling_finish(replace(
         row,description="13mm plasterboard ceiling lining",
         semantic_finish="plasterboard"))
+
+@pytest.mark.parametrize("description", [
+    "External WALL CLADDING finish",
+    "Steel FASCIA CLADDING at entry",
+    "Architectural FACADE CLADDING system",
+    "Marine blue SIGNAGE-CONTRACTOR CLADDING",
+])
+def test_originally_non_ceiling_cladding_never_acquires_derived_rcp_ceiling_area(description):
+    assert not _definition_is_ceiling_finish(_definition(description, "ceiling_grid"))
+    assert not _definition_is_ceiling_finish(_definition(description, "plasterboard"))
+    # Ceiling lining is not accidentally ruled out merely for cladding vocabulary.
+    assert _definition_is_ceiling_finish(_definition(
+        "Insulated ceiling cladding panels", "insulated_panel"))
