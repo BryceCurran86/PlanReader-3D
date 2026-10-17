@@ -80,8 +80,11 @@ def _one_source_policy(pdf, digest, *, shadow):
     published=source.ingest_native_pdf_bytes(
         document_id="live-source:" + digest[:32],
         source_bytes=pdf,
-        source_locator=("memory://optin-original-source.pdf"
-                        if shadow else "memory://baseline-original-source.pdf"),
+        # One identical provenance address: only the requested G17 capture
+        # policy may differ between independent original-source producers.
+        # Different source_locator values would introduce an unrelated
+        # source-revision metadata variable into strict issuer comparison.
+        source_locator="memory://gptmax-original-lot16-page-3.pdf",
         page_ids=(3,),
     )
     composition=compose_live_wall_opening_authority(

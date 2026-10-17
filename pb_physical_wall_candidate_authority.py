@@ -69,7 +69,11 @@ from pb_source_visibility_authority import (
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
-from pb_raster_unchanged_band_segments import UNCHANGED_BAND_IDENTITY_VERSION
+from pb_raster_unchanged_band_segments import (
+    UNCHANGED_BAND_IDENTITY_VERSION,
+    ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+)
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
@@ -979,7 +983,20 @@ def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> boo
     rekeying unrelated wall topology.
     """
     source_id = str(segment.get("id") or "")
-    return f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in source_id
+    # The source visibility producer issues independent namespace versions for
+    # a two-ended band, a one-ended original G17 flank and an end-anchored
+    # partial flank. None is a complete page-wide structural wall. Route all
+    # three only through the existing explicitly INCOMPLETE opening-local W4
+    # universe; otherwise new original paint can rekey OLD hosted walls.
+    # Match the exact source namespace token, not a label or nearby geometry.
+    return any(
+        f":{version}:" in source_id
+        for version in (
+            UNCHANGED_BAND_IDENTITY_VERSION,
+            ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+            ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+        )
+    )
 
 
 def _partition_opening_local_supplemental_segments(
