@@ -37,6 +37,9 @@ class DocumentedWallOpening:
     revision_id: str
     page_id: str
     published_original_opening_area_m2: float | None = None
+    host_axis_start_mm: float | None = None
+    host_axis_end_mm: float | None = None
+    original_host_axis_witness_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -149,6 +152,9 @@ def measure_figured_wall_lining_shadow(
     opening_ids, opening_source_ids = set(), set()
     side_opening_widths = {side_id: 0.0 for side_id in side_lengths}
     side_opening_areas = {side_id: 0.0 for side_id in side_lengths}
+    host_intervals: dict[str, list[tuple[float,float]]] = {
+        side_id: [] for side_id in side_lengths
+    }
     for opening in openings:
         if (type(opening) is not DocumentedWallOpening
                 or type(opening.physical_opening_id) is not str
@@ -161,6 +167,7 @@ def measure_figured_wall_lining_shadow(
                 or _number(opening.opening_width_mm) is None
                 or _number(opening.opening_height_mm) is None
                 or _number(opening.published_original_opening_area_m2) is None
+                or not _receipts(opening.original_host_axis_witness_ids)
                 or not _receipts(opening.host_binding_evidence_ids)
                 or not _receipts(opening.physical_frame_evidence_ids)
                 or (opening.source_sha256, opening.revision_id, opening.page_id)
@@ -172,6 +179,27 @@ def measure_figured_wall_lining_shadow(
                 or set(opening.host_binding_evidence_ids).intersection(
                     opening.physical_frame_evidence_ids)):
             return block("source_figured_wall_opening_frame_or_height_conflict")
+        start = _number(opening.host_axis_start_mm)
+        end = _number(opening.host_axis_end_mm)
+        # Original wall origin is the first metric side vertex. A valid door
+        # may start at 0, so use explicit nonnegative numeric validation.
+        if type(opening.host_axis_start_mm) not in (int,float):
+            return block("source_figured_wall_opening_host_interval_unavailable")
+        try:
+            start = float(opening.host_axis_start_mm)
+        except (TypeError,ValueError,OverflowError):
+            return block("source_figured_wall_opening_host_interval_unavailable")
+        if (not math.isfinite(start) or start < 0 or end is None
+                or end <= start
+                or not math.isclose(end-start,opening.opening_width_mm,
+                                    rel_tol=0,abs_tol=1e-9)
+                or end > side_lengths[opening.host_source_side_id]+1e-9):
+            return block("source_figured_wall_opening_host_interval_conflict")
+        if any(start < prior_end - 1e-9 and end > prior_start + 1e-9
+               for prior_start,prior_end in host_intervals[opening.host_source_side_id]):
+            return block("source_figured_wall_opening_host_interval_overlap")
+        host_intervals[opening.host_source_side_id].append((start,end))
+        all_receipts.update(opening.original_host_axis_witness_ids)
         all_receipts.update(opening.host_binding_evidence_ids)
         all_receipts.update(opening.physical_frame_evidence_ids)
         opening_ids.add(opening.physical_opening_id)
