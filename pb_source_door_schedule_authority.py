@@ -323,7 +323,10 @@ def _original_door_schedule_column_proof(
         geometry_verified=(both_printed and
                            "width" in matched and "height" in matched and
                            matched["width"].observation_id!=matched["height"].observation_id)
-        accepted_row=table_trusted and row.complete_native_row_text_trusted
+        accepted_row=(
+            table_trusted and row.complete_native_row_text_trusted
+            and row.status!="source_schedule_row_duplicate_code_conflict"
+        )
         first_gate=(
             "original_schedule_title_or_row_word_trust"
             if not accepted_row else
@@ -346,8 +349,7 @@ def _original_door_schedule_column_proof(
                 matched["height"].observation_id if "height" in matched else None
             ),
             source_dimension_column_roles_authenticated=bool(
-                table_trusted and row.complete_native_row_text_trusted
-                and geometry_verified
+                accepted_row and geometry_verified
             ),
             status=(
                 "source_schedule_row_text_authenticated" if accepted_row
