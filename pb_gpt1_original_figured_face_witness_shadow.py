@@ -22,6 +22,8 @@ class SourceFiguredAxis:
     second_terminal_pdf_pt: tuple[float, float]
     terminal_witness_source_ids: tuple[str, ...]
     page_id: str
+    source_sha256: str = ""
+    revision_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,9 @@ class SourceStructuralFaceStroke:
     classified_physical_wall_id: str
     physical_face_role: str
     source_style_id: str
+    source_sha256: str = ""
+    revision_id: str = ""
+    page_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,16 @@ def _point(v):
     except (ValueError, TypeError, OverflowError):
         return None
     return p if all(math.isfinite(x) for x in p) else None
+
+
+def _source_figured_mm_valid(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        n = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(n) and n > 0
 
 
 def source_figured_terminal_wall_faces_shadow(
@@ -83,9 +98,11 @@ def source_figured_terminal_wall_faces_shadow(
         or type(axis.source_dimension_id) is not str
         or not axis.source_dimension_id
         or type(axis.page_id) is not str or not axis.page_id
+        or type(axis.source_sha256) is not str or len(axis.source_sha256) != 64
+        or type(axis.revision_id) is not str or not axis.revision_id
         or axis.axis not in ("horizontal", "vertical")
         or type(axis.figure_value_mm) not in (int, float)
-        or not math.isfinite(float(axis.figure_value_mm))
+        or not _source_figured_mm_valid(axis.figure_value_mm)
         or axis.figure_value_mm <= 0
         or type(axis.terminal_witness_source_ids) not in (tuple, list)
         or len(axis.terminal_witness_source_ids) < 2
@@ -114,7 +131,9 @@ def source_figured_terminal_wall_faces_shadow(
             or face.physical_face_role not in (
                 "finished_inner_face", "structural_outer_face", "unresolved_face"
             )
-            or type(face.source_style_id) is not str or not face.source_style_id):
+            or type(face.source_style_id) is not str or not face.source_style_id
+            or (face.source_sha256,face.revision_id,face.page_id)
+               != (axis.source_sha256,axis.revision_id,axis.page_id)):
             return block("source_figured_original_wall_record_invalid")
         seen.add(face.original_stroke_id)
         if axis.axis == "horizontal":
