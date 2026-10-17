@@ -57,6 +57,7 @@ def test_lineage_packet_preserves_every_parent_and_refuses_foreign_label():
     assert len(reviews)==2
     assert all(r["takeoff_eligible"] is False and r["deduction_authority"] is False for r in reviews)
     assert all(r["local_aperture_frame"]["status"]=="candidate" for r in reviews)
+    assert all(r["local_aperture_frame"]["evidence"]["whole_wall_frame_id"] is None for r in reviews)
     assert all(r["source_related_wall_candidates"] for r in reviews)
     assert build_opening_review_packets(p,c)==reviews
     correspond=compare_opening_source_correspondence(reviews,reviews)
