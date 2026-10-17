@@ -105,7 +105,12 @@ def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
     # rows may carry the quantity ID in structured provenance or strict notes
     # rather than in a top-level optional column. Full provenance validity is
     # checked independently by verify_sealed_customer_output below.
-    if any(not _customer_quantity_id(row) for row in value):
+    # Manual estimator rows have no source-closed quantity identity and do not
+    # enter the machine-bijection denominator. Retain the verifier's strict
+    # provenance rejection for damaged automated rows, never infer their ID.
+    if any(not _customer_quantity_id(row) and (
+        "quantity_id" in row or row.get("commercial_projection_provenance") is not None
+    ) for row in value):
         raise ValueError("automated customer row lacks canonical quantity identity")
     return value
 
@@ -138,13 +143,14 @@ def _verify_customer_counts(sealed: Any, verified: Any, customer_rows: list[dict
         raise ValueError("duplicate or conflicting signed quantity identities")
     # Match the identity source actually accepted by the V1 verifier; a
     # top-level-only lookup would reject valid database-row projections.
-    customer_ids = [_customer_quantity_id(row) for row in customer_rows]
+    customer_ids = [qid for row in customer_rows
+                    if (qid := _customer_quantity_id(row))]
     if (
         verified.project_id != sealed.project_id
         or verified.sealed_quantity_count != len(sealed.quantities)
         or verified.valid_quantity_count != len(valid)
         or verified.abstained_quantity_count != len(abstained)
-        or verified.customer_row_count != len(customer_rows)
+        or verified.customer_row_count != len(customer_ids)
         or len(customer_ids) != len(set(customer_ids))
         or set(customer_ids) != valid
         or set(verified.verified_quantity_ids) != valid
