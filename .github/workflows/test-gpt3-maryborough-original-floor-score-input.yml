@@ -24,6 +24,7 @@ on:
       - "pb_material_schedule_v1222.py"
       - "pb_source_material_semantic_authority.py"
       - "tools/prepare_gpt3_pending_floor_surface_identity_activation.py"
+      - "tools/diag_native_multipath_cad_grid_source_shadow.py"
       - "tests/test_live_floor_family_customer_output.py"
       - "tests/test_gpt3_pending_floor_surface_identity_activation.py"
   workflow_dispatch:

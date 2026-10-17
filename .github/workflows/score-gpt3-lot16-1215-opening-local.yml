@@ -22,6 +22,7 @@ on:
       - "pb_customer_output_verification.py"
       - "pb_live_opening_area_quantity_publication.py"
       - "tools/prepare_gpt3_pending_identity_activation.py"
+      - "tools/diag_native_multipath_cad_grid_source_shadow.py"
       - "tests/test_raster_unchanged_band_segments.py"
       - ".github/workflows/score-gpt3-lot16-1215-opening-local.yml"
   workflow_dispatch:

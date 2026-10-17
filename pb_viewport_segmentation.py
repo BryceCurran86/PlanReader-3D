@@ -1708,6 +1708,92 @@ def _extract_scales_for_bbox(page: Any, bbox: Sequence[float]) -> tuple[Optional
     return raw, value, False, []
 
 
+def _source_connected_native_cell_family_shadow(
+    frame: Sequence[float], page: Any,
+) -> bool:
+    """Opt-in positive source shared-edge gate for external schedule cells.
+
+    The legacy table heuristic checks periodic rectangle CENTRES. Here a
+    family must additionally have an actually connected >=8-cell component
+    with source-shared edges in both native axes. No proximity, room labels,
+    nearest-frame ranking or inferred missing edges. This cannot prove text,
+    schedule identity, glyph, clip or real physical construction walls.
+    Performance-fail-closed cap is separate from the frozen raster cap.
+    """
+    width = float(frame[2]) - float(frame[0])
+    height = float(frame[3]) - float(frame[1])
+    if width <= 0 or height <= 0:
+        return False
+    area = width * height
+    families: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
+    candidates = _page_rectangle_primitives(page)
+    if len(candidates) > 20000:
+        return False  # native source inventory exceeds bounded shadow scope
+    for rect in candidates:
+        if not _bbox_contains(frame, rect, margin=1.0):
+            continue
+        rect_area = _bbox_area(rect)
+        if not (4.0 < rect_area < 0.15 * area):
+            continue
+        key = (
+            round((rect[2]-rect[0])/width, _TABLE_CELL_DIMENSION_ROUND_DIGITS),
+            round((rect[3]-rect[1])/height, _TABLE_CELL_DIMENSION_ROUND_DIGITS),
+        )
+        families.setdefault(key, []).append(rect)
+
+    tolerance = 0.01  # native PDF numerical exactness, NOT W2 wall snap
+    for cells in families.values():
+        n = len(cells)
+        if n < _TABLE_CELL_COUNT:
+            continue
+        if n > 512:
+            return False  # unknown source cell universe, never first/partial
+        parent = list(range(n))
+        shared_axes: list[tuple[int, int, str]] = []
+
+        def root(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i, left in enumerate(cells):
+            for j in range(i+1, n):
+                right = cells[j]
+                axis = None
+                if (
+                    min(abs(left[2]-right[0]), abs(right[2]-left[0])) <= tolerance
+                    and min(left[3],right[3])-max(left[1],right[1]) > tolerance
+                ):
+                    axis = "x"
+                elif (
+                    min(abs(left[3]-right[1]), abs(right[3]-left[1])) <= tolerance
+                    and min(left[2],right[2])-max(left[0],right[0]) > tolerance
+                ):
+                    axis = "y"
+                if axis is None:
+                    continue
+                ri, rj = root(i), root(j)
+                if ri != rj:
+                    parent[rj] = ri
+                shared_axes.append((i,j,axis))
+
+        components: dict[int, list[int]] = {}
+        for i in range(n):
+            components.setdefault(root(i), []).append(i)
+        for members in components.values():
+            if len(members) < _TABLE_CELL_COUNT:
+                continue
+            owned = set(members)
+            axes = {
+                axis for i,j,axis in shared_axes
+                if i in owned and j in owned
+            }
+            if axes == {"x","y"}:
+                return True
+    return False
+
+
 def _frame_resolved_viewports(
     page: Any,
     anchors: Sequence[_TitleAnchor],
@@ -1715,7 +1801,10 @@ def _frame_resolved_viewports(
     calibration: ViewportLayoutCalibration,
     *,
     page_number: int,
+    source_connected_table_cell_shadow: bool = False,
 ) -> tuple[list[SegmentedViewport], set[int]]:
+    if type(source_connected_table_cell_shadow) is not bool:
+        raise ValueError("source_table_shadow_requires_explicit_bool")
     fragments = _text_fragments(page)
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
@@ -1769,6 +1858,14 @@ def _frame_resolved_viewports(
                     # frames constitute an unresolved semantic ownership
                     # conflict (Maryborough page 11), not permission to
                     # choose the physically closest plan grid.
+                    if source_connected_table_cell_shadow:
+                        # A dense plan grid can mimic table cell CENTRES. Do not
+                        # mistake isolated fixture rectangles for source cells.
+                        # Shadow only: normal source publication is unchanged.
+                        true_cell_tables = [
+                            frame for frame in true_cell_tables
+                            if _source_connected_native_cell_family_shadow(frame, page)
+                        ]
                     if true_cell_tables:
                         external_source_owned = true_cell_tables
                     else:
@@ -2868,7 +2965,47 @@ def segment_source_page_viewports(
     )
 
 
-def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
+def _native_multipath_semantic_frame_candidates_shadow(
+    page: Any, anchors: Sequence[_TitleAnchor],
+) -> list[tuple[float, float, float, float]]:
+    """Default-unwired native line-built CAD table candidates only.
+
+    Native source grid reconstruction is a candidate *universe*, not a
+    selector. Only a source-closed component with exactly ONE classified
+    semantic title geometrically contained can join existing F.07 frame
+    rivals. All existing candidate frames remain. No nearby caption, room
+    label, project ID, quantity or inferred missing segment can elect it.
+    """
+    from tools.diag_native_multipath_cad_grid_source_shadow import (
+        audit_native_multipath_orthogonal_grid_components,
+    )
+    evidence = audit_native_multipath_orthogonal_grid_components(page)
+    if not evidence.get("source_line_universe_complete"):
+        return []
+    new = []
+    for grid in evidence["candidate_native_grids"]:
+        frame = tuple(grid["native_component_witness"]["native_bbox_pdf_pts"])
+        titles = [
+            a for a in anchors
+            if a.view_type in _SEMANTIC_TABLE_VIEW_TYPES
+            and _bbox_contains(frame, a.bbox)
+        ]
+        if len(titles) == 1:
+            new.append(frame)
+    return sorted(set(new))
+
+
+def segment_page_viewports(
+    page: Any, *, page_number: int,
+    source_connected_table_cell_shadow: bool = False,
+    source_native_multipath_semantic_frame_shadow: bool = False,
+) -> list[SegmentedViewport]:
+    if type(source_native_multipath_semantic_frame_shadow) is not bool:
+        raise ValueError("source_multipath_frame_shadow_requires_explicit_bool")
+    if source_native_multipath_semantic_frame_shadow and source_connected_table_cell_shadow is not True:
+        raise ValueError("source_multipath_requires_connected_source_cell_guard")
+    if type(source_connected_table_cell_shadow) is not bool:
+        raise ValueError("source_table_shadow_requires_explicit_bool")
     try:
         calibration = calibrate_viewport_layout(page)
     except NativePageFrameUnresolved:
@@ -2904,12 +3041,26 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
+    native_multipath_added: set[tuple[float, float, float, float]] = set()
+    if source_native_multipath_semantic_frame_shadow:
+        # Keep every source-original frame rival. A real external CAD
+        # schedule can be drawn as independently issued line paths.
+        for candidate in _native_multipath_semantic_frame_candidates_shadow(
+            page, anchors,
+        ):
+            if candidate not in frames:
+                frames.append(candidate)
+                native_multipath_added.add(candidate)
     framed, consumed = _frame_resolved_viewports(
         page,
         anchors,
         frames,
         calibration,
         page_number=page_number,
+        **(
+            {"source_connected_table_cell_shadow": True}
+            if source_connected_table_cell_shadow else {}
+        ),
     )
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
     try:
@@ -2921,6 +3072,33 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
             page, anchors, unresolved, framed, calibration,
             page_number=page_number,
         )
+        # A genuine table source frame establishes only TABLE ownership.
+        # It does not independently prove the extent of a neighboring plan.
+        # The rotated side-band rule is geometric partition evidence, never
+        # an automatically valid physical RCP when its separator is newly
+        # recovered from disconnected native CAD paths.
+        if native_multipath_added:
+            unsafe_separator_ids = {
+                v.view_id for v in framed
+                if v.bounding_box is not None
+                and tuple(v.bounding_box) in native_multipath_added
+            }
+            for v in rotated_derived:
+                if (v.provenance or {}).get("separator_view_id") not in unsafe_separator_ids:
+                    continue
+                v.status = ViewportSegmentationStatus.AMBIGUOUS.value
+                v.bounding_box = None
+                v.boundary_source = ViewportBoundarySource.NONE.value
+                v.confidence = 0.0
+                v.notes.append(
+                    "recovered native table frame does not prove neighboring physical plan extent"
+                )
+                v.provenance = {
+                    **v.provenance,
+                    "source_native_multipath_separator_candidate_only": True,
+                    "visual_band_validated": False,
+                    "independent_plan_extent_unproven": True,
+                }
         remaining_unresolved = [
             index for index in unresolved if index not in rotated_consumed
         ]
