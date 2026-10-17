@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -127,8 +128,9 @@ def build_original_byte_gated_project_report(
     manifest_sha_before = _sha256(manifest_path)
     manifest = _strict_original_json_object(manifest_path)
     project_id = manifest.get("project_id")
-    if not isinstance(project_id, str) or not project_id:
-        raise ValueError("frozen project manifest has invalid project identity")
+    if (type(project_id) is not str or
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", project_id) is None):
+        raise ValueError("frozen project manifest has invalid canonical project identity")
     # Never accept a caller-written or fixture manifest as benchmark authority.
     canonical_manifest = (
         FROZEN_ROOT / "projects" / project_id / "source_manifest.json"
