@@ -335,25 +335,61 @@ def _csv_text(value: Any) -> Any:
 
 
 def quote_csv(report: Mapping[str, Any]) -> str:
-    """Source-identifiable machine rows, no raw PDF or provenance note leaks."""
+    """Import-ready customer CSV with signed lines, separate manual and totals."""
     columns = (
-        "project_id", "quantity_id", "family", "semantic_key",
+        "row_type", "project_id", "quantity_id", "family", "semantic_key",
         "physical_quantity", "unit", "element", "location",
         "document_id", "source_page", "source_sha256", "revision_id",
         "pricing_status", "rate_scope", "rate_key", "cost_amount",
-        "sell_amount", "labour_hours",
+        "sell_amount", "labour_hours", "currency", "quote_fingerprint",
     )
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=columns)
+    handle = io.StringIO(newline="")
+    writer = csv.DictWriter(handle, fieldnames=columns)
     writer.writeheader()
-    for line in report["items"]:
-        writer.writerow({"project_id": _csv_text(report["project_id"]),
-                         **{key: (_csv_text(line.get(key)) if key not in (
-                             "physical_quantity", "cost_amount", "sell_amount", "labour_hours"
-                         ) else line.get(key))
-                            for key in columns if key != "project_id"}})
-    return buffer.getvalue()
 
+    def emit(row: dict) -> None:
+        safety = ("row_type", "project_id", "quantity_id", "family",
+                  "semantic_key", "unit", "element", "location",
+                  "document_id", "source_page", "source_sha256", "revision_id",
+                  "pricing_status", "rate_scope", "rate_key", "currency",
+                  "quote_fingerprint")
+        writer.writerow({
+            key: (_csv_text(row.get(key)) if key in safety else row.get(key))
+            for key in columns
+        })
+
+    fixed = {
+        "project_id": report["project_id"],
+        "currency": report["currency"],
+        "quote_fingerprint": report["quote_fingerprint"],
+    }
+    for line in report["items"]:
+        emit({**fixed, **line, "row_type": "SIGNED_AUTOMATED_ITEM"})
+    for item in report["manual_allowances"]:
+        emit({
+            **fixed, "row_type": "MANUAL_UNVERIFIED_ALLOWANCE",
+            "quantity_id": item["id"], "element": item["description"],
+            "pricing_status": item["authority"],
+            "sell_amount": (
+                item["amount"] if report["manual_allowances_included"] else None
+            ),
+        })
+    fields = (
+        ("PRICED_AUTOMATED_SUBTOTAL", "priced_automated_subtotal"),
+        ("PROJECT_OVERHEAD", "project_overhead"),
+        ("CONTINGENCY", "contingency"),
+        ("INCLUDED_MANUAL_ALLOWANCES", "manual_allowance_included_amount"),
+        ("DISCOUNT_DEDUCTION", "discount"),
+        ("TAX", "tax"),
+        ("GRAND_TOTAL_ONLY_IF_FULLY_PRICED", "grand_total"),
+    )
+    for label, field in fields:
+        amount = report["summary"][field]
+        if field == "discount" and amount is not None:
+            amount = _money(-Decimal(amount))
+        emit({**fixed, "row_type": "SUMMARY", "element": label,
+              "sell_amount": amount, "pricing_status": report["publication_status"]})
+    return handle.getvalue()
 
 def compare_verified_quotes(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict:
     """Reveal price changes without presenting rate-only changes as measured gains."""
