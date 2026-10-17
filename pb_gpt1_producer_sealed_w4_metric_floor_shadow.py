@@ -182,6 +182,44 @@ def bind_producer_sealed_w4_metric_floor_shadow(
             return block("original_w4_independent_metric_ring_area_conflict")
     except (TypeError,ValueError,OverflowError):
         return block("original_w4_independent_metric_ring_area_conflict")
+    if (
+        type(metric_room.source_side_ids) is not tuple
+        or len(metric_room.source_side_ids) != len(metric_room.source_vertices_pdf_pts)
+        or len(set(metric_room.source_side_ids)) != len(metric_room.source_side_ids)
+        or any(type(v) is not str or not v or v != v.strip()
+               for v in metric_room.source_side_ids)
+        or type(metric_room.source_segment_ids) is not tuple
+        or len(metric_room.source_segment_ids) < len(metric_room.source_side_ids)
+        or len(set(metric_room.source_segment_ids)) != len(metric_room.source_segment_ids)
+    ):
+        return block("original_w4_independent_metric_source_side_identity_conflict")
+    # The figured room solver carries one metric vertex for each original
+    # source wall vertex. An equal-area but geometrically reshaped polygon
+    # cannot borrow W4 ownership: each oriented edge must remain on its exact
+    # source direction (including the same winding and vertex order).
+    original_vertices = metric_room.source_vertices_pdf_pts
+    metric_vertices = metric_room.metric_vertices_mm
+    if len(original_vertices) != len(metric_vertices):
+        return block("original_w4_figured_side_correspondence_unavailable")
+    for i in range(len(original_vertices)):
+        a = original_vertices[i]
+        b = original_vertices[(i+1) % len(original_vertices)]
+        u = metric_vertices[i]
+        v = metric_vertices[(i+1) % len(metric_vertices)]
+        try:
+            sx,sy = float(b[0])-float(a[0]), float(b[1])-float(a[1])
+            mx,my = float(v[0])-float(u[0]), float(v[1])-float(u[1])
+            source_len,metric_len = math.hypot(sx,sy),math.hypot(mx,my)
+            aligned = (
+                math.isfinite(source_len) and source_len > 0
+                and math.isfinite(metric_len) and metric_len > 0
+                and sx*mx + sy*my > 0
+                and abs(sx*my-sy*mx) <= 1e-8*source_len*metric_len
+            )
+        except (TypeError,ValueError,OverflowError,IndexError):
+            aligned = False
+        if not aligned:
+            return block("original_w4_figured_metric_side_direction_conflict")
     source_polygon = _cycle(original.polygon_pdf_pts)
     if (
         source_polygon is None
