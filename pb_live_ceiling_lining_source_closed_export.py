@@ -25,6 +25,28 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _require_one_ceiling_per_original_area(
+    owners: dict[str, str],
+    *,
+    upstream_area_id: object,
+    canonical_ceiling_id: str,
+) -> None:
+    if (
+        type(upstream_area_id) is not str or not upstream_area_id
+        or upstream_area_id != upstream_area_id.strip()
+        or type(canonical_ceiling_id) is not str or not canonical_ceiling_id
+    ):
+        raise SourceClosedRunConflictError(
+            "ceiling original upstream room-area issuer is invalid"
+        )
+    previous = owners.get(upstream_area_id)
+    if previous is not None and previous != canonical_ceiling_id:
+        raise SourceClosedRunConflictError(
+            "one original room-area source reissued as competing ceiling surfaces"
+        )
+    owners[upstream_area_id] = canonical_ceiling_id
+
+
 def build_live_ceiling_lining_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -67,6 +89,7 @@ def build_live_ceiling_lining_source_traces(
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     seen_source_ids: set[str] = set()
+    source_area_ceiling_owners: dict[str, str] = {}
     for quantity in claim.ceiling_lining_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -311,6 +334,15 @@ def build_live_ceiling_lining_source_traces(
             raise SourceClosedRunConflictError(
                 f"duplicate ceiling quantity id: {quantity.quantity_id}"
             )
+        # One source-authenticated *whole room area* cannot be duplicated as
+        # two independent whole-ceiling finish quantities by aliasing the
+        # canonical ceiling object. Independent partial zones require their
+        # own independently measured area source IDs.
+        _require_one_ceiling_per_original_area(
+            source_area_ceiling_owners,
+            upstream_area_id=metadata.get("upstream_room_area_quantity_id"),
+            canonical_ceiling_id=canonical_ceiling_id,
+        )
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
