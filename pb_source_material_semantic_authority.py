@@ -81,8 +81,10 @@ _SCHEDULE_VIEW_TYPES = frozenset(
 
 
 _NONMATERIAL_GRID_DRAWING_TITLE = re.compile(
-    r"^\s*GRID\s+(?:(?:SET\s*OUT|SETOUT|LAYOUT)\s+PLAN|"
-    r"PLAN\s+(?:SET\s*OUT|SETOUT))\s*$",
+    r"^\s*(?:GRID\s+(?:(?:SET\s*OUT|SETOUT|LAYOUT)\s+PLAN|"
+    r"PLAN\s+(?:SET\s*OUT|SETOUT)|"
+    r"(?:REFLECTED\s+)?CEILING\s+(?:LAYOUT\s+)?PLAN)|"
+    r"(?:REFLECTED\s+)?CEILING\s+GRID\s+(?:LAYOUT\s+)?PLAN)\s*$",
     re.IGNORECASE,
 )
 
@@ -1693,6 +1695,7 @@ class SourceMaterialSemanticProducer:
         *,
         _seal: object = None,
         _physical_plan_page_ids: tuple[str, ...] = (),
+        _source_native_schedule_page_ids: tuple[str, ...] = (),
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
@@ -1703,6 +1706,7 @@ class SourceMaterialSemanticProducer:
             source_visibility_producer
         )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
+        self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
         self._plan_raster = (
             RasterTextCorroborationProducer.for_physical_plan_view_shadow(
                 source_visibility_producer
@@ -1711,6 +1715,10 @@ class SourceMaterialSemanticProducer:
             else None
         )
         self._plan_viewports: dict[tuple[str, str], SegmentedViewport] = {}
+        # Unlike a consumer-supplied schedule bounding box, these are the
+        # original F07 schedule scopes used by THIS source publisher.
+        self._schedule_viewports: dict[tuple[str, str, str], SegmentedViewport] = {}
+        self._schedule_scope_rejections: dict[tuple[str, str, str], str] = {}
         self._plan_ownership_ids: dict[tuple[str, str], str] = {}
         self._plan_text_results: dict[
             tuple[str, str, str, str, str], RasterTextCorroborationResult
@@ -1732,6 +1740,33 @@ class SourceMaterialSemanticProducer:
         source_visibility_producer: SourceVisibilityProducer,
     ) -> "SourceMaterialSemanticProducer":
         return cls(source_visibility_producer, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_source_native_multipath_schedule_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        page_ids: Sequence[str],
+    ) -> "SourceMaterialSemanticProducer":
+        """Opt-in original external CAD schedule source; NOT RCP area.
+
+        Explicit original page scope is essential: authenticating one
+        source schedule's frame does not authenticate sibling physical
+        drawing extents or any source material occurrence.
+        """
+        if (not isinstance(page_ids, Sequence)
+                or isinstance(page_ids,(str,bytes)) or not page_ids):
+            raise ValueError("explicit_original_schedule_source_page_ids_required")
+        if any(type(p) is not str or not p.isdecimal()
+               or str(int(p))!=p or int(p)<1 for p in page_ids):
+            raise ValueError("canonical_original_schedule_page_ids_required")
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_schedule_page_ids=tuple(
+                sorted(set(page_ids),key=int)
+            ),
+        )
 
     @classmethod
     def for_physical_plan_view_shadow(
@@ -1762,6 +1797,28 @@ class SourceMaterialSemanticProducer:
     def published_plan_viewports(self) -> tuple[SegmentedViewport, ...]:
         """Actual F.07 products consumed by this isolated producer."""
         return tuple(self._plan_viewports[k] for k in sorted(self._plan_viewports))
+
+    def published_source_schedule_viewports(self) -> tuple[SegmentedViewport, ...]:
+        """Exact trusted, producer-consumed F07 source schedule scopes.
+
+        This is not a physical RCP polygon, material occurrence or m2.
+        A schedule only appears here after the material producer has checked
+        its independently published source viewport and complete text.
+        """
+        return tuple(self._schedule_viewports[k]
+                     for k in sorted(self._schedule_viewports))
+
+    def published_source_schedule_revision_scopes(
+        self,
+    ) -> tuple[tuple[str,str,SegmentedViewport], ...]:
+        """Keep revision/page/view ownership for each recovered source scope."""
+        return tuple((revision,page,self._schedule_viewports[(revision,page,view)])
+                     for revision,page,view in sorted(self._schedule_viewports))
+
+    def published_source_schedule_rejections(self) -> tuple[tuple[str,str,str,str], ...]:
+        """All unresolved revision-scoped original schedules, deterministic."""
+        return tuple((*key,self._schedule_scope_rejections[key])
+                     for key in sorted(self._schedule_scope_rejections))
 
     def published_plan_text_corroboration_results(
         self,
@@ -1848,6 +1905,10 @@ class SourceMaterialSemanticProducer:
 
         published, source_bytes = self._source_bytes(revision_id)
         if published is None or source_bytes is None:
+            if self._source_native_schedule_page_ids:
+                # Explicit source evidence requested; absent revision is not a
+                # valid empty definition universe.
+                raise ValueError("original_schedule_source_revision_unavailable")
             self._published_revisions.add(revision_id)
             return self.authority()
 
@@ -1858,6 +1919,15 @@ class SourceMaterialSemanticProducer:
             "snapshot_id": str(published.snapshot.snapshot_id),
         }
         decoded_pages = {int(value) for value in published.coverage.decoded_pages}
+        # A caller-specified source schedule cannot silently disappear from
+        # the immutable PDF revision's published coverage. It is not a
+        # legitimate "schedule contains zero finishes" observation.
+        if (
+            self._source_native_schedule_page_ids
+            and not {int(p) for p in self._source_native_schedule_page_ids}
+            <= decoded_pages
+        ):
+            raise ValueError("original_schedule_page_outside_published_source_coverage")
         raw_definitions: dict[str, list[dict[str, object]]] = {}
         drawing_viewports: list[
             tuple[int, SegmentedViewport, tuple[_TrustedTextWord, ...]]
@@ -1875,6 +1945,8 @@ class SourceMaterialSemanticProducer:
         try:
             for page_number in sorted(decoded_pages):
                 if page_number < 1 or page_number > pdf.page_count:
+                    if str(page_number) in self._source_native_schedule_page_ids:
+                        raise ValueError("original_schedule_page_outside_actual_pdf")
                     continue
                 page = pdf.load_page(page_number - 1)
                 page_words = trusted_words.get(str(page_number), ())
@@ -1940,7 +2012,13 @@ class SourceMaterialSemanticProducer:
                         physical_plan_view_shadow=True,
                     )
                     if str(page_number) in self._physical_plan_page_ids
-                    else segment_page_viewports(page, page_number=page_number)
+                    else segment_page_viewports(
+                        page,page_number=page_number,
+                        **({
+                            "source_connected_table_cell_shadow":True,
+                            "source_native_multipath_semantic_frame_shadow":True,
+                        } if str(page_number) in self._source_native_schedule_page_ids else {}),
+                    )
                 )
                 if (
                     not viewports
@@ -1951,6 +2029,25 @@ class SourceMaterialSemanticProducer:
                 ):
                     continue
                 sibling_non_overlapping = validate_non_overlapping_viewports(viewports)
+                if str(page_number) in self._source_native_schedule_page_ids:
+                    schedule_candidates=tuple(v for v in viewports
+                        if v.view_type in _SCHEDULE_VIEW_TYPES
+                        and not _is_explicit_non_material_schedule(v))
+                    if not schedule_candidates:
+                        self._schedule_scope_rejections[
+                            (revision_id,str(page_number),"source-schedule-not-detected")
+                        ]="original_native_schedule_viewport_unavailable"
+                        schedule_universe_complete=False
+                        schedule_universe_reasons.append(
+                            SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
+                        )
+                    for candidate in schedule_candidates:
+                        if not _viewport_is_authoritative(
+                            candidate,sibling_non_overlapping=sibling_non_overlapping
+                        ):
+                            self._schedule_scope_rejections[
+                                (revision_id,str(page_number),candidate.view_id)
+                            ]="original_native_schedule_viewport_unresolved"
                 authoritative = tuple(
                     viewport
                     for viewport in viewports
@@ -2012,6 +2109,10 @@ class SourceMaterialSemanticProducer:
                     )
                     if viewport.view_type in _SCHEDULE_VIEW_TYPES:
                         if not text_complete or not lines:
+                            if str(page_number) in self._source_native_schedule_page_ids:
+                                self._schedule_scope_rejections[
+                                    (revision_id,str(page_number),viewport.view_id)
+                                ]="original_native_schedule_words_unverified"
                             schedule_universe_complete = False
                             schedule_universe_reasons.append(
                                 SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
@@ -2028,6 +2129,10 @@ class SourceMaterialSemanticProducer:
                                 )
                             )
                             continue
+                        if str(page_number) in self._source_native_schedule_page_ids:
+                            self._schedule_viewports[
+                                (revision_id,str(page_number),viewport.view_id)
+                            ]=viewport
                         text = "\n".join(line[0] for line in lines)
                         line_evidence = {
                             line[0]: line[2]
