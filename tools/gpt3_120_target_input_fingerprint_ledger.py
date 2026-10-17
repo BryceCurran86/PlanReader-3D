@@ -66,6 +66,8 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
         keep = (
             path == "SOURCE_SHA_VERIFICATION.json"
             or path.endswith("/source_package_preflight.json")
+            or path.endswith("/outputs/production_summary.json")
+            or path.endswith("/outputs/source_attempt_preflight.json")
             or path.endswith(".sealed.json")
             or (
                 path.count("/")==2
@@ -82,14 +84,106 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
         stable_files.append((path, sha))
     if len({row[0] for row in stable_files}) != len(stable_files):
         raise ValueError("duplicate source/sealed artifact in owner receipt")
+    handoffs = receipt.get("project_handoffs")
+    if type(handoffs) is not list:
+        raise ValueError("owner machine handoff status universe unavailable")
+    dispositions = {"COMPLETED", "PROCESS_FAILED", "TIMEOUT", "MEMORY_LIMIT",
+                    "SYSTEM_MEMORY_GUARD", "PRIMARY_SOURCE_UNAVAILABLE"}
+    for row in handoffs:
+        if (type(row) is not dict or type(row.get("status")) is not str
+            or row["status"] not in dispositions):
+            raise ValueError("unrecognized owner source production disposition")
+        status = row["status"]
+        code = row.get("exit_code")
+        if (
+            (status == "COMPLETED" and (type(code) is not int or code != 0))
+            or (status == "PROCESS_FAILED" and (type(code) is not int or code == 0))
+            or (status not in {"COMPLETED", "PROCESS_FAILED"} and code is not None)
+        ):
+            raise ValueError("owner source completion and process exit code conflict")
     return {
         "repo_head": receipt.get("repo_head"),
         "handoff_results": sorted(
             (row["project_id"], row["status"], row.get("exit_code"))
-            for row in receipt["project_handoffs"]
+            for row in handoffs
         ),
         "source_preflight_and_sealed_artifact_hashes": sorted(stable_files),
     }
+
+
+def _require_published_suite_summary_parity(
+    report: Mapping[str, Any], official: Mapping[str, Any],
+    item_results: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> None:
+    """Only the unchanged evaluator owns score counts; reject altered copies."""
+    import math
+    if len(item_results) != 120:
+        raise ValueError("published exact 120 target result universe incomplete")
+    matched = sum(row["state"] == "MATCHED_WITHIN_TOLERANCE"
+                  for row in item_results.values())
+    # The original evaluator consumes one produced quantity at most once.
+    # Even an UNRESOLVED row may carry an exact ID when its value is None;
+    # no two frozen targets may claim the same identified sealed quantity.
+    source_ids = []
+    for row in item_results.values():
+        state, qid = row["state"], row.get("produced_quantity_id")
+        if state in ("MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"):
+            if type(qid) is not str or not qid or qid != qid.strip():
+                raise ValueError("published matched target lacks canonical produced identity")
+        elif state in ("MISSED", "PARTIAL") and qid is not None:
+            raise ValueError("published missed/partial target cannot claim produced identity")
+        elif state == "UNRESOLVED" and qid is not None and (
+            type(qid) is not str or not qid or qid != qid.strip()
+        ):
+            raise ValueError("published unresolved target has invalid produced identity")
+        if qid is not None:
+            source_ids.append(qid)
+    if len(source_ids) != len(set(source_ids)):
+        raise ValueError("published target quantity identity reused across frozen items")
+    extras = official.get("unsupported_extra")
+    if type(extras) is not int or extras < 0:
+        raise ValueError("published evaluator unsupported-extra count malformed")
+    if type(official.get("matched_within_tolerance")) is not int or (
+        official["matched_within_tolerance"] != matched
+    ):
+        raise ValueError("published official matched total differs from item states")
+    expected_coverage = matched / 120
+    expected_precision = matched / (120 + extras)
+    for field, expected in (
+        ("coverage_accuracy", expected_coverage),
+        ("precision_adjusted_accuracy", expected_precision),
+    ):
+        for source in (report, official):
+            value = source.get(field)
+            if type(value) not in (int, float) or not math.isfinite(value) or (
+                not math.isclose(value, expected, rel_tol=0, abs_tol=1e-12)
+            ):
+                raise ValueError("published score copy differs from official exact item states")
+    project_rows = official.get("project_results")
+    if type(project_rows) is not list or len(project_rows) != 4:
+        raise ValueError("published four-project result universe missing")
+    if any(type(row.get("matched_within_tolerance")) is not int
+           or type(row.get("unsupported_extra")) is not int
+           or row["unsupported_extra"] < 0 for row in project_rows):
+        raise ValueError("published per-project counts malformed")
+    if sum(row["matched_within_tolerance"] for row in project_rows) != matched or (
+        sum(row["unsupported_extra"] for row in project_rows) != extras
+    ):
+        raise ValueError("published suite totals disagree with project results")
+    by_project: dict[str, int] = {}
+    for (project_id, _), item in item_results.items():
+        by_project[project_id] = by_project.get(project_id, 0) + (
+            item["state"] == "MATCHED_WITHIN_TOLERANCE"
+        )
+    # Equal suite totals do not justify swapping one project winner with
+    # another. Project ID and each exact numerator must remain paired.
+    if len(by_project) != 4 or any(
+        type(row.get("project_id")) is not str
+        or row["project_id"] not in by_project
+        or row["matched_within_tolerance"] != by_project[row["project_id"]]
+        for row in project_rows
+    ) or len({row["project_id"] for row in project_rows}) != 4:
+        raise ValueError("published project match claims disagree with exact target states")
 
 
 def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
@@ -144,6 +238,7 @@ def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
             raise ValueError("official target identity gap")
     if len(by_target) != 120:
         raise ValueError("official target count mismatch")
+    _require_published_suite_summary_parity(report, official, by_target)
     return by_target
 
 
@@ -181,6 +276,14 @@ def build_120_target_ledger(
         raise ValueError("producer head must be an exact lowercase 40-char commit")
     if owner_receipt is not None and not isinstance(owner_receipt, dict):
         raise ValueError("owner run receipt must be a JSON object")
+    if owner_receipt is not None:
+        receipt_head = owner_receipt.get("repo_head")
+        if type(receipt_head) is not str or not _SHA.fullmatch(receipt_head):
+            raise ValueError("owner receipt lacks canonical exact producer head")
+        if producer_head is None:
+            producer_head = receipt_head
+        elif producer_head != receipt_head:
+            raise ValueError("producer commit conflicts with owner-run receipt")
     owner_statuses: dict[str, str] = {}
     if owner_receipt is not None:
         owner_rows = owner_receipt.get("project_handoffs")
@@ -294,6 +397,15 @@ def main(argv: list[str] | None = None) -> int:
         path is not None and opts.output.resolve() == path.resolve() for path in inputs
     ):
         raise ValueError("cannot overwrite frozen evidence or input receipts")
+    if opts.output.is_symlink():
+        raise ValueError("target ledger cannot follow output symlinks")
+    if opts.output.exists():
+        try:
+            existing = _json_object(opts.output)
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise ValueError("target ledger cannot overwrite unrelated original evidence") from exc
+        if existing.get("schema_version") != "gpt3-120-target-ledger-v1":
+            raise ValueError("target ledger cannot overwrite unrelated original evidence")
     report = _json_object(opts.evidence_report)
     receipt = _json_object(opts.owner_run_receipt) if opts.owner_run_receipt else None
     previous = _json_object(opts.previous_ledger) if opts.previous_ledger else None
