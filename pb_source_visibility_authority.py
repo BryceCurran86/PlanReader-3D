@@ -1934,13 +1934,37 @@ class SourceVisibilityProducer:
         *,
         page_ids: Sequence[str] | None = None,
     ) -> PublishedVisibleSourceSnapshot:
-        """Source-owned *opt-in* alternative, not a customer/public count seam.
+        """Produce one new source-ink-closed G17 capture in an isolated page.
 
-        The source producer alone reads the original G17 ink and does not
-        accept caller pixels, geometric observations or measurements.
+        A previous ordinary or alternate page raster capture cannot silently
+        be reused for this stronger source policy: the historical attempt
+        marker does not encode which policy generated the source snapshot.
+        Treat that reuse as a hard failure, NEVER an empty shadow result or
+        a false claim that the new source wall has been investigated.
         """
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        if (
+            not isinstance(page_ids, (list, tuple))
+            or len(page_ids) != 1
+            or type(page_ids[0]) is not str
+            or not page_ids[0].isdecimal()
+            or str(int(page_ids[0])) != page_ids[0]
+            or int(page_ids[0]) < 1
+        ):
+            raise ValueError("G17 shadow requires one canonical source page")
+        page = page_ids[0]
+        decoded = {str(int(p)) for p in published.coverage.decoded_pages}
+        if page not in decoded or int(page) in published.coverage.failed_pages:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        if (str(revision_id), page) in self._raster_visibility_attempted_pages:
+            raise RuntimeError(
+                "G17 shadow requires a fresh source producer: "
+                "prior raster page capture has a different or unknown policy"
+            )
         return self._augment_with_raster_visible_segments_source_impl(
-            revision_id, page_ids=page_ids,
+            revision_id, page_ids=(page,),
             include_unmeasured_ink_closed_flanks_shadow=True,
         )
 
