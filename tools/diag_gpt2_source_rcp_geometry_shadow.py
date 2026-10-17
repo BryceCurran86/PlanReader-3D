@@ -226,3 +226,106 @@ def audit_original_rcp_source_finish_occurrence(
         "original_revision_id":rcp_candidate["original_revision_id"],
         "original_snapshot_id":rcp_candidate["original_snapshot_id"],
     }
+
+
+def audit_original_rcp_grid_ink_intersections(
+    rcp_candidate: dict,
+)->dict:
+    """Actual source-line grid crossings, not inferred tile size or m².
+
+    Only independently present horizontal and vertical source segments can
+    make a crossing. Do not extend any line to the room edge, infer missing
+    grid rows, or treat an axis title as a physical grid segment.
+    """
+    base={"status":"original_rcp_grid_crossings_unavailable",
+          "original_source_grid_intersections_pdf_pts":(),
+          "source_grid_cell_metric_size_issued":False,
+          "source_ceiling_area_or_grid_quantity_issued":False,
+          "new_firm_quantities":0}
+    if (type(rcp_candidate) is not dict or
+            rcp_candidate.get("status")!="original_rcp_source_ink_ceiling_polygon_candidate"):
+        return base
+    ink=rcp_candidate.get("original_grid_source_ink_candidates",())
+    if not isinstance(ink,(tuple,list)):
+        return base
+    vertical=[e for e in ink if
+              e["original_source_axis"]=="source_grid_vertical_candidate"]
+    horizontal=[e for e in ink if
+                e["original_source_axis"]=="source_grid_horizontal_candidate"]
+    polygon=Polygon(rcp_candidate["source_ceiling_ink_polygon_pdf_pts"])
+    from shapely.geometry import Point
+    hits=set()
+    for v in vertical:
+        (vx,va),(vxx,vb)=v["source_ink"]["ends"]
+        for h in horizontal:
+            (ha,hy),(hb,hyy)=h["source_ink"]["ends"]
+            if (min(va,vb)<=hy<=max(va,vb)
+                    and min(ha,hb)<=vx<=max(ha,hb)
+                    and polygon.contains(Point(vx,hy))):
+                hits.add((vx,hy))
+    return {
+        **base,
+        "status":"native_rcp_grid_ink_intersection_candidates_only",
+        "original_source_grid_intersections_pdf_pts":
+            tuple(sorted(hits)),
+        "original_source_orthogonal_grid_segment_counts":{
+            "vertical":len(vertical),"horizontal":len(horizontal),
+        },
+        "original_interior_source_grid_crossing_count":len(hits),
+        "structural_ceiling_zone_or_grid_identity_proven":False,
+    }
+
+
+def audit_competing_original_rcp_zone_owners(
+    candidate_zones: tuple[dict, ...],
+)->dict:
+    """Preserve overlapping ceiling zone ink and reused mark/grid ancestry.
+
+    No input ordering or lowest-area tie-break is allowed. Duplicated
+    source physical edges or identical issued occurrence records assigned
+    to more than one region remain an explicit cross-zone blocker.
+    """
+    if type(candidate_zones) is not tuple or not candidate_zones or len(candidate_zones)>64:
+        raise ValueError("bounded_original_rcp_zone_census_required")
+    owners={}
+    shared={}
+    all_out=[]
+    for index, zone in enumerate(candidate_zones):
+        if type(zone) is not dict:
+            raise ValueError("original_source_rcp_candidate_receipt_required")
+        if zone.get("status") not in {
+            "original_rcp_source_ink_ceiling_polygon_candidate",
+            "original_rcp_material_in_ceiling_ink_candidate",
+        }:
+            all_out.append({"index":index,"candidate":zone,"eligible":False})
+            continue
+        root=zone.get("original_source_sha256")
+        revision=zone.get("original_revision_id")
+        snapshot=zone.get("original_snapshot_id")
+        if not all(type(v) is str and v for v in (root,revision,snapshot)):
+            all_out.append({"index":index,"candidate":zone,"eligible":False})
+            continue
+        graph=zone.get("source_boundary_graph",{})
+        for ident in graph.get("original_native_edge_ids",()):
+            key=(root,revision,snapshot,"boundary",ident)
+            owners.setdefault(key,[]).append(index)
+        for ident in zone.get("original_source_finish_record_ids",()):
+            key=(root,revision,snapshot,"mark",ident)
+            shared.setdefault(key,[]).append(index)
+        all_out.append({"index":index,"candidate":zone,"eligible":True})
+    conflicts=[
+        {"source_ancestry_key":list(key),"competing_zone_indexes":tuple(owners[key])}
+        for key in sorted(owners) if len(owners[key])>1
+    ]+[
+        {"source_ancestry_key":list(key),"competing_zone_indexes":tuple(shared[key])}
+        for key in sorted(shared) if len(shared[key])>1
+    ]
+    return {
+        "status":("original_rcp_competing_zone_source_ownership" if conflicts
+                  else "original_rcp_source_zone_candidates_only"),
+        "all_original_rcp_candidate_zones":tuple(all_out),
+        "source_competing_grid_boundary_or_finish_mark_owners":tuple(conflicts),
+        "original_rcp_unique_room_identity_issued":False,
+        "source_ceiling_area_or_quantity_issued":False,
+        "new_firm_quantities":0,
+    }
