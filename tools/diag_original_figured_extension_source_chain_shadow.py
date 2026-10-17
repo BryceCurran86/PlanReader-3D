@@ -39,10 +39,14 @@ def _axis(points):
 def audit_figured_extension_to_source_face(
     page,*, original_dimension_line_id:str, original_face_line_id:str,
     dimension_endpoint_index:int, max_source_paths:int=120000,
-    max_witness_lines:int=20000,
+    max_witness_lines:int=20000, face_endpoint_index:int|None=None,
 ):
     if type(dimension_endpoint_index) is not int or dimension_endpoint_index not in (0,1):
         raise ValueError("explicit_source_dimension_endpoint_required")
+    if face_endpoint_index is not None and (
+        type(face_endpoint_index) is not int or face_endpoint_index not in (0,1)
+    ):
+        raise ValueError("explicit_original_source_face_endpoint_required")
     paths=page.get_drawings()
     if len(paths)>max_source_paths:
         return {"status":"native_source_path_cap_exceeded",
@@ -59,13 +63,15 @@ def audit_figured_extension_to_source_face(
         # for original extension-line connectivity.
         if start[1]!=face[0][1]:
             raise ValueError("no_same_ordinate_figure_face_projection")
-        target=min(face,key=lambda q:abs(q[0]-start[0]))
+        target=(face[face_endpoint_index] if face_endpoint_index is not None
+                else min(face,key=lambda q:abs(q[0]-start[0])))
         fixed=start[1]; lo,hi=sorted((start[0],target[0]))
         direction="horizontal"
     else:
         if start[0]!=face[0][0]:
             raise ValueError("no_same_abscissa_figure_face_projection")
-        target=min(face,key=lambda q:abs(q[1]-start[1]))
+        target=(face[face_endpoint_index] if face_endpoint_index is not None
+                else min(face,key=lambda q:abs(q[1]-start[1])))
         fixed=start[0]; lo,hi=sorted((start[1],target[1]))
         direction="vertical"
     if hi<=lo:
@@ -108,6 +114,8 @@ def audit_figured_extension_to_source_face(
         "face_line_id":original_face_line_id,
         "original_dimension_terminal_pdf_pts":list(start),
         "original_projection_target_pdf_pts":list(target),
+        "face_endpoint_explicitly_source_bound":face_endpoint_index is not None,
+        "nearest_face_endpoint_heuristic_in_default_candidate":face_endpoint_index is None,
         "native_projected_extension_length_pdf_pts":round(hi-lo,3),
         "source_intersecting_straight_ink_candidates":candidates,
         "original_uncovered_projection_intervals_pdf_pts":missing,
@@ -115,5 +123,60 @@ def audit_figured_extension_to_source_face(
         "figured_extension_source_role_proven":False,
         "physical_finished_face_or_wall_role_proven":False,
         "figured_face_connection_authority":False,
+        "new_firm_quantities":0,
+    }
+
+
+def audit_all_original_figured_extension_endpoint_hypotheses(
+    page, *, original_dimension_line_id: str,
+    original_face_line_id: str,
+    max_source_paths: int=120000,
+    max_witness_lines: int=20000,
+)->dict:
+    """Prove/abstain on ALL four source terminal-to-face projections.
+
+    The original dimension line and physical face each have two endpoint
+    owners. A nearest-face selection is not source authority. Keep every
+    geometrically possible candidate, including its uncovered intervals,
+    and never publish a figure, finished wall or metric width.
+    """
+    candidates=[]
+    for dim_terminal in (0,1):
+        for face_terminal in (0,1):
+            try:
+                candidate=audit_figured_extension_to_source_face(
+                    page,original_dimension_line_id=original_dimension_line_id,
+                    original_face_line_id=original_face_line_id,
+                    dimension_endpoint_index=dim_terminal,
+                    face_endpoint_index=face_terminal,
+                    max_source_paths=max_source_paths,
+                    max_witness_lines=max_witness_lines,
+                )
+            except ValueError as exc:
+                candidate={
+                    "status":"original_figure_face_endpoint_candidate_rejected",
+                    "first_unclosed_gate":str(exc),
+                    "figured_face_connection_authority":False,
+                    "new_firm_quantities":0,
+                }
+            candidates.append({
+                "original_dimension_endpoint_index":dim_terminal,
+                "original_face_endpoint_index":face_terminal,
+                "source_evidence":candidate,
+            })
+    covered=[
+        x for x in candidates
+        if x["source_evidence"].get("candidate_native_ink_projection_covered")
+    ]
+    return {
+        "status":("competing_original_extension_endpoint_candidates"
+                  if len(covered)>1
+                  else "single_source_ink_extension_candidate_only"
+                  if covered else "original_extension_source_incomplete"),
+        "all_four_source_endpoint_hypotheses":candidates,
+        "candidate_covered_hypothesis_count":len(covered),
+        "source_figure_endpoint_identity_elected":False,
+        "original_figure_metric_or_room_width_issued":False,
+        "physical_finished_face_or_wall_role_proven":False,
         "new_firm_quantities":0,
     }
