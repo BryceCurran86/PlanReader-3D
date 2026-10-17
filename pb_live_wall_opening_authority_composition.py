@@ -228,7 +228,15 @@ def compose_live_wall_opening_authority(
     )
     supplemental_wall_producer = supplemental_factory(
         source_visibility_producer,
-        page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
+        # Exact-endpoint G17 is a SOURCE-OWNED PLAN-opening proposal only.
+        # Elevation support pages may prove independent width/height/ink, but
+        # cannot emit G17 hosts from their page-local terminal-band texture.
+        # Ordinary supplemental production retains its historical all-page scope.
+        page_ids=(
+            selected_pages
+            if include_unmeasured_ink_closed_flanks_shadow
+            else _clean_page_ids((*selected_pages, *evidence_pages))
+        ),
     )
 
     # Wall-candidate materialization may legitimately augment the producer-owned
