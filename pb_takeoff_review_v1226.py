@@ -145,10 +145,14 @@ def _bbox_percent(bbox: Sequence[Any], page: Dict[str, Any], mode: str = "xyxy")
 
 
 def _studio_source(app: Any, workspace_id: int, source_reference: str, *, lookups: Optional[_SummaryLookups] = None) -> List[Dict[str, Any]]:
-    match = re.search(r"PB Takeoff Studio v1\.2\.11\s*·\s*page:(\d+)\s*·\s*area:([^·]+)", source_reference)
-    if not match:
+    matches = list(re.finditer(
+        r"PB Takeoff Studio v1\.2\.11\s*·\s*page:(\d+)\s*·\s*area:([^·]+)",
+        source_reference,
+    ))
+    identities = {(int(match.group(1)), match.group(2).strip()) for match in matches}
+    if len(identities) != 1:
         return []
-    page_id, area_id = int(match.group(1)), match.group(2).strip()
+    page_id, area_id = next(iter(identities))
     page = lookups.page(page_id=page_id) if lookups else _page(app, workspace_id, page_id=page_id)
     if not page:
         return []
@@ -166,13 +170,14 @@ def _studio_source(app: Any, workspace_id: int, source_reference: str, *, lookup
 
 
 def _zone_source(app: Any, workspace_id: int, source_reference: str) -> List[Dict[str, Any]]:
-    match = re.search(r"\bzone:(\d+)\b", source_reference)
-    if not match:
+    zone_ids = {int(match.group(1)) for match in re.finditer(r"\bzone:(\d+)\b", source_reference)}
+    if len(zone_ids) != 1:
         return []
+    match_group = next(iter(zone_ids))
     rows = app.lquery(
         """SELECT z.*,p.page_label,p.width_px,p.height_px,p.px_per_m,p.selected FROM mapped_zones z
            JOIN pages p ON p.id=z.page_id WHERE z.workspace_id=? AND z.id=?""",
-        (int(workspace_id), int(match.group(1))),
+        (int(workspace_id), match_group),
     )
     if not rows:
         return []
@@ -189,13 +194,17 @@ def _zone_source(app: Any, workspace_id: int, source_reference: str) -> List[Dic
 
 
 def _measurement_source(app: Any, workspace_id: int, source_reference: str) -> List[Dict[str, Any]]:
-    match = re.search(r"\bmeasurement:(\d+)\b", source_reference)
-    if not match:
+    measurement_ids = {
+        int(match.group(1))
+        for match in re.finditer(r"\bmeasurement:(\d+)\b", source_reference)
+    }
+    if len(measurement_ids) != 1:
         return []
+    measurement_id = next(iter(measurement_ids))
     rows = app.lquery(
         """SELECT m.*,p.page_label,p.width_px,p.height_px,p.px_per_m,p.selected FROM measurement_lines m
            JOIN pages p ON p.id=m.page_id WHERE m.workspace_id=? AND m.id=?""",
-        (int(workspace_id), int(match.group(1))),
+        (int(workspace_id), measurement_id),
     )
     if not rows:
         return []
