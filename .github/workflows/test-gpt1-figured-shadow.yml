@@ -1,0 +1,37 @@
+name: GPT1 Figured Measurement Shadow
+
+on:
+  pull_request:
+    paths:
+      - "pb_gpt1_figured_*"
+      - "pb_gpt1_original_figured_face_witness_shadow.py"
+      - "tests/test_gpt1_figured_*"
+      - ".github/workflows/test-gpt1-figured-shadow.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt1-figured-shadow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metric-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install "pytest>=8,<10" "shapely>=2.0,<3"
+      - name: Source-figured synthetic calculation regressions only
+        run: |
+          python -m pytest -q             tests/test_gpt1_figured_chain_metric_shadow.py             tests/test_gpt1_figured_source_side_assembly_shadow.py             tests/test_gpt1_figured_zone_net_area_shadow.py             tests/test_gpt1_documented_raked_ceiling_shadow.py             tests/test_gpt1_figured_takeoff_families_shadow.py
