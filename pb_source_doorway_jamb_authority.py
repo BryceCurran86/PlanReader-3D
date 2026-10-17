@@ -80,6 +80,14 @@ def audit_native_source_doorway_jamb_chain(
         return {**base,"status":"competing_nonstructural_paint_ink"}
     if not all(row["original_stroke_width_pdf_pt"]>0 for row in rows):
         return {**base,"status":"unpainted_primitive"}
+    # Opposing source elements must have matching drawing roles: the two
+    # wall fragments are one painted line family and the independent two
+    # jamb returns are another. Sharing only black color is insufficient.
+    if (not _near(l["original_stroke_width_pdf_pt"],
+                  r["original_stroke_width_pdf_pt"],.001)
+            or not _near(lj["original_stroke_width_pdf_pt"],
+                         rj["original_stroke_width_pdf_pt"],.001)):
+        return {**base,"status":"competing_source_stroke_role_mismatch"}
     return {
         **base,
         "status":"exact_original_native_jamb_endpoint_chain_candidate",
