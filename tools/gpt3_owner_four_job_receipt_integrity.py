@@ -17,8 +17,10 @@ from typing import Any
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from scripts.report_full_plan_v2_readiness import _write_readiness_report
 from tools.report_gpt3_four_project_evidence import (
-    FROZEN_ROOT, _json_object, load_suite_manifests, _read_json_without_duplicate_keys,
+    FROZEN_ROOT, _json_object, _json_customer_rows, load_suite_manifests,
+    _read_json_without_duplicate_keys,
 )
+from tools.gpt3_signed_v1_replay_drift import inspect_signed_v1_replay
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -315,6 +317,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
     cross_semantic_claims: dict[str, list[dict[str, Any]]] = {}
+    historical_lot16_receipt_audit: dict[str, Any] | None = None
     verified_manifest_docs = 0
     for project_id, manifest in frozen_by_id.items():
         pre = _object(root, project_id + "/source_package_preflight.json")
@@ -475,6 +478,40 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                      and set(sealed.source_sha256s) == {primary_sha}
                      and sealed.run_id == summary["combined_run_id"],
                      "sealed project original source identity or run ID mismatch")
+            if project_id == "au_qld_lot16_power":
+                # Compare the actual original owner V1 with the prior immutable
+                # archived commercial history using the established reader.
+                # This does NOT reissue source scope or allow old customer rows
+                # to be projected against a rekeyed fresh V1 fingerprint.
+                historical_dir = (
+                    Path(__file__).resolve().parents[1]
+                    / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
+                )
+                historical_lot16_receipt_audit = inspect_signed_v1_replay(
+                    archived_run=_json_object(historical_dir / "source_sealed_run.json"),
+                    candidate_run=payload,
+                    archived_customer_rows=_json_customer_rows(
+                        historical_dir / "verified_customer_rows.json"
+                    ),
+                    candidate_customer_rows=None,
+                )
+                _require(
+                    historical_lot16_receipt_audit["historical_quantity_count"] == 8
+                    and historical_lot16_receipt_audit["archived_customer_verified"] is True
+                    and historical_lot16_receipt_audit["candidate_customer_verified"] is False
+                    and historical_lot16_receipt_audit[
+                        "safe_to_reuse_archived_customers_with_candidate"
+                    ] is False
+                    and historical_lot16_receipt_audit["source_issuer_scope_attestation_proven"] is False,
+                    "original Lot16 source/customer history is not safely retained",
+                )
+                _require(all(
+                    row["status"] in (
+                        "EXACT_HISTORICAL_V1_PRESERVED",
+                        "SNAPSHOT_RECEIPT_REKEY_UNATTESTED",
+                        "NEW_QUANTITY_REQUIRES_INDEPENDENT_SOURCE_AND_V2_MATCH",
+                    ) for row in historical_lot16_receipt_audit["quantity_differences"]
+                ), "historical Lot16 original signed physical proposition changed")
             # Do not silently collapse physically overlapping but separately
             # typed quantity families. Surface possible cross-semantic reuse for
             # issuer review without deleting either signed quantity.
@@ -597,6 +634,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         "official_four_project_coverage_accuracy": None,
         "official_four_project_precision_adjusted_accuracy": None,
         "cross_semantic_signed_object_claims_for_review": cross_semantic_claims,
+        "historical_lot16_v1_source_customer_retention": historical_lot16_receipt_audit,
         "official_publication_status": "UNPUBLISHED",
         "projects": rows,
     }
