@@ -1276,9 +1276,37 @@ def _native_multirow_material_definition_candidates(
                 word for _, members in line_records[pos:end] for word in members
             )
             candidate = _material_definition_candidate(owned)
-            if candidate is None or candidate[0] != code:
+            if candidate is not None and candidate[0] == code:
+                candidates.append((partition_id, block_no, owned, code, candidate[1]))
                 continue
-            candidates.append((partition_id, block_no, owned, candidate[0], candidate[1]))
+            # The original schedule may print a code whose layout role is
+            # external to its *material* words, e.g. vinyl-faced plaster
+            # tiles labelled as GRID on a reflected-ceiling sheet. Generic
+            # material semantics can be read from the adjacent original
+            # description, but a raw code cannot assign CEILING_GRID or any
+            # other physical role. Preserve a SOURCE ROW CANDIDATE only.
+            # The trusted native schedule consumer will re-run its existing
+            # semantic proof and ABSTAIN unless independently validated.
+            description = " ".join(w.text.strip() for w in owned[1:]).strip()
+            independent_semantic = semantic_finish_from_schedule_entry({
+                "status": "Confirmed",
+                "description": description, "substrate": "", "finish": "",
+            })
+            if not independent_semantic or len(description) < 4:
+                continue
+            candidates.append((
+                partition_id, block_no, owned, code,
+                {
+                    "code": code,
+                    "description": description,
+                    "substrate": "",
+                    "finish": "",
+                    "page_id": int(owned[0].page_id),
+                    "page_label": f"page:{owned[0].page_id}",
+                    "source_semantic_role_unverified": True,
+                    "source_material_issuer_granted": False,
+                },
+            ))
     return tuple(candidates)
 
 
