@@ -13,6 +13,10 @@ on:
       - ".github/workflows/test-gpt3-four-project-evidence.yml"
   workflow_dispatch:
 
+concurrency:
+  group: gpt3-four-project-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fail-closed-inventory:
     runs-on: ubuntu-latest
@@ -58,34 +62,35 @@ jobs:
           assert all(x["publication_status"]=="UNAVAILABLE" for x in p["projects"])
           PY
 
-      - name: Verify tracked ORIGINAL PDF package completeness without scoring
+      # Original customer PDFs were intentionally removed from the PUBLIC tip
+      # by #2920. Their SHA-pinned checks remain owner-machine-only; GitHub
+      # must prove that absence does not mint quantity or score authority.
+      - name: Prove private original PDFs are not required on public runner
         run: |
           set -euo pipefail
           set +e
-          PYTHONPATH=. python -m tools.report_gpt3_four_project_evidence \
-            --source-dir documents/sources \
-            --sealed-dir /tmp/gpt3-empty-seal \
-            --identity-map-dir /tmp/gpt3-empty-map \
-            --customer-dir /tmp/gpt3-empty-customer \
+          PYTHONPATH=. python -m tools.report_gpt3_four_project_evidence \\
+            --source-dir documents/sources \\
+            --sealed-dir /tmp/gpt3-empty-seal \\
+            --identity-map-dir /tmp/gpt3-empty-map \\
+            --customer-dir /tmp/gpt3-empty-customer \\
             --output /tmp/gpt3-real-source-package-ledger.json
           code=$?
           set -e
           test "$code" -eq 2
           python - <<'PY'
           import json
-          p=json.load(open("/tmp/gpt3-real-source-package-ledger.json", encoding="utf-8"))
-          by_id={entry["project_id"]: entry for entry in p["projects"]}
-          assert p["frozen_denominator"]==120
-          assert p["publication_status"]=="UNPUBLISHED"
+          from pathlib import Path
+          p=json.loads(Path("/tmp/gpt3-real-source-package-ledger.json").read_text(encoding="utf-8"))
+          assert p["frozen_denominator"] == 120
+          assert p["publication_status"] == "UNPUBLISHED"
           assert p["coverage_accuracy"] is None
-          for project_id in ("au_qld_3laurel", "au_qld_maryborough_service_station"):
-              e=by_id[project_id]
-              assert e["source_sha_verified"] is True, e
-              assert e["publication_status"]=="UNAVAILABLE"
-              assert "signed_production_evidence_unavailable" in e["reason_codes"]
-          for project_id in ("au_qld_lot16_power", "au_qld_q5446_armstrong32_harlequin"):
-              e=by_id[project_id]
-              assert e["source_sha_verified"] is False, e
-              assert e["publication_status"]=="UNAVAILABLE"
-              assert "original_source_not_supplied_in_this_execution" in e["reason_codes"]
+          assert p["precision_adjusted_accuracy"] is None
+          assert p["official_suite_result"] is None
+          assert len(p["projects"]) == 4
+          for project in p["projects"]:
+              assert project["source_sha_verified"] is False, project
+              assert project["publication_status"] == "UNAVAILABLE", project
+              assert "original_source_not_supplied_in_this_execution" in project["reason_codes"], project
+              assert project["exact_project_report"] is None
           PY
