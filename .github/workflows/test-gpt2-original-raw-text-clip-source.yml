@@ -1,0 +1,49 @@
+name: TEST GPT2 Original Raw Text Clip Source Authority
+
+on:
+  pull_request:
+    paths:
+      - pb_pdf_text_integrity_authority.py
+      - tools/diag_original_pdf_active_clip_operator_authority.py
+      - tests/test_gpt2_original_raw_operator_text_clip_source.py
+      - .github/workflows/test-gpt2-original-raw-text-clip-source.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-pdf-text-outside-active-clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source head
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt fonttools
+      - name: Source actual raw BT qQ W clip plus adversarial streams
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q --tb=short tests/test_gpt2_original_raw_operator_text_clip_source.py tests/test_gpt2_symbol_source_optin_native_word_integrity.py 2>&1 | tee /tmp/gpt2-original-clip-tests.txt
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
+      - name: Capture sanitized source test failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-source-clip-test-report
+          path: /tmp/gpt2-original-clip-tests.txt
+          if-no-files-found: ignore
+          retention-days: 3
