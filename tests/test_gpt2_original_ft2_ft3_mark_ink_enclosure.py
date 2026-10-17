@@ -22,6 +22,7 @@ PWD={"left":("d66215i0","d3057i0"),
     (OFFICE,"FT3",[113,0,0]),
     (PWD,"FT2",[56,0,0]),
 ])
+@pytest.mark.skipif(not PDF.is_file(), reason="private original PDF unavailable in merge CI; separate SHA-pinned source acceptance required")
 def test_original_mark_inside_strict_matched_source_ink_box_not_authenticated(edges,code,address):
     raw=PDF.read_bytes()
     assert hashlib.sha256(raw).hexdigest()==SHA
@@ -40,6 +41,7 @@ def test_original_mark_inside_strict_matched_source_ink_box_not_authenticated(ed
     assert out["new_firm_quantities"]==0
 
 
+@pytest.mark.skipif(not PDF.is_file(), reason="private original PDF unavailable in merge CI; separate SHA-pinned source acceptance required")
 def test_source_name_alone_or_wrong_finish_mark_never_mints_room_finish():
     raw=PDF.read_bytes()
     out=audit(raw,expected_sha256=SHA,
@@ -64,6 +66,7 @@ def test_duplicate_same_literal_and_boundary_touching_original_bbox_abstain():
     assert not r["physical_source_floor_owner_authenticated"]
 
 
+@pytest.mark.skipif(not PDF.is_file(), reason="private original PDF unavailable in merge CI; separate SHA-pinned source acceptance required")
 def test_source_sha_and_competing_doorway_wall_abort_containment():
     raw=PDF.read_bytes()
     with pytest.raises(ValueError,match="original_source_sha_mismatch"):
