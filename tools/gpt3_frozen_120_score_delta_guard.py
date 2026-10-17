@@ -132,16 +132,27 @@ def _validate_input_ledger(
             or any(row.get("evaluation_state") not in _STATES for row in rows)
         ):
             raise ValueError("published claims must have a complete scored producer run")
+        matched_ids: list[str] = []
         for row in rows:
+            if row.get("project_evidence_status") != "PROJECT_VERIFIED":
+                raise ValueError("published target lacks source/customer-verified project evidence")
+            if row.get("project_gate_reasons") != []:
+                raise ValueError("published target retains unresolved project-level gates")
             if row["evaluation_state"] in (
                 "MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"
             ) and (type(row.get("produced_quantity_id")) is not str
                     or not row["produced_quantity_id"]):
                 raise ValueError("matched target requires exact produced quantity identity")
+            if row["evaluation_state"] in (
+                "MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"
+            ):
+                matched_ids.append(row["produced_quantity_id"])
             if row["evaluation_state"] in ("MISSED", "PARTIAL") and (
                 row.get("produced_quantity_id") is not None
             ):
                 raise ValueError("missing/partial target cannot claim exact produced identity")
+        if len(matched_ids) != len(set(matched_ids)):
+            raise ValueError("one signed produced quantity matched multiple frozen targets")
         within = sum(row["evaluation_state"] == _WIN for row in rows)
         expected = within / 120
         value = ledger.get("official_coverage_accuracy")
@@ -173,6 +184,19 @@ def _validate_input_ledger(
             ):
                 raise ValueError("precision adjusted score lacks integer unsupported-extra basis")
     return by_key
+
+
+def _scored_unsupported_extras(ledger: Mapping[str, Any]) -> int | None:
+    """Recover exact integer extras only from an evaluated score with winners.
+
+    Zero-winner accuracy cannot reveal extras, so do not fabricate a count.
+    """
+    if ledger["publication_status"] != "PUBLISHED":
+        return None
+    matched = sum(item["evaluation_state"] == _WIN for item in ledger["items"])
+    if not matched:
+        return None
+    return round(matched / ledger["official_precision_adjusted_accuracy"] - 120)
 
 
 def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
@@ -212,6 +236,9 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
             "after_coverage_accuracy": None,
             "net_additional_correct_items": None,
             "accuracy_percentage_point_change": None,
+            "precision_adjusted_percentage_point_change": None,
+            "before_unsupported_extra_count_from_evaluator": None,
+            "after_unsupported_extra_count_from_evaluator": None,
             "newly_correct_target_ids": [],
             "regressed_target_ids": [],
             "input_fingerprint_unchanged": same_input,
@@ -252,6 +279,12 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
         "after_coverage_accuracy": after_accuracy,
         "before_precision_adjusted_accuracy": before["official_precision_adjusted_accuracy"],
         "after_precision_adjusted_accuracy": after["official_precision_adjusted_accuracy"],
+        "precision_adjusted_percentage_point_change": 100.0 * (
+            after["official_precision_adjusted_accuracy"]
+            - before["official_precision_adjusted_accuracy"]
+        ),
+        "before_unsupported_extra_count_from_evaluator": _scored_unsupported_extras(before),
+        "after_unsupported_extra_count_from_evaluator": _scored_unsupported_extras(after),
         "newly_correct_target_ids": gains,
         "regressed_target_ids": regressions,
         "other_changed_target_states": other_changes,
