@@ -36,6 +36,7 @@ class DocumentedWallOpening:
     source_sha256: str
     revision_id: str
     page_id: str
+    published_original_opening_area_m2: float | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,7 @@ def measure_figured_wall_lining_shadow(
                 or opening.host_source_side_id not in side_lengths
                 or _number(opening.opening_width_mm) is None
                 or _number(opening.opening_height_mm) is None
+                or _number(opening.published_original_opening_area_m2) is None
                 or not _receipts(opening.host_binding_evidence_ids)
                 or not _receipts(opening.physical_frame_evidence_ids)
                 or (opening.source_sha256, opening.revision_id, opening.page_id)
@@ -162,6 +164,11 @@ def measure_figured_wall_lining_shadow(
         opening_source_ids.add(opening.source_opening_area_id)
         side_opening_widths[opening.host_source_side_id] += opening.opening_width_mm
         area = (opening.opening_width_mm * opening.opening_height_mm) / 1_000_000.0
+        if not math.isclose(
+            area, opening.published_original_opening_area_m2,
+            rel_tol=0.0, abs_tol=1e-9
+        ):
+            return block("source_figured_wall_opening_signed_area_conflict")
         side_opening_areas[opening.host_source_side_id] += area
         deductions.append((opening.physical_opening_id, area))
     if any(side_opening_widths[k] > side_lengths[k] + 1e-9
