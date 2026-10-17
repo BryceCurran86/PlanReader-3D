@@ -49,12 +49,19 @@ def _original_ceiling_simple_bbox(
         raise SourceClosedRunConflictError(
             f"canonical ceiling polygon is not a simple physical zone: {quantity_id}"
         )
+    from shapely.errors import GEOSException
     from shapely.geometry import Polygon
-    polygon = Polygon(ring)
-    if (
-        not polygon.is_valid or not polygon.exterior.is_simple
-        or not math.isfinite(polygon.area) or polygon.area <= 0.0
-    ):
+    try:
+        polygon = Polygon(ring)
+        valid = (
+            polygon.is_valid and polygon.exterior.is_simple
+            and math.isfinite(polygon.area) and polygon.area > 0.0
+        )
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"canonical ceiling polygon GEOS geometry invalid: {quantity_id}"
+        ) from exc
+    if not valid:
         raise SourceClosedRunConflictError(
             f"canonical ceiling polygon is not a simple physical zone: {quantity_id}"
         )
