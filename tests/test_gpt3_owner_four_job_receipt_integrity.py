@@ -592,3 +592,43 @@ def test_original_source_preflight_does_not_masquerade_as_all_pdf_producer_execu
         "earliest_verified_project_execution_gate"
     ] == "owner_process_stopped:MEMORY_LIMIT"
     assert receipt["official_four_project_coverage_accuracy"] is None
+
+
+def test_original_four_projects_produce_distinct_source_first_authority_gates():
+    result = audit.verify_owner_four_job_receipts(_ROOT)
+    rows = {row["project_id"]: row for row in result["projects"]}
+    assert result["official_publication_status"] == "UNPUBLISHED"
+    assert rows["au_qld_lot16_power"]["remaining_gates_in_execution_order"][0] == (
+        "multidocument_original_source_production_not_complete"
+    )
+    assert rows["au_qld_lot16_power"]["authority_stage_statuses"][
+        "signed_v1_quantity_receipt"
+    ] == "VERIFIED_DERIVED_BYTES"
+    assert rows["au_qld_3laurel"]["remaining_gates_in_execution_order"][0] == (
+        "source_producer_unsealed:no_sealable_quantities"
+    )
+    assert rows["au_qld_maryborough_service_station"][
+        "remaining_gates_in_execution_order"
+    ][0] == "owner_process_stopped:MEMORY_LIMIT"
+    assert rows["au_qld_maryborough_service_station"][
+        "authority_stage_statuses"
+    ]["producer_process_completion"] == "BLOCKED"
+    assert rows["au_qld_q5446_armstrong32_harlequin"][
+        "remaining_gates_in_execution_order"
+    ][0] == "source_producer_unsealed:source_complexity_blocked"
+    assert all(row["remaining_gate_count"] == len(row["remaining_gates_in_execution_order"])
+               for row in result["projects"])
+    assert all(row["authority_stage_statuses"]["official_v2_project_score"]
+               == "NOT_EVALUATED" for row in result["projects"])
+
+
+def test_old_original_owner_source_sha_preflight_is_not_independent_private_pdf_rehash():
+    result = audit.verify_owner_four_job_receipts(_ROOT)
+    for project in result["projects"]:
+        status = project["authority_stage_statuses"]
+        assert status["owner_original_pdf_sha_preflight"] == "OWNER_REPORTED_VERIFIED"
+        assert status["independent_private_pdf_sha_rehash"] == "NOT_PERFORMED"
+        assert status["physical_identity_map"] == "NOT_SUPPLIED_IN_OWNER_RECEIPT"
+        assert status["fresh_customer_bijection"] == "NOT_VERIFIED"
+        assert status["frozen_project_manifest"] == "INCOMPLETE"
+        assert project["official_project_score"] is None
