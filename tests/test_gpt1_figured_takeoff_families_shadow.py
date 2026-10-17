@@ -56,6 +56,7 @@ def test_figured_wall_gross_net_opening_and_skirting():
     door=DocumentedWallOpening(
         "door-1","side-0",1000,2100,"signed-void-1",
         ("host-evidence",),("frame-evidence",),SHA,"rev","7",
+        published_original_opening_area_m2=2.1,
     )
     measured=measure_figured_wall_lining_shadow(ring,metric(),heights,(door,))
     assert measured.status is Status.CANDIDATE
@@ -210,3 +211,18 @@ def test_figured_opening_reveals_keep_door_and_window_sills_distinct():
     assert a.candidate_frame_linear_m==5
     assert b.candidate_frame_linear_m==6
     assert a.candidate_structural_void_area_m2==2
+
+
+def test_hosted_opening_cannot_deduct_without_existing_source_signed_area():
+    ring=tuple(FiguredPhysicalSide(f"side-{i}",(0,i),(0,i+1),(f"ink-{i}",))
+               for i in range(4))
+    heights=tuple(DocumentedWallHeight(f"side-{i}",3000,(f"height-{i}",),SHA,"rev","7")
+                  for i in range(4))
+    baseline=DocumentedWallOpening(
+        "door-1","side-0",1000,2100,"area-issuer",
+        ("host-evidence",),("frame-evidence",),SHA,"rev","7",
+    )
+    for candidate in (baseline,replace(baseline,published_original_opening_area_m2=1.5)):
+        result=measure_figured_wall_lining_shadow(ring,metric(),heights,(candidate,))
+        assert result.status is Status.ABSTAINED
+        assert result.candidate_net_lining_m2 is None
