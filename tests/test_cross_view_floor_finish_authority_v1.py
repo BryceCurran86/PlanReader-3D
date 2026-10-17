@@ -821,6 +821,7 @@ def test_shared_floor_finish_occurrence_quarantines_all_competing_floor_owners(
         canonical_floor_id="canonical-floor-other",
         physical_floor_surface_id="physical-floor-other",
         occurrence_record_id="separate-producer-owned-occurrence",
+        occurrence_evidence_id="separate-source-observation",
     )
     retained, unresolved = _quarantine_reused_floor_finish_occurrences(
         (authentic, competing, unrelated)
@@ -868,6 +869,7 @@ def test_shared_floor_finish_conflict_result_is_input_order_independent(
         physical_floor_surface_id="floor-c",
         physical_room_id="room-c",
         occurrence_record_id="different-authenticated-occurrence",
+        occurrence_evidence_id="different-original-source-observation",
     )
     original, ids = _quarantine_reused_floor_finish_occurrences(
         (verified, competing, unrelated)
