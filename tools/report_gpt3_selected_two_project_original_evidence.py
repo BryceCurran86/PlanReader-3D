@@ -222,6 +222,13 @@ def build_selected_two_project_development_evidence(
     project_ids = [r["project_id"] for r in projects]
     if len(set(project_ids)) != 2:
         raise ValueError("two selected projects cannot reuse one source identity")
+    # Signed commercial outputs from independently sourced projects must not
+    # reuse the same sealed-run issuer or exact signed fingerprint, even if
+    # different caller-supplied project labels claim different projects.
+    for field in ("sealed_run_id", "sealed_run_fingerprint"):
+        values = [project.get(field) for project in projects]
+        if any(type(value) is not str or not value for value in values) or len(set(values)) != 2:
+            raise ValueError("two selected projects must have independently sealed run identities")
 
     seen_quantities: set[str] = set()
     for project in projects:
