@@ -197,12 +197,27 @@ def compose_live_wall_opening_authority(
         page_ids=selected_pages,
     )
 
-    wall_factory = (
-        PhysicalWallCandidateProducer.from_source_visibility_unmeasured_g17_flanks_shadow
-        if include_unmeasured_ink_closed_flanks_shadow
-        else PhysicalWallCandidateProducer.from_source_visibility_producer
-    )
-    wall_producer = wall_factory(
+    if include_unmeasured_ink_closed_flanks_shadow:
+        # An original G17 opening nomination is an exact ONE-plan-page
+        # source policy. Cross-view evidence pages are independent source
+        # witnesses, NOT additional pages whose openings may be minted under
+        # the single-plan G17 hypothesis. Prior composition incorrectly
+        # supplied (plan,elevation) to a one-page capture and raised before
+        # any W4/host/frame proof could run.
+        if len(selected_pages) != 1:
+            raise ValueError(
+                "original G17 ink-shadow requires exactly one topology page"
+            )
+        source_visibility_producer.augment_with_unmeasured_g17_flanks_source_shadow(
+            revision_id,
+            page_ids=selected_pages,
+        )
+    # Build the canonical old W4 universe over ALL selected original/evidence
+    # pages; the G17 page's new source families are already receipted and
+    # are excluded by the ordinary page AND F.07 viewport source filters.
+    # The separate incomplete supplemental wall producer below consumes the
+    # one-page G17 families, never the elevation as another opening.
+    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
