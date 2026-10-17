@@ -111,7 +111,11 @@ def _require_published_suite_summary_parity(
         if state in ("MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"):
             if type(qid) is not str or not qid or qid != qid.strip():
                 raise ValueError("published matched target lacks canonical produced identity")
-        elif qid is not None and (type(qid) is not str or not qid or qid != qid.strip()):
+        elif state in ("MISSED", "PARTIAL") and qid is not None:
+            raise ValueError("published missed/partial target cannot claim produced identity")
+        elif state == "UNRESOLVED" and qid is not None and (
+            type(qid) is not str or not qid or qid != qid.strip()
+        ):
             raise ValueError("published unresolved target has invalid produced identity")
         if qid is not None:
             source_ids.append(qid)
