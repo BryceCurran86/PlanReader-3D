@@ -115,9 +115,9 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
         sums[path] = digest
         _require(_digest(_safe_file(root, path)) == digest,
                  "SHA256SUMS actual byte digest mismatch: " + path)
-    _require(len(sums) == 31, "original owner SHA256SUMS must contain 31 records")
     _require(set(sums) == set(indexed) | _EXTRA_DERIVED,
              "SHA256SUMS universe differs from archived derived receipt")
+    _require(len(sums) == 31, "original owner SHA256SUMS must contain 31 records")
     # No extra arbitrary artifact may be smuggled into an otherwise hash-valid
     # share-safe owner archive. SHA256SUMS itself is the only unlisted hash file.
     # The original archive has one unindexed repository-only byte policy.
@@ -133,7 +133,19 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
         file.relative_to(root).as_posix()
         for file in root.rglob("*") if file.is_file()
     }
-    _require(actual_tree == expected_tree,
+    # Other repository tests may import the original SHA-indexed
+    # assemble_receipts.py and cause Python to emit a transient .pyc beside
+    # it. Such bytecode is not owner receipt evidence; never read/verify it,
+    # but do not mistake this one predictable runner byproduct for a private
+    # source file. All other unindexed paths (including any PDF) still fail.
+    allowed_bytecode = {
+        name for name in actual_tree - expected_tree
+        if name.startswith("__pycache__/assemble_receipts.cpython-")
+        and name.endswith(".pyc")
+        and name.count("/") == 1
+        and (root / name).stat().st_size <= 512 * 1024
+    }
+    _require(actual_tree - allowed_bytecode == expected_tree,
              "unindexed artifact in original share-safe receipt package")
     _require(all(sums[k] == sha for k, sha in indexed.items()),
              "SHA256SUMS and owner receipt disagree")
@@ -232,6 +244,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
     }
     _require(len(original_docs) == 10, "frozen ten-document source universe drift")
     owner = _object(root, "RUN_RECEIPT.json")
+    # Verify all archival bytes before interpreting producer/source semantics:
+    # a changed V1 must fail on SHA mismatch, not an incidental later compare.
+    indexed, sums = _sha_index(root, owner)
     _require(owner.get("schema") == "four_job_owner_machine_run_receipt/1",
              "owner run receipt schema mismatch")
     session = owner.get("session")
@@ -663,7 +678,6 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
     _require(not any(p.is_file() and p.suffix.lower() == ".pdf"
                      for p in root.rglob("*")),
              "private original PDF appeared in derived share-safe receipt package")
-    indexed, sums = _sha_index(root, owner)
     _require(_REQUIRED_FILES.issubset(sums), "required owner receipt source files absent")
     _require(all(path in sums for path in (
         "RUN_RECEIPT.json", "SOURCE_SHA_VERIFICATION.json", "PREFLIGHT_STATUS.json"
