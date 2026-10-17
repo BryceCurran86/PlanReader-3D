@@ -78,3 +78,18 @@ def test_malformed_original_source_sha_or_revision_cannot_reconcile_even_if_valu
         assert resolve_explicit_floor_area_evidence([
             _claim(revision=rev),_claim(page=2,revision=rev)
         ]) is None
+
+
+def test_unrepresentable_original_declared_area_stays_unbound():
+    assert resolve_explicit_floor_area_evidence([_claim(area=10**1000)]) is None
+
+
+def test_declared_source_receipt_collections_must_be_typed():
+    for pages in (None, True, "1", (1, "2")):
+        assert resolve_explicit_floor_area_evidence([
+            replace(_claim(), source_pages=pages)
+        ]) is None
+    for raw in (None, True, "raw original source", ("valid", None)):
+        assert resolve_explicit_floor_area_evidence([
+            replace(_claim(), raw_evidence=raw)
+        ]) is None
