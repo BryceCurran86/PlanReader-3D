@@ -94,6 +94,7 @@ def test_printed_92_wall_notes_flank_the_figure_but_do_not_elect_finished_face()
     from tools.diag_gpt2_original_figured_face_rivals_shadow import (
         audit_original_figured_detail_face_rivals,
         audit_original_figured_wall_note_alignment,
+        audit_original_ft2_internal_wall_face_basis,
     )
     original=PDF.read_bytes()
     figured=audit_original_figured_detail_plan_pair(
@@ -116,6 +117,14 @@ def test_printed_92_wall_notes_flank_the_figure_but_do_not_elect_finished_face()
     chain=audit(original,expected_sha256=SHA,page_1_based=26,
                 vertical=VERTICAL,horizontal=HORIZONTAL)
     result=audit_original_figured_wall_note_alignment(rivals,chain)
+    ft2=audit_original_ft2_internal_wall_face_basis(rivals,chain)
+    assert ft2["status"]=="original_ft2_clear_internal_wall_face_area_candidate"
+    assert ft2["source_ft2_clear_room_rectangle_area_m2_candidate_not_signed"]==7.854
+    assert ft2["source_wall_notes_outside_clear_dimensions_mm"]==(92,92,92,92)
+    assert not ft2["include_area_under_walls"]
+    assert not ft2["deduct_the_92mm_walls_from_clear_room_figures"]
+    assert not ft2["source_finished_wall_face_role_authenticated"]
+    assert ft2["new_firm_quantities"]==0
     assert result["status"]=="original_orthogonal_wall_note_and_face_rivals_candidate_only"
     assert result["source_original_dimension_chains"]["vertical"][
         "original_main_figure_mm"]==3570
