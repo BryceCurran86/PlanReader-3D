@@ -63,6 +63,9 @@ def _receipts(raw: Any, claim_date: Any, previous_ids: set[str]) -> list[dict]:
 
 def _validate_claim_chain(previous: list[dict], contract: Mapping[str, Any],
                           variations: Mapping[str, Any]) -> None:
+    # A variation can be proposed/approved after an earlier claim. The new
+    # register must extend, not rewrite, every previous signed event prefix.
+    current_event_hashes = [entry["event_hash"] for entry in variations["event_chain"]]
     prior = None
     for index, item in enumerate(previous, 1):
         if (type(item) is not dict
@@ -70,8 +73,9 @@ def _validate_claim_chain(previous: list[dict], contract: Mapping[str, Any],
             or item.get("claim_fingerprint") != digest(item, "claim_fingerprint")
             or item.get("claim_number") != index
             or item.get("contract_fingerprint") != contract["contract_fingerprint"]
-            or item.get("variation_register_fingerprint")
-                != variations["variation_register_fingerprint"]
+            or type(item.get("variation_event_hashes")) is not list
+            or current_event_hashes[:len(item["variation_event_hashes"])]
+                != item["variation_event_hashes"]
             or item.get("previous_claim_fingerprint")
                 != (prior["claim_fingerprint"] if prior else None)):
             raise ValueError("previous claims do not form a sequential unmodified chain")
@@ -178,6 +182,8 @@ def build_progress_claim(
     prior_milestone = previous_claims[-1]["milestone_completion_pct"] if previous_claims else {}
     prior_variation = previous_claims[-1]["variation_completion_pct"] if previous_claims else {}
     for current, past in ((source, prior_source), (milestone, prior_milestone), (change, prior_variation)):
+        if any(key not in current for key in past):
+            raise ValueError("previously approved progress keys cannot disappear")
         if any(value < Decimal(str(past.get(key, "0"))) for key, value in current.items()):
             raise ValueError("cumulative reported completion cannot be rolled backwards")
     milestone_earned, milestone_rows = _earnings(
@@ -270,6 +276,9 @@ def build_progress_claim(
         "signed_run_fingerprint": contract["signed_run_fingerprint"],
         "variation_register_fingerprint":
             variation_register["variation_register_fingerprint"],
+        "variation_event_hashes": [
+            event["event_hash"] for event in variation_register["event_chain"]
+        ],
         "previous_claim_fingerprint": (
             previous_claims[-1]["claim_fingerprint"] if previous_claims else None
         ),
