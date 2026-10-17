@@ -29,6 +29,7 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
         or book.get("schema_version") != "gpt3-client-procurement-events-v1"
         or book.get("procurement_fingerprint") != plan["procurement_fingerprint"]):
         raise ValueError("supplier event book must bind exact source procurement plan")
+    approved_on = _date(plan.get("as_of"), "procurement approval date")
     events = book.get("events")
     if type(events) is not list:
         raise ValueError("supplier event log must be an explicit chronological list")
@@ -54,6 +55,7 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
                 "rejected_delivery_quantity": Decimal("0"),
                 "returned_after_acceptance_quantity": Decimal("0"),
                 "invoiced_gross": Decimal("0"),
+                "credited_gross": Decimal("0"),
                 "paid_gross": Decimal("0"),
                 "ordered_gross": Decimal(line["gross_cost"]),
                 "source_quantity_ids": line["related_signed_quantity_ids"],
@@ -63,8 +65,11 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
     receipt_refs = set()
     invoice_refs = set()
     payment_refs = set()
+    credit_refs = set()
+    shipment_refs = set()
     invoices = {}
     payments = []
+    credit_notes = []
     audit = []
     previous_hash = plan["procurement_fingerprint"]
     last_date = None
@@ -77,6 +82,8 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
         if pid not in ordered:
             raise ValueError("event references unknown draft purchase order")
         when = _date(row.get("recorded_on"), "procurement event date")
+        if when < approved_on:
+            raise ValueError("supplier event predates explicit client procurement approval")
         if last_date is not None and when < last_date:
             raise ValueError("supplier events must be chronological")
         last_date = when
@@ -95,6 +102,9 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             if key not in lines:
                 raise ValueError("shipment notice belongs to unknown ordered line")
             qty = _positive(row.get("shipped_quantity"), "supplier announced shipment quantity")
+            notice_identity = (*key, reference)
+            if notice_identity in shipment_refs:
+                raise ValueError("duplicate supplier shipment notice reference for purchase line")
             existing = notices.get(key, Decimal("0"))
             state = lines[key]
             # Replacements of already rejected/returned supplier goods are
@@ -106,6 +116,7 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             if existing + qty > Decimal(state["ordered_quantity"]) + replacement_allowance:
                 raise ValueError("announced shipment exceeds approved order plus returned/rejected replacements")
             notices[key] = existing + qty
+            shipment_refs.add(notice_identity)
         elif kind == "RECEIVE_DELIVERY":
             key = (pid, _id(row.get("requisition_id"), "receipt requisition"))
             if key not in lines:
@@ -119,6 +130,11 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             if accepted + rejected <= 0:
                 raise ValueError("delivery record requires a positive handled quantity")
             state = lines[key]
+            if key in notices and (
+                state["accepted_receipt_quantity"] + state["rejected_delivery_quantity"]
+                + accepted + rejected > notices[key]
+            ):
+                raise ValueError("recorded deliveries exceed supplier-notified shipment quantity")
             if (
                 accepted + rejected > Decimal(state["ordered_quantity"])
                 or (
@@ -162,7 +178,8 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             invoices[invoice_id] = {
                 "invoice_id": invoice_id, "po_draft_id": pid,
                 "requisition_id": key[1], "gross_amount": _money(invoice_amount),
-                "paid": Decimal("0"), "recorded_on": when.isoformat(),
+                "paid": Decimal("0"), "credited": Decimal("0"),
+                "recorded_on": when.isoformat(),
             }
         elif kind == "RECORD_SUPPLIER_PAYMENT":
             invoice_id = _id(row.get("invoice_id"), "supplier payable invoice ID")
@@ -176,7 +193,8 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             if _money(amount) != str(row["amount"]):
                 raise ValueError("supplier payment amount must be exact cents")
             invoice = invoices[invoice_id]
-            if invoice["paid"] + amount > Decimal(invoice["gross_amount"]):
+            if (invoice["paid"] + invoice["credited"] + amount
+                > Decimal(invoice["gross_amount"])):
                 raise ValueError("recorded supplier payment exceeds issued invoice balance")
             invoice["paid"] += amount
             key = (pid, invoice["requisition_id"])
@@ -186,6 +204,38 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
                 "recorded_on": when.isoformat(), "amount": _money(amount),
                 "reference": reference,
                 "payment_status": "CLIENT_RECORDED_NOT_BANK_VERIFIED",
+            })
+        elif kind == "SUPPLIER_CREDIT_NOTE":
+            invoice_id = _id(row.get("invoice_id"), "supplier credit note invoice")
+            if invoice_id not in invoices or invoices[invoice_id]["po_draft_id"] != pid:
+                raise ValueError("supplier credit note must match a recorded invoice and order")
+            credit_id = _id(row.get("credit_id"), "supplier credit note ID")
+            if credit_id in credit_refs:
+                raise ValueError("duplicate supplier credit note identity")
+            amount = _amount(row.get("gross_amount"), "supplier credit amount")
+            if amount <= 0:
+                raise ValueError("supplier credit amount must be positive")
+            reason = row.get("credit_reason")
+            if reason not in ("RETURN", "PRICE_ADJUSTMENT", "OTHER_CLIENT_AUTHORISED"):
+                raise ValueError("supplier credit must include a typed client-declared reason")
+            invoice = invoices[invoice_id]
+            key = (pid, invoice["requisition_id"])
+            if reason == "RETURN" and (
+                lines[key]["returned_after_acceptance_quantity"] <= 0
+                and lines[key]["rejected_delivery_quantity"] <= 0
+            ):
+                raise ValueError("return credit requires a recorded rejected or returned delivery")
+            if invoice["paid"] + invoice["credited"] + amount > Decimal(invoice["gross_amount"]):
+                raise ValueError("supplier credit cannot exceed unpaid invoiced balance")
+            invoice["credited"] += amount
+            lines[key]["credited_gross"] += amount
+            credit_refs.add(credit_id)
+            credit_notes.append({
+                "credit_id": credit_id, "invoice_id": invoice_id,
+                "po_draft_id": pid, "requisition_id": key[1],
+                "gross_amount": _money(amount), "credit_reason": reason,
+                "recorded_on": when.isoformat(), "reference": reference,
+                "credit_status": "CLIENT_RECORDED_NOT_SUPPLIER_VERIFIED",
             })
         elif kind != "RECORD_PO_SENT" and kind != "SHIPMENT_NOTICE":
             raise ValueError("unknown supplier event transition")
@@ -218,16 +268,19 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
             "outstanding_purchase_quantity": _number(pending),
             "source_quantity_ids": item["source_quantity_ids"],
             "invoiced_gross": _money(item["invoiced_gross"]),
+            "credited_gross": _money(item["credited_gross"]),
+            "net_invoiced_gross": _money(item["invoiced_gross"] - item["credited_gross"]),
             "recorded_paid_gross": _money(item["paid_gross"]),
-            "unpaid_invoice_gross": _money(item["invoiced_gross"] - item["paid_gross"]),
+            "unpaid_invoice_gross": _money(item["invoiced_gross"] - item["paid_gross"] - item["credited_gross"]),
             "ordered_gross": _money(item["ordered_gross"]),
             "status": state,
             "material_receipt_authority": "CLIENT_DECLARED_NOT_VERIFIED_DELIVERY",
         })
     invoices_out = [
-        {**{k: v for k, v in inv.items() if k != "paid"},
+        {**{k: v for k, v in inv.items() if k not in ("paid", "credited")},
          "paid_gross": _money(inv["paid"]),
-         "outstanding_gross": _money(Decimal(inv["gross_amount"]) - inv["paid"])}
+         "credited_gross": _money(inv["credited"]),
+         "outstanding_gross": _money(Decimal(inv["gross_amount"]) - inv["paid"] - inv["credited"])}
         for _, inv in sorted(invoices.items())
     ]
     total = lambda field: _money(sum((Decimal(item[field]) for item in status), Decimal("0")))
@@ -243,16 +296,20 @@ def build_procurement_receipts(plan: dict, book: dict) -> dict:
         ],
         "line_status": status,
         "invoices": invoices_out, "payments": payments,
+        "credit_notes": credit_notes,
         "event_chain": audit,
         "supplier_financial_summary": {
             "approved_order_line_gross": total("ordered_gross"),
             "invoiced_gross": total("invoiced_gross"),
+            "credited_gross": total("credited_gross"),
+            "net_invoiced_gross": total("net_invoiced_gross"),
             "recorded_paid_gross": total("recorded_paid_gross"),
             "outstanding_payable_gross": total("unpaid_invoice_gross"),
         },
         "external_orders_sent_by_this_tool": False,
         "supplier_delivery_certified": False,
         "bank_payments_verified": False,
+        "supplier_credit_notes_verified": False,
         "signed_source_measurements_changed": False,
         "official_four_project_accuracy": None,
     }
@@ -264,7 +321,8 @@ def fulfillment_csv(report: Mapping[str, Any]) -> str:
     keys = ("po_draft_id", "requisition_id", "supplier_id", "status",
             "purchase_unit", "ordered_quantity", "net_accepted_quantity",
             "outstanding_purchase_quantity", "rejected_quantity",
-            "returned_quantity", "invoiced_gross", "recorded_paid_gross",
+            "returned_quantity", "invoiced_gross", "credited_gross",
+            "net_invoiced_gross", "recorded_paid_gross",
             "unpaid_invoice_gross", "source_quantity_ids")
     result = io.StringIO(newline="")
     writer = csv.DictWriter(result, fieldnames=keys)
@@ -298,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         "purchase_lines": len(result["line_status"]),
         "supplier_invoice_count": len(result["invoices"]),
         "payment_receipt_count": len(result["payments"]),
+        "supplier_credit_note_count": len(result["credit_notes"]),
         "official_four_project_accuracy": None,
     }, sort_keys=True))
     return 0
