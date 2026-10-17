@@ -157,6 +157,23 @@ def test_project_gate_output_never_overwrites_frozen_reference(tmp_path, monkeyp
     assert frozen_reference.read_bytes() == b"unchanged gold"
 
 
+def test_project_gate_rejects_protected_input_before_source_read(tmp_path, monkeypatch):
+    manifest, original, sealed, identity, _sha = _fixtures(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        module, "build_original_byte_gated_project_report",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("source must not be read")),
+    )
+    for protected in (manifest, original, sealed, identity):
+        before = protected.read_bytes()
+        with pytest.raises(ValueError, match="may not overwrite protected evidence"):
+            module.main([
+                "--manifest", str(manifest), "--source", str(original),
+                "--sealed-run", str(sealed), "--identity-map", str(identity),
+                "--output", str(protected),
+            ])
+        assert protected.read_bytes() == before
+
+
 @pytest.mark.parametrize("side", ["sealed", "identity"])
 def test_partial_signed_source_envelope_cannot_pass_original_byte_gate(tmp_path, monkeypatch, side):
     manifest, original, sealed, identity, _sha = _fixtures(
