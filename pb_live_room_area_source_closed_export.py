@@ -46,6 +46,7 @@ def _firm_room_area_quantities(
 
     out: list[QuantityEvidence] = []
     seen_ids: set[str] = set()
+    figured_pair_owner: dict[tuple[str, str], tuple[str, str]] = {}
     for quantity in claim.room_area_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -127,6 +128,30 @@ def _firm_room_area_quantities(
             raise SourceClosedRunConflictError(
                 f"room-area original semantic key does not match source room: {quantity_id}"
             )
+        # Only documented figured area legitimately owns an original H/V pair.
+        # Scaled room-area quantities do not derive metric area from those
+        # optional observations: never veto genuine scaled source receipts.
+        if quantity.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
+            axes = _quantity_metadata(quantity).get("figured_dimension_ids")
+            if axes is not None:
+                if (
+                    type(axes) not in (tuple, list) or len(axes) != 2
+                    or any(type(v) is not str or not v or v != v.strip() for v in axes)
+                    or axes[0] == axes[1]
+                ):
+                    raise SourceClosedRunConflictError(
+                        f"room-area original figured pair invalid: {quantity_id}"
+                    )
+                pair = tuple(sorted(axes))
+                prior = figured_pair_owner.get(pair)
+                if prior is not None:
+                    reason = (
+                        "one original figured pair claimed by competing rooms"
+                        if prior[0] != quantity.input_entity_ids[0]
+                        else "one original figured pair reissued as a second room-area quantity"
+                    )
+                    raise SourceClosedRunConflictError(f"{reason}: {pair}")
+                figured_pair_owner[pair] = (quantity.input_entity_ids[0], quantity_id)
         out.append(quantity)
 
     return tuple(sorted(out, key=lambda item: item.quantity_id))
