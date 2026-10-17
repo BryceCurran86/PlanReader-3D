@@ -12,6 +12,9 @@ import sys
 
 
 PRIVATE_SOURCE_ROOTS = ("documents/sources/", "benchmarks/sources/")
+PRIVATE_SOURCE_COMPONENTS = frozenset((".private-sources", "source-originals"))
+SECRET_FILE_SUFFIXES = (".pem", ".p12", ".pfx", ".p8", ".jks")
+SECRET_FILE_NAMES = frozenset(("id_rsa", "id_ed25519", ".npmrc"))
 
 
 def _canonical_git_path(raw: str) -> str:
@@ -32,7 +35,16 @@ def blocked_source_additions(paths: list[str] | tuple[str, ...]) -> tuple[str, .
     denied = set()
     for raw in paths:
         path = _canonical_git_path(raw)
-        if path.startswith(PRIVATE_SOURCE_ROOTS):
+        name = path.rsplit("/", 1)[-1]
+        parts = path.split("/")
+        if (
+            path.startswith(PRIVATE_SOURCE_ROOTS)
+            or any(part in PRIVATE_SOURCE_COMPONENTS for part in parts)
+            or name in SECRET_FILE_NAMES
+            or name.endswith(SECRET_FILE_SUFFIXES)
+            or name == ".env"
+            or (name.startswith(".env.") and name != ".env.example")
+        ):
             denied.add(raw)
     return tuple(sorted(denied))
 
