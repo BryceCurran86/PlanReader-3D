@@ -267,6 +267,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    # Protected originals and the immutable frozen tree must reject with the
+    # pre-existing gate even when their contents are not diagnostic JSON.
+    protected_inputs = (args.manifest, args.sealed_run, args.identity_map, *args.source)
+    if (args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
+            or any(args.output.resolve() == p.resolve() for p in protected_inputs)):
+        raise ValueError("original-byte project report may not overwrite protected evidence")
     # Validate output *before* reading potentially huge original PDF bytes.
     # A diagnostic must never replace an unrelated source or customer artifact.
     if args.output.is_symlink():
