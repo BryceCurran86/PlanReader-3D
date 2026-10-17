@@ -1903,6 +1903,7 @@ class SourceVisibilityProducer:
                 document_id=base.revision.document_id,
                 revision_id=base.revision.revision_id,
                 base_snapshot_id=base.snapshot.snapshot_id,
+                derived_observation_ids=visible_ids,
             )
 
         published = PublishedVisibleSourceSnapshot(

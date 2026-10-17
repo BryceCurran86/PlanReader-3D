@@ -1642,12 +1642,18 @@ class SourceObservationProducer:
         document_id: str,
         revision_id: str,
         base_snapshot_id: str,
+        derived_observation_ids: Sequence[str],
     ) -> ProducerSnapshotRecord:
         """Open one child snapshot that stores no new records.
 
         A native visible line keeps the native segment's stored geometry.
         The child snapshot is the visibility generation; it does not copy
-        that line.
+        that line. The snapshot id hashes the derived (visible) observation ids
+        exactly as publish_derived_observations does for the same ids, so every
+        id issued from this snapshot (host bindings, quantities, run
+        fingerprints) is unchanged. The snapshot itself keeps the base
+        observation id set because the visible lines are read views of native
+        records, not stored records.
         """
 
         current = self._store.current_revision_by_document.get(document_id)
@@ -1660,6 +1666,13 @@ class SourceObservationProducer:
             or base.document_id != document_id
         ):
             raise ValueError(f"{SNAPSHOT_MISMATCH}: base snapshot mismatch")
+        derived_ids = [str(observation_id) for observation_id in derived_observation_ids]
+        if not derived_ids:
+            raise ValueError("derived_observation_ids must be non-empty")
+        if len(derived_ids) != len(set(derived_ids)):
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: duplicate batch observation id"
+            )
         revision = self._store.revisions[revision_id]
         coverage = self._store.coverage_by_revision[revision_id]
         generation = self._store.next_generation()
@@ -1668,7 +1681,7 @@ class SourceObservationProducer:
             {
                 "revision_id": revision_id,
                 "base_snapshot_id": base_snapshot_id,
-                "derived_observation_ids": (),
+                "derived_observation_ids": tuple(sorted(derived_ids)),
                 "generation": generation,
             },
             digest_chars=32,
