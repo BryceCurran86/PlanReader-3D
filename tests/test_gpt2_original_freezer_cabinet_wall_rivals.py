@@ -70,4 +70,4 @@ def test_missing_actual_source_path_sha_and_bounded_universe_abstain():
     with pytest.raises(ValueError,match="immutable_source_sha_required"):
         audit(raw+b"altered",**BASE)
     with pytest.raises(ValueError,match="missing_original_frontage_source_pair"):
-        audit(raw,**{**BASE,"inner_front_source_ids":("d62523i0","d62620i0")})
+        audit(raw,**{**BASE,"inner_front_source_ids":("d999999i0","d62620i0")})
