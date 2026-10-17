@@ -11,6 +11,9 @@ from __future__ import annotations
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_cross_view_ceiling_finish_authority import _source_bytes
 from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_graph
+from tools.diag_gpt2_original_room_doorway_ancestry_shadow import (
+    audit_gpt2_original_room_doorway_ancestry_pair,
+)
 from tools.diag_gpt2_source_rcp_geometry_shadow import audit_original_rcp_ceiling_ink
 from pb_gpt2_w4_rcp_source_handoff import (
     audit_gpt2_w4_original_rcp_ceiling_handoff,
@@ -68,6 +71,40 @@ class GPT2OriginalSourceGeometryBridge:
             "source_revision_id":revision_id,
             "source_snapshot_id":published.snapshot.snapshot_id,
             "source_native_pdf_graph_is_not_measurement_authority":True,
+        }
+
+    def original_room_doorway_source_ancestry(
+        self, *, revision_id: str, original_floor_page_1_based: int,
+        original_second_page_1_based: int,
+        original_floor_source_edge_ids: tuple[str,...],
+        original_second_source_edge_ids: tuple[str,...],
+        original_translation_pdf_pts: tuple[float,float],
+    ) -> dict:
+        """Retain real five-stroke doorway evidence, including the p11 rival.
+
+        Never silently elect the geometrically nearest printed wall segment.
+        The public GitHub checkout cannot invoke this without original bytes,
+        and this producer verifies those bytes before inspecting either page.
+        """
+        published,raw=self._source_revision(
+            revision_id,page_1_based=original_floor_page_1_based)
+        other,_=self._source_revision(
+            revision_id,page_1_based=original_second_page_1_based)
+        if other.revision.source_sha256!=published.revision.source_sha256:
+            raise ValueError("original_source_doorway_page_root_disagreement")
+        result=audit_gpt2_original_room_doorway_ancestry_pair(
+            raw,expected_sha256=published.revision.source_sha256,
+            floor_page_1_based=original_floor_page_1_based,
+            second_page_1_based=original_second_page_1_based,
+            original_floor_source_edge_ids=original_floor_source_edge_ids,
+            original_second_source_edge_ids=original_second_source_edge_ids,
+            original_translation_pdf_pts=original_translation_pdf_pts,
+        )
+        return {
+            **result,
+            "source_document_id":published.revision.document_id,
+            "source_revision_id":revision_id,
+            "source_snapshot_id":published.snapshot.snapshot_id,
         }
 
     def original_rcp_ink_graph(
@@ -177,6 +214,7 @@ class GPT2OriginalSourceGeometryBridge:
         source_material_receipt: dict,
         canonical_rooms,
         physical_room_id: str,
+        original_doorway_source_ancestry: dict | None = None,
     ) -> dict:
         """One actual published W4 face + one original FT occurrence.
 
@@ -191,6 +229,27 @@ class GPT2OriginalSourceGeometryBridge:
                 source_cross_sheet_receipt.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_cross_sheet_root_does_not_match_active_revision")
+        if source_cross_sheet_receipt.get(
+                "source_real_door_ink_gap_virtual_closure_only") is True:
+            rival=original_doorway_source_ancestry
+            if (type(rival) is not dict
+                    or rival.get("status")!=
+                        "original_doorway_all_printed_wall_strokes_match_candidate"
+                    or rival.get("original_source_sha256")!=
+                        published.revision.source_sha256
+                    or rival.get("source_revision_id")!=revision_id
+                    or rival.get("source_snapshot_id")!=
+                        published.snapshot.snapshot_id
+                    or rival.get("original_floor_page")!=original_floor_page_1_based
+                    or rival.get("original_other_plan_page")!=
+                        source_cross_sheet_receipt.get("original_finish_page")):
+                return {
+                    "status":"source_original_doorway_ancestry_conflict",
+                    "first_failure":"real_original_doorway_stub_disagrees_across_sheets",
+                    "original_doorway_source_ancestry":rival,
+                    "floor_finish_quantity_granted":False,
+                    "new_firm_quantities":0,
+                }
         w4=audit_gpt2_w4_bound_original_floor(
             source_cross_sheet_receipt,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
