@@ -99,3 +99,20 @@ def test_explicit_source_schedule_requires_an_existing_producer_revision():
     with pytest.raises(ValueError, match="original_schedule_source_revision_unavailable"):
         material.publish("nonexistent-private-source-revision")
     assert material.published_plan_viewports() == ()
+
+@pytest.mark.parametrize("drawing_title", [
+    "GRID REFLECTED CEILING PLAN",
+    "GRID CEILING PLAN",
+    "GRID CEILING LAYOUT PLAN",
+    "REFLECTED CEILING GRID PLAN",
+    "CEILING GRID LAYOUT PLAN",
+])
+def test_source_grid_drawing_titles_are_not_ceiling_material_mark_occurrences(drawing_title):
+    # A material-code word in a complete sheet title is not the printed
+    # occurrence of that material on an individual physical ceiling.
+    assert materials._source_owned_material_codes_in_line(
+        drawing_title, {"GRID": {}}
+    ) == ()
+    assert materials._source_owned_material_codes_in_line(
+        "GRID", {"GRID": {}}
+    ) == ("GRID",)
