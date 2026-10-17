@@ -438,21 +438,50 @@ def _occurrences_on_page(
     *,
     page_id: str,
 ) -> tuple[SourceMaterialOccurrenceRecord, ...]:
-    records: list[SourceMaterialOccurrenceRecord] = []
+    # A completed viewport/plan scope may repeat the same source-issued
+    # observation already returned by another completed scope. Counting the
+    # *identical* receipt twice would make one true finish look ambiguous.
+    # Conversely, a reused ID with different evidence cannot choose a winner.
+    by_id: dict[str, list[SourceMaterialOccurrenceRecord]] = {}
+    by_evidence: dict[str, set[str]] = {}
     for result in results:
         if (
             result.status is not EvidenceResolutionStatus.CORROBORATED
             or not result.scope_complete
         ):
             continue
-        records.extend(
-            record
-            for record in result.records
-            if _clean(record.page_id) == _clean(page_id)
-        )
+        for record in result.records:
+            if (
+                type(record) is not SourceMaterialOccurrenceRecord
+                or _clean(record.page_id) != _clean(page_id)
+                or type(record.record_id) is not str
+                or not record.record_id
+                or record.record_id != record.record_id.strip()
+                or type(record.source_evidence_id) is not str
+                or not record.source_evidence_id
+                or record.source_evidence_id != record.source_evidence_id.strip()
+            ):
+                continue
+            by_id.setdefault(record.record_id, []).append(record)
+            by_evidence.setdefault(record.source_evidence_id, set()).add(
+                record.record_id
+            )
+
+    # No string label, nominal material area, or approximate bbox can
+    # collapse *different* physical observations. Both sides of a conflicting
+    # issuer identity are withheld, independently of result iteration order.
+    disputed = {
+        record_id
+        for record_id, rows in by_id.items()
+        if any(row != rows[0] for row in rows[1:])
+    }
+    for owners in by_evidence.values():
+        if len(owners) != 1:
+            disputed.update(owners)
     return tuple(
         sorted(
-            records,
+            (rows[0] for record_id, rows in by_id.items()
+             if record_id not in disputed),
             key=lambda record: (
                 record.bbox_pdf_pts,
                 record.code,
