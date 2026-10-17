@@ -147,6 +147,8 @@ def test_local_aperture_frame_never_enters_the_positive_whole_wall_authority():
     result=producer.local_source_frame_shadow(opening_selector=sel,host_binding_selector=binding_sel)
     assert result.status is Status.CANDIDATE and result.evidence is not None
     assert result.evidence.whole_wall_length_pt is None
+    assert result.evidence.whole_wall_frame_id is None
+    assert result.evidence.record_id.startswith("opening_local_source_frame_shadow_")
     assert result.evidence.u1_pt>result.evidence.u0_pt
     frame_sel=OpeningHostFrameSelector(binding.document_id,binding.revision_id,binding.source_sha256,
         binding.snapshot_id,binding.page_id,binding.decision_scope_id,binding.opening_identity_id)
