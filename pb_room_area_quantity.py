@@ -563,6 +563,30 @@ def build_room_area_quantities(
         if len(owners) > 1
     )) if area_owners_by_evidence else set()
 
+    # Reissuing the same original figured horizontal+vertical source pair
+    # with a different EvidenceAtom ID is still the same physical measurement.
+    # Keep this batch-level protection even if the upstream receipt index was
+    # bypassed; independently proven rooms require independent figured pairs.
+    original_figured_pair_owners: dict[tuple[str, str], set[str]] = {}
+    for room in rooms:
+        atom = explicit.get(room.room_ref)
+        if type(atom) is not EvidenceAtom:
+            continue
+        metadata = atom.metadata if isinstance(atom.metadata, dict) else {}
+        axes = metadata.get("figured_dimension_ids")
+        if (
+            type(axes) in (tuple, list)
+            and len(axes) == 2
+            and all(type(v) is str and v and v == v.strip() for v in axes)
+            and axes[0] != axes[1]
+        ):
+            original_figured_pair_owners.setdefault(
+                tuple(sorted(axes)), set()
+            ).add(room.room_ref)
+    for owners in original_figured_pair_owners.values():
+        if len(owners) > 1:
+            disputed_area_owners.update(owners)
+
     duplicate_face_ids: set[str] = set()
     for ids in rings.values():
         if len(ids) <= 1:
