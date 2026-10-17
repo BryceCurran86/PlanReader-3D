@@ -40,3 +40,8 @@ def test_unrepresentable_finite_source_floor_geometry_is_blocked():
     huge=1e308
     with pytest.raises(SourceClosedRunConflictError,match="floor source ring"):
         _bbox(((0,0),(huge,huge),(huge,0),(0,huge)))
+
+
+def test_extremely_large_integer_original_floor_coordinate_abstains():
+    with pytest.raises(SourceClosedRunConflictError, match="floor source ring"):
+        _bbox(((0, 0), (10**1000, 0), (2, 2), (0, 2)))
