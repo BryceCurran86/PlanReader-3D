@@ -142,6 +142,35 @@ def test_original_a600_three_door_rows_distinguish_ambulant_and_pwd():
     assert hashlib.sha256(PDF.read_bytes()).hexdigest()==SHA
 
 
+def test_original_a600_general_notes_d3_alias_is_not_schedule_row():
+    data=PDF.read_bytes()
+    assert hashlib.sha256(data).hexdigest()==SHA
+    with fitz.open(stream=data,filetype="pdf") as doc:
+        result=audit(doc[27],other_plan_pages=(doc[6],))
+        row_codes={
+            r["schedule_door_code_literal_untrusted"]
+            for r in result["all_original_schedule_row_candidates"]
+        }
+        # D3 occurs in an original general-notes native block alongside
+        # words such as DOOR; it is not a schedule code with dimensions.
+        assert "D3" not in row_codes
+        assert set(f"D{i:02d}" for i in range(1,29))<=row_codes
+        assert len(row_codes)==28
+        assert result["new_opening_counts"]==0
+
+
+def test_note_syntax_and_lone_door_code_never_become_schedule_row():
+    assert not _row_candidates([
+        _word(23,i,t) for i,t in
+        enumerate(["1.","READ","D3","DOOR","IN","GENERAL","NOTES","4"])
+    ])
+    assert not _row_candidates([_word(24,0,"D03")])
+    assert not _row_candidates([
+        _word(25,i,t) for i,t in
+        enumerate(["D03","D04","SINGLE","SWING","920","2040"])
+    ])
+
+
 def test_plan_page_input_must_be_explicit_tuple():
     with fitz.open() as doc:
         page=doc.new_page()
