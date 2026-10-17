@@ -140,7 +140,7 @@ def _validate_input_ledger(
             or any(row.get("evaluation_state") not in _STATES for row in rows)
         ):
             raise ValueError("published claims must have a complete scored producer run")
-        matched_ids: list[str] = []
+        claimed_ids: list[str] = []
         for row in rows:
             if row.get("project_evidence_status") != "PROJECT_VERIFIED":
                 raise ValueError("published target lacks source/customer-verified project evidence")
@@ -148,21 +148,23 @@ def _validate_input_ledger(
                 raise ValueError("published target retains unresolved project-level gates")
             if row.get("owner_handoff_status") not in (None, "COMPLETED"):
                 raise ValueError("published project cannot contain stopped owner source process")
-            if row["evaluation_state"] in (
-                "MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"
-            ) and (type(row.get("produced_quantity_id")) is not str
-                    or not row["produced_quantity_id"].strip()
-                    or row["produced_quantity_id"] != row["produced_quantity_id"].strip()):
-                raise ValueError("matched target requires exact produced quantity identity")
-            if row["evaluation_state"] in (
-                "MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"
-            ):
-                matched_ids.append(row["produced_quantity_id"])
-            if row["evaluation_state"] in ("MISSED", "PARTIAL") and (
-                row.get("produced_quantity_id") is not None
-            ):
+            state = row["evaluation_state"]
+            quantity_id = row.get("produced_quantity_id")
+            if state in ("MATCHED_WITHIN_TOLERANCE", "MATCHED_OUTSIDE_TOLERANCE"):
+                if (type(quantity_id) is not str or not quantity_id.strip()
+                        or quantity_id != quantity_id.strip()):
+                    raise ValueError("matched target requires exact produced quantity identity")
+            elif state == "UNRESOLVED" and quantity_id is not None:
+                # The unchanged V2 evaluator can attach an exact quantity ID
+                # to an unresolved item when that item's value is None.
+                if (type(quantity_id) is not str or not quantity_id.strip()
+                        or quantity_id != quantity_id.strip()):
+                    raise ValueError("unresolved target requires exact produced quantity identity or None")
+            elif state in ("MISSED", "PARTIAL") and quantity_id is not None:
                 raise ValueError("missing/partial target cannot claim exact produced identity")
-        if len(matched_ids) != len(set(matched_ids)):
+            if quantity_id is not None:
+                claimed_ids.append(quantity_id)
+        if len(claimed_ids) != len(set(claimed_ids)):
             raise ValueError("one signed produced quantity matched multiple frozen targets")
         within = sum(row["evaluation_state"] == _WIN for row in rows)
         expected = within / 120
