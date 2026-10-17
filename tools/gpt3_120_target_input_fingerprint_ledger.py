@@ -92,6 +92,48 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
     }
 
 
+def _require_published_suite_summary_parity(
+    report: Mapping[str, Any], official: Mapping[str, Any],
+    item_results: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> None:
+    """Only the unchanged evaluator owns score counts; reject altered copies."""
+    import math
+    if len(item_results) != 120:
+        raise ValueError("published exact 120 target result universe incomplete")
+    matched = sum(row["state"] == "MATCHED_WITHIN_TOLERANCE"
+                  for row in item_results.values())
+    extras = official.get("unsupported_extra")
+    if type(extras) is not int or extras < 0:
+        raise ValueError("published evaluator unsupported-extra count malformed")
+    if type(official.get("matched_within_tolerance")) is not int or (
+        official["matched_within_tolerance"] != matched
+    ):
+        raise ValueError("published official matched total differs from item states")
+    expected_coverage = matched / 120
+    expected_precision = matched / (120 + extras)
+    for field, expected in (
+        ("coverage_accuracy", expected_coverage),
+        ("precision_adjusted_accuracy", expected_precision),
+    ):
+        for source in (report, official):
+            value = source.get(field)
+            if type(value) not in (int, float) or not math.isfinite(value) or (
+                not math.isclose(value, expected, rel_tol=0, abs_tol=1e-12)
+            ):
+                raise ValueError("published score copy differs from official exact item states")
+    project_rows = official.get("project_results")
+    if type(project_rows) is not list or len(project_rows) != 4:
+        raise ValueError("published four-project result universe missing")
+    if any(type(row.get("matched_within_tolerance")) is not int
+           or type(row.get("unsupported_extra")) is not int
+           or row["unsupported_extra"] < 0 for row in project_rows):
+        raise ValueError("published per-project counts malformed")
+    if sum(row["matched_within_tolerance"] for row in project_rows) != matched or (
+        sum(row["unsupported_extra"] for row in project_rows) != extras
+    ):
+        raise ValueError("published suite totals disagree with project results")
+
+
 def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
     """Copy post-evaluator item states ONLY from a complete published suite."""
     if report.get("publication_status") != "PUBLISHED":
@@ -144,6 +186,7 @@ def _exact_official_items(report: Mapping[str, Any], manifests: tuple) -> dict:
             raise ValueError("official target identity gap")
     if len(by_target) != 120:
         raise ValueError("official target count mismatch")
+    _require_published_suite_summary_parity(report, official, by_target)
     return by_target
 
 
