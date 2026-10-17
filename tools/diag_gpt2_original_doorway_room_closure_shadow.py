@@ -79,16 +79,55 @@ def audit_original_doorway_ring_candidate(
             return {**base,"first_failure":"original_page_outside_document"}
         page=doc[original_page_1_based-1]
         drawings=page.get_drawings()
-        for role,row in witness["original_primitive_paths"].items():
-            ident=row["original_source_primitive_id"]
+        actual_roles={}
+        for role in ("left_wall","right_wall","left_jamb","right_jamb"):
+            row=witness["original_primitive_paths"].get(role)
+            if type(row) is not dict:
+                return {**base,"first_failure":"original_doorway_source_role_unavailable"}
+            ident=row.get("original_source_primitive_id")
             original=_line(drawings,ident)
             actual=set(tuple(v) for v in original["ends"])
-            claimed=set(tuple(v) for v in (
-                row["original_native_endpoints_pdf_pts"][:2],
-                row["original_native_endpoints_pdf_pts"][2:],
-            ))
-            if actual!=claimed:
+            ends=row.get("original_native_endpoints_pdf_pts")
+            if type(ends) not in (tuple,list) or len(ends)!=4:
                 return {**base,"first_failure":"native_jamb_receipt_source_root_conflict"}
+            claimed=set(tuple(v) for v in (ends[:2],ends[2:]))
+            if (actual!=claimed or not original.get("original_source_continuous_painted_stroke")
+                    or original["source_color"]!=(0.,0.,0.)):
+                return {**base,"first_failure":"native_jamb_receipt_source_root_conflict"}
+            actual_roles[role]=original
+        walls=[actual_roles[role] for role in ("left_wall","right_wall")]
+        jambs=[actual_roles[role] for role in ("left_jamb","right_jamb")]
+        if (walls[0]["stroke_width"]!=walls[1]["stroke_width"]
+                or jambs[0]["stroke_width"]!=jambs[1]["stroke_width"]
+                or walls[0]["stroke_opacity"]!=walls[1]["stroke_opacity"]
+                or jambs[0]["stroke_opacity"]!=jambs[1]["stroke_opacity"]):
+            return {**base,"first_failure":"original_doorway_paint_family_conflict"}
+        for i, wall in enumerate(walls):
+            (a,b)=wall["ends"]
+            if axis=="native_x":
+                if a[1]!=ordinate or b[1]!=ordinate or (
+                        (max(a[0],b[0]) if i==0 else min(a[0],b[0]))!=interval[i]):
+                    return {**base,"first_failure":"original_doorway_wall_endpoint_conflict"}
+            else:
+                if a[0]!=ordinate or b[0]!=ordinate or (
+                        (max(a[1],b[1]) if i==0 else min(a[1],b[1]))!=interval[i]):
+                    return {**base,"first_failure":"original_doorway_wall_endpoint_conflict"}
+        cross_intervals=[]
+        for i, jamb in enumerate(jambs):
+            a,b=jamb["ends"]
+            if axis=="native_x":
+                if a[0]!=interval[i] or b[0]!=interval[i]:
+                    return {**base,"first_failure":"original_doorway_jamb_not_perpendicular"}
+                cross=(a[1],b[1])
+            else:
+                if a[1]!=interval[i] or b[1]!=interval[i]:
+                    return {**base,"first_failure":"original_doorway_jamb_not_perpendicular"}
+                cross=(a[0],b[0])
+            cross_intervals.append(tuple(sorted(cross)))
+        if (cross_intervals[0]!=cross_intervals[1]
+                or ordinate not in cross_intervals[0]
+                or cross_intervals[0][0]==cross_intervals[0][1]):
+            return {**base,"first_failure":"original_doorway_jamb_crosswall_role_conflict"}
     edges={e["source_id"]:tuple(tuple(p) for p in e["endpoints_pdf_pts"])
            for e in source_room_graph["original_native_edges"]}
     adjacent={}
@@ -128,4 +167,5 @@ def audit_original_doorway_ring_candidate(
             tuple(chain),
         "source_only_native_polygon_area_pdf_pt2_not_m2":polygon.area,
         "source_jamb_roles_same_sha_rechecked":True,
+        "source_wall_and_jamb_geometry_independently_recomputed":True,
     }
