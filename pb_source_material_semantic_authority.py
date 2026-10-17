@@ -1717,8 +1717,8 @@ class SourceMaterialSemanticProducer:
         self._plan_viewports: dict[tuple[str, str], SegmentedViewport] = {}
         # Unlike a consumer-supplied schedule bounding box, these are the
         # original F07 schedule scopes used by THIS source publisher.
-        self._schedule_viewports: dict[tuple[str, str], SegmentedViewport] = {}
-        self._schedule_scope_rejections: dict[tuple[str, str], str] = {}
+        self._schedule_viewports: dict[tuple[str, str, str], SegmentedViewport] = {}
+        self._schedule_scope_rejections: dict[tuple[str, str, str], str] = {}
         self._plan_ownership_ids: dict[tuple[str, str], str] = {}
         self._plan_text_results: dict[
             tuple[str, str, str, str, str], RasterTextCorroborationResult
@@ -1808,8 +1808,15 @@ class SourceMaterialSemanticProducer:
         return tuple(self._schedule_viewports[k]
                      for k in sorted(self._schedule_viewports))
 
-    def published_source_schedule_rejections(self) -> tuple[tuple[str,str,str], ...]:
-        """All unresolved opt-in original schedule scopes, deterministic."""
+    def published_source_schedule_revision_scopes(
+        self,
+    ) -> tuple[tuple[str,str,SegmentedViewport], ...]:
+        """Keep revision/page/view ownership for each recovered source scope."""
+        return tuple((revision,page,self._schedule_viewports[(revision,page,view)])
+                     for revision,page,view in sorted(self._schedule_viewports))
+
+    def published_source_schedule_rejections(self) -> tuple[tuple[str,str,str,str], ...]:
+        """All unresolved revision-scoped original schedules, deterministic."""
         return tuple((*key,self._schedule_scope_rejections[key])
                      for key in sorted(self._schedule_scope_rejections))
 
@@ -2028,7 +2035,7 @@ class SourceMaterialSemanticProducer:
                         and not _is_explicit_non_material_schedule(v))
                     if not schedule_candidates:
                         self._schedule_scope_rejections[
-                            (str(page_number),"source-schedule-not-detected")
+                            (revision_id,str(page_number),"source-schedule-not-detected")
                         ]="original_native_schedule_viewport_unavailable"
                         schedule_universe_complete=False
                         schedule_universe_reasons.append(
@@ -2039,7 +2046,7 @@ class SourceMaterialSemanticProducer:
                             candidate,sibling_non_overlapping=sibling_non_overlapping
                         ):
                             self._schedule_scope_rejections[
-                                (str(page_number),candidate.view_id)
+                                (revision_id,str(page_number),candidate.view_id)
                             ]="original_native_schedule_viewport_unresolved"
                 authoritative = tuple(
                     viewport
@@ -2104,7 +2111,7 @@ class SourceMaterialSemanticProducer:
                         if not text_complete or not lines:
                             if str(page_number) in self._source_native_schedule_page_ids:
                                 self._schedule_scope_rejections[
-                                    (str(page_number),viewport.view_id)
+                                    (revision_id,str(page_number),viewport.view_id)
                                 ]="original_native_schedule_words_unverified"
                             schedule_universe_complete = False
                             schedule_universe_reasons.append(
@@ -2124,7 +2131,7 @@ class SourceMaterialSemanticProducer:
                             continue
                         if str(page_number) in self._source_native_schedule_page_ids:
                             self._schedule_viewports[
-                                (str(page_number),viewport.view_id)
+                                (revision_id,str(page_number),viewport.view_id)
                             ]=viewport
                         text = "\n".join(line[0] for line in lines)
                         line_evidence = {
