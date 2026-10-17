@@ -55,7 +55,16 @@ def require_signed_v2_family_trade_integrity(
         if item is None:
             # The unchanged frozen reconciler rejects unknown bound items.
             continue
-        refs = tuple(sorted(_field(binding, "production_object_identity_refs") or ()))
+        raw_refs = _field(binding, "production_object_identity_refs")
+        if (
+            type(raw_refs) not in (list, tuple)
+            or not raw_refs
+            or any(type(ref) is not str or not ref or ref != ref.strip()
+                   for ref in raw_refs)
+            or len(set(raw_refs)) != len(raw_refs)
+        ):
+            raise ValueError("bound production object identity refs are not canonical")
+        refs = tuple(sorted(raw_refs))
         for quantity in by_refs.get(refs, ()):
             family = _field(quantity, "family")
             if (
