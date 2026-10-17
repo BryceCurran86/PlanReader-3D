@@ -25,8 +25,10 @@ a footprint, or promotes a declared aggregate into physical take-off authority.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+import hashlib
+import math
 import re
 from typing import Iterable, Optional, Tuple
 
@@ -184,6 +186,8 @@ class DeclaredComponentFloorAreaEvidence:
     binding: str = DECLARED_FLOOR_AREA_BINDING
     source_sha256: Optional[str] = None
     revision_id: Optional[str] = None
+    # Original native *text* bounding box, never the physical floor polygon.
+    source_text_bbox_pdf_pts: Optional[tuple[float, float, float, float]] = None
 
 
 def extract_declared_component_floor_areas(
@@ -344,3 +348,80 @@ def reconcile_declared_component_area_total(
         return ()
 
     return tuple(sorted(records, key=lambda row: row.label.casefold()))
+
+
+
+def extract_unbound_component_areas_from_original_pdf(
+    source_pdf_bytes: bytes,
+    *,
+    expected_source_sha256: str,
+    revision_id: str,
+) -> Tuple[DeclaredComponentFloorAreaEvidence, ...]:
+    """Read original PDF native text blocks, never caller-selected area text.
+
+    The source bytes are SHA verified here. Native text is NOT by itself
+    visibility/glyph/clip trusted: every returned area is explicitly UNBOUND
+    and requires independent producer-owned text and physical zone proof.
+    Raster-only pages produce no candidate rows, not guessed OCR results.
+    """
+    if type(source_pdf_bytes) is not bytes or not source_pdf_bytes:
+        raise ValueError("original source must be nonempty immutable PDF bytes")
+    if (
+        type(expected_source_sha256) is not str
+        or len(expected_source_sha256) != 64
+        or any(c not in "0123456789abcdefABCDEF"
+               for c in expected_source_sha256)
+        or hashlib.sha256(source_pdf_bytes).hexdigest()
+        != expected_source_sha256.lower()
+    ):
+        raise ValueError("original PDF bytes do not match expected source SHA")
+    if type(revision_id) is not str or not revision_id or revision_id != revision_id.strip():
+        raise ValueError("original PDF revision ID must be a typed source receipt")
+
+    # Import only when native-PDF extraction is requested; ordinary printed
+    # area reconciliation has no PyMuPDF runtime dependency.
+    try:
+        import fitz
+        document = fitz.open(stream=source_pdf_bytes, filetype="pdf")
+    except Exception as exc:
+        raise ValueError("original source is not a readable PDF") from exc
+    candidates: list[DeclaredComponentFloorAreaEvidence] = []
+    try:
+        if document.is_encrypted:
+            raise ValueError("original PDF is encrypted and not decoded")
+        for page_index in range(document.page_count):
+            page = document.load_page(page_index)
+            for block_index, block in enumerate(page.get_text("blocks")):
+                if (
+                    not isinstance(block, (tuple, list))
+                    or len(block) < 7
+                    or block[6] != 0
+                    or type(block[4]) is not str
+                    or not block[4].strip()
+                ):
+                    continue
+                try:
+                    bbox = tuple(float(v) for v in block[:4])
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if (
+                    len(bbox) != 4
+                    or not all(math.isfinite(v) for v in bbox)
+                    or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]
+                ):
+                    continue
+                block_id = f"original-pdf-page-{page_index + 1}-text-block-{block_index}"
+                rows = extract_declared_component_floor_areas(
+                    block[4],
+                    source_page=page_index + 1,
+                    source_block_id=block_id,
+                    source_sha256=expected_source_sha256.lower(),
+                    revision_id=revision_id,
+                )
+                candidates.extend(
+                    replace(row, source_text_bbox_pdf_pts=bbox)
+                    for row in rows
+                )
+    finally:
+        document.close()
+    return tuple(candidates)
