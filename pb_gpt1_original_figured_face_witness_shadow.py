@@ -118,19 +118,18 @@ def source_figured_terminal_wall_faces_shadow(
             return block("source_figured_original_wall_record_invalid")
         seen.add(face.original_stroke_id)
         if axis.axis == "horizontal":
-            if abs(fa[1]-fb[1]) > 1e-8:
-                continue
-            endpoint_coord = (fa[0]+fb[0]) / 2
-            for i, terminal in enumerate((a,b)):
-                if abs(fa[0]-terminal[0]) <= native_precision_pt + 1e-9 and abs(fb[0]-terminal[0]) <= native_precision_pt + 1e-9:
-                    candidates[i].append(face.original_stroke_id)
-                elif abs(fa[0]-fb[0]) <= native_precision_pt + 1e-9 and abs(fa[0]-terminal[0]) <= native_precision_pt + 1e-9:
-                    candidates[i].append(face.original_stroke_id)
-        else:
+            # Horizontal dimensions terminate against vertical wall faces.
             if abs(fa[0]-fb[0]) > 1e-8:
                 continue
             for i, terminal in enumerate((a,b)):
-                if abs(fa[1]-fb[1]) <= native_precision_pt + 1e-9 and abs(fa[1]-terminal[1]) <= native_precision_pt + 1e-9:
+                if abs(fa[0]-terminal[0]) <= native_precision_pt + 1e-9:
+                    candidates[i].append(face.original_stroke_id)
+        else:
+            # Vertical dimensions terminate against horizontal wall faces.
+            if abs(fa[1]-fb[1]) > 1e-8:
+                continue
+            for i, terminal in enumerate((a,b)):
+                if abs(fa[1]-terminal[1]) <= native_precision_pt + 1e-9:
                     candidates[i].append(face.original_stroke_id)
     rivals = tuple(tuple(sorted(ids)) for ids in candidates)
     if any(not ids for ids in rivals):
