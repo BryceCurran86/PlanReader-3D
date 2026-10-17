@@ -294,6 +294,17 @@ def main(argv: list[str] | None = None) -> int:
         path is not None and opts.output.resolve() == path.resolve() for path in inputs
     ):
         raise ValueError("cannot overwrite frozen evidence or input receipts")
+    # An existing diagnostic can be regenerated, but source/customer/identity
+    # evidence beside the output must never be overwritten accidentally.
+    if opts.output.is_symlink():
+        raise ValueError("target ledger cannot follow output symlinks")
+    if opts.output.exists():
+        try:
+            existing = _json_object(opts.output)
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise ValueError("target ledger cannot overwrite unrelated original evidence") from exc
+        if existing.get("schema_version") != "gpt3-120-target-ledger-v1":
+            raise ValueError("target ledger cannot overwrite unrelated original evidence")
     report = _json_object(opts.evidence_report)
     receipt = _json_object(opts.owner_run_receipt) if opts.owner_run_receipt else None
     previous = _json_object(opts.previous_ledger) if opts.previous_ledger else None
