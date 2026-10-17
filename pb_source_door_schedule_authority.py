@@ -154,6 +154,14 @@ def _producer_owned_native_words(
 
 def _native_door_kind(words: tuple[str, ...]) -> str:
     values=set(words)
+    # Contradictory original source roles must not elect a door category
+    # by the ordering of our if-statements. Display shelving and an
+    # opening-access leaf are physically different objects.
+    if ({"DISPLAY","SHELVING"}<=values
+            and {"SWING","SLIDING","AUTOMATED"} & values):
+        return "original_door_kind_conflicting_source_roles"
+    if "SWING" in values and "SLIDING" in values:
+        return "original_door_kind_conflicting_mechanisms"
     if {"AUTOMATED","SLIDING"}<=values: return "automated_sliding"
     if {"DISPLAY","SHELVING","DOOR"}<=values: return "manufacturer_display_shelving"
     if {"SLIDING","DOOR","COOLROOM"}<=values: return "coolroom_access_sliding"
