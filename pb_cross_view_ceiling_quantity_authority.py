@@ -13,6 +13,7 @@ not invent or reconstruct scale authority.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
@@ -52,6 +53,12 @@ _RECORD_SEAL = object()
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def _valid_issuer_id(value: object) -> bool:
+    # A source receipt is an original typed identity, not stringified caller
+    # metadata. Never silently normalize untrusted PDF evidence ancestry.
+    return type(value) is str and bool(value) and value == value.strip()
 
 
 def _ceiling_id(room: LiveCanonicalRoomObject) -> str:
@@ -205,19 +212,36 @@ class CrossViewCeilingQuantityResult:
 
     @property
     def quantities(self) -> tuple[QuantityEvidence, ...]:
-        return tuple(record.quantity for record in self.records)
+        # Convenience projections share the canonical-identity conflict gate:
+        # a duplicated ceiling ID must not leak two FIRM rows.
+        return tuple(
+            record.quantity for record in self.records_by_ceiling_id.values()
+        )
 
     @property
     def canonical_ceilings(self) -> tuple[LiveCanonicalCeilingSurfaceObject, ...]:
-        return tuple(record.canonical_ceiling for record in self.records)
+        return tuple(
+            record.canonical_ceiling
+            for record in self.records_by_ceiling_id.values()
+        )
 
     @property
     def records_by_ceiling_id(
         self,
     ) -> Mapping[str, CrossViewCeilingQuantityRecord]:
-        return MappingProxyType(
-            {record.canonical_ceiling_id: record for record in self.records}
+        counts = Counter(
+            record.canonical_ceiling_id for record in self.records
+            if _valid_issuer_id(record.canonical_ceiling_id)
         )
+        # A conflicting record ID cannot select the last publisher's value.
+        return MappingProxyType({
+            record.canonical_ceiling_id: record
+            for record in self.records
+            if (
+                _valid_issuer_id(record.canonical_ceiling_id)
+                and counts[record.canonical_ceiling_id] == 1
+            )
+        })
 
 
 def publish_cross_view_ceiling_quantities(
@@ -251,14 +275,27 @@ def publish_cross_view_ceiling_quantities(
     # distinct physical rooms. Quarantine *all* owners rather than allowing
     # individually unique per-room rows to publish duplicated ceiling areas.
     occurrence_owners: dict[str, set[str]] = {}
+    original_mark_owners: dict[str, set[str]] = {}
     for finish_record in finishes.records:
-        occurrence_id = _clean(finish_record.occurrence_record_id)
-        physical_id = _clean(finish_record.physical_room_id)
-        if occurrence_id and physical_id:
+        physical_id = finish_record.physical_room_id
+        if not _valid_issuer_id(physical_id):
+            continue
+        occurrence_id = finish_record.occurrence_record_id
+        if _valid_issuer_id(occurrence_id):
             occurrence_owners.setdefault(occurrence_id, set()).add(physical_id)
+        original_mark = finish_record.occurrence_evidence_id
+        if _valid_issuer_id(original_mark):
+            original_mark_owners.setdefault(original_mark, set()).add(physical_id)
     conflicting_occurrence_ids = {
         occurrence_id
         for occurrence_id, owners in occurrence_owners.items()
+        if len(owners) > 1
+    }
+    # Producer IDs are not original material observations. One original
+    # mark may not justify two physical ceiling finishes after a rekey.
+    conflicting_original_mark_ids = {
+        evidence_id
+        for evidence_id, owners in original_mark_owners.items()
         if len(owners) > 1
     }
 
@@ -304,12 +341,17 @@ def publish_cross_view_ceiling_quantities(
         room = room_rows[0]
         finish = finish_rows[0]
         if (
-            not _clean(finish.occurrence_record_id)
-            or not _clean(finish.definition_record_id)
-            or _clean(finish.occurrence_record_id) in conflicting_occurrence_ids
+            not _valid_issuer_id(finish.occurrence_record_id)
+            or not _valid_issuer_id(finish.occurrence_evidence_id)
+            or not _valid_issuer_id(finish.definition_record_id)
+            or finish.occurrence_record_id in conflicting_occurrence_ids
+            or finish.occurrence_evidence_id in conflicting_original_mark_ids
         ):
             unresolved.add(physical_id)
-            if _clean(finish.occurrence_record_id) in conflicting_occurrence_ids:
+            if (
+                finish.occurrence_record_id in conflicting_occurrence_ids
+                or finish.occurrence_evidence_id in conflicting_original_mark_ids
+            ):
                 conflict = True
             continue
         area_candidates = [
