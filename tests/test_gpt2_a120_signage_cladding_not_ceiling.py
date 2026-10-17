@@ -54,6 +54,9 @@ def test_existing_valid_ceiling_definitions_remain_eligible():
     assert not _definition_is_ceiling_finish(
         _definition("Blue signage cladding", "ceiling_grid")
     )
+    assert not _definition_is_ceiling_finish(
+        _definition("Blue SIGNAGE-CONTRACTOR cladding", "plasterboard")
+    )
 
 
 def test_material_code_or_room_label_cannot_override_signage_cladding():
