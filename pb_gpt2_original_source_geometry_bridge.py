@@ -12,6 +12,10 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_cross_view_ceiling_finish_authority import _source_bytes
 from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_graph
 from tools.diag_gpt2_source_rcp_geometry_shadow import audit_original_rcp_ceiling_ink
+from pb_gpt2_w4_original_floor_handoff import (
+    audit_gpt2_w4_bound_original_floor,
+    audit_gpt2_w4_material_to_gpt1,
+)
 from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
     audit_gpt2_original_cross_sheet_ring_correspondence,
     audit_gpt2_original_doorway_bound_floor_finish_correspondence,
@@ -160,4 +164,46 @@ class GPT2OriginalSourceGeometryBridge:
             "new_firm_quantities":0,
             "source_virtual_door_connectors_are_structural":False,
             "customer_floor_finish_area_issued":False,
+        }
+
+
+    def source_closed_original_ft_handoff_for_gpt1(
+        self, *, revision_id: str,
+        original_floor_page_1_based: int,
+        source_cross_sheet_receipt: dict,
+        source_material_receipt: dict,
+        canonical_rooms,
+        physical_room_id: str,
+    ) -> dict:
+        """One actual published W4 face + one original FT occurrence.
+
+        Unlike native path proximity, this requires the sealed original
+        source-face authority retained by the canonical room composition.
+        No caller-provided area, copied wall ID, screenshot, or label can
+        mint room ownership or floor-finish quantity authority.
+        """
+        published,_=self._source_revision(
+            revision_id,page_1_based=original_floor_page_1_based)
+        if (type(source_cross_sheet_receipt) is not dict or
+                source_cross_sheet_receipt.get("original_source_sha256")!=
+                    published.revision.source_sha256):
+            raise ValueError("source_cross_sheet_root_does_not_match_active_revision")
+        w4=audit_gpt2_w4_bound_original_floor(
+            source_cross_sheet_receipt,canonical_rooms=canonical_rooms,
+            physical_room_id=physical_room_id)
+        if (w4.get("original_revision_id") and
+                w4["original_revision_id"]!=revision_id):
+            return {"status":"source_W4_revision_mismatch",
+                    "source_w4_room_face_claim":w4,
+                    "new_firm_quantities":0}
+        return {
+            "status":"source_W4_FT_handoff_shadow_only",
+            "source_w4_room_face_claim":w4,
+            "source_gpt1_floor_finish_input":
+                audit_gpt2_w4_material_to_gpt1(w4,source_material_receipt),
+            "source_original_document_id":published.revision.document_id,
+            "source_original_revision_id":revision_id,
+            "source_original_snapshot_id":published.snapshot.snapshot_id,
+            "new_firm_quantities":0,
+            "floor_finish_quantity_granted":False,
         }
