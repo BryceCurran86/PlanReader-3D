@@ -78,3 +78,19 @@ def test_stroke_style_mismatch_between_source_sheets_never_publishes_room_link()
         audit(source,expected_sha256=hashlib.sha256(source).hexdigest(),
               floor_page_1_based=1,finish_page_1_based=2,
               original_side_pairs=SIDE,expected_translation_pdf_pts=(78.,0.))
+
+def test_competing_registration_cannot_swallow_global_original_pdf_tampering():
+    from tools.diag_original_room_four_edge_source_ink_shadow import (
+        audit_competing_original_enclosure_registrations as compare,
+    )
+    source=_pdf()
+    with pytest.raises(ValueError,match="original_source_sha_mismatch"):
+        compare(source+b"forged-original-pdf",
+                expected_sha256=hashlib.sha256(source).hexdigest(),
+                floor_page_1_based=1,finish_page_1_based=2,
+                candidates=({"side_pairs":SIDE,"translation":(78.,0.)},))
+    with pytest.raises(ValueError,match="duplicate_original_registration_candidate"):
+        compare(source,expected_sha256=hashlib.sha256(source).hexdigest(),
+                floor_page_1_based=1,finish_page_1_based=2,
+                candidates=({"side_pairs":SIDE,"translation":(78.,0.)},
+                            {"side_pairs":SIDE,"translation":(78,0)}))
