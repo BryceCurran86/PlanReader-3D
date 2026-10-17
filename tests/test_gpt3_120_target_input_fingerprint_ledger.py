@@ -209,3 +209,30 @@ def test_cli_generates_120_unscored_items_without_private_source_files(tmp_path)
         ledger.main([
             "--evidence-report", str(report_path), "--output", str(report_path),
         ])
+
+
+def test_original_owner_report_resolves_its_own_exact_head_when_cli_omits_redundancy(tmp_path):
+    report = _blocked_report(tmp_path)
+    owner = _original_owner_receipt()
+    implicit = ledger.build_120_target_ledger(report, owner_receipt=owner)
+    explicit = ledger.build_120_target_ledger(
+        report, owner_receipt=owner, producer_head=owner["repo_head"],
+    )
+    assert implicit["producer_head"] == owner["repo_head"]
+    assert implicit["input_fingerprint"] == explicit["input_fingerprint"]
+    repeated = ledger.build_120_target_ledger(
+        report, owner_receipt=owner,
+        previous_input_fingerprint=implicit["input_fingerprint"],
+    )
+    assert repeated["repeat_evaluation_advice"] == (
+        "UNCHANGED_PRODUCER_SOURCE_SCORING_INPUTS_DO_NOT_RERUN"
+    )
+    assert repeated["publication_status"] == "UNPUBLISHED"
+
+
+@pytest.mark.parametrize("bad", [None, True, "fake-head", "0"*39, "Z"*40])
+def test_noncanonical_owner_producer_ref_is_rejected_without_fallback(tmp_path, bad):
+    owner = _original_owner_receipt()
+    owner["repo_head"] = bad
+    with pytest.raises(ValueError, match="canonical exact producer head"):
+        ledger.build_120_target_ledger(_blocked_report(tmp_path), owner_receipt=owner)
