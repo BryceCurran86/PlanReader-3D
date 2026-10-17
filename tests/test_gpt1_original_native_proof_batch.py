@@ -53,7 +53,10 @@ def test_source_changed_inside_batch_aborts_before_publication(damage):
         with source._native_dimension_source_proof_batch(published, page_id="1"):
             assert source.native_dimension_cap_evidence(selector, opening_support_ids=support) == original
             if damage == "visible_geometry":
-                key=(selector.snapshot_id,support[0]); record=store.observations[key]
+                key=(selector.snapshot_id,support[0])
+                if key not in store.observations:
+                    key=(selector.snapshot_id, source._visibility_receipts[key])
+                record=store.observations[key]
                 store.observations[key]=replace(record,geometry=(0.,0.,20.,0.))
             elif damage == "visibility_parent":
                 source._visibility_receipts.pop((selector.snapshot_id,support[0]))
@@ -94,6 +97,8 @@ def test_full_page_competitor_mutated_midbatch_rejects_all_opening_proofs(monkey
     rows=source.authority().authenticated_visible_observations(published)
     competitor=next(observation_id for observation_id, rec in rows if rec.page_id=="2")
     key=(published.snapshot.snapshot_id, competitor)
+    if key not in source._producer._store.observations:
+        key=(published.snapshot.snapshot_id, source._visibility_receipts[key])
     record=source._producer._store.observations[key]
     modified=False
 

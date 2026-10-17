@@ -37,6 +37,7 @@ from pb_source_observation_authority import (
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationRecord,
+    _observation_ids_with_derived,
 )
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
@@ -1467,9 +1468,13 @@ class PhysicalOpeningAuthority:
                 str(observation_id): record
                 for observation_id, record in batch_rows
             }
+            ordered_ids = _observation_ids_with_derived(
+                tuple(seed.snapshot.observation_ids),
+                tuple(by_id),
+            )
             records.extend(
                 replace(by_id[observation_id])
-                for observation_id in seed.snapshot.observation_ids
+                for observation_id in ordered_ids
                 if observation_id in by_id
                 and (
                     page_id is None
@@ -1480,7 +1485,11 @@ class PhysicalOpeningAuthority:
             visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
                 seed.snapshot.snapshot_id
             )
-            for observation_id in seed.snapshot.observation_ids:
+            ordered_ids = _observation_ids_with_derived(
+                tuple(seed.snapshot.observation_ids),
+                tuple(visible_observation_ids),
+            )
+            for observation_id in ordered_ids:
                 # Non-visible source observations historically resolve to
                 # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
                 if observation_id not in visible_observation_ids:

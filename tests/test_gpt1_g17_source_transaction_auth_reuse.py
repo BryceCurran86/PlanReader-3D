@@ -65,6 +65,8 @@ def test_original_g17_full_page_competitor_damage_abstains_before_cached_reuse(
     rows = source.authority().authenticated_visible_observations(published)
     competitor = next(key for key, record in rows if str(record.page_id) == "2")
     key = (published.snapshot.snapshot_id, competitor)
+    if key not in source._producer._store.observations:
+        key = (key[0], source._visibility_receipts[key])
     prior = source._producer._store.observations[key]
     source._producer._store.observations[key] = replace(
         prior, geometry=tuple(float(value) + 3 for value in prior.geometry)
@@ -86,6 +88,8 @@ def test_original_g17_transaction_rechecks_competitor_mutated_during_proof(
     competitor = next(key for key, record in rows if str(record.page_id) == "2")
     key = (published.snapshot.snapshot_id, competitor)
     stored = source._producer._store.observations
+    if key not in stored:
+        key = (key[0], source._visibility_receipts[key])
     original_record = stored[key]
     original_prove = physical.prove_existence
     mutation_count = []

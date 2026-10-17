@@ -36,7 +36,10 @@ def test_page_proof_checks_every_page_and_keeps_one_page():
         for observation_id, record in full
         if record.page_id == "2"
     )
-    key = (published.snapshot.snapshot_id, page_two)
+    parent_id = authority._visibility_receipts[
+        (published.snapshot.snapshot_id, page_two)
+    ]
+    key = (published.snapshot.snapshot_id, parent_id)
     prior = store.observations[key]
     store.observations[key] = replace(prior, geometry=tuple(
         value + 3.0 for value in prior.geometry
@@ -146,6 +149,8 @@ def test_replaced_competitor_on_another_page_is_not_served_from_cache():
     )
     key = (published.snapshot.snapshot_id, competitor)
     store = source._producer._store
+    if key not in store.observations:
+        key = (published.snapshot.snapshot_id, authority._visibility_receipts[key])
     prior = store.observations[key]
     store.observations[key] = replace(
         prior, geometry=tuple(float(value) + 3 for value in prior.geometry)

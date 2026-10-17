@@ -829,7 +829,21 @@ class SourceObservationProducer:
     def _native_page_parent_records(self, snapshot, page_id: str) -> list:
         """Find native page parents once per unchanged snapshot flat view."""
 
-        snap = self._store.observations._snaps.get(snapshot.snapshot_id)
+        observations = self._store.observations
+        snaps = getattr(observations, "_snaps", None)
+        if snaps is None:
+            by_page: dict[str, list] = {}
+            for observation_id in snapshot.observation_ids:
+                record = observations.get((snapshot.snapshot_id, observation_id))
+                if (
+                    record is not None
+                    and record.observation_kind == "native_pdf_page"
+                    and record.origin_kind == "native"
+                    and not record.derivation_parent_ids
+                ):
+                    by_page.setdefault(record.page_id, []).append(record)
+            return list(by_page.get(str(page_id), ()))
+        snap = snaps.get(snapshot.snapshot_id)
         flat = None if snap is None else snap.flat
         cached = getattr(self, "_native_page_parent_index", None)
         if (
@@ -1617,6 +1631,64 @@ class SourceObservationProducer:
             coverage=coverage,
             snapshot=snapshot,
             records=fresh,
+            source_bytes=self._store.source_bytes_by_revision[revision_id],
+            mark_source_snapshot=False,
+        )
+        return replace(snapshot)
+
+    def fork_derived_snapshot(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        base_snapshot_id: str,
+    ) -> ProducerSnapshotRecord:
+        """Open one child snapshot that stores no new records.
+
+        A native visible line keeps the native segment's stored geometry.
+        The child snapshot is the visibility generation; it does not copy
+        that line.
+        """
+
+        current = self._store.current_revision_by_document.get(document_id)
+        if current != revision_id:
+            raise ValueError(f"{STALE_REVISION}: revision is not current")
+        base = self._store.snapshots.get(base_snapshot_id)
+        if (
+            base is None
+            or base.revision_id != revision_id
+            or base.document_id != document_id
+        ):
+            raise ValueError(f"{SNAPSHOT_MISMATCH}: base snapshot mismatch")
+        revision = self._store.revisions[revision_id]
+        coverage = self._store.coverage_by_revision[revision_id]
+        generation = self._store.next_generation()
+        snapshot_id = stable_contract_id(
+            "source_snapshot",
+            {
+                "revision_id": revision_id,
+                "base_snapshot_id": base_snapshot_id,
+                "derived_observation_ids": (),
+                "generation": generation,
+            },
+            digest_chars=32,
+        )
+        snapshot = ProducerSnapshotRecord(
+            snapshot_id=snapshot_id,
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=revision.source_sha256,
+            observation_ids=base.observation_ids,
+            producer_method=self._producer_method,
+            producer_version=self._producer_version,
+            producer_generation=generation,
+            parent_snapshot_id=base_snapshot_id,
+        )
+        self._commit(
+            revision=revision,
+            coverage=coverage,
+            snapshot=snapshot,
+            records=(),
             source_bytes=self._store.source_bytes_by_revision[revision_id],
             mark_source_snapshot=False,
         )

@@ -253,7 +253,10 @@ def test_damaged_source_cannot_supply_annotation_opposition(defect,cache_hit):
     if cache_hit:
         assert len(source.native_dimension_cap_evidence(selector,opening_support_ids=support)) == 2
     if defect=='geometry':
-        key=(selector.snapshot_id,support[0]);record=source._producer._store.observations[key]
+        key=(selector.snapshot_id,support[0])
+        if key not in source._producer._store.observations:
+            key=(selector.snapshot_id, source._visibility_receipts[key])
+        record=source._producer._store.observations[key]
         source._producer._store.observations[key]=replace(record,geometry=(0.,0.,10.,0.))
     elif defect=='visibility_receipt':
         del source._visibility_receipts[(selector.snapshot_id,support[0])]
