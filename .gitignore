@@ -12,3 +12,9 @@ benchmark_results/current.json
 benchmark_results/.report_set.lock
 *.tmp
 .vs/
+
+# Original owner/client drawing PDFs belong to a private local source package.
+# This does not untrack existing public history; see privacy PR #2920.
+/documents/sources/
+/benchmarks/sources/
+**/.private-sources/
