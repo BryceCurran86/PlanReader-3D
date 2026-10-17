@@ -66,6 +66,11 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
         keep = (
             path == "SOURCE_SHA_VERIFICATION.json"
             or path.endswith("/source_package_preflight.json")
+            # A completed owner *process* may still produce no sealed quantity.
+            # Changes to first-failing original producer authority stage must
+            # invalidate the repeat fingerprint even with no signed V1 file.
+            or path.endswith("/outputs/production_summary.json")
+            or path.endswith("/outputs/source_attempt_preflight.json")
             or path.endswith(".sealed.json")
             or (
                 path.count("/")==2
