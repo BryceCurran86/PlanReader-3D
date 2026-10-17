@@ -25,7 +25,10 @@ def test_real_producer_explicit_room_area_kind_retains_plain_area():
     "dimension",None,True,"explicit_room_area ",
 ])
 def test_unrelated_source_dimension_or_finish_cannot_publish_plain_room_area(foreign_kind):
-    fake=replace(_explicit_area(25.0),kind=foreign_kind)
+    fake=_explicit_area(25.0)
+    # The original constructor already rejects an empty source kind; a
+    # corrupted downstream source packet must still fail the quantity gate.
+    object.__setattr__(fake,"kind",foreign_kind)
     q=_quantity(fake)
     assert q.abstained
     assert "explicit_area_source_kind_mismatch" in q.blocking_reasons
