@@ -147,6 +147,7 @@ def audit_gpt2_source_material_floor_handoff(
         return {**result,"first_failure":"original_finish_definition_not_authenticated"}
     record=definition.record
     if (record.code.upper()!=original_finish_code.upper()
+            or not record.semantic_finish
             or record.source_sha256!=root or
             record.revision_id!=definition_selector.revision_id or
             record.snapshot_id!=definition_selector.snapshot_id or
@@ -167,6 +168,7 @@ def audit_gpt2_source_material_floor_handoff(
             continue
         all_matching.append(occurrence)
         if (occurrence.definition_record_id!=record.record_id
+                or occurrence.semantic_finish!=record.semantic_finish
                 or occurrence.document_id!=occurrence_selector.document_id
                 or occurrence.revision_id!=occurrence_selector.revision_id
                 or occurrence.snapshot_id!=occurrence_selector.snapshot_id
@@ -178,6 +180,13 @@ def audit_gpt2_source_material_floor_handoff(
                 or len(set(occurrence.source_text_observation_ids))!=
                     len(occurrence.source_text_observation_ids)):
             return {**result,"first_failure":"original_material_mark_text_lineage_incomplete"}
+        try:
+            x0,y0,x1,y1=(float(v) for v in occurrence.bbox_pdf_pts)
+        except (TypeError,ValueError,OverflowError):
+            return {**result,"first_failure":"original_material_mark_geometry_invalid"}
+        if (not all(math.isfinite(x) for x in (x0,y0,x1,y1))
+                or x0>=x1 or y0>=y1):
+            return {**result,"first_failure":"original_material_mark_geometry_invalid"}
         try:
             boundary=box(*occurrence.bbox_pdf_pts)
         except (TypeError,ValueError,OverflowError):
