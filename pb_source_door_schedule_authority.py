@@ -389,8 +389,9 @@ def inspect_published_door_schedule(
     if type(producer) is not SourceVisibilityProducer:
         raise TypeError("door_source_requires_existing_visibility_producer")
     if (type(revision_id) is not str or not revision_id
-            or type(page_id) is not str or not page_id.isdecimal()
-            or int(page_id)<1):
+            or type(page_id) is not str or not page_id.isascii()
+            or not page_id.isdecimal() or int(page_id)<1
+            or page_id != str(int(page_id))):
         raise ValueError("exact_door_source_revision_and_page_required")
     published=producer.published_snapshot_for_revision(revision_id)
     if published is None:
