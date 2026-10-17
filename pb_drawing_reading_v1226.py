@@ -22,8 +22,11 @@ VERSION = "1.2.26"
 
 _DRAWING_FIELD = re.compile(r"\b(?:DRAWING|DWG|SHEET)\s*(?:NO\.?|NUMBER|#)\s*[:\-]?\s*([A-Z][A-Z0-9._-]{1,18})", re.I)
 _SCALE_FIELD = re.compile(r"\bSCALE\s*[:\-]?\s*(1\s*:\s*\d{2,4})", re.I)
-_REV_FIELD = re.compile(r"\bREV(?:ISION)?\s*[:\-]?\s*([A-Z0-9]{1,4})\b", re.I)
-_TITLE_FIELD = re.compile(r"\b(?:DRAWING\s+TITLE|SHEET\s+TITLE|TITLE)\s*[:\-]?\s*(.{3,100})", re.I)
+_REV_FIELD = re.compile(r"\bREV(?:ISION)?(?![A-Z0-9])\s*[:\-]?\s*([A-Z0-9]{1,4})\b", re.I)
+_TITLE_FIELD = re.compile(
+    r"\b(?:DRAWING\s+TITLE|SHEET\s+TITLE|TITLE)\s*[:\-]?\s*(.{3,100}?)(?=\s+\b(?:DRAWING\s+TITLE|SHEET\s+TITLE|TITLE|SCALE|REV(?:ISION)?)\b|$)",
+    re.I,
+)
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -71,30 +74,52 @@ def enhanced_title_block_evidence(pdf_page: Any, base_reader) -> Dict[str, Any]:
     if not block_text:
         return base
 
-    drawing_match = _DRAWING_FIELD.search(block_text)
-    if drawing_match:
+    drawing_numbers: List[str] = []
+    for drawing_match in _DRAWING_FIELD.finditer(block_text):
         candidate = drawing_match.group(1).upper().strip(" ._-:")
         # Reuse v1.2.25's architectural-code rejection rules.
         verified = registration._candidate_code(f"DRAWING NO {candidate}")
-        if verified:
-            base["drawing_no"] = verified
+        if verified and verified not in drawing_numbers:
+            drawing_numbers.append(verified)
+    if len(drawing_numbers) == 1:
+        base["drawing_no"] = drawing_numbers[0]
+    elif len(drawing_numbers) > 1:
+        base["drawing_no"] = ""
 
-    scale_match = _SCALE_FIELD.search(block_text)
-    if scale_match:
-        base["scale"] = re.sub(r"\s+", "", scale_match.group(1))
-    revision_match = _REV_FIELD.search(block_text)
-    if revision_match:
-        base["revision"] = revision_match.group(1).upper()
+    scales = []
+    for scale_match in _SCALE_FIELD.finditer(block_text):
+        scale = re.sub(r"\s+", "", scale_match.group(1))
+        if scale not in scales:
+            scales.append(scale)
+    if len(scales) == 1:
+        base["scale"] = scales[0]
+    elif len(scales) > 1:
+        base["scale"] = ""
 
-    title_match = _TITLE_FIELD.search(block_text)
-    explicit_title = _norm(title_match.group(1)) if title_match else ""
-    # Put explicit title text first so v1.2.25's title chooser sees it ahead of
-    # project/client/general notes in the same title-block band.
-    if explicit_title:
-        base["text"] = explicit_title + "\n" + block_text
-        base["drawing_title"] = explicit_title
+    revisions = []
+    for revision_match in _REV_FIELD.finditer(block_text):
+        revision = revision_match.group(1).upper()
+        if revision not in revisions:
+            revisions.append(revision)
+    if len(revisions) == 1:
+        base["revision"] = revisions[0]
+    elif len(revisions) > 1:
+        base["revision"] = ""
+
+    titles = []
+    for title_match in _TITLE_FIELD.finditer(block_text):
+        explicit_title = _norm(title_match.group(1))
+        if explicit_title and explicit_title not in titles:
+            titles.append(explicit_title)
+    # Put the one explicit title first so v1.2.25's title chooser sees it
+    # ahead of project/client/general notes in the same title-block band.
+    if len(titles) == 1:
+        base["text"] = titles[0] + "\n" + block_text
+        base["drawing_title"] = titles[0]
     else:
         base["text"] = block_text
+        if len(titles) > 1:
+            base["drawing_title"] = ""
     base["title_blocks"] = blocks
     return base
 

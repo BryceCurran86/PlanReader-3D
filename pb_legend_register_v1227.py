@@ -210,7 +210,7 @@ def build_legend_register(app: Any, workspace_id: int) -> Dict[str, Any]:
         status = "Conflict" if disagreements or len(categories) > 1 or len(substrates) > 1 or len(finishes) > 1 else "Confirmed"
         entry = {
             "code": code,
-            "description": str(representative.get("description") or ""),
+            "description": "" if disagreements else str(representative.get("description") or ""),
             "category": next(iter(categories)) if len(categories) == 1 else str(representative.get("category") or "general abbreviation"),
             "substrate": next(iter(substrates)) if len(substrates) == 1 else "",
             "finish": next(iter(finishes)) if len(finishes) == 1 else "",

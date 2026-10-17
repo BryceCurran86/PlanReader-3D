@@ -56,37 +56,45 @@ def _clean(value: object) -> str:
     return " ".join(str(value or "").replace("\u00a0", " ").split())
 
 
+def _storey_from_ordinal(match: re.Match[str]) -> tuple[str, Optional[int]]:
+    ordinal = match.group("ordinal").upper()
+    if ordinal in _WORD_ORDINALS:
+        index = _WORD_ORDINALS[ordinal]
+    else:
+        index = int(re.match(r"\d+", ordinal).group(0))
+    return (f"{ordinal.lower()}_floor", index)
+
+
+def _storey_from_basement(match: re.Match[str]) -> tuple[str, Optional[int]]:
+    prefix = _clean(match.group("prefix")).upper()
+    if prefix == "LOWER GROUND":
+        return ("lower_ground", None)
+    if prefix == "MEZZANINE":
+        return ("mezzanine", None)
+    basement_no_match = re.search(r"\d{1,2}", prefix)
+    basement_no = int(basement_no_match.group(0)) if basement_no_match else 1
+    return (f"basement_{basement_no}", -basement_no)
+
+
 def _normalized_level_label(label: str) -> Optional[tuple[str, Optional[int]]]:
+    """Return one printed storey. Two different storeys in one label abstain."""
     text = _clean(label).upper()
     if not text or "ROOF PLAN" in text:
         return None
 
-    match = _ORDINAL_RE.search(text)
-    if match is not None:
-        ordinal = match.group("ordinal").upper()
-        if ordinal in _WORD_ORDINALS:
-            index = _WORD_ORDINALS[ordinal]
-        else:
-            index = int(re.match(r"\d+", ordinal).group(0))
-        return (f"{ordinal.lower()}_floor", index)
-
-    match = _LEVEL_NUMBER_RE.search(text)
-    if match is not None:
+    found: dict[str, tuple[str, Optional[int]]] = {}
+    for match in _ORDINAL_RE.finditer(text):
+        identity = _storey_from_ordinal(match)
+        found[identity[0]] = identity
+    for match in _LEVEL_NUMBER_RE.finditer(text):
         number = int(match.group("number"))
-        return (f"level_{number}", number)
-
-    match = _BASEMENT_RE.search(text)
-    if match is not None:
-        prefix = _clean(match.group("prefix")).upper()
-        if prefix == "LOWER GROUND":
-            return ("lower_ground", None)
-        if prefix == "MEZZANINE":
-            return ("mezzanine", None)
-        basement_no_match = re.search(r"\d{1,2}", prefix)
-        basement_no = int(basement_no_match.group(0)) if basement_no_match else 1
-        return (f"basement_{basement_no}", -basement_no)
-
-    return None
+        found[f"level_{number}"] = (f"level_{number}", number)
+    for match in _BASEMENT_RE.finditer(text):
+        identity = _storey_from_basement(match)
+        found[identity[0]] = identity
+    if len(found) != 1:
+        return None
+    return next(iter(found.values()))
 
 
 @dataclass(frozen=True)
