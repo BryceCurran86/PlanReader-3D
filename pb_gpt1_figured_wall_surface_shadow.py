@@ -102,6 +102,13 @@ def measure_figured_wall_lining_shadow(
         or measured.source_segment_ids != tuple(sorted(
             segment for side in ring for segment in side.source_segment_ids
         ))
+        or measured.source_vertices_pdf_pts != tuple(
+            tuple(side.start_pdf_pt) for side in ring
+        )
+        or any(
+            tuple(side.end_pdf_pt) != tuple(ring[(i+1) % len(ring)].start_pdf_pt)
+            for i, side in enumerate(ring)
+        )
     ):
         return block("source_figured_wall_side_lineage_mismatch")
     metric_points = measured.metric_vertices_mm
