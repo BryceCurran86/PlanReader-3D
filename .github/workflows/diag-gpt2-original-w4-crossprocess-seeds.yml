@@ -1,0 +1,95 @@
+name: DIAG GPT2 Original W4 Cross-Interpreter Source Identity
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_native_preflight_w4_identity_invariance.py
+      - tests/test_gpt2_native_preflight_w4_identity_invariance.py
+      - .github/workflows/diag-gpt2-original-w4-crossprocess-seeds.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-source-interpreter-seeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Shadow source identity invariance tests, no gold mutation
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_native_preflight_w4_identity_invariance.py
+          ruff check --select F821,F823 tools/diag_gpt2_native_preflight_w4_identity_invariance.py tests/test_gpt2_native_preflight_w4_identity_invariance.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Four original isolated interpreter processes, same source and code
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-w4-crossprocess
+          git rev-parse HEAD > artifacts/gpt2-w4-crossprocess/head.txt
+          i=0
+          for seed in 0 1 17 0; do
+            i=$((i + 1))
+            echo "SOURCE_INTERPRETER_PROBE index=$i PYTHONHASHSEED=$seed"
+            PYTHONHASHSEED="$seed" timeout 1700s python -u -m tools.diag_gpt2_native_preflight_w4_identity_invariance \
+              --pdf "$PDF" --sha "$SHA" --page 11 --single-capture \
+              --output "artifacts/gpt2-w4-crossprocess/seed-$seed-run-$i.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.diag_gpt2_native_preflight_w4_identity_invariance import first_difference
+          root=Path('artifacts/gpt2-w4-crossprocess')
+          files=[
+              root/'seed-0-run-1.json',root/'seed-1-run-2.json',
+              root/'seed-17-run-3.json',root/'seed-0-run-4.json',
+          ]
+          values=[json.loads(p.read_text()) for p in files]
+          for v in values:
+              assert v['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+              assert v['source_snapshot_unchanged'] is True
+              assert len(v['scopes'])==1
+              scope=v['scopes'][0]
+              assert scope['wall_count']==890 and scope['shadow_face_count']==1235
+              assert v['new_commercial_quantities']==[]
+              assert v['physical_room_or_material_granted'] is False
+              assert v['frozen_benchmark_scored'] is False
+          identity_keys=('source_sha256','revision_id','snapshot_id','scopes')
+          comparable=[{k:v[k] for k in identity_keys} for v in values]
+          diff=[first_difference(comparable[0],v) for v in comparable[1:]]
+          result={
+              'source_sha256':values[0]['source_sha256'],
+              'same_seed_zero_repeat_equal':diff[2] is None,
+              'seed_one_first_difference':diff[0],
+              'seed_seventeen_first_difference':diff[1],
+              'seed_zero_repeat_first_difference':diff[2],
+              'scope_ids': [v['scopes'][0]['decision_scope_id'] for v in values],
+              'scope_digests': [v['scopes'][0]['complete_scope_digest'] for v in values],
+              'read_only':True,'physical_room_published':False,
+              'new_commercial_quantities':[],
+          }
+          (root/'comparisons.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print('GPT2_ORIGINAL_CROSSPROCESS_SOURCE_DIFFERENCES',json.dumps(result,sort_keys=True))
+          # A real mismatch is a source-only NEGATIVE finding to investigate,
+          # never permission to rekey a wall or turn a W4 candidate into a room.
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-w4-crossprocess-seed-evidence
+          path: artifacts/gpt2-w4-crossprocess
+          retention-days: 14

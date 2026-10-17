@@ -119,3 +119,52 @@ def test_digest_exact_lineage_and_no_source_mutation():
     assert len(result) == 64 and result == diagnostic._digest(original)
     assert original == old
     assert json.loads(json.dumps(original))["sha"] == "abc"
+
+
+def test_single_interpreter_source_capture_retains_all_ids_without_promotion(monkeypatch):
+    data = {
+        "source_sha256": "sha", "revision_id": "R", "snapshot_id": "S",
+        "source_snapshot_unchanged": True, "scopes": [
+            {"document_id": "doc", "revision_id": "R", "snapshot_id": "S",
+             "source_sha256": "sha", "decision_scope_id": "scope",
+             "walls": [{"wall_id": "w1", "original_w2_lineage": ["d0i0"]}],
+             "shadow_faces": [{"face_id": "f1", "polygon": [[0,0],[1,0],[1,1]]}]}
+        ],
+    }
+    old = deepcopy(data)
+    monkeypatch.setattr(
+        diagnostic, "capture_original_source",
+        lambda source, *, page_no, preflight: data,
+    )
+    report = diagnostic.single_source_capture(b"fake", page_no=11)
+    scope, = report["scopes"]
+    assert scope["wall_count"] == 1 and scope["shadow_face_count"] == 1
+    assert scope["wall_ids_and_digests"][0][0] == "w1"
+    assert scope["face_ids_and_digests"][0][0] == "f1"
+    assert len(scope["complete_scope_digest"]) == 64
+    assert data == old
+    assert report["new_commercial_quantities"] == []
+    assert report["physical_room_or_material_granted"] is False
+
+
+def test_per_interpreter_digests_detect_primitive_and_face_source_drift(monkeypatch):
+    base = {
+        "source_sha256": "sha", "revision_id": "R", "snapshot_id": "S",
+        "source_snapshot_unchanged": True,
+        "scopes": [{"document_id": "doc", "revision_id": "R",
+            "snapshot_id": "S", "source_sha256": "sha",
+            "decision_scope_id": "scope",
+            "walls": [{"wall_id": "w1", "source_primitive_ids": ["d0i0"]}],
+            "shadow_faces": [{"face_id": "f1", "polygon": [[0,0],[1,0],[1,1]]}],
+        }],
+    }
+    monkeypatch.setattr(
+        diagnostic, "capture_original_source",
+        lambda source, *, page_no, preflight: deepcopy(base),
+    )
+    original = diagnostic.single_source_capture(b"sha", page_no=11)
+    base["scopes"][0]["walls"][0]["source_primitive_ids"] = ["d1i0"]
+    changed = diagnostic.single_source_capture(b"sha", page_no=11)
+    assert original["scopes"][0]["wall_ids_and_digests"] != changed["scopes"][0]["wall_ids_and_digests"]
+    assert original["scopes"][0]["complete_scope_digest"] != changed["scopes"][0]["complete_scope_digest"]
+    assert original["scopes"][0]["face_ids_and_digests"] == changed["scopes"][0]["face_ids_and_digests"]
