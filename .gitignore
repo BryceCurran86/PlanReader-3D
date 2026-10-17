@@ -24,3 +24,10 @@ benchmark_results/.report_set.lock
 *.pfx
 .env.*
 !.env.example
+
+# Public repository: deny credential material locally before CI has to block it.
+*.p8
+*.jks
+**/.npmrc
+**/id_rsa
+**/id_ed25519
