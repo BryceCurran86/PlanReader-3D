@@ -408,6 +408,10 @@ def extract_unbound_component_areas_from_original_pdf(
             raise ValueError("original PDF is encrypted and not decoded")
         for page_index in range(document.page_count):
             page = document.load_page(page_index)
+            # get_text('blocks') is in the unrotated native text frame; the
+            # cropbox, not the rotated display page.rect, bounds visible
+            # source text. This remains only a negative eligibility check.
+            cropbox = page.cropbox
             for block_index, block in enumerate(page.get_text("blocks")):
                 if (
                     not isinstance(block, (tuple, list))
@@ -425,6 +429,10 @@ def extract_unbound_component_areas_from_original_pdf(
                     len(bbox) != 4
                     or not all(math.isfinite(v) for v in bbox)
                     or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]
+                    or bbox[0] < float(cropbox.x0) - 1e-3
+                    or bbox[1] < float(cropbox.y0) - 1e-3
+                    or bbox[2] > float(cropbox.x1) + 1e-3
+                    or bbox[3] > float(cropbox.y1) + 1e-3
                 ):
                     continue
                 block_id = f"original-pdf-page-{page_index + 1}-text-block-{block_index}"
