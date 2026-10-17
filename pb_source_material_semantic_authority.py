@@ -1231,6 +1231,12 @@ def _native_multirow_material_definition_candidates(
     code_pattern = re.compile(r"^[A-Z]{2,4}(?:\d{1,4})?$")
     stopwords = frozenset({"CODE", "TYPE", "ROOM", "WALL", "FLOOR", "DOOR", "NOTE", "FIRE"})
     for (partition_id, block_no), block_words in sorted(grouped.items()):
+        # A single pathological PDF text block must never expand the source
+        # semantic row candidate universe without bound. A120's real legend
+        # contains fewer than 16 lines; these are generic shadow inventory
+        # caps, wholly independent of the frozen 20k raster primitive cap.
+        if len(block_words) > 4096 or len({w.line_no for w in block_words}) > 256:
+            continue
         line_records: list[tuple[int, tuple[_TrustedTextWord, ...]]] = []
         by_line: dict[int, list[_TrustedTextWord]] = {}
         for word in block_words:
