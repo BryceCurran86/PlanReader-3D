@@ -179,6 +179,11 @@ def audit_original_figured_detail_face_rivals(
         "status":"original_figured_face_source_rivals_only",
         "original_source_sha256":source_sha256,
         "original_detail_page_1_based":page_1_based,
+        # Preserve both actually printed source text witnesses through the
+        # intermediate wall-face ledger. Otherwise a downstream plan
+        # candidate could quietly lose its independent FT2 mark provenance.
+        "original_room_and_finish_mark_candidates":
+            figure["original_room_and_finish_mark_candidates"],
         "original_source_candidate_face_families":tuple(candidates),
         "original_exact_figure_endpoint_family_count":len(matching),
         "original_source_figured_area_m2_candidate_not_signed":
