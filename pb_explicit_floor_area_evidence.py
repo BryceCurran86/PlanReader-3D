@@ -26,6 +26,7 @@ a footprint, or promotes a declared aggregate into physical take-off authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import re
 from typing import Iterable, Optional, Tuple
 
@@ -129,6 +130,36 @@ def resolve_explicit_floor_area_evidence(
     items = list(evidence)
     if not items:
         return None
+    # An unbound overall-area claim cannot borrow another declaration's
+    # source SHA, revision or page if one input has no original receipt.
+    # All unscoped legacy declarations may still reconcile with one another.
+    if any(
+        type(item) is not ExplicitFloorAreaEvidence
+        or item.authority != DECLARED_FLOOR_AREA_AUTHORITY
+        or item.binding != DECLARED_FLOOR_AREA_BINDING
+        or type(item.area_m2) not in (int, float)
+        or not math.isfinite(float(item.area_m2))
+        or item.area_m2 <= 0
+        or any(type(p) is not int or p <= 0 for p in item.source_pages)
+        or not item.source_pages
+        or (item.source_sha256 is not None and (
+            type(item.source_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", item.source_sha256) is None
+        ))
+        or (item.revision_id is not None and (
+            type(item.revision_id) is not str
+            or not item.revision_id
+            or item.revision_id != item.revision_id.strip()
+        ))
+        for item in items
+    ):
+        return None
+    for key in ("source_sha256", "revision_id"):
+        values = [getattr(item, key) for item in items]
+        if any(value is None for value in values) and any(
+            value is not None for value in values
+        ):
+            return None
 
     distinct = {round(item.area_m2, 3) for item in items}
     if len(distinct) != 1:
