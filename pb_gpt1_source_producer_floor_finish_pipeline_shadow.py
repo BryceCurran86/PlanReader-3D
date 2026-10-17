@@ -134,3 +134,100 @@ def diagnose_source_producer_floor_finish_handoff_shadow(
         preserved.candidate_finish_area_m2,
         tuple(sorted(structural_frame.matched_wall_equivalence_receipts)),
     )
+
+
+
+@dataclass(frozen=True)
+class SourceProducerFloorFinishBatch:
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    records: tuple[SourceProducerFloorFinishDiagnostic, ...]
+    quarantined_physical_room_ids: tuple[str, ...]
+    diagnostic_only: bool = True
+
+
+def reconcile_source_producer_finish_batch_shadow(
+    records: tuple[SourceProducerFloorFinishDiagnostic, ...],
+) -> SourceProducerFloorFinishBatch:
+    """One source area and one in-plan mark may authenticate one room only.
+
+    Batch reconciliation must happen BEFORE any new signed finish-area issue;
+    independent per-room positive handoffs cannot observe this conflict.
+    Every rival claim is quarantined, with insertion-order independence.
+    Original producer-selected signatories and source numeric values remain
+    unchanged; this is never a customer-facing signed record.
+    """
+    from collections import Counter
+    from dataclasses import replace
+
+    if type(records) is not tuple or any(
+        type(item) is not SourceProducerFloorFinishDiagnostic for item in records
+    ):
+        return SourceProducerFloorFinishBatch(
+            EvidenceResolutionStatus.ABSTAINED,
+            ("gpt1_original_finish_batch_records_untrusted",),(),(),
+        )
+    if not records:
+        return SourceProducerFloorFinishBatch(
+            EvidenceResolutionStatus.ABSTAINED,
+            ("gpt1_original_finish_batch_no_source_rooms",),(),(),
+        )
+    keys = (
+        ("physical_room_id", "gpt1_original_finish_physical_room_reused"),
+        ("source_room_face_record_id", "gpt1_original_finish_source_face_reused"),
+        ("canonical_floor_id", "gpt1_original_finish_floor_reused"),
+        ("existing_room_area_quantity_id", "gpt1_original_finish_area_issuer_reused"),
+        ("source_finish_occurrence_id", "gpt1_original_finish_plan_mark_reused"),
+    )
+    accepted = tuple(row for row in records if
+        row.status is EvidenceResolutionStatus.CANDIDATE
+    )
+    owners = {
+        field: Counter(getattr(row, field) for row in accepted
+                       if isinstance(getattr(row, field), str)
+                       and getattr(row, field))
+        for field, _ in keys
+    }
+    ordered: list[SourceProducerFloorFinishDiagnostic] = []
+    quarantine: set[str] = set()
+    conflict = False
+    for row in sorted(records,key=lambda r: (
+        r.physical_room_id,r.canonical_floor_id,
+        r.source_room_face_record_id,str(r.source_finish_occurrence_id),
+    )):
+        if row.status is not EvidenceResolutionStatus.CANDIDATE:
+            ordered.append(row)
+            continue
+        reason = next((
+            rule for field,rule in keys
+            if not isinstance(getattr(row, field), str)
+            or not getattr(row, field)
+            or owners[field][getattr(row, field)]!=1
+        ),None)
+        if reason is None:
+            ordered.append(row)
+            continue
+        conflict = True
+        quarantine.add(row.physical_room_id)
+        ordered.append(replace(
+            row,status=EvidenceResolutionStatus.ABSTAINED,
+            first_failure_code=reason,
+            existing_room_area_quantity_id=None,
+            existing_room_area_m2=None,
+            source_finish_occurrence_id=None,
+            source_finish_definition_id=None,
+            source_finish_code=None,
+            candidate_finish_area_m2=None,
+            source_crosssheet_wall_equivalence_ids=(),
+        ))
+    if conflict:
+        return SourceProducerFloorFinishBatch(
+            EvidenceResolutionStatus.CONFLICT,
+            ("gpt1_original_finish_batch_reused_source_authority",),
+            tuple(ordered),tuple(sorted(quarantine)),
+        )
+    return SourceProducerFloorFinishBatch(
+        EvidenceResolutionStatus.CANDIDATE,
+        ("gpt1_original_finish_batch_candidate_shadow_only",),
+        tuple(ordered),(),
+    )
