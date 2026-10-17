@@ -215,3 +215,72 @@ def test_two_source_edges_cannot_reuse_one_figured_side_identity():
     )
     assert result.status is Status.ABSTAINED
     assert result.reason_codes==("original_w4_independent_metric_source_side_identity_conflict",)
+
+
+def test_independently_figured_wall_lengths_are_bound_to_exact_w4_physical_ids():
+    import math
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    got=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,_metric_candidate(room),
+        physical_room_id=room.physical_room_id,
+    )
+    assert got.status is Status.CANDIDATE
+    assert len(got.figured_source_side_to_w4_wall_id)==len(room.polygon_pdf_pts)
+    assert dict(got.figured_source_side_to_w4_wall_id)
+    assert set(dict(got.figured_source_side_to_w4_wall_id).values())==set(
+        got.original_source_face_boundary_wall_ids
+    )
+    assert set(dict(got.candidate_wall_length_m_by_w4_id))==set(
+        got.original_source_face_boundary_wall_ids
+    )
+    assert all(v>0 for k,v in got.candidate_wall_length_m_by_w4_id)
+    assert math.isclose(
+        sum(v for k,v in got.candidate_wall_length_m_by_w4_id),
+        6.0, rel_tol=0, abs_tol=1e-8,
+    )
+    assert got.diagnostic_only and not hasattr(got,"quantity_id")
+
+
+def test_figured_wall_metric_identity_survives_start_vertex_rotation():
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    original=_metric_candidate(room)
+    rotated=replace(
+        original,
+        source_vertices_pdf_pts=original.source_vertices_pdf_pts[1:]
+          +original.source_vertices_pdf_pts[:1],
+        metric_vertices_mm=original.metric_vertices_mm[1:]
+          +original.metric_vertices_mm[:1],
+        source_side_ids=original.source_side_ids[1:]
+          +original.source_side_ids[:1],
+    )
+    before=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,original,physical_room_id=room.physical_room_id,
+    )
+    after=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,rotated,physical_room_id=room.physical_room_id,
+    )
+    assert before.status is Status.CANDIDATE
+    assert after.status is Status.CANDIDATE
+    assert dict(before.figured_source_side_to_w4_wall_id)==dict(
+        after.figured_source_side_to_w4_wall_id
+    )
+    assert before.candidate_wall_length_m_by_w4_id==after.candidate_wall_length_m_by_w4_id
+
+
+def test_source_side_to_wall_mapping_rejects_incompatible_order_even_if_equal_area():
+    rooms,floors=_actual_synthetic_producer()
+    room=rooms.rooms[0]
+    original=_metric_candidate(room)
+    altered=replace(
+        original,
+        source_vertices_pdf_pts=original.source_vertices_pdf_pts[::-1],
+        # Metric ring was not reversed with original source: retain m²
+        # and source ring identity but require exact paired orientation.
+    )
+    got=bind_producer_sealed_w4_metric_floor_shadow(
+        rooms,floors,altered,physical_room_id=room.physical_room_id,
+    )
+    assert got.status is Status.ABSTAINED
+    assert got.candidate_wall_length_m_by_w4_id==()
