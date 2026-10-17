@@ -746,16 +746,32 @@ def test_owner_diagnostic_cannot_replace_historical_lot16_signed_customer_rows()
     assert _sha(original) == digest_before
 
 
-def test_running_archived_receipt_assembler_import_may_leave_untrusted_bytecode(tmp_path):
+@pytest.mark.parametrize("cache_contents", [
+    b"synthetic-transient-interpreter-bytecode-not-source-evidence",
+    b"\\x00" * 49,
+    b"PK\\x03\\x04renamed-unindexed-payload",
+])
+def test_unindexed_assembler_cache_name_cannot_hide_other_bytes(tmp_path, cache_contents):
     root = _copy(tmp_path)
     cache = root / "__pycache__"
     cache.mkdir()
     pyc = cache / "assemble_receipts.cpython-313.pyc"
-    pyc.write_bytes(b"synthetic-transient-interpreter-bytecode-not-source-evidence")
-    result = audit.verify_owner_four_job_receipts(root)
-    assert result["independently_verified_sha256sums_entries"] == 31
-    assert result["official_publication_status"] == "UNPUBLISHED"
-    assert result["independently_rehashed_original_private_pdf_bytes"] is False
+    pyc.write_bytes(cache_contents)
+    with pytest.raises(ValueError, match="unindexed artifact"):
+        audit.verify_owner_four_job_receipts(root)
+    assert pyc.read_bytes() == cache_contents  # audit is read-only
+
+
+def test_unindexed_python_cache_is_rejected_even_with_magic_header(tmp_path):
+    import importlib.util
+    root = _copy(tmp_path)
+    cache = root / "__pycache__"
+    cache.mkdir()
+    (cache / "assemble_receipts.cpython-314.pyc").write_bytes(
+        importlib.util.MAGIC_NUMBER + b"\\x00" * 32
+    )
+    with pytest.raises(ValueError, match="unindexed artifact"):
+        audit.verify_owner_four_job_receipts(root)
 
 
 @pytest.mark.parametrize("filename", [
