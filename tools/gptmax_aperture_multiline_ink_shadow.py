@@ -61,6 +61,15 @@ def aperture_multiline_census(image: np.ndarray, image_rect: fitz.Rect, *,
     if (any(type(y) not in (int, float) or not isfinite(y) for y in source_rows) or
             any(a >= b for a, b in zip(source_rows, source_rows[1:]))):
         raise ValueError("strictly increasing unique source rows required")
+    # Different PDF y coordinates can sample one raster row. Reused pixels
+    # are not independent original-source witnesses.
+    if (isinstance(image, np.ndarray) and image.ndim == 3 and
+            image.shape[0] > 0 and not image_rect.is_empty and
+            all(isfinite(v) for v in image_rect)):
+        raster_rows = [round((y - image_rect.y0) * image.shape[0] /
+                             image_rect.height - .5) for y in source_rows]
+        if len(set(raster_rows)) != len(raster_rows):
+            raise ValueError("distinct source rows must resolve to distinct raster rows")
     observations = []
     for y in source_rows:
         entry = {"source_y_pt": y}
