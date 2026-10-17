@@ -28,6 +28,7 @@ _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _HEAD40 = re.compile(r"^[0-9a-f]{40}$")
 _WIN = "MATCHED_WITHIN_TOLERANCE"
 _SCHEMA = "gpt3-120-target-ledger-v1"
+_OUTPUT_SCHEMA = "gpt3-postscore-delta-v1"
 
 
 def _expected_inputs_and_targets() -> tuple[dict, dict, dict]:
@@ -243,6 +244,7 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
         or after["publication_status"] != "PUBLISHED"
     ):
         return {
+            "schema_version": _OUTPUT_SCHEMA,
             "comparison_status": "OFFICIAL_BASELINE_OR_REEVALUATION_UNAVAILABLE",
             "score_comparison_available": False,
             "before_coverage_accuracy": None,
@@ -283,6 +285,7 @@ def compare_postscore_ledgers(before: dict, after: dict) -> dict[str, Any]:
                         rel_tol=0, abs_tol=1e-12):
         raise ValueError("before/after evaluator accuracy cannot differ from target deltas")
     return {
+        "schema_version": _OUTPUT_SCHEMA,
         "comparison_status": (
             "UNCHANGED_PRODUCER_SOURCE_SCORING_INPUTS" if same_input
             else "COMPARED_POST_EVALUATOR_CLAIMS"
@@ -326,6 +329,18 @@ def main(argv: list[str] | None = None) -> int:
         )
     ):
         raise ValueError("cannot overwrite scoring inputs or benchmark truth")
+    # Only a fresh diagnostic or a previously written copy of *this* report
+    # is an admissible destination. Refuse to overwrite an unrelated customer,
+    # source, signed V1, or identity-map JSON in the same folder by accident.
+    if args.output.is_symlink():
+        raise ValueError("score comparison report cannot follow an output symlink")
+    if args.output.exists():
+        try:
+            existing = _json_object(args.output)
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError("score comparison may not overwrite other evidence") from exc
+        if existing.get("schema_version") != _OUTPUT_SCHEMA:
+            raise ValueError("score comparison may not overwrite other evidence")
     result = compare_postscore_ledgers(
         _json_object(args.before_ledger), _json_object(args.after_ledger),
     )
