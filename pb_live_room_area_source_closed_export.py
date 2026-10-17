@@ -171,10 +171,16 @@ def _source_bbox(
     # Veto only. Do not derive a new polygon, source role, or metric value.
     from shapely.geometry import Polygon
     ring = tuple(zip(xs, ys))
+    # A genuine source polygon may repeat its first point as final closure.
+    # Other repetitions are self-touching physical boundary conflicts.
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring = ring[:-1]
+    polygon = Polygon(ring)
     if (
-        len(set(ring)) != len(ring)
-        or not Polygon(ring).is_valid
-        or not Polygon(ring).exterior.is_simple
+        len(ring) < 3
+        or len(set(ring)) != len(ring)
+        or not polygon.is_valid
+        or not polygon.exterior.is_simple
     ):
         raise SourceClosedRunConflictError(
             f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
