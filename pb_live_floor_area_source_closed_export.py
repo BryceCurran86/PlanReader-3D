@@ -33,19 +33,39 @@ def _source_floor_area_simple_bbox(
     quantity_id: str,
 ) -> tuple[float, float, float, float]:
     """Reject invalid original floor topology; never infer m² from the bbox."""
-    ring = tuple(points)
+    if not isinstance(points, (tuple, list)):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring is not a typed coordinate list: {quantity_id}"
+        )
+    if any(
+        type(point) not in (tuple, list) or len(point) != 2
+        or any(type(value) not in (int, float)
+               or not math.isfinite(float(value)) for value in point)
+        for point in points
+    ):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring has malformed points: {quantity_id}"
+        )
+    ring = tuple((float(x), float(y)) for x, y in points)
     if len(ring) > 1 and ring[-1] == ring[0]:
         ring = ring[:-1]
     if len(ring) < 3 or len(set(ring)) != len(ring):
         raise SourceClosedRunConflictError(
             f"original floor source ring is not simple: {quantity_id}"
         )
+    from shapely.errors import GEOSException
     from shapely.geometry import Polygon
-    polygon = Polygon(ring)
-    if (
-        not polygon.is_valid or not polygon.exterior.is_simple
-        or not math.isfinite(polygon.area) or polygon.area <= 0.0
-    ):
+    try:
+        polygon = Polygon(ring)
+        valid = (
+            polygon.is_valid and polygon.exterior.is_simple
+            and math.isfinite(polygon.area) and polygon.area > 0.0
+        )
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"original floor source ring GEOS geometry invalid: {quantity_id}"
+        ) from exc
+    if not valid:
         raise SourceClosedRunConflictError(
             f"original floor source ring is not simple: {quantity_id}"
         )
