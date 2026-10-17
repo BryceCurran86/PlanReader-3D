@@ -183,3 +183,52 @@ def test_cli_does_not_overwrite_historical_run_and_never_exits_as_published(tmp_
             "--archived-customers", str(_OLD / "verified_customer_rows.json"),
             "--output", str(_OLD / "source_sealed_run.json"),
         ])
+
+
+def _historical_cli_args(output):
+    return [
+        "--archived-v1", str(_OLD / "source_sealed_run.json"),
+        "--candidate-v1", str(_NEW / "au_qld_lot16_power.json"),
+        "--archived-customers", str(_OLD / "verified_customer_rows.json"),
+        "--output", str(output),
+    ]
+
+
+def test_v1_replay_cli_permits_own_output_beside_archived_inputs(tmp_path, monkeypatch):
+    # Keep the real archive intact while exercising same-parent behaviour.
+    original = tmp_path / "archived.json"
+    candidate = tmp_path / "candidate.json"
+    customers = tmp_path / "customers.json"
+    original.write_bytes((_OLD / "source_sealed_run.json").read_bytes())
+    candidate.write_bytes((_NEW / "au_qld_lot16_power.json").read_bytes())
+    customers.write_bytes((_OLD / "verified_customer_rows.json").read_bytes())
+    args = [
+        "--archived-v1", str(original),
+        "--candidate-v1", str(candidate),
+        "--archived-customers", str(customers),
+        "--output", str(tmp_path / "audit.json"),
+    ]
+    assert drift.main(args) == 2
+    first = (tmp_path / "audit.json").read_bytes()
+    assert drift.main(args) == 2
+    assert (tmp_path / "audit.json").read_bytes() == first
+    assert original.read_bytes() == (_OLD / "source_sealed_run.json").read_bytes()
+
+
+def test_v1_replay_cli_rejects_unrelated_json_binary_and_output_symlink(tmp_path):
+    for filename, before in (
+        ("customer.json", b'{"quantity_id":"preserve"}\n'),
+        ("signed.bin", b"source-v1-signed-evidence"),
+    ):
+        path = tmp_path / filename
+        path.write_bytes(before)
+        with pytest.raises(ValueError, match="cannot overwrite unrelated evidence"):
+            drift.main(_historical_cli_args(path))
+        assert path.read_bytes() == before
+    original = tmp_path / "source.json"
+    original.write_text("DO NOT MUTATE", encoding="utf-8")
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(original)
+    with pytest.raises(ValueError, match="cannot follow an output symlink"):
+        drift.main(_historical_cli_args(alias))
+    assert original.read_text(encoding="utf-8") == "DO NOT MUTATE"

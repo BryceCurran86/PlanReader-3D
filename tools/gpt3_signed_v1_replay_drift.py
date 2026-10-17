@@ -228,10 +228,21 @@ def main(argv: list[str] | None = None) -> int:
             if args.candidate_customers else None
         ),
     )
+    # Protect exact original evidence paths, not the entire parent directory:
+    # diagnostics may safely live beside immutable source/customer inputs.
+    if args.output.is_symlink():
+        raise ValueError("diagnostic cannot follow an output symlink")
+    if args.output.exists():
+        try:
+            existing = _json_object(args.output)
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError("diagnostic cannot overwrite unrelated evidence") from exc
+        if existing.get("schema_version") != "gpt3-v1-replay-drift-v1":
+            raise ValueError("diagnostic cannot overwrite unrelated evidence")
     _write_readiness_report(
         args.output,
         json.dumps(report, sort_keys=True, indent=2) + "\n",
-        protected_roots=(FROZEN_ROOT, *(path.parent for path in source_paths if path is not None)),
+        protected_roots=(FROZEN_ROOT, *(path for path in source_paths if path is not None)),
     )
     print(json.dumps({
         "publication_status": report["publication_status"],
