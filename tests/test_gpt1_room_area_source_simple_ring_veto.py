@@ -30,3 +30,11 @@ def test_bowtie_and_backtracking_ink_do_not_mint_room_area():
 def test_nonfinite_and_boolean_points_stay_rejected():
     assert _polygon_area(((0,0),(1,float("nan")),(1,1))) == 0.0
     assert _polygon_area(((0,0),(True,0),(1,1),(0,1))) == 0.0
+
+
+def test_geos_extreme_original_pdf_points_do_not_crash_or_create_metric_area():
+    # A finite PDF coordinate is not enough if its polygon arithmetic is
+    # unrepresentable by GEOS/shoelace; this remains a negative authority.
+    huge = 1.0e308
+    invalid = ((0., 0.), (huge, huge), (huge, 0.), (0., huge))
+    assert _polygon_area(invalid) == 0.0
