@@ -140,7 +140,10 @@ def test_w4_original_polygon_competitor_cannot_be_overwritten_by_metric_ring():
 def test_one_original_w4_face_cannot_fund_two_canonical_floors():
     rooms,floors=_actual_synthetic_producer()
     room=rooms.rooms[0]
-    copied=replace(floors,floors=(*floors.floors,floors.floors[0]))
+    matching=[floor for floor in floors.floors
+              if floor.source_room_face_record_id==room.source_room_face_record_id]
+    assert len(matching)==1
+    copied=replace(floors,floors=(*floors.floors,matching[0]))
     out=bind_producer_sealed_w4_metric_floor_shadow(
         rooms,copied,_metric_candidate(room),
         physical_room_id=room.physical_room_id,
