@@ -34,6 +34,7 @@ def _scope():
         "7","11",tuple(f"room-ink-{i}" for i in range(4)),
         tuple(f"finish-ink-{i}" for i in range(4)),
         owners,((0,0),(10,0),(10,5),(0,5)),
+        source_room_face_record_id="source-room-face-1",
     )
 
 
