@@ -158,7 +158,7 @@ def test_missing_original_mark_witness_on_canonical_ceiling_blocks_seal():
     )
     with pytest.raises(
         SourceClosedRunConflictError,
-        match="material occurrence source receipt mismatch",
+        match="canonical ceiling trace does not cover quantity evidence",
     ):
         _traces(_claim(original, canonical_ceiling=ceiling))
 
