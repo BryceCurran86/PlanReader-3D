@@ -91,3 +91,11 @@ def test_scoped_original_schedule_page_not_in_source_revision_is_not_silent_empt
         material.publish(pub.revision.revision_id)
     # No phantom original schedule or physical ceiling result can be issued.
     assert material.published_plan_viewports() == ()
+
+def test_explicit_source_schedule_requires_an_existing_producer_revision():
+    src, _pub = _source_two_pages()
+    material = materials.SourceMaterialSemanticProducer.for_source_native_multipath_schedule_shadow(
+        src, page_ids=("2",))
+    with pytest.raises(ValueError, match="original_schedule_source_revision_unavailable"):
+        material.publish("nonexistent-private-source-revision")
+    assert material.published_plan_viewports() == ()
