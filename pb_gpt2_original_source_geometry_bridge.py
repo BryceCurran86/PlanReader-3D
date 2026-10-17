@@ -14,6 +14,9 @@ from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_gr
 from tools.diag_gpt2_original_figured_detail_plan_shadow import (
     audit_original_figured_detail_plan_pair,
 )
+from tools.diag_gpt2_original_figured_face_rivals_shadow import (
+    audit_original_figured_detail_face_rivals,
+)
 from tools.diag_gpt2_original_room_doorway_ancestry_shadow import (
     audit_gpt2_original_room_doorway_ancestry_pair,
 )
@@ -93,6 +96,48 @@ class GPT2OriginalSourceGeometryBridge:
             "source_snapshot_id":published.snapshot.snapshot_id,
             "metric_figured_area_candidate_only":True,
             "original_detail_to_main_floor_W4_binding_granted":False,
+            "new_firm_quantities":0,
+        }
+
+    def original_figured_detail_face_rival_census(
+        self, *, revision_id: str,
+        detail_page_1_based: int,
+        first_dimension: dict, second_dimension: dict,
+        original_room_word_address: tuple[int,int,int],
+        original_finish_word_address: tuple[int,int,int],
+        plan_enclosure_bbox_pdf_pts: tuple[float,float,float,float],
+        competing_original_wall_face_families: tuple[dict,...],
+    ) -> dict:
+        """Reissue original figured dimensions and all real face rivals.
+
+        This method deliberately has NO input for a caller-passed "verified"
+        figure receipt, family winner, room area, wall snap or answer. Both
+        independent dimension and original path-item provenance are decoded
+        fresh from the same sealed SourceVisibilityProducer original revision.
+        """
+        published,raw=self._source_revision(
+            revision_id,page_1_based=detail_page_1_based)
+        figure=self.original_figured_detail_plan_candidate(
+            revision_id=revision_id,detail_page_1_based=detail_page_1_based,
+            first_dimension=first_dimension,second_dimension=second_dimension,
+            original_room_word_address=original_room_word_address,
+            original_finish_word_address=original_finish_word_address,
+            plan_enclosure_bbox_pdf_pts=plan_enclosure_bbox_pdf_pts,
+        )
+        result=audit_original_figured_detail_face_rivals(
+            raw,source_sha256=published.revision.source_sha256,
+            original_figure_receipt=figure,page_1_based=detail_page_1_based,
+            competing_original_wall_face_families=
+                competing_original_wall_face_families,
+        )
+        return {
+            **result,
+            "source_document_id":published.revision.document_id,
+            "source_revision_id":revision_id,
+            "source_snapshot_id":published.snapshot.snapshot_id,
+            "source_original_detail_figure_receipt":figure,
+            "source_finished_net_area_m2":None,
+            "source_canonical_room_same_identity_issued":False,
             "new_firm_quantities":0,
         }
 
