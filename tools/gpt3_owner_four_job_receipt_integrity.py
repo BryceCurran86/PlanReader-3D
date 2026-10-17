@@ -599,8 +599,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                 "COMPLETED" if production_completed else "BLOCKED"
             ),
             "all_original_documents_processed": (
-                "SOURCE_PACKAGE_COMPLETE" if production_completed
-                and len(manifest.source_documents) == 1 else "NOT_PROVEN"
+                "ONE_SOURCE_ALL_PAGES_EXECUTED_NOT_AUTHENTICATED"
+                if production_completed and len(manifest.source_documents) == 1
+                else "NOT_PROVEN"
             ),
             "signed_v1_quantity_receipt": (
                 "VERIFIED_DERIVED_BYTES" if is_sealed else "NOT_AVAILABLE"
@@ -637,6 +638,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             "configured_primary_source_document_count": 1,
             "producer_process_completed": production_completed,
             "fresh_customer_bijection_verified": False,
+            "four_job_official_target_item_results_available": False,
             "earliest_verified_project_execution_gate": observed_gate,
             "derived_sealed_quantity_count": count,
             "signed_run_verified_against_derived_bytes": is_sealed,
