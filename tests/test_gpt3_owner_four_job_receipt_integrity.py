@@ -521,3 +521,26 @@ def test_unindexed_symlink_to_private_folder_is_rejected_even_if_no_file_is_inde
     (root / "external-source-folder").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="untrusted symlink"):
         audit.verify_owner_four_job_receipts(root)
+
+
+def test_original_owner_archive_has_exact_unindexed_byte_policy():
+    policy = _ROOT / ".gitattributes"
+    assert policy.read_bytes() == b"* -text\n"
+    audit_result = audit.verify_owner_four_job_receipts(_ROOT)
+    assert audit_result["independently_verified_share_safe_derived_file_count"] == 28
+    assert audit_result["independently_verified_sha256sums_entries"] == 31
+
+
+@pytest.mark.parametrize("raw", [b"* text\n", b"* -text", b"* -text\n# rogue\n", b""])
+def test_modified_unindexed_gitattributes_policy_is_rejected(tmp_path, raw):
+    root = _copy(tmp_path)
+    (root / ".gitattributes").write_bytes(raw)
+    with pytest.raises(ValueError, match="byte-preservation policy"):
+        audit.verify_owner_four_job_receipts(root)
+
+
+def test_other_unindexed_git_like_policy_is_not_whitelisted(tmp_path):
+    root = _copy(tmp_path)
+    (root / ".gitignore").write_text("private-files\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="unindexed artifact"):
+        audit.verify_owner_four_job_receipts(root)
