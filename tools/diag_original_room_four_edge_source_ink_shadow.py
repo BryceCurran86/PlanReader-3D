@@ -113,9 +113,19 @@ def audit_source_enclosure_correspondence(
         y_top=top[0][1];y_bottom=bottom[0][1]
         if (left!=[(x_left,y_top),(x_left,y_bottom)]
                 or right!=[(x_right,y_top),(x_right,y_bottom)]
-                or bottom!=[(x_left,y_bottom),(x_right,y_bottom)]
-                or top[1]!=(x_right,y_top)
-                or not x_left<top[0][0]<x_right):
+                or bottom!=[(x_left,y_bottom),(x_right,y_bottom)]):
+            raise ValueError("native_original_wall_side_or_doorway_gap_conflict")
+        # Two actual original A110/A140 orientations occur: OFFICE has a
+        # right-anchored top partial wall (open on the left); PWD has a
+        # left-anchored top partial wall (open on the right). Never assume
+        # the first endpoint of the partial stroke is the doorway endpoint.
+        if (top[1]==(x_right,y_top) and x_left<top[0][0]<x_right):
+            gap=[[x_left,y_top],[top[0][0],y_top]]
+            anchor="right"
+        elif (top[0]==(x_left,y_top) and x_left<top[1][0]<x_right):
+            gap=[[top[1][0],y_top],[x_right,y_top]]
+            anchor="left"
+        else:
             raise ValueError("native_original_wall_side_or_doorway_gap_conflict")
         return {
             "status":"original_four_edge_ink_correspondence_with_unclosed_doorway",
@@ -128,7 +138,8 @@ def audit_source_enclosure_correspondence(
             "source_original_page_pair_ids":[floor_page_1_based,finish_page_1_based],
             "source_translation_candidate_pdf_pts":list(expected_translation_pdf_pts),
             "original_witnesses":pairs,
-            "original_top_gap_pdf_pts":[[x_left,y_top],[top[0][0],y_top]],
+            "original_top_gap_pdf_pts":gap,
+            "original_top_partial_wall_anchor":anchor,
             "original_top_gap_is_a_door_without_jamb_proof":False,
             "canonical_cross_sheet_physical_room_equality_granted":False,
             "physical_wall_roles_verified":False,
