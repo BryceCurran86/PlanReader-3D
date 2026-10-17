@@ -28,7 +28,9 @@ def _w(b,i,text,x,y,trusted=True):
 
 
 def _world(*,duplicate_title=False,duplicate_header=False,bad_y=False,
-           untrusted_header=False,duplicate_code=False):
+           untrusted_header=False,duplicate_code=False,
+           untrusted_unrelated_header=False,untrusted_description=False,
+           untrusted_numeric=False):
     source=[
         _w(1,0,"DOOR",10,480),
         _w(1,1,"SCHEDULE",10,450),
@@ -46,9 +48,9 @@ def _world(*,duplicate_title=False,duplicate_header=False,bad_y=False,
         _w(4,1,"PWD",70,250),
         _w(4,2,"SINGLE",70,235),
         _w(4,3,"SWING",70,220),
-        _w(4,4,"920",70,105),
-        _w(4,5,"2040",70,250 if bad_y else 70),
-        _w(4,6,"SOLID",70,170),
+        _w(4,4,"920",70,105,not untrusted_numeric),
+        _w(4,5,"2040",70,250 if bad_y else 70,not untrusted_numeric),
+        _w(4,6,"SOLID",70,170,not untrusted_description),
         _w(4,7,"CORE",70,155),
         _w(4,8,"DOOR",70,140),
         _w(5,0,"D18",90,300),
@@ -56,6 +58,8 @@ def _world(*,duplicate_title=False,duplicate_header=False,bad_y=False,
         _w(5,2,"SHELVING",90,220),
         _w(5,3,"DOOR",90,210),
     ]
+    if untrusted_unrelated_header:
+        source.append(_w(2,3,"HARDWARE",40,5,False))
     if duplicate_title:
         source.extend((_w(91,0,"DOOR",5,480),_w(91,1,"SCHEDULE",5,440)))
     if duplicate_header:
@@ -175,3 +179,39 @@ def test_original_a600_two_printed_titles_and_exact_width_height_source_words():
     assert all(not r.width_height_metric_units_authenticated
                and not r.physical_host_or_frame_authenticated for r in result.rows)
     assert hashlib.sha256(PDF.read_bytes()).hexdigest()==SHA
+
+
+
+def test_untrusted_hardware_note_in_header_block_does_not_veto_source_numeric_fields():
+    source=_world(untrusted_unrelated_header=True)
+    result,table_trusted=_original_door_schedule_column_proof(
+        source,_original_source_row_candidates(source)
+    )
+    assert table_trusted
+    row=next(r for r in result if r.code=="D13")
+    assert row.source_dimension_column_roles_authenticated
+    assert row.status=="source_schedule_row_text_authenticated"
+    assert row.original_width_word_id=="original:4:4"
+
+
+def test_untrusted_description_does_not_turn_trusted_width_and_height_into_missing():
+    source=_world(untrusted_description=True)
+    result,table_trusted=_original_door_schedule_column_proof(
+        source,_original_source_row_candidates(source)
+    )
+    assert table_trusted
+    row=next(r for r in result if r.code=="D13")
+    assert row.source_dimension_column_roles_authenticated
+    assert row.status=="source_schedule_row_text_unverified"
+    assert row.first_unclosed_gate=="remaining_original_schedule_notes_or_physical_host"
+    assert not row.physical_host_or_frame_authenticated
+    assert row.default_opening_count is None
+
+
+def test_untrusted_numerical_word_blocks_source_column_authentication():
+    result,table_trusted=_proof(untrusted_numeric=True)
+    assert table_trusted
+    row=next(r for r in result if r.code=="D13")
+    assert not row.source_dimension_column_roles_authenticated
+    assert row.original_width_word_id=="original:4:4"
+    assert row.first_unclosed_gate=="original_schedule_title_or_row_word_trust"
