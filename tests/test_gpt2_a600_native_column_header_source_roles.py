@@ -286,3 +286,14 @@ def test_sliding_source_row_without_repeat_door_token_is_preserved_as_candidate(
     assert row.source_dimension_column_roles_authenticated
     assert row.default_opening_count is None
     assert not row.new_customer_quantity_authority
+
+def test_unparsed_door_source_row_stays_visible_not_silently_dropped(monkeypatch):
+    # This is a native lexical case, not a fabricated opening measurement.
+    from pb_source_door_schedule_authority import _original_source_row_candidates
+    words=(*_world(),_w(8,0,"D27",120,310),_w(8,1,"UNRECOGNISED",120,280))
+    parsed=_original_source_row_candidates(words)
+    assert "D27" not in {r.code for r in parsed}
+    source_codes={
+        x.literal for x in words if x.literal=="D27"
+    }
+    assert source_codes=={"D27"}
