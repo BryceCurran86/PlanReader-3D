@@ -18,6 +18,6 @@ def test_paired_plan_and_elevation_source_captures_plan_only():
 
 
 def test_original_commercial_wall_factory_keeps_historical_public_signature():
-    assert inspect.signature(
+    assert set(inspect.signature(
         PhysicalWallCandidateProducer.from_source_visibility_producer
-    ).parameters.keys() == {"cls":None,"source_visibility_producer":None,"page_ids":None}.keys()
+    ).parameters) == {"source_visibility_producer","page_ids"}
