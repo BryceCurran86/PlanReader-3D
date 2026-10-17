@@ -188,6 +188,9 @@ class DeclaredComponentFloorAreaEvidence:
     revision_id: Optional[str] = None
     # Original native *text* bounding box, never the physical floor polygon.
     source_text_bbox_pdf_pts: Optional[tuple[float, float, float, float]] = None
+    # Original nonblank line offset *within the native text block*. Neither
+    # a room index nor a user-selected benchmark item identity.
+    source_block_line_index: Optional[int] = None
 
 
 def extract_declared_component_floor_areas(
@@ -266,6 +269,7 @@ def extract_declared_component_floor_areas(
                 source_page=source_page,
                 source_block_id=source_block_id,
                 raw_evidence=raw_line + (" " + candidate_line if not inline else ""),
+                source_block_line_index=index,
                 source_sha256=source_sha256,
                 revision_id=revision_id,
             )
