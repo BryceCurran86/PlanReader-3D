@@ -34,4 +34,6 @@ jobs:
       - run: python -m pip install "pytest>=8,<10" "shapely>=2.0,<3"
       - name: Source-figured synthetic calculation regressions only
         run: |
-          python -m pytest -q             tests/test_gpt1_figured_chain_metric_shadow.py             tests/test_gpt1_figured_source_side_assembly_shadow.py             tests/test_gpt1_figured_zone_net_area_shadow.py             tests/test_gpt1_documented_raked_ceiling_shadow.py             tests/test_gpt1_figured_takeoff_families_shadow.py
+          python -m pytest -q             tests/test_gpt1_figured_chain_metric_shadow.py             tests/test_gpt1_figured_source_side_assembly_shadow.py             tests/test_gpt1_figured_zone_net_area_shadow.py             tests/test_gpt1_documented_raked_ceiling_shadow.py             tests/test_gpt1_figured_takeoff_families_shadow.py \
+            tests/test_gpt1_general_figured_polygon_shadow.py \
+            tests/test_gpt1_figured_metric_plane_shadow.py
