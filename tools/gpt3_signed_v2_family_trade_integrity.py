@@ -120,7 +120,7 @@ def require_signed_v2_family_trade_integrity(
                     )
                 ):
                     raise ValueError(
-                        "mapped opening has no complete source-owned door/window kind"
+                        "mapped opening has no source-owned door/window kind or complete source identity"
                     )
                 if trade != typed_trade:
                     raise ValueError(
