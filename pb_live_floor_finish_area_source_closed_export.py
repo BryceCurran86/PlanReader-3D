@@ -71,6 +71,29 @@ def _original_floor_polygon_is_simple(
         return False
 
 
+
+def _require_exact_floor_finish_semantic(
+    semantic_key: object,
+    *,
+    canonical_floor_id: str,
+    finish_code: object,
+    semantic_finish: object,
+) -> None:
+    """Original finish code, material and physical floor form one source key."""
+    if (
+        type(semantic_key) is not str
+        or type(finish_code) is not str or not finish_code
+        or finish_code != finish_code.strip()
+        or type(semantic_finish) is not str or not semantic_finish
+        or semantic_finish != semantic_finish.strip()
+        or semantic_key !=
+        f"floor_finish_area:{canonical_floor_id}:{finish_code}:{semantic_finish}"
+    ):
+        raise SourceClosedRunConflictError(
+            "floor finish semantic identity disagrees with original source code"
+        )
+
+
 def build_live_floor_finish_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -321,6 +344,15 @@ def build_live_floor_finish_area_source_traces(
                 "physical floor has competing finish area quantities: "
                 f"{physical_floor_id}"
             )
+        # Check the exact FT code at the customer seal only AFTER the more
+        # specific competing canonical/physical floor owner checks above.
+        # Preserving first-failure ordering avoids changing old conflict gates.
+        _require_exact_floor_finish_semantic(
+            quantity.semantic_key,
+            canonical_floor_id=floor_id,
+            finish_code=metadata.get("finish_code"),
+            semantic_finish=metadata.get("semantic_finish"),
+        )
         floor_owner_by_occurrence[occurrence_id] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
         quantity_owner_by_physical_floor[physical_floor_id] = (
