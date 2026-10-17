@@ -44,6 +44,8 @@ class SourceSealedW4MetricFloorShadow:
     viewport_id: str | None
     independent_candidate_metric_area_m2: float | None
     diagnostic_only: bool = True
+    figured_source_side_to_w4_wall_id: tuple[tuple[str, str], ...] = ()
+    candidate_wall_length_m_by_w4_id: tuple[tuple[str, float], ...] = ()
 
 
 def _cycle(value: object) -> tuple[tuple[float, float], ...] | None:
@@ -269,6 +271,35 @@ def bind_producer_sealed_w4_metric_floor_shadow(
         retained.append((wall_id,edge))
     if seen_edges != actual_edges:
         return block("original_w4_source_wall_subedge_incomplete")
+    # This is the first real producer-backed connection from figured metric
+    # perimeter sides to exact W4 physical walls. Match the original source
+    # edge itself; never assign a room side to a nearest/parallel candidate.
+    owner_by_edge = {edge: wall_id for wall_id, edge in retained}
+    figured_w4_sides = []
+    wall_metric_mm: dict[str, list[float]] = {}
+    for index, side_id in enumerate(metric_room.source_side_ids):
+        start = tuple(round(float(n),6) for n in original_vertices[index])
+        finish = tuple(round(float(n),6) for n in original_vertices[
+            (index + 1) % len(original_vertices)
+        ])
+        physical_wall = owner_by_edge.get(_edge(start, finish))
+        if physical_wall is None:
+            return block("original_w4_figured_source_side_owner_unavailable")
+        metric_first = tuple(float(n) for n in metric_vertices[index])
+        metric_last = tuple(float(n) for n in metric_vertices[
+            (index + 1) % len(metric_vertices)
+        ])
+        length_mm = math.dist(metric_first, metric_last)
+        if not math.isfinite(length_mm) or length_mm <= 0:
+            return block("original_w4_figured_source_side_length_unavailable")
+        figured_w4_sides.append((side_id, physical_wall))
+        wall_metric_mm.setdefault(physical_wall, []).append(length_mm)
+    if set(wall_metric_mm) != set(original.bounding_wall_ids):
+        return block("original_w4_figured_wall_member_universe_incomplete")
+    candidate_wall_lengths = tuple(
+        (wall_id, math.fsum(lengths) / 1000.)
+        for wall_id, lengths in sorted(wall_metric_mm.items())
+    )
     matches=[
         floor for floor in floors.floors
         if type(floor) is LiveCanonicalFloorSurfaceObject
@@ -299,4 +330,6 @@ def bind_producer_sealed_w4_metric_floor_shadow(
         tuple(sorted(retained)),room.source_sha256,room.revision_id,
         room.snapshot_id,room.decision_scope_id,room.page_id,
         room.viewport_id,metric_room.candidate_area_m2,
+        figured_source_side_to_w4_wall_id=tuple(figured_w4_sides),
+        candidate_wall_length_m_by_w4_id=candidate_wall_lengths,
     )
