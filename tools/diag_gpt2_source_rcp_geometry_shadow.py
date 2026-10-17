@@ -309,6 +309,11 @@ def audit_competing_original_rcp_zone_owners(
         for ident in graph.get("original_native_edge_ids",()):
             key=(root,revision,snapshot,"boundary",ident)
             owners.setdefault(key,[]).append(index)
+        for line in zone.get("original_grid_source_ink_candidates",()):
+            if type(line) is not dict or not line.get("native_source_id"):
+                raise ValueError("original_rcp_grid_ink_source_ancestry_invalid")
+            key=(root,revision,snapshot,"grid",line["native_source_id"])
+            owners.setdefault(key,[]).append(index)
         for ident in zone.get("original_source_finish_record_ids",()):
             key=(root,revision,snapshot,"mark",ident)
             shared.setdefault(key,[]).append(index)
