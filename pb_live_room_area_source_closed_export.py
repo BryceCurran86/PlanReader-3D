@@ -46,7 +46,7 @@ def _firm_room_area_quantities(
 
     out: list[QuantityEvidence] = []
     seen_ids: set[str] = set()
-    figured_pair_owner: dict[tuple[str, str], str] = {}
+    figured_pair_owner: dict[tuple[str, str], tuple[str, str]] = {}
     for quantity in claim.room_area_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -139,11 +139,14 @@ def _firm_room_area_quantities(
                 )
             pair = tuple(sorted(axes))
             prior = figured_pair_owner.get(pair)
-            if prior is not None and prior != quantity.input_entity_ids[0]:
-                raise SourceClosedRunConflictError(
-                    f"one original figured pair claimed by competing rooms: {pair}"
+            if prior is not None:
+                reason = (
+                    "one original figured pair claimed by competing rooms"
+                    if prior[0] != quantity.input_entity_ids[0]
+                    else "one original figured pair reissued as a second room-area quantity"
                 )
-            figured_pair_owner[pair] = quantity.input_entity_ids[0]
+                raise SourceClosedRunConflictError(f"{reason}: {pair}")
+            figured_pair_owner[pair] = (quantity.input_entity_ids[0], quantity_id)
         out.append(quantity)
 
     return tuple(sorted(out, key=lambda item: item.quantity_id))
