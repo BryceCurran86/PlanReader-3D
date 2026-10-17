@@ -52,11 +52,21 @@ def _native_mark_containment_census(words,*,code:str,bbox):
             "producer_issued_material_occurrence":False,
         })
     owners=[w for w in matches if w["strict_containment_candidate"]]
+    # A PDF source address can be duplicated by malformed source layering.
+    # Do not let duplicated addresses masquerade as two independently
+    # supported rooms or as a unique FT2/FT3 material occurrence.
+    addresses=[tuple(w["original_source_word_address"])
+               for w in matches
+               if w["source_word_geometry_and_address_valid"]]
+    duplicate_address_count=len(addresses)-len(set(addresses))
     return {
         "all_original_same_code_words_in_page":matches,
         "in_enclosure_candidates":owners,
         "malformed_same_code_source_words":malformed,
-        "unique_native_code_word_in_enclosure":len(owners)==1 and malformed==0,
+        "duplicate_original_mark_addresses":duplicate_address_count,
+        "unique_native_code_word_in_enclosure":(
+            len(owners)==1 and malformed==0 and duplicate_address_count==0
+        ),
         "physical_source_floor_owner_authenticated":False,
         "new_firm_quantities":0,
     }
@@ -99,5 +109,71 @@ def audit_original_floor_finish_mark_enclosure_candidate(
         "source_mark_material_definition_issued":False,
         "original_cross_sheet_floor_identity_issued":False,
         "source_measurement_and_metric_area_proven":False,
+        "new_firm_quantities":0,
+    }
+
+def audit_competing_original_finish_mark_ownership(
+    original_pdf: bytes, *, expected_sha256: str,
+    floor_page: int, finish_page: int,
+    candidate_enclosures: tuple[dict, ...],
+    finish_code_literal: str,
+) -> dict:
+    """Census original mark ownership across every supplied source enclosure.
+
+    The same FT2/FT3 original native word cannot be assigned to two separate
+    room candidates simply because both ink boxes geometrically contain it.
+    Rival translations and source negatives remain explicit; no W4 identity,
+    material definition, finished face, metric or signed customer output.
+    """
+    import hashlib
+    if (type(original_pdf) is not bytes
+            or hashlib.sha256(original_pdf).hexdigest()!=expected_sha256):
+        raise ValueError("original_source_sha_mismatch")
+    if (type(candidate_enclosures) is not tuple or not candidate_enclosures
+            or len(candidate_enclosures)>32):
+        raise ValueError("bounded_original_finish_enclosures_required")
+    evidence=[]
+    for index, item in enumerate(candidate_enclosures):
+        if type(item) is not dict or set(item)!={"source_side_pairs","translation"}:
+            raise ValueError("explicit_original_finish_candidate_fields_required")
+        try:
+            receipt=audit_original_floor_finish_mark_enclosure_candidate(
+                original_pdf,expected_sha256=expected_sha256,
+                floor_page=floor_page,finish_page=finish_page,
+                source_side_pairs=item["source_side_pairs"],
+                translation_pdf_pts=item["translation"],
+                finish_code_literal=finish_code_literal,
+            )
+        except ValueError as exc:
+            receipt={"status":"original_source_ink_enclosure_candidate_rejected",
+                     "first_unclosed_gate":str(exc),"new_firm_quantities":0}
+        evidence.append({"original_candidate_index":index,
+                         "source_side_pairs":item["source_side_pairs"],
+                         "translation":item["translation"],
+                         "candidate_source_evidence":receipt})
+    owners={}
+    for entry in evidence:
+        report=entry["candidate_source_evidence"]
+        for word in report.get("source_mark_word_evidence",{}).get("in_enclosure_candidates",()):
+            address=tuple(word["original_source_word_address"])
+            owners.setdefault(address,[]).append(entry["original_candidate_index"])
+    conflicted={address:indices for address,indices in owners.items()
+                if len(indices)>1}
+    for entry in evidence:
+        marks=entry["candidate_source_evidence"].get("source_mark_word_evidence")
+        if marks is not None:
+            marks["cross_room_mark_owner_conflict"]=any(
+                entry["original_candidate_index"] in indexes
+                for indexes in conflicted.values()
+            )
+            if marks["cross_room_mark_owner_conflict"]:
+                marks["unique_native_code_word_in_enclosure"]=False
+    return {
+        "status":("original_finish_mark_competing_room_owners" if conflicted
+                  else "original_finish_mark_source_candidates_only"),
+        "all_original_candidate_enclosures":evidence,
+        "cross_room_duplicate_native_mark_addresses":[list(addr) for addr in sorted(conflicted)],
+        "physical_room_and_material_occurrence_identity_proven":False,
+        "original_finish_area_or_quantity_issued":False,
         "new_firm_quantities":0,
     }
