@@ -237,9 +237,11 @@ class GPT2OriginalSourceGeometryBridge:
             source_floor_rcp_correspondence,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
         result=audit_gpt2_w4_original_rcp_ceiling_handoff(
-            w4,independently_registered_rcp=source_floor_rcp_correspondence,
+            independently_registered_rcp=source_floor_rcp_correspondence,
             original_rcp_ink=original_rcp_ink,
             original_rcp_material=original_rcp_material,
+            canonical_rooms=canonical_rooms,
+            physical_room_id=physical_room_id,
         )
         return {
             "status":"source_W4_original_A120_ceiling_compilation_shadow_only",
