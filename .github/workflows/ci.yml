@@ -215,6 +215,6 @@ jobs:
               reason = p["first_failing_authority_reason"]
               lines.append(f'| {p["project_id"]} | {p["denominator"]} | {first}: {reason} |')
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-              out.write("\\n".join(lines)+"\\n")
-          print("\\n".join(lines))
+              out.write("\n".join(lines)+"\n")
+          print("\n".join(lines))
           PY
