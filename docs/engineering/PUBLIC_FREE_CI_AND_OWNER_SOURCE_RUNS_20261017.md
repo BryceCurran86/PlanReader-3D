@@ -66,3 +66,29 @@ further owner/legal action.
 **Release remains gated** on original SHA authentication, full original
 multi-document producer execution, sealed quantities, exact physical identity,
 fresh customer bijection and the unchanged Full Plan V2 evaluator.
+
+
+## Memory-bounded original-source family replay (GPT3)
+
+For an owner-run that previously reached MEMORY_LIMIT, use the existing
+`four_job_windows_launcher.py` with a deliberately narrower source producer:
+`--only au_qld_maryborough_service_station --family-group floor_area`
+rather than simply increasing the machine's RAM limit. The allowed family
+values are `all`, `core`, `surfaces`, and `floor_area`; `all` remains
+the default. The independent producer interprets these families. To bind an
+explicit authenticated source-positive floor plan page, optionally pass
+`--source-plan-page-index 6` (zero-based, only after verifying the PDF's
+physical page). That option requires exactly one `--only` project.
+`--source-plan-page-index` is not a guessed sheet number and cannot bypass
+the source-positive FLOOR_PLAN classifier.
+
+Every run still verifies all ten originals first, does not upload PDFs, has
+the existing process-tree private-memory and timeout protections, and writes
+to a new private run session. Each output records its requested
+`family_group`, `source_plan_page_index` and `source_scope_complete`
+so a partial family/page producer cannot be presented as complete four-project
+source coverage. A narrower or successful run is **not** a new FIRM
+construction quantity, signed customer seal, or official 120-item V2 score.
+No separate family runs may be blindly added: a source-authenticated signed
+quantity must independently prove its stable identity and deduplication
+before the unchanged scorer considers it.
