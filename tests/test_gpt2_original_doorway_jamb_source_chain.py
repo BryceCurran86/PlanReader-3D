@@ -30,13 +30,15 @@ def test_original_office_d15_exact_jamb_chain_not_physical_room_or_door_count():
 def _fixture(*,right_jamb_x=150.,gray=False,right_wall_start=150.,
              right_wall_width=.48,right_jamb_width=.96, left_wall_opacity=1.,
              right_wall_opacity=1., left_jamb_opacity=1.,right_jamb_opacity=1.,
-             right_jamb_dashes=None):
+             right_jamb_dashes=None, shift_x=0., shift_y=0., scale=1.):
     doc=fitz.open()
-    page=doc.new_page(width=400,height=300)
-    page.draw_line((20,100),(50,100),color=(0,0,0),width=.48,stroke_opacity=left_wall_opacity)
-    page.draw_line((right_wall_start,100),(280,100),color=(0,0,0),width=right_wall_width,stroke_opacity=right_wall_opacity)
-    page.draw_line((50,92),(50,100),color=(.5,.5,.5) if gray else (0,0,0),width=.96,stroke_opacity=left_jamb_opacity)
-    page.draw_line((right_jamb_x,92),(right_jamb_x,100),color=(0,0,0),width=right_jamb_width,stroke_opacity=right_jamb_opacity,dashes=right_jamb_dashes)
+    page=doc.new_page(width=800,height=800)
+    def pt(x,y):
+        return (shift_x+scale*x,shift_y+scale*y)
+    page.draw_line(pt(20,100),pt(50,100),color=(0,0,0),width=.48,stroke_opacity=left_wall_opacity)
+    page.draw_line(pt(right_wall_start,100),pt(280,100),color=(0,0,0),width=right_wall_width,stroke_opacity=right_wall_opacity)
+    page.draw_line(pt(50,92),pt(50,100),color=(.5,.5,.5) if gray else (0,0,0),width=.96,stroke_opacity=left_jamb_opacity)
+    page.draw_line(pt(right_jamb_x,92),pt(right_jamb_x,100),color=(0,0,0),width=right_jamb_width,stroke_opacity=right_jamb_opacity,dashes=right_jamb_dashes)
     return doc,page
 
 
@@ -149,4 +151,57 @@ def test_jamb_return_on_opposite_side_is_still_exact_but_not_extra_authority():
     assert result["native_ink_contact_proved"]
     assert result["source_native_jamb_crosswall_interval_pdf_pts"] == [100.,108.]
     assert result["new_quantities"] == 0
+    doc.close()
+
+def test_doorway_source_contact_is_translation_and_uniform_scale_covariant():
+    base_doc, base_page = _fixture()
+    moved_doc, moved_page = _fixture(shift_x=11.,shift_y=17.,scale=1.5)
+    def apply(page):
+        return audit(page,left_wall_id="d0i0",right_wall_id="d1i0",
+                     left_jamb_id="d2i0",right_jamb_id="d3i0")
+    base, moved = apply(base_page), apply(moved_page)
+    assert base["native_ink_contact_proved"] == moved["native_ink_contact_proved"]
+    assert moved["status"] == base["status"]
+    assert moved["source_native_jamb_separation_pdf_pt"] == 1.5 * base["source_native_jamb_separation_pdf_pt"]
+    assert moved["source_native_unbridged_wall_gap_pdf_pts"] == [86.,236.]
+    assert moved["new_quantities"] == 0
+    base_doc.close()
+    moved_doc.close()
+
+
+def test_unrelated_original_paint_does_not_change_exact_native_path_item_proof():
+    doc,page = _fixture()
+    def apply():
+        return audit(page,left_wall_id="d0i0",right_wall_id="d1i0",
+                     left_jamb_id="d2i0",right_jamb_id="d3i0")
+    before=apply()
+    # A later annotation/legend is a different original path, not a parent of
+    # the four exact IDs. The candidate must not change when it is appended.
+    page.draw_line((320,300),(370,300),color=(1,0,0),width=1.)
+    after=apply()
+    assert before==after
+    assert after["new_physical_opening_count"]==0
+    doc.close()
+
+
+def test_repeated_jamb_audit_does_not_mutate_the_original_source_page():
+    doc,page = _fixture()
+    original=doc.tobytes()
+    values=[
+        audit(page,left_wall_id="d0i0",right_wall_id="d1i0",
+              left_jamb_id="d2i0",right_jamb_id="d3i0")
+        for _ in range(3)
+    ]
+    assert values[0]==values[1]==values[2]
+    assert doc.tobytes()==original
+    doc.close()
+
+
+def test_reversed_wall_roles_cannot_fabricate_native_gap_or_count():
+    doc,page=_fixture()
+    evidence=audit(page,left_wall_id="d1i0",right_wall_id="d0i0",
+                   left_jamb_id="d3i0",right_jamb_id="d2i0")
+    assert evidence["status"]=="no_original_positive_wall_opening_gap"
+    assert not evidence["native_ink_contact_proved"]
+    assert evidence["new_quantities"]==evidence["new_physical_opening_count"]==0
     doc.close()
