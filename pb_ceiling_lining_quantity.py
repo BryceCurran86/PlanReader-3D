@@ -154,10 +154,16 @@ def _base_context_blockers(
         ViewportResolutionStatus.DERIVED,
     ):
         blockers.append("viewport_unresolved")
-    if int(page_no) not in context.trusted_page_numbers():
+    # A page number is an original source scope, not an alias that may
+    # be rounded down or converted from True, a string or a floating value.
+    if type(page_no) is not int or page_no <= 0:
+        blockers.append("page_not_owned")
+    elif page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
     mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and int(mapped_page) != int(page_no):
+    if mapped_page is not None and (
+        type(mapped_page) is not int or mapped_page != page_no
+    ):
         blockers.append("viewport_page_mismatch")
     return tuple(dict.fromkeys(blockers))
 
