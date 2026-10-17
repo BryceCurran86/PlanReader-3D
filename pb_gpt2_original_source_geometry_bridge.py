@@ -14,7 +14,10 @@ from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_gr
 from tools.diag_gpt2_original_room_doorway_ancestry_shadow import (
     audit_gpt2_original_room_doorway_ancestry_pair,
 )
-from tools.diag_gpt2_source_rcp_geometry_shadow import audit_original_rcp_ceiling_ink
+from tools.diag_gpt2_source_rcp_geometry_shadow import (
+    audit_original_rcp_ceiling_ink,
+    audit_original_rcp_source_finish_occurrence,
+)
 from pb_gpt2_w4_rcp_source_handoff import (
     audit_gpt2_w4_original_rcp_ceiling_handoff,
 )
@@ -212,6 +215,10 @@ class GPT2OriginalSourceGeometryBridge:
         original_floor_page_1_based: int,
         source_cross_sheet_receipt: dict,
         source_material_receipt: dict,
+        source_material_authority,
+        source_definition_selector,
+        source_occurrence_selector,
+        original_finish_code: str,
         canonical_rooms,
         physical_room_id: str,
         original_doorway_source_ancestry: dict | None = None,
@@ -250,6 +257,27 @@ class GPT2OriginalSourceGeometryBridge:
                     "floor_finish_quantity_granted":False,
                     "new_firm_quantities":0,
                 }
+        # Independently resolve through the exact producer-owned source
+        # material authority. A copied dict that merely says "authenticated"
+        # is not an FT2/FT3 mark or material-definition issuer.
+        actual_material=audit_gpt2_source_material_floor_handoff(
+            source_cross_sheet_receipt,
+            material_authority=source_material_authority,
+            definition_selector=source_definition_selector,
+            occurrence_selector=source_occurrence_selector,
+            original_finish_code=original_finish_code,
+        )
+        if (type(source_material_receipt) is not dict
+                or source_material_receipt!=actual_material
+                or actual_material.get("status")!=
+                    "source_owned_material_on_original_ink_ring_candidate"):
+            return {
+                "status":"source_material_issuer_not_replayable",
+                "first_failure":"original_FT_mark_or_schedule_source_lineage_unresolved",
+                "source_material_first_failure":actual_material.get("first_failure"),
+                "floor_finish_quantity_granted":False,
+                "new_firm_quantities":0,
+            }
         w4=audit_gpt2_w4_bound_original_floor(
             source_cross_sheet_receipt,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
@@ -262,7 +290,7 @@ class GPT2OriginalSourceGeometryBridge:
             "status":"source_W4_FT_handoff_shadow_only",
             "source_w4_room_face_claim":w4,
             "source_gpt1_floor_finish_input":
-                audit_gpt2_w4_material_to_gpt1(w4,source_material_receipt),
+                audit_gpt2_w4_material_to_gpt1(w4,actual_material),
             "source_original_document_id":published.revision.document_id,
             "source_original_revision_id":revision_id,
             "source_original_snapshot_id":published.snapshot.snapshot_id,
@@ -277,6 +305,10 @@ class GPT2OriginalSourceGeometryBridge:
         source_floor_rcp_correspondence: dict,
         original_rcp_ink: dict,
         original_rcp_material: dict,
+        source_material_authority,
+        source_definition_selector,
+        source_occurrence_selector,
+        original_ceiling_finish_code: str,
         canonical_rooms,
         physical_room_id: str,
     ) -> dict:
@@ -292,13 +324,32 @@ class GPT2OriginalSourceGeometryBridge:
                 or source_floor_rcp_correspondence.get("original_source_sha256")!=
                     published.revision.source_sha256):
             raise ValueError("source_floor_to_RCP_original_root_mismatch")
+        # Source issue is independently repeated from the original,
+        # producer-sealed A120 RCP mark and material definition. A copied
+        # dict cannot supply source-verified ceiling material ownership.
+        actual_rcp_material=audit_original_rcp_source_finish_occurrence(
+            original_rcp_ink,authority=source_material_authority,
+            definition_selector=source_definition_selector,
+            occurrence_selector=source_occurrence_selector,
+            original_finish_code=original_ceiling_finish_code,
+        )
+        if (type(original_rcp_material) is not dict
+                or original_rcp_material!=actual_rcp_material
+                or actual_rcp_material.get("status")!=
+                    "original_rcp_material_in_ceiling_ink_candidate"):
+            return {
+                "status":"source_RCP_material_issuer_not_replayable",
+                "first_failure":"original_A120_schedule_or_mark_source_lineage_unresolved",
+                "source_ceiling_area_m2":None,
+                "new_firm_quantities":0,
+            }
         w4=audit_gpt2_w4_bound_original_floor(
             source_floor_rcp_correspondence,canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id)
         result=audit_gpt2_w4_original_rcp_ceiling_handoff(
             independently_registered_rcp=source_floor_rcp_correspondence,
             original_rcp_ink=original_rcp_ink,
-            original_rcp_material=original_rcp_material,
+            original_rcp_material=actual_rcp_material,
             canonical_rooms=canonical_rooms,
             physical_room_id=physical_room_id,
         )
