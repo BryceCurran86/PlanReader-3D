@@ -64,7 +64,10 @@ def scope(monkeypatch, *, ink=(True, True), physical_id="physical-one", observed
                         Labels.from_source_visibility_producer)
     monkeypatch.setattr(g17, "build_opening_local_g17_wall_shadow", lambda src, sel, **kwargs: Obj(
         physical_opening_id=physical_id,
-        flanks=tuple(Obj(source_ink_supported=value) for value in ink),
+        flanks=tuple(Obj(
+            source_ink_supported=value,
+            source_observation_ids=ids,
+        ) for value, ids in zip(ink, (("f1", "f2", "e1"), ("f3", "f4", "e2")))),
     ))
     return producer, published
 
@@ -203,3 +206,41 @@ def test_source_selector_conflict_for_same_record_fails_closed(monkeypatch):
             src, published, "3",
             include_unmeasured_ink_closed_flanks_shadow=True,
         )
+
+
+@pytest.mark.parametrize("ink,expected_partial,expected_positive", [
+    ((False,True), ("left",), ("right",)),
+    ((True,False), ("right",), ("left",)),
+    ((False,False), ("left","right"), ()),
+    ((True,True), (), ("left","right")),
+])
+def test_each_independently_painted_original_flank_has_own_source_status(
+        monkeypatch, ink, expected_partial, expected_positive):
+    src,published=scope(monkeypatch,ink=ink)
+    all_full, unclosed_ink, independently_positive = (
+        SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+            src,published,"3",
+            include_unmeasured_ink_closed_flanks_shadow=True,
+            include_original_partial_jamb_receipts_shadow=True,
+        )
+    )
+    # A strong source-ink claim never implies that the other wall flank's
+    # source paint is complete, nor that a structural wall host is proved.
+    left=("horizontal",(0.0,0.0,5.0,2.0))
+    right=("horizontal",(10.0,0.0,15.0,2.0))
+    lookup={"left":left,"right":right}
+    assert set(independently_positive)=={lookup[x] for x in expected_positive}
+    assert {tuple(item[:2]) for item in unclosed_ink}=={
+        lookup[x] for x in expected_partial
+    }
+    assert set(all_full)==({left,right} if all(ink) else set())
+
+
+def test_default_source_capture_stays_all_or_nothing_for_unmeasured(monkeypatch):
+    src,published=scope(monkeypatch,ink=(True,False))
+    # The old default and original simple shadow contract cannot quietly
+    # claim the missing opposite physical flank.
+    assert SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src,published,"3") == ()
+    assert SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src,published,"3",include_unmeasured_ink_closed_flanks_shadow=True) == ()
