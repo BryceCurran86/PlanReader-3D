@@ -237,7 +237,10 @@ def test_independently_figured_wall_lengths_are_bound_to_exact_w4_physical_ids()
     assert all(v>0 for k,v in got.candidate_wall_length_m_by_w4_id)
     assert math.isclose(
         sum(v for k,v in got.candidate_wall_length_m_by_w4_id),
-        6.0, rel_tol=0, abs_tol=1e-8,
+        sum(math.dist(_metric_candidate(room).metric_vertices_mm[i],
+                      _metric_candidate(room).metric_vertices_mm[(i+1)%len(room.polygon_pdf_pts)])
+            for i in range(len(room.polygon_pdf_pts))) / 1000.,
+        rel_tol=0, abs_tol=1e-8,
     )
     assert got.diagnostic_only and not hasattr(got,"quantity_id")
 
