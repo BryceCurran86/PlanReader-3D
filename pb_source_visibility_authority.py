@@ -42,6 +42,9 @@ from pb_raster_unchanged_band_segments import (
     detect_original_one_ended_ink_band_segments,
     ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
     ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_DETECTOR_VERSION,
+    detect_original_jamb_anchored_ink_segments,
     band_segment_already_observed,
 )
 from pb_raster_opening_source_primitives import (
@@ -2114,10 +2117,17 @@ class SourceVisibilityProducer:
                     # proven raster-opening support inventory. Unrelated raster
                     # table/furniture bands must not perturb the ordinary W4
                     # graph simply because they contain solid paint.
-                    flank_boxes = self._proven_raster_opening_flank_boxes(
-                        published, page_id,
-                        include_unmeasured_ink_closed_flanks_shadow=include_unmeasured_ink_closed_flanks_shadow,
-                    )
+                    if include_unmeasured_ink_closed_flanks_shadow:
+                        flank_boxes, partial_source_jambs = self._proven_raster_opening_flank_boxes(
+                            published, page_id,
+                            include_unmeasured_ink_closed_flanks_shadow=True,
+                            include_original_partial_jamb_receipts_shadow=True,
+                        )
+                    else:
+                        flank_boxes = self._proven_raster_opening_flank_boxes(
+                            published, page_id,
+                        )
+                        partial_source_jambs = ()
                     supplemental = tuple(s for s in supplemental
                         if any(_unchanged_segment_inside_flank(s, box,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
@@ -2160,6 +2170,28 @@ class SourceVisibilityProducer:
                             ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
                             ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
                             hashlib.sha256(full_png).hexdigest()))
+                    if partial_source_jambs:
+                        # Independent original G17 endcaps; a changed pixel
+                        # stops the run. Never bridge the unpainted interval.
+                        partial = detect_original_jamb_anchored_ink_segments(
+                            image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                            original_source_jambs=partial_source_jambs,
+                        )
+                        partial = tuple(seg for seg in partial
+                            if _axis_aligned_geometry_fully_covered_by_rect_union(
+                                seg.geometry_pt, image_regions)
+                            and not band_segment_already_observed(
+                                seg, segments,
+                                dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                ordinary_dpi=RASTER_RENDER_DPI))
+                        if partial:
+                            families.append((
+                                partial, hashlib.sha256(image_png).hexdigest(),
+                                RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+                                ORIGINAL_G17_JAMB_PARTIAL_DETECTOR_VERSION,
+                                hashlib.sha256(full_png).hexdigest(),
+                            ))
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
@@ -2334,6 +2366,7 @@ class SourceVisibilityProducer:
     def _proven_raster_opening_flank_boxes(
         self, published, page_id, *,
         include_unmeasured_ink_closed_flanks_shadow: bool = False,
+        include_original_partial_jamb_receipts_shadow: bool = False,
     ):
         """Nominate real source paint into raster capture, never a host or count.
 
@@ -2345,6 +2378,12 @@ class SourceVisibilityProducer:
         """
         if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
             raise TypeError("unmeasured G17 flank capture must be an explicit boolean")
+        if type(include_original_partial_jamb_receipts_shadow) is not bool:
+            raise TypeError("partial original G17 receipt flag must be boolean")
+        if (include_original_partial_jamb_receipts_shadow
+                and not include_unmeasured_ink_closed_flanks_shadow):
+            raise ValueError("partial G17 original source requires opt-in")
+        partial_jambs = set()
         physical = self.physical_opening_authority()
         visibility = self.authority()
         # The existing source compiler reauthenticates the *complete* isolated
@@ -2363,7 +2402,7 @@ class SourceVisibilityProducer:
         selectors = {r.observation_id: replace(seed_selector, observation_id=r.observation_id)
                      for r in records}
         if not records:
-            return ()
+            return ((), ()) if include_original_partial_jamb_receipts_shadow else ()
         # Enumerate all raw candidates from the existing compiler, not a
         # nearest/first support or a caller-narrowed candidate universe.
         candidates = physical._raster_framed_candidates_for(records[0], tuple(records))
@@ -2408,11 +2447,43 @@ class SourceVisibilityProducer:
                     self, original_selector,
                     original_ink_render_cache_shadow=True,
                 )
-                if (
-                    ink.physical_opening_id != opening.record_id
-                    or len(ink.flanks) != 2
-                    or not all(flank.source_ink_supported for flank in ink.flanks)
-                ):
+                if (ink.physical_opening_id != opening.record_id
+                        or len(ink.flanks) != 2):
+                    continue
+                if include_original_partial_jamb_receipts_shadow:
+                    for flank in ink.flanks:
+                        if flank.source_ink_supported:
+                            continue
+                        support = [by_id[oid] for oid in flank.source_observation_ids
+                                   if oid in by_id]
+                        faces = [r for r in support
+                                 if r.observation_kind == RASTER_WALL_BAND_FACE]
+                        ends = [r for r in support
+                                if r.observation_kind == RASTER_WALL_BAND_END]
+                        if len(support) != 3 or len(faces) != 2 or len(ends) != 1:
+                            continue
+                        a, b = (tuple(float(v) for v in x.geometry) for x in faces)
+                        cap = tuple(float(v) for v in ends[0].geometry)
+                        if (a[1] == a[3] and b[1] == b[3]
+                                and a[0] == b[0] and a[2] == b[2]
+                                and a[1] != b[1]):
+                            off = sorted((a[1], b[1]))
+                            if (cap[0] != cap[2] or cap[0] not in (a[0],a[2])
+                                    or sorted((cap[1],cap[3])) != off):
+                                continue
+                            item=("horizontal",(a[0],off[0],a[2],off[1]),cap[0])
+                        elif (a[0] == a[2] and b[0] == b[2]
+                                and a[1] == b[1] and a[3] == b[3]
+                                and a[0] != b[0]):
+                            off = sorted((a[0], b[0]))
+                            if (cap[1] != cap[3] or cap[1] not in (a[1],a[3])
+                                    or sorted((cap[0],cap[2])) != off):
+                                continue
+                            item=("vertical",(off[0],a[1],off[1],a[3]),cap[1])
+                        else:
+                            continue
+                        partial_jambs.add(item)
+                if not all(flank.source_ink_supported for flank in ink.flanks):
                     continue
             faces = [by_id[oid].geometry for oid in opening.source_observation_ids
                      if by_id[oid].observation_kind == RASTER_WALL_BAND_FACE]
@@ -2427,6 +2498,8 @@ class SourceVisibilityProducer:
                     a, b = sorted(offsets)
                     box = (lo, a, hi, b) if axis == 'horizontal' else (a, lo, b, hi)
                     boxes.add((axis, box))
+        if include_original_partial_jamb_receipts_shadow:
+            return tuple(sorted(boxes)), tuple(sorted(partial_jambs))
         return tuple(sorted(boxes))
 
     def augment_with_raster_opening_primitives(
