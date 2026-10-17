@@ -154,3 +154,19 @@ def test_generated_native_text_receipts_preserve_different_line_ordinal():
     assert len(rows) == 2
     assert {row.source_block_line_index for row in rows} == {0, 2}
     assert rows[0].source_text_bbox_pdf_pts == rows[1].source_text_bbox_pdf_pts
+
+
+
+def test_native_source_text_cropped_out_of_actual_page_is_not_a_candidate():
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((30, 75), "EXCLUDED AREA: 14.75m2", fontsize=10)
+        page.insert_text((120, 225), "VISIBLE AREA: 8.25m2", fontsize=10)
+        page.set_cropbox(fitz.Rect(100, 100, 550, 700))
+        payload = doc.tobytes()
+    finally:
+        doc.close()
+    result = _read(payload)
+    assert all(row.label != "EXCLUDED" for row in result)
+    assert all(row.binding == "unbound" for row in result)
