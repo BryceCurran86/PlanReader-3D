@@ -249,3 +249,43 @@ def test_original_word_receipts_respect_text_case_without_proximity_join():
     rival = list(words)
     rival[1] = (1., 0., 2., 1., "Study", 3, 2, 1)
     assert _native_area_word_addresses(rival, 3, row) is None
+
+
+def test_native_area_word_receipts_require_same_original_block_ink_bounds():
+    from pb_explicit_floor_area_evidence import (
+        _native_area_word_addresses, extract_declared_component_floor_areas,
+    )
+    claim, = extract_declared_component_floor_areas(
+        "OFFICE AREA: 13.50m2", source_page=1,
+        source_block_id="text-block-1",
+    )
+    words = [
+        (10., 10., 22., 20., "OFFICE", 1, 0, 0),
+        (24., 10., 32., 20., "AREA:", 1, 0, 1),
+        (35., 10., 48., 20., "13.50m2", 1, 0, 2),
+    ]
+    bbox = (8., 8., 50., 22.)
+    assert _native_area_word_addresses(words, 1, claim, bbox) is not None
+    displaced = list(words)
+    displaced[-1] = (50., 10., 63., 20., "13.50m2", 1, 0, 2)
+    assert _native_area_word_addresses(displaced, 1, claim, bbox) is None
+    assert _native_area_word_addresses(words, 2, claim, bbox) is None
+
+
+def test_native_component_source_word_boxes_stay_inside_original_block():
+    payload = _source()
+    doc = fitz.open(stream=payload, filetype="pdf")
+    try:
+        original = {
+            (int(w[5]), int(w[6]), int(w[7])): tuple(float(v) for v in w[:4])
+            for w in doc[0].get_text("words")
+        }
+        for row in _read(payload):
+            x0, y0, x1, y1 = row.source_text_bbox_pdf_pts
+            for addr in (*row.source_label_word_addresses,
+                         *row.source_value_word_addresses):
+                a, b, c, d = original[addr]
+                assert x0 - 1e-3 <= a <= c <= x1 + 1e-3
+                assert y0 - 1e-3 <= b <= d <= y1 + 1e-3
+    finally:
+        doc.close()
