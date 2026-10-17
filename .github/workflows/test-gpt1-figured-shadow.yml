@@ -42,4 +42,5 @@ jobs:
             tests/test_gpt1_original_material_producer_finish_bridge_shadow.py \
             tests/test_gpt1_original_two_view_wall_frame_shadow.py \
             tests/test_gpt1_original_figured_extension_to_face_shadow.py \
-            tests/test_gpt1_original_crosssheet_marked_sections_shadow.py
+            tests/test_gpt1_original_crosssheet_marked_sections_shadow.py \
+            tests/test_gpt1_original_figured_room_3d_shell_shadow.py
