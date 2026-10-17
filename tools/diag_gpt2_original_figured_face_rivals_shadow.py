@@ -286,3 +286,96 @@ def audit_original_figured_wall_note_alignment(
         "source_FT2_area_m2_candidate_not_signed":
             original_face_rivals["original_source_figured_area_m2_candidate_not_signed"],
     }
+
+
+
+def audit_original_ft2_internal_wall_face_basis(
+    original_face_rivals: dict, original_dimension_chains: dict,
+) -> dict:
+    """Explicit FT2 trade measurement rule: exposed floor up to wall faces.
+
+    A502 prints 92 | main clear dimension | 92 on each axis. The short wall
+    notes are OUTSIDE the middle figure: never include them in floor area and
+    never subtract them a second time. Other secondary strokes INSIDE the
+    figured box remain recorded as possible lining/face evidence, not an
+    automatic offset to the measured internal wall boundary.
+
+    This policy chooses WHAT physical surface to measure, not WHICH original
+    W4-produced face is the finished wall. No signed customer quantity.
+    """
+    base={
+        "status":"original_ft2_internal_wall_face_basis_unresolved",
+        "first_failure":"original_internal_figure_or_ft2_source_not_authenticated",
+        "measurement_surface":"exposed_ft2_floor_within_internal_finished_wall_faces",
+        "include_area_under_walls":False,
+        "deduct_the_92mm_walls_from_clear_room_figures":False,
+        "add_the_92mm_walls_to_clear_room_figures":False,
+        "do_not_elect_further_inset_stroke_as_finished_face_by_proximity":True,
+        "d13_threshold_treatment_requires_source_boundary_proof":True,
+        "source_finished_wall_face_role_authenticated":False,
+        "source_W4_physical_room_identity_authenticated":False,
+        "source_FT2_floor_finish_m2_signed":None,
+        "new_firm_quantities":0,
+    }
+    mark=original_face_rivals.get("original_room_and_finish_mark_candidates")
+    if (type(mark) not in (list,tuple) or len(mark)!=2
+            or mark[0].get("original_literal_untrusted")!="PWD"
+            or mark[1].get("original_literal_untrusted")!="FT2"):
+        return base
+    aligned=audit_original_figured_wall_note_alignment(
+        original_face_rivals,original_dimension_chains)
+    if aligned["status"]!="original_orthogonal_wall_note_and_face_rivals_candidate_only":
+        return {**base,"first_failure":aligned["first_failure"]}
+    ratios=aligned["source_original_dimension_chains"]
+    try:
+        vertical=ratios["vertical"]
+        horizontal=ratios["horizontal"]
+        long_mm=vertical["original_main_figure_mm"]
+        width_mm=horizontal["original_main_figure_mm"]
+        walls=(
+            vertical["original_wall_note_before_mm"],
+            vertical["original_wall_note_after_mm"],
+            horizontal["original_wall_note_before_mm"],
+            horizontal["original_wall_note_after_mm"],
+        )
+        face_candidates=aligned["all_original_inner_outer_face_alignment_candidates"]
+    except (KeyError,TypeError):
+        return base
+    if (type(long_mm) is not int or type(width_mm) is not int
+            or long_mm<=0 or width_mm<=0 or
+            not all(type(x) is int and x>0 for x in walls)):
+        return base
+    # Original figured spans must terminate at ONE genuinely drawn source
+    # face family. Even that figure-bound family is not thereby certified a
+    # finished-face W4 wall: original multiple source layers can coexist.
+    fig_bound=[
+        family for family in face_candidates
+        if family["source_both_printed_long_figures_terminate_at_this_family"]
+    ]
+    if len(fig_bound)!=1 or len(face_candidates)<2:
+        return {
+            **base,
+            "first_failure":"clear_inside_figure_face_missing_or_competing",
+            "source_original_face_family_candidates":tuple(face_candidates),
+        }
+    area=round(long_mm*width_mm/1_000_000,9)
+    if area!=aligned["source_FT2_area_m2_candidate_not_signed"]:
+        return {
+            **base,"first_failure":"original_figure_area_receipt_conflict",
+        }
+    return {
+        **base,
+        "status":"original_ft2_clear_internal_wall_face_area_candidate",
+        "first_failure":"original_figured_face_W4_finished_surface_and_D13_threshold",
+        "original_source_sha256":aligned["original_source_sha256"],
+        "original_page_1_based":aligned["original_page_1_based"],
+        "source_original_figured_internal_length_mm":long_mm,
+        "source_original_figured_internal_width_mm":width_mm,
+        "source_wall_notes_outside_clear_dimensions_mm":walls,
+        "source_original_figure_bound_face_family":
+            fig_bound[0]["original_face_family_id"],
+        "source_all_face_family_candidates":tuple(face_candidates),
+        "source_ft2_clear_room_rectangle_area_m2_candidate_not_signed":area,
+        "source_rectangular_area_not_a_sealed_finished_floor_polygon":True,
+        "source_floor_finish_occurrence_authority_issued":False,
+    }
