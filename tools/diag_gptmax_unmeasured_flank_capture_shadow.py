@@ -72,10 +72,16 @@ def compare_original_g17_release_receipts(original, alternate):
     }
 
 
-def _one_source_policy(pdf, digest, *, shadow):
+def _one_source_policy(pdf, digest, *, shadow, elevation_witness_shadow=False):
+    if type(shadow) is not bool or type(elevation_witness_shadow) is not bool:
+        raise ValueError("original source policy must be an explicit boolean")
+    # The paired-face physical opening policy MUST accompany the opt-in G17
+    # ink capture, otherwise the additional original 2127 STACKER is never
+    # visible to its source flank candidate universe.
     source=SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+        raster_paired_outer_faces_shadow=shadow,
     )
     published=source.ingest_native_pdf_bytes(
         document_id="live-source:" + digest[:32],
@@ -85,12 +91,13 @@ def _one_source_policy(pdf, digest, *, shadow):
         # Different source_locator values would introduce an unrelated
         # source-revision metadata variable into strict issuer comparison.
         source_locator="memory://gptmax-original-lot16-page-3.pdf",
-        page_ids=(3,),
+        page_ids=(3,5) if elevation_witness_shadow else (3,),
     )
     composition=compose_live_wall_opening_authority(
         source_visibility_producer=source,
         revision_id=published.revision.revision_id,
         page_ids=("3",),
+        evidence_page_ids=("5",) if elevation_witness_shadow else (),
         include_unmeasured_ink_closed_flanks_shadow=shadow,
     )
     voids=compose_live_physical_opening_voids(
@@ -107,14 +114,19 @@ def _one_source_policy(pdf, digest, *, shadow):
 
 
 
-def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA) -> dict:
+def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
+                  elevation_witness_shadow: bool = False) -> dict:
+    if type(elevation_witness_shadow) is not bool:
+        raise ValueError("elevation source witness policy must be an explicit boolean")
     if type(pdf) is not bytes or sha256(pdf).hexdigest() != expected_sha256:
         raise ValueError("immutable original Lot16 source SHA mismatch")
     old_source, old_composition, old_receipt = _one_source_policy(
         pdf, expected_sha256, shadow=False,
+        elevation_witness_shadow=elevation_witness_shadow,
     )
     snapshot, comp, new_receipt = _one_source_policy(
         pdf, expected_sha256, shadow=True,
+        elevation_witness_shadow=elevation_witness_shadow,
     )
     parity = compare_original_g17_release_receipts(old_receipt,new_receipt)
     if old_source.revision.source_sha256 != snapshot.revision.source_sha256:
@@ -134,6 +146,8 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA) -> dict:
         "baseline_source_snapshot_id": old_source.snapshot.snapshot_id,
         "original_change_receipt_parity": parity,
         "source_changed_policy_paired_to_fresh_original":True,
+        "physical_paired_source_policy_replayed_on_original":True,
+        "separate_elevation_witness_page_5":elevation_witness_shadow,
         "old_source_snapshot_may_differ": True,
         "old_21_15_9_8_source_baseline_NOT_replayed_or_assumed": True,
         "opt_in_physical_opening_count": len(rows),
@@ -154,8 +168,11 @@ def main() -> None:
     parser.add_argument("--pdf", type=Path, required=True)
     parser.add_argument("--sha256", default=SOURCE_SHA)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--include-elevation-witness", action="store_true",
+        help="Decode page5 separately as evidence, never as an opening topology page")
     args = parser.parse_args()
-    result = replay_opt_in(args.pdf.read_bytes(), expected_sha256=args.sha256)
+    result = replay_opt_in(args.pdf.read_bytes(), expected_sha256=args.sha256,
+                           elevation_witness_shadow=args.include_elevation_witness)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n",
