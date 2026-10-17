@@ -1,0 +1,42 @@
+name: TEST GPT2 Production Original Symbol Font Source Seam
+
+on:
+  pull_request:
+    paths:
+      - pb_pdf_source_symbol_font_authority.py
+      - pb_pdf_text_integrity_authority.py
+      - tools/diag_pdf_symbol_byte_glyph_shadow.py
+      - tests/test_gpt2_production_symbol_font_source_parity.py
+      - .github/workflows/test-gpt2-production-symbol-source-seam.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  original-production-symbol-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Confirm exact source commit
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt fonttools
+      - name: Verify source original glyph positive and unsafe fallbacks negative
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          python -m pytest -q tests/test_gpt2_production_symbol_font_source_parity.py tests/test_gpt2_symbol_source_optin_native_word_integrity.py
+          python -m pytest -q tests/test_signed_output_gate_path_coverage.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
