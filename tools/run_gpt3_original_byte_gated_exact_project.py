@@ -267,6 +267,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    # Validate output *before* reading potentially huge original PDF bytes.
+    # A diagnostic must never replace an unrelated source or customer artifact.
+    if args.output.is_symlink():
+        raise ValueError("original-byte project report cannot follow output symlinks")
+    if args.output.exists():
+        try:
+            existing = _strict_original_json_object(args.output)
+        except (OSError, ValueError, TypeError, UnicodeError) as exc:
+            raise ValueError("original-byte project report cannot overwrite unrelated evidence") from exc
+        if existing.get("project_id") is None or (
+            existing.get("publication_status") not in ("PUBLISHED", "UNPUBLISHED")
+            or "score_claim" not in existing
+        ):
+            raise ValueError("original-byte project report cannot overwrite unrelated evidence")
     report = build_original_byte_gated_project_report(
         manifest_path=args.manifest, sealed_run_path=args.sealed_run,
         identity_map_path=args.identity_map, original_files=args.source,
