@@ -2173,7 +2173,11 @@ def _producer_proven_page_opening_records(
         # Cached positive proofs must still reauthenticate the *full* original
         # source, including competitors outside the page and any supplied
         # producer-owned page index, before reuse.
-        _authenticated_page_rows(visibility.authenticated_visible_observations(published))
+        _authenticated_page_rows(
+            visibility.authenticated_visible_observations(
+                published, bind_page_id=str(page_id)
+            )
+        )
         return cached
     proven: dict[str, PhysicalOpeningExistenceRecord] = {}
     # The original source-native dimension transaction fully authenticates
@@ -3894,10 +3898,7 @@ class PhysicalWallCandidateProducer:
                 if selected_page_ids is not None
                 else sorted(decoded_page_ids, key=lambda value: int(value))
             )
-            visible_by_page = _visible_observations_by_page(
-                source_producer=source_visibility_producer,
-                published=published,
-            )
+            visibility = source_visibility_producer.authority()
             text_receipts_by_page = _text_receipts_by_page(
                 source_producer=source_visibility_producer,
                 published=published,
@@ -3910,7 +3911,13 @@ class PhysicalWallCandidateProducer:
             )
 
             for page_id in materialized_page_ids:
-                page_visible_observations = visible_by_page.get(page_id, ())
+                # Check every visible observation, and keep a bound copy of
+                # this page only while its wall scope is built.
+                page_visible_observations = (
+                    visibility.authenticated_visible_observations(
+                        published, bind_page_id=str(page_id)
+                    )
+                )
                 if include_page_scopes:
                     builder = (
                         _build_opening_local_supplemental_scope_result

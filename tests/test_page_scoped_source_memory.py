@@ -15,6 +15,45 @@ def test_republish_keeps_the_stored_source_bytes_object():
     assert store.source_bytes_by_revision[revision_id] is stored
 
 
+def test_page_proof_checks_every_page_and_keeps_one_page():
+    source, published, _ = _source(page_count=2)
+    authority = source.authority()
+    full = authority.authenticated_visible_observations(published)
+    pages = {record.page_id for _observation_id, record in full}
+    assert pages == {"1", "2"}
+    store = source._producer._store
+    assert len(store.visible_authentication_cache) == 1
+    page = authority.authenticated_visible_observations(
+        published, bind_page_id="1"
+    )
+    assert {record.page_id for _observation_id, record in page} == {"1"}
+    assert page == tuple(
+        row for row in full if row[1].page_id == "1"
+    )
+    assert store.visible_authentication_cache == {}
+    page_two = next(
+        observation_id
+        for observation_id, record in full
+        if record.page_id == "2"
+    )
+    key = (published.snapshot.snapshot_id, page_two)
+    prior = store.observations[key]
+    store.observations[key] = replace(prior, geometry=tuple(
+        value + 3.0 for value in prior.geometry
+    ))
+    try:
+        try:
+            authority.authenticated_visible_observations(
+                published, bind_page_id="1"
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("a damaged observation on another page must fail")
+    finally:
+        store.observations[key] = prior
+
+
 def test_second_visible_authentication_reuses_the_bound_rows():
     source, published, _ = _source(page_count=2)
     authority = source.authority()

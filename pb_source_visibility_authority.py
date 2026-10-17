@@ -1030,7 +1030,9 @@ class SourceVisibilityProducer:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         if self.published_snapshot_for_revision(published.revision.revision_id) != published:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-        rows = self.authority().authenticated_visible_observations(published)
+        rows = self.authority().authenticated_visible_observations(
+            published, bind_page_id=str(page_id)
+        )
         batch = dict(published=published, page_id=str(page_id), rows=rows,
                      first_selector=None, first_support=(), cache_key=None,
                      components=(), source_segment_ids=frozenset())
@@ -1075,7 +1077,9 @@ class SourceVisibilityProducer:
             # Revalidate the FULL original visible source, including original
             # parent lineage and the complete competitor inventory.
             self._native_dimension_proof_batch = None
-            fresh = self.authority().authenticated_visible_observations(published)
+            fresh = self.authority().authenticated_visible_observations(
+                published, bind_page_id=str(page_id)
+            )
             if fresh != rows or self.published_snapshot_for_revision(
                 published.revision.revision_id
             ) != published:
@@ -2875,7 +2879,10 @@ class SourceVisibilityAuthority:
         return (*rows,)
 
     def authenticated_visible_observations(
-        self, published: "PublishedVisibleSourceSnapshot"
+        self,
+        published: "PublishedVisibleSourceSnapshot",
+        *,
+        bind_page_id: str | None = None,
     ) -> tuple[tuple[str, object], ...]:
         """Bulk-authenticate the producer-owned visible universe for one snapshot.
 
@@ -2913,11 +2920,17 @@ class SourceVisibilityAuthority:
         ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
 
-        reused = self._reusable_visible_rows(
-            store, snapshot_id, snapshot, published
-        )
-        if reused is not None:
-            return reused
+        # A page proof still checks every visible observation. It keeps a
+        # bound copy only for the page being proved, and drops any earlier
+        # document-wide bound copies before that work continues.
+        if bind_page_id is not None:
+            store.visible_authentication_cache.pop(snapshot_id, None)
+        else:
+            reused = self._reusable_visible_rows(
+                store, snapshot_id, snapshot, published
+            )
+            if reused is not None:
+                return reused
 
         def _record(observation_id: str):
             observation_id = str(observation_id)
@@ -3050,6 +3063,11 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
 
+            if (
+                bind_page_id is not None
+                and str(observation.page_id) != str(bind_page_id)
+            ):
+                continue
             bound = _bind_record_to_snapshot(observation, snapshot)
             rows.append((observation_id, bound))
             identity.append((
@@ -3060,6 +3078,8 @@ class SourceVisibilityAuthority:
                 parent,
                 page_parent,
             ))
+        if bind_page_id is not None:
+            return tuple(rows)
         store.visible_authentication_cache.clear()
         store.visible_authentication_cache[snapshot_id] = (
             snapshot, tuple(identity), tuple(rows),

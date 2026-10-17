@@ -25,8 +25,8 @@ def _counting_authentications():
     original = SourceVisibilityAuthority.authenticated_visible_observations
     seen: list = []
 
-    def wrapped(self, published):
-        rows = original(self, published)
+    def wrapped(self, published, **kwargs):
+        rows = original(self, published, **kwargs)
         seen.append((published, rows))
         return rows
 

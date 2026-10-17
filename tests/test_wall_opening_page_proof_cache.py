@@ -184,7 +184,7 @@ def test_cached_opening_proofs_use_published_snapshot_order_not_index_order(monk
     assert len(source_ids) > 1
     monkeypatch.setattr(
         type(authoritative), "authenticated_visible_observations",
-        lambda self, snapshot: tuple(reversed(original_index)),
+        lambda self, snapshot, **_kwargs: tuple(reversed(original_index)),
     )
     witnessed = []
 

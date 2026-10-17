@@ -1435,19 +1435,33 @@ class PhysicalOpeningAuthority:
         batch_rows = None
         producer = self._source_visibility_producer
         if producer is not None:
-            published = producer.published_snapshot_for_revision(
-                seed.snapshot.revision_id
-            )
+            active = producer._native_dimension_proof_batch
             if (
-                published is not None
-                and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+                active is not None
+                and active.get("published") is not None
+                and active["published"].snapshot.snapshot_id
+                == seed.snapshot.snapshot_id
+                and (
+                    page_id is None
+                    or str(active.get("page_id")) == str(page_id)
+                )
             ):
-                try:
-                    batch_rows = visibility.authenticated_visible_observations(
-                        published
-                    )
-                except RuntimeError:
-                    batch_rows = None
+                batch_rows = active["rows"]
+            else:
+                published = producer.published_snapshot_for_revision(
+                    seed.snapshot.revision_id
+                )
+                if (
+                    published is not None
+                    and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+                ):
+                    try:
+                        batch_rows = visibility.authenticated_visible_observations(
+                            published,
+                            bind_page_id=None if page_id is None else str(page_id),
+                        )
+                    except RuntimeError:
+                        batch_rows = None
         if batch_rows is not None:
             by_id = {
                 str(observation_id): record

@@ -18,7 +18,9 @@ def test_batch_original_native_components_match_scalar_with_final_reproof():
     with patch.object(
         SourceVisibilityAuthority, "authenticated_visible_observations", autospec=True
     ) as wrapped:
-        wrapped.side_effect = lambda instance, pub: original_resolve(instance, pub)
+        wrapped.side_effect = lambda instance, pub, **kwargs: original_resolve(
+            instance, pub, **kwargs
+        )
         with source._native_dimension_source_proof_batch(published, page_id="1"):
             first = source.native_dimension_cap_evidence(selector, opening_support_ids=support)
             second = source.native_dimension_cap_evidence(

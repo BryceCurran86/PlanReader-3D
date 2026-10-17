@@ -33,9 +33,9 @@ def test_original_g17_proof_reuses_transaction_entry_auth_and_retains_order(
     original = SourceVisibilityAuthority.authenticated_visible_observations
     checks = []
 
-    def checked(self, exact_published):
+    def checked(self, exact_published, **kwargs):
         checks.append(exact_published)
-        return original(self, exact_published)
+        return original(self, exact_published, **kwargs)
 
     monkeypatch.setattr(
         SourceVisibilityAuthority, "authenticated_visible_observations", checked
