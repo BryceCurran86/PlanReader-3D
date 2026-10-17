@@ -137,7 +137,7 @@ def _source_bbox(
     try:
         xs = [float(point[0]) for point in points]
         ys = [float(point[1]) for point in points]
-    except (TypeError, ValueError, IndexError) as exc:
+    except (TypeError, ValueError, IndexError, OverflowError) as exc:
         raise SourceClosedRunConflictError(
             f"canonical floor polygon is invalid: {floor.canonical_floor_id}"
         ) from exc
@@ -165,6 +165,31 @@ def _source_bbox(
     if not math.isfinite(twice_area) or abs(twice_area) <= 2e-9:
         raise SourceClosedRunConflictError(
             f"canonical floor polygon is degenerate: {floor.canonical_floor_id}"
+        )
+    # A positive shoelace answer does not prove original enclosing wall ink:
+    # a bowtie/self-crossing floor can still have an arbitrary positive m².
+    # Veto only. Do not derive a new polygon, source role, or metric value.
+    from shapely.errors import GEOSException
+    from shapely.geometry import Polygon
+    ring = tuple(zip(xs, ys))
+    # A genuine source polygon may repeat its first point as final closure.
+    # Other repetitions are self-touching physical boundary conflicts.
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring = ring[:-1]
+    if len(ring) < 3 or len(set(ring)) != len(ring):
+        raise SourceClosedRunConflictError(
+            f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
+        )
+    try:
+        polygon = Polygon(ring)
+        valid = polygon.is_valid and polygon.exterior.is_simple
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"canonical floor source geometry is invalid: {floor.canonical_floor_id}"
+        ) from exc
+    if not valid:
+        raise SourceClosedRunConflictError(
+            f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
         )
     return bbox
 
