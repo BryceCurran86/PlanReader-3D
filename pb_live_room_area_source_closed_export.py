@@ -121,6 +121,12 @@ def _firm_room_area_quantities(
             raise SourceClosedRunConflictError(
                 f"room-area quantity must reference exactly one source room: {quantity_id}"
             )
+        # Source family and semantic key must describe the exact same
+        # physical room identity, not a different canonical object/finish.
+        if quantity.semantic_key != f"room_area:{quantity.input_entity_ids[0]}":
+            raise SourceClosedRunConflictError(
+                f"room-area original semantic key does not match source room: {quantity_id}"
+            )
         out.append(quantity)
 
     return tuple(sorted(out, key=lambda item: item.quantity_id))
