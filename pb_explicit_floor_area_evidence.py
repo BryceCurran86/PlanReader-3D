@@ -194,6 +194,8 @@ class DeclaredComponentFloorAreaEvidence:
     # Original nonblank line offset *within the native text block*. Neither
     # a room index nor a user-selected benchmark item identity.
     source_block_line_index: Optional[int] = None
+    source_label_word_addresses: Tuple[Tuple[int, int, int], ...] = ()
+    source_value_word_addresses: Tuple[Tuple[int, int, int], ...] = ()
 
 
 def extract_declared_component_floor_areas(
