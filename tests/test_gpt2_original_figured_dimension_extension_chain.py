@@ -92,3 +92,23 @@ def test_explicit_face_endpoint_projection_is_not_nearest_selection():
     assert not out["original_figure_metric_or_room_width_issued"]
     assert out["new_firm_quantities"]==0
     pdf.close()
+
+def test_unpainted_dimension_projection_cannot_count_as_visible_source_extension():
+    import fitz
+    from tools.diag_original_figured_extension_source_chain_shadow import (
+        audit_figured_extension_to_source_face,
+    )
+    d=fitz.open();p=d.new_page(width=300,height=300)
+    p.draw_line((100,20),(100,100),color=(0,0,0),width=.48)
+    p.draw_line((80,20),(160,20),color=(0,0,0),width=.48)
+    p.draw_line((80,20),(100,20),color=(0,0,0),width=.48,
+                stroke_opacity=0.)
+    result=audit_figured_extension_to_source_face(
+        p,original_dimension_line_id="d0i0",original_face_line_id="d1i0",
+        dimension_endpoint_index=0,face_endpoint_index=0,
+    )
+    assert all("source_continuous_rendered_stroke" in item
+               for item in result["source_intersecting_straight_ink_candidates"])
+    assert not result["figured_extension_source_role_proven"]
+    assert result["new_firm_quantities"]==0
+    d.close()
