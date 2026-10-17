@@ -511,3 +511,13 @@ def test_cross_semantic_claims_ignore_raw_evidence_order_not_identity():
     assert len(claims) == 1
     assert claims[0]["signed_quantity_ids"] == ["a", "b"]
     assert claims[0]["canonical_object_refs"] == ["A", "B"]
+
+
+def test_unindexed_symlink_to_private_folder_is_rejected_even_if_no_file_is_indexed(tmp_path):
+    root = _copy(tmp_path)
+    outside = tmp_path / "unrelated-private-folder"
+    outside.mkdir()
+    (outside / "sensitive.txt").write_text("synthetic not actual client material", encoding="utf-8")
+    (root / "external-source-folder").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="untrusted symlink"):
+        audit.verify_owner_four_job_receipts(root)
