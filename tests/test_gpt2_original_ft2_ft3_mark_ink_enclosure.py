@@ -77,3 +77,34 @@ def test_source_sha_and_competing_doorway_wall_abort_containment():
         audit(raw,expected_sha256=SHA,
               floor_page=7,finish_page=11,source_side_pairs=PWD,
               translation_pdf_pts=(77.76,0.),finish_code_literal="FT2")
+
+def test_malformed_competing_source_ft3_word_prevents_unique_mark_claim():
+    words=[
+        (20,20,30,30,"FT3",113,0,0),
+        (float("nan"),20,30,30,"FT3",114,0,0),
+    ]
+    result=census(words,code="FT3",bbox=(10,10,45,45))
+    assert len(result["in_enclosure_candidates"]) == 1
+    assert result["malformed_same_code_source_words"] == 1
+    assert len(result["all_original_same_code_words_in_page"]) == 2
+    assert not result["unique_native_code_word_in_enclosure"]
+    assert result["new_firm_quantities"] == 0
+
+
+@pytest.mark.parametrize("bad_bbox", [
+    (10.,10.,10.,45.), (10.,10.,45.,10.),
+    (float("nan"),10.,45.,45.), (10.,10.,float("inf"),45.),
+    (45.,45.,10.,10.), ("unknown",10.,45.,45.),
+])
+def test_missing_or_ill_formed_original_mark_enclosure_never_elects_floor(bad_bbox):
+    with pytest.raises(ValueError, match="original_mark_enclosure_bbox_unavailable"):
+        census([(20,20,30,30,"FT3",113,0,0)],
+               code="FT3",bbox=bad_bbox)
+
+
+def test_noncanonical_original_word_address_cannot_become_trusted_mark():
+    result=census([(20,20,30,30,"FT3",-1,0,0)],
+                  code="FT3",bbox=(10,10,45,45))
+    assert not result["unique_native_code_word_in_enclosure"]
+    assert result["malformed_same_code_source_words"] == 1
+    assert not result["physical_source_floor_owner_authenticated"]
