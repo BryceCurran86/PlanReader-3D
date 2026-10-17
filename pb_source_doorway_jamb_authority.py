@@ -59,10 +59,11 @@ def audit_native_source_doorway_jamb_chain(
             return {**base,"status":"original_doorway_stroke_pattern_unavailable"}
         if "".join(pattern.split()) not in {"[]0",""}:
             return {**base,"status":"competing_dashed_drafting_line"}
-    if (l["native_line_axis"]!="native_x" or
-            r["native_line_axis"]!="native_x" or
-            lj["native_line_axis"]!="native_y" or
-            rj["native_line_axis"]!="native_y"):
+    wall_run_axis=l["native_line_axis"]
+    if (wall_run_axis not in ("native_x","native_y")
+            or r["native_line_axis"]!=wall_run_axis
+            or lj["native_line_axis"]==wall_run_axis
+            or rj["native_line_axis"]!=lj["native_line_axis"]):
         return {**base,"status":"original_native_axes_mismatch"}
     if not _near(l["native_axis_coordinate_pdf_pt"],
                  r["native_axis_coordinate_pdf_pt"],exact_native_tolerance_pt):
@@ -77,13 +78,23 @@ def audit_native_source_doorway_jamb_chain(
     ):
         return {**base,"status":"native_jamb_not_exact_wall_terminator"}
     wall_y=l["native_axis_coordinate_pdf_pt"]
-    if not (
-        _near(lj["native_interval_pdf_pts"][1],wall_y,exact_native_tolerance_pt)
-        and _near(rj["native_interval_pdf_pts"][1],wall_y,exact_native_tolerance_pt)
-        and _near(lj["native_interval_pdf_pts"][0],rj["native_interval_pdf_pts"][0],
-                  exact_native_tolerance_pt)
-        and lj["native_interval_pdf_pts"][0]<wall_y
-    ):
+    left_backface=lj["native_interval_pdf_pts"]
+    right_backface=rj["native_interval_pdf_pts"]
+    same_backface=(
+        _near(left_backface[0],right_backface[0],exact_native_tolerance_pt)
+        and _near(left_backface[1],right_backface[1],exact_native_tolerance_pt)
+    )
+    # A genuine rotation may put the two jamb returns on either side of
+    # the common wall ordinate. Both MUST terminate at that wall and
+    # occupy the same opposite structural-ink interval; never bridge.
+    positive_side=(
+        (_near(left_backface[1],wall_y,exact_native_tolerance_pt)
+         and left_backface[0] < wall_y-exact_native_tolerance_pt)
+        or
+        (_near(left_backface[0],wall_y,exact_native_tolerance_pt)
+         and left_backface[1] > wall_y+exact_native_tolerance_pt)
+    )
+    if not same_backface or not positive_side:
         return {**base,"status":"native_opposing_jamb_backface_conflict"}
     # Must retain original actual paint/widths.  Both walls and jambs are
     # black, with no faded drafting grid substituting a real jamb.
@@ -112,6 +123,7 @@ def audit_native_source_doorway_jamb_chain(
         "status":"exact_original_native_jamb_endpoint_chain_candidate",
         "native_ink_contact_proved":True,
         "source_original_wall_axis_pdf_pt":wall_y,
+        "source_native_wall_run_axis":wall_run_axis,
         "source_native_unbridged_wall_gap_pdf_pts":[left_x,right_x],
         "source_native_jamb_crosswall_interval_pdf_pts":lj["native_interval_pdf_pts"],
         "source_native_jamb_separation_pdf_pt":right_x-left_x,
