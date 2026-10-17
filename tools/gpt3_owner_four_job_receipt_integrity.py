@@ -587,14 +587,55 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             observed_gate = "multidocument_original_source_production_not_complete"
         else:
             observed_gate = "customer_rows_not_verified_for_fresh_source_run"
+        # Independent source-stage inventory; no stage is a V2 item result.
+        # A configured producer primary input is not full source processing.
+        production_completed = state == "COMPLETED" and summary.get("status") not in (
+            "source_attempt_recorded_unsealed", "source_complexity_blocked",
+        )
+        stage_gates = {
+            "owner_original_pdf_sha_preflight": "OWNER_REPORTED_VERIFIED",
+            "independent_private_pdf_sha_rehash": "NOT_PERFORMED",
+            "producer_process_completion": (
+                "COMPLETED" if production_completed else "BLOCKED"
+            ),
+            "all_original_documents_processed": (
+                "SOURCE_PACKAGE_COMPLETE" if production_completed
+                and len(manifest.source_documents) == 1 else "NOT_PROVEN"
+            ),
+            "signed_v1_quantity_receipt": (
+                "VERIFIED_DERIVED_BYTES" if is_sealed else "NOT_AVAILABLE"
+            ),
+            "fresh_customer_bijection": "NOT_VERIFIED",
+            "physical_identity_map": "NOT_SUPPLIED_IN_OWNER_RECEIPT",
+            "frozen_project_manifest": manifest.status,
+            "official_v2_project_score": "NOT_EVALUATED",
+        }
+        all_gates = [observed_gate]
+        if len(manifest.source_documents) > 1 and (
+            "multidocument_original_source_production_not_complete" not in all_gates
+        ):
+            all_gates.append("multidocument_original_source_production_not_complete")
+        if "customer_rows_not_verified_for_fresh_source_run" not in all_gates:
+            all_gates.append("customer_rows_not_verified_for_fresh_source_run")
+        all_gates.extend((
+            "independent_physical_identity_map_not_supplied",
+            "frozen_project_source_manifest_not_verified",
+        ) if manifest.status != "VERIFIED" else (
+            "independent_physical_identity_map_not_supplied",
+        ))
         rows.append({
             "project_id": project_id,
+            "authority_stage_statuses": stage_gates,
+            "remaining_gates_in_execution_order": all_gates,
+            "remaining_gate_count": len(all_gates),
             "frozen_denominator": denominator_by_id[project_id],
             "frozen_manifest_status": manifest.status,
             "process_status": state,
             "producer_status": summary.get("status"),
             "original_source_package_document_count": len(manifest.source_documents),
             "producer_primary_source_document_count": 1,
+            "configured_primary_source_document_count": 1,
+            "producer_process_completed": production_completed,
             "fresh_customer_bijection_verified": False,
             "earliest_verified_project_execution_gate": observed_gate,
             "derived_sealed_quantity_count": count,
