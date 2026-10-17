@@ -193,3 +193,96 @@ def audit_original_figured_detail_face_rivals(
         "source_A502_to_A110_physical_room_issuer_granted":False,
         "new_firm_quantities":0,
     }
+
+
+def audit_original_figured_wall_note_alignment(
+    original_face_rivals: dict, original_dimension_chains: dict,
+) -> dict:
+    """Same-source original drawing's wall notes around the figured span.
+
+    Independently drawn short end dimensions can tell us whether the
+    printed long room dimension is bracketed by wall-build-up annotations.
+    The numeric wall notes are NOT themselves verified wall type/finished
+    surface. The outer source linework vs inner lining is not elected by
+    lexical meaning, even when the first family matches all figured ends.
+    """
+    blocked={
+        "status":"source_figured_wall_note_alignment_unresolved",
+        "first_failure":"independent_original_figure_wall_note_source_unavailable",
+        "source_net_finished_face_authenticated":False,
+        "source_metric_floor_finish_area_issued":False,
+        "new_firm_quantities":0,
+    }
+    if (type(original_face_rivals) is not dict or type(original_dimension_chains) is not dict or
+            original_face_rivals.get("status")!="original_figured_face_source_rivals_only" or
+            original_dimension_chains.get("status")!=
+                "source_orthogonal_native_figured_chains_candidate_only" or
+            original_face_rivals.get("original_source_sha256")!=
+                original_dimension_chains.get("original_source_sha256") or
+            original_face_rivals.get("original_detail_page_1_based")!=
+                original_dimension_chains.get("original_detail_page_1_based")):
+        return blocked
+    chains=original_dimension_chains.get("native_printed_dimension_chains",{})
+    try:
+        x_chain=chains["horizontal"]
+        y_chain=chains["vertical"]
+        x_main=x_chain["original_source_records"]["main"]
+        y_main=y_chain["original_source_records"]["main"]
+        x_fig=tuple(float(n) for n in x_main["original_arrowhead_tips_pdf_pts"])
+        y_fig=tuple(float(n) for n in y_main["original_arrowhead_tips_pdf_pts"])
+    except (KeyError,TypeError,ValueError,OverflowError):
+        return blocked
+    # Both axes must have a typed, exact three-segment original annotation
+    # chain: the near (wall) notes sit OUTSIDE the main dimension terminals.
+    chain_roles={}
+    for axis,chain in (("horizontal",x_chain),("vertical",y_chain)):
+        try:
+            b,m,a=(chain["original_source_records"][role]
+                   for role in ("short_before","main","short_after"))
+            bt=b["original_arrowhead_tips_pdf_pts"]
+            mt=m["original_arrowhead_tips_pdf_pts"]
+            at=a["original_arrowhead_tips_pdf_pts"]
+            continuous=(bt[1]==mt[0] and mt[1]==at[0] and
+                        bt[0]<bt[1]<mt[1]<at[1])
+        except (KeyError,TypeError,ValueError,IndexError):
+            return blocked
+        if not continuous:
+            return {**blocked,"first_failure":"source_original_wall_note_chain_has_uncovered_terminals"}
+        chain_roles[axis]={
+            "original_wall_note_before_mm":b["source_original_dimension_mm"],
+            "original_main_figure_mm":m["source_original_dimension_mm"],
+            "original_wall_note_after_mm":a["source_original_dimension_mm"],
+            "original_wall_note_before_source_span_pdf_pts":bt,
+            "original_main_figure_source_span_pdf_pts":mt,
+            "original_wall_note_after_source_span_pdf_pts":at,
+            "source_wall_note_labels_independently_printed":True,
+            "source_wall_type_or_finished_face_role_granted":False,
+        }
+    candidates=[]
+    for family in original_face_rivals.get("original_source_candidate_face_families",()):
+        coords=family["original_source_native_bbox_pdf_pts"]
+        x_residual=[round(coords[0]-x_fig[0],3),round(coords[2]-x_fig[1],3)]
+        y_residual=[round(coords[1]-y_fig[0],3),round(coords[3]-y_fig[1],3)]
+        candidates.append({
+            "original_face_family_id":family["source_native_family_id_untrusted"],
+            "original_source_face_bbox_pdf_pts":coords,
+            "source_wall_note_to_figured_face_residual_x_pdf_pts":x_residual,
+            "source_wall_note_to_figured_face_residual_y_pdf_pts":y_residual,
+            "source_both_printed_long_figures_terminate_at_this_family":
+                all(value==0 for value in (*x_residual,*y_residual)),
+            "source_finished_face_role_proven":False,
+        })
+    if not candidates:
+        return blocked
+    return {
+        **blocked,
+        "status":"original_orthogonal_wall_note_and_face_rivals_candidate_only",
+        "first_failure":"original_inset_main_room_W4_identity_and_finished_face_role",
+        "original_source_sha256":original_face_rivals["original_source_sha256"],
+        "original_page_1_based":original_face_rivals["original_detail_page_1_based"],
+        "source_original_dimension_chains":chain_roles,
+        "all_original_inner_outer_face_alignment_candidates":tuple(candidates),
+        "original_figured_dimension_has_adjacent_wall_note_chains":True,
+        "source_FT2_area_m2_candidate_not_signed":
+            original_face_rivals["original_source_figured_area_m2_candidate_not_signed"],
+    }
