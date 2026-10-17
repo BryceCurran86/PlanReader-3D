@@ -10,6 +10,7 @@ PDF=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 
 
+@pytest.mark.skipif(not PDF.is_file(), reason="private original PDF unavailable in merge CI; separate SHA-pinned source acceptance required")
 def test_original_pwd_3570_leader_has_real_uncovered_cross_source_gap():
     raw=PDF.read_bytes()
     assert hashlib.sha256(raw).hexdigest()==SHA
@@ -24,6 +25,7 @@ def test_original_pwd_3570_leader_has_real_uncovered_cross_source_gap():
     assert hashlib.sha256(PDF.read_bytes()).hexdigest()==SHA
 
 
+@pytest.mark.skipif(not PDF.is_file(), reason="private original PDF unavailable in merge CI; separate SHA-pinned source acceptance required")
 def test_original_pwd_2200_leader_has_unproven_extension_to_real_face():
     with fitz.open(stream=PDF.read_bytes(),filetype="pdf") as doc:
         row=audit(doc[25],original_dimension_line_id="d12656i0",
@@ -60,6 +62,7 @@ def test_synthetic_split_fixture_ink_cannot_bridge_uncovered_interval():
     assert not row["figured_face_connection_authority"]
 
 
+@pytest.mark.skipif(not PDF.is_file(), reason="private original PDF unavailable in merge CI; separate SHA-pinned source acceptance required")
 def test_source_projection_vs_true_contact_validation_is_fail_closed():
     with fitz.open(stream=PDF.read_bytes(),filetype="pdf") as d:
         with pytest.raises(ValueError,match="opposed"):
