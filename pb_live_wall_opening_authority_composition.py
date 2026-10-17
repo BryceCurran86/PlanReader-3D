@@ -221,11 +221,14 @@ def compose_live_wall_opening_authority(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
-    supplemental_wall_producer = (
-        PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer(
-            source_visibility_producer,
-            page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
-        )
+    supplemental_factory = (
+        PhysicalWallCandidateProducer.from_opening_local_exact_g17_source_shadow
+        if include_unmeasured_ink_closed_flanks_shadow
+        else PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer
+    )
+    supplemental_wall_producer = supplemental_factory(
+        source_visibility_producer,
+        page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
 
     # Wall-candidate materialization may legitimately augment the producer-owned
