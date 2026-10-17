@@ -185,16 +185,31 @@ def test_unrelated_original_paint_does_not_change_exact_native_path_item_proof()
 
 
 def test_repeated_jamb_audit_does_not_mutate_the_original_source_page():
+    import hashlib
+
     doc,page = _fixture()
-    original=doc.tobytes()
-    values=[
-        audit(page,left_wall_id="d0i0",right_wall_id="d1i0",
-              left_jamb_id="d2i0",right_jamb_id="d3i0")
-        for _ in range(3)
-    ]
-    assert values[0]==values[1]==values[2]
-    assert doc.tobytes()==original
+    original = doc.tobytes()
     doc.close()
+    # A second independent MuPDF serialization may rewrite the trailer
+    # document ID, even if no source page is changed. Pin ONE serialized
+    # immutable source and compare its original native graphics before and
+    # after the three read-only audits instead of reserializing twice.
+    digest_before = hashlib.sha256(original).hexdigest()
+    with fitz.open(stream=original, filetype="pdf") as pinned:
+        source_page = pinned[0]
+        drawings_before = source_page.get_drawings()
+        words_before = source_page.get_text("words")
+        page_count_before = pinned.page_count
+        values = [
+            audit(source_page,left_wall_id="d0i0",right_wall_id="d1i0",
+                  left_jamb_id="d2i0",right_jamb_id="d3i0")
+            for _ in range(3)
+        ]
+        assert values[0] == values[1] == values[2]
+        assert source_page.get_drawings() == drawings_before
+        assert source_page.get_text("words") == words_before
+        assert pinned.page_count == page_count_before
+    assert hashlib.sha256(original).hexdigest() == digest_before
 
 
 def test_reversed_wall_roles_cannot_fabricate_native_gap_or_count():
