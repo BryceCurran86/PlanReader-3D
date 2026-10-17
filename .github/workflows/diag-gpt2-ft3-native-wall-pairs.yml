@@ -3,6 +3,12 @@ name: GPT2 FT3 Original Cross Sheet Native Wall Pairs
 on:
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_gpt2_ft3_cross_sheet_native_wall_pairs.py"
+      - "tests/test_gpt2_ft3_cross_sheet_native_wall_pairs.py"
+      - "tools/diag_ft3_p11_p7_floor_correspondence.py"
+      - ".github/workflows/diag-gpt2-ft3-native-wall-pairs.yml"
   pull_request:
     paths:
       - tools/diag_gpt2_ft3_cross_sheet_native_wall_pairs.py

@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-a120-semantic-frame-acceptance.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_gpt2_semantic_frame_acceptance_shadow.py"
+      - "tests/test_gpt2_semantic_frame_acceptance_shadow.py"
+      - ".github/workflows/test-gpt2-a120-semantic-frame-acceptance.yml"
   workflow_dispatch:
 
 jobs:

@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-original-semantic-cell-connectivity.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_source_connected_semantic_cell_shadow.py"
+      - "tests/test_gpt2_source_connected_semantic_cell_shadow.py"
+      - ".github/workflows/test-gpt2-original-semantic-cell-connectivity.yml"
   workflow_dispatch:
 
 jobs:

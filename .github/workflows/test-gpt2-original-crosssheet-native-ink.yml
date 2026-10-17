@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-original-crosssheet-native-ink.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_original_crosssheet_native_ink_registration_shadow.py"
+      - "tests/test_gpt2_original_crosssheet_native_ink_registration.py"
+      - ".github/workflows/test-gpt2-original-crosssheet-native-ink.yml"
   workflow_dispatch:
 
 jobs:

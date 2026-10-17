@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-a120-native-opposed-wall-ink.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_native_opposed_source_wall_ink_shadow.py"
+      - "tests/test_gpt2_a120_opposed_source_wall_ink.py"
+      - ".github/workflows/test-gpt2-a120-native-opposed-wall-ink.yml"
   workflow_dispatch:
 
 jobs:

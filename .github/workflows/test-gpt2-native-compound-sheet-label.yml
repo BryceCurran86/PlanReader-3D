@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-native-compound-sheet-label.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "pb_page_title_authority.py"
+      - "tests/test_gpt2_native_compound_sheet_labels.py"
+      - ".github/workflows/test-gpt2-native-compound-sheet-label.yml"
   workflow_dispatch:
 
 jobs:

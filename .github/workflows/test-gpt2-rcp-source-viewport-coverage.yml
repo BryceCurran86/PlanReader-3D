@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-rcp-source-viewport-coverage.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_source_viewport_coverage_shadow.py"
+      - "tests/test_gpt2_source_viewport_coverage_shadow.py"
+      - ".github/workflows/test-gpt2-rcp-source-viewport-coverage.yml"
   workflow_dispatch:
 
 jobs:

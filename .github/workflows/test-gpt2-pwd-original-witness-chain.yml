@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-pwd-original-witness-chain.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_source_figure_wall_witness_chain_shadow.py"
+      - "tests/test_gpt2_pwd_native_figure_wall_witness_chain.py"
+      - ".github/workflows/test-gpt2-pwd-original-witness-chain.yml"
   workflow_dispatch:
 
 jobs:

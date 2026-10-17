@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-a503-stepped-partition.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_native_stepped_partition_source_shadow.py"
+      - "tests/test_gpt2_native_a503_stepped_partition_shadow.py"
+      - ".github/workflows/test-gpt2-a503-stepped-partition.yml"
   workflow_dispatch:
 
 jobs:

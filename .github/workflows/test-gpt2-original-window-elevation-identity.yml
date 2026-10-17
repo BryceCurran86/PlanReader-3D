@@ -8,6 +8,11 @@ on:
       - .github/workflows/test-gpt2-original-window-elevation-identity.yml
   push:
     branches: [main]
+    paths:
+      - "pb_*.py"
+      - "tools/diag_original_window_elevation_title_lineage_shadow.py"
+      - "tests/test_gpt2_original_window_elevation_title_lineage.py"
+      - ".github/workflows/test-gpt2-original-window-elevation-identity.yml"
   workflow_dispatch:
 
 jobs:
