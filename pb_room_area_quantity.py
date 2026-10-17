@@ -578,6 +578,49 @@ def build_room_area_quantities(
             duplicate_ids.add(room.room_ref)
         seen_ids.add(room.room_ref)
         rings.setdefault(_canonical_ring(room.polygon_pdf_pts), []).append(room.room_ref)
+    # One original figured area atom may describe at most one physical
+    # room. Different polygons or labels do not create independent source
+    # measurements when both reuse an identical evidence_id.
+    area_owners_by_evidence: dict[str, set[str]] = {}
+    for room in rooms:
+        owned = explicit.get(room.room_ref)
+        if (
+            type(owned) is EvidenceAtom
+            and type(owned.evidence_id) is str
+            and owned.evidence_id
+        ):
+            area_owners_by_evidence.setdefault(owned.evidence_id, set()).add(
+                room.room_ref
+            )
+    disputed_area_owners = set().union(*(
+        owners for owners in area_owners_by_evidence.values()
+        if len(owners) > 1
+    )) if area_owners_by_evidence else set()
+
+    # Reissuing the same original figured horizontal+vertical source pair
+    # with a different EvidenceAtom ID is still the same physical measurement.
+    # Keep this batch-level protection even if the upstream receipt index was
+    # bypassed; independently proven rooms require independent figured pairs.
+    original_figured_pair_owners: dict[tuple[str, str], set[str]] = {}
+    for room in rooms:
+        atom = explicit.get(room.room_ref)
+        if type(atom) is not EvidenceAtom:
+            continue
+        metadata = atom.metadata if isinstance(atom.metadata, dict) else {}
+        axes = metadata.get("figured_dimension_ids")
+        if (
+            type(axes) in (tuple, list)
+            and len(axes) == 2
+            and all(type(v) is str and v and v == v.strip() for v in axes)
+            and axes[0] != axes[1]
+        ):
+            original_figured_pair_owners.setdefault(
+                tuple(sorted(axes)), set()
+            ).add(room.room_ref)
+    for owners in original_figured_pair_owners.values():
+        if len(owners) > 1:
+            disputed_area_owners.update(owners)
+
     duplicate_face_ids: set[str] = set()
     for ids in rings.values():
         if len(ids) <= 1:
@@ -621,6 +664,8 @@ def build_room_area_quantities(
             blockers.append("duplicate_room_identity")
         if room.room_ref in duplicate_face_ids:
             blockers.append("duplicate_room_face")
+        if room.room_ref in disputed_area_owners:
+            blockers.append("original_area_evidence_owned_by_multiple_rooms")
         if blockers:
             output.append(
                 _abstention(
