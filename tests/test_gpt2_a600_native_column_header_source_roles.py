@@ -297,3 +297,16 @@ def test_unparsed_door_source_row_stays_visible_not_silently_dropped(monkeypatch
         x.literal for x in words if x.literal=="D27"
     }
     assert source_codes=={"D27"}
+
+@pytest.mark.parametrize("words", [
+    ("DISPLAY","SHELVING","DOOR","SWING"),
+    ("DISPLAY","SHELVING","SLIDING","COOLROOM"),
+])
+def test_display_shelving_versus_physical_access_kind_remains_conflict(words):
+    from pb_source_door_schedule_authority import _native_door_kind
+    assert _native_door_kind(words)=="original_door_kind_conflicting_source_roles"
+
+
+def test_swing_sliding_competing_original_door_mechanisms_abstain():
+    from pb_source_door_schedule_authority import _native_door_kind
+    assert _native_door_kind(("SWING","SLIDING","DOOR"))=="original_door_kind_conflicting_mechanisms"
