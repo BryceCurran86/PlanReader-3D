@@ -83,6 +83,17 @@ def test_unclipped_native_segments_publish_producer_owned_visible_receipts() -> 
 
     # The generic writer remains encapsulated by the visibility producer.
     assert not hasattr(producer, "publish_derived_observation")
+    source_sha = published.revision.source_sha256
+    assert [
+        key for key in producer._producer._native_page_decode_cache if key[0] == source_sha
+    ] == []
+    assert [
+        key for key in producer._visibility_page_cache if key[0] == source_sha
+    ] == []
+    assert all(
+        record.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
+        for record in producer._producer._store.observations.values()
+    )
 
 
 def test_native_visible_segments_publish_in_one_derived_snapshot() -> None:

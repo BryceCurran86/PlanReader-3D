@@ -125,6 +125,8 @@ def test_stale_or_damaged_support_cannot_protect_a_face(warm):
         assert len(_protected(source, published)) == 4
     observation_id = published.visible_observation_ids[0]
     key = (published.snapshot.snapshot_id, observation_id)
+    if key not in source._producer._store.observations:
+        key = (key[0], source._visibility_receipts[key])
     original = source._producer._store.observations[key]
     source._producer._store.observations[key] = replace(
         original, geometry=tuple(value + 1 for value in original.geometry))

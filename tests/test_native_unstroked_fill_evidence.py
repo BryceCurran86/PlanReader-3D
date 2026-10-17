@@ -92,6 +92,8 @@ def test_geometry_receipt_and_source_hash_damage_fail_closed(defect):
     assert source.native_unstroked_fill_evidence(selector, support_observation_ids=selected)
     if defect == 'geometry':
         key = (selector.snapshot_id, selected[0])
+        if key not in source._producer._store.observations:
+            key = (selector.snapshot_id, source._visibility_receipts[key])
         record = source._producer._store.observations[key]
         source._producer._store.observations[key] = replace(record, geometry=(0.,0.,1.,1.))
     elif defect == 'missing_receipt':

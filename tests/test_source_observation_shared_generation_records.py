@@ -83,6 +83,10 @@ def test_unchanged_records_are_shared_objects_across_generations(chain) -> None:
         for observation_id in snapshot.observation_ids:
             key = (snapshot.snapshot_id, observation_id)
             assert key in store.observations and key in store.record_fingerprints
+    # Storage is one object per observation, not one copy per generation.
+    assert store.observations.stored_entry_count() == len(distinct_ids)
+    assert store.record_fingerprints.stored_entry_count() == len(distinct_ids)
+    assert len(store.observations) == sum(len(snapshot.observation_ids) for snapshot in snapshots)
 
 
 def test_every_read_matches_what_a_per_generation_clone_returned(chain) -> None:
@@ -113,16 +117,22 @@ def test_bulk_visible_reader_binds_records_to_the_queried_snapshot(chain) -> Non
     assert rows
     inherited = 0
     for observation_id, record in rows:
-        stored = store.observations[(current.snapshot.snapshot_id, observation_id)]
+        parent_id = source._visibility_receipts.get(
+            (current.snapshot.snapshot_id, observation_id)
+        )
+        stored_id = parent_id if parent_id is not None else observation_id
+        stored = store.observations[(current.snapshot.snapshot_id, stored_id)]
         inherited += stored.snapshot_id != current.snapshot.snapshot_id
         assert record.snapshot_id == current.snapshot.snapshot_id
         assert record.producer_generation == current.snapshot.producer_generation
         assert record is not stored
-        assert replace(
-            stored,
-            snapshot_id=current.snapshot.snapshot_id,
-            producer_generation=current.snapshot.producer_generation,
-        ) == record
+        assert record.geometry == stored.geometry
+        if parent_id is None:
+            assert replace(
+                stored,
+                snapshot_id=current.snapshot.snapshot_id,
+                producer_generation=current.snapshot.producer_generation,
+            ) == record
     assert inherited > 0, "fixture must exercise records inherited from older generations"
 
 
