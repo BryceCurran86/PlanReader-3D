@@ -60,3 +60,22 @@ def test_missing_figured_pair_does_not_invent_numeric_measurements():
     indexed=_index(untyped)
     assert "physical-room-a" in indexed
     # This index does not grant metric value. Its caller must prove the area.
+
+
+def test_malformed_present_source_figured_pair_must_not_be_treated_as_missing():
+    original = _row("a", ("h", "v"))
+    for wrong in ([], ["h"], ["h", "h"], "h,v", ["h", 12], None, True):
+        untrusted = Record(
+            original.source_room_face_record_id, original.physical_room_id,
+            Evidence("original-figured-area-a", {"figured_dimension_ids": wrong}),
+        )
+        assert dict(_index(untrusted)) == {}
+
+
+def test_explicit_source_area_without_figured_pair_can_still_be_indexed():
+    original = _row("a", ("h", "v"))
+    genuine_explicit = Record(
+        original.source_room_face_record_id, original.physical_room_id,
+        Evidence("source-explicit-printed-area", {}),
+    )
+    assert tuple(_index(genuine_explicit)) == ("physical-room-a",)
