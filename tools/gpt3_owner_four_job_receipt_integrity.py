@@ -318,6 +318,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     cross_semantic_claims: dict[str, list[dict[str, Any]]] = {}
     historical_lot16_receipt_audit: dict[str, Any] | None = None
+    historical_lot16_input_sha256s: dict[str, str] = {}
     verified_manifest_docs = 0
     for project_id, manifest in frozen_by_id.items():
         pre = _object(root, project_id + "/source_package_preflight.json")
@@ -487,6 +488,10 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                     Path(__file__).resolve().parents[1]
                     / "docs/engineering/lot16_original_signed_eight_row_20261015/production"
                 )
+                historical_lot16_input_sha256s = {
+                    name: _digest(historical_dir / name)
+                    for name in ("source_sealed_run.json", "verified_customer_rows.json")
+                }
                 historical_lot16_receipt_audit = inspect_signed_v1_replay(
                     archived_run=_json_object(historical_dir / "source_sealed_run.json"),
                     candidate_run=payload,
@@ -662,8 +667,24 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
     _require(all(path in sums for path in (
         "RUN_RECEIPT.json", "SOURCE_SHA_VERIFICATION.json", "PREFLIGHT_STATUS.json"
     )), "archive source receipts missing")
+    frozen_source_inputs = {
+        str(path.relative_to(FROZEN_ROOT)): _digest(path)
+        for path in (
+            FROZEN_ROOT / "manifest.json",
+            FROZEN_ROOT / "evaluator.py",
+            FROZEN_ROOT / "sealed_reconciliation.py",
+            *(
+                FROZEN_ROOT / "projects" / project / "source_manifest.json"
+                for project in sorted(frozen_by_id)
+            ),
+        )
+    }
+    _require(len(historical_lot16_input_sha256s) == 2,
+             "original historical Lot16 signed source/customer package unavailable")
     fingerprint = sha256(json.dumps({
         "owner_producer_commit": head,
+        "historical_lot16_signed_inputs": historical_lot16_input_sha256s,
+        "frozen_input_sha256s": frozen_source_inputs,
         "derived_artifact_sha256s": indexed,
         "source_manifest_sha256s": {
             m.project_id: sorted(d.sha256 for d in m.source_documents)
@@ -680,6 +701,8 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         "independently_verified_share_safe_derived_file_count": len(indexed),
         "independently_verified_sha256sums_entries": len(sums),
         "reconciled_derived_artifact_fingerprint": fingerprint,
+        "historical_lot16_v1_and_customer_file_sha256s": historical_lot16_input_sha256s,
+        "frozen_source_evaluator_file_sha256s": frozen_source_inputs,
         "frozen_denominator": 120,
         "official_four_project_coverage_accuracy": None,
         "official_four_project_precision_adjusted_accuracy": None,
