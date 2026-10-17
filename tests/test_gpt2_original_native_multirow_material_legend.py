@@ -55,6 +55,8 @@ def test_original_a120_grid_true_ceiling_definition_has_separate_source_lines():
         assert owned[0].text=="GRID"
         assert "VINYL FACED PLASTER TILE 600x1200" in item["description"]
         assert item["code"]=="GRID"
+        assert item["source_semantic_role_unverified"]
+        assert not item["source_material_issuer_granted"]
         assert {r.observation_id for r in owned}=={
             f"original_p9:{r.block_no}:{r.line_no}:{r.word_no}" for r in owned
         }
@@ -95,6 +97,8 @@ def test_synthetic_two_code_lines_positive_and_cladding_not_ceiling():
     assert "GRID" in d and "IPF1" in d
     assert "CLD3" not in d
     assert "600x1200" in d["GRID"]["description"]
+    assert d["GRID"]["source_semantic_role_unverified"]
+    assert d["GRID"]["source_material_issuer_granted"] is False
 
 
 def test_duplicate_codes_and_broken_source_lineage_abstain():
@@ -152,3 +156,41 @@ def test_pathological_large_original_text_block_abstains_without_raster_cap_chan
         for i in range(4097)
     )
     assert source_rows(huge)==()
+
+
+
+def test_original_cld3_signage_is_separate_source_and_never_ceiling_grid():
+    raw=PDF.read_bytes()
+    with fitz.open(stream=raw,filetype="pdf") as d:
+        rows=source_rows(_original_p9_legend_words(d[8]))
+        material={code:item for _,_,_,code,item in rows}
+        assert "CLD3" not in material
+        grid=material["GRID"]
+        assert "VINYL FACED PLASTER TILE" in grid["description"]
+        assert grid["source_semantic_role_unverified"]
+        assert not grid["source_material_issuer_granted"]
+
+
+def test_unverified_raw_source_code_with_no_material_semantics_abstains():
+    words=tuple(
+        _word(block=35,line=i,index=j,literal=t)
+        for i,line in enumerate([
+            ["GRID"],["NONSENSE","TYPICAL","PLAN","NOTE"],
+            ["IPF1"],["13mm","PLASTERBOARD","CEILING"],
+        ]) for j,t in enumerate(line)
+    )
+    codes={code for _,_,_,code,_ in source_rows(words)}
+    assert "GRID" not in codes
+    assert "IPF1" in codes
+
+
+def test_same_original_source_block_does_not_grant_grid_ceiling_metric():
+    with fitz.open(stream=PDF.read_bytes(),filetype="pdf") as d:
+        owned=[r for r in source_rows(_original_p9_legend_words(d[8]))
+               if r[3]=="GRID"]
+        assert len(owned)==1
+        _partition,_block,words,code,item=owned[0]
+        assert {word.block_no for word in words}=={5}
+        assert not all(word.trusted for word in words)
+        assert item["source_semantic_role_unverified"]
+        assert item["source_material_issuer_granted"] is False
