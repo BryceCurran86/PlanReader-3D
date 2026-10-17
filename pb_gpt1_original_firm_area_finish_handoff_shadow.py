@@ -64,7 +64,8 @@ def reuse_authenticated_room_area_for_finish_shadow(
         or floor.revision_id != correspondence.revision_id
         or floor.canonical_floor_id != correspondence.canonical_floor_id
         or finish_candidate.original_floor_id != floor.canonical_floor_id
-        or floor.room_entity_id != correspondence.physical_room_id
+        or floor.source_room_face_record_id != correspondence.source_room_face_record_id
+        or floor.page_id != correspondence.original_room_page_id
         or floor.snapshot_id != correspondence.producer_snapshot_id
     ):
         return block("original_firm_floor_finish_physical_lineage_conflict")
