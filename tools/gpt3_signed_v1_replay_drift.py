@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
-from pb_customer_output_verification import verify_sealed_customer_output
+from pb_customer_output_verification import _customer_quantity_id, verify_sealed_customer_output
 from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _json_object, _json_customer_rows,
 )
@@ -126,7 +126,9 @@ def inspect_signed_v1_replay(
     # their shared top-level quantity IDs.
     old_verified = verify_sealed_customer_output(old, archived_customer_rows)
     if (
-        old_verified.customer_row_count != len(archived_customer_rows)
+        old_verified.customer_row_count != sum(
+            bool(_customer_quantity_id(row)) for row in archived_customer_rows
+        )
         or old_verified.valid_quantity_count != len(old.quantities)
         or old_verified.abstained_quantity_count != 0
     ):
@@ -162,7 +164,9 @@ def inspect_signed_v1_replay(
     if candidate_customer_rows is not None:
         actual_verified = verify_sealed_customer_output(fresh, candidate_customer_rows)
         if (
-            actual_verified.customer_row_count != len(candidate_customer_rows)
+            actual_verified.customer_row_count != sum(
+                bool(_customer_quantity_id(row)) for row in candidate_customer_rows
+            )
             or actual_verified.valid_quantity_count != sum(not q.abstained for q in fresh.quantities)
         ):
             raise ValueError("candidate V1 customer bijection incomplete")
