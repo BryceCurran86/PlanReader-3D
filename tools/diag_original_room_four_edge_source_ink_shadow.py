@@ -143,6 +143,12 @@ def audit_competing_original_enclosure_registrations(
     original-source translation. The result is a negative-evidence ledger;
     even one source-ink winner does not grant W4 or physical room identity.
     """
+    # Source integrity is global, not a rejected individual hypothesis.
+    # No rival may turn a tampered original PDF into a legitimate empty
+    # candidate set (which could otherwise silence a production audit).
+    if (type(original_pdf_bytes) is not bytes or
+            hashlib.sha256(original_pdf_bytes).hexdigest()!=expected_sha256):
+        raise ValueError("original_source_sha_mismatch")
     if type(candidates) is not tuple or not candidates or len(candidates)>32:
         raise ValueError("bounded_explicit_source_registration_universe_required")
     seen=set()
@@ -154,7 +160,12 @@ def audit_competing_original_enclosure_registrations(
         translation=candidate["translation"]
         if type(pairs) is not dict or set(pairs)!=set(_ROLES):
             raise ValueError("four_explicit_original_edge_pair_candidates_required")
-        key=(tuple((side,pairs[side]) for side in _ROLES),str(translation))
+        if (type(translation) is not tuple or len(translation)!=2 or
+                any(type(v) not in (int,float) or not math.isfinite(v)
+                    for v in translation)):
+            raise ValueError("finite_source_translation_candidate_required")
+        key=(tuple((side,pairs[side]) for side in _ROLES),
+             tuple(float(v) for v in translation))
         if key in seen:
             raise ValueError("duplicate_original_registration_candidate")
         seen.add(key)
