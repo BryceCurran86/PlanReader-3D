@@ -27,13 +27,14 @@ def test_original_office_d15_exact_jamb_chain_not_physical_room_or_door_count():
     assert hashlib.sha256(PDF.read_bytes()).hexdigest()==SHA
 
 
-def _fixture(*,right_jamb_x=150.,gray=False,right_wall_start=150.):
+def _fixture(*,right_jamb_x=150.,gray=False,right_wall_start=150.,
+             right_wall_width=.48,right_jamb_width=.96):
     doc=fitz.open()
     page=doc.new_page(width=400,height=300)
     page.draw_line((20,100),(50,100),color=(0,0,0),width=.48)
-    page.draw_line((right_wall_start,100),(280,100),color=(0,0,0),width=.48)
+    page.draw_line((right_wall_start,100),(280,100),color=(0,0,0),width=right_wall_width)
     page.draw_line((50,92),(50,100),color=(.5,.5,.5) if gray else (0,0,0),width=.96)
-    page.draw_line((right_jamb_x,92),(right_jamb_x,100),color=(0,0,0),width=.96)
+    page.draw_line((right_jamb_x,92),(right_jamb_x,100),color=(0,0,0),width=right_jamb_width)
     return doc,page
 
 
@@ -51,6 +52,8 @@ def test_synthetic_jamb_source_positive_and_no_guessed_door_dimensions():
     ({"right_jamb_x":151.},"native_jamb_not_exact_wall_terminator"),
     ({"right_wall_start":149.},"native_jamb_not_exact_wall_terminator"),
     ({"gray":True},"competing_nonstructural_paint_ink"),
+    ({"right_wall_width":.24},"competing_source_stroke_role_mismatch"),
+    ({"right_jamb_width":.48},"competing_source_stroke_role_mismatch"),
 ])
 def test_competing_source_strokes_do_not_become_doorway(kwargs,reason):
     doc,p=_fixture(**kwargs)
