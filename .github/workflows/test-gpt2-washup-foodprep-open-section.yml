@@ -1,0 +1,35 @@
+name: TEST GPT2 Original WASH UP Food Prep Open Divider
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_original_open_functional_divider_shadow.py"
+      - "tests/test_gpt2_original_washup_foodprep_open_divider.py"
+      - ".github/workflows/test-gpt2-washup-foodprep-open-section.yml"
+  workflow_dispatch:
+jobs:
+  source-open-functional-zone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original source coverage notice
+        run: |
+          if [ -f documents/sources/Arch_Combined_Maryborough_Service_Station.pdf ]; then
+            echo "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007  documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" | sha256sum --check
+          else
+            echo "::notice::Original source private on merge checkout; independent original SHA-positive acceptance remains blocked."
+          fi
+      - name: Run synthetic source role checks and eligible originals
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q -rs tests/test_gpt2_original_washup_foodprep_open_divider.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
