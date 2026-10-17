@@ -70,6 +70,9 @@ class ExplicitFloorAreaEvidence:
     binding: str = DECLARED_FLOOR_AREA_BINDING
     source_sha256: Optional[str] = None
     revision_id: Optional[str] = None
+    # Optional original native area-table block address. Legacy page-wide
+    # declared totals remain unbound with no asserted block identity.
+    source_block_id: Optional[str] = None
 
 
 def _normalise_text(text: str) -> str:
@@ -344,6 +347,16 @@ def reconcile_declared_component_area_total(
         values.append(value)
     if len(block_ids) != 1 or type(total.area_m2) not in (int, float):
         return ()
+    # A native area-table total must be issued from the SAME original block
+    # as the component set; a matching number from a neighboring table is
+    # not a corroborating source checksum.
+    if total.source_block_id is not None and (
+        type(total.source_block_id) is not str
+        or not total.source_block_id
+        or total.source_block_id != total.source_block_id.strip()
+        or total.source_block_id not in block_ids
+    ):
+        return ()
     try:
         expected = Decimal(str(total.area_m2))
     except InvalidOperation:
@@ -429,3 +442,59 @@ def extract_unbound_component_areas_from_original_pdf(
     finally:
         document.close()
     return tuple(candidates)
+
+
+
+_NATIVE_COMPONENT_TOTAL_RE = re.compile(
+    r"^TOTAL\s+FLOOR\s+AREA\s*:\s*"
+    r"(?P<value>\d{1,6}(?:\.\d{1,3})?)\s*"
+    r"(?P<unit>m(?:2|²)|sq\.?\s*m|sqm)$",
+    re.IGNORECASE,
+)
+
+
+def extract_unbound_total_from_component_area_text_block(
+    source_block_text: str,
+    *,
+    source_page: int,
+    source_block_id: str,
+    source_sha256: str,
+    revision_id: str,
+) -> Optional[ExplicitFloorAreaEvidence]:
+    """Read only an exact printed total from one original native table block.
+
+    The source's original glyph/clip/visibility remains unverified here.
+    Duplicate (even identical) printed TOTAL lines in the same block abstain.
+    This number is an aggregate control, never a physical floor surface.
+    """
+    # Reuse existing source-block and source-digest input safety on the same
+    # native text, rather than accepting arbitrary page metadata.
+    extract_declared_component_floor_areas(
+        source_block_text,
+        source_page=source_page,
+        source_block_id=source_block_id,
+        source_sha256=source_sha256,
+        revision_id=revision_id,
+    )
+    lines = [line.strip() for line in source_block_text.splitlines() if line.strip()]
+    totals = [_NATIVE_COMPONENT_TOTAL_RE.fullmatch(line) for line in lines]
+    matches = [match for match in totals if match is not None]
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    try:
+        value = float(match.group("value"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (0.0 < value <= 1_000_000.0):
+        return None
+    return ExplicitFloorAreaEvidence(
+        area_m2=value,
+        source_pages=(source_page,),
+        raw_evidence=(match.group(0),),
+        authority=DECLARED_FLOOR_AREA_AUTHORITY,
+        binding=DECLARED_FLOOR_AREA_BINDING,
+        source_sha256=source_sha256,
+        revision_id=revision_id,
+        source_block_id=source_block_id,
+    )
