@@ -5,6 +5,7 @@ containment or a code literal as W4 physical floor, authentic material
 occurrence issuer, document scale or quantity.
 """
 from __future__ import annotations
+import math
 import fitz
 from tools.diag_original_room_four_edge_source_ink_shadow import (
     audit_source_enclosure_correspondence,
@@ -12,20 +13,41 @@ from tools.diag_original_room_four_edge_source_ink_shadow import (
 
 
 def _native_mark_containment_census(words,*,code:str,bbox):
-    x0,y0,x1,y1=bbox
+    # Original-page native words are not equivalent to trusted PDF glyphs.
+    # A malformed source competitor must be retained as a typed negative,
+    # never dropped from a seemingly unique FT2/FT3 mark universe.
+    if (type(bbox) not in (tuple,list) or len(bbox)!=4):
+        raise ValueError("original_mark_enclosure_bbox_unavailable")
+    try:
+        x0,y0,x1,y1=(float(v) for v in bbox)
+    except (TypeError,ValueError,OverflowError):
+        raise ValueError("original_mark_enclosure_bbox_unavailable") from None
+    if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+            or x0>=x1 or y0>=y1):
+        raise ValueError("original_mark_enclosure_bbox_unavailable")
     matches=[]
+    malformed=0
     for w in words:
         if len(w)<8 or str(w[4])!=code:continue
         try:
             a,b,c,d=(float(x) for x in w[:4])
+            address=[int(v) for v in w[5:8]]
+            valid=(all(math.isfinite(v) for v in (a,b,c,d))
+                   and a<c and b<d
+                   and all(type(v) is int and v>=0 for v in w[5:8]))
         except (TypeError,ValueError,OverflowError):
-            continue
-        within=x0<a and y0<b and c<x1 and d<y1
+            valid=False
+            a=b=c=d=0.
+            address=[]
+        within=bool(valid and x0<a and y0<b and c<x1 and d<y1)
+        if not valid:
+            malformed+=1
         matches.append({
-            "original_source_word_address":[int(v) for v in w[5:8]],
+            "original_source_word_address":address,
             "original_source_text_untrusted":str(w[4]),
-            "original_source_bbox_pdf_pts":[a,b,c,d],
+            "original_source_bbox_pdf_pts":[a,b,c,d] if valid else None,
             "strict_containment_candidate":within,
+            "source_word_geometry_and_address_valid":bool(valid),
             "original_native_text_integrity_proven":False,
             "producer_issued_material_occurrence":False,
         })
@@ -33,7 +55,8 @@ def _native_mark_containment_census(words,*,code:str,bbox):
     return {
         "all_original_same_code_words_in_page":matches,
         "in_enclosure_candidates":owners,
-        "unique_native_code_word_in_enclosure":len(owners)==1,
+        "malformed_same_code_source_words":malformed,
+        "unique_native_code_word_in_enclosure":len(owners)==1 and malformed==0,
         "physical_source_floor_owner_authenticated":False,
         "new_firm_quantities":0,
     }
