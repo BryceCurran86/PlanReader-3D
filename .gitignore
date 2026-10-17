@@ -12,3 +12,15 @@ benchmark_results/current.json
 benchmark_results/.report_set.lock
 *.tmp
 .vs/
+# Owner-supplied original architectural/structural PDFs stay on the local
+# authorized machine or secure source store, never inside Git. The SHA-pinned
+# source manifests remain committed (metadata only).
+/documents/sources/
+/benchmarks/sources/
+**/source-originals/
+**/.private-sources/
+*.pem
+*.p12
+*.pfx
+.env.*
+!.env.example
