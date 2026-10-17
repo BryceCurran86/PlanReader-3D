@@ -191,7 +191,8 @@ def measure_source_internal_sections_on_metric_plane_shadow(
     if physical is None or metric is None:
         return block("source_figured_metric_parent_geometry_unavailable")
     source_outer=physical[1];metric_outer=metric[1]
-    selected=[],[]
+    selected = []
+    measured = []
     section_ids=set();original_ink_ids=set();mark_ids=set()
     for row in sections:
         if type(row) is not OriginalInternalSourceSection:
