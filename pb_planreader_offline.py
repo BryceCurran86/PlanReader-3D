@@ -608,6 +608,11 @@ def detect_dimensions(
         if len(text) < 2 or len(text) > 20:
             continue
         
+        bare_numbers = {int(match.group(1)) for match in re.finditer(r"\b(\d{2,5})\b", text)}
+        explicit_unit = re.search(r"\d\s*(?:mm|cm|m)\b|['\"]", text, re.IGNORECASE)
+        if explicit_unit is None and len(bare_numbers) > 1:
+            continue
+
         # Check for dimension patterns
         for pattern, unit_type in DIMENSION_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -748,6 +753,21 @@ def detect_scale(
 # ROOM/AREA DETECTION
 # =============================================================================
 
+def _printed_keyword(text: str, keywords: List[str]) -> Optional[str]:
+    """Return one keyword. A shorter keyword inside a longer one is not a second hit."""
+    raw: List[str] = []
+    for keyword in keywords:
+        if keyword in text and keyword not in raw:
+            raw.append(keyword)
+    reduced = [
+        keyword for keyword in raw
+        if not any(keyword != other and keyword in other for other in raw)
+    ]
+    if len(reduced) != 1:
+        return None
+    return raw[0]
+
+
 def detect_rooms(
     page: "fitz.Page",
     words: Optional[List[Dict[str, Any]]] = None,
@@ -768,20 +788,18 @@ def detect_rooms(
     for word in words:
         text = word["text"].strip().lower()
         
-        # Check if it's a room keyword
-        for keyword in ROOM_KEYWORDS:
-            if keyword in text:
-                rooms.append({
-                    "label": word["text"].strip(),
-                    "type": "text_label",
-                    "position": {
-                        "x0": word["x0"],
-                        "y0": word["y0"],
-                        "x1": word["x1"],
-                        "y1": word["y1"],
-                    },
-                })
-                break
+        if _printed_keyword(text, ROOM_KEYWORDS) is None:
+            continue
+        rooms.append({
+            "label": word["text"].strip(),
+            "type": "text_label",
+            "position": {
+                "x0": word["x0"],
+                "y0": word["y0"],
+                "x1": word["x1"],
+                "y1": word["y1"],
+            },
+        })
     
     # Look for enclosed rectangles (potential rooms)
     if rectangles:
@@ -821,20 +839,20 @@ def detect_materials(
     for word in words:
         text = word["text"].strip().lower()
         
-        for keyword in MATERIAL_KEYWORDS:
-            if keyword in text and keyword not in seen:
-                materials.append({
-                    "keyword": keyword,
-                    "text": word["text"].strip(),
-                    "position": {
-                        "x0": word["x0"],
-                        "y0": word["y0"],
-                        "x1": word["x1"],
-                        "y1": word["y1"],
-                    },
-                })
-                seen.add(keyword)
-                break
+        keyword = _printed_keyword(text, MATERIAL_KEYWORDS)
+        if keyword is None or keyword in seen:
+            continue
+        materials.append({
+            "keyword": keyword,
+            "text": word["text"].strip(),
+            "position": {
+                "x0": word["x0"],
+                "y0": word["y0"],
+                "x1": word["x1"],
+                "y1": word["y1"],
+            },
+        })
+        seen.add(keyword)
     
     return materials
 
@@ -857,20 +875,20 @@ def detect_colours(
     for word in words:
         text = word["text"].strip().lower()
         
-        for keyword in COLOUR_KEYWORDS:
-            if keyword in text and keyword not in seen:
-                colours.append({
-                    "keyword": keyword,
-                    "text": word["text"].strip(),
-                    "position": {
-                        "x0": word["x0"],
-                        "y0": word["y0"],
-                        "x1": word["x1"],
-                        "y1": word["y1"],
-                    },
-                })
-                seen.add(keyword)
-                break
+        keyword = _printed_keyword(text, COLOUR_KEYWORDS)
+        if keyword is None or keyword in seen:
+            continue
+        colours.append({
+            "keyword": keyword,
+            "text": word["text"].strip(),
+            "position": {
+                "x0": word["x0"],
+                "y0": word["y0"],
+                "x1": word["x1"],
+                "y1": word["y1"],
+            },
+        })
+        seen.add(keyword)
     
     return colours
 

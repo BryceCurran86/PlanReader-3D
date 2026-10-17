@@ -682,14 +682,28 @@ def solve_scale(evidence: Sequence[Dict[str, Any]], tolerance: float = 0.035) ->
     valid = [dict(e) for e in evidence if 5.0 <= _num(e.get("px_per_m")) <= 5000.0]
     if not valid:
         return {"px_per_m": 0.0, "verified": False, "confidence": 0, "evidence": [], "agreement_percent": None}
-    best_group: List[Dict[str, Any]] = []
-    best_weight = -1.0
+    grouped: List[Tuple[float, float, List[Dict[str, Any]]]] = []
+    seen_bases: List[float] = []
     for candidate in valid:
         base = _num(candidate["px_per_m"])
+        if any(abs(base - prior) / max(prior, 1e-9) <= tolerance for prior in seen_bases):
+            continue
+        seen_bases.append(base)
         group = [e for e in valid if abs(_num(e["px_per_m"]) - base) / max(base, 1e-9) <= tolerance]
         weight = sum(max(0.25, _num(e.get("weight"), 1.0)) for e in group)
-        if weight > best_weight:
-            best_weight, best_group = weight, group
+        weights_now = [max(0.25, _num(e.get("weight"), 1.0)) for e in group]
+        values_now = [_num(e["px_per_m"]) for e in group]
+        solved_now = sum(v * w for v, w in zip(values_now, weights_now)) / sum(weights_now)
+        grouped.append((weight, solved_now, group))
+    best_weight = max(item[0] for item in grouped)
+    winners = [item for item in grouped if abs(item[0] - best_weight) <= 1e-9]
+    distinct_scales: List[float] = []
+    for _weight, solved_now, _group in winners:
+        if not any(abs(solved_now - prior) / max(prior, 1e-9) <= tolerance for prior in distinct_scales):
+            distinct_scales.append(solved_now)
+    if len(distinct_scales) != 1:
+        return {"px_per_m": 0.0, "verified": False, "confidence": 0, "evidence": [], "agreement_percent": None}
+    best_group = next(group for _weight, solved_now, group in winners if abs(solved_now - distinct_scales[0]) / max(distinct_scales[0], 1e-9) <= tolerance)
     weights = [max(0.25, _num(e.get("weight"), 1.0)) for e in best_group]
     values = [_num(e["px_per_m"]) for e in best_group]
     solved = sum(v * w for v, w in zip(values, weights)) / sum(weights)
