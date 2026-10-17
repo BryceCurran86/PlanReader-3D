@@ -30,9 +30,10 @@ verified, and nowhere else.
   refuses a commit that adds anything there. The transform refuses to touch a job that uploads an artifact whose path could
   include the originals (`.`, `**`, `documents/...`, the workspace), because artifacts of a public repository are downloadable
   by anyone; today no workflow does, and a test pins that.
-* **Excluded on purpose:** `package-full-plan-v2-verified-checkout.yml` (job `snapshot-public-repository-only`) is obsolete.
-  It archives the tracked checkout and asserts a PDF is inside it, which the originals-out-of-git policy forbids. It will fail
-  until someone deletes or rewrites it; provisioning cannot help because `git archive` skips untracked files.
+* **Excluded on purpose:** `package-full-plan-v2-verified-checkout.yml` (job `snapshot-public-repository-only`) is never given
+  the originals. Its old body archived the tracked checkout and asserted a PDF was inside it, which the originals-out-of-git
+  policy forbids; #3014 replaced it with a code-only, source-free verification, so it no longer reads `documents/sources/`.
+  The exclusion stays as a guard: a publishing job must never receive the originals.
 * **Fork pull requests** receive no secrets, so original-source jobs fail closed on them. That is intended.
 
 ## Owner setup (one time)
