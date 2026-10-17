@@ -204,7 +204,18 @@ def compare_opening_source_correspondence(original_packets,alternate_packets):
         lineage=packet["source_lineage"]
         if not lineage or not lineage["source_proof_closed"] or not packet["physical_opening"]:
             return None
-        source_roots=packet["physical_opening"]["source_observation_ids"]
+        opening=packet["physical_opening"]
+        if packet["page_id"]!=opening["page_id"]:
+            return None
+        # Every exported parent, not only the opening roots, must have the
+        # same authenticated source issuer and source page. Review packets
+        # are explanations and cannot waive the native producer's scope gate.
+        source_scope=("document_id","revision_id","source_sha256","snapshot_id")
+        if any(row.get("page_id") != opening["page_id"] or any(
+                row.get(field) != opening[field] for field in source_scope)
+                for row in lineage["observations"]):
+            return None
+        source_roots=opening["source_observation_ids"]
         if not source_roots or len(source_roots)!=len(set(source_roots)):
             return None
         roots=set(source_roots)
