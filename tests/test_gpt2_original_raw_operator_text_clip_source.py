@@ -142,3 +142,60 @@ def test_real_source_text_clipped_by_inserted_operator_fails_raw_ancestry():
     p=doc[0]
     assert not source_page_all_native_text_unclipped(p)
     doc.close()
+
+
+
+def test_original_rotated_text_raw_authority_avoids_full_clip_graph(monkeypatch):
+    """Real production bottleneck: no redundant 27,537-path graph build."""
+    import pb_pdf_text_integrity_authority as authority
+    raw=ORIGINAL.read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==SOURCE_SHA
+    with fitz.open(stream=raw,filetype="pdf") as doc:
+        page=doc[10]
+        word=next(w for w in page.get_text("words") if w[4]=="FT3")
+        native=_native_word(word)
+        def fail_eager_clip_model(_page):
+            raise AssertionError("eager_full_CAD_clip_model_not_allowed")
+        monkeypatch.setattr(authority,"_clip_model",fail_eager_clip_model)
+        # Native/trace/paint checks happen elsewhere; the raw clip check is
+        # an independently bounded first gate with direct source ancestry.
+        result=authority._text_clip_reasons(
+            page,native["bbox"],seqno=None,native_word=native,
+            source_raw_no_active_text_clip_shadow=True,
+        )
+        assert result==()
+        # Original default-off rule has NOT been converted to shortcut.
+        with pytest.raises(AssertionError,match="eager_full_CAD_clip_model_not_allowed"):
+            authority._text_clip_reasons(
+                page,native["bbox"],seqno=None,native_word=native,
+                source_raw_no_active_text_clip_shadow=False,
+            )
+
+
+def test_raw_clip_source_cache_invalidates_when_pdf_content_changes(monkeypatch):
+    import pb_pdf_text_integrity_authority as authority
+    d=fitz.open()
+    p=d.new_page(width=250,height=200)
+    p.insert_text((60,60),"FT3",fontsize=12)
+    p.set_rotation(90)
+    with fitz.open(stream=d.tobytes(),filetype="pdf") as doc:
+        page=doc[0]
+        word=next(w for w in page.get_text("words") if w[4]=="FT3")
+        native=_native_word(word)
+        ok=authority._text_clip_reasons(
+            page,native["bbox"],seqno=None,native_word=native,
+            source_raw_no_active_text_clip_shadow=True,
+        )
+        assert ok==()
+        stream=page.read_contents()
+        xref=page.get_contents()[0]
+        changed=stream.replace(b"BT",b"q 0 0 5 5 re W n BT",1).replace(
+            b"ET",b"ET Q",1)
+        doc.update_stream(xref,changed)
+        page=doc[0]
+        blocked=authority._text_clip_reasons(
+            page,native["bbox"],seqno=None,native_word=native,
+            source_raw_no_active_text_clip_shadow=True,
+        )
+        assert blocked==(TEXT_CLIP_STATE_UNRESOLVED,)
+    d.close()
