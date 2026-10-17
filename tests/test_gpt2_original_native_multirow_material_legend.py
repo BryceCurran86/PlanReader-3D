@@ -135,3 +135,20 @@ def test_new_material_producer_shadow_is_explicit_and_default_off():
     assert normal.published_occurrence_results()==shadow.published_occurrence_results()==()
     with pytest.raises(TypeError):
         SourceMaterialSemanticProducer(src)
+
+
+
+def test_pathological_large_original_text_block_abstains_without_raster_cap_change():
+    many=tuple(
+        _word(block=48,line=i,index=0,literal=("GRID" if i==0
+            else "IPF1" if i==2 else "PLASTERBOARD"))
+        for i in range(257)
+    )
+    assert source_rows(many)==()
+    huge=tuple(
+        _word(block=49,line=i//30,index=i%30,
+              literal="GRID" if i==0 else "IPF1" if i==30
+              else "VINYL")
+        for i in range(4097)
+    )
+    assert source_rows(huge)==()
