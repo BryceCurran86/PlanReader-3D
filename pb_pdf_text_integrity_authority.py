@@ -442,7 +442,7 @@ def _source_embedded_symbol_byte_glyph_reasons(
             # Helpers are independent original-source readers, not a font
             # replacement/normalization. The fontTools dependency is optional:
             # an unavailable or malformed program must always abstain.
-            from tools.diag_pdf_symbol_byte_glyph_shadow import (
+            from pb_pdf_source_symbol_font_authority import (
                 _source_truetype_symbol_subtables,
                 _unique_source_tounicode,
             )
