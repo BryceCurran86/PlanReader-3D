@@ -14,6 +14,7 @@ from tools.diag_gpt2_source_room_graph_shadow import audit_original_room_edge_gr
 from tools.diag_gpt2_source_rcp_geometry_shadow import audit_original_rcp_ceiling_ink
 from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
     audit_gpt2_original_cross_sheet_ring_correspondence,
+    audit_gpt2_original_doorway_bound_floor_finish_correspondence,
     audit_gpt2_source_material_floor_handoff,
 )
 
@@ -113,4 +114,50 @@ class GPT2OriginalSourceGeometryBridge:
             "new_firm_quantities":0,
             "physical_floor_or_ceiling_issued":False,
             "source_verified_not_customer_verified":True,
+        }
+
+
+    def original_doorway_bound_floor_finish_handoff(
+        self, *, revision_id: str,
+        floor_page_1_based: int, finish_page_1_based: int,
+        original_floor_doorway_ring: dict,
+        original_finish_doorway_ring: dict,
+        independent_cross_sheet_registration: dict,
+        original_translation_pdf_pts: tuple[float,float],
+        material_authority,
+        source_definition_selector,
+        source_occurrence_selector,
+        source_finish_code: str,
+    ) -> dict:
+        # Reconfirm the producer's source root/page coverage before
+        # examining separately SHA-authenticated doorway receipts.
+        floor,_=self._source_revision(
+            revision_id,page_1_based=floor_page_1_based)
+        finish,_=self._source_revision(
+            revision_id,page_1_based=finish_page_1_based)
+        expected_root=floor.revision.source_sha256
+        if (finish.revision.source_sha256!=expected_root or
+                any(row.get("original_source_sha256")!=expected_root
+                    for row in (original_floor_doorway_ring,
+                                original_finish_doorway_ring))):
+            raise ValueError("original_source_doorway_handoff_revision_root_conflict")
+        joining=audit_gpt2_original_doorway_bound_floor_finish_correspondence(
+            original_floor_doorway_ring,original_finish_doorway_ring,
+            source_registration=independent_cross_sheet_registration,
+            translation_pdf_pts=original_translation_pdf_pts,
+        )
+        return {
+            "status":"original_source_doorway_bound_floor_finish_shadow_only",
+            "source_geometry_correspondence":joining,
+            "source_material_handoff":audit_gpt2_source_material_floor_handoff(
+                joining,
+                material_authority=material_authority,
+                definition_selector=source_definition_selector,
+                occurrence_selector=source_occurrence_selector,
+                original_finish_code=source_finish_code,
+            ),
+            "original_source_sha256":expected_root,
+            "new_firm_quantities":0,
+            "source_virtual_door_connectors_are_structural":False,
+            "customer_floor_finish_area_issued":False,
         }
