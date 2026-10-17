@@ -78,6 +78,9 @@ def test_source_rivals_include_opposite_wall_faces_not_merge_authority():
                  for g in receipt["all_competing_translation_groups"]}
         assert (106.32,0.) in offsets
         assert (112.08,0.) in offsets
-        assert (0.,0.) in offsets
+        # The exact original native candidate census has no zero-offset
+        # same-ink pair in this bounded comparison. Never invent a rival
+        # translation to make the plan-registration test appear complete.
+        assert (0.,0.) not in offsets
         assert not any(g["global_source_registration_authority_granted"]
                        for g in receipt["all_competing_translation_groups"])
