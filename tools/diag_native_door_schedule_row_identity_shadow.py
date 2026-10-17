@@ -55,6 +55,10 @@ def _row_candidates(source_words):
             kind="partition_system_single_swing" if "SWING" in txt else "partition_system_candidate"
         elif "SOLID" in txt and "CORE" in txt:
             kind="solid_core_single_swing" if "SWING" in txt else "solid_core_candidate"
+        elif "DISPLAY" in txt and "SHELVING" in txt and "DOOR" in txt:
+            kind="coolroom_display_shelving_door_candidate"
+        elif "SLIDING" in txt and "DOOR" in txt and "COOLROOM" in txt:
+            kind="coolroom_sliding_door_candidate"
         elif "COOLROOM" in txt and "CONTRACTOR" in txt:
             kind="coolroom_contractor_candidate"
         elif "ALUMINIUM" in txt and "GLASS" in txt:
@@ -88,6 +92,10 @@ def _row_candidates(source_words):
             "source_door_kind_candidate":kind,
             "source_height_derived_from_explicit_row_not_default":bool(dimensions),
             "source_dimensions_missing_or_untrusted":not bool(dimensions),
+            "source_physical_room_perimeter_door_proven":False,
+            "display_shelving_door_not_room_wall_assumed":(
+                kind=="coolroom_display_shelving_door_candidate"
+            ),
             "source_door_height_units_authenticated":False,
             "native_pdf_glyph_clip_paint_row_authenticated":False,
             "schedule_row_semantics_source_verified":False,
