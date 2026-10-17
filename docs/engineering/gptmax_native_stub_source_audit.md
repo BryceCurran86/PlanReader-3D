@@ -53,8 +53,11 @@ That source boundary geometry alone cannot prove solid structural wall
 continuation; even the stroked paths still require wall-role proof. This
 supports keeping #2511 blocked, not changing its parity assertion.
 
-The exact witness and candidate identities are retained in the accompanying
-checkpoint. No original hypothesis is deleted from production, no native/raster
+The detailed source-derived witness and candidate identities belong in a
+private owner-authorized workspace. The former native-geometry JSON checkpoint
+has been untracked from the public branch; only the broad audit findings and
+source re-verification procedure are retained here. Original-source Git history
+remains a separate confidentiality problem until history is remediated. No original hypothesis is deleted from production, no native/raster
 candidate universe is declared complete, and no host or metric is promoted.
 The source SHA and literal paint ownership are independently authenticated;
 the source snapshot and source records remain unchanged. Syntax/lint validation
