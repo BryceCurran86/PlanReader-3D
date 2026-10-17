@@ -3059,7 +3059,10 @@ def _assemble_scope_result(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     excluded_boundary_primitives: Sequence[ExcludedBoundaryPrimitive] = (),
     authenticated_frame_edge_primitive_count: int = 0,
+    opening_local_exact_source_endpoints_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
+    if type(opening_local_exact_source_endpoints_shadow) is not bool:
+        raise TypeError("exact G17 local W2 shadow must be explicit boolean")
     scope_id = selector.decision_scope_id
     # Source-proven face protection is DIAGNOSTIC ONLY until the original
     # Lot16/W4 candidate, host and frame identity preservation is proved.
@@ -3081,7 +3084,14 @@ def _assemble_scope_result(
         topology_segments,
         proven_wall_strips,
     )
-    graph = build_wall_graph_for_viewport(graph_segments)
+    if opening_local_exact_source_endpoints_shadow:
+        graph = build_wall_graph_for_viewport(
+            graph_segments, gap_snap_tolerance_pt=0.0,
+            exact_endpoint_index_shadow=True,
+            exact_split_parent_lineage_shadow=True,
+        )
+    else:
+        graph = build_wall_graph_for_viewport(graph_segments)
     try:
         typed_semantic_evidence_atoms = tuple(
             collect_source_lineage_grid_evidence(
@@ -3391,6 +3401,7 @@ def _build_opening_local_supplemental_scope_result(
     resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
+    opening_local_exact_source_endpoints_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     """Assemble only supplemental terminal-band W4 candidates.
 
@@ -3455,6 +3466,7 @@ def _build_opening_local_supplemental_scope_result(
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
+        opening_local_exact_source_endpoints_shadow=opening_local_exact_source_endpoints_shadow,
     )
     if result.status is not EvidenceResolutionStatus.CORROBORATED:
         return result
@@ -3745,6 +3757,21 @@ class PhysicalWallCandidateProducer:
         )
 
     @classmethod
+    def from_opening_local_exact_g17_source_shadow(
+        cls, source_visibility_producer, *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Original-source exact W2 only inside an incomplete G17 W4 scope."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+            supplemental_only=True,
+            opening_local_exact_source_endpoints_shadow=True,
+        )
+
+    @classmethod
     def from_source_owned_plan_view_shadow(
         cls,
         source_visibility_producer,
@@ -3847,6 +3874,7 @@ class PhysicalWallCandidateProducer:
         supplemental_only: bool,
         physical_plan_view_shadow: bool = False,
         include_unmeasured_ink_closed_flanks_shadow: bool = False,
+        opening_local_exact_source_endpoints_shadow: bool = False,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -3859,6 +3887,11 @@ class PhysicalWallCandidateProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
             )
+
+        if type(opening_local_exact_source_endpoints_shadow) is not bool:
+            raise TypeError("G17 local exact source policy must be a boolean")
+        if opening_local_exact_source_endpoints_shadow and not supplemental_only:
+            raise ValueError("G17 exact endpoints cannot enter complete W4")
 
         selected_page_ids: Optional[set[str]] = None
         if page_ids is not None:
@@ -3977,6 +4010,11 @@ class PhysicalWallCandidateProducer:
                         resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
+                        **(
+                            {"opening_local_exact_source_endpoints_shadow": True}
+                            if supplemental_only and opening_local_exact_source_endpoints_shadow
+                            else {}
+                        ),
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,
