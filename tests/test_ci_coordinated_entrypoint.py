@@ -32,7 +32,9 @@ def test_public_required_ci_trigger_and_check_context_stay_unchanged():
     full = job("test")
     assert "python-version: [\"3.13\", \"3.14\"]" in full
     assert "github.event_name != 'workflow_dispatch'" in full
-    assert "PYTHONPATH=. pytest -q tests/" in full
+    # The full suite still runs the whole tests/ tree; "-rs" (list skipped tests) was added with the public-CI
+    # private-original policy (#2989), so allow it without allowing a narrower selection.
+    assert re.search(r"PYTHONPATH=\. pytest -q(?: -rs)? tests/(?:\s|$)", full)
     for guard in ("check_private_original_source_additions.py",
                   "check_provider_gold_isolation.py",
                   "check_full_plan_v2_integrity.py",
