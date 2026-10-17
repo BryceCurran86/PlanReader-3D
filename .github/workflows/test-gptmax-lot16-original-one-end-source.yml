@@ -5,7 +5,7 @@ on:
     paths:
       - pb_raster_unchanged_band_segments.py
       - pb_source_visibility_authority.py
-      - tests/test_gptmax_lot16_original_one_end_source.py tests/test_gptmax_lot16_original_2127_external_wall_ink.py
+      - tests/test_gptmax_lot16_original_one_end_source.py
       - tests/test_gptmax_lot16_original_2127_external_wall_ink.py
       - .github/workflows/test-gptmax-lot16-original-one-end-source.yml
   workflow_dispatch:
@@ -25,4 +25,4 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt pytest
       - run: |
           printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum -c
-          PYTHONPATH=. python -m pytest -q tests/test_gptmax_lot16_original_one_end_source.py
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_lot16_original_one_end_source.py tests/test_gptmax_lot16_original_2127_external_wall_ink.py
