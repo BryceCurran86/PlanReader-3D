@@ -231,3 +231,78 @@ def reconcile_source_producer_finish_batch_shadow(
         ("gpt1_original_finish_batch_candidate_shadow_only",),
         tuple(ordered),(),
     )
+
+
+def diagnose_source_producer_floor_finish_with_w4_shadow(
+    *,
+    canonical_rooms: "LiveCanonicalRoomComposition",
+    physical_ring: FiguredPolygonMetricShadow,
+    original_room_face_id: str,
+    same_view_areas: SameViewRoomAreaResult | None,
+    cross_view_areas: CrossViewRoomAreaResult | None,
+    canonical_floors: LiveCanonicalFloorSurfaceComposition,
+    original_signed_room_area: QuantityEvidence,
+    structural_frame: SourceWallRingFrameShadow,
+    crosssheet_floor: PhysicalFloorFinishCorrespondenceShadow,
+    finish_definition: SourceMaterialDefinitionResult,
+    complete_finish_occurrences: SourceMaterialOccurrenceScopeResult,
+    native_paint_clip_receipts: tuple[OriginalAuthenticatedTextPaintClipReceipt,...],
+) -> SourceProducerFloorFinishDiagnostic:
+    """Source-sealed W4 room gate preceding original material/floor handoff.
+
+    This is the strict *opt-in consumer* for prospective source-authorized
+    issuance. A caller-authored SourceWallRingFrameShadow is NOT an original
+    W4 certificate. The real canonical-room producer must first replay its
+    original sealed SourceRoomFaceAuthority scope with its actual W4 ownership.
+    The returned result stays CANDIDATE and never signs commercial quantities.
+    """
+    from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
+    from pb_gpt1_producer_sealed_w4_metric_floor_shadow import (
+        bind_producer_sealed_w4_metric_floor_shadow,
+    )
+
+    def abstain(reason: str) -> SourceProducerFloorFinishDiagnostic:
+        return SourceProducerFloorFinishDiagnostic(
+            EvidenceResolutionStatus.ABSTAINED,reason,
+            str(getattr(physical_ring,"physical_room_id","")),
+            str(original_room_face_id),
+            str(getattr(crosssheet_floor,"canonical_floor_id","")),
+            None,None,None,None,None,None,(),
+        )
+    if type(canonical_rooms) is not LiveCanonicalRoomComposition:
+        return abstain("gpt1_original_producer_w4_room_composition_unavailable")
+    verified=bind_producer_sealed_w4_metric_floor_shadow(
+        canonical_rooms,canonical_floors,physical_ring,
+        physical_room_id=physical_ring.physical_room_id,
+    )
+    if verified.status is not EvidenceResolutionStatus.CANDIDATE:
+        return abstain(verified.reason_codes[0])
+    if (
+        verified.source_room_face_record_id != original_room_face_id
+        or verified.canonical_floor_id != crosssheet_floor.canonical_floor_id
+        or verified.physical_room_id != crosssheet_floor.physical_room_id
+        or (verified.source_sha256,verified.revision_id,verified.snapshot_id,
+            verified.decision_scope_id)
+        != (crosssheet_floor.source_sha256,crosssheet_floor.revision_id,
+            crosssheet_floor.producer_snapshot_id,
+            crosssheet_floor.decision_scope_id)
+        or verified.page_id != crosssheet_floor.original_room_page_id
+        or not verified.original_published_boundary_subedges
+        or not verified.original_source_face_boundary_wall_ids
+    ):
+        return abstain("gpt1_original_producer_w4_to_finish_lineage_conflict")
+    result=diagnose_source_producer_floor_finish_handoff_shadow(
+        physical_ring=physical_ring,
+        original_room_face_id=original_room_face_id,
+        same_view_areas=same_view_areas,
+        cross_view_areas=cross_view_areas,
+        canonical_floors=canonical_floors,
+        original_signed_room_area=original_signed_room_area,
+        structural_frame=structural_frame,
+        crosssheet_floor=crosssheet_floor,
+        finish_definition=finish_definition,
+        complete_finish_occurrences=complete_finish_occurrences,
+        native_paint_clip_receipts=native_paint_clip_receipts,
+    )
+    # No downstream code can mistake this for an already signed finish row.
+    return result
