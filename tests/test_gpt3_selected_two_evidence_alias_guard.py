@@ -30,3 +30,18 @@ def test_selected_two_refuses_original_pdf_alias_of_sealed_source(tmp_path, monk
         AssertionError("source role alias was not rejected")))
     with pytest.raises(ValueError, match="roles alias"):
         selected._checked_one(raw)
+
+def test_selected_two_refuses_hardlinked_signed_and_customer_roles_before_io(tmp_path, monkeypatch):
+    import os
+    raw = entry(tmp_path)
+    source = tmp_path / "sealed.json"
+    source.write_text('{"synthetic":"independent-proof-required"}', encoding="utf-8")
+    target = tmp_path / "customer.json"
+    try:
+        os.link(source, target)
+    except (OSError, NotImplementedError):
+        pytest.skip("hardlinks unavailable on this filesystem")
+    monkeypatch.setattr(selected, "_json_object", lambda _: (_ for _ in ()).throw(
+        AssertionError("hardlink alias was not rejected before reading any evidence")))
+    with pytest.raises(ValueError, match="roles alias"):
+        selected._checked_one(raw)
