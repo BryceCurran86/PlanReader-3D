@@ -68,9 +68,7 @@ def _object(root: Path, relative: str) -> dict[str, Any]:
 
 
 def _list(root: Path, relative: str) -> list:
-    value = _read_json_without_duplicate_keys(
-        _safe_file(root, relative).read_text(encoding="utf-8")
-    )
+    value = _read_json_without_duplicate_keys(_safe_file(root, relative))
     _require(type(value) is list, "derived receipt expected JSON array: " + relative)
     return value
 
