@@ -5,6 +5,8 @@ without being the same drawing revision or document authority.
 """
 from copy import deepcopy
 
+import pytest
+
 from pb_opening_source_review_shadow import compare_opening_source_correspondence
 
 
@@ -56,3 +58,17 @@ def test_identical_ink_from_another_document_is_not_same_source_support():
     result = compare_opening_source_correspondence([old], [new])
     assert result[0]["exact_source_support_original_ids"] == []
     assert result[0]["physical_identity_alias_granted"] is False
+
+
+def test_duplicate_original_packets_cannot_overwrite_source_support():
+    original = _packet()
+    duplicate = deepcopy(original)
+    duplicate["opening_identity_id"] = "another-original"
+    with pytest.raises(ValueError, match="duplicate original"):
+        compare_opening_source_correspondence([original, duplicate], [_packet("alternate")])
+
+
+def test_duplicate_alternate_packets_cannot_repeat_same_review_identity():
+    alternate = _packet("alternate")
+    with pytest.raises(ValueError, match="duplicate alternate"):
+        compare_opening_source_correspondence([_packet()], [alternate, deepcopy(alternate)])
