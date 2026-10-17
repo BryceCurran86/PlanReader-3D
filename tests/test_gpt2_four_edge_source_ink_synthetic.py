@@ -94,3 +94,26 @@ def test_competing_registration_cannot_swallow_global_original_pdf_tampering():
                 floor_page_1_based=1,finish_page_1_based=2,
                 candidates=({"side_pairs":SIDE,"translation":(78.,0.)},
                             {"side_pairs":SIDE,"translation":(78,0)}))
+
+
+def test_left_anchored_original_top_partial_has_gap_on_right_not_false_wall():
+    d=fitz.open()
+    for offset in (0,78):
+        p=d.new_page(width=320,height=220)
+        for a,b in (
+            ((20,30),(20,150)),
+            ((130,30),(130,150)),
+            ((20,150),(130,150)),
+            ((20,30),(65,30)),
+        ):
+            p.draw_line((a[0]+offset,a[1]),
+                        (b[0]+offset,b[1]),color=(0,0,0),width=.48)
+    raw=d.tobytes();d.close()
+    r=audit(raw,expected_sha256=hashlib.sha256(raw).hexdigest(),
+            floor_page_1_based=1,finish_page_1_based=2,
+            original_side_pairs=SIDE,expected_translation_pdf_pts=(78.,0.))
+    assert r["status"]=="original_four_edge_ink_correspondence_with_unclosed_doorway"
+    assert r["original_top_partial_wall_anchor"]=="left"
+    assert r["original_top_gap_pdf_pts"]==[[65.,30.],[130.,30.]]
+    assert not r["canonical_cross_sheet_physical_room_equality_granted"]
+    assert r["new_firm_quantities"]==0
