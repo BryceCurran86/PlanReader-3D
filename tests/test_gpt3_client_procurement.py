@@ -186,3 +186,42 @@ def test_no_supplier_invoice_without_actual_client_recorded_receipt():
               ]}
     with pytest.raises(ValueError, match="requires net accepted"):
         build_procurement_receipts(procurement, events)
+
+
+def test_supplier_replacement_of_rejected_and_returned_stock_does_not_overorder():
+    signed, rows, quote, book = fixtures()
+    procurement = build_procurement_plan(quote, signed, rows, book)
+    pid = procurement["purchase_order_drafts"][0]["po_draft_id"]
+    original = [
+        {"event": "RECORD_PO_SENT", "po_draft_id": pid,
+         "recorded_on": "2026-10-20", "reference": "sent",
+         "recorded_by": "Client"},
+        {"event": "SHIPMENT_NOTICE", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-22",
+         "reference": "first-shipment", "shipped_quantity": "4"},
+        {"event": "RECEIVE_DELIVERY", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-23",
+         "reference": "first-check", "receipt_id": "accepted-1",
+         "accepted_quantity": "3", "rejected_quantity": "1"},
+        {"event": "RETURN_ACCEPTED", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-23",
+         "reference": "supplier-return", "return_id": "return-1",
+         "returned_quantity": "1"},
+        {"event": "SHIPMENT_NOTICE", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-25",
+         "reference": "replacement-shipment", "shipped_quantity": "2"},
+        {"event": "RECEIVE_DELIVERY", "po_draft_id": pid,
+         "requisition_id": "REQ-01", "recorded_on": "2026-10-26",
+         "reference": "replacement-check", "receipt_id": "accepted-2",
+         "accepted_quantity": "2", "rejected_quantity": "0"},
+    ]
+    book = {
+        "schema_version": "gpt3-client-procurement-events-v1",
+        "procurement_fingerprint": procurement["procurement_fingerprint"],
+        "events": original,
+    }
+    receipt = build_procurement_receipts(procurement, book)
+    assert receipt["line_status"][0]["net_accepted_quantity"] == "4"
+    assert receipt["line_status"][0]["outstanding_purchase_quantity"] == "0"
+    assert receipt["line_status"][0]["status"] == "RECEIVED"
+    assert receipt["signed_source_measurements_changed"] is False
