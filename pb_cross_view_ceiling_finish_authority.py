@@ -344,7 +344,11 @@ def _definition_is_ceiling_finish(
         (definition.description,definition.substrate,definition.finish)
         if _clean(value)
     ))
-    if "signage" in original_material_text.split() and "cladding" in original_material_text.split():
+    # Native PDF source descriptions may contain punctuation or line joins,
+    # such as SIGNAGE-CONTRACTOR; tokenize semantics without source guessing.
+    import re
+    role_tokens = set(re.findall(r"[a-z]+", original_material_text))
+    if {"signage", "cladding"} <= role_tokens:
         return False
     # The semantic family must still come from a non-empty authenticated
     # schedule meaning. The occurrence's authenticated RCP viewport supplies
