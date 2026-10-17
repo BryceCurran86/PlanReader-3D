@@ -37,3 +37,10 @@ def test_untypeable_or_nonfinite_source_rings_cannot_seal():
     ):
         with pytest.raises(SourceClosedRunConflictError,match="ceiling polygon"):
             _bbox(points)
+
+
+def test_unrepresentably_large_original_ceiling_geometry_never_crashes_customer_seal():
+    huge=1e308
+    ring=((0.,0.),(huge,huge),(huge,0.),(0.,huge))
+    with pytest.raises(SourceClosedRunConflictError,match="ceiling polygon"):
+        _bbox(ring)
