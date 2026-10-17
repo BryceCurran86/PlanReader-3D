@@ -45,7 +45,12 @@ def scope(monkeypatch, *, ink=(True, True), physical_id="physical-one", observed
     visibility = Obj(resolve_raster_opening_primitive=lambda selector: Obj(
         status=Status.CORROBORATED, observation=obs[selector.observation_id],
     ))
-    producer = Obj(physical_opening_authority=lambda: physical, authority=lambda: visibility)
+    producer = Obj(
+        physical_opening_authority=lambda: physical,
+        authority=lambda: visibility,
+        _raster_paired_outer_faces_shadow=False,
+        _physical_source_capture_authority_cache=None,
+    )
     published = Obj(
         revision=Obj(document_id="document", revision_id="revision", source_sha256="a" * 64),
         snapshot=Obj(snapshot_id="snapshot"),
@@ -84,6 +89,40 @@ def test_default_unmeasured_capture_stays_empty(monkeypatch):
     assert SourceVisibilityProducer._proven_raster_opening_flank_boxes(
         src, published, "3",
     ) == ()
+
+
+def test_paired_policy_keeps_legacy_capture_until_ink_policy_is_opted_in(monkeypatch):
+    # Paired physical recognition alone must not change the legacy source
+    # inventory. The explicit ink policy must use its paired authority.
+    from copy import copy
+
+    src, published = scope(monkeypatch, area=1.2, missing_area=False)
+    paired = src.physical_opening_authority()
+    legacy = copy(paired)
+    candidates = paired._raster_framed_candidates_for
+    calls = []
+
+    def nominated_by(name):
+        def nominate(seed, records):
+            calls.append(name)
+            return candidates(seed, records)
+        return nominate
+
+    paired._raster_framed_candidates_for = nominated_by("paired")
+    legacy._raster_framed_candidates_for = nominated_by("legacy")
+    src._raster_paired_outer_faces_shadow = True
+    src._physical_source_capture_authority_cache = legacy
+
+    baseline = SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src, published, "3",
+    )
+    opted_in = SourceVisibilityProducer._proven_raster_opening_flank_boxes(
+        src, published, "3", include_unmeasured_ink_closed_flanks_shadow=True,
+    )
+
+    assert len(baseline) == 2
+    assert opted_in == baseline
+    assert calls == ["legacy", "paired"]
 
 
 def test_source_closed_and_both_solid_flanks_enter_candidate_capture(monkeypatch):
