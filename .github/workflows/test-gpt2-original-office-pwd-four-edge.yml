@@ -4,6 +4,11 @@ on:
     branches: [main]
     paths:
       - "tools/diag_original_room_four_edge_source_ink_shadow.py"
+      - "tools/diag_gpt2_original_native_dimension_chain_shadow.py"
+      - "tools/diag_gpt2_original_figured_face_rivals_shadow.py"
+      - "pb_gpt2_original_source_geometry_bridge.py"
+      - "tests/test_gpt2_original_native_dimension_chain_synthetic.py"
+      - "tests/test_gpt2_original_a502_dimension_chain_92_wall_notes.py"
       - "tests/test_gpt2_original_office_pwd_four_edge_crosssheet_source.py"
       - ".github/workflows/test-gpt2-original-office-pwd-four-edge.yml"
   workflow_dispatch:
@@ -28,6 +33,7 @@ jobs:
           else
             echo "::notice::Private original PDF unavailable on this merge checkout; synthetic source tests run, ORIGINAL SOURCE ACCEPTANCE REMAINS BLOCKED."
           fi
-          python -m pytest -q -rs tests/test_gpt2_four_edge_source_ink_synthetic.py tests/test_gpt2_original_office_pwd_four_edge_crosssheet_source.py
+          python -m pytest -q -rs tests/test_gpt2_four_edge_source_ink_synthetic.py tests/test_gpt2_original_office_pwd_four_edge_crosssheet_source.py tests/test_gpt2_original_native_dimension_chain_synthetic.py tests/test_gpt2_original_a502_dimension_chain_92_wall_notes.py
+          python -m py_compile tools/diag_gpt2_original_native_dimension_chain_shadow.py tools/diag_gpt2_original_figured_face_rivals_shadow.py pb_gpt2_original_source_geometry_bridge.py
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
