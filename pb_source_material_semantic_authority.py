@@ -1693,6 +1693,7 @@ class SourceMaterialSemanticProducer:
         *,
         _seal: object = None,
         _physical_plan_page_ids: tuple[str, ...] = (),
+        _source_native_schedule_page_ids: tuple[str, ...] = (),
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
@@ -1703,6 +1704,7 @@ class SourceMaterialSemanticProducer:
             source_visibility_producer
         )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
+        self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
         self._plan_raster = (
             RasterTextCorroborationProducer.for_physical_plan_view_shadow(
                 source_visibility_producer
@@ -1732,6 +1734,33 @@ class SourceMaterialSemanticProducer:
         source_visibility_producer: SourceVisibilityProducer,
     ) -> "SourceMaterialSemanticProducer":
         return cls(source_visibility_producer, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_source_native_multipath_schedule_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        page_ids: Sequence[str],
+    ) -> "SourceMaterialSemanticProducer":
+        """Opt-in original external CAD schedule source; NOT RCP area.
+
+        Explicit original page scope is essential: authenticating one
+        source schedule's frame does not authenticate sibling physical
+        drawing extents or any source material occurrence.
+        """
+        if (not isinstance(page_ids, Sequence)
+                or isinstance(page_ids,(str,bytes)) or not page_ids):
+            raise ValueError("explicit_original_schedule_source_page_ids_required")
+        if any(type(p) is not str or not p.isdecimal()
+               or str(int(p))!=p or int(p)<1 for p in page_ids):
+            raise ValueError("canonical_original_schedule_page_ids_required")
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_schedule_page_ids=tuple(
+                sorted(set(page_ids),key=int)
+            ),
+        )
 
     @classmethod
     def for_physical_plan_view_shadow(
@@ -1940,7 +1969,13 @@ class SourceMaterialSemanticProducer:
                         physical_plan_view_shadow=True,
                     )
                     if str(page_number) in self._physical_plan_page_ids
-                    else segment_page_viewports(page, page_number=page_number)
+                    else segment_page_viewports(
+                        page,page_number=page_number,
+                        **({
+                            "source_connected_table_cell_shadow":True,
+                            "source_native_multipath_semantic_frame_shadow":True,
+                        } if str(page_number) in self._source_native_schedule_page_ids else {}),
+                    )
                 )
                 if (
                     not viewports
