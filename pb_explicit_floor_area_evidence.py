@@ -142,6 +142,15 @@ def resolve_explicit_floor_area_evidence(
         or item.area_m2 <= 0
         or any(type(p) is not int or p <= 0 for p in item.source_pages)
         or not item.source_pages
+        or (item.source_sha256 is not None and (
+            type(item.source_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", item.source_sha256) is None
+        ))
+        or (item.revision_id is not None and (
+            type(item.revision_id) is not str
+            or not item.revision_id
+            or item.revision_id != item.revision_id.strip()
+        ))
         for item in items
     ):
         return None
