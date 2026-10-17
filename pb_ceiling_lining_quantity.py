@@ -190,7 +190,25 @@ def resolve_ceiling_finish_entity(
     if not scoped:
         return None
 
-    evidence_ids = tuple(sorted({atom.evidence_id for atom in scoped}))
+    # A repeated identical original observation adds no authority. A reused
+    # source ID with conflicting text, status or scope must not select either
+    # issuer by input order before material resolution.
+    source_by_id: dict[str, EvidenceAtom] = {}
+    scoped_ids = {atom.evidence_id for atom in scoped}
+    # Unrelated original source IDs remain irrelevant, but the *same* source
+    # ID reused across two physical ceiling scopes is not independent material.
+    source_id_collision = any(
+        atom.evidence_id in scoped_ids and _scope_id(atom) != scope
+        for atom in evidence_atoms
+    )
+    for atom in scoped:
+        if atom.evidence_id in source_by_id:
+            if source_by_id[atom.evidence_id] != atom:
+                source_id_collision = True
+        else:
+            source_by_id[atom.evidence_id] = atom
+    scoped = tuple(source_by_id[key] for key in sorted(source_by_id))
+    evidence_ids = tuple(sorted(source_by_id))
     candidate_id = stable_contract_id(
         "ent",
         {
@@ -211,6 +229,8 @@ def resolve_ceiling_finish_entity(
             page_no=page_no,
         )
     )
+    if source_id_collision:
+        blockers.append("ceiling_source_evidence_identity_conflict")
     descriptors: dict[str, list[str]] = {}
     source_methods: set[str] = set()
     has_non_ocr_source = False
