@@ -30,6 +30,7 @@ def verify_source_free_public_archive(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise ValueError("source-free checkout archive is missing")
     names: set[str] = set()
+    content_sha256s: dict[str, str] = {}
     raw_manifests: dict[str, bytes] = {}
     with tarfile.open(path, "r:gz") as archive:
         for member in archive:
@@ -44,11 +45,21 @@ def verify_source_free_public_archive(path: Path) -> dict[str, object]:
                 if name in names:
                     raise ValueError("duplicate tracked archive member: " + name)
                 names.add(name)
-                if name == MASTER or name.endswith("/source_manifest.json"):
-                    payload = archive.extractfile(member)
-                    if payload is None:
-                        raise ValueError("unreadable frozen source metadata")
-                    raw_manifests[name] = payload.read()
+                payload = archive.extractfile(member)
+                if payload is None:
+                    raise ValueError("unreadable tracked code archive member")
+                digest = hashlib.sha256()
+                metadata_chunks = [] if (name == MASTER or name.endswith("/source_manifest.json")) else None
+                while True:
+                    chunk = payload.read(1 << 20)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    if metadata_chunks is not None:
+                        metadata_chunks.append(chunk)
+                content_sha256s[name] = digest.hexdigest()
+                if metadata_chunks is not None:
+                    raw_manifests[name] = b"".join(metadata_chunks)
     if blocked_source_additions(tuple(names)):
         raise ValueError("public checkout includes forbidden original/credential path")
     if MASTER not in names:
@@ -65,6 +76,7 @@ def verify_source_free_public_archive(path: Path) -> dict[str, object]:
         if tuple(suite["projects"]) != PROJECTS:
             raise ValueError("wrong frozen project membership")
         source_names = []
+        original_source_hashes = set()
         for project in PROJECTS:
             source_file = f"{BENCHMARK}/projects/{project}/source_manifest.json"
             manifest = json.loads(raw_manifests[source_file])
@@ -76,12 +88,15 @@ def verify_source_free_public_archive(path: Path) -> dict[str, object]:
                         or not all(c in "0123456789abcdef" for c in sha)):
                     raise ValueError("invalid original source SHA declaration")
                 source_names.append(d["name"].casefold())
+                original_source_hashes.add(sha)
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError("invalid frozen source metadata") from exc
     if len(source_names) != 10 or len(set(source_names)) != 10:
         raise ValueError("frozen original source package must have ten distinct PDFs")
     if any(name.rsplit("/", 1)[-1].casefold() in source_names for name in names):
-        raise ValueError("public archive contains a renamed original client PDF")
+        raise ValueError("public archive contains original client filename")
+    if any(sha in original_source_hashes for sha in content_sha256s.values()):
+        raise ValueError("public archive contains original client PDF bytes under another name")
     return {
         "status": "CODE_ONLY_SOURCE_FREE",
         "benchmark_id": "full_plan_takeoff_reconciliation_v2",
