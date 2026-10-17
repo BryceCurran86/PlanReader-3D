@@ -25,6 +25,7 @@ def test_original_memory_limit_with_no_os_exit_code_remains_blocked_not_missing(
     ("COMPLETED", None), ("COMPLETED", True), ("COMPLETED", 1),
     ("MEMORY_LIMIT", 0), ("TIMEOUT", 0), ("FAILED", False),
     ("ERROR", "1"), ("FIRM_QUANTITIES_VERIFIED", 0), ("DONE", 0),
+    ([], 0), ({}, 0), (None, 0),
 ])
 def test_owner_run_fingerprint_rejects_forged_completion_or_fake_success(state, code):
     with pytest.raises(ValueError, match="disposition|exit code"):
