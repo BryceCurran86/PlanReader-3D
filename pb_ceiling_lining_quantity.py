@@ -194,7 +194,13 @@ def resolve_ceiling_finish_entity(
     # source ID with conflicting text, status or scope must not select either
     # issuer by input order before material resolution.
     source_by_id: dict[str, EvidenceAtom] = {}
-    source_id_collision = False
+    scoped_ids = {atom.evidence_id for atom in scoped}
+    # Unrelated original source IDs remain irrelevant, but the *same* source
+    # ID reused across two physical ceiling scopes is not independent material.
+    source_id_collision = any(
+        atom.evidence_id in scoped_ids and _scope_id(atom) != scope
+        for atom in evidence_atoms
+    )
     for atom in scoped:
         if atom.evidence_id in source_by_id:
             if source_by_id[atom.evidence_id] != atom:
