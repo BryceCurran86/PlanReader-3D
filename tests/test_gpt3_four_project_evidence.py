@@ -669,7 +669,7 @@ def test_manual_estimator_rows_do_not_change_verified_automated_customer_bijecti
     mixed = [*originals, manual]
     path = tmp_path / "customer.json"
     path.write_text(json.dumps(mixed), encoding="utf-8")
-    parsed = module._json_customer_rows(path)
+    parsed = module._json_customer_rows(path, allow_manual=True)
     verified = verify_sealed_customer_output(sealed, parsed)
     assert verified.customer_row_count == 8
     assert module._verify_customer_counts(sealed, verified, parsed) is None
@@ -689,7 +689,7 @@ def test_manual_row_exclusion_cannot_hide_damaged_automated_identity(tmp_path, b
     path = tmp_path / "customer.json"
     path.write_text(json.dumps([bad]), encoding="utf-8")
     with pytest.raises(ValueError, match="canonical quantity identity"):
-        module._json_customer_rows(path)
+        module._json_customer_rows(path, allow_manual=True)
 
 
 def test_manual_row_with_machine_source_reference_still_rejected_by_v1_verifier(tmp_path):
@@ -711,3 +711,18 @@ def test_manual_row_with_machine_source_reference_still_rejected_by_v1_verifier(
     # Embedded machine adapter claim with no quantity cannot be treated as manual.
     with pytest.raises((ValueError, CustomerOutputVerificationError)):
         verify_sealed_customer_output(sealed, [*customers, automated])
+
+
+def test_manual_input_option_never_weakens_default_machine_only_reader(tmp_path):
+    import json
+    path = tmp_path / "mixed-rows.json"
+    path.write_text(json.dumps([
+        {"quantity_id": "machine-q"},
+        {"notes": "genuine manual estimator note"},
+    ]), encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical quantity identity"):
+        module._json_customer_rows(path)
+    accepted = module._json_customer_rows(path, allow_manual=True)
+    assert len(accepted) == 2
+    assert accepted[0]["quantity_id"] == "machine-q"
+    assert "quantity_id" not in accepted[1]
