@@ -169,19 +169,25 @@ def _source_bbox(
     # A positive shoelace answer does not prove original enclosing wall ink:
     # a bowtie/self-crossing floor can still have an arbitrary positive m².
     # Veto only. Do not derive a new polygon, source role, or metric value.
+    from shapely.errors import GEOSException
     from shapely.geometry import Polygon
     ring = tuple(zip(xs, ys))
     # A genuine source polygon may repeat its first point as final closure.
     # Other repetitions are self-touching physical boundary conflicts.
     if len(ring) > 1 and ring[-1] == ring[0]:
         ring = ring[:-1]
-    polygon = Polygon(ring)
-    if (
-        len(ring) < 3
-        or len(set(ring)) != len(ring)
-        or not polygon.is_valid
-        or not polygon.exterior.is_simple
-    ):
+    if len(ring) < 3 or len(set(ring)) != len(ring):
+        raise SourceClosedRunConflictError(
+            f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
+        )
+    try:
+        polygon = Polygon(ring)
+        valid = polygon.is_valid and polygon.exterior.is_simple
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"canonical floor source geometry is invalid: {floor.canonical_floor_id}"
+        ) from exc
+    if not valid:
         raise SourceClosedRunConflictError(
             f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
         )
