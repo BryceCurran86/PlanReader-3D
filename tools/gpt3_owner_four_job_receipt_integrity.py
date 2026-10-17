@@ -76,7 +76,8 @@ def _list(root: Path, relative: str) -> list:
 def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]:
     """Independently SHA all 28 derived records AND all SHA256SUMS entries."""
     file_rows = owner.get("files")
-    _require(type(file_rows) is list and bool(file_rows), "owner file ledger unavailable")
+    _require(type(file_rows) is list and len(file_rows) == 28,
+             "original owner share-safe artifact ledger must contain 28 records")
     indexed: dict[str, str] = {}
     for row in file_rows:
         _require(type(row) is dict, "invalid owner file ledger row")
@@ -108,6 +109,7 @@ def _sha_index(root: Path, owner: dict) -> tuple[dict[str, str], dict[str, str]]
         sums[path] = digest
         _require(_digest(_safe_file(root, path)) == digest,
                  "SHA256SUMS actual byte digest mismatch: " + path)
+    _require(len(sums) == 31, "original owner SHA256SUMS must contain 31 records")
     _require(set(sums) == set(indexed) | _EXTRA_DERIVED,
              "SHA256SUMS universe differs from archived derived receipt")
     # No extra arbitrary artifact may be smuggled into an otherwise hash-valid
@@ -128,9 +130,8 @@ def _cross_semantic_source_claims(quantities: Any) -> list[dict[str, Any]]:
     """Surface shared physical source with multiple families; never erase rows."""
     claims: dict[tuple[str, str, tuple[str, ...]], list] = {}
     for q in quantities:
-        object_key = (
-            q.source_sha256, q.revision_id, tuple(q.object_identity_refs),
-        )
+        object_refs = tuple(sorted(set(q.object_identity_refs)))
+        object_key = (q.source_sha256, q.revision_id, object_refs)
         claims.setdefault(object_key, []).append(q)
     return [
         {
@@ -144,6 +145,16 @@ def _cross_semantic_source_claims(quantities: Any) -> list[dict[str, Any]]:
         for key, values in sorted(claims.items())
         if key[2] and len({q.family for q in values}) > 1
     ]
+
+
+def _redacted_execution_receipt_path(value: Any, *, session: str,
+                                     subfolder: str, basename: str) -> None:
+    """A SHA-pinned owner receipt may not attribute another session's output."""
+    _require(type(value) is str and value.startswith("<HOME>\\")
+             and "/" not in value, "unredacted or malformed owner run path")
+    parts = PureWindowsPath(value).parts
+    _require(".." not in parts and tuple(parts[-3:]) == (session, subfolder, basename),
+             "owner run receipt points to a different source or session")
 
 
 def _exact_execution_pages(value: Any, page_count: int, field: str) -> None:
@@ -209,6 +220,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
     owner = _object(root, "RUN_RECEIPT.json")
     _require(owner.get("schema") == "four_job_owner_machine_run_receipt/1",
              "owner run receipt schema mismatch")
+    session = owner.get("session")
+    _require(type(session) is str and re.fullmatch(r"[0-9]{8}_[0-9]{6}", session)
+             is not None, "original owner run session identifier malformed")
     head = owner.get("repo_head")
     _require(type(head) is str and _COMMIT.fullmatch(head) is not None,
              "owner original producer commit not pinned")
@@ -254,6 +268,10 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                  "foreign or duplicated project preflight")
         _require(p.get("status") == "COMPLETED" and p.get("exit_code") == 0,
                  "original project preflight failed")
+        _redacted_execution_receipt_path(
+            p.get("report"), session=session, subfolder="preflight",
+            basename=project + ".json",
+        )
         statuses[project] = p
     _require(set(statuses) == set(frozen_by_id), "original project preflight missing")
 
@@ -269,6 +287,10 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                  "foreign or duplicated owner production attempt")
         _require(handoff.get("single_document_handoff_only") is True,
                  "owner diagnostic cannot imply full multidocument source closure")
+        _redacted_execution_receipt_path(
+            handoff.get("output_folder"), session=session,
+            subfolder="project_outputs", basename=project,
+        )
         state = handoff.get("status")
         _require(type(state) is str and state in (
             "COMPLETED", "TIMEOUT", "MEMORY_LIMIT", "SYSTEM_MEMORY_GUARD",
@@ -347,7 +369,7 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
         ), "invalid production quantity family counts")
         # A completed process can still contain source-only candidates; the
         # producer's own page-scope receipts must agree before any sealing.
-        page_count = primary_pages = summary.get("page_count")
+        page_count = summary.get("page_count")
         _require(type(page_count) is int and page_count > 0,
                  "invalid original producer source page count")
         _exact_execution_pages(summary.get("execution_pages"), page_count,
@@ -430,6 +452,8 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                  "incomplete producer cannot claim complete signed output")
         is_sealed = combined is not None
         if is_sealed:
+            _require(summary.get("status") == "sealed",
+                     "signed V1 run cannot be presented with an unsealed producer status")
             _require(type(combined) is str and combined
                      and summary.get("combined_run_id"),
                      "sealed project missing run identity")
@@ -450,6 +474,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             cross_semantic_claims[project_id] = _cross_semantic_source_claims(
                 sealed.quantities
             )
+            _require(all(q.lineage_ok and not q.abstained and q.value is not None
+                         and q.status.strip() for q in sealed.quantities),
+                     "signed original quantities cannot contain unverified physical lineage")
             _require(len(sealed.quantities) == count
                      and sum(family_counts.values()) == count,
                      "producer family quantity counts disagree with sealed run")
@@ -461,6 +488,8 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
             _require(type(files) is dict and type(ids) is dict
                      and set(files) == set(ids),
                      "family signed-run proof universe incomplete")
+            _require(set(files) == {family for family, n in family_counts.items() if n > 0},
+                     "nonempty original quantity family lacks a source-owned sealed V1 receipt")
             for family in files:
                 _require(type(family) is str and family in family_counts
                          and family_counts[family] > 0,
@@ -473,6 +502,9 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                 relative = project_id + "/outputs/family_runs/" + family + ".sealed.json"
                 family_payload = _object(root, relative)
                 family_seal = sealed_source_closed_run_from_dict(family_payload)
+                _require(family_seal.project_id == project_id
+                         and set(family_seal.source_sha256s) == {primary_sha},
+                         "family signed run source/project lineage mismatch")
                 _require(family_seal.run_id == ids[family],
                          "family signed run id changed")
                 _require(
@@ -480,15 +512,24 @@ def verify_owner_four_job_receipts(root: Path) -> dict[str, Any]:
                     == {x.quantity_id for x in sealed.quantities if x.family == family},
                     "family signed run identity differs from combined run",
                 )
+                combined_by_id = {q.quantity_id: q.payload() for q in sealed.quantities}
+                _require(all(q.payload() == combined_by_id.get(q.quantity_id)
+                             for q in family_seal.quantities),
+                         "family signed-run quantity payload differs from combined sealed quantity")
                 if len(files) == 1:
                     _require(_digest(_safe_file(root, relative)) == _digest(
                         _safe_file(root, file_path)
                     ), "single-family sealed bytes differ from combined V1")
         else:
+            _require(summary.get("status") != "sealed",
+                     "unsealed original source attempt cannot advertise sealed producer status")
+            _require(summary.get("combined_run_id") is None,
+                     "unsealed original source attempt cannot carry a signed V1 run ID")
             _require(count == 0 and not any(family_counts.values()),
                      "unsealed source attempt cannot claim signed quantities")
             _require(not summary.get("family_run_files") and not summary.get("family_run_ids"),
                      "unsealed attempt cannot carry signed family references")
+        cross_semantic_claims.setdefault(project_id, [])
         # Source-stage classification is derived from the original producer's
         # own status and NOT from benchmark target expectations. Never label an
         # unevaluated target MISSED based on a source process outcome.
