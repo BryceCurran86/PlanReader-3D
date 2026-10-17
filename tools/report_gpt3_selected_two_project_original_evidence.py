@@ -255,7 +255,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     entries = [_json_object(path) for path in args.entry]
-    report = build_selected_two_project_development_evidence(entries)
+    # Reject an unsafe destination BEFORE rehashing private originals or
+    # performing an expensive source-closed reconciliation.
     output = args.output
     if output.is_symlink() or output.exists() or any(
         output.resolve() == Path(value).resolve()
@@ -263,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         if key != "original_files"
     ):
         raise FileExistsError("source development report must be a new file")
+    report = build_selected_two_project_development_evidence(entries)
     output.parent.mkdir(parents=True, exist_ok=True)
     temp: Path | None = None
     try:
