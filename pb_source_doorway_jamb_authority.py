@@ -47,6 +47,18 @@ def audit_native_source_doorway_jamb_chain(
         "new_quantities":0,
     }
     l,r,lj,rj=rows
+    # A dashed construction-grid/dimension line with the right endpoints
+    # is not an original solid doorway boundary. Read the exact same native
+    # source parents already validated by native_ink_record; do not infer
+    # solidity from color or coordinates.
+    parents=page.get_drawings()
+    for native_id in ids:
+        path_index=int(native_id[1:].split("i",1)[0])
+        pattern=parents[path_index].get("dashes")
+        if type(pattern) is not str:
+            return {**base,"status":"original_doorway_stroke_pattern_unavailable"}
+        if "".join(pattern.split()) not in {"[]0",""}:
+            return {**base,"status":"competing_dashed_drafting_line"}
     if (l["native_line_axis"]!="native_x" or
             r["native_line_axis"]!="native_x" or
             lj["native_line_axis"]!="native_y" or
