@@ -146,6 +146,28 @@ def audit_original_detail_vs_main_source_room_candidate(
         raise ValueError("original_floor_source_bounds_not_real")
     floor_x=x1-x0
     floor_y=y1-y0
+    # Printed PWD room words must be wholly INSIDE their own plan's
+    # source ink; printed D13 must touch the actual top doorway edge.
+    # A separate PWD ELEVATION on the same A502 sheet also prints D13;
+    # label equality with the floor plan is therefore not enough.
+    def inside_room(word,bounds):
+        l,t,r,bot=bounds
+        return l<float(word[0])<float(word[2])<r and (
+            t<float(word[1])<float(word[3])<bot)
+    def printed_door_at_top(word,bounds):
+        l,t,r,_=bounds
+        midpoint=(float(word[0])+float(word[2]))/2
+        return l<midpoint<r and float(word[1])<=t<=float(word[3])
+    source_boxes=tuple(
+        candidate["original_source_native_bbox_pdf_pts"]
+        for candidate in face["original_source_candidate_face_families"]
+    )
+    floor_box=(x0,y0,x1,y1)
+    if (not inside_room(fw,floor_box)
+            or not all(inside_room(dw,b) for b in source_boxes)
+            or not printed_door_at_top(fd,floor_box)
+            or not any(printed_door_at_top(dd,b) for b in source_boxes)):
+        raise ValueError("original_plan_word_or_door_boundary_not_source_owned")
     geometries=[]
     for candidate in face["original_source_candidate_face_families"]:
         cx0,cy0,cx1,cy1=candidate["original_source_native_bbox_pdf_pts"]
@@ -172,6 +194,8 @@ def audit_original_detail_vs_main_source_room_candidate(
         "original_page_rotations_degrees":original_rotations,
         "source_original_plan_caption_evidence":caption,
         "source_original_room_and_door_word_candidates":marks,
+        "original_source_plan_words_inside_own_physical_ink_candidates":True,
+        "original_source_door_word_intersects_printed_top_boundary":True,
         "source_original_room_ink_graph":floor_graph,
         "source_all_figured_inner_outer_axis_correspondence_candidates":
             tuple(geometries),
