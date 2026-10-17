@@ -7,13 +7,103 @@ that are currently duplicated across 18+ test files.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import types
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
 import pytest
+
+
+# Private construction customer PDFs must remain outside the repository.
+# The public CI path MAY deliberately skip tests which cannot run without
+# those privately provisioned source bytes. All synthetic/adversarial tests
+# in the same files still run. Dedicated original-SHA workflows never enable
+# this flag, and MUST fail if the original PDF is unavailable.
+_MARYBOROUGH_ORIGINAL_NAME = "Arch_Combined_Maryborough_Service_Station.pdf"
+_PRIVATE_SOURCE_PUBLIC_CI_POLICY = "skip_missing_in_public_ci"
+
+
+def _public_ci_source_policy_enabled() -> bool:
+    policy = os.environ.get("PLANREADER_PRIVATE_ORIGINAL_POLICY", "")
+    if policy and policy != _PRIVATE_SOURCE_PUBLIC_CI_POLICY:
+        raise pytest.UsageError("invalid_private_original_source_ci_policy")
+    return (
+        policy == _PRIVATE_SOURCE_PUBLIC_CI_POLICY
+        and not (
+            Path.cwd() / "documents" / "sources" / _MARYBOROUGH_ORIGINAL_NAME
+        ).is_file()
+    )
+
+
+def _code_uses_original_source(
+    function,
+    *,
+    max_depth: int = 4,
+    _seen: Optional[set[int]] = None,
+) -> bool:
+    """Static, bounded source-dependency scan; never execute a test/helper.
+
+    Check actual source-variable references, source filename literals and
+    directly called module-local helpers. Do not skip synthetic tests just
+    because their test *module* contains a private ORIGINAL/PDF constant.
+    Ambiguous or unrecognized dependencies are NOT skipped, so CI fails
+    visibly instead of hiding an unexpected original-source requirement.
+    """
+    if max_depth < 0:
+        return False
+    code = getattr(function, "__code__", None)
+    if not isinstance(code, types.CodeType):
+        return False
+    seen = set() if _seen is None else _seen
+    if id(code) in seen:
+        return False
+    seen.add(id(code))
+    globals_map = getattr(function, "__globals__", {})
+    for constant in code.co_consts:
+        if isinstance(constant, str) and _MARYBOROUGH_ORIGINAL_NAME in constant:
+            return True
+    for name in code.co_names:
+        val = globals_map.get(name)
+        if isinstance(val, Path) and val.name == _MARYBOROUGH_ORIGINAL_NAME:
+            return True
+    if max_depth == 0:
+        return False
+    for name in code.co_names:
+        val = globals_map.get(name)
+        if (
+            callable(val)
+            and getattr(val, "__module__", None)
+            == getattr(function, "__module__", None)
+            and _code_uses_original_source(
+                val, max_depth=max_depth - 1, _seen=seen,
+            )
+        ):
+            return True
+    return False
+
+
+def _test_requires_missing_original_pdf(item) -> bool:
+    if _code_uses_original_source(getattr(item, "function", None)):
+        return True
+    info = getattr(item, "_fixtureinfo", None)
+    named = getattr(info, "name2fixturedefs", {}) or {}
+    for fixture_name in getattr(item, "fixturenames", ()):
+        for definition in named.get(fixture_name, ()):
+            if _code_uses_original_source(getattr(definition, "func", None)):
+                return True
+    return False
+
+
+def pytest_report_header(config):
+    if _public_ci_source_policy_enabled():
+        return (
+            "PRIVATE PDF ABSENT: public CI skips only tests whose source-byte "
+            "dependency is proven; this is NOT an original-PDF test pass"
+        )
 
 
 # These three historical Phase 5 tests encode the now-rejected assumption that
@@ -39,6 +129,16 @@ _PHASE5M_SUPERSEDED_FLOOR_DROP_TESTS = {
 
 
 def pytest_collection_modifyitems(items):
+    if _public_ci_source_policy_enabled():
+        for item in items:
+            if _test_requires_missing_original_pdf(item):
+                item.add_marker(pytest.mark.skip(
+                    reason=(
+                        "PRIVATE ORIGINAL SOURCE UNAVAILABLE in public CI: "
+                        "not a passing original-source verification; "
+                        "run this test with SHA-verified private source"
+                    ),
+                ))
     for item in items:
         if item.name in _PHASE5M_SUPERSEDED_UNSAFE_ROOF_TESTS:
             item.add_marker(pytest.mark.xfail(
