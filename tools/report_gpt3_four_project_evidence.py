@@ -239,6 +239,8 @@ def build_four_project_evidence_ledger(
             "missing_original_source_document_count": 0,
             "missing_original_source_document_roles": [],
             "customer_bijection_verified": False,
+            "reconciliation_input_presence_status": "NOT_CHECKED_SOURCE_UNAVAILABLE",
+            "missing_signed_reconciliation_artifacts": [],
             "reconciliation_complete": False,
             "reason_codes": [],
             "exact_project_report": None,
@@ -292,12 +294,15 @@ def build_four_project_evidence_ledger(
             ) if not path.is_file()
         ]
         if missing_evidence:
+            entry["reconciliation_input_presence_status"] = "MISSING"
+            entry["missing_signed_reconciliation_artifacts"] = missing_evidence
             entry["reason_codes"] = [
                 "signed_production_evidence_unavailable",
                 *("missing:" + name for name in missing_evidence),
             ]
             continue
 
+        entry["reconciliation_input_presence_status"] = "PRESENT_UNVERIFIED"
         try:
             signed_hashes = {
                 path: _sha256(path)
@@ -342,6 +347,7 @@ def build_four_project_evidence_ledger(
                 sealed, project_id=project_id, seen=seen_signed_quantity_ids,
             )
             entry["customer_bijection_verified"] = True
+            entry["reconciliation_input_presence_status"] = "INDEPENDENTLY_VERIFIED"
             entry["reconciliation_complete"] = True
             entry["exact_project_report"] = exact
             if manifest.status != "VERIFIED" or not manifest.source_package_complete:
@@ -358,6 +364,7 @@ def build_four_project_evidence_ledger(
                 completed_by_project[project_id] = True
         except (OSError, UnicodeError, TypeError, ValueError, RuntimeError, KeyError) as exc:
             entry["publication_status"] = "CONFLICT"
+            entry["reconciliation_input_presence_status"] = "REJECTED"
             entry["reconciliation_complete"] = False
             entry["exact_project_report"] = None
             entry["reason_codes"] = ["signed_evidence_reconciliation_rejected", type(exc).__name__]

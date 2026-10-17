@@ -684,3 +684,38 @@ def test_one_supplied_source_does_not_claim_complete_twodoc_source_preflight(tmp
     assert row["source_sha_verified"] is False
     assert row["publication_status"] == "UNAVAILABLE"
     assert report["coverage_accuracy"] is None
+
+
+def test_signed_and_customer_dependency_roster_only_after_full_original_source_gate(
+    tmp_path, monkeypatch,
+):
+    dirs = _dirs(tmp_path)
+    manifest = module.load_suite_manifests(module.FROZEN_ROOT)[0]
+    src = dirs["source_dir"] / manifest.project_id
+    src.mkdir(parents=True)
+    for doc in manifest.source_documents:
+        (src / doc.name).write_bytes(b"%PDF-source-neutral-test")
+    # Bypass only the original SHA gate in a synthetic fixture; production
+    # cannot label these untrusted bytes as a real source.
+    monkeypatch.setattr(module, "_original_sha_gate",
+                        lambda m, files: (True, [], [d.sha256 for d in manifest.source_documents]))
+    result = module.build_four_project_evidence_ledger(**dirs)
+    target = next(row for row in result["projects"] if row["project_id"] == manifest.project_id)
+    assert target["source_sha_verified"] is True
+    assert target["reconciliation_input_presence_status"] == "MISSING"
+    assert target["missing_signed_reconciliation_artifacts"] == [
+        "sealed_run", "identity_map", "customer_rows"
+    ]
+    assert target["customer_bijection_verified"] is False
+    assert target["reconciliation_complete"] is False
+    assert result["coverage_accuracy"] is None
+
+
+def test_unavailable_source_never_claims_signed_files_missing_or_verified(tmp_path):
+    report = module.build_four_project_evidence_ledger(**_dirs(tmp_path))
+    for target in report["projects"]:
+        assert target["source_sha_verified"] is False
+        assert target["reconciliation_input_presence_status"] == "NOT_CHECKED_SOURCE_UNAVAILABLE"
+        assert target["missing_signed_reconciliation_artifacts"] == []
+        assert target["exact_project_report"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
