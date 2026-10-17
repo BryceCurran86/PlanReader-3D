@@ -310,6 +310,10 @@ class _SourceObservationStore:
                 SourceObservationAuthorityResult,
             ],
         ] = {}
+        # One authenticated visible-universe read for the snapshot currently
+        # being proved. Object identity, not a timer, decides reuse. A replaced
+        # record, receipt, or parent misses this cache and is revalidated.
+        self.visible_authentication_cache: dict[str, tuple] = {}
 
     def source_bytes_match_revision(
         self,
@@ -1530,7 +1534,19 @@ class SourceObservationProducer:
             staged[key] = record
         self._store.revisions[revision.revision_id] = revision
         self._store.current_revision_by_document[revision.document_id] = revision.revision_id
-        stored_source_bytes = bytes(source_bytes)
+        existing_source_bytes = self._store.source_bytes_by_revision.get(
+            revision.revision_id
+        )
+        # bytes is immutable. Republishing the object already stored for this
+        # revision must not allocate or rehash a second copy of the PDF.
+        # A bytearray or a different object is still copied before the hash check.
+        if (
+            isinstance(source_bytes, bytes)
+            and existing_source_bytes is source_bytes
+        ):
+            stored_source_bytes = source_bytes
+        else:
+            stored_source_bytes = bytes(source_bytes)
         if not self._store.source_bytes_match_revision(
             revision.revision_id,
             stored_source_bytes,

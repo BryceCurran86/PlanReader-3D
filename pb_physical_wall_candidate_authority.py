@@ -1133,25 +1133,23 @@ def _source_page_segments(
     page_visible_ids: list[str] = []
 
     if resolved_visible_observations is None:
-        page_rows: list[tuple[str, object]] = []
-        for observation_id in published.visible_observation_ids:
-            result = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+        # Authenticate the whole published universe once, then keep this page.
+        # A non-corroborated observation on any page still fails closed. Later
+        # calls reuse the identity-bound visible read instead of cloning every
+        # segment again.
+        try:
+            authenticated_rows = visibility.authenticated_visible_observations(
+                published
             )
-            observation = result.observation
-            if (
-                result.status is not EvidenceResolutionStatus.CORROBORATED
-                or observation is None
-            ):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-            if observation.page_id == page_id:
-                page_rows.append((observation_id, observation))
+        except RuntimeError as exc:
+            raise RuntimeError(
+                PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE
+            ) from exc
+        page_rows = [
+            (observation_id, observation)
+            for observation_id, observation in authenticated_rows
+            if observation.page_id == page_id
+        ]
     else:
         page_rows = list(resolved_visible_observations)
 

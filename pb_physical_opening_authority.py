@@ -1412,11 +1412,15 @@ class PhysicalOpeningAuthority:
         visibility = self._source_visibility_authority
         if visibility is None or seed.snapshot is None or seed.source_revision is None:
             return (), ()
+        page_id = (
+            seed.observation.page_id if seed.observation is not None else None
+        )
         cache_key = (
             seed.snapshot.document_id,
             seed.snapshot.revision_id,
             seed.snapshot.source_sha256,
             seed.snapshot.snapshot_id,
+            page_id,
         )
         cached = self._visible_snapshot_cache.get(cache_key)
         if cached is not None:
@@ -1453,6 +1457,10 @@ class PhysicalOpeningAuthority:
                 replace(by_id[observation_id])
                 for observation_id in seed.snapshot.observation_ids
                 if observation_id in by_id
+                and (
+                    page_id is None
+                    or by_id[observation_id].page_id == page_id
+                )
             )
         else:
             visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
@@ -1476,7 +1484,11 @@ class PhysicalOpeningAuthority:
                     result.status is EvidenceResolutionStatus.CORROBORATED
                     and result.observation
                 ):
-                    records.append(result.observation)
+                    if (
+                        page_id is None
+                        or result.observation.page_id == page_id
+                    ):
+                        records.append(result.observation)
                 elif result.status is EvidenceResolutionStatus.CONFLICT:
                     failures.append(result)
                 elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:

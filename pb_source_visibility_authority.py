@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 import hashlib
 import json
 import math
@@ -813,6 +813,7 @@ class SourceVisibilityProducer:
         self._native_paint_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_page_text_dirs_cache: OrderedDict = OrderedDict()
+        self._native_dimension_page_word_cache: OrderedDict = OrderedDict()
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
@@ -1208,24 +1209,84 @@ class SourceVisibilityProducer:
         self._native_dimension_page_text_dirs_cache.move_to_end(directions_key)
         text_authority = self.text_integrity_authority()
         source_authority = self._producer.authority()
-        words = []
-        for observation_id in published.text_observation_ids:
-            word_selector = replace(selector, observation_id=observation_id)
-            source_result = source_authority.resolve(word_selector)
-            record = source_result.observation
-            if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
-                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            if record.page_id != page_id:
-                continue
-            text = text_authority.resolve_text(word_selector)
-            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
-                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
-                continue
-            receipt = text.receipt
-            words.append(dict(id=observation_id, text=text.trusted_text,
-                bbox=receipt.geometry,
-                axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+        store = self._producer._store
+        revision = store.revisions.get(selector.revision_id)
+        snapshot_obj = store.snapshots.get(selector.snapshot_id)
+        text_identity: list[tuple] = []
+        identity_reusable = revision is not None and snapshot_obj is not None
+        if identity_reusable:
+            for observation_id in published.text_observation_ids:
+                key = (selector.snapshot_id, observation_id)
+                record = store.observations.get(key)
+                verified = store.verified_resolution_cache.get(key)
+                fingerprint = store.record_fingerprints.get(key)
+                if (
+                    record is None
+                    or verified is None
+                    or verified[0] is not revision
+                    or verified[1] is not snapshot_obj
+                    or verified[2] is not record
+                    or verified[3] != fingerprint
+                    or any(
+                        (selector.snapshot_id, parent_id) not in store.observations
+                        for parent_id in record.derivation_parent_ids
+                    )
+                ):
+                    identity_reusable = False
+                    break
+                receipt = self._text_integrity_receipts.get(key)
+                text_identity.append((
+                    observation_id, record, record.raw_text, record.geometry, receipt,
+                ))
+        word_key = (selector.source_sha256, selector.snapshot_id, str(page_id))
+        cached_words = self._native_dimension_page_word_cache.get(word_key)
+        if (
+            identity_reusable
+            and cached_words is not None
+            and cached_words[0] == tuple(text_identity)
+        ):
+            words = cached_words[1]
+        else:
+            words = []
+            page_records = text_identity if identity_reusable else None
+            if page_records is None:
+                for observation_id in published.text_observation_ids:
+                    word_selector = replace(selector, observation_id=observation_id)
+                    source_result = source_authority.resolve(word_selector)
+                    record = source_result.observation
+                    if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
+                        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                    if record.page_id != page_id:
+                        continue
+                    text = text_authority.resolve_text(word_selector)
+                    if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                    if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                        continue
+                    receipt = text.receipt
+                    words.append(dict(id=observation_id, text=text.trusted_text,
+                        bbox=receipt.geometry,
+                        axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+            else:
+                for observation_id, record, _raw_text, _geometry, _receipt in page_records:
+                    if record.page_id != page_id:
+                        continue
+                    word_selector = replace(selector, observation_id=observation_id)
+                    text = text_authority.resolve_text(word_selector)
+                    if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                    if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                        continue
+                    receipt = text.receipt
+                    words.append(dict(id=observation_id, text=text.trusted_text,
+                        bbox=receipt.geometry,
+                        axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+                self._native_dimension_page_word_cache[word_key] = (
+                    tuple(text_identity), words,
+                )
+                while len(self._native_dimension_page_word_cache) > 2:
+                    self._native_dimension_page_word_cache.popitem(last=False)
+                self._native_dimension_page_word_cache.move_to_end(word_key)
         # Cache immutable geometry facts only. Every source byte, observation
         # and text receipt above is reauthenticated before even a cache hit.
         # The full authenticated inputs key the cache, not a caller's role or
@@ -2494,6 +2555,26 @@ class SourceVisibilityProducer:
         return updated
 
 
+def _bound_clone_matches(clone, record, snapshot) -> bool:
+    """True when a returned frozen clone still matches the store record.
+
+    snapshot_id and producer_generation are taken from the snapshot being
+    read. Every other field must still equal the stored record, so an
+    object.__setattr__ on the returned clone cannot be served again.
+    """
+    for field in fields(type(clone)):
+        value = getattr(clone, field.name)
+        if field.name == "snapshot_id":
+            if value != snapshot.snapshot_id:
+                return False
+        elif field.name == "producer_generation":
+            if value != snapshot.producer_generation:
+                return False
+        elif getattr(record, field.name) != value:
+            return False
+    return True
+
+
 class SourceVisibilityAuthority:
     """Read-only authority for producer-receipted visible segment observations.
 
@@ -2732,6 +2813,66 @@ class SourceVisibilityAuthority:
                     ids.add(str(observation_id))
         return frozenset(ids)
 
+    def _reusable_visible_rows(
+        self,
+        store,
+        snapshot_id: str,
+        snapshot,
+        published: "PublishedVisibleSourceSnapshot",
+    ):
+        """Return the prior bound rows only while every store object is unchanged.
+
+        A mutated returned clone, a replaced record, or a replaced receipt misses
+        and the caller rebuilds from the store. That keeps the batch exit check
+        able to see a row that was changed after it was first returned.
+        """
+        cached = store.visible_authentication_cache.get(snapshot_id)
+        if cached is None:
+            return None
+        cached_snapshot, identity, rows = cached
+        visible_ids = tuple(str(item) for item in published.visible_observation_ids)
+        if cached_snapshot is not snapshot or len(identity) != len(visible_ids):
+            return None
+        for item, observation_id in zip(identity, visible_ids):
+            key = (snapshot_id, observation_id)
+            record = store.observations.get(key)
+            native = self._visibility_receipts.get(key)
+            raster = self._raster_visibility_receipts.get(key)
+            if record is None or (native is None and raster is None):
+                return None
+            if raster is None:
+                parent = store.observations.get((snapshot_id, native))
+                page_parent = None
+            else:
+                parent = store.observations.get(
+                    (snapshot_id, raster.parent_observation_id)
+                )
+                page_parent = store.observations.get(
+                    (snapshot_id, raster.page_parent_observation_id)
+                )
+            (
+                cached_id, cached_record, cached_native, cached_raster,
+                cached_parent, cached_page_parent,
+            ) = item
+            if (
+                cached_id != observation_id
+                or cached_record is not record
+                or cached_native is not native
+                or cached_raster is not raster
+                or cached_parent is not parent
+                or cached_page_parent is not page_parent
+            ):
+                return None
+        for (observation_id, bound), item in zip(rows, identity):
+            if observation_id != item[0] or not _bound_clone_matches(
+                bound, item[1], snapshot
+            ):
+                return None
+        # Python may return the same tuple from tuple() or a full slice.
+        # Unpacking builds a distinct exit tuple while the bound records stay
+        # shared, so the universe is not cloned again.
+        return (*rows,)
+
     def authenticated_visible_observations(
         self, published: "PublishedVisibleSourceSnapshot"
     ) -> tuple[tuple[str, object], ...]:
@@ -2770,6 +2911,12 @@ class SourceVisibilityAuthority:
             or snapshot.source_sha256 != source_sha256
         ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+
+        reused = self._reusable_visible_rows(
+            store, snapshot_id, snapshot, published
+        )
+        if reused is not None:
+            return reused
 
         def _record(observation_id: str):
             observation_id = str(observation_id)
@@ -2813,6 +2960,7 @@ class SourceVisibilityAuthority:
             return record
 
         rows: list[tuple[str, object]] = []
+        identity: list[tuple] = []
         for observation_id in published.visible_observation_ids:
             observation_id = str(observation_id)
             expected_parent = self._visibility_receipts.get(
@@ -2837,6 +2985,7 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                 parent = _record(expected_parent)
+                page_parent = None
                 if (
                     parent.observation_kind != "native_pdf_segment"
                     or parent.origin_kind != "native"
@@ -2897,7 +3046,20 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
 
-            rows.append((observation_id, _bind_record_to_snapshot(observation, snapshot)))
+            bound = _bind_record_to_snapshot(observation, snapshot)
+            rows.append((observation_id, bound))
+            identity.append((
+                observation_id,
+                observation,
+                expected_parent,
+                raster_receipt,
+                parent,
+                page_parent,
+            ))
+        store.visible_authentication_cache.clear()
+        store.visible_authentication_cache[snapshot_id] = (
+            snapshot, tuple(identity), tuple(rows),
+        )
         return tuple(rows)
 
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
