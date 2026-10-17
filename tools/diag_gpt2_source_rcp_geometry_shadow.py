@@ -336,6 +336,74 @@ def audit_competing_original_rcp_zone_owners(
     }
 
 
+
+
+def _original_ceiling_native_mark_census(words, *, code: str, bbox):
+    """Native p9 word ownership without depending on a stacked PR.
+
+    This is a SOURCE CANDIDATE only. Neither source text integrity nor
+    material occurrence membership is established merely by reading fitz
+    word rectangles. A malformed competing code/address vetoes uniqueness.
+    """
+    if (type(bbox) not in (tuple,list) or len(bbox)!=4
+            or type(code) is not str or not code):
+        raise ValueError("original_rcp_mark_enclosure_invalid")
+    try:
+        x0,y0,x1,y1=(float(v) for v in bbox)
+    except (TypeError,ValueError,OverflowError):
+        raise ValueError("original_rcp_mark_enclosure_invalid") from None
+    if (not all(math.isfinite(v) for v in (x0,y0,x1,y1))
+            or x0>=x1 or y0>=y1):
+        raise ValueError("original_rcp_mark_enclosure_invalid")
+    all_mark_words=[]
+    malformed=0
+    seen=set()
+    duplicate=0
+    for word in words:
+        if len(word)<8 or str(word[4])!=code:
+            continue
+        try:
+            a,b,c,d=(float(v) for v in word[:4])
+            native=tuple(int(v) for v in word[5:8])
+            valid=(
+                all(math.isfinite(v) for v in (a,b,c,d))
+                and a<c and b<d
+                and all(type(v) is int and v>=0 for v in word[5:8])
+            )
+        except (TypeError,ValueError,OverflowError):
+            valid=False
+            a=b=c=d=0.
+            native=()
+        if not valid:
+            malformed+=1
+        elif native in seen:
+            duplicate+=1
+        else:
+            seen.add(native)
+        all_mark_words.append({
+            "original_source_word_address":list(native),
+            "original_source_text_untrusted":code,
+            "original_source_bbox_pdf_pts":[a,b,c,d] if valid else None,
+            "strict_containment_candidate":bool(
+                valid and x0<a and y0<b and c<x1 and d<y1
+            ),
+            "original_native_text_integrity_proven":False,
+            "producer_issued_material_occurrence":False,
+        })
+    inside=[row for row in all_mark_words
+            if row["strict_containment_candidate"]]
+    return {
+        "all_original_same_code_words_in_page":all_mark_words,
+        "in_enclosure_candidates":inside,
+        "malformed_same_code_source_words":malformed,
+        "duplicate_original_mark_addresses":duplicate,
+        "unique_native_code_word_in_enclosure":(
+            len(inside)==1 and malformed==0 and duplicate==0
+        ),
+        "physical_source_ceiling_owner_authenticated":False,
+        "new_firm_quantities":0,
+    }
+
 def audit_original_rcp_mark_in_source_ink_enclosure(
     original_pdf_bytes: bytes, *, expected_sha256: str,
     floor_page_1_based: int, rcp_page_1_based: int,
@@ -352,9 +420,6 @@ def audit_original_rcp_mark_in_source_ink_enclosure(
     """
     from tools.diag_original_room_four_edge_source_ink_shadow import (
         audit_source_enclosure_correspondence,
-    )
-    from tools.diag_original_finish_mark_in_room_ink_shadow import (
-        _native_mark_containment_census,
     )
     import hashlib
     import fitz
@@ -387,7 +452,7 @@ def audit_original_rcp_mark_in_source_ink_enclosure(
     if not (left<right and upper<lower):
         return {**base,"first_failure":"original_rcp_room_source_ink_box_invalid"}
     with fitz.open(stream=original_pdf_bytes,filetype="pdf") as doc:
-        marks=_native_mark_containment_census(
+        marks=_original_ceiling_native_mark_census(
             doc[rcp_page_1_based-1].get_text("words"),
             code=ceiling_code_literal,
             bbox=(left,upper,right,lower),
