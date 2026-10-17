@@ -775,6 +775,36 @@ class SourceObservationProducer:
         while len(self._native_page_decode_cache) > _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES:
             self._native_page_decode_cache.popitem(last=False)
 
+    def _native_page_for_read(
+        self, revision_id: str, source_sha256: str, page_number: int
+    ) -> Optional[_NativePageDecodeCacheEntry]:
+        """The cached native decode, or one fresh decode of the stored source bytes.
+
+        Visibility publication releases its page decodes once the records are
+        stored, so a later reader decodes the exact retained bytes again. The
+        fresh decode is not cached (the release is the memory bound). Missing or
+        mismatched source bytes return None; callers treat that as no decode.
+        """
+
+        cached = self._cached_native_page(source_sha256, page_number)
+        if cached is not None:
+            return cached
+        source_bytes = self._store.source_bytes_by_revision.get(str(revision_id))
+        if source_bytes is None:
+            return None
+        if hashlib.sha256(source_bytes).hexdigest() != str(source_sha256):
+            return None
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception:
+            return None
+        try:
+            if not 1 <= int(page_number) <= int(pdf.page_count):
+                return None
+            return _decode_native_page_for_cache(pdf, int(page_number))
+        finally:
+            pdf.close()
+
     def _retained_source_pdf(self, source_bytes: bytes) -> fitz.Document:
         """Reuse one open document for these exact source bytes.
 

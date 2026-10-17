@@ -526,6 +526,33 @@ def _native_visible_alias(
     )
 
 
+def _native_visible_alias_identity_holds(
+    parent: SourceObservationRecord,
+    visible_id: str,
+    origin_kind: str,
+) -> bool:
+    """True when ``visible_id`` is the id this native record's visible line was issued under.
+
+    A visible id hashes the line's document, revision, page, partition, parent id, geometry and origin kind. The view
+    is built from the parent, so comparing view fields with the parent proves nothing; recomputing the id does: a
+    receipt re-pointed at a different native record, or a parent whose geometry was replaced, yields another id.
+    """
+
+    try:
+        return str(visible_id) == _visible_observation_id(
+            document_id=parent.document_id,
+            revision_id=parent.revision_id,
+            page_id=parent.page_id,
+            partition_id=parent.source_partition_id,
+            primitive_ref=f"visible:{parent.source_primitive_ref}",
+            parent_observation_id=parent.observation_id,
+            geometry=parent.geometry,
+            origin_kind=origin_kind,
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def _canonical_raster_geometry(
     geometry: Sequence[float],
 ) -> tuple[float, float, float, float]:
@@ -3160,6 +3187,10 @@ class SourceVisibilityAuthority:
                     RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
                 ):
                     raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                if not _native_visible_alias_identity_holds(
+                    parent, observation_id, origin_kind
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
                 page_parent = None
                 page_key = str(parent.page_id)
                 if bind_page_id is not None and page_key != str(bind_page_id):
@@ -3291,7 +3322,11 @@ class SourceVisibilityAuthority:
                 )
             )
             parent = parent_result.observation
-            if parent is None or parent_result.status != EvidenceResolutionStatus.CORROBORATED:
+            if parent_result.status != EvidenceResolutionStatus.CORROBORATED:
+                # The visible line is a read view of this native record, so it fails exactly as the stored visible
+                # record used to: a stale revision stays stale_revision, an integrity conflict stays a conflict.
+                return parent_result
+            if parent is None:
                 return self._blocked(OBSERVATION_UNAVAILABLE)
             origin_kind = self._visible_origin_kinds.get(
                 (selector.snapshot_id, selector.observation_id)
@@ -3305,6 +3340,10 @@ class SourceVisibilityAuthority:
                 parent.observation_kind != "native_pdf_segment"
                 or parent.origin_kind != "native"
                 or parent_result.snapshot is None
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
+            if not _native_visible_alias_identity_holds(
+                parent, selector.observation_id, origin_kind
             ):
                 return self._conflict(VISIBILITY_PARENT_MISMATCH)
             observation = _native_visible_alias(

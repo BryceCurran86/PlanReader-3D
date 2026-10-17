@@ -204,4 +204,9 @@ def test_resolve_returns_what_the_replace_based_read_returned(instances):
             assert first.snapshot is not second.snapshot and first.source_revision is not second.source_revision
             assert first.observation is not stored
             checked += 1
-    assert checked > 50
+    # Every stored record of every generation is checked (up to 25 each). The
+    # native visible generation stores no records of its own (its lines are
+    # read views of the native records), so it holds the base id set.
+    assert len(store.snapshots) >= 4
+    assert checked == sum(min(25, len(s.observation_ids)) for s in store.snapshots.values())
+    assert checked > 40
