@@ -51,3 +51,8 @@ def test_untyped_original_ceiling_polygon_abstains_without_raw_exception(source_
     with pytest.raises(SourceClosedRunConflictError, match="ceiling polygon"):
         _bbox(source_ring)
 
+
+
+def test_extremely_large_integer_ceiling_coordinate_is_safe_abstention():
+    with pytest.raises(SourceClosedRunConflictError, match="ceiling polygon"):
+        _bbox(((0, 0), (10**1000, 0), (1, 1), (0, 1)))
