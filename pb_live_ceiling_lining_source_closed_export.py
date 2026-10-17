@@ -25,6 +25,57 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _original_ceiling_simple_bbox(
+    points: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    *,
+    quantity_id: str,
+) -> tuple[float, float, float, float]:
+    """Negative geometry veto only; no ceil finish or source area derived."""
+    def finite_source_coordinate(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    if type(points) not in (tuple, list) or len(points) < 3 or any(
+        type(p) not in (tuple, list) or len(p) != 2 or
+        any(not finite_source_coordinate(v) for v in p)
+        for p in points
+    ):
+        raise SourceClosedRunConflictError(
+            f"canonical ceiling polygon is invalid: {quantity_id}"
+        )
+    ring = tuple((float(p[0]), float(p[1])) for p in points)
+    # Genuine PDF polygons may close on the first vertex; other repeated
+    # interior vertices, crossed source paths and zero-area rings cannot
+    # authorize an actual ceiling surface.
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring = ring[:-1]
+    if len(ring) < 3 or len(set(ring)) != len(ring):
+        raise SourceClosedRunConflictError(
+            f"canonical ceiling polygon is not a simple physical zone: {quantity_id}"
+        )
+    from shapely.errors import GEOSException
+    from shapely.geometry import Polygon
+    try:
+        polygon = Polygon(ring)
+        valid = (
+            polygon.is_valid and polygon.exterior.is_simple
+            and math.isfinite(polygon.area) and polygon.area > 0.0
+        )
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"canonical ceiling polygon GEOS geometry invalid: {quantity_id}"
+        ) from exc
+    if not valid:
+        raise SourceClosedRunConflictError(
+            f"canonical ceiling polygon is not a simple physical zone: {quantity_id}"
+        )
+    return polygon.bounds
+
+
 def build_live_ceiling_lining_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -267,7 +318,9 @@ def build_live_ceiling_lining_source_traces(
             raise SourceClosedRunConflictError(
                 f"canonical ceiling polygon is invalid: {quantity.quantity_id}"
             )
-        source_bbox = (min(xs), min(ys), max(xs), max(ys))
+        source_bbox = _original_ceiling_simple_bbox(
+            checked, quantity_id=quantity.quantity_id
+        )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
