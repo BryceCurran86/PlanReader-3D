@@ -218,6 +218,9 @@ def _synthetic_published_suite_copy():
         (project, str(i)): {
             "state": "MATCHED_WITHIN_TOLERANCE"
             if project == "synthetic-lot16" and i < 3 else "MISSED",
+            "produced_quantity_id": (f"synthetic-signed-q-{i}"
+                                     if project == "synthetic-lot16" and i < 3
+                                     else None),
         }
         for project, n in sizes for i in range(n)
     }
@@ -264,6 +267,25 @@ def test_published_score_copy_rejects_advertised_accuracy_without_evaluator_pari
     with pytest.raises(ValueError):
         ledger._require_published_suite_summary_parity(report, official, rows)
 
+
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda x: x[("synthetic-lot16", "1")].update(
+        produced_quantity_id=x[("synthetic-lot16", "0")]["produced_quantity_id"]),
+    lambda x: x[("synthetic-laurel", "0")].update(
+        state="UNRESOLVED", produced_quantity_id="synthetic-signed-q-0"),
+    lambda x: x[("synthetic-laurel", "0")].update(
+        state="UNRESOLVED", produced_quantity_id=123),
+    lambda x: x[("synthetic-lot16", "0")].update(produced_quantity_id=None),
+    lambda x: x[("synthetic-laurel", "0")].update(
+        state="MISSED", produced_quantity_id="synthetic-forged-extra"),
+])
+def test_published_score_parity_rejects_reused_or_untyped_quantity_id(tamper):
+    report, official, rows = _synthetic_published_suite_copy()
+    tamper(rows)
+    with pytest.raises(ValueError, match="identity"):
+        ledger._require_published_suite_summary_parity(report, official, rows)
 
 def test_equal_suite_totals_cannot_hide_offsetting_two_project_match_errors():
     report, official, rows = _synthetic_published_suite_copy()
