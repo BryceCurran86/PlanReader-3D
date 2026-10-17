@@ -35,6 +35,15 @@ jobs:
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
           echo "$SHA  $PDF" | sha256sum --check
-          python -m pytest -q tests/test_gpt2_original_raw_operator_text_clip_source.py tests/test_gpt2_symbol_source_optin_native_word_integrity.py
+          python -m pytest -q --tb=short tests/test_gpt2_original_raw_operator_text_clip_source.py tests/test_gpt2_symbol_source_optin_native_word_integrity.py 2>&1 | tee /tmp/gpt2-original-clip-tests.txt
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
+
+      - name: Capture sanitized source test failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-source-clip-test-report
+          path: /tmp/gpt2-original-clip-tests.txt
+          if-no-files-found: ignore
+          retention-days: 3
