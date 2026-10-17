@@ -27,6 +27,7 @@ class DocumentedPhysicalOpeningFrame:
     source_sha256: str
     revision_id: str
     page_id: str
+    original_dimension_basis: str = ""
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,11 @@ def measure_source_figured_opening_reveals_shadow(
         return block("original_opening_reveal_record_untrusted")
     if opening.source_opening_kind not in ("door","window"):
         return block("original_opening_reveal_semantic_kind_unavailable")
+    if opening.original_dimension_basis not in (
+        "source_structural_rough_opening",
+        "source_physical_clear_aperture",
+    ):
+        return block("original_opening_reveal_dimensional_basis_unavailable")
     identity=(opening.physical_opening_id,opening.physical_host_wall_id,
               opening.source_sha256,opening.revision_id,opening.page_id,
               opening.source_width_dimension_id,opening.source_height_dimension_id,
