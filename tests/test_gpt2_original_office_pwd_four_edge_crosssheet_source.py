@@ -24,7 +24,7 @@ PWD={
 }
 
 
-@pytest.mark.parametrize("pair,expected_gap",[(OFFICE,60.24),(PWD,64.08)])
+@pytest.mark.parametrize("pair,expected_gap",[(OFFICE,60.24),(PWD,59.52)])
 def test_exact_original_crosssheet_room_ink_positive_door_gaps_unclosed(pair,expected_gap):
     source=SOURCE.read_bytes()
     assert hashlib.sha256(source).hexdigest()==SHA
@@ -34,6 +34,8 @@ def test_exact_original_crosssheet_room_ink_positive_door_gaps_unclosed(pair,exp
     assert len(receipt["original_witnesses"])==4
     opening=receipt["original_top_gap_pdf_pts"]
     assert round(opening[1][0]-opening[0][0],2)==expected_gap
+    expected_anchor="right" if pair is OFFICE else "left"
+    assert receipt["original_top_partial_wall_anchor"]==expected_anchor
     assert receipt["original_top_gap_is_a_door_without_jamb_proof"] is False
     assert receipt["canonical_cross_sheet_physical_room_equality_granted"] is False
     assert receipt["source_finished_face_and_area_verified"] is False
