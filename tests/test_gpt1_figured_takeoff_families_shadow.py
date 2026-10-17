@@ -58,7 +58,10 @@ def test_figured_wall_gross_net_opening_and_skirting():
         ("host-evidence",),("frame-evidence",),SHA,"rev","7",
         published_original_opening_area_m2=2.1,
     )
-    measured=measure_figured_wall_lining_shadow(ring,metric(),heights,(door,))
+    backed=replace(metric(),
+                   source_side_ids=tuple(f"side-{i}" for i in range(4)),
+                   source_segment_ids=tuple(f"ink-{i}" for i in range(4)))
+    measured=measure_figured_wall_lining_shadow(ring,backed,heights,(door,))
     assert measured.status is Status.CANDIDATE
     assert measured.candidate_perimeter_m==30.0
     assert measured.candidate_gross_lining_m2==90.0
@@ -223,6 +226,9 @@ def test_hosted_opening_cannot_deduct_without_existing_source_signed_area():
         ("host-evidence",),("frame-evidence",),SHA,"rev","7",
     )
     for candidate in (baseline,replace(baseline,published_original_opening_area_m2=1.5)):
-        result=measure_figured_wall_lining_shadow(ring,metric(),heights,(candidate,))
+        backed=replace(metric(),
+                       source_side_ids=tuple(f"side-{i}" for i in range(4)),
+                       source_segment_ids=tuple(f"ink-{i}" for i in range(4)))
+        result=measure_figured_wall_lining_shadow(ring,backed,heights,(candidate,))
         assert result.status is Status.ABSTAINED
         assert result.candidate_net_lining_m2 is None
