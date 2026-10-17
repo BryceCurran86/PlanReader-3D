@@ -22,7 +22,7 @@ def _source(*, with_second_page: bool = True) -> bytes:
         plan = doc.new_page(width=595, height=842)
         plan.insert_text(
             (30, 80),
-            "UPPER LIVING AREA:\\n42.75m2\\nGARAGE AREA: 18.50m2\\nTOTAL FLOOR AREA: 61.25m2",
+            "UPPER LIVING AREA:\n42.75m2\nGARAGE AREA: 18.50m2\nTOTAL FLOOR AREA: 61.25m2",
             fontsize=10,
         )
         if with_second_page:
