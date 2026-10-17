@@ -12,6 +12,7 @@ def _floor(points):
 def test_closed_rectangle_and_simple_concave_source_ring_keep_source_extent():
     rect=((0,0),(10,0),(10,5),(0,5))
     assert _source_bbox(_floor(rect)) == (0,0,10,5)
+    assert _source_bbox(_floor(rect + (rect[0],))) == (0,0,10,5)
     concave=((0,0),(8,0),(8,3),(3,3),(3,7),(0,7))
     assert _source_bbox(_floor(concave)) == (0,0,8,7)
 
