@@ -450,6 +450,7 @@ def extract_unbound_component_areas_from_original_pdf(
             # cropbox, not the rotated display page.rect, bounds visible
             # source text. This remains only a negative eligibility check.
             cropbox = page.cropbox
+            original_words = tuple(page.get_text("words"))
             for block_index, block in enumerate(page.get_text("blocks")):
                 if (
                     not isinstance(block, (tuple, list))
@@ -481,10 +482,16 @@ def extract_unbound_component_areas_from_original_pdf(
                     source_sha256=expected_source_sha256.lower(),
                     revision_id=revision_id,
                 )
-                candidates.extend(
-                    replace(row, source_text_bbox_pdf_pts=bbox)
-                    for row in rows
-                )
+                for row in rows:
+                    addresses = _native_area_word_addresses(original_words, block_index, row)
+                    if addresses is None:
+                        continue
+                    labels, values = addresses
+                    candidates.append(replace(
+                        row, source_text_bbox_pdf_pts=bbox,
+                        source_label_word_addresses=labels,
+                        source_value_word_addresses=values,
+                    ))
     finally:
         document.close()
     return tuple(candidates)
