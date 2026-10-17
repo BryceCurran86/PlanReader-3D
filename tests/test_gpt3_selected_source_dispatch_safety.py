@@ -16,7 +16,7 @@ def _job(name: str) -> str:
     assert text.count(marker) == 1
     import re
     tail = text.split(marker, 1)[1]
-    next_job = re.search(r"(?m)^  [a-z][a-z0-9_-]*:\\s*$", tail)
+    next_job = re.search(r"(?m)^  [a-z][a-z0-9_-]*:\s*$", tail)
     return tail[:next_job.start()] if next_job else tail
 
 
