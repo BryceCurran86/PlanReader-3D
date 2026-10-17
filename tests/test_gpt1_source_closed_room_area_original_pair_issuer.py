@@ -48,3 +48,15 @@ def test_invalid_original_figured_pair_receipt_cannot_seal():
     source=replace(_original("a",("h","v")),metadata={"figured_dimension_ids":["same","same"]})
     with pytest.raises(SourceClosedRunConflictError,match="figured pair invalid"):
         _firm_room_area_quantities(_claim(source))
+
+
+def test_same_original_pair_cannot_reissue_second_quantity_to_same_room():
+    original=_original("a",("h-original","v-original"))
+    duplicate=replace(
+        original,
+        quantity_id="room-area-a-reissued",
+        evidence_ids=("new-area-observation-id",),
+    )
+    for order in ((original,duplicate),(duplicate,original)):
+        with pytest.raises(SourceClosedRunConflictError,match="second room-area quantity"):
+            _firm_room_area_quantities(_claim(*order))
