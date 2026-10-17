@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -223,6 +224,29 @@ def build_selected_two_project_development_evidence(
     if len(set(project_ids)) != 2:
         raise ValueError("two selected projects cannot reuse one source identity")
 
+    # The unchanged frozen V2 evaluator partitions EVERY eligible item
+    # into exactly one of five states. Do not aggregate a manipulated copy
+    # whose numerator, denominator or unsupported-extra fields disagree.
+    states = ("matched_within_tolerance", "matched_outside_tolerance",
+              "missed", "partial", "unresolved")
+    for project in projects:
+        for name in ("denominator", "unsupported_extra", *states):
+            value = project.get(name)
+            if type(value) is not int or value < 0:
+                raise ValueError("selected project has malformed exact scorer counts")
+        denominator = project["denominator"]
+        if denominator == 0 or sum(project[name] for name in states) != denominator:
+            raise ValueError("selected project target states do not partition frozen denominator")
+        for field, expected in (
+            ("coverage_accuracy", project["matched_within_tolerance"] / denominator),
+            ("precision_adjusted_accuracy", project["matched_within_tolerance"] /
+             (denominator + project["unsupported_extra"])),
+        ):
+            actual = project.get(field)
+            if type(actual) not in (float, int) or not math.isfinite(actual) or (
+                not math.isclose(actual, expected, rel_tol=0, abs_tol=1e-12)
+            ):
+                raise ValueError("selected project copied scoring percentage disagrees with item counts")
     seen_quantities: set[str] = set()
     for project in projects:
         ids = project["customer_quantity_ids"]
