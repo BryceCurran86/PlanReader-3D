@@ -317,6 +317,8 @@ def audit_original_ft2_internal_wall_face_basis(
         "source_FT2_floor_finish_m2_signed":None,
         "new_firm_quantities":0,
     }
+    if type(original_face_rivals) is not dict or type(original_dimension_chains) is not dict:
+        return base
     mark=original_face_rivals.get("original_room_and_finish_mark_candidates")
     if (type(mark) not in (list,tuple) or len(mark)!=2
             or mark[0].get("original_literal_untrusted")!="PWD"
