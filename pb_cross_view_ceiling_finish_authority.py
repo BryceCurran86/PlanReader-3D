@@ -348,7 +348,12 @@ def _definition_is_ceiling_finish(
     # such as SIGNAGE-CONTRACTOR; tokenize semantics without source guessing.
     import re
     role_tokens = set(re.findall(r"[a-z]+", original_material_text))
-    if {"signage", "cladding"} <= role_tokens:
+    # Exterior wall, facade and fascia cladding are independently printed
+    # non-ceiling material roles too; never let a stale ceiling-grid semantic
+    # turn these into square metres of internal suspended ceiling.
+    if "cladding" in role_tokens and role_tokens.intersection(
+        {"signage", "wall", "facade", "fascia"}
+    ):
         return False
     # The semantic family must still come from a non-empty authenticated
     # schedule meaning. The occurrence's authenticated RCP viewport supplies
