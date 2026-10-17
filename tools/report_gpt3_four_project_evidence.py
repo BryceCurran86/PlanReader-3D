@@ -97,7 +97,7 @@ def _json_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
+def _json_customer_rows(path: Path, *, allow_manual: bool = False) -> list[dict[str, Any]]:
     value = _read_json_without_duplicate_keys(path)
     if type(value) is not list or any(type(row) is not dict for row in value):
         raise ValueError("customer projection must be a JSON array of objects")
@@ -109,7 +109,8 @@ def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
     # enter the machine-bijection denominator. Retain the verifier's strict
     # provenance rejection for damaged automated rows, never infer their ID.
     if any(not _customer_quantity_id(row) and (
-        "quantity_id" in row or row.get("commercial_projection_provenance") is not None
+        not allow_manual or "quantity_id" in row
+        or row.get("commercial_projection_provenance") is not None
     ) for row in value):
         raise ValueError("automated customer row lacks canonical quantity identity")
     return value
@@ -312,7 +313,7 @@ def build_four_project_evidence_ledger(
                 or set(mapping.source_sha256s) != actual_hashes
             ):
                 raise ValueError("source envelope or project identity mismatch")
-            customer_rows = _json_customer_rows(customer_path)
+            customer_rows = _json_customer_rows(customer_path, allow_manual=True)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
             _enforce_mapped_production_family_trade(manifest, sealed, mapping)
