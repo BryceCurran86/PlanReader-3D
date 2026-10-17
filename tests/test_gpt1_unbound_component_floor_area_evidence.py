@@ -14,6 +14,7 @@ from pb_explicit_floor_area_evidence import (
     DECLARED_FLOOR_AREA_BINDING,
     extract_declared_component_floor_areas,
     extract_explicit_floor_area_evidence,
+    extract_unbound_total_from_component_area_text_block,
     reconcile_declared_component_area_total,
 )
 
@@ -224,3 +225,58 @@ def test_source_page_and_sha_agreement_are_independent_of_numeric_sum():
     assert reconcile_declared_component_area_total(
         rows, replace(total, source_pages=(3, 4))
     ) == ()
+
+
+
+def test_same_native_block_aggregate_source_is_separately_unbound_and_reconciles():
+    raw = (
+        "COURTYARD AREA:\n12.75m2\n"
+        "HALL AREA: 3.25m²\nTOTAL FLOOR AREA: 16.00m2"
+    )
+    components = _parse(raw)
+    total = extract_unbound_total_from_component_area_text_block(
+        raw,
+        source_page=3,
+        source_block_id="native-block-1",
+        source_sha256=SOURCE_SHA,
+        revision_id="source-revision-1",
+    )
+    assert total is not None
+    assert total.source_block_id == "native-block-1"
+    assert total.binding == "unbound"
+    assert len(components) == 2
+    assert len(reconcile_declared_component_area_total(components, total)) == 2
+    assert not hasattr(total, "quantity_id")
+
+
+def test_aggregate_from_different_native_block_cannot_reconcile_identical_sum():
+    raw = "COURTYARD AREA: 12.75m2\nHALL AREA: 3.25m2"
+    components = _parse(raw)
+    other = extract_unbound_total_from_component_area_text_block(
+        "TOTAL FLOOR AREA: 16.00m2",
+        source_page=3,
+        source_block_id="another-original-text-block",
+        source_sha256=SOURCE_SHA,
+        revision_id="source-revision-1",
+    )
+    assert other is not None
+    assert reconcile_declared_component_area_total(components, other) == ()
+
+
+@pytest.mark.parametrize("bad", [
+    "TOTAL FLOOR AREA: 16.0m2\nTOTAL FLOOR AREA: 16.0m2",
+    "TOTAL FLOOR AREA: 16.0m2\nTOTAL FLOOR AREA: 18.0m2",
+    "TOTAL FLOOR AREA: 16.0 sqft",
+    "TOTAL FLOOR AREA: -16.0m2",
+    "TOTAL FLOOR AREA: 16.0",
+    "TOTAL SITE AREA: 16.0m2",
+    "FLOOR AREA: 16.0m2",
+])
+def test_ambiguous_or_unscoped_aggregate_is_not_a_physical_area(bad):
+    assert extract_unbound_total_from_component_area_text_block(
+        bad,
+        source_page=3,
+        source_block_id="native-block-1",
+        source_sha256=SOURCE_SHA,
+        revision_id="source-revision-1",
+    ) is None
