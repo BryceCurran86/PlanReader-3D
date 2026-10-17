@@ -83,6 +83,10 @@ def test_unchanged_records_are_shared_objects_across_generations(chain) -> None:
         for observation_id in snapshot.observation_ids:
             key = (snapshot.snapshot_id, observation_id)
             assert key in store.observations and key in store.record_fingerprints
+    # Storage is one object per observation, not one copy per generation.
+    assert store.observations.stored_entry_count() == len(distinct_ids)
+    assert store.record_fingerprints.stored_entry_count() == len(distinct_ids)
+    assert len(store.observations) == sum(len(snapshot.observation_ids) for snapshot in snapshots)
 
 
 def test_every_read_matches_what_a_per_generation_clone_returned(chain) -> None:

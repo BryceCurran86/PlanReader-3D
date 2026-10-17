@@ -72,6 +72,7 @@ from pb_source_observation_authority import (
     SourceObservationProducer,
     SourceObservationRecord,
     SourceRevisionRecord,
+    committed_record_is_trusted,
 )
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
@@ -2928,7 +2929,7 @@ class SourceVisibilityAuthority:
                 raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
             expected = store.record_fingerprints.get(key)
             cached = store.verified_resolution_cache.get(key)
-            if not (
+            cache_hit = (
                 expected is not None
                 and cached is not None
                 and cached[0] is revision
@@ -2939,6 +2940,9 @@ class SourceVisibilityAuthority:
                     (snapshot_id, parent_id) in store.observations
                     for parent_id in record.derivation_parent_ids
                 )
+            )
+            if not cache_hit and not committed_record_is_trusted(
+                store, snapshot_id, record, expected
             ):
                 resolved = self._source_authority.resolve(
                     ObservationSelector(
