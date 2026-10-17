@@ -121,6 +121,11 @@ def audit_source_enclosure_correspondence(
             "status":"original_four_edge_ink_correspondence_with_unclosed_doorway",
             "original_floor_page_id":floor_page_1_based,
             "original_finish_page_id":finish_page_1_based,
+            # Every positive candidate carries its immutable original source
+            # root. Path-item IDs are sheet-local and cannot be joined to
+            # similarly numbered paths in an independently issued PDF.
+            "original_source_sha256":expected_sha256,
+            "source_original_page_pair_ids":[floor_page_1_based,finish_page_1_based],
             "source_translation_candidate_pdf_pts":list(expected_translation_pdf_pts),
             "original_witnesses":pairs,
             "original_top_gap_pdf_pts":[[x_left,y_top],[top[0][0],y_top]],
