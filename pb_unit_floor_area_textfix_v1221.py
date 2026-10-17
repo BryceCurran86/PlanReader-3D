@@ -26,29 +26,31 @@ def extract_unit_area_candidates(text: Any) -> List[Dict[str, Any]]:
         # Prefer the label line and the lines that belong to this unit until the
         # next unit starts. This is how most schedules/plan annotations read.
         forward_end = min(next_idx, idx + 4)
-        candidates = list(range(idx, forward_end))
-        # If an unusual schedule puts area immediately before the unit label,
-        # search backwards second, but never cross the previous unit label.
+        # A neighbouring unit's area is outside this span. Look backward only
+        # when this unit's own lines contain no area.
         backward_start = max(previous_idx + 1, idx - 3)
-        candidates.extend(range(idx - 1, backward_start - 1, -1))
 
-        area = 0.0
-        source = lines[idx]
-        for line_idx in candidates:
-            if not (0 <= line_idx < len(lines)):
-                continue
-            match = auto._AREA_RE.search(lines[line_idx])
-            if not match:
-                continue
-            value = auto._num(match.group(1))
-            if 8.0 <= value <= 1000.0:
-                area = value
-                source = lines[line_idx]
-                break
+        def _areas_at(indexes: List[int]) -> List[tuple]:
+            found: List[tuple] = []
+            for line_idx in indexes:
+                if not (0 <= line_idx < len(lines)):
+                    continue
+                for match in auto._AREA_RE.finditer(lines[line_idx]):
+                    value = auto._num(match.group(1))
+                    if 8.0 <= value <= 1000.0:
+                        found.append((round(value, 2), lines[line_idx]))
+            return found
 
+        forward = list(range(idx, forward_end))
+        areas = _areas_at(forward)
+        if not areas:
+            areas = _areas_at(list(range(idx - 1, backward_start - 1, -1)))
+        distinct = {value for value, _source in areas}
         key = str(label).lower()
-        if area > 0 and key not in used:
-            out.append({"label": label, "area_m2": round(area, 2), "confidence": "Documented", "source": source})
+        if len(distinct) == 1 and key not in used:
+            area = next(iter(distinct))
+            source = next(item_source for value, item_source in areas if value == area)
+            out.append({"label": label, "area_m2": area, "confidence": "Documented", "source": source})
             used.add(key)
     return out
 
