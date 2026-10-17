@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Public CI verifies code and source integrity but never needs a write token.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -20,6 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Source-only PRs must not publish original customer PDFs. Run before
       # dependency installation, independent of benchmark separation checks.
