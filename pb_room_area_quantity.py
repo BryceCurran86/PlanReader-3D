@@ -544,6 +544,25 @@ def build_room_area_quantities(
             duplicate_ids.add(room.room_ref)
         seen_ids.add(room.room_ref)
         rings.setdefault(_canonical_ring(room.polygon_pdf_pts), []).append(room.room_ref)
+    # One original figured area atom may describe at most one physical
+    # room. Different polygons or labels do not create independent source
+    # measurements when both reuse an identical evidence_id.
+    area_owners_by_evidence: dict[str, set[str]] = {}
+    for room in rooms:
+        owned = explicit.get(room.room_ref)
+        if (
+            type(owned) is EvidenceAtom
+            and type(owned.evidence_id) is str
+            and owned.evidence_id
+        ):
+            area_owners_by_evidence.setdefault(owned.evidence_id, set()).add(
+                room.room_ref
+            )
+    disputed_area_owners = set().union(*(
+        owners for owners in area_owners_by_evidence.values()
+        if len(owners) > 1
+    )) if area_owners_by_evidence else set()
+
     duplicate_face_ids: set[str] = set()
     for ids in rings.values():
         if len(ids) <= 1:
@@ -587,6 +606,8 @@ def build_room_area_quantities(
             blockers.append("duplicate_room_identity")
         if room.room_ref in duplicate_face_ids:
             blockers.append("duplicate_room_face")
+        if room.room_ref in disputed_area_owners:
+            blockers.append("original_area_evidence_owned_by_multiple_rooms")
         if blockers:
             output.append(
                 _abstention(
