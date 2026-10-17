@@ -158,6 +158,7 @@ class GPT2OriginalSourceGeometryBridge:
         original_floor_door_word_address: tuple[int,int,int],
         original_detail_door_word_address: tuple[int,int,int],
         room_literal: str, door_literal: str,
+        original_detail_finish_code_literal: str,
     ) -> dict:
         """Original figure + true source face families + named plan caption.
 
@@ -192,6 +193,8 @@ class GPT2OriginalSourceGeometryBridge:
             original_detail_figure_face_receipt=rivals,
             source_room_literal=room_literal,
             original_door_code_literal=door_literal,
+            original_detail_finish_code_literal=
+                original_detail_finish_code_literal,
         )
         return {
             **result,
