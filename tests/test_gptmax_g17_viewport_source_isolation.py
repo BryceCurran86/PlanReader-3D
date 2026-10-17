@@ -22,8 +22,8 @@ def test_opening_local_family_separation_applies_to_every_viewport():
 
 def test_all_new_families_are_supplemental_not_original_viewport_walls():
     canonical=[{"id":"native:original-segment-1","source_observation_id":"n1"}]
-    ink=[
-        {"id":f"visible:raster_segment:image:{ver}:full:0",
+    # The wall producer consumes primitive IDs after stripping the `visible:`\n    # wrapper from independently verified source-visible receipts.\n    ink=[
+        {"id":f"raster_segment:image:{ver}:full:0",
          "source_observation_id":f"s{i}"}
         for i,ver in enumerate((
             UNCHANGED_BAND_IDENTITY_VERSION,
