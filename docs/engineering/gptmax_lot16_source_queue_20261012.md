@@ -3,8 +3,11 @@
 Original PDF SHA `10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844`.
 The source-stage run authenticates all source pages with geometry selected on
 page 3. This is an evidence checkpoint, not sealed output or reconciliation.
-Machine-readable exact source/canonical identities and receipts:
-`gptmax_lot16_source_evidence_checkpoint_20261012.json`.
+Exact source/canonical identities and the full original-source evidence ledger
+are retained only in the authorized private source workspace. The original
+checkpoint has been untracked from this public branch; source SHA and the
+non-promotional audit conclusions below remain for reproducibility. Public
+Git history may still contain the old ledger until separately remediated.
 
 ## Verified integration and current shadow
 
