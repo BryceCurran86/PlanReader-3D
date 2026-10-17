@@ -59,6 +59,8 @@ def test_figured_wall_gross_net_opening_and_skirting():
         "door-1","side-0",1000,2100,"signed-void-1",
         ("host-evidence",),("frame-evidence",),SHA,"rev","7",
         published_original_opening_area_m2=2.1,
+        host_axis_start_mm=0,host_axis_end_mm=1000,
+        original_host_axis_witness_ids=("wall-axis-start","wall-axis-end"),
     )
     backed=replace(metric(),
                    source_side_ids=tuple(f"side-{i}" for i in range(4)),
