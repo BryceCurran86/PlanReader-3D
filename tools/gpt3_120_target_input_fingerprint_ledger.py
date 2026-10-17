@@ -82,11 +82,26 @@ def _stable_owner_evidence(receipt: Mapping[str, Any] | None) -> dict | None:
         stable_files.append((path, sha))
     if len({row[0] for row in stable_files}) != len(stable_files):
         raise ValueError("duplicate source/sealed artifact in owner receipt")
+    handoffs = receipt.get("project_handoffs")
+    if type(handoffs) is not list:
+        raise ValueError("owner machine handoff status universe unavailable")
+    dispositions = {"COMPLETED", "TIMEOUT", "MEMORY_LIMIT",
+                    "SYSTEM_MEMORY_GUARD", "ERROR", "FAILED"}
+    for row in handoffs:
+        if type(row) is not dict or row.get("status") not in dispositions:
+            raise ValueError("unrecognized owner source production disposition")
+        code = row.get("exit_code")
+        if (
+            (row["status"] == "COMPLETED" and (type(code) is not int or code != 0))
+            or (row["status"] != "COMPLETED" and code is not None
+                and (type(code) is not int or code == 0))
+        ):
+            raise ValueError("owner source completion and process exit code conflict")
     return {
         "repo_head": receipt.get("repo_head"),
         "handoff_results": sorted(
             (row["project_id"], row["status"], row.get("exit_code"))
-            for row in receipt["project_handoffs"]
+            for row in handoffs
         ),
         "source_preflight_and_sealed_artifact_hashes": sorted(stable_files),
     }
