@@ -205,7 +205,9 @@ def compare_opening_source_correspondence(original_packets,alternate_packets):
         rows=[r for r in lineage["observations"] if r["observation_id"] in roots]
         if len(rows)!=len(roots):
             return None
-        return (packet["physical_opening"]["source_sha256"],packet["page_id"],tuple(sorted(
+        return (packet["physical_opening"]["document_id"],
+                packet["physical_opening"]["revision_id"],
+                packet["physical_opening"]["source_sha256"],packet["page_id"],tuple(sorted(
             (r["observation_kind"],r["source_primitive_ref"],tuple(r["geometry"])) for r in rows)))
     old={p["packet_id"]:signature(p) for p in original_packets}
     relationships=[]
