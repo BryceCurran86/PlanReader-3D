@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "One coordinated run: full, focused public tests, or unpublished V2 readiness"
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - focused
+          - readiness
 
 # Public CI verifies code and source integrity but never needs a write token.
 permissions:
@@ -15,7 +26,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Required CI / test check name remains unchanged for every PR and
+  # main push. Manual focused/readiness verification does NOT replace it.
   test:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'full' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -121,3 +135,96 @@ jobs:
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)
         run: python tests/ci_smoke.py
+
+
+  # Public, source-neutral verification in ONE runner rather than separate
+  # paid matrices for each agent. Deliberately MANUAL only: this does not
+  # generate a second automatic CI run on every push or PR.
+  focused:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.suite == 'focused' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install source-neutral test dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Frozen truth, production isolation and Python syntax
+        run: |
+          set -euo pipefail
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+          python -m compileall -q scripts tools
+          ruff check --select F821,F823 scripts tools
+      - name: Run selected independent agent and scoring guards together
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q \
+            tests/test_gpt3_120_target_input_fingerprint_ledger.py \
+            tests/test_full_plan_v2_readiness_report.py \
+            tests/test_opening_host_source_candidate_witness.py \
+            tests/test_gpt3_four_project_evidence.py \
+            tests/test_ci_coordinated_entrypoint.py
+      - name: Label limited scope accurately
+        run: |
+          echo '### Focused public CI (not the required full check)' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Source-neutral tests only; no original PDFs, production score, or full-suite approval.' >> "$GITHUB_STEP_SUMMARY"
+
+  # This deliberately executes NO V2 evaluator and never produces a number
+  # for missing private original PDFs or unsealed project runs.
+  readiness:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.suite == 'readiness' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Report true frozen 120-item source and signed-production gates
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unavailable-produced"
+          python scripts/report_full_plan_v2_readiness.py \
+            --produced-root "$RUNNER_TEMP/unavailable-produced" \
+            --output "$RUNNER_TEMP/full-plan-v2-readiness.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          report=json.loads((Path(os.environ["RUNNER_TEMP"])/"full-plan-v2-readiness.json").read_text())
+          assert report["publication_status"] == "UNPUBLISHED"
+          assert report["score_claim"] is False
+          assert report["required_project_count"] == 4
+          projects = report["projects"]
+          assert len(projects) == 4
+          assert sum(p["denominator"] for p in projects) == 120
+          assert all(p["coverage_accuracy"] is None for p in projects)
+          assert all(p["precision_adjusted_accuracy"] is None for p in projects)
+          lines = [
+              "### Four-project V2 readiness — UNPUBLISHED",
+              "Frozen denominator: 120 (27 + 63 + 24 + 6).",
+              "No source PDF, customer seal, or signed identity map is fabricated or uploaded.",
+              "This branch has NOT executed a complete original-source production run.",
+              "| Project | Eligible | First source/production blocker |",
+              "|---|---:|---|",
+          ]
+          for p in projects:
+              first = p["first_failing_authority_stage"]
+              reason = p["first_failing_authority_reason"]
+              lines.append(f'| {p["project_id"]} | {p["denominator"]} | {first}: {reason} |')
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(lines)+"\n")
+          print("\n".join(lines))
+          PY
