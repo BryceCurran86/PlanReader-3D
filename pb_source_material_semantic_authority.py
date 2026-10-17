@@ -1887,6 +1887,15 @@ class SourceMaterialSemanticProducer:
             "snapshot_id": str(published.snapshot.snapshot_id),
         }
         decoded_pages = {int(value) for value in published.coverage.decoded_pages}
+        # A caller-specified source schedule cannot silently disappear from
+        # the immutable PDF revision's published coverage. It is not a
+        # legitimate "schedule contains zero finishes" observation.
+        if (
+            self._source_native_schedule_page_ids
+            and not {int(p) for p in self._source_native_schedule_page_ids}
+            <= decoded_pages
+        ):
+            raise ValueError("original_schedule_page_outside_published_source_coverage")
         raw_definitions: dict[str, list[dict[str, object]]] = {}
         drawing_viewports: list[
             tuple[int, SegmentedViewport, tuple[_TrustedTextWord, ...]]
