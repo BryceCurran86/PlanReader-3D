@@ -412,21 +412,13 @@ def _validate_area_quantity(
     if _clean(meta.get("viewport_id")) != viewport.viewport_id:
         blockers.append("upstream_area_coordinate_frame_mismatch")
     raw_area_page = meta.get("page_no")
-    if type(raw_area_page) not in (int, str) or (
-        isinstance(raw_area_page, str) and (
-            not raw_area_page or raw_area_page != raw_area_page.strip()
-            or not raw_area_page.isdecimal()
-        )
-    ):
+    # Upstream area metadata is issued by an original page-scoped quantity
+    # producer, never by a display string or a numerically coerced page alias.
+    # This protects the already-FIRM area input to provisional ceiling m².
+    if type(raw_area_page) is not int or raw_area_page <= 0:
         blockers.append("upstream_area_page_unbound")
-    else:
-        try:
-            area_page = int(raw_area_page)
-        except (TypeError, ValueError, OverflowError):
-            blockers.append("upstream_area_page_unbound")
-        else:
-            if area_page != _original_page_no_or_none(page_no):
-                blockers.append("upstream_area_page_mismatch")
+    elif raw_area_page != _original_page_no_or_none(page_no):
+        blockers.append("upstream_area_page_mismatch")
 
     blockers.extend(
         _base_context_blockers(
