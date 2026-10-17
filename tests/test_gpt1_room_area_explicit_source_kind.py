@@ -32,3 +32,28 @@ def test_unrelated_source_dimension_or_finish_cannot_publish_plain_room_area(for
     q=_quantity(fake)
     assert q.abstained
     assert "explicit_area_source_kind_mismatch" in q.blocking_reasons
+
+
+@pytest.mark.parametrize("method", [
+    "authenticated_same_view_figured_dimensions",
+    "authenticated_cross_view_figured_dimensions",
+    "vector_text",
+])
+def test_known_original_room_area_issuers_remain_valid(method):
+    original=_explicit_area(25.0)
+    object.__setattr__(original,"method",method)
+    qty=_quantity(original)
+    assert not qty.abstained
+    assert qty.value == 25.0
+
+
+@pytest.mark.parametrize("untrusted", [
+    "caller_supplied", "ocr_guess", "model_derived",
+    "image_proximity", "manual_estimate", "vector_text ", None, True,
+])
+def test_unknown_original_source_methods_cannot_issue_firm_room_area(untrusted):
+    evidence=_explicit_area(25.0)
+    object.__setattr__(evidence,"method",untrusted)
+    q=_quantity(evidence)
+    assert q.abstained
+    assert "explicit_area_source_method_untrusted" in q.blocking_reasons
