@@ -72,3 +72,25 @@ def test_numeric_scope_cap_abstains_without_firm_window_dimension():
         assert r["status"]=="number_universe_cap_exceeded"
         assert not r["source_numeric_universe_complete"]
         assert r["new_firm_quantities"]==0
+
+
+
+def test_synthetic_grouped_elevation_numeric_tokens_are_not_frame_axes():
+    d=fitz.open()
+    d.new_page(width=320,height=300)
+    d[0].insert_text((15,20),"W01",fontsize=11)
+    d.new_page(width=320,height=300)
+    pg=d[1]
+    pg.insert_text((20,90),"W01 ELEVATION",fontsize=11)
+    pg.insert_text((40,120),"1800",fontsize=11)
+    pg.insert_text((40,150),"960",fontsize=11)
+    r=audit(d[0],pg,original_window_codes=("W01",),
+            group_scopes={("W01",):(0.,0.,250.,200.)})
+    vals={v["original_numeric_literal_untrusted"]
+          for v in r["numeric_original_source_candidates"]
+          if v["possible_caption_groups"]==[["W01"]]}
+    assert vals=={"1800","960"}
+    assert len(r["original_grouped_elevation_title_receipts"])==1
+    assert r["new_window_metric_areas"]==0
+    assert not r["source_frame_width_height_axes_proven"]
+    d.close()
