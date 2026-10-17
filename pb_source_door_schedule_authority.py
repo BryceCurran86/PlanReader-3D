@@ -410,5 +410,8 @@ def inspect_published_door_schedule(
         rows=rows,
         all_original_source_codes=tuple(sorted({r.code for r in rows})),
         title_source_trusted=title_ok,
-        complete_source_word_universe=True,
+        # A page with no returned original words cannot claim a complete
+        # source-owned door schedule; do not equate empty OCR/observation
+        # output with a verified empty original schedule.
+        complete_source_word_universe=bool(words),
     )
