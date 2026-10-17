@@ -334,3 +334,85 @@ def audit_competing_original_rcp_zone_owners(
         "source_ceiling_area_or_quantity_issued":False,
         "new_firm_quantities":0,
     }
+
+
+def audit_original_rcp_mark_in_source_ink_enclosure(
+    original_pdf_bytes: bytes, *, expected_sha256: str,
+    floor_page_1_based: int, rcp_page_1_based: int,
+    original_side_pairs: dict[str,tuple[str,str]],
+    expected_translation_pdf_pts: tuple[float,float],
+    ceiling_code_literal: str,
+) -> dict:
+    """Actual p7→p9 original source ink + printed ceiling mark (not m2).
+
+    OFFICE and PWD use opposite orientations of the real missing top-wall
+    doorway. A source-visible code inside an open source-ink box is a mark
+    *candidate*. Never inherit floor area, guess an RCP ceiling height,
+    close the wall gap or elevate untrusted text to a producer-issued mark.
+    """
+    from tools.diag_original_room_four_edge_source_ink_shadow import (
+        audit_source_enclosure_correspondence,
+    )
+    from tools.diag_original_finish_mark_in_room_ink_shadow import (
+        _native_mark_containment_census,
+    )
+    import hashlib
+    import fitz
+    base={
+        "status":"original_RCP_source_mark_unavailable",
+        "new_firm_quantities":0,
+        "ceiling_metric_area_m2":None,
+        "physical_ceiling_room_identity_proven":False,
+        "source_ceiling_material_occurrence_issued":False,
+        "original_top_door_gap_physically_closed":False,
+    }
+    if (type(ceiling_code_literal) is not str
+            or not ceiling_code_literal or not ceiling_code_literal.isascii()
+            or not ceiling_code_literal.isalnum()):
+        raise ValueError("explicit_original_ceiling_mark_code_required")
+    witness=audit_source_enclosure_correspondence(
+        original_pdf_bytes,expected_sha256=expected_sha256,
+        floor_page_1_based=floor_page_1_based,
+        finish_page_1_based=rcp_page_1_based,
+        original_side_pairs=original_side_pairs,
+        expected_translation_pdf_pts=expected_translation_pdf_pts,
+    )
+    if witness.get("status")!="original_four_edge_ink_correspondence_with_unclosed_doorway":
+        return {**base,"first_failure":"independent_source_wall_registration_unavailable"}
+    sides=witness["original_witnesses"]
+    left=sides["left"]["finish_source"]["ends"][0][0]
+    right=sides["right"]["finish_source"]["ends"][0][0]
+    upper=sides["top_partial"]["finish_source"]["ends"][0][1]
+    lower=sides["bottom"]["finish_source"]["ends"][0][1]
+    if not (left<right and upper<lower):
+        return {**base,"first_failure":"original_rcp_room_source_ink_box_invalid"}
+    with fitz.open(stream=original_pdf_bytes,filetype="pdf") as doc:
+        marks=_native_mark_containment_census(
+            doc[rcp_page_1_based-1].get_text("words"),
+            code=ceiling_code_literal,
+            bbox=(left,upper,right,lower),
+        )
+    if not marks["unique_native_code_word_in_enclosure"]:
+        return {
+            **base,"first_failure":"original_rcp_mark_missing_or_competing",
+            "original_RCP_source_mark_census":marks,
+            "original_source_ink_wall_registration":witness,
+        }
+    return {
+        **base,
+        "status":"original_RCP_ink_enclosed_ceiling_mark_candidate_only",
+        "first_failure":"source_material_issuer_W4_ceiling_zone_and_metric_surface",
+        "original_source_sha256":expected_sha256,
+        "original_floor_page_1_based":floor_page_1_based,
+        "original_rcp_page_1_based":rcp_page_1_based,
+        "source_native_p7_to_rcp_translation_pdf_pts":
+            list(expected_translation_pdf_pts),
+        "source_rcp_ink_enclosure_bbox_pdf_pts":[left,upper,right,lower],
+        "source_rcp_partial_wall_anchor":
+            witness["original_top_partial_wall_anchor"],
+        "source_original_unclosed_door_gap_pdf_pts":
+            witness["original_top_gap_pdf_pts"],
+        "original_ceiling_code_literal_untrusted":ceiling_code_literal,
+        "original_RCP_source_mark_census":marks,
+        "original_source_ink_wall_registration":witness,
+    }
