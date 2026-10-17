@@ -283,7 +283,9 @@ def test_cli_writes_unpublished_outside_receipt_directory_and_cannot_overwrite(t
 def test_confidential_original_pdf_must_not_be_present_even_unindexed(tmp_path):
     root = _copy(tmp_path)
     (root / "private-original-plan.pdf").write_bytes(b"%PDF-synthetic-private-not-for-public")
-    with pytest.raises(ValueError, match="private original PDF"):
+    # Archive-tree inventory runs before the later explicit PDF-extension gate;
+    # either way, no unindexed source file may be accepted.
+    with pytest.raises(ValueError, match="unindexed artifact"):
         audit.verify_owner_four_job_receipts(root)
 
 
