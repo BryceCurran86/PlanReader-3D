@@ -130,6 +130,21 @@ def test_enrichment_never_assigns_reused_source_mark_even_for_a_valid_floor(monk
     assert enriched.floors == floors.floors
 
 
+def test_invalidly_rekeyed_rival_cannot_launder_the_shared_original_source_mark(monkeypatch):
+    original, _ = _producer_result(monkeypatch)
+    corrupt = replace(
+        original,
+        canonical_floor_id="",
+        physical_floor_surface_id="other-but-invalid-floor",
+        physical_room_id="other-room",
+        source_room_face_record_id="other-room-face",
+    )
+    for order in ((original, corrupt), (corrupt, original)):
+        result = _public_result(*order)
+        assert result.quantities == ()
+        assert result.records_by_floor_id == {}
+
+
 def test_duplicate_same_floor_or_unsealed_record_cannot_enter_public_quantities(monkeypatch):
     original, _ = _producer_result(monkeypatch)
     assert _public_result(original, original).quantities == ()
