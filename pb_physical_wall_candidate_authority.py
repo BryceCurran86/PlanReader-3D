@@ -4045,7 +4045,11 @@ class PhysicalWallCandidateProducer:
                         resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
-                        opening_local_exact_source_endpoints_shadow=opening_local_exact_source_endpoints_shadow,
+                        **(
+                            {"opening_local_exact_source_endpoints_shadow": True}
+                            if supplemental_only and opening_local_exact_source_endpoints_shadow
+                            else {}
+                        ),
                     )
                     key = _ScopeKey(
                         document_id=result.document_id,
