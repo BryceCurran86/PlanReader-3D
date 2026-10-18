@@ -83,6 +83,21 @@ def test_translation_does_not_change_source_ownership_or_grant_quantity(dx,dy):
         doc.close()
 
 
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_native_page_rotation_preserves_original_stroke_lineage(rotation):
+    doc, f, c = _pages()
+    try:
+        doc[0].set_rotation(rotation)
+        doc[1].set_rotation(rotation)
+        result = audit(doc[0], doc[1], floor_face_bbox=f, rcp_face_bbox=c)
+        assert result["status"] == "source_ink_candidate"
+        assert result["floor_uncovered_stroke_intervals"]["top"] == ((228., 268.),)
+        assert result["source_metric_scale_proven"] is False
+        assert result["firm_ceiling_area_m2"] is None
+    finally:
+        doc.close()
+
+
 def test_mismatched_physical_extents_do_not_become_authoritative():
     doc,f,c=_pages()
     try:
