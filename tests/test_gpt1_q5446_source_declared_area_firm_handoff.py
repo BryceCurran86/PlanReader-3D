@@ -142,7 +142,7 @@ def test_scheduled_area_requires_independent_numeric_and_label_stroke_witnesses(
         "original_label_vector_path_ids": ()
         if lost in ("label", "both") else row.original_label_vector_path_ids,
     }
-    with pytest.raises(ValueError, match="source vector-path identities unavailable"):
+    with pytest.raises(ValueError, match="original source vector-path families unavailable"):
         _issued_row(replace(row, **kwargs), key="garage", workspace_id=1)
 
 
