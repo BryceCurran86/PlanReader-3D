@@ -132,6 +132,25 @@ def test_bad_lexical_or_dimension_inputs_fail_before_source_interpretation():
         pdf.close()
 
 
+def test_original_office_grid_material_and_room_labels_require_physical_owner():
+    """Same-room ceiling marks in different PDF blocks cannot bind by block ID."""
+    if not ORIGINAL.is_file():
+        pytest.skip("private source absent: crosssheet finish ownership not authenticated")
+    raw = ORIGINAL.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == SHA
+    with fitz.open(stream=raw, filetype="pdf") as pdf:
+        page = pdf[8]
+        office = [w for w in page.get_text("words")
+                  if w[4] == "OFFICE" and w[5] == 9 and w[6] == 0]
+        grid = [w for w in page.get_text("words")
+                if w[4] == "GRID" and w[5] == 10 and w[6] == 1]
+        assert len(office) == len(grid) == 1
+        assert office[0][5] != grid[0][5]
+        assert len([w for w in page.get_text("words") if w[4] == "GRID"]) == 3
+    # This test does not authorize jumping PDF block IDs by nearest label.
+    # A source-owned closed physical ceiling zone is mandatory before binding.
+
+
 def test_original_sha_verified_page9_sales_grid_has_two_source_path_owners():
     if not ORIGINAL.is_file():
         pytest.skip("private original absent from public CI: positive NOT executed")
