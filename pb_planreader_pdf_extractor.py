@@ -1957,8 +1957,22 @@ class GenericPlanReaderExtractor:
                 existing_area = pred_dict.get("floor_screed")
                 current_best_area = existing_area.quantity if existing_area else 0.0
                 page_has_plan_footprint_authority = self._has_plan_footprint_context(page_text)
-                should_replace_area = page_has_plan_footprint_authority and (
-                    total_floor_screed > current_best_area or current_best_area == 0
+                # An incomplete compound plan still has a numeric area for
+                # its known enclosed component, but that is NOT the complete
+                # evidenced floor/slab/finish footprint. Do not promote the
+                # incomplete partial sum as the complete whole-building takeoff.
+                # This also protects the DPM, mesh, slab and DPC projections
+                # nested under the exact same area publication gate.
+                compound_area_complete = (
+                    footprint_res.status == FootprintStatus.CONFIRMED.value
+                    and not footprint_res.missing_components
+                    and math.isfinite(structural_bed_area_m2)
+                    and structural_bed_area_m2 > 0.0
+                )
+                should_replace_area = (
+                    page_has_plan_footprint_authority
+                    and compound_area_complete
+                    and (total_floor_screed > current_best_area or current_best_area == 0)
                 )
 
                 if should_replace_area:
