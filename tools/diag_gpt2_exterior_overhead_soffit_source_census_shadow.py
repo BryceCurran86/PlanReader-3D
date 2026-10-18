@@ -107,6 +107,27 @@ def audit_exterior_overhead_source_census_shadow(
     number_rows = [
         (int(w[4]), w) for w in words if _NUMERIC.fullmatch(str(w[4]))
     ]
+    # A printed standalone dimension can have its own exact black-stroked
+    # source line. Keep ALL rivals and their native parents. This is not
+    # physical overhead-face / scale / dimension-issuer authentication.
+    individual_figure_stroke_candidates = []
+    for value, word in number_rows:
+        center_y = (word[1] + word[3]) / 2
+        for stroke in native_dim_strokes:
+            if (0 < stroke[0] - word[2] < 3.0
+                    and stroke[1] <= center_y <= stroke[2]):
+                individual_figure_stroke_candidates.append({
+                    "printed_value_untrusted": value,
+                    "printed_source_word_address": address(word),
+                    "original_source_path_item_id": (stroke[3], stroke[4]),
+                    "original_stroke_pdf_pt_not_metric": round(
+                        stroke[2] - stroke[1], 5
+                    ),
+                    "original_dim_extension_line_owner_proven": False,
+                    "physical_soffit_surface_axis_proven": False,
+                })
+    if len(individual_figure_stroke_candidates) > 10000:
+        raise ValueError("bounded_individual_dimension_line_rivals_required")
     numbers = tuple({
         "printed_value_untrusted": value,
         "source_word_address": address(w),
@@ -199,6 +220,9 @@ def audit_exterior_overhead_source_census_shadow(
         "all_original_code_word_candidates": tuple(codes),
         "original_soffit_material_description_candidates": tuple(definitions),
         "original_figured_number_candidates": numbers,
+        "original_individual_figured_stroke_candidates": tuple(
+            individual_figure_stroke_candidates
+        ),
         "all_competing_figured_arithmetic_chains": tuple(chains),
         "external_material_issuer_authenticated": False,
         "source_clip_and_active_paint_authenticated": False,
