@@ -377,6 +377,9 @@ class TesseractOCRBackend(RasterOCRBackend):
             info.st_mtime_ns, info.st_ctime_ns, info.st_mode,
         )
         if self._healthy_executable_signature == signature:
+            # pytesseract keeps a process-global executable path. A separate
+            # OCR backend may have changed it since this instance's probe.
+            pytesseract.pytesseract.tesseract_cmd = cmd
             return True
         try:
             pytesseract.pytesseract.tesseract_cmd = cmd
