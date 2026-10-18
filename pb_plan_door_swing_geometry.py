@@ -133,7 +133,12 @@ def unlabeled_door_swing_count(hits: Sequence[QuarterCircleCubic]) -> int:
     for hit in hits:
         key = _bucket(hit.radius)
         buckets[key] = buckets.get(key, 0) + 1
-    modal_r, modal_n = max(buckets.items(), key=lambda item: (item[1], -item[0]))
+    top = max(buckets.values())
+    leaders = [key for key, count in buckets.items() if count == top]
+    if len(leaders) != 1:
+        return 0
+    modal_r = leaders[0]
+    modal_n = top
 
     if modal_n >= _FILLET_CLUSTER_MIN:
         threshold = max(_MIN_DOOR_RADIUS_PT, _OUTLIER_RATIO * float(modal_r))
