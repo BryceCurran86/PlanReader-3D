@@ -174,7 +174,9 @@ def test_source_material_mark_must_be_same_original_physical_floor_polygon():
         {"original_source_floor_perimeter_polygon_pdf_pts":
             ((30.,20.),(130.,20.),(130.,100.),(30.,100.))},
         {"original_floor_page":8},
+        {"original_floor_page":"07"},
         {"original_finish_page":7},
+        {"original_finish_page":"not-a-page"},
         {"original_source_finish_perimeter_polygon_pdf_pts":()},
     ):
         rival=deepcopy(material)
