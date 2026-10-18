@@ -1,0 +1,46 @@
+name: GPT MAX Paired Parent Source Census Synthetics
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_original_frame_competitors.py"
+      - "tools/diag_gptmax_original_selector_policy_matrix.py"
+      - "tests/test_gptmax_original_frame_competitors.py"
+      - "tests/test_gptmax_original_selector_policy_matrix.py"
+      - ".github/workflows/test-gptmax-paired-parent-censuses-synthetic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-source-negative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source-root and quantity non-promotion synthetic regressions
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gptmax_original_frame_competitors.py tests/test_gptmax_original_selector_policy_matrix.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_frame_competitors.py tools/diag_gptmax_original_selector_policy_matrix.py tests/test_gptmax_original_frame_competitors.py tests/test_gptmax_original_selector_policy_matrix.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Preserve original-source verification boundary
+        run: |
+          echo 'These are public, source-neutral receipt and fail-closed checks ONLY.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Original Lot16 PDFs are intentionally absent; the original source-positive tests remain NOT RUN, not passing.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No W4 physical DISTINCT, opening host, frame, count, signed area or frozen V2 score is authorized.' >> "$GITHUB_STEP_SUMMARY"
