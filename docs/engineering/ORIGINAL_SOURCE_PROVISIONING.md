@@ -34,6 +34,9 @@ verified, and nowhere else.
   the originals. Its old body archived the tracked checkout and asserted a PDF was inside it, which the originals-out-of-git
   policy forbids; #3014 replaced it with a code-only, source-free verification, so it no longer reads `documents/sources/`.
   The exclusion stays as a guard: a publishing job must never receive the originals.
+  Likewise `test-gpt2-private-original-ci-policy.yml` (job `absent-private-source-synthetic-policy`) asserts with
+  `test ! -f documents/sources/...` that the private original is absent from the public checkout, so it is excluded, and the
+  transform leaves any job with such an absence assertion alone.
 * **Fork pull requests** receive no secrets, so original-source jobs fail closed on them. That is intended.
 
 ## Owner setup (one time)
