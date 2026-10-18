@@ -1,0 +1,31 @@
+name: TEST GPT2 Original Source Doorway Jamb Chain
+
+on:
+  pull_request:
+    paths:
+      - pb_source_doorway_jamb_authority.py
+      - tests/test_gpt2_original_doorway_jamb_source_chain.py
+      - .github/workflows/test-gpt2-original-door-jamb-chain.yml
+  workflow_dispatch:
+
+jobs:
+  original-door-jamb-source-first:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Private source owned-machine acceptance notice
+        run: echo "Original PDF SHA-positive tests remain owner-machine-only; public CI runs the synthetic cases."
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source original D15 and synthetic adversarial cases
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt2_original_doorway_jamb_source_chain.py -k 'not test_original_office_d15_exact_jamb_chain_not_physical_room_or_door_count and not test_original_pwd_d13_independent_native_jamb_source_chain'
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
