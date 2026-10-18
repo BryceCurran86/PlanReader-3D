@@ -105,3 +105,73 @@ def prove_tile_seam_source_pixels(
                 "reason_codes": [], "image_roots": roots,
                 "structural_host_granted": False, "whole_wall_frame_granted": False,
                 "opening_count_granted": False, "quantity_granted": False}
+
+def prove_contiguous_source_ink_across_tile_seam(
+    pdf_bytes: bytes, *, expected_sha256: str, page_no: int,
+    seam_x: float, source_y: float, flank_offset_pt: float = 7.0,
+    dpi: int = 300,
+) -> dict[str, Any]:
+    """Require EVERY raster column, not just flanking samples, to have original painted ink.
+
+    Establishes a bounded contiguous SOURCE-PAINT scanline across two independently
+    authenticated image xrefs, not W4 structural equivalence or an opening host.
+    The maximum sampled interval is 250 pixels at the permitted dpi/offset limits.
+    """
+    basis = prove_tile_seam_source_pixels(
+        pdf_bytes, expected_sha256=expected_sha256, page_no=page_no,
+        seam_x=seam_x, source_y=source_y, flank_offset_pt=flank_offset_pt, dpi=dpi,
+    )
+    if basis["status"] != SOURCE_ONLY:
+        return basis
+    y = float(source_y)
+    scale = dpi / 72.0
+    low = float(seam_x) - float(flank_offset_pt)
+    high = float(seam_x) + float(flank_offset_pt)
+    left, right = basis["image_roots"]
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+        page = document[page_no - 1]
+        composite = page.get_pixmap(
+            matrix=fitz.Matrix(scale, scale),
+            clip=fitz.Rect(low - 1, y - 1, high + 1, y + 1),
+            alpha=False,
+        )
+        pixels = {row["xref"]: fitz.Pixmap(document, row["xref"]) for row in (left, right)}
+        counts = {left["xref"]: 0, right["xref"]: 0}
+        x0, x1 = int(low * scale), int(high * scale)
+        if x1 <= x0 or x1 - x0 > 250:
+            return _abstain(basis["source_sha256"], page_no, "source_scan_unbounded_or_empty")
+        for column in range(x0, x1):
+            x = (column + 0.5) / scale
+            matches = [
+                root for root in (left, right)
+                if fitz.Rect(root["placement"]).contains(fitz.Point(x, y))
+            ]
+            if len(matches) != 1:
+                return _abstain(basis["source_sha256"], page_no, "source_pixel_column_membership_ambiguous")
+            root = matches[0]
+            rect = fitz.Rect(root["placement"])
+            source = pixels[root["xref"]]
+            ix = min(source.width - 1, max(0, int((x - rect.x0) / rect.width * source.width)))
+            iy = min(source.height - 1, max(0, int((y - rect.y0) / rect.height * source.height)))
+            source_rgb = source.pixel(ix, iy)[:3]
+            cx, cy = column - composite.x, int(y * scale) - composite.y
+            if not (0 <= cx < composite.width and 0 <= cy < composite.height):
+                return _abstain(basis["source_sha256"], page_no, "source_scan_pixel_outside_composite")
+            rendered_rgb = composite.pixel(cx, cy)[:3]
+            if (max(source_rgb) > 64 or max(rendered_rgb) > 64
+                or any(abs(a - b) > 12 for a, b in zip(source_rgb, rendered_rgb))):
+                return _abstain(basis["source_sha256"], page_no, "contiguous_source_ink_scan_failed")
+            counts[root["xref"]] += 1
+        if not all(counts.values()):
+            return _abstain(basis["source_sha256"], page_no, "source_tile_has_no_owned_dark_columns")
+    return {
+        **basis,
+        "status": "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW",
+        "source_painted_pixel_columns": x1 - x0,
+        "source_pixel_columns_per_image_root": [counts[left["xref"]], counts[right["xref"]]],
+        "source_scanline_y_pt": y,
+        "structural_host_granted": False,
+        "whole_wall_frame_granted": False,
+        "opening_count_granted": False,
+        "quantity_granted": False,
+    }
