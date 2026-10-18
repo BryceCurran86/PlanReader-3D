@@ -201,6 +201,31 @@ def audit_gpt2_w4_material_to_gpt1(
     ):
         if w4_result.get(owner_key)!=material_result.get(mark_key):
             return {**base,"first_failure":"source_finish_W4_issuer_lineage_conflict"}
+    # Same PDF/revision is not same physical room. Only the very floor
+    # polygon enclosing the producer-issued material mark can be passed to
+    # W4; never associate a mark with another room by label or same SHA.
+    w4_floor=_polygon(w4_result.get("original_source_floor_polygon_pdf_pts"))
+    marked_floor=_polygon(
+        material_result.get("original_source_floor_perimeter_polygon_pdf_pts"))
+    marked_finish=_polygon(
+        material_result.get("original_source_finish_perimeter_polygon_pdf_pts"))
+    if (w4_floor is None or marked_floor is None or marked_finish is None
+            or not w4_floor.equals(marked_floor)
+            or str(material_result.get("original_floor_page"))!=
+               str(w4_result.get("original_floor_page"))
+            or material_result.get("original_finish_page") is None
+            or str(material_result["original_finish_page"])==
+               str(material_result["original_floor_page"])):
+        return {**base,
+            "first_failure":"original_finish_mark_and_W4_physical_floor_mismatch"}
+    if (not material_result.get("original_source_scope_ownership_id")
+            or not material_result.get("original_finish_viewport_id")
+            or not material_result.get("original_material_definition_id")
+            or type(material_result.get("original_mark_source_record_ids")) not in (tuple,list)
+            or len(material_result["original_mark_source_record_ids"])!=1
+            or not material_result["original_mark_source_record_ids"][0]):
+        return {**base,
+            "first_failure":"original_finish_scope_or_unique_source_mark_unproven"}
     # A caller's numerically populated room area is deliberately not
     # converted to finish m2. The existing GPT1/GPT3 verifier controls that.
     return {
@@ -218,18 +243,17 @@ def audit_gpt2_w4_material_to_gpt1(
         "original_ft_material_definition_id":
             material_result["original_material_definition_id"],
         "original_finish_code":material_result["original_finish_code"],
-        # FT2 tile is laid on the EXPOSED room floor, never underneath the
-        # walls. The printed 92mm wall widths bracket the already-clear
-        # room figure; neither add nor subtract them again. An internal
-        # finished-face W4 boundary must still be independently issued.
+        # FT2 tile is laid on the EXPOSED floor, never under a wall.
+        # Whether the A502 3570/2200 dimension terminals actually land
+        # on these W4 finished faces is separately unproved here; do not
+        # assert the 92mm strokes fall outside the validated W4 ring.
         "floor_finish_measurement_boundary_basis":(
             "inside_finished_wall_faces" if material_result["original_finish_code"]=="FT2"
             else "material_specific_finished_face_authority_required"
         ),
         "FT2_exclude_wall_footprint":material_result["original_finish_code"]=="FT2",
-        "FT2_92mm_wall_widths_already_outside_clear_figures":(
-            material_result["original_finish_code"]=="FT2"
-        ),
+        "FT2_92mm_wall_widths_already_outside_clear_figures":None,
+        "original_dimension_terminal_to_finished_W4_face_proven":False,
         "original_D13_threshold_finish_area_verified":False,
         "source_finish_mark_record_ids":
             material_result["original_mark_source_record_ids"],
