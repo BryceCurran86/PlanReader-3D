@@ -130,6 +130,13 @@ def detect_unchanged_terminal_band_segments(
 ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION = "original_g17_one_end_paint_v1"
 ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION = "original_g17_one_end_paint_v1"
 
+# Registered image/full-render immutable source parent namespaces only.
+# Adding the one-ended source ID does not enable its producer or grant W4 role.
+OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS = frozenset((
+    UNCHANGED_BAND_IDENTITY_VERSION,
+    ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+))
+
 
 def detect_original_one_ended_ink_band_segments(
     image_png: bytes, full_png: bytes, *, dpi: int,

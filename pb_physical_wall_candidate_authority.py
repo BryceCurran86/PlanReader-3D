@@ -69,7 +69,7 @@ from pb_source_visibility_authority import (
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
-from pb_raster_unchanged_band_segments import UNCHANGED_BAND_IDENTITY_VERSION
+from pb_raster_unchanged_band_segments import OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
@@ -1034,7 +1034,7 @@ def _segment_is_authenticated_vector_frame_edge(
 
 
 def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> bool:
-    """Partition ONLY the genuine source-visible terminal-band raster issuer.
+    """Partition ONLY registered source-visible opening-local raster issuers.
 
     A substring is not a source parent: arbitrary native and malformed raster
     IDs must not change canonical page/F.07 W4 membership. The real raster
@@ -1047,11 +1047,11 @@ def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> boo
         return False
     source_id = str(segment.get("id") or "")
     parts = source_id.split(":")
-    if UNCHANGED_BAND_IDENTITY_VERSION not in parts:
+    if not any(identity in parts for identity in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS):
         return False
     if (
         len(parts) != 5 or parts[0] != "raster_segment"
-        or parts[2] != UNCHANGED_BAND_IDENTITY_VERSION
+        or parts[2] not in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
         or any(len(parts[i]) != 64 or any(c not in "0123456789abcdef" for c in parts[i])
                for i in (1, 3))
         or not parts[4].isdecimal() or str(int(parts[4])) != parts[4]
