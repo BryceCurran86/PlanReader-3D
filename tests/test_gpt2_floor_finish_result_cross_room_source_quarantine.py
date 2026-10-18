@@ -41,7 +41,9 @@ def _different_room(original):
         input_entity_ids=(floor_id,),
         semantic_key="floor_finish_area:different-canonical-floor:FT1:tile",
         evidence_ids=tuple(dict.fromkeys((
-            *original.quantity.evidence_ids, "different-original-source-mark",
+            *(e for e in original.quantity.evidence_ids
+              if e != original.occurrence_evidence_id),
+            "different-original-source-mark",
         ))),
         metadata={
             **original.quantity.metadata,
@@ -135,6 +137,25 @@ def test_reconstructed_source_metadata_cannot_disagree_with_authentic_result(
         }),
     )
     assert _public_result(mismatched).quantities == ()
+
+
+def test_secondary_quantity_evidence_cannot_reuse_another_floors_original_mark(monkeypatch):
+    original, _ = _producer_result(monkeypatch)
+    independent = _different_room(original)
+    assert len(_public_result(original, independent).quantities) == 2
+    forged = replace(
+        independent,
+        quantity=replace(
+            independent.quantity,
+            evidence_ids=tuple(dict.fromkeys(
+                (*independent.quantity.evidence_ids, original.occurrence_evidence_id)
+            )),
+        ),
+    )
+    for order in ((original, forged), (forged, original)):
+        result = _public_result(*order)
+        assert result.records_by_floor_id == {}
+        assert result.quantities == ()
 
 
 def test_reconstructed_result_cannot_change_canonical_quantity_input(monkeypatch):
