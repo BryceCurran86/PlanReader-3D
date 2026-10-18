@@ -42,3 +42,51 @@ def test_original_g17_frames_preserve_existing_signed_and_customer_bytes(tmp_pat
         assert (tmp_path / "current" / name).read_bytes() == (
             _PROTECTED / name
         ).read_bytes(), f"original signed Lot16 source identity changed: {name}"
+
+
+def test_original_g17_frames_survive_all_pages_four_job_entrypoint(tmp_path):
+    """The owner's 10GB four-job path must not silently seal only two of eight.
+
+    The all-page source snapshot may legitimately use different host-binding
+    receipts/fingerprints from the page-3 issuer. Compare stable source
+    *physical opening* identities, quantity IDs and values, not cross-scope
+    fingerprints, and NEVER copy the archived rows into a new producer output.
+    """
+    raw = os.environ.get("PLANREADER_LOT16_ORIGINAL_PDF")
+    if not raw:
+        pytest.skip("private original not provisioned; source-neutral tests run")
+    from tools.run_gpt3_lot16_original_sealed_score_input import _verify_original_source
+    from tools.run_source_closed_project_handoff import generate_project_handoff
+    import json
+
+    source = Path(raw)
+    _verify_original_source(source, _PROTECTED.parents[3] /
+        "benchmarks/frozen_holdout/full_plan_v2/projects/"
+        "au_qld_lot16_power/source_manifest.json")
+
+    out = tmp_path / "all_pages"
+    summary = generate_project_handoff(
+        pdf_path=source,
+        project_id="au_qld_lot16_power",
+        workspace_id=1,
+        output_dir=out,
+        family_group="all",
+    )
+    assert summary["status"] == "sealed"
+    assert summary["family_counts"]["opening_area"] == 8
+    assert summary["customer_rows_verified"] is False  # Not a customer publisher.
+
+    historical = json.loads((_PROTECTED / "source_sealed_run.json").read_text())
+    all_page = json.loads((out / "au_qld_lot16_power.json").read_text())
+    assert all_page["source_sha256s"] == historical["source_sha256s"]
+    def stable(rows):
+        return {
+            q["quantity_id"]: (
+                q["semantic_key"],
+                q["value"],
+                q["unit"],
+                tuple(q["object_identity_refs"]),
+            )
+            for q in rows
+        }
+    assert stable(all_page["quantities"]) == stable(historical["quantities"])
