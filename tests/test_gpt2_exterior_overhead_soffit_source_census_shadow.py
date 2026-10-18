@@ -43,6 +43,7 @@ def test_synthetic_original_text_arithmetic_is_not_metric_or_material_authority(
     assert len(candidates) == 1
     assert candidates[0]["component_printed_values_untrusted"] == (1000, 2000, 3000)
     assert candidates[0]["source_extension_lines_proven"] is False
+    assert candidates[0]["source_ink_line_correspondence_candidates"] == ()
     assert result["source_canopy_union_overlap_proven"] is False
     assert result["source_fascia_or_gutter_quantity_proven"] is False
     assert result["source_contractor_scope_proven"] is False
@@ -121,6 +122,18 @@ def test_original_a253_stp_figured_chain_and_rival_numbers_are_not_soffit_area()
     ]
     assert exact[0]["arithmetic_total_untrusted"] == 34150
     assert (18, 11, 0, 0) in exact[0]["rival_total_source_word_addresses"]
+    # Five individually inked black dimension segments and a separate
+    # full-length native black overall line (not fabricated PDF-scale m2).
+    ink = exact[0]["source_ink_line_correspondence_candidates"]
+    assert len(ink) >= 1
+    assert any(
+        set(row["original_ink_component_path_item_ids"])
+        == {(4131, 0), (4115, 0), (4111, 0), (4107, 0), (4122, 0)}
+        and row["original_ink_overall_path_item_id"] == (4140, 0)
+        for row in ink
+    )
+    assert all(not row["physical_soffit_dimension_axis_proven"]
+               and not row["firm_metric_authority"] for row in ink)
     num_addresses = {tuple(r["source_word_address"])
                      for r in result["original_figured_number_candidates"]}
     assert (18, 12, 1, 0) in num_addresses  # 6150 has no proven extension-line span
