@@ -562,6 +562,21 @@ class CrossViewFloorFinishResult:
             getattr(record.quantity, "quantity_id", None)
             for record in sealed
         )
+        # Count an occurrence mark carried as *secondary* evidence on a
+        # different floor too. A rekeyed record cannot conceal reuse by
+        # changing just its primary occurrence_evidence_id.
+        primary_original_marks = {
+            record.occurrence_evidence_id for record in sealed
+            if type(record.occurrence_evidence_id) is str
+            and record.occurrence_evidence_id
+        }
+        source_mark_references = Counter(
+            source_id
+            for record in sealed
+            if type(record.quantity) is QuantityEvidence
+            for source_id in set(record.quantity.evidence_ids)
+            if source_id in primary_original_marks
+        )
         def unique_owner(record: CrossViewFloorFinishRecord) -> bool:
             if (
                 type(record.quantity) is not QuantityEvidence
@@ -575,6 +590,12 @@ class CrossViewFloorFinishResult:
                 or type(record.quantity.quantity_id) is not str
                 or not record.quantity.quantity_id
                 or quantity_ids[record.quantity.quantity_id] != 1
+                or source_mark_references[record.occurrence_evidence_id] != 1
+                or any(
+                    source_id != record.occurrence_evidence_id
+                    and source_id in primary_original_marks
+                    for source_id in record.quantity.evidence_ids
+                )
             ):
                 return False
             # An independently rekeyed result cannot keep the ORIGINAL
