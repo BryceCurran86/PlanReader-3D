@@ -3921,15 +3921,14 @@ class PhysicalWallCandidateProducer:
         completeness, roles, quantities, or any other evidence-shaped input.
         The legacy no-argument behavior remains the complete decoded-page build.
         """
-        if type(source_visibility_producer) is not SourceVisibilityProducer:
-            raise TypeError(
-                "source_visibility_producer must be an actual SourceVisibilityProducer"
-            )
-
         if type(opening_local_exact_source_endpoints_shadow) is not bool:
             raise TypeError("exact local W2 source option must be an explicit boolean")
         if opening_local_exact_source_endpoints_shadow and not supplemental_only:
             raise ValueError("exact local W2 is prohibited in complete wall scopes")
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError(
+                "source_visibility_producer must be an actual SourceVisibilityProducer"
+            )
 
         selected_page_ids: Optional[set[str]] = None
         if page_ids is not None:
