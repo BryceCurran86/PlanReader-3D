@@ -113,6 +113,47 @@ def test_schedule_row_untrusted_duplicate_or_incomplete_census_must_abstain():
         assert result.pairs[0].opening_count is None
 
 
+def test_unparsed_schedule_rival_blocks_otherwise_authenticated_same_code():
+    schedule = replace(
+        _schedule(_row("D13"), _row("D17")),
+        unparsed_original_door_codes=("D13",),
+    )
+    result = pair(
+        plan_words=(_word("D13", 1), _word("D17", 2)),
+        schedule=schedule, plan_page_id="7",
+    )
+    by_code = {r.code: r for r in result.pairs}
+    assert by_code["D13"].first_unclosed_gate == "original_schedule_competing_unparsed_code"
+    assert not by_code["D13"].source_code_correspondence_proven
+    assert by_code["D17"].source_code_correspondence_proven
+    assert result.eligible_printed_code_pair_count == 1
+    assert result.new_opening_counts == result.new_opening_area_quantities == 0
+
+
+def test_schedule_word_receipt_cannot_be_shared_by_distinct_source_door_rows():
+    duplicate = replace(_row("D17"), observation_ids=("source:28:D13",))
+    schedule = _schedule(_row("D13"), duplicate)
+    result = pair(
+        plan_words=(_word("D13", 1), _word("D17", 2)),
+        schedule=schedule, plan_page_id="7",
+    )
+    assert result.unresolved_codes == ("D13", "D17")
+    assert result.eligible_printed_code_pair_count == 0
+    assert all(r.first_unclosed_gate == "original_schedule_shared_word_observation_conflict"
+               for r in result.pairs)
+    assert all(r.opening_count is None and not r.customer_quantity_authorized
+               for r in result.pairs)
+
+
+def test_source_schedule_census_cannot_omit_a_claimed_authenticated_row():
+    schedule = replace(_schedule(_row("D13")), all_original_source_codes=())
+    result = pair(plan_words=(_word("D13", 1),),
+                  schedule=schedule, plan_page_id="7")
+    assert result.unresolved_codes == ("D13",)
+    assert result.pairs[0].first_unclosed_gate == "original_schedule_code_absent_from_complete_census"
+    assert result.eligible_printed_code_pair_count == 0
+
+
 def test_untrusted_and_duplicate_native_plan_source_address_abstain():
     source = _word("D13", 1, trusted=False)
     result = pair(plan_words=(source,), schedule=_schedule(_row("D13")),
