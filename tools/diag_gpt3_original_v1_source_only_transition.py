@@ -141,8 +141,21 @@ def inspect_signed_source_only_v1_transition(
         "original_source_document_universe_complete_in_both": (
             archived_sha == candidate_sha == original_sha
         ),
-        "historical_values": sorted(row.value for row in archived.quantities),
-        "candidate_values": sorted(row.value for row in candidate.quantities),
+        # Signed V1 can legitimately carry ABSTAIN rows with value=None.
+        # Preserve these separately instead of sorting None and real metrics,
+        # which would crash before reporting the original authority blocker.
+        "historical_values": sorted(
+            row.value for row in archived.quantities if row.value is not None
+        ),
+        "candidate_values": sorted(
+            row.value for row in candidate.quantities if row.value is not None
+        ),
+        "historical_unmeasured_quantity_count": sum(
+            row.value is None for row in archived.quantities
+        ),
+        "candidate_unmeasured_quantity_count": sum(
+            row.value is None for row in candidate.quantities
+        ),
         **diff,
         "archived_customer_bijection_verified": False,
         "candidate_customer_bijection_verified": False,
