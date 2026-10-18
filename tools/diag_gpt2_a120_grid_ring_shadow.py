@@ -99,9 +99,10 @@ def _interior_source_grid_ink_shadow(page, box):
 
 def original_stroked_grid_rectangles_shadow(page, *, min_span_pt: float = 200.0, code: str = "GRID"):
     """Enumerate all source-line quartets: never choose first or nearest."""
-    if not math.isfinite(min_span_pt) or min_span_pt <= 0:
+    if (type(min_span_pt) not in (int, float)
+            or not math.isfinite(min_span_pt) or min_span_pt <= 0):
         raise ValueError("finite_positive_min_span_required")
-    if not code or not code.isalpha() or code.upper() != code:
+    if type(code) is not str or not code.isalpha() or code.upper() != code:
         raise ValueError("literal_material_code_required")
     words = tuple(page.get_text("words"))
     marks = tuple(w for w in words if str(w[4]).strip() == code)
