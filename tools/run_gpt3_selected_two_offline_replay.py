@@ -18,7 +18,9 @@ import shutil
 import tempfile
 from zipfile import ZipFile, BadZipFile
 
-from scripts.report_full_plan_v2_readiness import _write_readiness_report
+from tools.gpt3_safe_original_report_output import (
+    preflight_new_diagnostic, write_new_diagnostic,
+)
 from tools.report_gpt3_selected_two_project_original_evidence import (
     build_selected_two_project_development_evidence,
 )
@@ -153,12 +155,10 @@ def run(
     *, sources: Path, lot16_archive: Path, maryborough_archive: Path, output: Path,
 ) -> dict:
     inputs = (sources, lot16_archive, maryborough_archive, FROZEN_ROOT)
-    destination = output.resolve()
-    if output.is_symlink() or output.exists() or any(
-        destination == p.resolve() or destination.is_relative_to(p.resolve())
-        for p in inputs if p.is_dir()
-    ) or destination in (lot16_archive.resolve(), maryborough_archive.resolve()):
-        raise ValueError("offline development output must be a new path outside all sources")
+    # Never overwrite any result or source, even if another process creates
+    # the destination between original-PDF validation and score serialization.
+    # Refuse an unsafe output before extracting or reading private originals.
+    preflight_new_diagnostic(output, protected_roots=inputs)
     # Stage only derived customer/producer files, never the original PDFs.
     with tempfile.TemporaryDirectory(prefix="gpt3-selected-private-") as tmp:
         stage = Path(tmp)
@@ -166,7 +166,7 @@ def run(
         _unpack_pinned_derived_archive(maryborough_archive, stage / "maryborough", _MARY_ZIP_SHA)
         report = build_selected_two_project_development_evidence(_entries(stage, sources))
         _require_dev_only(report)
-        _write_readiness_report(
+        write_new_diagnostic(
             output, json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n",
             protected_roots=inputs + (stage,),
         )

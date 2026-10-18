@@ -18,7 +18,10 @@ import importlib
 import importlib.util
 import sys
 
-from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
+from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+from tools.gpt3_safe_original_report_output import (
+    preflight_new_diagnostic, write_new_diagnostic,
+)
 from pb_customer_output_verification import (
     _customer_quantity_id,
     verify_sealed_customer_output,
@@ -439,17 +442,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--customer-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    protected = (
+        FROZEN_ROOT, args.source_dir, args.sealed_dir,
+        args.identity_map_dir, args.customer_dir,
+    )
+    # Reject an existing output or alias BEFORE reading original source PDFs
+    # and all four projects' sealed/customer data. No two jobs can race to
+    # replace an earlier signed-release decision.
+    preflight_new_diagnostic(args.output, protected_roots=protected)
     report = build_four_project_evidence_ledger(
         source_dir=args.source_dir, sealed_dir=args.sealed_dir,
         identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
     )
-    _write_readiness_report(
+    write_new_diagnostic(
         args.output,
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        protected_roots=(
-            FROZEN_ROOT, args.source_dir, args.sealed_dir,
-            args.identity_map_dir, args.customer_dir,
-        ),
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        protected_roots=protected,
     )
     print(json.dumps({
         "publication_status": report["publication_status"],

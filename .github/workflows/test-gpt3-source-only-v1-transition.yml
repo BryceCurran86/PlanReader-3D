@@ -1,0 +1,51 @@
+name: GPT3 Signed Source-Only V1 Transition
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_original_v1_source_only_transition.py"
+      - "tests/test_gpt3_original_v1_source_only_transition.py"
+      - "tools/gpt3_signed_v1_replay_drift.py"
+      - "tools/gpt3_safe_original_report_output.py"
+      - "pb_source_closed_run_export.py"
+      - ".github/workflows/test-gpt3-source-only-v1-transition.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt3-source-only-v1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install existing source-neutral test requirements
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Verify real archived signed runs without missing private PDFs
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m pytest -q -rs tests/test_gpt3_original_v1_source_only_transition.py
+          python -m ruff check --select F821,F823 tools/diag_gpt3_original_v1_source_only_transition.py tests/test_gpt3_original_v1_source_only_transition.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Record deliberate benchmark nonpublication
+        run: |
+          echo "Only archived V1 signed source receipts are available here." >> "$GITHUB_STEP_SUMMARY"
+          echo "No original PDF rehash, producer decision-scope signature, customer bijection or official V2 score is issued." >> "$GITHUB_STEP_SUMMARY"

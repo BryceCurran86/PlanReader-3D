@@ -38,6 +38,7 @@ from pb_raster_visible_segment_detector import (
 from pb_raster_unchanged_band_segments import (
     UNCHANGED_BAND_IDENTITY_VERSION,
     UNCHANGED_BAND_DETECTOR_VERSION,
+    OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS,
     detect_unchanged_terminal_band_segments,
     band_segment_already_observed,
 )
@@ -628,7 +629,7 @@ def _raster_segment_receipt_matches_parent(
         elif len(parts) == 5:
             prefix, render_sha, identity_version, full_sha, index = parts
             if (receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
-                    or identity_version != UNCHANGED_BAND_IDENTITY_VERSION
+                    or identity_version not in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
                     or full_sha != receipt.visibility_render_sha256
                     or len(full_sha) != 64
                     or any(c not in '0123456789abcdef' for c in full_sha)):

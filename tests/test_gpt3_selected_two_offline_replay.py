@@ -128,10 +128,50 @@ def test_offline_owner_replay_report_requires_unchanged_source_evaluator(monkeyp
     assert result["official_four_project_accuracy"] is None
     assert all(f.read_bytes() == b"%PDF-1.7 owner-only test bytes"
                for f in sources.glob("*.pdf"))
-    with pytest.raises(ValueError, match="new path"):
+    with pytest.raises(FileExistsError, match="new path"):
         offline.run(sources=sources, lot16_archive=lz, maryborough_archive=mz, output=output)
-    with pytest.raises(ValueError, match="new path"):
+    with pytest.raises(ValueError, match="protected evidence"):
         offline.run(
             sources=sources, lot16_archive=lz, maryborough_archive=mz,
             output=sources / "unsafe.json",
         )
+
+
+def test_offline_replay_rejects_unrelated_output_before_either_source_archive_opens(
+    tmp_path, monkeypatch,
+):
+    original = tmp_path / "owners"
+    original.mkdir()
+    output = tmp_path / "customer_existing.json"
+    output.write_text('{"must":"stay"}', encoding="utf-8")
+    def never_unpack(*a, **kw):
+        raise AssertionError("unsafe owner output must fail before any ZIP or PDF read")
+    monkeypatch.setattr(offline, "_unpack_pinned_derived_archive", never_unpack)
+    with pytest.raises(FileExistsError, match="new path"):
+        offline.run(
+            sources=original,
+            lot16_archive=tmp_path / "missing_lot16.zip",
+            maryborough_archive=tmp_path / "missing_maryborough.zip",
+            output=output,
+        )
+    assert output.read_text() == '{"must":"stay"}'
+
+
+def test_offline_replay_rejects_output_symlink_without_following_private_input(
+    tmp_path,
+):
+    original = tmp_path / "signed-original.json"
+    original.write_text('{"do":"not mutate"}', encoding="utf-8")
+    output = tmp_path / "output.json"
+    try:
+        output.symlink_to(original)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink unavailable on this platform")
+    with pytest.raises(FileExistsError, match="new path"):
+        offline.run(
+            sources=tmp_path,
+            lot16_archive=tmp_path / "missing_lot16.zip",
+            maryborough_archive=tmp_path / "missing_maryborough.zip",
+            output=output,
+        )
+    assert original.read_text() == '{"do":"not mutate"}'
