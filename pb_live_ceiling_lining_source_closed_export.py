@@ -364,7 +364,7 @@ def build_live_ceiling_lining_source_traces(
         occurrence_id = metadata["finish_occurrence_record_id"]
         if mark_id not in quantity.evidence_ids or mark_id not in evidence_ids:
             raise SourceClosedRunConflictError(
-                f"ceiling material occurrence original mark receipt mismatch: {quantity.quantity_id}"
+                f"ceiling material occurrence source receipt mismatch: {quantity.quantity_id}"
             )
 
         points = ceiling.polygon_pdf_pts
