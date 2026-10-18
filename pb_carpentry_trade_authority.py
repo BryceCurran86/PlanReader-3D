@@ -30,7 +30,7 @@ class CarpentryElementSpec:
     description: str
     section: str = "Structure" # "Structure", "External", "Internal", "Roof"
     length_m: float = 0.0
-    height_m: float = 2.70
+    height_m: float = 0.0
     width_m: float = 0.0
     area_m2: float = 0.0
     perimeter_lm: float = 0.0
@@ -93,8 +93,8 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
     """Calculate trade items for timber stud wall framing: plates, studs, noggings, and frame area."""
     items: List[CarpentryTakeoffItem] = []
     length = spec.length_m
-    height = spec.height_m if spec.height_m > 0.0 else 2.70
-    if length <= 0.0:
+    height = spec.height_m
+    if length <= 0.0 or height <= 0.0:
         return items
 
     gross_area = round(length * height, 2)
@@ -286,7 +286,12 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
     """Calculate trade items for external cladding and eave soffits."""
     items: List[CarpentryTakeoffItem] = []
     if spec.element_type == "cladding":
-        gross_area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.height_m)
+        if spec.area_m2 > 0.0:
+            gross_area = spec.area_m2
+        elif spec.length_m > 0.0 and spec.height_m > 0.0:
+            gross_area = spec.length_m * spec.height_m
+        else:
+            gross_area = 0.0
         op_ded = sum(float(op.get("area") or 0.0) for op in spec.openings)
         net_area = round(max(0.0, gross_area - op_ded), 2)
         if net_area > 0.0:
