@@ -25,6 +25,19 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _stated_positive_count(value: Any) -> int:
+    """Only a stated, positive integral quantity can create opening area."""
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value if value > 0 else 0
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value.is_integer() and value > 0 else 0
+    if isinstance(value, str) and value.strip().isdecimal():
+        return max(0, int(value.strip()))
+    return 0
+
+
 def normalise_opening(raw: Dict[str, Any]) -> Dict[str, Any]:
     raw = dict(raw or {})
     kind = str(raw.get("kind") or "").strip()
@@ -32,12 +45,8 @@ def normalise_opening(raw: Dict[str, Any]) -> Dict[str, Any]:
         kind = "Other opening"
     width = max(0.0, _num(raw.get("width_m")))
     height = max(0.0, _num(raw.get("height_m")))
-    raw_quantity = raw.get("quantity")
-    if raw_quantity in (None, ""):
-        quantity = 0
-    else:
-        quantity = max(0, int(_num(raw_quantity)))
-    return {
+    quantity = _stated_positive_count(raw.get("quantity"))
+    result = {
         "id": str(raw.get("id") or uuid.uuid4().hex[:12]),
         "kind": kind,
         "label": str(raw.get("label") or kind).strip(),
@@ -49,6 +58,13 @@ def normalise_opening(raw: Dict[str, Any]) -> Dict[str, Any]:
         "source_reference": str(raw.get("source_reference") or "").strip(),
         "confidence": str(raw.get("confidence") or "To review").strip(),
     }
+    # Keep a supplied physical sill datum through register normalization.
+    # Missing is not a numeric 0.0 or an assumed 0.9 m window sill.
+    if "sill_m" in raw:
+        raw_sill = raw.get("sill_m")
+        parsed_sill = _num(raw_sill, -1.0) if not isinstance(raw_sill, bool) else -1.0
+        result["sill_m"] = parsed_sill if parsed_sill >= 0.0 else None
+    return result
 
 
 def opening_area_m2(opening: Dict[str, Any]) -> float:
