@@ -12,12 +12,15 @@ from hashlib import sha256
 import io
 import json
 import math
+<<<<<<< HEAD
 import os
+=======
+>>>>>>> 4c09f4dc (feat(gptmax): bind explicit nominal width approvals to source-owned opening reviews)
 from pathlib import Path
 import tempfile
 import zipfile
 
-from pb_canonical_building import CanonicalOpening
+from pb_canonical_building import CanonicalOpening, ReviewState
 from pb_migration_contracts import canonical_contract_json
 from pb_opening_source_review_shadow import nominal_opening_obj_shadow, _source_support_signature
 
@@ -111,17 +114,29 @@ def _validate_review_report(report):
                 raise ValueError("nominal asset must retain its unplaced physical opening identity")
             if canonical is not None:
                 metadata = canonical.get("metadata")
-                axes = (packet.get("nominal_axes") or {}).get("evidence")
-                if (not isinstance(metadata, dict) or not isinstance(axes, dict)
-                        or axes.get("opening_record_id") != packet["opening_identity_id"]
-                        or any(metadata.get(k) != selector[k] for k in ("source_sha256", "revision_id", "snapshot_id"))):
-                    raise ValueError("nominal asset source axes do not belong to this packet")
-                for metric, nominal in (("width_m","width_mm"),("height_m","height_mm")):
-                    value, stated = canonical.get(metric), axes.get(nominal)
-                    if (type(value) not in (int,float) or type(stated) not in (int,float)
+                if not isinstance(metadata, dict):
+                    raise ValueError("nominal asset metadata must be a dictionary")
+                if metadata.get("dimension_basis") == "user_approved_single_nominal_width":
+                    value = canonical.get("width_m")
+                    approval = metadata.get("nominal_width_approval") or {}
+                    stated = approval.get("value_mm")
+                    if (type(value) not in (int, float) or type(stated) not in (int, float)
                             or not math.isfinite(value) or not math.isfinite(stated)
-                            or min(value,stated) <= 0 or not math.isclose(value,stated/1000.,abs_tol=1e-12,rel_tol=1e-12)):
-                        raise ValueError("nominal asset dimensions disagree with its owned axes")
+                            or min(value, stated) <= 0 or not math.isclose(value, stated / 1000., abs_tol=1e-12, rel_tol=1e-12)
+                            or canonical.get("height_m") is not None):
+                        raise ValueError("single width nominal asset dimensions invalid")
+                else:
+                    axes = (packet.get("nominal_axes") or {}).get("evidence")
+                    if (not isinstance(axes, dict)
+                            or axes.get("opening_record_id") != packet["opening_identity_id"]
+                            or any(metadata.get(k) != selector[k] for k in ("source_sha256", "revision_id", "snapshot_id"))):
+                        raise ValueError("nominal asset source axes do not belong to this packet")
+                    for metric, nominal in (("width_m","width_mm"),("height_m","height_mm")):
+                        value, stated = canonical.get(metric), axes.get(nominal)
+                        if (type(value) not in (int,float) or type(stated) not in (int,float)
+                                or not math.isfinite(value) or not math.isfinite(stated)
+                                or min(value,stated) <= 0 or not math.isclose(value,stated/1000.,abs_tol=1e-12,rel_tol=1e-12)):
+                            raise ValueError("nominal asset dimensions disagree with its owned axes")
     if len(issuer_scopes) > 1:
         raise ValueError("source review cannot mix document/revision issuers")
     additions = report.get("quantity_addition_review")
@@ -178,8 +193,19 @@ def build_opening_source_review_package(report,output):
             content[f"{branch}/evidence/{identity}.json"]=(canonical_contract_json(packet)+"\n").encode()
             canonical=packet.get("canonical_nominal_review")
             if canonical is not None:
-                obj=nominal_opening_obj_shadow(CanonicalOpening.from_dict(canonical))
-                content[f"{branch}/nominal-review/{identity}.obj"]=obj.encode()
+                opening=CanonicalOpening.from_dict(canonical)
+                if opening.metadata.get("dimension_basis")=="user_approved_single_nominal_width":
+                    if (type(opening.width_m) not in (int,float)
+                            or not math.isfinite(opening.width_m) or opening.width_m<=0
+                            or opening.id!=packet["opening_identity_id"]
+                            or opening.review_state is not ReviewState.REVIEW_REQUIRED
+                            or opening.height_m is not None or opening.takeoff_eligible
+                            or opening.deduction_authority or opening.wall_id is not None
+                            or opening.sill_height_m is not None or opening.offset_along_wall_m is not None):
+                        raise ValueError("partial nominal width review cannot carry height or placement authority")
+                else:
+                    obj=nominal_opening_obj_shadow(opening)
+                    content[f"{branch}/nominal-review/{identity}.obj"]=obj.encode()
             blockers = packet["next_required_evidence"]
             lineage = packet.get("source_lineage") or {}
             for rank, capability in enumerate(blockers, 1):
