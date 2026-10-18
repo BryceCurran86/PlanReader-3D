@@ -65,6 +65,7 @@ def pair_trusted_original_door_codes(
     *, plan_words: tuple[SourceDoorScheduleWord, ...],
     schedule: SourceDoorScheduleResult,
     plan_page_id: str,
+    published_full_plan_word_universe: bool = False,
 ) -> SourcePlanDoorCorrespondence:
     """Retain missing, repeated and untrusted source labels as explicit rivals."""
     if (
@@ -158,7 +159,7 @@ def pair_trusted_original_door_codes(
         snapshot_id=schedule.snapshot_id,
         plan_page_id=plan_page_id,
         schedule_page_id=schedule.page_id,
-        source_plan_observation_universe_complete=True,
+        source_plan_observation_universe_complete=(published_full_plan_word_universe is True),
         source_schedule_observation_universe_complete=(
             schedule.complete_source_word_universe and schedule.title_source_trusted
         ),
@@ -199,6 +200,7 @@ def inspect_published_plan_and_schedule_door_codes(
     plan_words = _producer_owned_native_words(producer, published, plan_page_id)
     return pair_trusted_original_door_codes(
         plan_words=plan_words, schedule=schedule, plan_page_id=plan_page_id,
+        published_full_plan_word_universe=True,
     )
 
 
