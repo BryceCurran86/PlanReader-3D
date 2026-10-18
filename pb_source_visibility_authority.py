@@ -2775,7 +2775,8 @@ class SourceVisibilityProducer:
                 for oid in opening.source_observation_ids if oid in selectors)
             has_source_issued_area = any(
                 r.status is EvidenceResolutionStatus.CORROBORATED
-                and r.evidence is not None and r.evidence.area_m2 is not None
+                and r.evidence is not None
+                and (r.evidence.area_m2 is not None or bool(r.evidence.dimension_values_mm))
                 for r in results
             )
             if not has_source_issued_area:

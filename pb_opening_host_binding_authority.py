@@ -3024,6 +3024,32 @@ def _resolve_raster_source_band_host_from_records(
                     owners.append(((cross_lo + cross_hi) / 2.0, record))
                     break
         if not owners:
+            is_terminal_return = False
+            for record in records:
+                wall = record.wall_candidate
+                if wall.is_curved or len(wall.centerline_pts) < 2:
+                    continue
+                points = tuple((float(x), float(y)) for x, y in wall.centerline_pts)
+                for start, end in zip(points, points[1:]):
+                    dx = end[0] - start[0]
+                    dy = end[1] - start[1]
+                    seg_len = math.hypot(dx, dy)
+                    if seg_len < 1e-3:
+                        continue
+                    seg_unit = (dx / seg_len, dy / seg_len)
+                    if abs(seg_unit[0] * opening.axis[0] + seg_unit[1] * opening.axis[1]) < _PARALLEL_TOL:
+                        p1_along = _project(start, opening.origin, opening.axis)
+                        p2_along = _project(end, opening.origin, opening.axis)
+                        p1_cross = _project(start, opening.origin, opening.normal)
+                        p2_cross = _project(end, opening.origin, opening.normal)
+                        if min(abs(p1_along - edge), abs(p2_along - edge)) <= snap_tol + pixel_tol:
+                            if min(p1_cross, p2_cross) <= cross_hi + pixel_tol and max(p1_cross, p2_cross) >= cross_lo - pixel_tol:
+                                is_terminal_return = True
+                                break
+                if is_terminal_return:
+                    break
+            if is_terminal_return:
+                continue
             reason = (
                 f"raster_source_band_{role}_local_wall_owner_unmapped"
                 if source_members else f"raster_source_band_{role}_source_primitive_unmapped"
@@ -3041,7 +3067,7 @@ def _resolve_raster_source_band_host_from_records(
             )
         selected.append(normalized[0])
     ids = tuple(sorted({item.record.wall_candidate_id for item in selected}))
-    if len(ids) != 2:
+    if not (1 <= len(ids) <= 2):
         return empty
     return _HostBandResolution(
         EvidenceResolutionStatus.CORROBORATED,
@@ -3051,7 +3077,7 @@ def _resolve_raster_source_band_host_from_records(
                 item.record.physical_identity.candidate_identity_id for item in selected
             )),
             member_equivalence_groups=tuple(sorted({item.candidate_group for item in selected})),
-            center_offset=sum(item.offset for item in selected) / 2.0,
+            center_offset=sum(item.offset for item in selected) / float(len(selected)),
         ),),
         (RASTER_SOURCE_BAND_HOST_RESOLVED,),
     )
@@ -3119,7 +3145,7 @@ def _resolve_opening_local_mixed_scope_source_band(
             selected[wall_id] = record
             if supplement:
                 supplemental_ids.add(wall_id)
-    if not supplemental_ids or len(selected) < 2:
+    if not supplemental_ids or len(selected) < 1:
         return _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, ())
     # No silent filtering of an ambiguous local W4 identity.  Producer-owned
     # physical-equivalence compares all role-eligible identities in this
