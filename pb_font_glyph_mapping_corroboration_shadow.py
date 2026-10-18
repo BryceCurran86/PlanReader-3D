@@ -83,6 +83,25 @@ class GlyphMappingVerification:
     text_trust_granted: bool = False
 
 
+def _validate_native_word_glyph_claim(word: WordGlyphs) -> None:
+    """An OCR-corrobated word cannot cast votes for a different Unicode trace."""
+    if (
+        type(word) is not WordGlyphs
+        or type(word.observation_id) is not str or not word.observation_id
+        or type(word.font_key) is not str or not word.font_key
+        or type(word.text) is not str or not word.text
+        or type(word.glyphs) is not tuple or not word.glyphs
+    ):
+        raise ValueError("invalid native word glyph evidence")
+    if any(
+        type(pair) is not tuple or len(pair) != 2
+        or type(pair[0]) is not int or pair[0] < 0
+        or type(pair[1]) is not str or len(pair[1]) != 1
+        for pair in word.glyphs
+    ) or "".join(char for _gid, char in word.glyphs) != word.text:
+        raise ValueError("native word glyph trace disagrees with corroborated text")
+
+
 def verify_glyph_mappings(corroborated: Iterable[WordGlyphs], *, min_words: int = DEFAULT_MIN_WORDS) -> GlyphMappingVerification:
     """Partition every (font, glyph id) seen in the corroborated words.
 
@@ -94,6 +113,7 @@ def verify_glyph_mappings(corroborated: Iterable[WordGlyphs], *, min_words: int 
     votes: Dict[GlyphKey, Counter] = defaultdict(Counter)
     seen: Dict[str, WordGlyphs] = {}
     for word in corroborated:
+        _validate_native_word_glyph_claim(word)
         previous = seen.get(word.observation_id)
         if previous is not None:
             if previous != word:
@@ -143,6 +163,7 @@ class GlyphMappingLedger:
     _words: Dict[str, WordGlyphs] = field(default_factory=dict)
 
     def record(self, word: WordGlyphs, corroborated: bool) -> None:
+        _validate_native_word_glyph_claim(word)
         prior_word = self._words.get(word.observation_id)
         if prior_word is not None and prior_word != word:
             raise ValueError(f"conflicting glyph evidence for observation {word.observation_id}")
