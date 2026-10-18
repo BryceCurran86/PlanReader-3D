@@ -1405,8 +1405,11 @@ class GenericPlanReaderExtractor:
         # ------------------------------------------------------------------
         _addr_kws = ("P.O. BOX", "P.O BOX", "PO BOX", "P O BOX", "TEL:", "FAX:", "EMAIL:", "BOX 100727", "BOX 9656")
         detected_span: Optional[float] = None
-        global_verandah_width: Optional[float] = None  # None unless explicitly parsed
-        global_has_verandah_mention = False
+        # Keep secondary source components in their own original-page scope.
+        # A label/width found on another sheet is not proof that it belongs to
+        # this physical plan; cross-page reuse needs a separate correspondence.
+        verandah_mention_pages: set[int] = set()
+        verandah_width_by_page: Dict[int, float] = {}
         global_roof_pitch_deg: Optional[float] = None
         global_has_dpc = False
         global_has_dpm = False
@@ -1459,9 +1462,13 @@ class GenericPlanReaderExtractor:
                     "evidence_present_reconciliation_only"
                 )
 
-            # Track verandah mention across drawings
-            if any(k in norm_pg for k in ("verandah", "veranda")):
-                global_has_verandah_mention = True
+            # An unfigured secondary space on this *same* page must remain
+            # an explicit partial component rather than a borrowed width.
+            page_has_verandah_mention = any(
+                k in norm_pg for k in ("verandah", "veranda")
+            )
+            if page_has_verandah_mention:
+                verandah_mention_pages.add(p_idx + 1)
 
             # Only record verandah width if an explicit dimension is figured in text.
             # F.23: prefer same-viewport, adjacency-validated spatial evidence
@@ -1470,7 +1477,7 @@ class GenericPlanReaderExtractor:
             # sentence regex below -- the regex is purely additive as a
             # fallback for wording this stricter resolver does not (yet)
             # anchor to a viewport, never a replacement for it.
-            if global_verandah_width is None:
+            if page_has_verandah_mention:
                 from pb_secondary_footprint_evidence import (
                     resolve_secondary_footprint_width_m,
                 )
@@ -1479,15 +1486,17 @@ class GenericPlanReaderExtractor:
                     doc[p_idx], page_num=p_idx + 1
                 )
                 if spatial_evidence is not None:
-                    global_verandah_width = spatial_evidence.width_m
+                    verandah_width_by_page[p_idx + 1] = spatial_evidence.width_m
 
-            if global_verandah_width is None:
-                vm = re.search(r"(\d+(?:[,.]\d+)?)\s*(?:m|mm)?\s*wide\s*veranda", norm_pg)
-                if not vm:
-                    vm = re.search(r"veranda[h]?\s*[:\-\(]?\s*(\d+(?:[,.]\d+)?)\s*(?:m|mm)", norm_pg)
-                if vm:
-                    raw_v = float(vm.group(1).replace(",", "."))
-                    global_verandah_width = raw_v / 1000.0 if raw_v > 10 else raw_v
+                if (p_idx + 1) not in verandah_width_by_page:
+                    vm = re.search(r"(\d+(?:[,.]\d+)?)\s*(?:m|mm)?\s*wide\s*veranda", norm_pg)
+                    if not vm:
+                        vm = re.search(r"veranda[h]?\s*[:\-\(]?\s*(\d+(?:[,.]\d+)?)\s*(?:m|mm)", norm_pg)
+                    if vm:
+                        raw_v = float(vm.group(1).replace(",", "."))
+                        verandah_width_by_page[p_idx + 1] = (
+                            raw_v / 1000.0 if raw_v > 10 else raw_v
+                        )
 
             # Roof pitch angle: only if explicitly specified
             if global_roof_pitch_deg is None:
@@ -1822,7 +1831,7 @@ class GenericPlanReaderExtractor:
                 and page_num in global_resolved_explicit_floor_area.source_pages
                 else None
             )
-            resolved_verandah_width_for_page = global_verandah_width
+            resolved_verandah_width_for_page = verandah_width_by_page.get(page_num)
             floor_plan_dims_m: Optional[List[float]] = None
             if not is_elevation_page:
                 try:
@@ -1868,7 +1877,7 @@ class GenericPlanReaderExtractor:
                     source_page=page_num,
                 )
 
-                if global_has_verandah_mention:
+                if page_num in verandah_mention_pages:
                     builder.add_verandah(
                         length_m=length_m,
                         width_m=resolved_verandah_width_for_page,
