@@ -153,10 +153,10 @@ def pair_trusted_original_door_codes(
             failure = "original_schedule_competing_unparsed_code"
         elif code in shared_schedule_observation_codes:
             failure = "original_schedule_shared_word_observation_conflict"
-        elif code not in original_census_codes:
-            failure = "original_schedule_code_absent_from_complete_census"
         elif len(schedule_rows) != 1:
             failure = "original_schedule_row_missing_or_competing"
+        elif code not in original_census_codes:
+            failure = "original_schedule_code_absent_from_complete_census"
         elif not valid_schedule:
             failure = "original_schedule_row_or_universe_unverified"
         else:
