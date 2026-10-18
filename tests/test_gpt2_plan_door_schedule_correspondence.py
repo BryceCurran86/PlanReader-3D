@@ -154,6 +154,27 @@ def test_source_schedule_census_cannot_omit_a_claimed_authenticated_row():
     assert result.eligible_printed_code_pair_count == 0
 
 
+def test_authentication_status_cannot_overrule_untrusted_or_missing_source_row_receipts():
+    authenticated = _row("D13")
+    for bad_row in (
+        replace(authenticated, complete_native_row_text_trusted=False),
+        replace(authenticated, observation_ids=()),
+        replace(authenticated, observation_ids=("source:28:D13", "source:28:D13")),
+        replace(authenticated, source_title_observation_ids=()),
+    ):
+        result = pair(
+            plan_words=(_word("D13", 1),),
+            schedule=_schedule(bad_row),
+            plan_page_id="7",
+        )
+        assert result.unresolved_codes == ("D13",)
+        assert result.eligible_printed_code_pair_count == 0
+        assert result.pairs[0].first_unclosed_gate == (
+            "original_schedule_row_or_universe_unverified"
+        )
+        assert result.pairs[0].opening_count is None
+
+
 def test_untrusted_and_duplicate_native_plan_source_address_abstain():
     source = _word("D13", 1, trusted=False)
     result = pair(plan_words=(source,), schedule=_schedule(_row("D13")),
