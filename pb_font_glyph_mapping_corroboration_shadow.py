@@ -89,14 +89,17 @@ def verify_glyph_mappings(corroborated: Iterable[WordGlyphs], *, min_words: int 
     A word votes once for each distinct (pair, character) it carries, however often the glyph repeats inside it. A pair is verified when exactly one
     character has votes, at least ``min_words`` words voted for it, and no word voted for another; it is contradicted when two characters have votes
     (neither wins); it is under-supported when one character has fewer than ``min_words`` votes."""
-    if int(min_words) < 1:
-        raise ValueError("min_words must be at least 1")
+    if type(min_words) is not int or min_words < 2:
+        raise ValueError("min_words must be an integer >= 2; one word cannot verify a glyph")
     votes: Dict[GlyphKey, Counter] = defaultdict(Counter)
-    seen = set()
+    seen: Dict[str, WordGlyphs] = {}
     for word in corroborated:
-        if word.observation_id in seen:
+        previous = seen.get(word.observation_id)
+        if previous is not None:
+            if previous != word:
+                raise ValueError(f"conflicting glyph evidence for observation {word.observation_id}")
             continue
-        seen.add(word.observation_id)
+        seen[word.observation_id] = word
         for pair, char in set(word.pairs()):
             votes[pair][char] += 1
     verified: Dict[GlyphKey, str] = {}
@@ -140,6 +143,9 @@ class GlyphMappingLedger:
     _words: Dict[str, WordGlyphs] = field(default_factory=dict)
 
     def record(self, word: WordGlyphs, corroborated: bool) -> None:
+        prior_word = self._words.get(word.observation_id)
+        if prior_word is not None and prior_word != word:
+            raise ValueError(f"conflicting glyph evidence for observation {word.observation_id}")
         previous = self._outcomes.get(word.observation_id)
         if previous is not None and previous != bool(corroborated):
             raise ValueError(f"conflicting outcomes recorded for observation {word.observation_id}")
