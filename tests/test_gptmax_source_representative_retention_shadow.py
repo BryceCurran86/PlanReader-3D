@@ -66,7 +66,7 @@ def test_duplicate_conflicting_receipt_or_foreign_identity_fails_closed():
 
 def test_malformed_witness_and_mutable_list_not_accepted():
     original = root()
-    with pytest.raises(TypeError, match="tuple"):
+    with pytest.raises(TypeError, match="immutable changed-policy"):
         compare_original_source_selector(original, [original])
     with pytest.raises(ValueError, match="malformed"):
         compare_original_source_selector(replace(original, existence_corroborated=1), (original,))
