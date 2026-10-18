@@ -104,8 +104,29 @@ def pair_trusted_original_door_codes(
             raise ValueError("foreign or malformed source schedule row")
         schedule_by_code[row.code].append(row)
 
+    # An accepted schedule row must not erase a competing source-visible
+    # occurrence which the schedule publisher could not parse. Nor may two
+    # independently named door rows share one source word receipt.
+    unparsed_codes = set(schedule.unparsed_original_door_codes)
+    original_census_codes = set(schedule.all_original_source_codes)
+    shared_schedule_observation_codes: set[str] = set()
+    observation_owners: dict[str, set[str]] = defaultdict(set)
+    for code, schedule_rows in schedule_by_code.items():
+        for source_row in schedule_rows:
+            for observation_id in source_row.observation_ids:
+                if type(observation_id) is str and observation_id:
+                    observation_owners[observation_id].add(code)
+                else:
+                    shared_schedule_observation_codes.add(code)
+            if len(set(source_row.observation_ids)) != len(source_row.observation_ids):
+                shared_schedule_observation_codes.add(code)
+    for owners in observation_owners.values():
+        if len(owners) > 1:
+            shared_schedule_observation_codes.update(owners)
+
     universe = sorted(
-        set(plan_by_code) | set(schedule.all_original_source_codes) | set(schedule_by_code)
+        set(plan_by_code) | original_census_codes | set(schedule_by_code)
+        | unparsed_codes
     )
     rows: list[SourcePlanDoorCodePair] = []
     unresolved: list[str] = []
@@ -128,6 +149,12 @@ def pair_trusted_original_door_codes(
             failure = "original_plan_door_tag_ambiguous_or_repeated"
         elif not tags[0].trusted:
             failure = "original_plan_text_integrity_unverified"
+        elif code in unparsed_codes:
+            failure = "original_schedule_competing_unparsed_code"
+        elif code in shared_schedule_observation_codes:
+            failure = "original_schedule_shared_word_observation_conflict"
+        elif code not in original_census_codes:
+            failure = "original_schedule_code_absent_from_complete_census"
         elif len(schedule_rows) != 1:
             failure = "original_schedule_row_missing_or_competing"
         elif not valid_schedule:
