@@ -365,20 +365,38 @@ def _native_words(page: Any) -> tuple:
     return words
 
 
-def _native_word_orientations(page: Any) -> dict[tuple[int, int], str]:
+def _native_word_orientations(page: Any, *, word_aligned: bool = False) -> dict[tuple[int, int], str]:
     """Return exact native text-line orientations keyed by word block/line.
 
     PyMuPDF word tuples carry block/line indices while the native text dict
     carries the corresponding source text direction. This is stronger than
     inferring orientation from an axis-aligned bbox, especially on rotated
     architectural sheets.
+
+    The default ``get_text("dict")`` profile also numbers image blocks, while
+    ``get_text("words")`` (where the lookup keys come from) uses TEXTFLAGS_WORDS and
+    has none, so any image earlier in the content stream shifts every later
+    (block, line) key and lends one line's direction to another word. With
+    ``word_aligned=True`` the dict is read with TEXTFLAGS_WORDS so both sides
+    number blocks identically. The default keeps the historical keys byte for
+    byte until a reviewed promotion changes the producers' behaviour.
     """
+    if type(word_aligned) is not bool:
+        raise ValueError("word_aligned must be an explicit boolean")
+    cache_key = "word_orientations_word_aligned" if word_aligned else "word_orientations"
     cache = _page_native_parse_cache(page)
-    if isinstance(cache, dict) and "word_orientations" in cache:
-        return cache["word_orientations"]
+    if isinstance(cache, dict) and cache_key in cache:
+        return cache[cache_key]
     out: dict[tuple[int, int], str] = {}
+    if word_aligned:
+        # Imported here, outside the try, so a missing constant can never be swallowed into "no hints".
+        import fitz
+
+        text_flags: Optional[int] = fitz.TEXTFLAGS_WORDS
+    else:
+        text_flags = None
     try:
-        data = page.get_text("dict") or {}
+        data = (page.get_text("dict") if text_flags is None else page.get_text("dict", flags=text_flags)) or {}
     except Exception:
         data = {}
     for block_index, block in enumerate(data.get("blocks", []) or []):
@@ -399,7 +417,7 @@ def _native_word_orientations(page: Any) -> dict[tuple[int, int], str]:
             elif abs(dy) >= abs(dx) * 4.0:
                 out[(block_index, line_index)] = DimensionOrientation.VERTICAL.value
     if isinstance(cache, dict):
-        cache["word_orientations"] = out
+        cache[cache_key] = out
     return out
 
 
@@ -1563,8 +1581,15 @@ def extract_dimension_evidence_bundle(
     view_id: str = "",
     view_type: str = DrawingViewType.UNKNOWN.value,
     ocr_candidates: Iterable[DimensionObservation] = (),
+    word_aligned_text_blocks: bool = False,
 ) -> DimensionEvidenceBundle:
-    """Extract native/vector evidence, bind candidates, preserve OCR, and form chains."""
+    """Extract native/vector evidence, bind candidates, preserve OCR, and form chains.
+
+    ``word_aligned_text_blocks`` is a default-off shadow switch for the native text-direction hints (see
+    ``_native_word_orientations``); no production caller forwards it, so default output is unchanged.
+    """
+    if type(word_aligned_text_blocks) is not bool:
+        raise ValueError("word_aligned_text_blocks must be an explicit boolean")
     layout = calibrate_dimension_layout(page)
     segments = extract_vector_segments(page, page_num=page_num, view_id=view_id)
     native = extract_native_dimension_observations(
@@ -1602,7 +1627,7 @@ def extract_dimension_evidence_bundle(
         layout,
     )
 
-    word_orientations = _native_word_orientations(page)
+    word_orientations = _native_word_orientations(page, word_aligned=word_aligned_text_blocks)
     orientation_hints: dict[str, str] = {}
     prefix = f"native_dim_p{page_num}_"
     for observation in native:
