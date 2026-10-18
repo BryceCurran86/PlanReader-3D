@@ -1968,12 +1968,11 @@ class GenericPlanReaderExtractor:
                 existing_area = pred_dict.get("floor_screed")
                 current_best_area = existing_area.quantity if existing_area else 0.0
                 page_has_plan_footprint_authority = self._has_plan_footprint_context(page_text)
-                # An incomplete compound plan still has a numeric area for
-                # its known enclosed component, but that is NOT the complete
-                # evidenced floor/slab/finish footprint. Do not promote the
-                # incomplete partial sum as the complete whole-building takeoff.
-                # This also protects the DPM, mesh, slab and DPC projections
-                # nested under the exact same area publication gate.
+                # Preserve the legacy source-neutral diagnostic estimates for
+                # incomplete plans (including independently evidenced DPC);
+                # never mislabel a partial footprint as commercially closed.
+                # A real FIRM issuer still needs complete source/physical
+                # floor correspondence, independent metric proof and material.
                 from pb_multi_space_footprint_geometry import FootprintStatus
 
                 compound_area_complete = (
@@ -1982,10 +1981,8 @@ class GenericPlanReaderExtractor:
                     and math.isfinite(structural_bed_area_m2)
                     and structural_bed_area_m2 > 0.0
                 )
-                should_replace_area = (
-                    page_has_plan_footprint_authority
-                    and compound_area_complete
-                    and (total_floor_screed > current_best_area or current_best_area == 0)
+                should_replace_area = page_has_plan_footprint_authority and (
+                    total_floor_screed > current_best_area or current_best_area == 0
                 )
 
                 if should_replace_area:
@@ -2027,11 +2024,13 @@ class GenericPlanReaderExtractor:
                         description=desc_flr,
                         quantity=total_floor_screed,
                         unit="SM",
-                        confidence=0.92,
+                        confidence=0.92 if compound_area_complete else 0.45,
                         source_page=page_num,
                         sheet_number=sheet_no,
                         dimensions=[length_m, width_m],
                         metadata={
+                            "commercial_area_authorized": compound_area_complete,
+                            "original_source_compound_complete": compound_area_complete,
                             "component_areas": footprint_res.component_areas,
                             "gross_floor_area_m2": footprint_res.gross_floor_area_m2,
                             "dpm_area_m2": footprint_res.dpm_area_m2,

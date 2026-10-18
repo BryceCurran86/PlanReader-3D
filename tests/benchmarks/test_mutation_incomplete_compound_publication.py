@@ -1,4 +1,4 @@
-"""Fail-closed production quantities when a known source component is unfigured.
+"""Preserve partial diagnostic takeoffs without advertising source closure.
 
 All PDFs here are synthetic. These are not benchmark plans, expected gold
 outputs, or original-source quantity authorizations.
@@ -38,13 +38,14 @@ def test_unfigured_verandah_cannot_publish_partial_sum_as_complete_floor(tmp_pat
         _plan(tmp_path, unfigured_verandah=True), collect_item35_shadow=False,
     )
     by_tag = {prediction.tag: prediction for prediction in predictions}
-    assert "floor_screed" not in by_tag
-    assert "substructure_surface_bed" not in by_tag
-    assert "substructure_bed_dpm" not in by_tag
-    assert "substructure_a142_mesh" not in by_tag
-    assert "reinforced_floor_slab" not in by_tag
-    # Partial source authority is not an area of zero or a guessed width.
-    # Upstream source room production must first resolve the verandah dimensions.
+    # Legacy diagnostic quantities remain visible for incomplete plans,
+    # including older DPC calculations. Their area is NOT an original-source
+    # complete commercial quantity and must not carry a firm signal.
+    floor = by_tag["floor_screed"]
+    assert floor.quantity == pytest.approx(60.0)
+    assert floor.metadata["commercial_area_authorized"] is False
+    assert floor.metadata["original_source_compound_complete"] is False
+    assert floor.confidence < 0.5
 
 
 def test_complete_same_figured_envelope_retains_original_slab_and_dpm(tmp_path: Path) -> None:
@@ -92,4 +93,6 @@ def test_other_sheet_width_cannot_repair_unfigured_verandah_on_plan(tmp_path: Pa
         _two_page_source(tmp_path, plan_mentions_verandah=True),
         collect_item35_shadow=False,
     )
-    assert "floor_screed" not in {item.tag for item in predictions}
+    floor = {item.tag: item for item in predictions}["floor_screed"]
+    assert floor.quantity == pytest.approx(60.0)
+    assert floor.metadata["commercial_area_authorized"] is False
