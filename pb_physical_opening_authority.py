@@ -928,6 +928,37 @@ def _raster_wall_face_continues(
     return False
 
 
+def _raster_double_continuous_face_gap(
+    line_mask: np.ndarray,
+    pair: _RasterBandPair,
+) -> bool:
+    """Find two independently painted wall faces spanning an alleged opening.
+
+    A wall band may have complete upper/lower source faces slightly inside its
+    morphological bounds. These are incompatible with positive G17 framed or
+    swing aperture evidence. Requiring BOTH separated outer-quarter face
+    traces prevents a centerline or isolated door-threshold line from being
+    mistaken for a structural wall. This is NEGATIVE opening evidence, never
+    proof of a canonical W4 host or material quantity.
+    """
+    if pair.row1 - pair.row0 < 4:
+        return False
+    low = max(pair.row0, 0)
+    high = min(pair.row1, line_mask.shape[0] - 1)
+    if high - low < 4 or pair.gap_x0 < 0 or pair.gap_x1 >= line_mask.shape[1]:
+        return False
+    gap = line_mask[:, pair.gap_x0:pair.gap_x1 + 1]
+    if gap.size == 0:
+        return False
+    quarter = max(1, (high - low) // 4)
+    upper = range(low, low + quarter + 1)
+    lower = range(high - quarter, high + 1)
+    def covered(row: int) -> bool:
+        return float(gap[row].mean()) >= _RASTER_LINE_COVERAGE
+    return any(covered(row) for row in upper) and any(
+        covered(row) for row in lower)
+
+
 def _raster_hairline_mask(
     line_mask: np.ndarray,
     thick: np.ndarray,
@@ -2016,9 +2047,15 @@ class PhysicalOpeningAuthority:
                         common_endpoint_rows=(pair.row0,pair.row1),frame_line_groups=groups,
                         original_common_row_continuity=legacy_face_continues,
                         paired_original_outer_face_continuity=face_continues))
+                # A pair of independently continuous source-painted outer
+                # faces within a candidate gap contradicts an aperture even
+                # when morphology missed their precise endpoint row.
+                opposing_wall_faces = _raster_double_continuous_face_gap(
+                    work_line, pair,
+                )
                 frames = (
                     frame_support(pair, axis, groups)
-                    if groups and not face_continues
+                    if groups and not face_continues and not opposing_wall_faces
                     else ()
                 )
                 if frames:
@@ -2049,6 +2086,12 @@ class PhysicalOpeningAuthority:
                         self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
                         framed_gap_boxes.add(gap_box_pt)
                         continue
+
+                # Do not let the door-swing fallback override separately
+                # authenticated continuous wall-face ink. This guard applies
+                # equally to framed and swing nomination paths.
+                if face_continues or opposing_wall_faces:
+                    continue
 
                 swing_scale_ratio = _raster_swing_perpendicular_scale_ratio(
                     gap_box_pt,
