@@ -1558,10 +1558,56 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     return anchors
 
 
-def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
+def _opaque_white_unstroked_frame_mask_shadow(drawing: Any) -> bool:
+    """Source-negative: an opaque white fill alone draws no outline.
+
+    PyMuPDF rectangle items describe paths, not necessarily stroked frames.
+    CAD exporters use opaque white filling paths as masking/background
+    objects. Their invisible edges are not independent positive title-frame
+    evidence. This does not authenticate any physical wall or table.
+    """
+    if not isinstance(drawing, dict) or drawing.get("type") != "f":
+        return False
+    if drawing.get("color") is not None:
+        return False
+    fill = drawing.get("fill")
+    opacity = drawing.get("fill_opacity")
+    return bool(
+        type(fill) in (tuple, list)
+        and len(fill) in (1, 3, 4)
+        and all(
+            type(value) in (int, float)
+            and math.isfinite(value)
+            and abs(float(value) - 1.0) <= 1e-6
+            for value in fill
+        )
+        and type(opacity) in (int, float)
+        and math.isfinite(opacity)
+        and abs(float(opacity) - 1.0) <= 1e-6
+    )
+
+
+def extract_vector_frames(
+    page: Any,
+    calibration: ViewportLayoutCalibration,
+    *,
+    exclude_opaque_white_fill_masks_shadow: bool = False,
+) -> list[tuple[float, float, float, float]]:
+    """Enumerate possible source frames, optionally excluding white masks.
+
+    The source-ink filter is diagnostic and default-OFF. It cannot stamp F.07
+    source products or issue a physical/semantic viewport by itself.
+    """
+    if type(exclude_opaque_white_fill_masks_shadow) is not bool:
+        raise ValueError("opaque_white_fill_shadow_requires_explicit_bool")
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
     for drawing in _page_drawings(page):
+        if (
+            exclude_opaque_white_fill_masks_shadow
+            and _opaque_white_unstroked_frame_mask_shadow(drawing)
+        ):
+            continue
         items = drawing.get("items", []) or []
         closed = _closed_four_line_rect(items, tol=tol)
         if closed is not None:
