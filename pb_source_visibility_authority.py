@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, replace
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -1107,7 +1108,8 @@ class SourceVisibilityProducer:
         )
         batch = dict(published=published, page_id=str(page_id), rows=rows,
                      first_selector=None, first_support=(), cache_key=None,
-                     components=(), source_segment_ids=frozenset())
+                     components=(), source_segment_ids=frozenset(),
+                     selected_evidence_cache=OrderedDict())
         self._native_dimension_proof_batch = batch
         try:
             # Independently authenticate original source bytes and ALL native
@@ -1245,13 +1247,33 @@ class SourceVisibilityProducer:
             if (not selected or selector.observation_id not in selected
                 or not selected <= batch['source_segment_ids']):
                 raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            return native_dimension_cap_evidence_from_components(
-                components=batch['components'], selected_ids=tuple(selected),
-                document_id=selector.document_id, page_id=batch['page_id'],
-                revision_id=selector.revision_id,
-                source_sha256=selector.source_sha256,
-                snapshot_id=selector.snapshot_id,
-            )
+            # The complete source was authenticated on batch entry and will
+            # be re-proved on exit. Repeated OPENING candidates routinely
+            # address the same immutable set of original page fragments.
+            # Cache the compiled candidate atoms only within THIS
+            # unpublished source-proof transaction; the standalone public
+            # entrypoint continues to prove the whole original source.
+            # EvidenceAtom is frozen, but its metadata is a dict: never
+            # return a cached object to a caller without a defensive clone.
+            ordered_ids = tuple(sorted(selected))
+            cached = batch['selected_evidence_cache'].get(ordered_ids)
+            if cached is None:
+                cached = native_dimension_cap_evidence_from_components(
+                    components=batch['components'], selected_ids=ordered_ids,
+                    document_id=selector.document_id, page_id=batch['page_id'],
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                )
+                # Even a genuine empty source-negative result is worth
+                # caching: it does not assert wall or opening nonexistence.
+                cache = batch['selected_evidence_cache']
+                cache[ordered_ids] = cached
+                if len(cache) > 64:
+                    cache.popitem(last=False)
+            else:
+                batch['selected_evidence_cache'].move_to_end(ordered_ids)
+            return deepcopy(cached)
         if authenticated is None:
             rows = visibility.authenticated_visible_observations(published)
         else:
@@ -1392,10 +1414,21 @@ class SourceVisibilityProducer:
             batch['source_segment_ids'] = frozenset(
                 i for i, r in records.items() if str(r.page_id) == str(page_id)
             )
-        return native_dimension_cap_evidence_from_components(components=components,
+        atoms = native_dimension_cap_evidence_from_components(components=components,
             selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
             revision_id=selector.revision_id, source_sha256=selector.source_sha256,
             snapshot_id=selector.snapshot_id)
+        # Seed the per-source transaction's same-selector positive/negative
+        # memo only after the original source, receipt and page component
+        # ownership gates above succeed. Full independent exit proof
+        # deliberately does NOT reuse this memo.
+        if batch is not None:
+            cache = batch['selected_evidence_cache']
+            cache[tuple(sorted(selected))] = atoms
+            if len(cache) > 64:
+                cache.popitem(last=False)
+            return deepcopy(atoms)
+        return atoms
 
     def raster_opening_image_placements(
         self,
