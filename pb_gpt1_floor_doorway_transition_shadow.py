@@ -184,6 +184,11 @@ def diagnose_floor_doorway_transition_shadow(
         or len(set(opening.source_observation_ids)) != len(opening.source_observation_ids)
         or not set(frame.source_observation_ids).intersection(opening.source_observation_ids)):
         return _blocked("source_opening_frame_physical_identity_unbound")
+    if (frame.coordinate_unit != "pdf_point"
+        or not frame.whole_wall_candidate_ids
+        or frame.host_wall_id not in frame.whole_wall_candidate_ids
+        or len(set(frame.whole_wall_candidate_ids)) != len(frame.whole_wall_candidate_ids)):
+        return _blocked("original_opening_host_frame_metric_or_wall_ancestry_unverified")
     if any(frame.host_wall_id not in floor.bounding_wall_ids for floor in (first,second)):
         return _blocked("source_floor_boundary_host_wall_unbound")
     origin=_point(frame.origin_pt);axis=_point(frame.axis_unit);normal=_point(frame.normal_unit)
@@ -196,10 +201,10 @@ def diagnose_floor_doorway_transition_shadow(
     if (any(type(x) not in (int,float) or not math.isfinite(x) for x in (u0,u1,frame.wall_thickness_pt))
         or u0 >= u1 or frame.wall_thickness_pt<=0):
         return _blocked("source_opening_frame_span_invalid")
-    if (frame.whole_wall_length_pt is not None
-        and (type(frame.whole_wall_length_pt) not in (int,float)
-             or not math.isfinite(frame.whole_wall_length_pt)
-             or u0 < -_EPS_PT or u1 > frame.whole_wall_length_pt+_EPS_PT)):
+    if (type(frame.whole_wall_length_pt) not in (int,float)
+        or not math.isfinite(frame.whole_wall_length_pt)
+        or frame.whole_wall_length_pt <= 0
+        or u0 < -_EPS_PT or u1 > frame.whole_wall_length_pt+_EPS_PT):
         return _blocked("source_opening_frame_span_outside_wall")
     polygons=tuple(_polygon(f) for f in (first,second))
     if any(poly is None for poly in polygons):
