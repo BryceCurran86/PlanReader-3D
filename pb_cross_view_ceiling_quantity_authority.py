@@ -234,7 +234,8 @@ class CrossViewCeilingQuantityResult:
             record.canonical_ceiling_id: record
             for record in self.records
             if (
-                counts[record.canonical_ceiling_id] == 1
+                type(record.canonical_ceiling_id) is str
+                and counts.get(record.canonical_ceiling_id, 0) == 1
                 and record.physical_ceiling_surface_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.canonical_ceiling_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.ceiling_quantity_id == record.quantity.quantity_id
