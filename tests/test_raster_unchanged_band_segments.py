@@ -198,6 +198,9 @@ def test_registered_one_ended_g17_source_parent_reauthenticates_and_routes_only_
     assert capture.OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS == frozenset((
         capture.UNCHANGED_BAND_IDENTITY_VERSION,
         capture.ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+        capture.ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+        capture.ORIGINAL_G17_EXACT_ONE_END_IDENTITY_VERSION,
+        capture.ORIGINAL_G17_EXACT_PARTIAL_IDENTITY_VERSION,
     ))
     source = SourceVisibilityProducer(producer_method="original-one-ended-parent-test", producer_version="1")
     selected = source.ingest_native_pdf_bytes(document_id="one-ended-parent",
