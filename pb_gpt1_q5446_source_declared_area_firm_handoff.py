@@ -18,6 +18,7 @@ from pb_gpt1_q5446_original_area_schedule_shadow import (
     OriginalAreaScheduleCandidate,
     Q5446SourceAreaScheduleShadow,
     ORIGINAL_ROW_Y_BOUNDS,
+    PRINTED_ORIGINAL_ROWS,
     SOURCE_SHA256,
     inspect_original_q5446_printed_area_schedule,
 )
@@ -73,6 +74,18 @@ def _issued_row(
     workspace_id: int,
 ) -> tuple[QuantityEvidence, CommercialTakeoffSourceTrace]:
     physical_category, sheet_number, physical_plan_page = _PLAN_OWNERS[key]
+    expected_row = next(
+        (i for i, record in enumerate(PRINTED_ORIGINAL_ROWS, 1)
+         if record[0] == key),
+        None,
+    )
+    if (
+        expected_row is None or row.table_row_number != expected_row
+        or row.is_rollup
+        or row.printed_area_m2 != PRINTED_ORIGINAL_ROWS[expected_row - 1][2]
+        or row.printed_label != PRINTED_ORIGINAL_ROWS[expected_row - 1][1]
+    ):
+        raise ValueError("original schedule source row is not the intended component")
     physical_entity = f"q5446_original_{physical_category}"
     # Pinned original page-1 native stroke paths; each witness must be
     # individually source-unique, typed and bound to the SHA-verified PDF.
