@@ -190,3 +190,105 @@ def test_substructure_siblings_keep_structural_footprint_not_clear_finish(tmp_pa
     assert preds["substructure_bed_dpm"].quantity == pytest.approx(120.0)
     assert preds["substructure_a142_mesh"].quantity == pytest.approx(120.0)
     assert preds["substructure_surface_bed"].quantity == pytest.approx(120.0)
+
+
+def test_overlapping_verandah_does_not_double_count_floor_finish() -> None:
+    # Both individually measured rectangles can appear CONFIRMED even though
+    # their physical areas overlap; additivity is not geometry authority.
+    components = [
+        SpaceComponent(
+            space_id="main", space_type=SpaceType.MAIN_BUILDING.value,
+            label="Enclosed", length_m=8.0, width_m=6.0,
+            polygon=[(0, 0), (8, 0), (8, 6), (0, 6)],
+        ),
+        SpaceComponent(
+            space_id="porch", space_type=SpaceType.VERANDAH.value,
+            label="Covered external", length_m=8.0, width_m=2.0,
+            polygon=[(0, 5), (8, 5), (8, 7), (0, 7)],
+        ),
+    ]
+    footprint = MultiSpaceFootprintEngine.evaluate(components)
+    assert footprint.status == "confirmed"
+    assert footprint.gross_floor_area_m2 == pytest.approx(64.0)
+    assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
+    reversed_footprint = MultiSpaceFootprintEngine.evaluate(list(reversed(components)))
+    assert derive_component_aware_floor_finish_area(reversed_footprint, 0.2) is None
+
+
+def test_shared_threshold_boundary_is_not_area_overlap() -> None:
+    builder = MultiSpaceFootprintBuilder()
+    builder.add_main_room(length_m=8.0, width_m=6.0)
+    builder.add_verandah(length_m=8.0, width_m=2.0, adjacency="front")
+    result = derive_component_aware_floor_finish_area(builder.build(), 0.2)
+    assert result is not None
+    # At a shared doorway, coverings finish at their own face boundaries;
+    # the two separate areas are not a duplicated 2m strip of floor.
+    assert result.main_clear_area_m2 == pytest.approx(7.6 * 5.6)
+    assert result.open_verandah_area_m2 == pytest.approx(16.0)
+    assert result.floor_finish_area_m2 == pytest.approx(58.56)
+
+
+def test_forged_rectangular_dimensions_against_source_polygon_abstain() -> None:
+    builder = MultiSpaceFootprintBuilder()
+    builder.add_main_room(length_m=8.0, width_m=6.0)
+    footprint = builder.build()
+    footprint.components[0].length_m = 9.0
+    assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
+
+
+def test_forged_area_against_exact_dimension_product_abstains() -> None:
+    builder = MultiSpaceFootprintBuilder()
+    builder.add_main_room(length_m=8.0, width_m=6.0)
+    footprint = builder.build()
+    footprint.components[0].area_m2 = 50.0
+    assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
+
+
+def test_parallelogram_is_not_a_verified_rectangular_clear_floor() -> None:
+    comp = SpaceComponent(
+        space_id="main", space_type=SpaceType.MAIN_BUILDING.value,
+        label="Skewed", length_m=8.0, width_m=6.0,
+        polygon=[(0, 0), (8, 0), (9, 6), (1, 6)],
+    )
+    footprint = MultiSpaceFootprintEngine.evaluate([comp])
+    assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
+
+
+def test_duplicate_source_component_identity_cannot_mint_two_finish_areas() -> None:
+    builder = MultiSpaceFootprintBuilder()
+    builder.add_main_room(length_m=8.0, width_m=6.0)
+    builder.add_verandah(length_m=8.0, width_m=2.0, adjacency="front")
+    footprint = builder.build()
+    footprint.components[1].space_id = footprint.components[0].space_id
+    assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
+
+
+def test_missing_original_component_placement_prevents_compound_area() -> None:
+    builder = MultiSpaceFootprintBuilder()
+    builder.add_main_room(length_m=8.0, width_m=6.0)
+    builder.add_verandah(length_m=8.0, width_m=2.0, adjacency="front")
+    footprint = builder.build()
+    footprint.components[1].polygon = []
+    assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
+
+
+def test_rotated_evidenced_rectangle_keeps_clear_face_area() -> None:
+    # A physical orthogonal room need not align with the PDF axes.
+    import math
+    theta = math.radians(29)
+    ux, uy = math.cos(theta), math.sin(theta)
+    vx, vy = -uy, ux
+    poly = [
+        (0.0, 0.0),
+        (8.0 * ux, 8.0 * uy),
+        (8.0 * ux + 6.0 * vx, 8.0 * uy + 6.0 * vy),
+        (6.0 * vx, 6.0 * vy),
+    ]
+    comp = SpaceComponent(
+        space_id="main", space_type=SpaceType.MAIN_BUILDING.value,
+        label="Rotated", length_m=8.0, width_m=6.0, polygon=poly,
+    )
+    footprint = MultiSpaceFootprintEngine.evaluate([comp])
+    result = derive_component_aware_floor_finish_area(footprint, 0.2)
+    assert result is not None
+    assert result.floor_finish_area_m2 == pytest.approx(7.6 * 5.6)
