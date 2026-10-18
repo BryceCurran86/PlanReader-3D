@@ -84,6 +84,11 @@ def test_synthetic_structural_fixture_has_source_scoped_not_customer_area(key):
     assert Decimal(str(q.value)) == _synthetic_verified_shape(key).printed_area_m2
     assert q.metadata["commercial_projection_allowed"] is False
     assert q.metadata["quantity_handoff_only"] is True
+    assert q.metadata["canonical_physical_floor_owner_authenticated"] is False
+    assert q.input_entity_ids == (
+        f"q5446_original_source_schedule_{_synthetic_verified_shape(key).original_row_id}",
+    )
+    assert trace.canonical_entity_ids == q.input_entity_ids
     assert q.metadata["shadow_only"] is False
     assert "not_net_wall_face_or_finish" in q.metadata["source_printed_area_semantics"]
     assert trace.project_id == Q5446_PROJECT_ID
@@ -135,6 +140,10 @@ def test_original_sha_positive_issues_five_firm_source_area_receipts_only():
     assert len(report.quantities) == len(report.traces) == 5
     assert all(q.status == "firm" and not q.abstained for q in report.quantities)
     assert all(q.family == "architectural_scheduled_area" for q in report.quantities)
+    assert all(
+        q.metadata["canonical_physical_floor_owner_authenticated"] is False
+        for q in report.quantities
+    )
     assert set(Decimal(str(q.value)) for q in report.quantities) == {
         Decimal("123.89"), Decimal("121.81"), Decimal("4.08"),
         Decimal("36.40"), Decimal("12.00"),
