@@ -16,8 +16,11 @@ SHA = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 def _pages(*, shift=(85, 12), room_width=144., omit_floor_side=False,
            omit_rcp_top=False, extra_floor_gap=False, color=(0, 0, 0)):
     doc = fitz.open()
-    floor = doc.new_page(width=1000, height=1000)
-    rcp = doc.new_page(width=1000, height=1000)
+    doc.new_page(width=1000, height=1000)
+    doc.new_page(width=1000, height=1000)
+    # PyMuPDF invalidates earlier Page wrappers when the page tree changes.
+    # Reacquire BOTH original page objects only after creating both sheets.
+    floor, rcp = doc[0], doc[1]
     x0,y0,x1,y1 = (200.,300.,200.+room_width,500.)
     dx,dy=shift
     floor_box=(x0,y0,x1,y1)
