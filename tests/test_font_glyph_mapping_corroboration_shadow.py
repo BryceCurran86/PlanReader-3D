@@ -98,6 +98,19 @@ def test_a_mapping_needs_the_minimum_number_of_agreeing_words_and_one_word_is_no
         verify_glyph_mappings(words, min_words=0)
 
 
+def test_corrupted_native_trace_cannot_vote_for_different_corroborated_text():
+    # Corroborating FT3 does not license a traced glyph pair that spells FT2.
+    forged = WordGlyphs("same-source", "FT3", "source-font", ((40, "F"), (41, "T"), (42, "2")))
+    for evidence in (forged, WordGlyphs("", "A", "source-font", ((40, "A"),)),
+                     WordGlyphs("x", "A", "", ((40, "A"),))):
+        with pytest.raises(ValueError, match="native word glyph"):
+            verify_glyph_mappings((evidence, evidence))
+        with pytest.raises(ValueError, match="native word glyph"):
+            GlyphMappingLedger().record(evidence, True)
+    clean = WordGlyphs("same-source", "FT3", "source-font", ((40, "F"), (41, "T"), (42, "3")))
+    assert verify_glyph_mappings((clean, clean)).verified == {}
+
+
 def test_a_glyph_repeated_inside_one_word_and_a_repeated_observation_are_one_vote_each():
     assert verify_glyph_mappings([word("a", "111", [10, 10, 10])]).verified == {}
     assert verify_glyph_mappings([word("a", "1", [10]), word("a", "1", [10])]).verified == {}
