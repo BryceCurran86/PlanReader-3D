@@ -194,15 +194,19 @@ def produce_all_source_roles(
                         sealed_file.resolve().parent == role_dir.resolve()
                         and sealed_file.is_file() and not sealed_file.is_symlink()
                     ):
-                        signed = load_verified_sealed_run(sealed_file)
-                        if (
-                            signed.project_id == project_id
-                            and set(signed.source_sha256s) == {role["sha256"]}
-                        ):
-                            sealed.append(sealed_file)
-                            row["sealed"] = True
+                        try:
+                            signed = load_verified_sealed_run(sealed_file)
+                        except (OSError, TypeError, ValueError, RuntimeError):
+                            row["first_failure"] = "original_role_signed_receipt_invalid"
                         else:
-                            row["first_failure"] = "original_role_seal_source_envelope_conflict"
+                            if (
+                                signed.project_id == project_id
+                                and set(signed.source_sha256s) == {role["sha256"]}
+                            ):
+                                sealed.append(sealed_file)
+                                row["sealed"] = True
+                            else:
+                                row["first_failure"] = "original_role_seal_source_envelope_conflict"
                     else:
                         row["first_failure"] = "role_seal_output_path_untrusted"
                 else:
