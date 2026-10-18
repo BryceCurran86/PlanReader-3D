@@ -33,7 +33,7 @@ class SteelMemberSpec:
     description: str
     section: str = "Structure" # "Structure", "Roof", "Substructure"
     length_m: float = 0.0
-    count: int = 1
+    count: int = 0
     mass_kg_per_m: float = 0.0 # kg per linear metre
     surface_area_m2_per_m: float = 0.0  # m² surface area per linear metre for coating
     coating: str = "Shop primed (zinc phosphate)" # "Shop primed", "Hot-dip galvanized (HDG)", "Intumescent 60min"
@@ -92,7 +92,9 @@ class SteelTakeoffItem:
 def calculate_primary_member_items(spec: SteelMemberSpec) -> List[SteelTakeoffItem]:
     """Calculate trade takeoff items for primary structural steel members (beams, columns, rafters)."""
     items: List[SteelTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0 or spec.length_m <= 0.0:
+        return items
+    count = spec.count
     total_length_m = round(count * spec.length_m, 2)
     if total_length_m <= 0.0:
         return items
@@ -162,7 +164,9 @@ def calculate_primary_member_items(spec: SteelMemberSpec) -> List[SteelTakeoffIt
 def calculate_purlin_and_girt_items(spec: SteelMemberSpec) -> List[SteelTakeoffItem]:
     """Calculate trade takeoff items for secondary cold-formed steel purlins and girts."""
     items: List[SteelTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0 or spec.length_m <= 0.0:
+        return items
+    count = spec.count
     total_length_m = round(count * spec.length_m, 2)
     if total_length_m <= 0.0:
         return items
@@ -193,7 +197,9 @@ def calculate_purlin_and_girt_items(spec: SteelMemberSpec) -> List[SteelTakeoffI
 def calculate_bracing_items(spec: SteelMemberSpec) -> List[SteelTakeoffItem]:
     """Calculate trade takeoff items for structural bracing systems."""
     items: List[SteelTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0:
+        return items
+    count = spec.count
     total_length = round(count * spec.length_m, 2)
 
     items.append(SteelTakeoffItem(
@@ -226,7 +232,9 @@ def calculate_connection_fittings_allowance(
     total_primary_tonnes = 0.0
     for spec in primary_specs:
         if spec.element_type in ("beam", "column", "rafter", "lintel"):
-            length = spec.length_m * max(1, spec.count)
+            if spec.count <= 0:
+                continue
+            length = spec.length_m * spec.count
             mass_kg = length * spec.mass_kg_per_m
             total_primary_tonnes += mass_kg / 1000.0
 
