@@ -37,6 +37,7 @@ def test_missing_original_sources_keep_all_120_items_unpublished(tmp_path, monke
         assert project["customer_bijection_verified"] is False
         assert project["reconciliation_complete"] is False
         assert project["exact_project_report"] is None
+        assert project["first_failing_authority_stage"] == "original_source_file_absent"
 
 
 def test_present_but_corrupt_original_bytes_report_conflict_not_zero(tmp_path):
@@ -50,6 +51,7 @@ def test_present_but_corrupt_original_bytes_report_conflict_not_zero(tmp_path):
     observed = next(x for x in result["projects"] if x["project_id"] == manifest.project_id)
     assert observed["publication_status"] == "CONFLICT"
     assert observed["source_sha_verified"] is False
+    assert observed["first_failing_authority_stage"] == "original_source_sha_rejected"
     assert observed["reconciliation_complete"] is False
     assert observed["exact_project_report"] is None
     assert any(
@@ -79,6 +81,7 @@ def test_verified_source_without_signed_run_stays_unavailable(tmp_path, monkeypa
     assert observed["source_sha_verified"] is True
     assert observed["publication_status"] == "UNAVAILABLE"
     assert "signed_production_evidence_unavailable" in observed["reason_codes"]
+    assert observed["first_failing_authority_stage"] == "sealed_reconciliation_artifact_absent"
     assert observed["customer_bijection_verified"] is False
     assert observed["exact_project_report"] is None
     assert result["official_suite_result"] is None
@@ -795,4 +798,46 @@ def test_unavailable_source_never_claims_signed_files_missing_or_verified(tmp_pa
         assert target["reconciliation_input_presence_status"] == "NOT_CHECKED_SOURCE_UNAVAILABLE"
         assert target["missing_signed_reconciliation_artifacts"] == []
         assert target["exact_project_report"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
+
+
+def test_first_failing_stage_rejects_corrupt_signed_run_before_identity_or_customer(tmp_path, monkeypatch):
+    dirs = _dirs(tmp_path)
+    manifest = module.load_suite_manifests(module.FROZEN_ROOT)[0]
+    root = dirs["source_dir"] / manifest.project_id
+    root.mkdir(parents=True)
+    for doc in manifest.source_documents:
+        (root / doc.name).write_bytes(b"%PDF-synthetic-source-only")
+    monkeypatch.setattr(
+        module, "_original_sha_gate",
+        lambda raw, files: (True, [], [d.sha256 for d in manifest.source_documents]),
+    )
+    for path in (
+        dirs["sealed_dir"] / (manifest.project_id + ".json"),
+        dirs["identity_map_dir"] / (manifest.project_id + ".identity_map.json"),
+        dirs["customer_dir"] / (manifest.project_id + ".customer_rows.json"),
+    ):
+        path.parent.mkdir(parents=True)
+        path.write_text('{"not":"a signed run"}', encoding="utf-8")
+    observed = module.build_four_project_evidence_ledger(**dirs)
+    row = next(q for q in observed["projects"] if q["project_id"] == manifest.project_id)
+    assert row["publication_status"] == "CONFLICT"
+    assert row["first_failing_authority_stage"] == "sealed_source_run_parse_or_signature"
+    assert row["reconciliation_input_presence_status"] == "REJECTED"
+    assert row["source_sha_verified"] is True
+    assert row["customer_bijection_verified"] is False
+    assert row["exact_project_report"] is None
+    assert observed["coverage_accuracy"] is None
+    assert observed["official_suite_result"] is None
+
+
+def test_first_failing_stage_uses_only_fixed_share_safe_identifiers(tmp_path):
+    report = module.build_four_project_evidence_ledger(**_dirs(tmp_path))
+    for row in report["projects"]:
+        stage = row["first_failing_authority_stage"]
+        assert type(stage) is str and stage.replace("_", "").isascii()
+        assert "/" not in stage and "\\\\" not in stage
+        assert "original" in stage or "source" in stage
+        assert row["denominator"] > 0
+    assert report["frozen_denominator"] == 120
     assert report["publication_status"] == "UNPUBLISHED"
