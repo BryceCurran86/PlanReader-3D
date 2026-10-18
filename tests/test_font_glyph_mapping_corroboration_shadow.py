@@ -237,3 +237,25 @@ def test_a_mislabelled_glyph_is_never_verified_because_no_word_with_it_is_corrob
     assert ("F", 20) not in ledger.verification().verified
     assert {k for k in ledger.verification().verified} == {("F", 10), ("F", 11)}
     assert classify_word(words[1], ledger.verification()) == GLYPH_NOT_YET_VERIFIED
+
+
+def test_verification_cannot_be_lowered_to_one_word_or_noninteger_threshold():
+    single = [word("solo", "A", [10])]
+    for invalid in (0, 1, True, 1.5, "2"):
+        with pytest.raises(ValueError, match="min_words"):
+            verify_glyph_mappings(single, min_words=invalid)
+    assert verify_glyph_mappings(single, min_words=2).verified == {}
+
+
+def test_duplicate_observation_with_changed_glyph_evidence_blocks_instead_of_hiding_order_conflict():
+    first = word("same", "A", [10])
+    second = word("same", "B", [10])
+    for records in ([first, second], [second, first]):
+        with pytest.raises(ValueError, match="conflicting glyph evidence"):
+            verify_glyph_mappings(records)
+    assert verify_glyph_mappings([first, first]).under_supported == {("F", 10): 1}
+    ledger = GlyphMappingLedger()
+    ledger.record(first, True)
+    with pytest.raises(ValueError, match="conflicting glyph evidence"):
+        ledger.record(second, True)
+    assert ledger.verification().under_supported == {("F", 10): 1}
