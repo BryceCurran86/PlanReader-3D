@@ -19,7 +19,7 @@ def preflight_new_diagnostic(
     if not isinstance(output, Path):
         raise TypeError("diagnostic output must be a Path")
     destination = output.resolve()
-    if output.is_symlink() or output.exists():
+    if output.is_symlink():
         raise FileExistsError("original-source diagnostic output must be a new path")
     if not output.name or output.name in (".", ".."):
         raise ValueError("original-source diagnostic output name is missing")
@@ -29,6 +29,8 @@ def preflight_new_diagnostic(
         source = Path(root).resolve()
         if destination == source or destination.is_relative_to(source):
             raise ValueError("original-source diagnostic may not overwrite protected evidence")
+    if output.exists():
+        raise FileExistsError("original-source diagnostic output must be a new path")
 
 
 def write_new_diagnostic(
