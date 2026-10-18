@@ -3549,6 +3549,15 @@ def _build_authenticated_viewport_scope_results(
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
         )
+        # A source-local opening ink fragment is incomplete supplemental W4
+        # evidence, never a canonical F.07 viewport structural wall. The
+        # page-wide W4 path already partitions it. Filtering before iterating
+        # eligible viewports ensures both scope types use the same canonical
+        # source universe and cannot silently rekey existing walls/hosts.
+        # This does not promote the supplemental fragments or change source IDs.
+        page_segments, _opening_local_supplemental = _partition_opening_local_supplemental_segments(
+            page_segments,
+        )
     except WallPageFrameUnresolved:
         return ()
     if physical_plan_view_shadow:
