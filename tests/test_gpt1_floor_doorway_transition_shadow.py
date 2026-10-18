@@ -149,6 +149,9 @@ def test_source_opening_and_host_ancestry_required():
     assert run(a,b,op,replace(fr,status=S.CONFLICT),k).status is S.ABSTAINED
     ev=fr.evidence
     assert run(a,b,op,replace(fr,evidence=replace(ev,host_wall_id="wrong-wall")),k).status is S.ABSTAINED
+    assert run(a,b,op,replace(fr,evidence=replace(ev,coordinate_unit="metre")),k).status is S.ABSTAINED
+    assert run(a,b,op,replace(fr,evidence=replace(ev,whole_wall_length_pt=None)),k).status is S.ABSTAINED
+    assert run(a,b,op,replace(fr,evidence=replace(ev,whole_wall_candidate_ids=("different",))),k).status is S.ABSTAINED
     assert run(a,b,op,replace(fr,evidence=replace(ev,opening_identity_id="wrong-id")),k).status is S.ABSTAINED
     wrong=replace(ev.selector,source_sha256="c"*64)
     assert run(a,b,op,replace(fr,evidence=replace(ev,selector=wrong)),k).status is S.CONFLICT
