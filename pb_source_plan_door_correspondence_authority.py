@@ -139,8 +139,18 @@ def pair_trusted_original_door_codes(
             and schedule.title_source_trusted
             and schedule.complete_source_word_universe
             and status == "source_schedule_row_text_authenticated"
+            and schedule_rows[0].complete_native_row_text_trusted is True
+            and bool(schedule_rows[0].observation_ids)
+            and len(set(schedule_rows[0].observation_ids)) ==
+                len(schedule_rows[0].observation_ids)
             and all(
-                type(x) is str and bool(x) for x in schedule_rows[0].observation_ids
+                type(x) is str and bool(x) and x == x.strip()
+                for x in schedule_rows[0].observation_ids
+            )
+            and bool(schedule_rows[0].source_title_observation_ids)
+            and all(
+                type(x) is str and bool(x) and x == x.strip()
+                for x in schedule_rows[0].source_title_observation_ids
             )
         )
         if not tags:
