@@ -548,29 +548,49 @@ class MultiSpaceFootprintBuilder:
             )
             return self
 
-        # Place verandah adjacent to reference space if polygon exists
+        # A length/width is not a site location. Place the secondary
+        # component only when a unique supported whole-edge adjacency exists.
+        # Never manufacture a rectangle at (0,0) for an absent/ambiguous host,
+        # for a rotated/skewed parent, or for a short strip with an unknown
+        # starting offset along the parent's side.
         poly: List[Tuple[float, float]] = []
-        if 0 <= reference_space_idx < len(self.components):
+        if type(reference_space_idx) is int and 0 <= reference_space_idx < len(self.components):
             ref = self.components[reference_space_idx]
-            if ref.polygon and len(ref.polygon) == 4:
-                # Assuming axis-aligned rectangle [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-                x0 = min(p[0] for p in ref.polygon)
-                x1 = max(p[0] for p in ref.polygon)
-                y0 = min(p[1] for p in ref.polygon)
-                y1 = max(p[1] for p in ref.polygon)
+            ring = tuple(ref.polygon)
+            if len(ring) == 5 and ring[0] == ring[-1]:
+                ring = ring[:-1]
+            if len(ring) == 4 and all(
+                isinstance(point, (tuple, list)) and len(point) == 2
+                and all(type(value) in (int, float) and math.isfinite(float(value))
+                        for value in point)
+                for point in ring
+            ):
+                x0 = min(point[0] for point in ring)
+                x1 = max(point[0] for point in ring)
+                y0 = min(point[1] for point in ring)
+                y1 = max(point[1] for point in ring)
+                corners = {(x0, y0), (x1, y0), (x1, y1), (x0, y1)}
+                side_length = (
+                    x1 - x0 if adjacency in ("front", "south", "rear", "north")
+                    else y1 - y0 if adjacency in ("left", "west", "right", "east")
+                    else None
+                )
+                if (
+                    len(corners) == 4 and set(map(tuple, ring)) == corners
+                    and side_length is not None
+                    and math.isclose(length_m, side_length, rel_tol=0.0, abs_tol=1e-6)
+                    and ref.has_evidenced_dimensions and not ref.missing_dimensions
+                ):
+                    if adjacency in ("front", "south"):
+                        poly = [(x0, y0 - width_m), (x1, y0 - width_m), (x1, y0), (x0, y0)]
+                    elif adjacency in ("rear", "north"):
+                        poly = [(x0, y1), (x1, y1), (x1, y1 + width_m), (x0, y1 + width_m)]
+                    elif adjacency in ("left", "west"):
+                        poly = [(x0 - width_m, y0), (x0, y0), (x0, y1), (x0 - width_m, y1)]
+                    elif adjacency in ("right", "east"):
+                        poly = [(x1, y0), (x1 + width_m, y0), (x1 + width_m, y1), (x1, y1)]
 
-                if adjacency in ("front", "south"):
-                    poly = [(x0, y0 - width_m), (x0 + length_m, y0 - width_m), (x0 + length_m, y0), (x0, y0)]
-                elif adjacency in ("rear", "north"):
-                    poly = [(x0, y1), (x0 + length_m, y1), (x0 + length_m, y1 + width_m), (x0, y1 + width_m)]
-                elif adjacency in ("left", "west"):
-                    poly = [(x0 - width_m, y0), (x0, y0), (x0, y0 + length_m), (x0 - width_m, y0 + length_m)]
-                elif adjacency in ("right", "east"):
-                    poly = [(x1, y0), (x1 + width_m, y0), (x1 + width_m, y0 + length_m), (x1, y0 + length_m)]
-
-        if not poly:
-            # Fallback local placement
-            poly = [(0.0, 0.0), (length_m, 0.0), (length_m, width_m), (0.0, width_m)]
+        placement_missing = not poly
 
         self.components.append(
             SpaceComponent(
@@ -580,6 +600,8 @@ class MultiSpaceFootprintBuilder:
                 polygon=poly,
                 width_m=width_m,
                 length_m=length_m,
+                has_evidenced_dimensions=not placement_missing,
+                missing_dimensions=["physical_placement"] if placement_missing else [],
                 spatial_adjacency=adjacency,
                 source_page=source_page,
                 confidence=confidence,
