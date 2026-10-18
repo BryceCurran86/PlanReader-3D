@@ -124,6 +124,100 @@ def detect_unchanged_terminal_band_segments(
     return tuple(sorted(result, key=lambda s: (s.orientation, s.geometry_pt, s.pixel_geometry)))
 
 
+# A separate original-source identity: unlike the ordinary two-ended band
+# detector, these are one-ended G17 source flank *candidates*. Their original
+# opening, image-region ownership and face/end closure are proven upstream.
+ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION = "original_g17_one_end_paint_v1"
+ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION = "original_g17_one_end_paint_v1"
+
+
+def detect_original_one_ended_ink_band_segments(
+    image_png: bytes, full_png: bytes, *, dpi: int,
+    source_closed_flank_boxes,
+) -> tuple[UnchangedRasterBandSegment, ...]:
+    """Describe actual one-ended original paint without inventing an end cap.
+
+    The source producer must independently prove both original G17 flanks
+    through their physical-opening issuer before passing these boxes here.
+    This pure pixel observer is NEVER structural-role, W4, host or quantity
+    authority. It explicitly cannot accept a drawn bridging line, loose text
+    or incomplete unclosed source boxes as a source ownership assertion.
+    """
+    if type(dpi) is not int or dpi <= 0:
+        raise ValueError("positive original-source integer DPI required")
+    if not isinstance(source_closed_flank_boxes, (list, tuple)):
+        raise ValueError("source-closed flank inventory required")
+    image, full = (cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+                   for png in (image_png, full_png))
+    if image is None or full is None or image.shape != full.shape:
+        raise ValueError("identical native-frame source renders required")
+    found = set()
+    seen_boxes = set()
+    for item in source_closed_flank_boxes:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise ValueError("original source flank address malformed")
+        axis, bounds = item
+        if axis not in ("horizontal", "vertical"):
+            raise ValueError("unsupported original flank orientation")
+        if (not isinstance(bounds, (list, tuple)) or len(bounds) != 4
+                or any(type(v) not in (int, float) or not math.isfinite(v)
+                       for v in bounds)):
+            raise ValueError("original source flank coordinates invalid")
+        source_address = (axis, tuple(float(v) for v in bounds))
+        if source_address in seen_boxes:
+            raise ValueError("duplicate original G17 source flank address")
+        seen_boxes.add(source_address)
+        pixel_values = tuple(float(v) * dpi / 72.0 for v in bounds)
+        pixel = tuple(int(round(v)) for v in pixel_values)
+        if any(abs(a-b)>1e-4 for a,b in zip(pixel_values,pixel)):
+            # A source box cannot borrow paint from adjacent raster pixels.
+            raise ValueError("original source flank off the authenticated lattice")
+        x0,y0,x1,y1 = pixel
+        if (x0<0 or y0<0 or x1>=image.shape[1] or y1>=image.shape[0]
+                or x1-x0<2 or y1-y0<2):
+            continue
+        a = image[y0:y1+1, x0:x1+1]
+        b = full[y0:y1+1, x0:x1+1]
+        gray = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
+        middle = ((a.shape[0] if axis=="horizontal" else a.shape[1])-1)/2.0
+        lo, hi = math.floor(middle), math.ceil(middle)
+        centre = ((slice(lo,hi+1),slice(None)) if axis=="horizontal"
+                  else (slice(None),slice(lo,hi+1)))
+        core = (slice(1,-1),slice(1,-1))
+        solid = bool(np.all(gray[core]<MASS_THRESHOLD)
+                     and np.all(gray[centre]<MASS_THRESHOLD))
+        unchanged = bool(np.array_equal(a[core],b[core])
+                         and np.array_equal(a[centre],b[centre]))
+        painted_cells = (x1-x0+1 if axis=="horizontal" else y1-y0+1)
+        # Exactly the historical >=4pt rule: count physical printed cells
+        # because a 17-cell unmodified band has 4.08pt of actual source ink.
+        if (not solid or not unchanged
+                or painted_cells*72.0/dpi < _MIN_LINE_LENGTH_PT):
+            continue
+        # A source-authenticated 17-cell G17 jamb is 4.08pt of actual
+        # ORIGINAL ink, although 17 pixel centre addresses span just 3.84pt.
+        # If and ONLY if the cell-coverage minimum passes but the centre-span
+        # fails the unchanged 4pt source threshold, emit that exact ink-cell
+        # outer extent (half a cell at each end). This is observed physical
+        # pixel footprint, not an interpolated or guessed wall extension.
+        # Longer already-accepted opening flanks retain their old coordinates
+        # byte-for-byte. The historic two-ended detector is NEVER changed.
+        cell_edge_extent = (
+            (painted_cells - 1) * 72.0 / dpi < _MIN_LINE_LENGTH_PT
+        )
+        inset = 0.5 if cell_edge_extent else 0.0
+        if axis=="horizontal":
+            mid=(y0+y1)/2.0
+            line=(float(x0)-inset,mid,float(x1)+inset,mid)
+        else:
+            mid=(x0+x1)/2.0
+            line=(mid,float(y0)-inset,mid,float(y1)+inset)
+        geometry=tuple(round(v*72.0/dpi,6) for v in line)
+        found.add(UnchangedRasterBandSegment(
+            line,geometry,axis,(x0,y0,x1,y1)))
+    return tuple(sorted(found,key=lambda seg:(
+        seg.orientation,seg.geometry_pt,seg.pixel_geometry)))
+
 def band_segment_already_observed(segment, ordinary_segments, *, dpi: int, ordinary_dpi: int) -> bool:
     """Avoid a second representation of the same already captured solid run.
 
