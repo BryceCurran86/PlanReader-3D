@@ -24,17 +24,18 @@ from pb_gpt1_q5446_original_area_schedule_shadow import (
 )
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
-from pb_source_closed_run_export import SealedSourceClosedRun, seal_source_closed_run
+from pb_source_closed_run_export import (
+    SealedSourceClosedRun, SourceClosedRunExportError, seal_source_closed_run,
+)
 
 Q5446_PROJECT_ID = "au_qld_q5446_armstrong32_harlequin"
 Q5446_DOCUMENT_ID = "q5446_standard_plans_original"
 Q5446_ORIGINAL_REVISION_ID = "q5446_sha_" + SOURCE_SHA256[:20]
 Q5446_SOURCE_VIEWPORT_ID = "original_page1_printed_areas_schedule"
 
-# These are named physical architectural components on the original ground/
-# first-floor drawings, NOT inferred wall-face rings or benchmark identities.
-# The original p1 schedule supplies all values; "first floor" belongs to
-# separate original first-floor plan p2.
+# These source-plan associations document the ARCHITECT'S PRINTED schedule,
+# not a canonical physical room or independently authenticated wall-face ring.
+# A consumer must not assume these names prove a unique physical surface.
 _PLAN_OWNERS = {
     "ground_floor": ("architectural_ground_floor_level", "2.1", 1),
     "first_floor": ("architectural_first_floor_level", "2.2", 2),
@@ -73,7 +74,7 @@ def _issued_row(
     key: str,
     workspace_id: int,
 ) -> tuple[QuantityEvidence, CommercialTakeoffSourceTrace]:
-    physical_category, sheet_number, physical_plan_page = _PLAN_OWNERS[key]
+    scheduled_category, sheet_number, physical_plan_page = _PLAN_OWNERS[key]
     expected_row = next(
         (i for i, record in enumerate(PRINTED_ORIGINAL_ROWS, 1)
          if record[0] == key),
@@ -86,7 +87,9 @@ def _issued_row(
         or row.printed_label != PRINTED_ORIGINAL_ROWS[expected_row - 1][1]
     ):
         raise ValueError("original schedule source row is not the intended component")
-    physical_entity = f"q5446_original_{physical_category}"
+    # Evidence entity is the ORIGINAL PRINTED SOURCE ROW, not an invented
+    # canonical floor polygon. Physical wall/finish owner remains unresolved.
+    source_entity = f"q5446_original_source_schedule_{row.original_row_id}"
     # Pinned original page-1 native stroke paths; each witness must be
     # individually source-unique, typed and bound to the SHA-verified PDF.
     paths = (
@@ -114,7 +117,7 @@ def _issued_row(
         "q5446_original_scheduled_area",
         {
             "sha256": SOURCE_SHA256,
-            "physical_category": physical_category,
+            "source_area_category": scheduled_category,
             "row": row.original_row_id,
             "original_numeric_paths": row.original_numeric_vector_path_ids,
         },
@@ -123,10 +126,10 @@ def _issued_row(
     quantity = QuantityEvidence(
         quantity_id=quantity_id,
         family="architectural_scheduled_area",
-        semantic_key=f"architectural_scheduled_area:{physical_entity}",
+        semantic_key=f"architectural_scheduled_area:{source_entity}",
         value=float(value),
         unit="m2",
-        input_entity_ids=(physical_entity,),
+        input_entity_ids=(source_entity,),
         formula="original_printed_architectural_area_schedule",
         formula_version="1.0.0",
         evidence_ids=receipts,
@@ -146,7 +149,8 @@ def _issued_row(
             "original_source_row_id": row.original_row_id,
             "original_source_printed_label": row.printed_label,
             "source_printed_value_m2": str(value),
-            "source_printed_category": physical_category,
+            "source_printed_category": scheduled_category,
+            "canonical_physical_floor_owner_authenticated": False,
             "source_printed_area_semantics": (
                 "architectural_area_schedule_not_net_wall_face_or_finish"
             ),
@@ -169,7 +173,7 @@ def _issued_row(
         revision_id=Q5446_ORIGINAL_REVISION_ID,
         current_revision_id=Q5446_ORIGINAL_REVISION_ID,
         evidence_ids=receipts,
-        canonical_entity_ids=(physical_entity,),
+        canonical_entity_ids=(source_entity,),
         source_bbox=(979.32, lo, 1147.44, hi),
         metadata={
             "source_role": "architectural_area_schedule",
@@ -273,7 +277,7 @@ def issue_original_q5446_scheduled_area_handoff(
             or not all(row.lineage_ok and not row.abstained for row in sealed_run.quantities)
         ):
             return _blocked("original_scheduled_area_seal_lineage_unavailable")
-    except (ValueError, TypeError, OverflowError):
+    except (ValueError, TypeError, OverflowError, SourceClosedRunExportError):
         return _blocked("original_scheduled_area_issuer_conflict")
 
     return OriginalQ5446ArchitecturalAreaHandoff(
