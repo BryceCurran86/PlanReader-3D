@@ -59,6 +59,7 @@ class OriginalAreaScheduleCandidate:
     glyph_correspondence_authenticated: bool = False
     physical_surface_owner_authenticated: bool = False
     customer_projection_allowed: bool = False
+    original_numeric_vector_path_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,116 @@ def _table_witnesses_valid(drawings: list[dict[str, Any]]) -> bool:
     )
 
 
+# One isolated numeric glyph source stroke per printed character.
+# These are original SHA-verified vector shapes, NOT OCR text guesses.
+# The label/category characters are *not* decoded by this source module.
+ORIGINAL_NUMERIC_COLUMNS = (1039.50, 1072.80)
+ORIGINAL_ROW_Y_BOUNDS = (
+    (646.68, 657.00),
+    (657.00, 667.56),
+    (667.56, 677.88),
+    (677.88, 688.20),
+    (688.20, 698.76),
+    (698.76, 709.08),
+    (709.08, 728.52),
+)
+
+
+def _numeric_vector_digit(record: dict[str, Any]) -> str | None:
+    """Classify ORIGINAL vector-stroked glyph topology, without raster OCR.
+
+    The immutable original 0–9 font has independently distinct path profiles:
+    command count, normalized first stroke and character width. All ten
+    digits and decimal point occur in the authenticated source table.
+    """
+    if record.get("type") != "s" or record.get("color") != (0.0, 0.0, 0.0):
+        return None
+    width = record.get("width")
+    if type(width) not in (int, float) or abs(width - 0.96) > 0.05:
+        return None
+    rect = record.get("rect")
+    items = record.get("items")
+    if rect is None or not isinstance(items, (tuple, list)) or not items:
+        return None
+    try:
+        w = float(rect.x1 - rect.x0)
+        h = float(rect.y1 - rect.y0)
+        if w <= 0 or h <= 0:
+            return None
+        first = items[0]
+        if first[0] == "qu":
+            if len(items) == 1 and 0.43 <= w <= 0.55 and 0.43 <= h <= 0.75:
+                return "."
+            return None
+        if first[0] != "l":
+            return None
+        if not (5.45 <= h <= 5.85 and 1.15 <= w <= 3.75):
+            return None
+        px = (float(first[1].x) - float(rect.x0)) / w
+        py = (float(first[1].y) - float(rect.y0)) / h
+        if not (0 <= px <= 1.005 and 0 <= py <= 1.005):
+            return None
+        count = len(items)
+        if count == 2:
+            return "7" if w >= 3.4 else None
+        if count == 3:
+            return "1" if w < 1.6 else "4" if w >= 3.4 else None
+        if count == 13:
+            return "2"
+        if count == 14:
+            return "3"
+        if count == 16:
+            return "5" if px >= 0.7 else "0" if px <= 0.55 else None
+        if count == 22:
+            return "9" if px >= 0.97 and py > 0.26 else "6" if px < 0.97 and py < 0.26 else None
+        if count == 28:
+            return "8"
+    except (TypeError, ValueError, OverflowError, IndexError, AttributeError):
+        return None
+    return None
+
+
+def _original_numeric_glyph_receipts(
+    drawings: list[dict[str, Any]],
+) -> tuple[tuple[int, ...], ...] | None:
+    """Require ALL seven row values from ordered, independent native vectors.
+
+    Only source-numeric outlines are authenticated here, not their physical
+    wall ownership, gross/net meaning, or printed category label glyphs.
+    """
+    results: list[tuple[int, ...]] = []
+    for (_, _, numeric, _), (y0, y1) in zip(
+        PRINTED_ORIGINAL_ROWS, ORIGINAL_ROW_Y_BOUNDS
+    ):
+        located = []
+        for index, record in enumerate(drawings):
+            rect = record.get("rect")
+            if rect is None:
+                continue
+            try:
+                if (
+                    ORIGINAL_NUMERIC_COLUMNS[0] < rect.x0 < rect.x1 < ORIGINAL_NUMERIC_COLUMNS[1]
+                    and y0 + 0.35 < rect.y0 < rect.y1 < y1 - 0.35
+                ):
+                    located.append((index, rect.x0, record))
+            except (TypeError, ValueError, AttributeError):
+                return None
+        located.sort(key=lambda record: (record[1], record[0]))
+        decoded = "".join(_numeric_vector_digit(record) or "?" for _, _, record in located)
+        if decoded != str(numeric):
+            return None
+        ids = tuple(index for index, _, _ in located)
+        if len(set(ids)) != len(ids):
+            return None
+        results.append(ids)
+    if len(results) != len(PRINTED_ORIGINAL_ROWS):
+        return None
+    all_ids = tuple(index for ids in results for index in ids)
+    if len(all_ids) != len(set(all_ids)):
+        return None
+    return tuple(results)
+
+
 def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446SourceAreaScheduleShadow:
     """Original SHA and native ruled table geometry; no OCR, no FIRM issue."""
     source = Path(pdf_path)
@@ -133,8 +244,12 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
                 and abs(page.rect.height - 841.92) < GEOMETRY_EPSILON_PT
             ):
                 return _abstain("original_source_page_frame_mismatch", source_sha)
-            if not _table_witnesses_valid(page.get_drawings()):
+            drawings = page.get_drawings()
+            if not _table_witnesses_valid(drawings):
                 return _abstain("original_area_schedule_vector_table_witness_missing", source_sha)
+            original_numeric_source_ids = _original_numeric_glyph_receipts(drawings)
+            if original_numeric_source_ids is None:
+                return _abstain("original_area_schedule_numeric_vector_glyphs_unverified", source_sha)
     except Exception:
         return _abstain("original_area_schedule_native_pdf_unavailable", source_sha)
 
@@ -145,6 +260,8 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
             original_page_index=SOURCE_PAGE_INDEX,
             table_row_number=i + 1,
             original_source_sha256=source_sha,
+            glyph_correspondence_authenticated=True,
+            original_numeric_vector_path_ids=original_numeric_source_ids[i],
         )
         for i, (key, label, value, rollup) in enumerate(PRINTED_ORIGINAL_ROWS)
     )
@@ -160,7 +277,8 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
         status="CANDIDATE",
         reason_codes=(
             "original_source_vector_table_ruled_geometry_verified",
-            "original_area_numerals_vector_glyphs_unauthenticated",
+            "original_area_numeric_vector_glyphs_authenticated",
+            "area_category_label_vector_glyphs_unverified",
             "physical_floor_owner_and_gross_net_semantics_unresolved",
             "rollups_not_independent_physical_quantities",
         ),
