@@ -182,7 +182,7 @@ def inspect_published_plan_and_schedule_door_codes(
         if (
             type(page_id) is not str or not page_id.isdecimal()
             or page_id != str(int(page_id)) or int(page_id) < 1
-            or int(page_id) not in published.coverage.decoded_pages
+            or int(page_id) not in {int(x) for x in published.coverage.decoded_pages}
         ):
             raise ValueError("source plan or schedule page not in published coverage")
     if plan_page_id == schedule_page_id:
