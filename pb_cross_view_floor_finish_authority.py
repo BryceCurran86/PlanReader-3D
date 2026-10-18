@@ -566,6 +566,11 @@ class CrossViewFloorFinishResult:
             if (
                 type(record.quantity) is not QuantityEvidence
                 or record.quantity.family != "floor_finish_area"
+                or record.quantity.status != AuthorityStatus.FIRM.value
+                or record.quantity.authority !=
+                   MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+                or record.quantity.abstained
+                or record.quantity.unit not in ("m2", "m²")
                 or record.quantity.input_entity_ids != (record.canonical_floor_id,)
                 or type(record.quantity.quantity_id) is not str
                 or not record.quantity.quantity_id
