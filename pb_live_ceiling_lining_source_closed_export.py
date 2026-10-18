@@ -76,6 +76,53 @@ def _original_ceiling_simple_bbox(
     return polygon.bounds
 
 
+
+def _require_exact_ceiling_finish_semantic(
+    *,
+    semantic_key: object,
+    canonical_ceiling_id: str,
+    finish_code: object,
+    semantic_finish: object,
+) -> None:
+    """Veto a rekeyed original ceiling finish; do not infer materials."""
+    if (
+        type(semantic_key) is not str
+        or type(finish_code) is not str or not finish_code
+        or finish_code != finish_code.strip()
+        or type(semantic_finish) is not str or not semantic_finish
+        or semantic_finish != semantic_finish.strip()
+        or semantic_key !=
+        f"ceiling_lining:{canonical_ceiling_id}:{finish_code}:{semantic_finish}"
+    ):
+        raise SourceClosedRunConflictError(
+            "ceiling quantity semantic key conflicts with exact source finish"
+        )
+
+
+def _require_one_ceiling_per_original_area(
+    owners: dict[str, str],
+    *,
+    upstream_area_id: object,
+    canonical_ceiling_id: str,
+) -> None:
+    """One original whole-room area cannot source two physical ceilings."""
+    if (
+        type(upstream_area_id) is not str or not upstream_area_id
+        or upstream_area_id != upstream_area_id.strip()
+        or type(canonical_ceiling_id) is not str or not canonical_ceiling_id
+        or canonical_ceiling_id != canonical_ceiling_id.strip()
+    ):
+        raise SourceClosedRunConflictError(
+            "ceiling original upstream room-area issuer is invalid"
+        )
+    previous = owners.get(upstream_area_id)
+    if previous is not None and previous != canonical_ceiling_id:
+        raise SourceClosedRunConflictError(
+            "one original room-area source reissued as competing ceiling surfaces"
+        )
+    owners[upstream_area_id] = canonical_ceiling_id
+
+
 def build_live_ceiling_lining_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -118,6 +165,7 @@ def build_live_ceiling_lining_source_traces(
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     seen_source_ids: set[str] = set()
+    source_area_ceiling_owners: dict[str, str] = {}
     for quantity in claim.ceiling_lining_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -175,6 +223,12 @@ def build_live_ceiling_lining_source_traces(
         figured_ids = tuple(sorted(original_figured_ids))
 
         canonical_ceiling_id = _clean(quantity.input_entity_ids[0])
+        _require_exact_ceiling_finish_semantic(
+            semantic_key=quantity.semantic_key,
+            canonical_ceiling_id=canonical_ceiling_id,
+            finish_code=metadata.get("finish_code"),
+            semantic_finish=metadata.get("semantic_finish"),
+        )
         ceiling = ceilings.get(canonical_ceiling_id)
         if ceiling is None:
             raise SourceClosedRunConflictError(
@@ -364,6 +418,11 @@ def build_live_ceiling_lining_source_traces(
             raise SourceClosedRunConflictError(
                 f"duplicate ceiling quantity id: {quantity.quantity_id}"
             )
+        _require_one_ceiling_per_original_area(
+            source_area_ceiling_owners,
+            upstream_area_id=metadata.get("upstream_room_area_quantity_id"),
+            canonical_ceiling_id=canonical_ceiling_id,
+        )
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
