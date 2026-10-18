@@ -40,6 +40,31 @@ def audit_exterior_overhead_source_census_shadow(
             raise ValueError("original_source_page_out_of_range")
         page = doc[page_number - 1]
         words = tuple(page.get_text("words", sort=False))
+        drawings = page.get_drawings()
+        if len(drawings) > 120000:
+            raise ValueError("bounded_original_source_drawings_required")
+        native_dim_strokes = []
+        for path_id, draw in enumerate(drawings):
+            if (draw.get("type") != "s"
+                    or draw.get("color") != (0., 0., 0.)
+                    or draw.get("stroke_opacity") != 1):
+                continue
+            width = draw.get("width")
+            if type(width) not in (float, int) or width <= 0:
+                continue
+            for item_id, item in enumerate(draw.get("items") or ()):
+                if len(item) < 3 or item[0] != "l":
+                    continue
+                a, b = item[1:3]
+                if abs(a.x - b.x) > 0.03 or abs(a.y - b.y) < 30:
+                    continue
+                native_dim_strokes.append((
+                    float((a.x + b.x) / 2),
+                    float(min(a.y, b.y)), float(max(a.y, b.y)),
+                    int(path_id), int(item_id), float(width),
+                ))
+        if len(native_dim_strokes) > 10000:
+            raise ValueError("bounded_original_source_dimension_lines_required")
     if len(words) > 120000:
         return {
             "status": "source_word_universe_over_bound",
@@ -101,6 +126,54 @@ def audit_exterior_overhead_source_census_shadow(
         ]
         if not rivals:
             continue
+        # Search original ink for the printed dimension chain, retaining
+        # every complete stroke ancestry. Nearby labels/ink are candidates,
+        # not extension-line ownership or measured geometry authority.
+        original_ink_chains = []
+        grouped_words = sorted(
+            members, key=lambda member: (member[1][1] + member[1][3]) / 2
+        )
+        source_letters_x2 = sum(w[2] for _, w in members) / len(members)
+        for overall_word in rivals:
+            for overall in native_dim_strokes:
+                if not 0 < overall[0] - overall_word[2] < 3.0:
+                    continue
+                component_rows = []
+                for _value, word in grouped_words:
+                    center_y = (word[1] + word[3]) / 2
+                    near = tuple(
+                        stroke for stroke in native_dim_strokes
+                        if 0 < stroke[0] - source_letters_x2 < 3.0
+                        and stroke[1] <= center_y <= stroke[2]
+                    )
+                    component_rows.append(near)
+                if any(not options for options in component_rows):
+                    continue
+                import itertools
+                for combination in itertools.product(*component_rows):
+                    ids = tuple((line[3], line[4]) for line in combination)
+                    if len(set(ids)) != len(members):
+                        continue
+                    low = min(line[1] for line in combination)
+                    high = max(line[2] for line in combination)
+                    if abs(low - overall[1]) > 0.05 or abs(high - overall[2]) > 0.05:
+                        continue
+                    original_ink_chains.append({
+                        "original_ink_component_path_item_ids": ids,
+                        "original_ink_overall_path_item_id": (overall[3], overall[4]),
+                        "original_ink_overall_line_pdf_pt_not_metric": round(
+                            overall[2] - overall[1], 5
+                        ),
+                        "figure_extension_line_endpoint_binding_proven": False,
+                        "physical_soffit_dimension_axis_proven": False,
+                        "firm_metric_authority": False,
+                    })
+                    if len(original_ink_chains) >= 128:
+                        break
+                if len(original_ink_chains) >= 128:
+                    break
+            if len(original_ink_chains) >= 128:
+                break
         chains.append({
             "component_source_word_addresses": tuple(
                 address(w) for _, w in members
@@ -111,6 +184,7 @@ def audit_exterior_overhead_source_census_shadow(
                 address(w) for w in rivals
             ),
             "source_extension_lines_proven": False,
+            "source_ink_line_correspondence_candidates": tuple(original_ink_chains),
             "physical_soffit_axes_proven": False,
         })
     chains.sort(key=lambda c: c["component_source_word_addresses"])
