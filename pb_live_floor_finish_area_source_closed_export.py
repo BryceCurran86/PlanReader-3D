@@ -130,6 +130,7 @@ def build_live_floor_finish_area_source_traces(
     quantity_owner_by_floor: dict[str, str] = {}
     quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
     floor_owner_by_occurrence: dict[str, str] = {}
+    floor_owner_by_original_observation: dict[str, str] = {}
     # Original quantity identity is a producer-owned family invariant, not
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
@@ -296,9 +297,19 @@ def build_live_floor_finish_area_source_traces(
             )
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
-        occurrence_evidence_id = _clean(
-            metadata.get("finish_occurrence_evidence_id")
-        )
+        # An issuer's source observation ID is a typed PDF-address identity,
+        # not a label converted to a string by _clean().
+        raw_observation_id = metadata.get("finish_occurrence_evidence_id")
+        if (
+            type(raw_observation_id) is not str
+            or not raw_observation_id
+            or raw_observation_id != raw_observation_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original observation source ID malformed: "
+                f"{quantity.quantity_id}"
+            )
+        occurrence_evidence_id = raw_observation_id
         # Occurrence record and source receipt are different producer IDs.
         # Require the exact source occurrence witness actually retained in
         # both QuantityEvidence and its canonical floor; a metadata-only
@@ -353,6 +364,18 @@ def build_live_floor_finish_area_source_traces(
             finish_code=metadata.get("finish_code"),
             semantic_finish=metadata.get("semantic_finish"),
         )
+        prior_observation_floor = floor_owner_by_original_observation.get(
+            occurrence_evidence_id
+        )
+        if (
+            prior_observation_floor is not None
+            and prior_observation_floor != floor_id
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original observation has competing physical floors: "
+                f"{occurrence_evidence_id}"
+            )
+        floor_owner_by_original_observation[occurrence_evidence_id] = floor_id
         floor_owner_by_occurrence[occurrence_id] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
         quantity_owner_by_physical_floor[physical_floor_id] = (
