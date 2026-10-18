@@ -295,8 +295,12 @@ def calculate_measurement(values: Dict[str, Any]) -> Dict[str, Any]:
     height = max(0.0, _to_float(result.get("height_m")))
     entered_gross = max(0.0, _to_float(result.get("gross_area_m2")))
     openings = max(0.0, _to_float(result.get("openings_m2")))
-    layers = max(1, _to_int(result.get("layers"), 1))
-    sides = max(1, _to_int(result.get("sides"), 1))
+    layers = _to_int(result.get("layers"), 0) if result.get("layers") not in (None, "") else 0
+    sides = _to_int(result.get("sides"), 0) if result.get("sides") not in (None, "") else 0
+    if layers < 0:
+        layers = 0
+    if sides < 0:
+        sides = 0
     waste = max(0.0, _to_float(result.get("waste_percent")))
     board_width = max(0.0, _to_float(result.get("board_width_mm")))
     board_length = max(0.0, _to_float(result.get("board_length_mm")))
@@ -332,8 +336,8 @@ def _measurement_basis(row: Dict[str, Any]) -> str:
     gross = _to_float(row.get("gross_area_m2"))
     openings = _to_float(row.get("openings_m2"))
     net = _to_float(row.get("net_area_m2"))
-    sides = max(1, _to_int(row.get("sides"), 1))
-    layers = max(1, _to_int(row.get("layers"), 1))
+    sides = _to_int(row.get("sides"), 0)
+    layers = _to_int(row.get("layers"), 0)
     if length > 0 and height > 0 and element not in {"Ceiling", "Bulkhead / drop"}:
         base = f"{length:.3f}m × {height:.3f}m = {gross:.3f}m² gross"
     else:
