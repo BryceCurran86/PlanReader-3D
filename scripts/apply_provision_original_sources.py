@@ -44,6 +44,18 @@ def manifest_names(root: Path) -> List[str]:
     return names
 
 
+# A job that asserts an original is ABSENT from its checkout (test ! -f / [ ! -e ] / ! test -d on a source path). Provisioning
+# the originals into it would make its own assertion fail by construction, so it is never given them.
+_ABSENCE_ASSERTION = re.compile(
+    r"(?:\btest\s+!\s+-[efd]\s+|\[\[?\s+!\s+-[efd]\s+|!\s+test\s+-[efd]\s+)\S*(?:documents/sources|benchmarks/sources)"
+)
+
+
+def asserts_originals_absent(job_text: str) -> bool:
+    """True when the job checks that a file under the source directories does not exist."""
+    return bool(_ABSENCE_ASSERTION.search(job_text))
+
+
 def reads_originals(job_text: str) -> bool:
     """True when the job names the source directories or runs the whole test tree."""
     return bool(WHOLE_SUITE.search(job_text)) or any(token in job_text for token in SOURCE_DIR_TOKENS)
@@ -55,6 +67,9 @@ EXCLUDED_JOBS = {
         "obsolete: it archives the tracked checkout and asserts that an original PDF is inside it, which is exactly what the "
         "originals-out-of-git policy forbids; provisioning would change nothing (git archive skips untracked files) and "
         "the assertion can only pass if a PDF is tracked again",
+    ("test-gpt2-private-original-ci-policy.yml", "absent-private-source-synthetic-policy"):
+        "asserts that the private original is absent from the public checkout (test ! -f documents/sources/...); "
+        "provisioning it would make that assertion fail by construction",
 }
 # An artifact path that could sweep documents/sources into a downloadable artifact (artifacts of a public repository are
 # readable by anyone). Paths under artifacts/ or the runner temp directory are the repository convention and are fine.
@@ -166,7 +181,11 @@ def plan_file(path: Path, all_names: Sequence[str], action_ref: str) -> Optional
         whole = bool(WHOLE_SUITE.search(text))
         if not reads_originals(text):
             continue
-        if (path.name, job) in EXCLUDED_JOBS or unsafe_artifact_paths((parsed_jobs.get(job) or {}).get("steps") or []):
+        if (
+            (path.name, job) in EXCLUDED_JOBS
+            or asserts_originals_absent(text)
+            or unsafe_artifact_paths((parsed_jobs.get(job) or {}).get("steps") or [])
+        ):
             skipped.append(job)
             continue
         located = _checkout_step_end(lines, first, last)
@@ -234,8 +253,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     verb = "changed" if args.apply else "would change"
     print(f"{verb} {touched} workflow file(s), {jobs} job(s)")
     if skipped_all:
-        print("jobs that need the originals but were left alone (no actions/checkout step, excluded, or an artifact path "
-              "that could publish them):", ", ".join(skipped_all))
+        print("jobs that need the originals but were left alone (no actions/checkout step, excluded, asserts the originals "
+              "are absent, or an artifact path that could publish them):", ", ".join(skipped_all))
     return 0
 
 
