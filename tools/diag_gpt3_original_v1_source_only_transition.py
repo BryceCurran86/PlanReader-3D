@@ -75,7 +75,10 @@ def _diff(
         "missing_historical_quantities": missing,
         "new_candidate_quantities": added,
         "same_quantity_id_universe": not missing and not added,
-        "all_shared_fingerprints_byte_exact": not changed_issuer,
+        # Zero shared identities provide no byte-level continuity evidence:
+        # the Python all([]) vacuity must not describe unrelated source runs
+        # as "all shared exact" when every physical identity was replaced.
+        "all_shared_fingerprints_byte_exact": bool(shared) and not changed_issuer,
         "historical_to_candidate_quantity_equivalence_proven": False,
     }
 
