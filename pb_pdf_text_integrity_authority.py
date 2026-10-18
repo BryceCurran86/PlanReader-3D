@@ -2043,7 +2043,8 @@ def _visibility_status(
             span.get("bbox") or subject_bbox,
             seqno,
             native_word=native_word,
-            source_raw_no_active_text_clip_shadow=source_raw_no_active_text_clip_shadow,
+            **({"source_raw_no_active_text_clip_shadow": True}
+               if source_raw_no_active_text_clip_shadow else {}),
         )
     )
     try:

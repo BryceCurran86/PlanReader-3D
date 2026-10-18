@@ -354,6 +354,14 @@ def detect_header(words: Sequence[str]) -> Dict[str, Any]:
         if not w_clean:
             continue
         col_basis, col_source = _infer_column_basis(w)
+        # In the explicit DOOR / TYPE and WINDOW / TYPE schema, TYPE is
+        # the filling description (e.g. HINGED), beside the opening mark.
+        # It is not a second competing mark column. Other repeated mark
+        # headings remain ambiguous and are retained below.
+        if (w_clean == "type" and i > 0
+                and words[i - 1].strip().lower() in {"door", "window"}):
+            hits["desc"].append((i, "", ""))
+            continue
         if w_clean in _HEADER_MARK_KEYWORDS:
             hits["mark"].append((i, "", ""))
             continue
