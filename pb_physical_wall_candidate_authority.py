@@ -1196,25 +1196,23 @@ def _source_page_segments(
     page_visible_ids: list[str] = []
 
     if resolved_visible_observations is None:
-        page_rows: list[tuple[str, object]] = []
-        for observation_id in published.visible_observation_ids:
-            result = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+        # Authenticate the whole published universe once, then keep this page.
+        # A non-corroborated observation on any page still fails closed. Later
+        # calls reuse the identity-bound visible read instead of cloning every
+        # segment again.
+        try:
+            authenticated_rows = visibility.authenticated_visible_observations(
+                published
             )
-            observation = result.observation
-            if (
-                result.status is not EvidenceResolutionStatus.CORROBORATED
-                or observation is None
-            ):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-            if observation.page_id == page_id:
-                page_rows.append((observation_id, observation))
+        except RuntimeError as exc:
+            raise RuntimeError(
+                PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE
+            ) from exc
+        page_rows = [
+            (observation_id, observation)
+            for observation_id, observation in authenticated_rows
+            if observation.page_id == page_id
+        ]
     else:
         page_rows = list(resolved_visible_observations)
 
@@ -2238,7 +2236,11 @@ def _producer_proven_page_opening_records(
         # Cached positive proofs must still reauthenticate the *full* original
         # source, including competitors outside the page and any supplied
         # producer-owned page index, before reuse.
-        _authenticated_page_rows(visibility.authenticated_visible_observations(published))
+        _authenticated_page_rows(
+            visibility.authenticated_visible_observations(
+                published, bind_page_id=str(page_id)
+            )
+        )
         return cached
     proven: dict[str, PhysicalOpeningExistenceRecord] = {}
     # The original source-native dimension transaction fully authenticates
@@ -3959,10 +3961,7 @@ class PhysicalWallCandidateProducer:
                 if selected_page_ids is not None
                 else sorted(decoded_page_ids, key=lambda value: int(value))
             )
-            visible_by_page = _visible_observations_by_page(
-                source_producer=source_visibility_producer,
-                published=published,
-            )
+            visibility = source_visibility_producer.authority()
             text_receipts_by_page = _text_receipts_by_page(
                 source_producer=source_visibility_producer,
                 published=published,
@@ -3975,7 +3974,13 @@ class PhysicalWallCandidateProducer:
             )
 
             for page_id in materialized_page_ids:
-                page_visible_observations = visible_by_page.get(page_id, ())
+                # Check every visible observation, and keep a bound copy of
+                # this page only while its wall scope is built.
+                page_visible_observations = (
+                    visibility.authenticated_visible_observations(
+                        published, bind_page_id=str(page_id)
+                    )
+                )
                 if include_page_scopes:
                     builder = (
                         _build_opening_local_supplemental_scope_result

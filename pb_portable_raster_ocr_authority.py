@@ -476,22 +476,47 @@ class RapidOCRBackend(RasterOCRBackend):
         is not silently reused by a later, unrelated test."""
         cls._engine_cache = None
 
-    def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:
+    def extract_lines(
+        self,
+        image: Image.Image,
+        dpi: int = 150,
+        *,
+        detect: bool = True,
+    ) -> tuple[OCRLine, ...]:
         if not self.is_available():
             raise RuntimeError("RapidOCR backend is not available")
+        if image.width <= 0 or image.height <= 0:
+            return ()
         import numpy as np
 
         engine = self._get_engine()
         array = np.array(image.convert("RGB"))
-        result = engine(array)
+        if detect:
+            result = engine(array)
+        else:
+            # RapidOCR keeps use_det on the shared engine. A word crop must
+            # not leave the next page search without its detector.
+            previous_det = getattr(engine, "use_det", True)
+            try:
+                result = engine(array, use_det=False)
+            finally:
+                restore = getattr(engine, "update_params", None)
+                if callable(restore):
+                    restore(use_det=previous_det)
 
         scale_to_pt = 72.0 / float(dpi) if dpi > 0 else 1.0
         lines: list[OCRLine] = []
         texts = getattr(result, "txts", None) if result is not None else None
         if not texts:
             return ()
-        boxes = result.boxes
-        scores = result.scores
+        boxes = getattr(result, "boxes", None)
+        scores = getattr(result, "scores", None)
+        if boxes is None:
+            if detect:
+                return ()
+            return _ocr_lines_covering_image(texts, scores, array, scale_to_pt)
+        if scores is None:
+            return ()
         for text, box, score in zip(texts, boxes, scores):
             text = str(text).strip()
             if not text:
@@ -510,6 +535,36 @@ class RapidOCRBackend(RasterOCRBackend):
                 )
             )
         return tuple(lines)
+
+
+def _ocr_lines_covering_image(texts, scores, array, scale_to_pt: float) -> tuple[OCRLine, ...]:
+    """One recognition of an already-isolated crop, with no detector boxes.
+
+    Each non-empty reading is kept. The caller decides whether one reading
+    is required; this does not drop a second reading.
+    """
+
+    height, width = array.shape[:2]
+    bbox_px = (0.0, 0.0, float(width), float(height))
+    bbox_pt = tuple(round(value * scale_to_pt, 4) for value in bbox_px)
+    score_list = () if scores is None else tuple(scores)
+    lines: list[OCRLine] = []
+    for index, text in enumerate(texts):
+        text = str(text).strip()
+        if not text:
+            continue
+        confidence = None
+        if index < len(score_list) and score_list[index] is not None:
+            confidence = float(score_list[index])
+        lines.append(
+            OCRLine(
+                text=text,
+                confidence=confidence,
+                bbox_px=bbox_px,
+                bbox_pt=bbox_pt,
+            )
+        )
+    return tuple(lines)
 
 
 # Exact production backends only — Mock and arbitrary subclasses are not authority.

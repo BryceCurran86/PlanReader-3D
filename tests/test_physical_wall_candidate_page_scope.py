@@ -164,9 +164,11 @@ def test_page_segments_reused_across_page_and_viewport_wall_producers() -> None:
         assert current is not None
         first_result = first_producer.authority().resolve_scope(_selector(current, "2"))
         assert first_result.status is EvidenceResolutionStatus.CORROBORATED
-        # Source visibility already decoded this exact immutable page during
-        # ingest, so wall reconstruction must reuse that producer-owned parse.
-        assert extract.call_count == 0
+        # Visibility publication releases its page decodes once the records
+        # are stored (the memory bound), so wall reconstruction decodes the
+        # page once. Every later wall producer reuses that one parse.
+        assert not source._producer._native_page_decode_cache
+        assert extract.call_count == 1
 
         second_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
             source,
@@ -181,13 +183,13 @@ def test_page_segments_reused_across_page_and_viewport_wall_producers() -> None:
         )
 
         assert second_result == first_result
-        assert extract.call_count == 0
+        assert extract.call_count == 1
 
         PhysicalWallCandidateProducer.from_authenticated_viewports(
             source,
             page_ids=("2",),
         )
-        assert extract.call_count == 0
+        assert extract.call_count == 1
 
 
 def test_page_segments_fall_back_to_native_decode_when_producer_cache_is_missing() -> None:

@@ -37,6 +37,7 @@ from pb_source_observation_authority import (
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationRecord,
+    _observation_ids_with_derived,
 )
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
@@ -1436,11 +1437,15 @@ class PhysicalOpeningAuthority:
         visibility = self._source_visibility_authority
         if visibility is None or seed.snapshot is None or seed.source_revision is None:
             return (), ()
+        page_id = (
+            seed.observation.page_id if seed.observation is not None else None
+        )
         cache_key = (
             seed.snapshot.document_id,
             seed.snapshot.revision_id,
             seed.snapshot.source_sha256,
             seed.snapshot.snapshot_id,
+            page_id,
         )
         cached = self._visible_snapshot_cache.get(cache_key)
         if cached is not None:
@@ -1455,34 +1460,60 @@ class PhysicalOpeningAuthority:
         batch_rows = None
         producer = self._source_visibility_producer
         if producer is not None:
-            published = producer.published_snapshot_for_revision(
-                seed.snapshot.revision_id
-            )
+            active = producer._native_dimension_proof_batch
             if (
-                published is not None
-                and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+                active is not None
+                and active.get("published") is not None
+                and active["published"].snapshot.snapshot_id
+                == seed.snapshot.snapshot_id
+                and (
+                    page_id is None
+                    or str(active.get("page_id")) == str(page_id)
+                )
             ):
-                try:
-                    batch_rows = visibility.authenticated_visible_observations(
-                        published
-                    )
-                except RuntimeError:
-                    batch_rows = None
+                batch_rows = active["rows"]
+            else:
+                published = producer.published_snapshot_for_revision(
+                    seed.snapshot.revision_id
+                )
+                if (
+                    published is not None
+                    and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+                ):
+                    try:
+                        batch_rows = visibility.authenticated_visible_observations(
+                            published,
+                            bind_page_id=None if page_id is None else str(page_id),
+                        )
+                    except RuntimeError:
+                        batch_rows = None
         if batch_rows is not None:
             by_id = {
                 str(observation_id): record
                 for observation_id, record in batch_rows
             }
+            ordered_ids = _observation_ids_with_derived(
+                tuple(seed.snapshot.observation_ids),
+                tuple(by_id),
+            )
             records.extend(
                 replace(by_id[observation_id])
-                for observation_id in seed.snapshot.observation_ids
+                for observation_id in ordered_ids
                 if observation_id in by_id
+                and (
+                    page_id is None
+                    or by_id[observation_id].page_id == page_id
+                )
             )
         else:
             visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
                 seed.snapshot.snapshot_id
             )
-            for observation_id in seed.snapshot.observation_ids:
+            ordered_ids = _observation_ids_with_derived(
+                tuple(seed.snapshot.observation_ids),
+                tuple(visible_observation_ids),
+            )
+            for observation_id in ordered_ids:
                 # Non-visible source observations historically resolve to
                 # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
                 if observation_id not in visible_observation_ids:
@@ -1500,7 +1531,11 @@ class PhysicalOpeningAuthority:
                     result.status is EvidenceResolutionStatus.CORROBORATED
                     and result.observation
                 ):
-                    records.append(result.observation)
+                    if (
+                        page_id is None
+                        or result.observation.page_id == page_id
+                    ):
+                        records.append(result.observation)
                 elif result.status is EvidenceResolutionStatus.CONFLICT:
                     failures.append(result)
                 elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:

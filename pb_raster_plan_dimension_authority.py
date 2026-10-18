@@ -209,6 +209,7 @@ def _canonical_segment_geometry(
 def _native_segment_style_table(
     source_visibility: SourceVisibilityProducer,
     *,
+    revision_id: str,
     source_sha256: str,
     page_id: str,
 ) -> Mapping[
@@ -222,15 +223,19 @@ def _native_segment_style_table(
     """Return source graphic state only from the producer-owned native decode.
 
     This is provenance metadata for tie-breaking only. Missing, malformed or
-    stale cache data simply disables the tie-break; it can never create a
-    visible segment or change source identity.
+    stale decode data simply disables the tie-break; it can never create a
+    visible segment or change source identity. Publication releases its page
+    decodes, so the producer decodes its own retained, hash-checked source
+    bytes again here.
     """
     try:
         page_number = int(str(page_id))
     except (TypeError, ValueError):
         return MappingProxyType({})
     source_writer = source_visibility._producer
-    cached = source_writer._cached_native_page(str(source_sha256), page_number)
+    cached = source_writer._native_page_for_read(
+        str(revision_id), str(source_sha256), page_number
+    )
     native_page = (
         None
         if cached is None or cached.failed
@@ -1060,6 +1065,7 @@ class RasterPlanDimensionProducer:
         visibility = self._source_visibility.authority()
         native_style_by_raw_id = _native_segment_style_table(
             self._source_visibility,
+            revision_id=revision_id,
             source_sha256=published.revision.source_sha256,
             page_id=page_id,
         )
