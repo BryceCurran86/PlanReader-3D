@@ -25,7 +25,8 @@ def _fake_sources(tmp_path, monkeypatch):
     docs = []
     for i in range(2):
         doc = fitz.open()
-        doc.new_page()
+        page = doc.new_page()
+        page.insert_text((72, 72), f"synthetic-original-document-role-{i}")
         file = root / ("primary.pdf" if i == 0 else "structure.pdf")
         doc.save(file)
         doc.close()
