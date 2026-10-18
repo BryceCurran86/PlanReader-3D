@@ -13,7 +13,7 @@ from pb_gptmax_raster_tile_seam_shadow import (
 )
 
 
-def _source(*, gap=0, same=False, right_dark=True, vector_override=False, rotated=False):
+def _source(*, gap=0, same=False, right_dark=True, vector_override=False, rotated=False, interior_gap=False):
     doc = fitz.open()
     page = doc.new_page(width=250, height=150)
     images = []
@@ -22,6 +22,8 @@ def _source(*, gap=0, same=False, right_dark=True, vector_override=False, rotate
         draw = ImageDraw.Draw(im)
         if side == 0 or right_dark:
             draw.rectangle((0, 48, 99, 53), fill=(0, 0, 0))
+        if side == 1 and interior_gap:
+            draw.rectangle((1, 48, 2, 53), fill=(255, 255, 255))
         if side == 1 and not same:
             draw.point((12, 12), fill=(255, 0, 0))
         stream = BytesIO()
@@ -111,3 +113,52 @@ def test_original_lot16_page5_seam_requires_owner_source_if_available():
     assert all(not report[k] for k in (
         "structural_host_granted", "whole_wall_frame_granted", "opening_count_granted", "quantity_granted"
     ))
+
+
+def test_complete_source_scanline_corroborates_all_dark_pixel_columns():
+    from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
+    pdf = _source()
+    got = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=hashlib.sha256(pdf).hexdigest(), page_no=1,
+        seam_x=100, source_y=50, flank_offset_pt=7,
+    )
+    assert got["status"] == "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert got["source_painted_pixel_columns"] >= 50
+    assert all(got["source_pixel_columns_per_image_root"])
+    assert all(not got[k] for k in (
+        "structural_host_granted", "whole_wall_frame_granted", "opening_count_granted", "quantity_granted"
+    ))
+
+
+def test_inner_white_source_gap_blocks_even_with_two_dark_endpoint_samples():
+    from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
+    pdf = _source(interior_gap=True)
+    digest = hashlib.sha256(pdf).hexdigest()
+    basic = prove_tile_seam_source_pixels(
+        pdf, expected_sha256=digest, page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,
+    )
+    assert basic["status"] == SOURCE_ONLY
+    strict = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=digest, page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,
+    )
+    assert strict["status"] == ABSTAIN
+    assert "contiguous_source_ink_scan_failed" in strict["reason_codes"]
+
+
+def test_original_lot16_p3_58_source_image_pixel_columns_cross_tile_seam():
+    from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
+    source = os.environ.get("LOT16_ARCH_ORIGINAL")
+    if not source or not Path(source).is_file():
+        pytest.skip("private original source absent: not an original-source verification")
+    pdf = Path(source).read_bytes()
+    digest = hashlib.sha256(pdf).hexdigest()
+    assert digest == "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    report = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=digest, page_no=3, seam_x=714.36,
+        source_y=426.5, flank_offset_pt=7,
+    )
+    assert report["status"] == "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert [r["xref"] for r in report["image_roots"]] == [95, 97]
+    assert report["source_painted_pixel_columns"] == 58
+    assert report["source_pixel_columns_per_image_root"] == [29, 29]
+    assert not report["structural_host_granted"]
