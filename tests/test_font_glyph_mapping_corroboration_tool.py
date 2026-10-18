@@ -78,8 +78,8 @@ def test_when_nothing_can_be_read_nothing_is_verified_and_the_budget_is_respecte
 def test_one_corroborated_word_per_glyph_is_not_enough_with_the_default_minimum():
     single = tool.analyse(two_page_pdf(), [1], budget=1, corroborator_factory=everything)
     assert single["verified_font_glyph_pairs"] == 0 and single["under_supported_font_glyph_pairs"] > 0
-    relaxed = tool.analyse(two_page_pdf(), [1], budget=1, min_words=1, corroborator_factory=everything)
-    assert relaxed["verified_font_glyph_pairs"] > 0
+    with pytest.raises(ValueError, match="min_words"):
+        tool.analyse(two_page_pdf(), [1], budget=1, min_words=1, corroborator_factory=everything)
 
 
 def test_the_report_has_counts_only_and_grants_nothing(tmp_path, capsys):
