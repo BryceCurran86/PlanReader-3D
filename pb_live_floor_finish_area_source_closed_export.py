@@ -325,8 +325,10 @@ def build_live_floor_finish_area_source_traces(
         raw_observation_id = metadata.get("finish_occurrence_evidence_id")
         if (
             type(raw_observation_id) is not str
-            or not raw_observation_id
-            or raw_observation_id != raw_observation_id.strip()
+            or (
+                raw_observation_id
+                and raw_observation_id != raw_observation_id.strip()
+            )
         ):
             raise SourceClosedRunConflictError(
                 "floor-finish original observation source ID malformed: "
