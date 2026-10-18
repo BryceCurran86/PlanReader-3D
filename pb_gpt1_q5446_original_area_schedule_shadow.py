@@ -60,6 +60,8 @@ class OriginalAreaScheduleCandidate:
     physical_surface_owner_authenticated: bool = False
     customer_projection_allowed: bool = False
     original_numeric_vector_path_ids: tuple[int, ...] = ()
+    original_label_vector_path_ids: tuple[int, ...] = ()
+    label_stroke_presence_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,57 @@ ORIGINAL_ROW_Y_BOUNDS = (
     (698.76, 709.08),
     (709.08, 728.52),
 )
+
+
+# Fixed, original-plan, physical vector stroke witnesses within each source
+# category's left table cell. Multiple strokes can form one outlined character.
+# This proves that the printed label ink still occupies the original row, but
+# is NOT a free-standing glyph-to-letter semantic decoder.
+ORIGINAL_LABEL_STROKE_PATHS = (
+    (9, 11, 12, 13, 16, 18, 19, 22, 23, 25, 26, 27),
+    (52, 54, 57, 58, 59, 61, 64, 65, 67, 68, 69),
+    (94, 95, 98, 99, 101, 102, 105, 107, 108),
+    (133, 134, 136, 137, 139, 140, 141),
+    (163, 165, 167, 169, 170, 171, 172, 173, 174),
+    (197, 200, 203, 204, 205, 206, 207, 208, 209),
+    (234, 235, 238, 240, 243, 244, 246, 247, 248),
+)
+
+
+def _original_label_stroke_receipts(drawings: list[dict[str, Any]]) -> tuple[tuple[int, ...], ...] | None:
+    if len(ORIGINAL_LABEL_STROKE_PATHS) != len(PRINTED_ORIGINAL_ROWS):
+        return None
+    found = []
+    for row, (y0, y1) in zip(ORIGINAL_LABEL_STROKE_PATHS, ORIGINAL_ROW_Y_BOUNDS):
+        if len(set(row)) != len(row):
+            return None
+        for idx in row:
+            if type(idx) is not int or idx < 0 or idx >= len(drawings):
+                return None
+            record = drawings[idx]
+            rect = record.get("rect")
+            width = record.get("width")
+            if (
+                record.get("type") != "s"
+                or record.get("color") != (0.0, 0.0, 0.0)
+                or type(width) not in (int, float)
+                or abs(width - 0.72) > GEOMETRY_EPSILON_PT
+                or rect is None
+            ):
+                return None
+            try:
+                if not (
+                    980.0 < rect.x0 < rect.x1 < 1038.6
+                    and y0 + 1.0 < rect.y0 < rect.y1 < y1 - 1.0
+                ):
+                    return None
+            except (TypeError, ValueError, AttributeError):
+                return None
+        found.append(row)
+    all_ids = tuple(index for row in found for index in row)
+    if len(set(all_ids)) != len(all_ids):
+        return None
+    return tuple(found)
 
 
 def _numeric_vector_digit(record: dict[str, Any]) -> str | None:
@@ -250,6 +303,9 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
             original_numeric_source_ids = _original_numeric_glyph_receipts(drawings)
             if original_numeric_source_ids is None:
                 return _abstain("original_area_schedule_numeric_vector_glyphs_unverified", source_sha)
+            original_label_source_ids = _original_label_stroke_receipts(drawings)
+            if original_label_source_ids is None:
+                return _abstain("original_area_schedule_label_vector_ink_missing", source_sha)
     except Exception:
         return _abstain("original_area_schedule_native_pdf_unavailable", source_sha)
 
@@ -262,6 +318,8 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
             original_source_sha256=source_sha,
             glyph_correspondence_authenticated=True,
             original_numeric_vector_path_ids=original_numeric_source_ids[i],
+            original_label_vector_path_ids=original_label_source_ids[i],
+            label_stroke_presence_verified=True,
         )
         for i, (key, label, value, rollup) in enumerate(PRINTED_ORIGINAL_ROWS)
     )
@@ -278,7 +336,8 @@ def inspect_original_q5446_printed_area_schedule(pdf_path: str | Path) -> Q5446S
         reason_codes=(
             "original_source_vector_table_ruled_geometry_verified",
             "original_area_numeric_vector_glyphs_authenticated",
-            "area_category_label_vector_glyphs_unverified",
+            "source_category_label_original_strokes_verified_not_letters",
+            "area_category_label_glyph_semantics_unverified",
             "physical_floor_owner_and_gross_net_semantics_unresolved",
             "rollups_not_independent_physical_quantities",
         ),
