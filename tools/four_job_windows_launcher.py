@@ -65,10 +65,47 @@ def output_report(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+_PROC_ROOT = Path("/proc")
+
+
+def _procfs_pid_for_namespace_pid(pid: int) -> int | None:
+    """Translate our namespace PID before reading a possibly host-mounted /proc.
+
+    A numeric /proc directory may belong to an unrelated process when procfs
+    was mounted outside this PID namespace. Match both the namespace inode and
+    its innermost NSpid; never sample the first numerically matching directory.
+    """
+    if type(pid) is not int or pid <= 0:
+        return None
+    try:
+        namespace = os.readlink(_PROC_ROOT / "self" / "ns" / "pid")
+    except OSError:
+        return None
+
+    def matches(entry: Path) -> bool:
+        try:
+            if os.readlink(entry / "ns" / "pid") != namespace:
+                return False
+            for line in (entry / "status").read_text().splitlines():
+                if line.startswith("NSpid:"):
+                    ids = tuple(int(value) for value in line.split()[1:])
+                    return bool(ids) and ids[-1] == pid
+        except (OSError, ValueError):
+            return False
+        return False
+
+    direct = _PROC_ROOT / str(pid)
+    if matches(direct):
+        return pid
+    matches_in_namespace = [int(entry.name) for entry in _PROC_ROOT.iterdir()
+                            if entry.name.isdigit() and matches(entry)]
+    return matches_in_namespace[0] if len(matches_in_namespace) == 1 else None
+
+
 def _children_by_parent() -> dict[int, list[int]]:
     """POSIX only: parent pid -> child pids, read from /proc."""
     children: dict[int, list[int]] = {}
-    for entry in Path("/proc").iterdir():
+    for entry in _PROC_ROOT.iterdir():
         if not entry.name.isdigit():
             continue
         try:
@@ -103,8 +140,11 @@ def sample_memory_kb(pid: int) -> tuple[int, int, int | None]:
                                     capture_output=True, text=True, check=False, timeout=60)
             ws, private, free_kb = result.stdout.split()[:3]
             return int(ws) // 1024, int(private) // 1024, int(free_kb)
+        procfs_pid = _procfs_pid_for_namespace_pid(pid)
+        if procfs_pid is None:
+            return 0, 0, None
         children = _children_by_parent()
-        pids, stack = set(), [int(pid)]
+        pids, stack = set(), [procfs_pid]
         while stack:
             current = stack.pop()
             if current not in pids:
@@ -113,13 +153,13 @@ def sample_memory_kb(pid: int) -> tuple[int, int, int | None]:
         rss_kb = 0
         for current in pids:
             try:
-                for line in Path(f"/proc/{current}/status").read_text().splitlines():
+                for line in (_PROC_ROOT / str(current) / "status").read_text().splitlines():
                     if line.startswith("VmRSS:"):
                         rss_kb += int(line.split()[1])
             except OSError:
                 continue
         free_kb = None
-        meminfo = {line.split(":")[0]: int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines()}
+        meminfo = {line.split(":")[0]: int(line.split()[1]) for line in (_PROC_ROOT / "meminfo").read_text().splitlines()}
         if "MemAvailable" in meminfo:
             free_kb = meminfo["MemAvailable"] + meminfo.get("SwapFree", 0)
         return rss_kb, rss_kb, free_kb

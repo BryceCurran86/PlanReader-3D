@@ -177,7 +177,7 @@ class OpeningHostFrameEvidence:
     opening_identity_id: str
     host_binding_record_id: str
     host_wall_id: str
-    whole_wall_frame_id: str
+    whole_wall_frame_id: str | None
     whole_wall_candidate_ids: tuple[str, ...]
     source_observation_ids: tuple[str, ...]
     origin_pt: tuple[float, float]
@@ -1194,6 +1194,88 @@ class OpeningHostFrameProducer:
             MappingProxyType(dict(self._results)),
             _seal=_AUTHORITY_SEAL,
         )
+
+    def local_source_frame_shadow(self, *, opening_selector, host_binding_selector,
+            supplemental_wall_candidate_authority=None, source_fragment_roles_shadow=False):
+        """Recover the owned aperture axes while withholding whole-wall authority.
+
+        Supplemental source fragments may prove the aperture's local axes even
+        when complete whole-wall extent is unavailable. Return CANDIDATE only,
+        with no whole-wall length, and NEVER store it in the positive frame
+        authority. Existing void, scale and publication consumers cannot use it.
+        """
+        if type(opening_selector) is not ObservationSelector or type(host_binding_selector) is not OpeningHostBindingSelector:
+            raise TypeError("exact producer source/frame selectors required")
+        if type(source_fragment_roles_shadow) is not bool:
+            raise TypeError("source fragment roles shadow must be an explicit boolean")
+        if supplemental_wall_candidate_authority is not None and type(
+                supplemental_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
+            raise TypeError("supplemental wall authority must be producer-owned")
+        physical = self._opening.prove_existence(opening_selector)
+        opening = physical.existence_record
+        bound = self._host.resolve(host_binding_selector)
+        binding = bound.record
+        if (physical.status is not EvidenceResolutionStatus.CORROBORATED or opening is None
+                or bound.status is not EvidenceResolutionStatus.CORROBORATED or binding is None):
+            return _blocked(EvidenceResolutionStatus.ABSTAINED,
+                            OPENING_HOST_FRAME_HOST_UNAVAILABLE)
+        if (opening.record_id != binding.opening_identity_id
+                or any(getattr(opening, field) != getattr(binding, field) for field in (
+                    "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id"))):
+            return _blocked(EvidenceResolutionStatus.CONFLICT, OPENING_HOST_FRAME_SCOPE_MISMATCH)
+        geometry = host_geometry._opening_geometry(self._opening, opening)
+        if geometry is None or len(binding.member_wall_candidate_ids) != 2:
+            return _blocked(EvidenceResolutionStatus.ABSTAINED,
+                            OPENING_HOST_FRAME_GEOMETRY_UNAVAILABLE)
+        selector = PhysicalWallCandidateSelector(
+            document_id=binding.document_id, revision_id=binding.revision_id,
+            source_sha256=binding.source_sha256, snapshot_id=binding.snapshot_id,
+            page_id=binding.page_id, decision_scope_id=binding.decision_scope_id)
+        ordinary = self._walls.resolve_scope(selector)
+        if (ordinary.status is not EvidenceResolutionStatus.CORROBORATED
+                or not ordinary.scope_complete or ordinary.equivalence is None):
+            return _blocked(EvidenceResolutionStatus.ABSTAINED,
+                            "opening_host_frame_complete_wall_scope_unavailable")
+        proof = host_geometry._resolve_raster_source_band_host(self._opening, opening,
+            ordinary.records, geometry, ordinary.equivalence, ordinary.source_observation_ids)
+        if (proof.status is EvidenceResolutionStatus.CORROBORATED and not proof.bands
+                and supplemental_wall_candidate_authority is not None):
+            supplemental = supplemental_wall_candidate_authority.resolve_scope(selector)
+            if (supplemental.status is EvidenceResolutionStatus.CORROBORATED
+                    and supplemental.scope_complete is False and supplemental.equivalence is not None):
+                proof = host_geometry._resolve_opening_local_mixed_scope_source_band(
+                    self._opening, opening, geometry, ordinary.records, supplemental.records,
+                    ordinary.source_observation_ids, supplemental.source_observation_ids,
+                    source_fragment_roles_shadow=source_fragment_roles_shadow)
+        if (proof.status is not EvidenceResolutionStatus.CORROBORATED or len(proof.bands) != 1
+                or proof.bands[0].member_ids != tuple(sorted(binding.member_wall_candidate_ids))):
+            return _blocked(EvidenceResolutionStatus.ABSTAINED,
+                            "opening_local_source_frame_membership_unproven", *proof.reason_codes)
+        if (not all(math.isfinite(float(x)) for x in (*geometry.origin, *geometry.axis,
+                *geometry.normal, geometry.length, geometry.thickness))
+                or min(geometry.length, geometry.thickness) <= 0):
+            return _blocked(EvidenceResolutionStatus.CONFLICT, OPENING_HOST_FRAME_GEOMETRY_INVALID)
+        frame_selector = OpeningHostFrameSelector(binding.document_id, binding.revision_id,
+            binding.source_sha256, binding.snapshot_id, binding.page_id,
+            binding.decision_scope_id, binding.opening_identity_id)
+        frame_id = stable_contract_id("opening_local_source_frame_shadow", {
+            "selector": frame_selector.key, "binding": binding.record_id,
+            "origin":geometry.origin, "axis":geometry.axis, "normal":geometry.normal,
+            "length":geometry.length, "thickness":geometry.thickness,
+            "members":proof.bands[0].member_ids}, digest_chars=32)
+        evidence = OpeningHostFrameEvidence(
+            selector=frame_selector, record_id=frame_id,
+            opening_identity_id=binding.opening_identity_id,
+            host_binding_record_id=binding.record_id, host_wall_id=binding.host_wall_id,
+            whole_wall_frame_id=None,
+            whole_wall_candidate_ids=proof.bands[0].member_ids,
+            source_observation_ids=tuple(sorted(opening.source_observation_ids)),
+            origin_pt=geometry.origin, axis_unit=geometry.axis, normal_unit=geometry.normal,
+            u0_pt=0.0, u1_pt=geometry.length, wall_thickness_pt=geometry.thickness,
+            whole_wall_length_pt=None)
+        return OpeningHostFrameResult(status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=("opening_local_source_frame_shadow",
+                          OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN), evidence=evidence)
 
 
 __all__ = [

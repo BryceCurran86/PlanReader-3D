@@ -121,6 +121,7 @@ class LiveWallOpeningAuthorityComposition:
     host_frame_selectors: Mapping[str, OpeningHostFrameSelector]
     evidence_page_ids: tuple[str, ...] = ()
     schema_version: str = LIVE_WALL_OPENING_COMPOSITION_SCHEMA_VERSION
+    supplemental_physical_wall_candidate_authority: Optional[PhysicalWallCandidateAuthority] = None
 
 
 def _clean_page_ids(page_ids: Sequence[str]) -> tuple[str, ...]:
@@ -156,6 +157,9 @@ def compose_live_wall_opening_authority(
     revision_id: str,
     page_ids: Sequence[str],
     evidence_page_ids: Sequence[str] = (),
+    include_unmeasured_ink_closed_flanks_shadow: bool = False,
+    source_fragment_roles_shadow: bool = False,
+    source_revision_scope_shadow: bool = False,
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
@@ -169,6 +173,14 @@ def compose_live_wall_opening_authority(
     """
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
+    if type(include_unmeasured_ink_closed_flanks_shadow) is not bool:
+        raise TypeError("unmeasured G17 capture shadow must be an explicit boolean")
+    if type(source_fragment_roles_shadow) is not bool:
+        raise TypeError("source fragment roles shadow must be an explicit boolean")
+    if type(source_revision_scope_shadow) is not bool:
+        raise TypeError("source revision scope shadow must be an explicit boolean")
+    if source_fragment_roles_shadow and not include_unmeasured_ink_closed_flanks_shadow:
+        raise ValueError("source fragment roles require isolated G17 source capture")
     revision_id = str(revision_id or "").strip()
     if not revision_id:
         raise ValueError("revision_id must be non-empty")
@@ -194,15 +206,56 @@ def compose_live_wall_opening_authority(
         page_ids=selected_pages,
     )
 
-    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
-        source_visibility_producer,
-        page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
-    )
-    supplemental_wall_producer = (
-        PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer(
+    if include_unmeasured_ink_closed_flanks_shadow:
+        # An original G17 opening nomination is an exact ONE-plan-page
+        # source policy. Cross-view evidence pages are independent source
+        # witnesses, NOT additional pages whose openings may be minted under
+        # the single-plan G17 hypothesis. Prior composition incorrectly
+        # supplied (plan,elevation) to a one-page capture and raised before
+        # any W4/host/frame proof could run.
+        if len(selected_pages) != 1:
+            raise ValueError(
+                "original G17 ink-shadow requires exactly one topology page"
+            )
+        source_visibility_producer.augment_with_unmeasured_g17_flanks_source_shadow(
+            revision_id,
+            page_ids=selected_pages,
+        )
+    # Build the canonical old W4 universe over ALL selected original/evidence
+    # pages; the G17 page's new source families are already receipted and
+    # are excluded by the ordinary page AND F.07 viewport source filters.
+    # The separate incomplete supplemental wall producer below consumes the
+    # one-page G17 families, never the elevation as another opening.
+    if source_revision_scope_shadow:
+        wall_producer = PhysicalWallCandidateProducer.from_source_revision_shadow(
+            source_visibility_producer,revision_id=revision_id,
+            page_ids=_clean_page_ids((*selected_pages, *evidence_pages)))
+    else:
+        wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
             source_visibility_producer,
             page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
         )
+    supplemental_factory = (
+        PhysicalWallCandidateProducer.from_opening_local_exact_g17_source_shadow
+        if include_unmeasured_ink_closed_flanks_shadow
+        else PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer
+    )
+    if source_revision_scope_shadow:
+        supplemental_factory = PhysicalWallCandidateProducer.from_opening_local_source_revision_shadow
+    supplemental_wall_producer = supplemental_factory(
+        source_visibility_producer,
+        **({"revision_id":revision_id,
+            "exact_endpoints_shadow":include_unmeasured_ink_closed_flanks_shadow}
+           if source_revision_scope_shadow else {}),
+        # Exact-endpoint G17 is a SOURCE-OWNED PLAN-opening proposal only.
+        # Elevation support pages may prove independent width/height/ink, but
+        # cannot emit G17 hosts from their page-local terminal-band texture.
+        # Ordinary supplemental production retains its historical all-page scope.
+        page_ids=(
+            selected_pages
+            if include_unmeasured_ink_closed_flanks_shadow
+            else _clean_page_ids((*selected_pages, *evidence_pages))
+        ),
     )
 
     # Wall-candidate materialization may legitimately augment the producer-owned
@@ -343,6 +396,9 @@ def compose_live_wall_opening_authority(
         physical_opening_authority=physical_opening_authority,
         host_wall_universe_authority=host_universe_authority,
         supplemental_wall_candidate_authority=supplemental_wall_authority,
+        **({"source_fragment_roles_shadow": True} if source_fragment_roles_shadow else {}),
+        **({"reconcile_all_source_scopes_shadow": True}
+           if source_visibility_producer._exact_g17_nomination_shadow else {}),
     )
 
 
@@ -566,6 +622,7 @@ def compose_live_wall_opening_authority(
         ),
         opening_host_binding_authority=binding_authority,
         opening_host_frame_authority=host_frame_authority,
+        supplemental_physical_wall_candidate_authority=supplemental_wall_authority,
         binding_selectors=MappingProxyType(dict(binding_selectors)),
         host_frame_selectors=MappingProxyType(dict(host_frame_selectors)),
         evidence_page_ids=evidence_pages,
