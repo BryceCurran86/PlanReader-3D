@@ -39,6 +39,96 @@ class ComponentFloorFinishResult:
     component_finish_areas_m2: Dict[str, float] = field(default_factory=dict)
 
 
+
+def _component_rectangles_are_disjoint(components: list) -> bool:
+    """Only sum separately sourced finish areas when their metric footprints close.
+
+    A plausible L x W and a CONFIRMED flag do not prove the footprint polygon
+    agrees with the figured dimensions.  In a compound layout an overlap is
+    already counted twice by a sum of component areas; shared boundary edges
+    are allowed but an interior intersection is not. No inferred transform,
+    location, scale or polygon may repair a missing source footprint.
+    """
+    try:
+        from shapely.geometry import Polygon
+
+        if not components:
+            return False
+        if len({c.space_id for c in components}) != len(components):
+            return False
+        if any(type(c.space_id) is not str or not c.space_id.strip() for c in components):
+            return False
+
+        polygons = []
+        for comp in components:
+            if (
+                type(comp.length_m) not in (int, float)
+                or type(comp.width_m) not in (int, float)
+                or type(comp.area_m2) not in (int, float)
+                or any(not math.isfinite(float(v)) or v <= 0.0 for v in
+                       (comp.length_m, comp.width_m, comp.area_m2))
+            ):
+                return False
+            if not math.isclose(
+                comp.area_m2, comp.length_m * comp.width_m,
+                rel_tol=0.0, abs_tol=0.011,
+            ):
+                return False
+
+            # For a sole enclosed rectangle, two independently evidenced
+            # orthogonal dimensions suffice. Multiple components require
+            # their own full source placement to prove absence of overlap.
+            if not comp.polygon:
+                if len(components) != 1:
+                    return False
+                continue
+            ring = tuple(comp.polygon)
+            if len(ring) == 5 and ring[0] == ring[-1]:
+                ring = ring[:-1]
+            if len(ring) != 4 or len(set(ring)) != 4:
+                return False
+            if any(
+                type(pt) not in (tuple, list)
+                or len(pt) != 2
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in pt)
+                for pt in ring
+            ):
+                return False
+            polygon = Polygon(ring)
+            if not polygon.is_valid or polygon.is_empty or polygon.area <= 0.0:
+                return False
+            edges = tuple(
+                (ring[(i + 1) % 4][0] - ring[i][0],
+                 ring[(i + 1) % 4][1] - ring[i][1])
+                for i in range(4)
+            )
+            lengths = tuple(math.hypot(*edge) for edge in edges)
+            if min(lengths) <= 0:
+                return False
+            if any(
+                abs(edges[i][0] * edges[(i + 1) % 4][0] +
+                    edges[i][1] * edges[(i + 1) % 4][1]) >
+                1e-6 * lengths[i] * lengths[(i + 1) % 4]
+                for i in range(4)
+            ):
+                return False
+            actual_sides = sorted((lengths[0], lengths[1]))
+            recorded_sides = sorted((comp.length_m, comp.width_m))
+            if any(abs(a - b) > 0.011 for a, b in zip(actual_sides, recorded_sides)):
+                return False
+            if not math.isclose(polygon.area, comp.area_m2, rel_tol=0, abs_tol=0.011):
+                return False
+            for earlier in polygons:
+                if polygon.intersection(earlier).area > 1e-8:
+                    return False
+            polygons.append(polygon)
+        return True
+    except Exception:
+        # Invalid GEOS rings, unavailable geometry validation and malformed
+        # source components all fail closed; no fallback guessed finish area.
+        return False
+
+
 def derive_component_aware_floor_finish_area(
     footprint: FootprintGeometryResult,
     wall_thickness_m: Optional[float],
@@ -76,6 +166,8 @@ def derive_component_aware_floor_finish_area(
         c.space_type not in (SpaceType.MAIN_BUILDING.value, SpaceType.VERANDAH.value)
         for c in solid_components
     ):
+        return None
+    if not _component_rectangles_are_disjoint(solid_components):
         return None
     if any(
         not c.has_evidenced_dimensions or c.missing_dimensions
