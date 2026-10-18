@@ -262,6 +262,118 @@ def compute_collinear_segment_overlap(
 # Multi-Space Footprint Engine & Builder
 # ---------------------------------------------------------------------------
 
+def _source_compound_geometry_conflicts(
+    components: List[SpaceComponent],
+) -> Tuple[str, ...]:
+    """Detect physical union/void failures before a partial sum becomes FIRM.
+
+    The legacy partial numeric fields remain diagnostic; consumers must demand
+    CONFIRMED status before issuing whole-building takeoff quantities.
+    Missing positions are never invented from neighbouring components.
+    """
+    if not components:
+        return ("empty_component_universe",)
+    ids = [component.space_id for component in components]
+    if any(type(identity) is not str or not identity.strip() for identity in ids):
+        return ("invalid_physical_space_identity",)
+    if len(set(ids)) != len(ids):
+        return ("duplicate_physical_space_identity",)
+
+    try:
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+    except ImportError:
+        return ("source_polygon_validator_unavailable",)
+
+    source_polygons = []
+    problems: set[str] = set()
+    for component in components:
+        if (
+            type(component.area_m2) not in (int, float)
+            or not math.isfinite(float(component.area_m2))
+            or (
+                component.has_evidenced_dimensions
+                and not component.missing_dimensions
+                and component.area_m2 <= 0.0
+            )
+        ):
+            problems.add("invalid_component_metric_area")
+            continue
+        if not component.polygon:
+            # A single independently figured rectangle can have metric area
+            # without original drawing coordinates. A compound union cannot.
+            if len(components) > 1 and component.has_evidenced_dimensions:
+                problems.add("unplaced_compound_source_component")
+            continue
+        try:
+            ring = component.polygon
+            if (
+                not isinstance(ring, (list, tuple)) or len(ring) < 3
+                or any(
+                    type(point) not in (tuple, list) or len(point) != 2
+                    or any(type(x) not in (int, float) or not math.isfinite(float(x))
+                           for x in point)
+                    for point in ring
+                )
+            ):
+                problems.add("invalid_source_polygon")
+                continue
+            polygon = Polygon(ring)
+            if not polygon.is_valid or polygon.is_empty or polygon.area <= 0.0:
+                problems.add("invalid_source_polygon")
+                continue
+            if abs(polygon.area - component.area_m2) > 0.015:
+                problems.add("inconsistent_source_polygon_area")
+            if component.perimeter_m and (
+                type(component.perimeter_m) not in (int, float)
+                or not math.isfinite(float(component.perimeter_m))
+                or abs(polygon.length - component.perimeter_m) > 0.015
+            ):
+                problems.add("inconsistent_source_polygon_perimeter")
+            if component.length_m is not None and component.width_m is not None:
+                if (
+                    type(component.length_m) not in (int, float)
+                    or type(component.width_m) not in (int, float)
+                    or not math.isfinite(float(component.length_m))
+                    or not math.isfinite(float(component.width_m))
+                    or component.length_m <= 0 or component.width_m <= 0
+                    or abs(component.length_m * component.width_m - polygon.area) > 0.015
+                ):
+                    problems.add("figured_dimensions_disagree_with_source_polygon")
+            source_polygons.append((component, polygon))
+        except (TypeError, ValueError, OverflowError):
+            problems.add("invalid_source_polygon")
+
+    solids = [
+        polygon for component, polygon in source_polygons
+        if not component.is_void and component.space_type != SpaceType.COURTYARD_VOID.value
+    ]
+    voids = [
+        polygon for component, polygon in source_polygons
+        if component.is_void or component.space_type == SpaceType.COURTYARD_VOID.value
+    ]
+    try:
+        for i, first in enumerate(solids):
+            for second in solids[i + 1:]:
+                if first.intersection(second).area > 1e-7:
+                    problems.add("overlapping_source_solid_areas")
+        if voids:
+            if not solids:
+                problems.add("unhosted_source_void")
+            else:
+                envelope = unary_union(solids)
+                for void in voids:
+                    if void.difference(envelope).area > 1e-7:
+                        problems.add("source_void_outside_solid_footprint")
+                for i, first in enumerate(voids):
+                    for second in voids[i + 1:]:
+                        if first.intersection(second).area > 1e-7:
+                            problems.add("overlapping_source_voids")
+    except Exception:
+        problems.add("source_polygon_boolean_unresolved")
+    return tuple(sorted(problems))
+
+
 class MultiSpaceFootprintEngine:
     """Calculates compound footprint metrics from multiple spaces."""
 
@@ -271,6 +383,16 @@ class MultiSpaceFootprintEngine:
         missing_components: List[str] = []
         is_partial = False
         is_provisional = False
+
+        # The arithmetic is intentionally retained for source diagnostics,
+        # but any impossible/overlapping physical union must be PARTIAL, never
+        # a whole-floor/DPM/mesh/perimeter authority.
+        geometry_conflicts = _source_compound_geometry_conflicts(components)
+        if geometry_conflicts:
+            is_partial = True
+            missing_components.extend(
+                f"source_geometry_conflict:{reason}" for reason in geometry_conflicts
+            )
 
         solid_components: List[SpaceComponent] = []
         void_components: List[SpaceComponent] = []
@@ -348,6 +470,7 @@ class MultiSpaceFootprintEngine:
                 "total_void_area_m2": round(total_void_area, 2),
                 "num_solid_spaces": len(solid_components),
                 "num_voids": len(void_components),
+                "source_geometry_conflicts": list(geometry_conflicts),
             },
         )
 

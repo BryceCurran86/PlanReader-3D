@@ -208,7 +208,8 @@ def test_overlapping_verandah_does_not_double_count_floor_finish() -> None:
         ),
     ]
     footprint = MultiSpaceFootprintEngine.evaluate(components)
-    assert footprint.status == "confirmed"
+    assert footprint.status == "partial_missing_components"
+    assert "overlapping_source_solid_areas" in footprint.metadata["source_geometry_conflicts"]
     assert footprint.gross_floor_area_m2 == pytest.approx(64.0)
     assert derive_component_aware_floor_finish_area(footprint, 0.2) is None
     reversed_footprint = MultiSpaceFootprintEngine.evaluate(list(reversed(components)))
