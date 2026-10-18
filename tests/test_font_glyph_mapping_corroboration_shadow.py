@@ -92,7 +92,8 @@ def test_a_mapping_needs_the_minimum_number_of_agreeing_words_and_one_word_is_no
     assert v.under_supported == {("F", 11): 1}
     assert v.contradicted == {}
     assert verify_glyph_mappings(words[:1]).verified == {}
-    assert verify_glyph_mappings(words[:1], min_words=1).verified == {("F", 10): "1", ("F", 11): "2"}
+    with pytest.raises(ValueError, match="min_words"):
+        verify_glyph_mappings(words[:1], min_words=1)
     with pytest.raises(ValueError):
         verify_glyph_mappings(words, min_words=0)
 
