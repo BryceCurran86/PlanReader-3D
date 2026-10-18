@@ -577,6 +577,30 @@ class CrossViewFloorFinishResult:
                 or quantity_ids[record.quantity.quantity_id] != 1
             ):
                 return False
+            # An independently rekeyed result cannot keep the ORIGINAL
+            # measurement's internal provenance on its new floor. Even when
+            # its top-level input ID is altered, the signed quantity metadata
+            # must still name the same source face and exact material mark.
+            metadata = record.quantity.metadata
+            if not isinstance(metadata, Mapping):
+                return False
+            owner_fields = {
+                "canonical_floor_id": record.canonical_floor_id,
+                "physical_floor_surface_id": record.physical_floor_surface_id,
+                "source_room_face_record_id": record.source_room_face_record_id,
+                "source_dimension_page_id": record.source_dimension_page_id,
+                "finish_occurrence_record_id": record.occurrence_record_id,
+                "finish_occurrence_evidence_id": record.occurrence_evidence_id,
+                "finish_definition_record_id": record.definition_record_id,
+                "finish_code": record.finish_code,
+                "support_snapshot_id": record.support_snapshot_id,
+            }
+            if (
+                any(metadata.get(key) != expected
+                    for key, expected in owner_fields.items())
+                or record.occurrence_evidence_id not in record.quantity.evidence_ids
+            ):
+                return False
             return all(
                 type(getattr(record, field, None)) is str
                 and bool(getattr(record, field))
