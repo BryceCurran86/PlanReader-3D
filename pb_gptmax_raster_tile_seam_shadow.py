@@ -21,6 +21,29 @@ def _number(value: object, name: str) -> float:
     return float(value)
 
 
+def _canonical_source_image_placement(rect: fitz.Rect, matrix: fitz.Matrix) -> bool:
+    """Only original axis-aligned, unmirrored image-to-page transforms qualify.
+
+    get_image_rects(xref) alone loses the transform. A rotated, flipped or
+    sheared image can paint the same dark pixels inside that box but its
+    image-space (x,y) has different physical meaning. This source-only
+    gate must fail closed instead of declaring a false source pixel root.
+    """
+    values = (rect.x0, rect.y0, rect.x1, rect.y1,
+              matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f)
+    if not all(math.isfinite(float(v)) for v in values):
+        return False
+    return (
+        rect.width > 0 and rect.height > 0 and
+        matrix.a > 0 and matrix.d > 0 and
+        abs(matrix.b) <= 1e-5 and abs(matrix.c) <= 1e-5 and
+        abs(matrix.e - rect.x0) <= 1e-3 and
+        abs(matrix.f - rect.y0) <= 1e-3 and
+        abs(matrix.e + matrix.a - rect.x1) <= 1e-3 and
+        abs(matrix.f + matrix.d - rect.y1) <= 1e-3
+    )
+
+
 def _abstain(digest: str, page_no: int, reason: str) -> dict[str, Any]:
     return {"status": ABSTAIN, "source_sha256": digest, "page_no": page_no,
             "reason_codes": [reason], "image_roots": [],
@@ -60,21 +83,25 @@ def prove_tile_seam_source_pixels(
         page = document[page_no - 1]
         if page.rotation != 0 or not all(page.rect.contains(fitz.Point(x, source_y)) for x in xs):
             return _abstain(digest, page_no, "unresolved_source_page_frame")
-        owners: list[list[tuple[int, int, fitz.Rect]]] = [[], []]
+        owners: list[list[tuple[int, int, fitz.Rect, bool]]] = [[], []]
         seen = set()
         for item in page.get_images(full=True):
             xref, smask = int(item[0]), int(item[1])
-            for rect in page.get_image_rects(xref):
-                key = (xref, tuple(float(v) for v in rect))
+            for rect, matrix in page.get_image_rects(xref, transform=True):
+                key = (xref, tuple(float(v) for v in rect),
+                       tuple(float(v) for v in matrix))
                 if key in seen:
                     continue
                 seen.add(key)
+                supported = _canonical_source_image_placement(rect, matrix)
                 for i, x in enumerate(xs):
                     if rect.contains(fitz.Point(x, source_y)):
-                        owners[i].append((xref, smask, rect))
+                        owners[i].append((xref, smask, rect, supported))
         if any(len(o) != 1 for o in owners):
             return _abstain(digest, page_no, "source_tile_membership_not_unique")
-        (left_xref, left_mask, left_rect), (right_xref, right_mask, right_rect) = owners[0][0], owners[1][0]
+        (left_xref, left_mask, left_rect, left_ok), (right_xref, right_mask, right_rect, right_ok) = owners[0][0], owners[1][0]
+        if not (left_ok and right_ok):
+            return _abstain(digest, page_no, "source_tile_image_transform_unsupported")
         if (left_xref == right_xref or left_mask or right_mask
             or abs(left_rect.x1 - seam_x) > 0.03 or abs(right_rect.x0 - seam_x) > 0.03
             or abs(left_rect.x1 - right_rect.x0) > 0.03):
@@ -83,7 +110,7 @@ def prove_tile_seam_source_pixels(
         clip = fitz.Rect(xs[0] - 1, source_y - 1, xs[1] + 1, source_y + 1)
         composite = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
         roots = []
-        for x, (xref, _smask, rect) in zip(xs, (owners[0][0], owners[1][0])):
+        for x, (xref, _smask, rect, _supported) in zip(xs, (owners[0][0], owners[1][0])):
             image = fitz.Pixmap(document, xref)
             if image.n != 3 or image.width < 1 or image.height < 1:
                 return _abstain(digest, page_no, "source_tile_pixel_format_unsupported")
