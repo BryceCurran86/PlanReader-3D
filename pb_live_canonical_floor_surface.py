@@ -236,6 +236,10 @@ def _valid_metric_area_quantity(
         return False
     if tuple(quantity.input_entity_ids or ()) != (source_room_id,):
         return False
+    if quantity.semantic_key != f"room_area:{source_room_id}":
+        # An original room metric cannot be borrowed by an unrelated floor,
+        # ceiling lining or competing physical room semantic identity.
+        return False
     original_entity_receipts = getattr(source_room_entity, "evidence_ids", None)
     if (
         not isinstance(original_entity_receipts, (tuple, list))

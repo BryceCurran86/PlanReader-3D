@@ -298,20 +298,33 @@ def refresh_snapshot(repo: Path, runs: Path, session: Path, ref: str) -> str | N
     return head
 
 
-def handoff_bootstrap(out: Path, pdf: Path, project: str, stack_dump_min: int) -> str:
+def handoff_bootstrap(
+    out: Path, pdf: Path, project: str, stack_dump_min: int,
+    *, family_group: str = "all", source_plan_page_index: int | None = None,
+) -> str:
     """Python source that starts one handoff. Paths are data, not syntax."""
     dump = repr(str(out / "stack_dumps.txt"))
     pdf_literal = repr(str(pdf))
     out_literal = repr(str(out))
     project_literal = repr(project)
     seconds = max(1, int(stack_dump_min)) * 60
+    if family_group not in ("all", "core", "surfaces", "floor_area"):
+        raise ValueError("unsupported source handoff family group")
+    if source_plan_page_index is not None and (
+        type(source_plan_page_index) is not int or source_plan_page_index < 0
+    ):
+        raise ValueError("source plan page index must be nonnegative")
+    suffix = (
+        f", '--source-plan-page-index', {source_plan_page_index!r}"
+        if source_plan_page_index is not None else ""
+    )
     return (
         "import faulthandler, sys, runpy\n"
         f"f = open({dump}, 'a', encoding='utf-8')\n"
         f"faulthandler.dump_traceback_later({seconds}, repeat=True, file=f)\n"
         "sys.argv = ['run_source_closed_project_handoff', '--pdf', "
         f"{pdf_literal}, '--project-id', {project_literal},\n"
-        f"            '--family-group', 'all', '--output-dir', {out_literal}]\n"
+        f"            '--family-group', {family_group!r}, '--output-dir', {out_literal}{suffix}]\n"
         "runpy.run_module('tools.run_source_closed_project_handoff', run_name='__main__', alter_sys=True)\n"
     )
 
@@ -340,6 +353,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Verify bundled files only; skip network, packages and production")
     parser.add_argument("--ref", default="main", help="Branch or commit of the public repository to run (default main)")
     parser.add_argument("--only", nargs="*", choices=PROJECTS, help="Run production for these projects only")
+    parser.add_argument(
+        "--family-group", choices=("all", "core", "surfaces", "floor_area"),
+        default="all",
+        help="Bound original source production by physical family, without claiming full-suite score",
+    )
+    parser.add_argument(
+        "--source-plan-page-index", type=int, default=None,
+        help="0-based original floor-plan page (requires exactly one --only project)",
+    )
     parser.add_argument("--timeout-min", type=int, default=180, help="Per-project production limit in minutes")
     parser.add_argument("--stack-dump-min", type=int, default=10, help="Dump Python stacks this often (minutes)")
     parser.add_argument("--with-ocr", action="store_true",
@@ -358,6 +380,10 @@ def main() -> int:
     parser = build_parser()
     opts = parser.parse_args()
     projects = tuple(opts.only) if opts.only else PROJECTS
+    if opts.source_plan_page_index is not None and (
+        opts.source_plan_page_index < 0 or len(projects) != 1
+    ):
+        parser.error("source plan page index must be nonnegative and specify exactly one --only project")
 
     kit = Path(__file__).resolve().parent
     if not (kit / "LOCAL_SOURCE_INVENTORY.json").is_file():
@@ -448,6 +474,12 @@ def main() -> int:
         "requested_ref": opts.ref,
         "source_pdf_count": 10,
         "source_preflight": "VERIFIED",
+        "family_group": opts.family_group,
+        "source_plan_page_index": opts.source_plan_page_index,
+        "source_scope_complete": (
+            opts.family_group == "all" and opts.source_plan_page_index is None
+            and len(projects) == len(PROJECTS)
+        ),
         "per_project_timeout_min": opts.timeout_min,
         "ocr_extras_requested": bool(opts.with_ocr),
         "ocr_extras_installed": ocr_installed,
@@ -468,7 +500,11 @@ def main() -> int:
             continue
         out = session / "project_outputs" / project
         out.mkdir(parents=True, exist_ok=True)
-        bootstrap = handoff_bootstrap(out, pdf, project, opts.stack_dump_min)
+        bootstrap = handoff_bootstrap(
+            out, pdf, project, opts.stack_dump_min,
+            family_group=opts.family_group,
+            source_plan_page_index=opts.source_plan_page_index,
+        )
         note(f"  Starting {project} (max {opts.timeout_min} minutes; log in the logs folder)")
         started = time.monotonic()
         rc, status, usage = run_logged([str(python), "-u", "-c", bootstrap], repo,
@@ -478,6 +514,8 @@ def main() -> int:
                                        min_free_commit_mb=int(opts.min_free_commit_gb * 1024))
         handoff = {
             "project_id": project, "status": status, "exit_code": rc,
+            "family_group": opts.family_group,
+            "source_plan_page_index": opts.source_plan_page_index,
             "elapsed_s": round(time.monotonic() - started, 1),
             "peak_working_set_mb_sampled": round(usage["peak_working_set_kb"] / 1024, 1),
             "peak_private_mb_sampled": round(usage["peak_private_kb"] / 1024, 1),

@@ -78,3 +78,14 @@ def test_focus_is_not_an_alternative_to_required_full_ci():
     assert "test_ci_coordinated_entrypoint.py" in focused
     assert "test_full_plan_v2_readiness_report.py" in focused
     assert "test_opening_host_source_candidate_witness.py" in focused
+
+
+def test_full_ci_compiles_outside_source_archives_and_does_not_write_test_bytecode():
+    """The archived derived owner package intentionally rejects ANY unindexed pyc."""
+    full = job("test")
+    assert "python -m compileall -q ." in full
+    assert "PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-pycache" in full
+    assert 'PYTHONDONTWRITEBYTECODE: "1"' in full
+    assert "PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci" in full
+    assert "PYTHONPYCACHEPREFIX: ." not in full
+    assert "PYTHONPYCACHEPREFIX: documents/" not in full
