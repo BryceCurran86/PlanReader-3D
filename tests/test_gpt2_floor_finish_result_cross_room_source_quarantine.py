@@ -40,6 +40,17 @@ def _different_room(original):
         quantity_id="different-firm-floor-finish-quantity",
         input_entity_ids=(floor_id,),
         semantic_key="floor_finish_area:different-canonical-floor:FT1:tile",
+        evidence_ids=tuple(dict.fromkeys((
+            *original.quantity.evidence_ids, "different-original-source-mark",
+        ))),
+        metadata={
+            **original.quantity.metadata,
+            "canonical_floor_id": floor_id,
+            "physical_floor_surface_id": "different-physical-floor",
+            "source_room_face_record_id": "different-source-room-face",
+            "finish_occurrence_record_id": "different-material-occurrence",
+            "finish_occurrence_evidence_id": "different-original-source-mark",
+        },
     )
     return replace(
         original,
@@ -99,6 +110,31 @@ def test_reconstructed_result_quarantines_both_owners_of_one_source_or_quantity_
         result = _public_result(*order)
         assert result.records_by_floor_id == {}
         assert result.quantities == ()
+
+
+@pytest.mark.parametrize("source_field", [
+    "canonical_floor_id",
+    "physical_floor_surface_id",
+    "source_room_face_record_id",
+    "source_dimension_page_id",
+    "finish_occurrence_record_id",
+    "finish_occurrence_evidence_id",
+    "finish_definition_record_id",
+    "finish_code",
+    "support_snapshot_id",
+])
+def test_reconstructed_source_metadata_cannot_disagree_with_authentic_result(
+    monkeypatch, source_field,
+):
+    original, _ = _producer_result(monkeypatch)
+    mismatched = replace(
+        original,
+        quantity=replace(original.quantity, metadata={
+            **original.quantity.metadata,
+            source_field: "foreign-original-source-owner",
+        }),
+    )
+    assert _public_result(mismatched).quantities == ()
 
 
 def test_reconstructed_result_cannot_change_canonical_quantity_input(monkeypatch):
