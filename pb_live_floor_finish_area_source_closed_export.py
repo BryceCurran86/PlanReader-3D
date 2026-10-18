@@ -295,6 +295,29 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish source material identity is malformed: {quantity.quantity_id}"
             )
+        # All original issuer and support addresses have one exact typed form.
+        # Silently stringifying True, numbers or padded values invents source
+        # lineage that the original PDF producer never issued.
+        source_issuer_fields = (
+            "finish_occurrence_record_id",
+            "finish_definition_record_id",
+            "finish_occurrence_evidence_id",
+            "support_snapshot_id",
+            "support_page_id",
+            "support_viewport_id",
+        )
+        if any(
+            type(metadata.get(name)) is not str
+            or (
+                metadata[name]
+                and metadata[name] != metadata[name].strip()
+            )
+            for name in source_issuer_fields
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish source issuer identity is malformed: "
+                f"{quantity.quantity_id}"
+            )
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
         # An issuer's source observation ID is a typed PDF-address identity,
