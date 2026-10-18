@@ -334,6 +334,27 @@ def _definition_is_ceiling_finish(
     semantic = _norm(definition.semantic_finish)
     if semantic not in _CEILING_LINING_SEMANTICS:
         return False
+    # An independently printed material description that specifies signage
+    # cladding is contrary original evidence of a *ceiling* finish. Do not
+    # allow a stale/mistyped upstream semantic_finish to override that
+    # contradiction, even if its scope later overlaps an RCP viewport.
+    # This is a generic negative original-source rule, not code/name lookup.
+    original_material_text = _norm(" ".join(
+        _clean(value) for value in
+        (definition.description,definition.substrate,definition.finish)
+        if _clean(value)
+    ))
+    # Native PDF source descriptions may contain punctuation or line joins,
+    # such as SIGNAGE-CONTRACTOR; tokenize semantics without source guessing.
+    import re
+    role_tokens = set(re.findall(r"[a-z]+", original_material_text))
+    # Exterior wall, facade and fascia cladding are independently printed
+    # non-ceiling material roles too; never let a stale ceiling-grid semantic
+    # turn these into square metres of internal suspended ceiling.
+    if "cladding" in role_tokens and role_tokens.intersection(
+        {"signage", "wall", "facade", "fascia"}
+    ):
+        return False
     # The semantic family must still come from a non-empty authenticated
     # schedule meaning. The occurrence's authenticated RCP viewport supplies
     # the ceiling role; a bare raw code can never reach this function.
