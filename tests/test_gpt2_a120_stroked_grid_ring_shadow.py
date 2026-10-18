@@ -108,6 +108,19 @@ def test_translation_and_scaling_do_not_grant_metric_authority(scale,dx,dy):
         pdf.close()
 
 
+@pytest.mark.parametrize("native_rotation",[0,90,180,270])
+def test_native_page_rotation_does_not_invent_an_area_or_change_ink_owners(native_rotation):
+    pdf,page = synthetic()
+    try:
+        page.set_rotation(native_rotation)
+        result = find(page)
+        assert result["candidate_count"] == 1
+        assert result["candidates"][0]["firm_quantity_m2"] is None
+        assert result["candidates"][0]["source_scale_authority"] is False
+    finally:
+        pdf.close()
+
+
 def test_bad_lexical_or_dimension_inputs_fail_before_source_interpretation():
     pdf,page = synthetic()
     try:
