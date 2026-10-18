@@ -27,6 +27,7 @@ permissions:
 jobs:
   original-native-view-membership:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -106,3 +107,9 @@ jobs:
             artifacts/gptmax-original-f07-native-mark-ownership.json
             artifacts/gptmax-native-f07-vector-frame-gates.json
           retention-days: 21
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-native-view-membership

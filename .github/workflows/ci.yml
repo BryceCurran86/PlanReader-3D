@@ -21,9 +21,11 @@ on:
 permissions:
   contents: read
 
+# A superseded pull request run is cancelled; every push to main and every manual dispatch keeps its own run, so each
+# merge gets its own required CI / test verdict (the same convention as the other PR-scoped workflows).
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Required CI / test check name remains unchanged for every PR and

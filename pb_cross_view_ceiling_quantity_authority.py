@@ -251,14 +251,29 @@ def publish_cross_view_ceiling_quantities(
     # distinct physical rooms. Quarantine *all* owners rather than allowing
     # individually unique per-room rows to publish duplicated ceiling areas.
     occurrence_owners: dict[str, set[str]] = {}
+    original_mark_owners: dict[str, set[str]] = {}
+
+    def valid_issuer_id(value: object) -> bool:
+        return type(value) is str and bool(value) and value == value.strip()
+
     for finish_record in finishes.records:
-        occurrence_id = _clean(finish_record.occurrence_record_id)
-        physical_id = _clean(finish_record.physical_room_id)
-        if occurrence_id and physical_id:
+        physical_id = finish_record.physical_room_id
+        if not valid_issuer_id(physical_id):
+            continue
+        occurrence_id = finish_record.occurrence_record_id
+        mark_id = finish_record.occurrence_evidence_id
+        if valid_issuer_id(occurrence_id):
             occurrence_owners.setdefault(occurrence_id, set()).add(physical_id)
+        if valid_issuer_id(mark_id):
+            original_mark_owners.setdefault(mark_id, set()).add(physical_id)
     conflicting_occurrence_ids = {
         occurrence_id
         for occurrence_id, owners in occurrence_owners.items()
+        if len(owners) > 1
+    }
+    conflicting_original_mark_ids = {
+        original_id
+        for original_id, owners in original_mark_owners.items()
         if len(owners) > 1
     }
 
@@ -304,12 +319,17 @@ def publish_cross_view_ceiling_quantities(
         room = room_rows[0]
         finish = finish_rows[0]
         if (
-            not _clean(finish.occurrence_record_id)
-            or not _clean(finish.definition_record_id)
-            or _clean(finish.occurrence_record_id) in conflicting_occurrence_ids
+            not valid_issuer_id(finish.occurrence_record_id)
+            or not valid_issuer_id(finish.definition_record_id)
+            or not valid_issuer_id(finish.occurrence_evidence_id)
+            or finish.occurrence_record_id in conflicting_occurrence_ids
+            or finish.occurrence_evidence_id in conflicting_original_mark_ids
         ):
             unresolved.add(physical_id)
-            if _clean(finish.occurrence_record_id) in conflicting_occurrence_ids:
+            if (
+                finish.occurrence_record_id in conflicting_occurrence_ids
+                or finish.occurrence_evidence_id in conflicting_original_mark_ids
+            ):
                 conflict = True
             continue
         area_candidates = [

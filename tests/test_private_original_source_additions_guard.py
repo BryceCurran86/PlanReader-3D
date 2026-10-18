@@ -116,3 +116,154 @@ def test_null_delimited_cli_blocked_secret_and_allowed_manifest(tmp_path):
     assert result.returncode == 1
     assert b".env.production" in result.stderr
     assert b"source_manifest.json" not in result.stderr
+
+
+# --- pinned name / exact-bytes rules (synthetic manifest, never real originals) ---
+
+import hashlib
+import json
+
+from scripts.check_private_original_source_additions import (
+    PINNED_MANIFEST_GLOB,
+    load_pinned_originals,
+    source_addition_findings,
+)
+
+_PINNED_NAME = "Synthetic Client Plans (REV Z).pdf"
+_PINNED_BYTES = b"%PDF-1.7 synthetic stand-in for a pinned original\n" * 20
+
+
+def _write_manifest(root: Path, entries, project="p1"):
+    folder = root / PINNED_MANIFEST_GLOB.rsplit("/", 1)[0].replace("*", project)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "source_manifest.json").write_text(
+        json.dumps({"source_documents": entries}), encoding="utf-8"
+    )
+
+
+def _entry(name=_PINNED_NAME, data=_PINNED_BYTES):
+    return {
+        "name": name,
+        "size_bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
+@pytest.fixture
+def tree(tmp_path):
+    _write_manifest(tmp_path, [_entry()])
+    return tmp_path
+
+
+def _run_cli(root: Path, *paths: str):
+    changed = b"".join(p.encode() + b"\x00" for p in paths)
+    return subprocess.run(
+        [sys.executable, str(GUARD), "--root", str(root)],
+        input=changed, capture_output=True,
+    )
+
+
+def test_renamed_original_bytes_are_blocked_at_any_path(tree):
+    (tree / "tests" / "fixtures").mkdir(parents=True)
+    (tree / "tests" / "fixtures" / "x.pdf").write_bytes(_PINNED_BYTES)
+    pinned = load_pinned_originals(tree)
+    assert source_addition_findings(
+        ["tests/fixtures/x.pdf"], pinned=pinned, root=tree
+    ) == (("tests/fixtures/x.pdf", "bytes of a pinned original source document"),)
+    result = _run_cli(tree, "tests/fixtures/x.pdf")
+    assert result.returncode == 1
+    assert b"tests/fixtures/x.pdf" in result.stderr
+
+
+@pytest.mark.parametrize("path", [
+    f"docs/engineering/x/{_PINNED_NAME}",
+    f"docs/{_PINNED_NAME.upper()}",
+    "DOCS\\" + _PINNED_NAME.lower(),
+])
+def test_pinned_original_name_is_blocked_even_when_not_in_the_tree(tree, path):
+    pinned = load_pinned_originals(tree)
+    assert blocked_source_additions([path], pinned=pinned, root=tree) == (path,)
+    assert _run_cli(tree, path).returncode == 1
+
+
+def test_same_size_different_bytes_is_allowed(tree):
+    other = bytes(len(_PINNED_BYTES))
+    (tree / "tests").mkdir()
+    (tree / "tests" / "same_size.pdf").write_bytes(other)
+    pinned = load_pinned_originals(tree)
+    assert blocked_source_additions(
+        ["tests/same_size.pdf"], pinned=pinned, root=tree
+    ) == ()
+    assert _run_cli(tree, "tests/same_size.pdf").returncode == 0
+
+
+def test_only_size_equal_files_are_hashed(tree, monkeypatch):
+    import scripts.check_private_original_source_additions as guard
+
+    (tree / "tests").mkdir()
+    (tree / "tests" / "small.pdf").write_bytes(b"synthetic")
+    (tree / "tests" / "match.pdf").write_bytes(_PINNED_BYTES)
+    hashed = []
+    real = guard._file_sha256
+    monkeypatch.setattr(guard, "_file_sha256", lambda p: hashed.append(p.name) or real(p))
+    pinned = load_pinned_originals(tree)
+    blocked_source_additions(
+        ["tests/small.pdf", "tests/match.pdf"], pinned=pinned, root=tree
+    )
+    assert hashed == ["match.pdf"]
+
+
+def test_path_absent_from_tree_or_symlink_is_not_hashed(tree):
+    pinned = load_pinned_originals(tree)
+    assert blocked_source_additions(
+        ["tests/never_checked_out.pdf"], pinned=pinned, root=tree
+    ) == ()
+
+
+def test_synthetic_fixture_pdfs_stay_allowed_with_pinned_rules(tree):
+    (tree / "tests" / "fixtures").mkdir(parents=True)
+    (tree / "tests" / "fixtures" / "synthetic_plan.pdf").write_bytes(b"%PDF-1.4 fake")
+    assert _run_cli(tree, "tests/fixtures/synthetic_plan.pdf", "docs/a.md").returncode == 0
+
+
+def test_path_only_rules_unchanged_without_pinned_set():
+    # Library callers that pass no pinned set keep the original path-only rules.
+    assert blocked_source_additions([f"docs/{_PINNED_NAME}"]) == ()
+    assert blocked_source_additions(["documents/sources/a.pdf"]) == ("documents/sources/a.pdf",)
+
+
+@pytest.mark.parametrize("make", [
+    lambda root: None,  # no manifest at all
+    lambda root: _write_manifest(root, []),  # pins nothing
+    lambda root: _write_manifest(root, [dict(_entry(), sha256="not-a-digest")]),
+    lambda root: _write_manifest(root, [dict(_entry(), size_bytes=0)]),
+    lambda root: _write_manifest(root, [dict(_entry(), name="a/b.pdf")]),
+    lambda root: _write_manifest(root, ["not-a-dict"]),
+    lambda root: (_write_manifest(root, [_entry()]),
+                  (root / PINNED_MANIFEST_GLOB.rsplit("/", 1)[0].replace("*", "p1")
+                   / "source_manifest.json").write_text("{broken", encoding="utf-8")),
+])
+def test_unreadable_or_empty_manifests_fail_closed(tmp_path, make):
+    make(tmp_path)
+    with pytest.raises(ValueError):
+        load_pinned_originals(tmp_path)
+    result = _run_cli(tmp_path, "docs/a.md")
+    assert result.returncode == 1
+    assert b"gate failed" in result.stderr
+
+
+def test_deletion_only_change_needs_no_manifest(tmp_path):
+    assert _run_cli(tmp_path).returncode == 0
+
+
+def test_real_frozen_manifests_pin_well_formed_originals_and_no_tracked_file_matches():
+    pinned = load_pinned_originals(ROOT)
+    assert pinned.names and pinned.sha256_by_size
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("not a git checkout")
+    tracked = [item.decode("utf-8") for item in listing.split(b"\x00") if item]
+    assert blocked_source_additions(tracked, pinned=pinned, root=ROOT) == ()

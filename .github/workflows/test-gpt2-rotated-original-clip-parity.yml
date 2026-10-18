@@ -18,6 +18,7 @@ on:
 jobs:
   immutable-rotated-pdf-native-clip-parity:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -43,3 +44,9 @@ jobs:
           python -m pytest -q tests/test_gpt2_pdf_rotated_native_clip_parity_shadow.py
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: immutable-rotated-pdf-native-clip-parity

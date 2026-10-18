@@ -277,3 +277,110 @@ def test_only_restricts_the_rewrite_to_matching_workflow_files(tmp_path, capsys)
     assert "provision-original-sources" in (root / ".github" / "workflows" / "synthetic.yml").read_text(encoding="utf-8")
     assert other.read_bytes() == LF_WORKFLOW.encode("utf-8")
     assert "changed 1 workflow file(s), 3 job(s)" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# a job that asserts the originals are ABSENT is never given them
+# ---------------------------------------------------------------------------------------------------------------------
+
+ABSENCE_ONLY_WORKFLOW = """name: Synthetic absence
+on:
+  pull_request:
+jobs:
+  absent-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify private PDF not present in public checkout
+        run: |
+          set -euo pipefail
+          test ! -f documents/sources/Plan B.pdf
+"""
+
+MIXED_WORKFLOW = ABSENCE_ONLY_WORKFLOW + """  reads-original:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m tools.x --pdf 'documents/sources/Plan A (REV 1).pdf'
+"""
+
+
+@pytest.mark.parametrize("command", [
+    "test ! -f documents/sources/Plan B.pdf",
+    "test ! -e 'documents/sources/Plan B.pdf'",
+    "test ! -d benchmarks/sources",
+    "[ ! -f documents/sources/Plan B.pdf ]",
+    "[[ ! -e \"documents/sources/Plan B.pdf\" ]]",
+    "! test -f documents/sources/Plan B.pdf",
+    "  test  !  -f  ./documents/sources/Plan B.pdf",
+])
+def test_absence_assertions_are_detected(command):
+    assert T.asserts_originals_absent("run: " + command)
+
+
+@pytest.mark.parametrize("command", [
+    "test -f documents/sources/Plan B.pdf",
+    "[ -f documents/sources/Plan B.pdf ]",
+    "test ! -f docs/other/Plan B.pdf",
+    "ls documents/sources",
+    "cat documents/sources/Plan B.pdf",
+    "contest ! -f documents/sources/Plan B.pdf",
+])
+def test_presence_checks_and_reads_are_not_absence_assertions(command):
+    assert not T.asserts_originals_absent("run: " + command)
+
+
+def test_a_job_that_asserts_the_original_is_absent_is_skipped_and_left_unchanged(tmp_path):
+    root = _write(tmp_path, ABSENCE_ONLY_WORKFLOW)
+    path, (new, changed, skipped) = _plan(root)
+    assert changed == []
+    assert skipped == ["absent-policy"]
+    assert new == path.read_bytes().decode("utf-8")
+    assert "provision-original-sources" not in new
+
+
+def test_in_a_mixed_workflow_only_the_reading_job_gets_the_step(tmp_path):
+    root = _write(tmp_path, MIXED_WORKFLOW)
+    _path, (new, changed, skipped) = _plan(root)
+    assert changed == ["reads-original"]
+    assert skipped == ["absent-policy"]
+    jobs = yaml.safe_load(new)["jobs"]
+    assert not any("provision" in str(s.get("uses", "")) for s in jobs["absent-policy"]["steps"])
+    assert sum("provision-original-sources" in str(s.get("uses", "")) for s in jobs["reads-original"]["steps"]) == 1
+
+
+def test_second_run_over_a_mixed_workflow_changes_nothing(tmp_path):
+    root = _write(tmp_path, MIXED_WORKFLOW)
+    path, (new, _changed, _skipped) = _plan(root)
+    path.write_bytes(new.encode("utf-8"))
+    _path, (again, changed, skipped) = _plan(root)
+    assert changed == []
+    assert skipped == ["absent-policy"]
+    assert again == new
+
+
+def test_the_real_private_original_policy_job_is_excluded_and_never_rewritten():
+    name, job = "test-gpt2-private-original-ci-policy.yml", "absent-private-source-synthetic-policy"
+    assert (name, job) in T.EXCLUDED_JOBS
+    path = ROOT / ".github" / "workflows" / name
+    text = path.read_bytes().decode("utf-8")
+    jobs = yaml.safe_load(text)["jobs"]
+    assert job in jobs
+    assert T.asserts_originals_absent(text)  # excluded by rule as well as by name
+    result = T.plan_file(path, T.manifest_names(ROOT), "main")
+    assert result is not None
+    new, changed, skipped = result
+    assert changed == [] and skipped == [job]
+    assert new == text
+
+
+def test_every_real_job_with_an_absence_assertion_is_deliberately_excluded():
+    offenders = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
+        raw = path.read_bytes().decode("utf-8")
+        eol = "\r\n" if "\r\n" in raw else "\n"
+        lines = raw.split(eol)
+        for job, (first, last) in T._job_spans(lines).items():
+            if T.asserts_originals_absent(eol.join(lines[first:last])) and (path.name, job) not in T.EXCLUDED_JOBS:
+                offenders.append((path.name, job))
+    assert offenders == []
