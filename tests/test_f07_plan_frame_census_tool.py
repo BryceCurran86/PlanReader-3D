@@ -56,6 +56,9 @@ def test_census_reports_the_shadow_effect_page_and_frame_evidence(lattice_pdf: P
     assert frames[0]["shadow_table"] is False and frames[0]["shadow_lifts_table_status"] is True
     family = frames[0]["qualifying_families"][0]
     assert family["cells"] == 48 and family["edge_connected_fraction"] == 0.0 and family["text_bearing_fraction"] == 1.0
+    # the largest same-size family is reported beside the qualifying ones (here they coincide)
+    largest = frames[0]["largest_same_size_family"]
+    assert largest["cells"] == 48 and largest["text_bearing_fraction"] == 1.0 and largest["edge_connected_fraction"] == 0.0
 
     summary = census.summarise([report], with_baseline=False)
     assert summary["pages"] == 1 and summary["pages_shadow_changes_viewports"] == 1

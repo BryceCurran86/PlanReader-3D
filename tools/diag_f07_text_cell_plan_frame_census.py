@@ -107,6 +107,37 @@ def _family_rows(frame: Sequence[float], page: Any, calibration: Any, fragments:
     return rows
 
 
+def _largest_family_row(frame: Sequence[float], page: Any, fragments: Sequence[Any]) -> Optional[dict[str, Any]]:
+    """The largest same-size rectangle family in the frame, whether or not it passes the structural tests.
+
+    This is the statistic a "text-bearing fraction of the largest family" measurement reports; it is listed
+    beside the QUALIFYING families because they are not always the same family.
+    """
+    width = float(frame[2]) - float(frame[0])
+    height = float(frame[3]) - float(frame[1])
+    area = width * height
+    families: dict[tuple[float, float], list[tuple[float, float, float, float]]] = {}
+    for rect in vs._page_rectangle_primitives(page):
+        if not vs._bbox_contains(frame, rect, margin=1.0) or not 4.0 < vs._bbox_area(rect) < 0.15 * area:
+            continue
+        key = (
+            round((rect[2] - rect[0]) / width, vs._TABLE_CELL_DIMENSION_ROUND_DIGITS),
+            round((rect[3] - rect[1]) / height, vs._TABLE_CELL_DIMENSION_ROUND_DIGITS),
+        )
+        families.setdefault(key, []).append(rect)
+    if not families:
+        return None
+    family = max(families.values(), key=len)
+    centres = sorted(vs._bbox_center(bbox) for bbox, _text in fragments)
+    mesh = vs._frame_source_edge_mesh(frame, page)
+    return {
+        "cells": len(family),
+        "cell_wh": [round(family[0][2] - family[0][0], 2), round(family[0][3] - family[0][1], 2)],
+        "text_bearing_fraction": round(vs._cells_text_bearing_fraction(family, centres, [c[0] for c in centres]), 3),
+        "edge_connected_fraction": round(sum(1 for cell in family if cell in mesh) / len(family), 3),
+    }
+
+
 def _table_frame_rows(doc: Any, index: int) -> list[dict[str, Any]]:
     page = doc.load_page(index)
     calibration = vs.calibrate_viewport_layout(page)
@@ -125,6 +156,7 @@ def _table_frame_rows(doc: Any, index: int) -> list[dict[str, Any]]:
             "shadow_table": bool(shadow_table),
             "shadow_lifts_table_status": not shadow_table,
             "qualifying_families": _family_rows(frame, page, calibration, fragments),
+            "largest_same_size_family": _largest_family_row(frame, page, fragments),
         })
     return rows
 
