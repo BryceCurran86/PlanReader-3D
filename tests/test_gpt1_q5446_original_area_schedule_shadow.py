@@ -15,6 +15,9 @@ from pb_gpt1_q5446_original_area_schedule_shadow import (
     PRINTED_ORIGINAL_ROWS,
     _rule_matches,
     _table_witnesses_valid,
+    _numeric_vector_digit,
+    _original_numeric_glyph_receipts,
+    ORIGINAL_ROW_Y_BOUNDS,
     inspect_original_q5446_printed_area_schedule,
 )
 
@@ -92,6 +95,76 @@ def test_original_printed_values_are_not_recomputed_from_rounded_display():
     assert sum(rollup for _, _, _, rollup in PRINTED_ORIGINAL_ROWS) == 2
 
 
+@dataclass
+class _Point:
+    x: float
+    y: float
+
+
+@dataclass
+class _Quad:
+    ul: _Point
+
+
+def _outlined_numeral(char: str, x0: float, y0: float):
+    shape = {
+        "0": (16, 3.36, 5.76, .43, 0.0),
+        "1": (3, 1.20, 5.76, 0.0, .20),
+        "2": (13, 3.36, 5.76, .07, .25),
+        "3": (14, 3.36, 5.76, .14, 0.0),
+        "4": (3, 3.60, 5.76, .67, 1.0),
+        "5": (16, 3.36, 5.76, .86, 0.0),
+        "6": (22, 3.12, 5.76, .92, .17),
+        "7": (2, 3.60, 5.76, .27, 1.0),
+        "8": (28, 3.36, 5.76, .36, 0.0),
+        "9": (22, 3.12, 5.76, 1.0, .33),
+        ".": (1, .48, .48, .50, 0.0),
+    }
+    count, w, h, first_x, first_y = shape[char]
+    r = _Rect(x0, y0, x0 + w, y0 + h)
+    point = _Point(x0 + w * first_x, y0 + h * first_y)
+    items = ([("qu", _Quad(point))] if char == "."
+             else [("l", point, point)] * count)
+    return {"type": "s", "color": (0., 0., 0.), "width": .96,
+            "rect": r, "items": items}
+
+
+def _synthetic_numeric_table():
+    result = _original_ruling_grid()
+    for (name, _, original_m2, _), (start, end) in zip(
+        PRINTED_ORIGINAL_ROWS, ORIGINAL_ROW_Y_BOUNDS
+    ):
+        for position, char in enumerate(str(original_m2)):
+            y = start + (6.7 if char == "." else 1.6)
+            result.append(_outlined_numeral(char, 1041 + position * 4.5, y))
+    return result
+
+
+def test_all_ten_vector_decimal_glyph_shapes_are_independently_decoded():
+    for char in "0123456789.":
+        assert _numeric_vector_digit(_outlined_numeral(char, 1045, 650)) == char
+
+
+def test_full_source_numeric_rows_have_unique_ordered_vector_receipts():
+    rows = _original_numeric_glyph_receipts(_synthetic_numeric_table())
+    assert rows is not None
+    assert [len(r) for r in rows] == [6, 6, 6, 4, 5, 5, 6]
+    assert len(set(index for row in rows for index in row)) == sum(len(x) for x in rows)
+
+
+def test_native_6_cannot_be_mutated_into_a_9_or_borrowed_from_another_row():
+    source = _synthetic_numeric_table()
+    ids = _original_numeric_glyph_receipts(source)
+    assert ids is not None
+    six = ids[4][1]
+    record = source[six].copy()
+    rect = record["rect"]
+    fake_start = _Point(rect.x0 + rect.x1 - rect.x0, rect.y0 + .34 * (rect.y1 - rect.y0))
+    record["items"] = [("l", fake_start, fake_start)] * 22
+    source[six] = record
+    assert _original_numeric_glyph_receipts(source) is None
+
+
 def test_private_original_positive_is_optional_not_mocked():
     source = os.environ.get("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
     if not source:
@@ -102,7 +175,10 @@ def test_private_original_positive_is_optional_not_mocked():
     assert len(report.rows) == 7
     assert sum(not r.is_rollup for r in report.rows) == 5
     assert all(r.status == "CANDIDATE" for r in report.rows)
-    assert all(not r.glyph_correspondence_authenticated for r in report.rows)
+    assert all(r.glyph_correspondence_authenticated for r in report.rows)
+    assert [len(r.original_numeric_vector_path_ids) for r in report.rows] == [
+        6, 6, 6, 4, 5, 5, 6,
+    ]
     assert all(not r.physical_surface_owner_authenticated for r in report.rows)
     assert all(not r.customer_projection_allowed for r in report.rows)
     assert report.printed_floor_subtotal_delta_m2 == Decimal("0.01")
