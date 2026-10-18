@@ -166,6 +166,8 @@ def build_live_ceiling_lining_source_traces(
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     seen_source_ids: set[str] = set()
     source_area_ceiling_owners: dict[str, str] = {}
+    original_mark_ceiling_owners: dict[str, str] = {}
+    original_occurrence_ceiling_owners: dict[str, str] = {}
     for quantity in claim.ceiling_lining_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -338,6 +340,33 @@ def build_live_ceiling_lining_source_traces(
                 f"canonical ceiling trace does not cover quantity evidence: {quantity.quantity_id}"
             )
 
+        # An original finish observation is independent of the producer's
+        # occurrence record and dictionary definition. Each must remain an
+        # exact issuer-owned ID; never turn a boolean, integer or padded
+        # string into a valid material source receipt.
+        original_fields = (
+            "finish_occurrence_record_id",
+            "finish_occurrence_evidence_id",
+            "finish_definition_record_id",
+            "finish_code",
+            "semantic_finish",
+        )
+        if any(
+            type(metadata.get(key)) is not str
+            or not metadata[key]
+            or metadata[key] != metadata[key].strip()
+            for key in original_fields
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling material original issuer receipt malformed: {quantity.quantity_id}"
+            )
+        mark_id = metadata["finish_occurrence_evidence_id"]
+        occurrence_id = metadata["finish_occurrence_record_id"]
+        if mark_id not in quantity.evidence_ids or mark_id not in evidence_ids:
+            raise SourceClosedRunConflictError(
+                f"ceiling material occurrence original mark receipt mismatch: {quantity.quantity_id}"
+            )
+
         points = ceiling.polygon_pdf_pts
         if type(points) not in (tuple, list) or len(points) < 3:
             raise SourceClosedRunConflictError(
@@ -423,6 +452,20 @@ def build_live_ceiling_lining_source_traces(
             upstream_area_id=metadata.get("upstream_room_area_quantity_id"),
             canonical_ceiling_id=canonical_ceiling_id,
         )
+        # Two distinct physical ceilings cannot claim one original RCP mark
+        # even if the producer rekeys the occurrence or quantity identifiers.
+        # Check AFTER established source area and canonical gates so their
+        # first-failure classifications remain stable.
+        for original_id, owners in (
+            (mark_id, original_mark_ceiling_owners),
+            (occurrence_id, original_occurrence_ceiling_owners),
+        ):
+            earlier = owners.get(original_id)
+            if earlier is not None and earlier != canonical_ceiling_id:
+                raise SourceClosedRunConflictError(
+                    f"original RCP material mark has competing ceilings: {original_id}"
+                )
+            owners[original_id] = canonical_ceiling_id
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
