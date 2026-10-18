@@ -10,25 +10,29 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 from typing import Any, Mapping
 
 from tools.prepare_gpt3_pending_identity_activation import build_activation
+from tools.report_gpt3_four_project_evidence import (
+    FROZEN_ROOT, _read_json_without_duplicate_keys,
+)
 
 
 def _object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
+    value = _read_json_without_duplicate_keys(path)
+    if type(value) is not dict:
         raise TypeError(f"{path} must contain a JSON object")
     return value
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, list) or any(
-        not isinstance(row, dict) for row in value
+    value = _read_json_without_duplicate_keys(path)
+    if type(value) is not list or any(
+        type(row) is not dict for row in value
     ):
         raise TypeError(f"{path} must contain an array of objects")
     return value
@@ -135,13 +139,54 @@ def build_guarded_exact_report(
     return candidate_map, activation_receipt, report
 
 
-def _write(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+def _preflight_outputs(
+    outputs: tuple[Path, Path, Path], inputs: tuple[Path, ...],
+) -> None:
+    """Refuse all collisions before reading or scoring signed data."""
+    resolved = [path.resolve() for path in outputs]
+    sources = {source.resolve() for source in inputs}
+    if len(set(resolved)) != 3:
+        raise ValueError("three guarded reconciliation output paths must be distinct")
+    frozen = FROZEN_ROOT.resolve()
+    for path, destination in zip(outputs, resolved):
+        if path.exists() or path.is_symlink():
+            raise FileExistsError("guarded reconciliation output must be new, never overwrite")
+        if destination in sources or destination == frozen or destination.is_relative_to(frozen):
+            raise ValueError("guarded reconciliation cannot output over source or frozen evidence")
 
+
+def _write_triplet(
+    outputs: tuple[Path, Path, Path], payloads: tuple[object, object, object],
+    *, inputs: tuple[Path, ...],
+) -> None:
+    """Stage all three files then publish exclusively, with rollback on failure."""
+    _preflight_outputs(outputs, inputs)
+    staged: list[Path] = []
+    created: list[Path] = []
+    try:
+        for path, value in zip(outputs, payloads):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", dir=path.parent, encoding="utf-8", newline="",
+                prefix=".gpt3-activation-", suffix=".tmp", delete=False,
+            ) as out:
+                temp = Path(out.name)
+                staged.append(temp)
+                out.write(json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
+        # An atomic create-only hard link will fail if any external writer
+        # creates the destination since preflight. Do not replace originals.
+        for path, temp in zip(outputs, staged):
+            os.link(temp, path)
+            created.append(path)
+    except BaseException:
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        for temp in staged:
+            temp.unlink(missing_ok=True)
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -161,6 +206,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-report", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    inputs = (
+        args.pending_ledger, args.sealed_run, args.customer_rows,
+        args.active_identity_map, args.manifest, args.source_identity_proof,
+        args.object_universe,
+    )
+    outputs = (args.output_map, args.output_activation_receipt, args.output_report)
+    _preflight_outputs(outputs, inputs)
     manifest = _object(args.manifest)
     candidate_map, activation, report = build_guarded_exact_report(
         pending_ledger=_object(args.pending_ledger),
@@ -172,9 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         object_universe=_object(args.object_universe),
         manifest_path=args.manifest,
     )
-    _write(args.output_map, candidate_map)
-    _write(args.output_activation_receipt, activation)
-    _write(args.output_report, report)
+    _write_triplet(outputs, (candidate_map, activation, report), inputs=inputs)
     print(json.dumps(report, sort_keys=True))
     return 0
 
