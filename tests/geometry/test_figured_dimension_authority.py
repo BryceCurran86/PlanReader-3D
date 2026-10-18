@@ -198,3 +198,54 @@ class TestResultAlwaysCarriesAuthorityMetadata:
         if kwargs.get("scaled_mm") is not None or kwargs.get("figured_text") is not None:
             assert result.source_type is not None
         assert result.authority_status  # always populated, never blank
+
+
+# ---------------------------------------------------------------------------
+# Two representations of one dimension must agree
+# ---------------------------------------------------------------------------
+
+class TestFiguredRepresentationsMustAgree:
+    @pytest.mark.parametrize(
+        ("text", "mm"),
+        [("6500", 3200.0), ("3200", 6500.0), ("6.5m", 650.0), ("650", 6500.0), ("6500", 6500.01)],
+    )
+    def test_disagreeing_text_and_value_block_whichever_is_larger(self, text, mm):
+        result = resolve_measurement_authority(figured_text=text, figured_mm=mm)
+        assert result.authority_status == AuthorityStatus.BLOCKED.value
+        assert result.value_m is None
+        assert result.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        assert "disagree" in result.notes
+
+    @pytest.mark.parametrize(
+        ("text", "mm"),
+        [("6500", 6500.0), ("6.5m", 6500.0), ("6500mm", 6500), ("6,500", 6500.0), ("6500", 6500.0000001)],
+    )
+    def test_agreeing_text_and_value_stay_firm_with_the_same_result_as_text_alone(self, text, mm):
+        both = resolve_measurement_authority(figured_text=text, figured_mm=mm)
+        alone = resolve_measurement_authority(figured_text=text)
+        assert both.authority_status == AuthorityStatus.FIRM.value
+        assert (both.value_m, both.figured_mm, both.notes) == (alone.value_m, alone.figured_mm, alone.notes)
+
+    @pytest.mark.parametrize("mm", [float("nan"), float("inf"), -1.0, 0.0, True])
+    def test_an_invalid_value_beside_valid_text_blocks_instead_of_being_ignored(self, mm):
+        result = resolve_measurement_authority(figured_text="6500", figured_mm=mm)
+        assert result.authority_status == AuthorityStatus.BLOCKED.value
+        assert result.value_m is None
+
+    def test_malformed_text_beside_a_valid_value_still_blocks(self):
+        result = resolve_measurement_authority(figured_text="six metres", figured_mm=6000.0)
+        assert result.authority_status == AuthorityStatus.BLOCKED.value
+        assert "malformed" in result.notes
+
+    def test_the_value_alone_and_the_text_alone_are_unchanged(self):
+        assert resolve_measurement_authority(figured_mm=6500.0).value_m == 6.5
+        assert resolve_measurement_authority(figured_text="6500").value_m == 6.5
+
+    def test_a_scaled_comparison_still_applies_to_agreeing_representations(self):
+        result = resolve_measurement_authority(6500.0, figured_text="6500", figured_mm=6500.0)
+        assert result.authority_status == AuthorityStatus.FIRM.value
+        assert result.scaled_delta_mm == 0.0
+
+    def test_resolution_is_deterministic(self):
+        first = resolve_measurement_authority(figured_text="6500", figured_mm=3200.0)
+        assert first == resolve_measurement_authority(figured_text="6500", figured_mm=3200.0)

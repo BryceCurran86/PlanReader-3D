@@ -337,8 +337,11 @@ def compose_live_physical_opening_voids(
     *,
     source_visibility_producer: SourceVisibilityProducer,
     wall_opening_composition: LiveWallOpeningAuthorityComposition,
+    bifold_descriptor_shadow: bool = False,
 ) -> LivePhysicalOpeningVoidComposition:
     """Compose the exact sealed prerequisite chain for every proven opening."""
+    if type(bifold_descriptor_shadow) is not bool:
+        raise ValueError("bifold descriptor shadow must be explicit boolean")
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
     if type(wall_opening_composition) is not LiveWallOpeningAuthorityComposition:
@@ -524,7 +527,8 @@ def compose_live_physical_opening_voids(
     dimension_authority = source_visibility_producer.opening_dimension_authority()
     label_dimension_producer = (
         OpeningLabelDimensionProducer.from_source_visibility_producer(
-            source_visibility_producer
+            source_visibility_producer,
+            **({"bifold_descriptor_shadow": True} if bifold_descriptor_shadow else {})
         )
     )
     label_dimension_results = {
@@ -533,7 +537,8 @@ def compose_live_physical_opening_voids(
     }
     label_semantic_producer = (
         OpeningLabelSemanticProducer.from_source_visibility_producer(
-            source_visibility_producer
+            source_visibility_producer,
+            **({"bifold_descriptor_shadow": True} if bifold_descriptor_shadow else {})
         )
     )
     label_semantic_results = {

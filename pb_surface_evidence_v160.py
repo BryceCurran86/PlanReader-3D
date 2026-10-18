@@ -795,17 +795,14 @@ def extract_finish_codes_from_positions(
         text = str(text).strip()
         if not text:
             continue
-        # Check if the word itself is a finish code
-        m = _PAINT_CODE_RE.fullmatch(text.upper())
-        if not m:
-            # Also check for codes embedded in multi-word text
-            m2 = _PAINT_CODE_RE.search(text)
-            if m2:
-                code = m2.group(0).upper()
-            else:
-                continue
-        else:
-            code = m.group(0).upper()
+        codes: list[str] = []
+        for match in _PAINT_CODE_RE.finditer(text.upper()):
+            code = match.group(0).upper()
+            if code not in codes:
+                codes.append(code)
+        if len(codes) != 1:
+            continue
+        code = codes[0]
 
         bbox = getattr(w, "bbox", None) or (w.get("bbox", (0, 0, 0, 0)) if isinstance(w, dict) else (0, 0, 0, 0))
         try:

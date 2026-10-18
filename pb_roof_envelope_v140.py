@@ -35,7 +35,11 @@ def roof_evidence(app:Any,workspace_id:int)->Dict[str,Any]:
 
 def roof_caps(app:Any,workspace_id:int,walls:List[Dict[str,Any]])->List[Dict[str,Any]]:
     prisms=app.build_precision_prisms(int(workspace_id)) if hasattr(app,"build_precision_prisms") else []
-    evidence=roof_evidence(app,workspace_id); max_h=max([_num(w.get("height_m"),2.7) for w in walls] or [2.7])
+    evidence=roof_evidence(app,workspace_id)
+    heights=[h for w in walls if (h:=_num(w.get("height_m")))>0.0]
+    if not heights:
+        return []
+    max_h=max(heights)
     caps=[]
     for p in prisms:
         pts=list(p.get("points") or []); tris=list(p.get("triangles") or [])

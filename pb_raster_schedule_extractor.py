@@ -685,12 +685,8 @@ class GenericScheduleTableExtractor:
                     continue
 
                 dims = self._parse_dimensions_string(row_text)
-                qty_match = re.search(r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\b", row_text, re.I)
-                if dims is None or qty_match is None:
-                    continue
-
-                qty = float(qty_match.group(1))
-                if qty <= 0:
+                qty = self._unique_labelled_count(row_text, r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\b")
+                if dims is None or qty is None:
                     continue
 
                 x0 = min(float(w[0]) for w in row_words)
@@ -795,8 +791,7 @@ class GenericScheduleTableExtractor:
                     continue
 
                 dims = self._parse_dimensions_string(col_text)
-                qty_match = re.search(r"\b(\d+)\s*(?:no\.?s?|nos?)\b", col_text, re.I)
-                qty = float(qty_match.group(1)) if qty_match else None
+                qty = self._unique_labelled_count(col_text, r"\b(\d+)\s*(?:no\.?s?|nos?)\b")
 
                 c_x0 = min(w[0] for w in col_w)
                 c_y0 = min(w[1] for w in col_w)
@@ -1184,28 +1179,56 @@ class GenericScheduleTableExtractor:
 
         return conflict_retained_rows + result
 
+    def _unique_labelled_count(self, text: str, pattern: str) -> Optional[float]:
+        """Return one labelled count. Two different counts abstain."""
+        found: List[float] = []
+        for match in re.finditer(pattern, text or "", re.I):
+            try:
+                value = float(match.group(1))
+            except ValueError:
+                continue
+            if value > 0 and value not in found:
+                found.append(value)
+        if len(found) != 1:
+            return None
+        return found[0]
+
     def _parse_quantity_string(self, text: str) -> Optional[float]:
-        """Parse count / quantity strictly from string, returning None if unevidenced."""
+        """Parse one count. Two different numbers abstain."""
         if not text:
             return None
-        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:no\.?s?|nos?|units?|pcs?|nr\.?)?", text, re.I)
-        if m:
+        found: List[float] = []
+        for match in re.finditer(
+            r"(\d+(?:\.\d+)?)\s*(?:no\.?s?|nos?|units?|pcs?|nr\.?)?",
+            text,
+            re.I,
+        ):
             try:
-                val = float(m.group(1))
-                return val if val > 0 else None
+                value = float(match.group(1))
             except ValueError:
-                return None
-        return None
+                continue
+            if value > 0 and value not in found:
+                found.append(value)
+        if len(found) != 1:
+            return None
+        return found[0]
 
     def _parse_dimensions_string(self, text: str) -> Optional[List[float]]:
-        """Parse width and height dimensions from string (e.g. '3000 x 1200', '900*2100')."""
+        """Parse one width and height pair. Two different pairs abstain."""
         if not text:
             return None
         clean = text.replace(",", "")
-        m = re.search(r"(\d{3,4})\s*(?:mm)?\s*[*xX×]\s*(\d{3,4})\s*(?:mm)?", clean)
-        if m:
+        pairs: List[Tuple[float, float]] = []
+        for match in re.finditer(
+            r"(\d{3,4})\s*(?:mm)?\s*[*xX×]\s*(\d{3,4})\s*(?:mm)?",
+            clean,
+        ):
             try:
-                return [float(m.group(1)), float(m.group(2))]
+                pair = (float(match.group(1)), float(match.group(2)))
             except ValueError:
-                return None
-        return None
+                continue
+            if pair not in pairs:
+                pairs.append(pair)
+        if len(pairs) != 1:
+            return None
+        return [pairs[0][0], pairs[0][1]]

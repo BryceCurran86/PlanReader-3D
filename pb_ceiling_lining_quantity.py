@@ -65,7 +65,8 @@ _AUTHORITATIVE_AREA_STATUSES = frozenset(
 _EXPLICIT_CEILING_FINISH_RE = re.compile(
     r"\bceiling\s+(?:finish|lining)\b"
     r"\s*(?::|=|-|–|—)?\s*"
-    r"(?P<descriptor>[A-Za-z0-9][A-Za-z0-9 /.,()'\"+\-]{1,119})",
+    r"(?P<descriptor>[A-Za-z0-9]"
+    r"(?:(?!\bceiling\s+(?:finish|lining)\b)[A-Za-z0-9 /.,()'\"+\-]){1,119})",
     re.IGNORECASE,
 )
 _UNRESOLVED_REFERENCE_RE = re.compile(
@@ -91,18 +92,26 @@ def _scope_id(atom: EvidenceAtom) -> str:
     return _clean(_metadata(atom.metadata).get("scope_entity_id"))
 
 
-def _finish_descriptor(raw_text: str) -> Optional[str]:
-    """Return canonical explicit finish descriptor, or None if not explicit."""
-    text = " ".join(_clean(raw_text).replace("\u00a0", " ").split())
-    match = _EXPLICIT_CEILING_FINISH_RE.search(text)
-    if match is None:
-        return None
+def _descriptor_text(match: re.Match[str]) -> Optional[str]:
     descriptor = match.group("descriptor").strip(" \t:;,.=-–—")
     # Stop common sentence/title delimiters from swallowing unrelated content.
     descriptor = re.split(r"\s{2,}|\s+\|\s+|\s+•\s+", descriptor, maxsplit=1)[0].strip()
     if len(descriptor) < 2 or _UNRESOLVED_REFERENCE_RE.fullmatch(descriptor):
         return None
     return _norm(descriptor)
+
+
+def _finish_descriptor(raw_text: str) -> Optional[str]:
+    """Return one explicit finish. Two different descriptors abstain."""
+    text = " ".join(_clean(raw_text).replace("\u00a0", " ").split())
+    found: list[str] = []
+    for match in _EXPLICIT_CEILING_FINISH_RE.finditer(text):
+        descriptor = _descriptor_text(match)
+        if descriptor and descriptor not in found:
+            found.append(descriptor)
+    if len(found) != 1:
+        return None
+    return found[0]
 
 
 def explicit_ceiling_finish_descriptor(raw_text: str) -> Optional[str]:

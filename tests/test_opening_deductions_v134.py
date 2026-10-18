@@ -17,7 +17,7 @@ def test_each_opening_can_be_included_or_excluded_from_deduction():
 
 def test_toggle_changes_net_wall_area_without_removing_opening():
     opening = legacy.normalise_opening(
-        {"kind": "Door", "width_m": 1.0, "height_m": 2.0, "deduct": True, "wall_ref": "W01", "manual_override_confirmed": True}
+        {"kind": "Door", "width_m": 1.0, "height_m": 2.0, "quantity": 1, "deduct": True, "wall_ref": "W01", "manual_override_confirmed": True}
     )
     assert legacy.net_wall_area_m2(10.0, [opening]) == 8.0
     opening["deduct"] = False
@@ -25,5 +25,5 @@ def test_toggle_changes_net_wall_area_without_removing_opening():
 
 
 def test_deduction_never_drives_wall_negative():
-    opening = {"kind": "Window", "width_m": 5.0, "height_m": 5.0, "deduct": True, "wall_ref": "W01", "manual_override_confirmed": True}
+    opening = {"kind": "Window", "width_m": 5.0, "height_m": 5.0, "quantity": 1, "deduct": True, "wall_ref": "W01", "manual_override_confirmed": True}
     assert legacy.net_wall_area_m2(10.0, [opening]) == 0.0

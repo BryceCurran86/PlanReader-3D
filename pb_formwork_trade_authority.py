@@ -37,11 +37,11 @@ class FormworkElementSpec:
     depth_m: float = 0.0
     area_m2: float = 0.0
     perimeter_lm: float = 0.0
-    count: int = 1
+    count: int = 0
     is_circular: bool = False
     is_single_faced: bool = False
     is_cantilever: bool = False
-    propping_height_m: float = 2.70
+    propping_height_m: float = 0.0
     openings: List[Dict[str, float]] = field(default_factory=list)  # [{"width": 1.2, "height": 2.1, "area": 2.52}]
     source_page: str = ""
     source_reference: str = ""
@@ -102,9 +102,12 @@ def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
         return items
 
     # Standard flat soffit formwork
-    propping_desc = f"propping up to {spec.propping_height_m:.1f}m"
     if spec.propping_height_m > 3.6:
         propping_desc = f"high propping ({spec.propping_height_m:.1f}m)"
+    elif spec.propping_height_m > 0.0:
+        propping_desc = f"propping up to {spec.propping_height_m:.1f}m"
+    else:
+        propping_desc = "propping height not stated"
 
     element_name = "Suspended slab soffit formwork (Class 3)"
     if spec.is_cantilever:
@@ -155,8 +158,8 @@ def calculate_edge_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     """Calculate formwork items for slab edges and perimeter boards."""
     items: List[FormworkTakeoffItem] = []
     length = spec.perimeter_lm if spec.perimeter_lm > 0.0 else spec.length_m
-    depth = spec.depth_m if spec.depth_m > 0.0 else (spec.height_m or 0.150)
-    if length <= 0.0:
+    depth = spec.depth_m if spec.depth_m > 0.0 else spec.height_m
+    if length <= 0.0 or depth <= 0.0:
         return items
 
     contact_area = round(length * depth, 2)
@@ -187,7 +190,7 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     """Calculate formwork items for concrete walls (double or single faced) and opening blockouts."""
     items: List[FormworkTakeoffItem] = []
     length = spec.length_m
-    height = spec.height_m if spec.height_m > 0.0 else 2.70
+    height = spec.height_m
     if length <= 0.0 or height <= 0.0:
         return items
 
@@ -225,9 +228,10 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     for i, op in enumerate(spec.openings):
         op_w = float(op.get("width") or 0.0)
         op_h = float(op.get("height") or 0.0)
-        thick = spec.depth_m if spec.depth_m > 0.0 else 0.200  # Default 200mm wall
+        thick = spec.depth_m if spec.depth_m > 0.0 else 0.0
         if op_w > 0.0 and op_h > 0.0:
             blockout_perim = 2 * (op_w + op_h)
+            thick_note = f" in {int(thick*1000)}mm thick wall" if thick > 0.0 else ""
             items.append(FormworkTakeoffItem(
                 section=spec.section or "Structure",
                 element=f"Opening blockout formwork ({int(op_w*1000)}×{int(op_h*1000)}mm)",
@@ -241,7 +245,7 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
                 source_reference=f"{FORMWORK_SOURCE_PREFIX} · {spec.element_id}",
                 inclusion_status="INCLUSION",
                 confidence="Verified",
-                notes=f"Boxout perimeter: {blockout_perim:.2f} lm in {int(thick*1000)}mm thick wall.",
+                notes=f"Boxout perimeter: {blockout_perim:.2f} lm{thick_note}.",
                 row_role="",
             ))
 
@@ -251,10 +255,12 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
 def calculate_column_formwork_items(spec: FormworkElementSpec) -> List[FormworkTakeoffItem]:
     """Calculate formwork items for reinforced concrete columns."""
     items: List[FormworkTakeoffItem] = []
-    count = max(1, spec.count)
-    height = spec.height_m if spec.height_m > 0.0 else 2.70
-    w = spec.width_m if spec.width_m > 0.0 else 0.400
-    d = spec.depth_m if spec.depth_m > 0.0 else (spec.length_m or w)
+    count = spec.count
+    height = spec.height_m
+    w = spec.width_m
+    d = spec.depth_m if spec.depth_m > 0.0 else spec.length_m
+    if count <= 0 or height <= 0.0 or w <= 0.0 or d <= 0.0:
+        return items
 
     if spec.is_circular:
         diameter = w
@@ -311,9 +317,9 @@ def calculate_beam_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     """Calculate formwork items for concrete beams (sides and soffit)."""
     items: List[FormworkTakeoffItem] = []
     length = spec.length_m
-    w = spec.width_m if spec.width_m > 0.0 else 0.400
-    d = spec.depth_m if spec.depth_m > 0.0 else 0.600
-    if length <= 0.0:
+    w = spec.width_m
+    d = spec.depth_m
+    if length <= 0.0 or w <= 0.0 or d <= 0.0:
         return items
 
     # Formwork contact area: beam soffit + 2 vertical sides
@@ -346,8 +352,8 @@ def calculate_stepdowns_and_penetrations(spec: FormworkElementSpec) -> List[Form
     items: List[FormworkTakeoffItem] = []
     if spec.element_type == "stepdown":
         length = spec.length_m
-        drop = spec.depth_m if spec.depth_m > 0.0 else 0.050  # Default 50mm stepdown
-        if length > 0.0:
+        drop = spec.depth_m
+        if length > 0.0 and drop > 0.0:
             items.append(FormworkTakeoffItem(
                 section=spec.section or "Structure",
                 element=f"Slab stepdown rebate formwork ({int(drop*1000)}mm drop)",
@@ -365,7 +371,9 @@ def calculate_stepdowns_and_penetrations(spec: FormworkElementSpec) -> List[Form
                 row_role="",
             ))
     elif spec.element_type == "penetration":
-        count = max(1, spec.count)
+        count = spec.count
+        if count <= 0:
+            return items
         size_desc = f"{int(spec.width_m*1000)}mm dia" if spec.is_circular else f"{int(spec.width_m*1000)}×{int(spec.depth_m*1000)}mm"
         items.append(FormworkTakeoffItem(
             section=spec.section or "Structure",

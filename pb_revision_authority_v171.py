@@ -37,8 +37,35 @@ class PageRevisionRecord:
         }
 
 
+_EXPLICIT_REV_RE = re.compile(
+    r"rev(?:ision)?(?![a-z0-9])[\s\-_]*([a-z0-9]{1,3})\b",
+    re.IGNORECASE,
+)
+_TRAILING_REV_RE = re.compile(
+    r"[\s\-_]([a-z]|\d{1,3})\.[a-z0-9]+$",
+    re.IGNORECASE,
+)
+_SHEET_CODE_RE = re.compile(
+    r"([a-z]{1,2}[\s\-_]?\d{3,4}[a-z]?)",
+    re.IGNORECASE,
+)
+
+
+def _revision_rank(code: str) -> Tuple[str, int]:
+    if code.isdigit():
+        rank = int(code)
+    elif len(code) == 1 and "A" <= code <= "Z":
+        rank = ord(code) - ord("A") + 1
+    else:
+        rank = 1
+    return (code, rank)
+
+
 def parse_revision_code(text: str) -> Tuple[str, int]:
-    """Extract revision code and numerical rank from drawing text/filenames.
+    """Extract one revision code and its numerical rank.
+
+    Two different revision tokens abstain as ('0', 0). The same token
+    repeated is kept. REVISIONS is not revision S.
 
     Examples:
         'Rev A' -> ('A', 1)
@@ -49,31 +76,29 @@ def parse_revision_code(text: str) -> Tuple[str, int]:
     if not text:
         return ("0", 0)
 
-    # 1. Match explicit 'Rev A', 'Rev-02', 'Revision B', '_Rev_C'
-    m = re.search(r'rev(?:ision)?[\s\-_]*([a-z0-9]{1,3})', text, re.IGNORECASE)
-    if not m:
-        # 2. Match trailing single letter or number before extension
-        m = re.search(r'[\s\-_]([a-z]|\d{1,3})\.[a-z0-9]+$', text, re.IGNORECASE)
-    if m:
-        code = m.group(1).upper()
-        if code.isdigit():
-            rank = int(code)
-        elif len(code) == 1 and 'A' <= code <= 'Z':
-            rank = ord(code) - ord('A') + 1
-        else:
-            rank = 1
-        return (code, rank)
+    explicit = [match.group(1).upper() for match in _EXPLICIT_REV_RE.finditer(text)]
+    if len(set(explicit)) > 1:
+        return ("0", 0)
+    if len(set(explicit)) == 1:
+        return _revision_rank(explicit[0])
+
+    trailing = [match.group(1).upper() for match in _TRAILING_REV_RE.finditer(text)]
+    if len(set(trailing)) == 1:
+        return _revision_rank(trailing[0])
     return ("0", 0)
 
 
 def extract_sheet_number(label: str) -> str:
-    """Extract standard Australian sheet number from page label e.g., 'A-101 Floor Plan' -> 'A-101'."""
+    """Return one Australian sheet code, or UNKNOWN when none or two are printed."""
     if not label:
         return "UNKNOWN"
-    m = re.search(r'([a-z]{1,2}[\s\-_]?\d{3,4}[a-z]?)', label, re.IGNORECASE)
-    if m:
-        return m.group(1).upper().replace(" ", "")
-    return label.split()[0].upper()
+    found = {
+        match.group(1).upper().replace(" ", "")
+        for match in _SHEET_CODE_RE.finditer(label)
+    }
+    if len(found) != 1:
+        return "UNKNOWN"
+    return next(iter(found))
 
 
 class RevisionAuthorityRegistry:
@@ -108,7 +133,9 @@ class RevisionAuthorityRegistry:
             plabel = str(p.get("page_label") or "")
             fname = str(p.get("file_name") or "")
             sheet = extract_sheet_number(plabel)
-            rev_code, rank = parse_revision_code(fname or plabel)
+            if sheet == "UNKNOWN":
+                sheet = f"UNNUMBERED-{pid}"
+            rev_code, rank = parse_revision_code(plabel)
             records_map.setdefault(sheet, []).append({
                 "page_id": pid,
                 "sheet_number": sheet,

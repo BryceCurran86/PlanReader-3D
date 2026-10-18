@@ -134,16 +134,14 @@ def test_single_opening_is_one_six_member_candidate():
     assert candidate.status is EvidenceResolutionStatus.CANDIDATE
 
 
-def test_adjacent_openings_expose_overlapping_member_sets():
+def test_adjacent_openings_do_not_create_spanning_candidate():
     _source, _published, _physical, result = _structures(ADJACENT)
     members = [set(c.source_observation_ids) for c in result.candidates]
-    assert len(members) == 3  # two adjacent gaps + the spanning collinear pair
-    assert sorted(len(m) for m in members) == [6, 6, 6]
-    # Every pair shares members (the stub / shared wall faces) but none contains another.
-    overlaps = sorted(
-        len(members[i] & members[j]) for i in range(3) for j in range(i + 1, 3)
-    )
-    assert overlaps == [2, 3, 3]
+    assert len(members) == 2
+    assert sorted(len(m) for m in members) == [6, 6]
+    # The two real openings share only the solid middle wall-face stub. Positive
+    # visible continuation across that stub forbids a third spanning candidate.
+    assert len(members[0] & members[1]) == 2
     assert all(not (a <= b) for a in members for b in members if a is not b)
 
 

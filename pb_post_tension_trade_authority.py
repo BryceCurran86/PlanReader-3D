@@ -34,7 +34,7 @@ class PTExtractionSpec:
     area_m2: float = 0.0
     length_m: float = 0.0
     width_m: float = 0.0
-    thickness_m: float = 0.200
+    thickness_m: float = 0.0
     tendon_density_kg_per_m2: float = 3.5  # Typical commercial slab: 3.0 to 4.5 kg/m²
     tendon_spacing_m: float = 1.200        # Average tendon spacing
     strand_diameter_mm: float = 12.7
@@ -95,7 +95,7 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
     """Calculate post-tensioning trade items for a suspended PT slab."""
     items: List[PTTakeoffItem] = []
     area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    if area <= 0.0:
+    if area <= 0.0 or spec.thickness_m <= 0.0:
         return items
 
     # 1. Primary PT Slab Area (m²)
@@ -242,9 +242,9 @@ def calculate_pt_band_beam_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
     """Calculate post-tensioning trade items for PT band beams."""
     items: List[PTTakeoffItem] = []
     length = spec.length_m
-    w = spec.width_m if spec.width_m > 0.0 else 1.200
-    d = spec.thickness_m if spec.thickness_m > 0.0 else 0.450
-    if length <= 0.0:
+    w = spec.width_m
+    d = spec.thickness_m
+    if length <= 0.0 or w <= 0.0 or d <= 0.0:
         return items
 
     # Band beams typically carry higher tendon density: 8 to 15 kg per metre length

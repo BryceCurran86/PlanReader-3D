@@ -199,8 +199,9 @@ def _cluster_center(c: HatchCluster) -> Tuple[float, float]:
 # A multi-view sheet (floor plan + elevations + sections all on one PDF page)
 # can have hatch-confident clusters from unrelated views. Rather than assume
 # a fixed viewport rectangle (which would only be valid for one drawing),
-# group wall-like clusters by spatial proximity and keep only the largest
-# connected group -- the plan's own walls cluster tightly together, while an
+# group wall-like clusters by spatial proximity and keep the unique largest
+# connected group. Two groups of the same size stay unused. The plan's own
+# walls cluster tightly together, while an
 # elevation or section drawn elsewhere on the sheet forms its own separate,
 # disconnected group. This is a density/connectivity heuristic, not a
 # hand-picked region.
@@ -239,6 +240,9 @@ def _largest_spatially_connected_group(
     for i in range(n):
         groups.setdefault(find(i), []).append(clusters[i])
 
+    sizes = [len(group) for group in groups.values()]
+    if not sizes or sizes.count(max(sizes)) != 1:
+        return []
     return max(groups.values(), key=len)
 
 

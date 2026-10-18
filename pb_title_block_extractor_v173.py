@@ -43,80 +43,127 @@ class TitleBlockMetadata:
         }
 
 
+_JOB_RE = re.compile(
+    r"(?:job|project|proj)[\s\-_#]*no\.?[\s:]*([a-z0-9\-_]{3,15})",
+    re.IGNORECASE,
+)
+_SHEET_RE = re.compile(
+    r"(?:dwg|drawing|sheet)[\s\-_#]*no\.?[\s:]*([a-z]{1,2}[\s\-_]?\d{3,4}[a-z]?)",
+    re.IGNORECASE,
+)
+_REV_RE = re.compile(
+    r"rev(?:ision)?(?![a-z0-9])[\s\-_:]*([a-z0-9]{1,3})\b",
+    re.IGNORECASE,
+)
+_SCALE_RE = re.compile(
+    r"scale[\s:]*(1\s*[:/]\s*\d{2,4}(?:\s*@\s*a[130])?)",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(
+    r"\bdate[\s:]*(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4})\b",
+    re.IGNORECASE,
+)
+_LEGEND_RE = re.compile(
+    r"^\s*([a-z0-9]{1,4})\s*[:=\-]\s*(.{4,50})$",
+    re.IGNORECASE,
+)
+
+
+def _one_printed_value(values: List[str]) -> Tuple[str, bool]:
+    """Keep a value only when every reading is the same non-empty value."""
+
+    distinct = {value for value in values if value}
+    if len(distinct) == 1:
+        return next(iter(distinct)), False
+    return "", len(distinct) > 1
+
+
 def extract_title_block_from_text(page_id: int, text: str) -> TitleBlockMetadata:
-    """Extract structured title block fields and legend symbol keys from page text content."""
+    """Extract structured title block fields and legend symbol keys from page text content.
+
+    A field printed twice with two different values stays empty. The same
+    value printed twice is kept. An unlabelled date-shaped token is not a date,
+    and the word REVISIONS is not revision S.
+    """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
 
-    project_name = ""
-    job_no = ""
-    drawing_title = ""
-    sheet_no = ""
-    revision = ""
-    scale_text = ""
-    date_str = ""
-    architect = ""
-    legend_keys: Dict[str, str] = {}
+    job_values: List[str] = []
+    sheet_values: List[str] = []
+    revision_values: List[str] = []
+    scale_values: List[str] = []
+    date_values: List[str] = []
+    title_values: List[str] = []
+    legend_values: Dict[str, List[str]] = {}
+    conflict = False
 
     for l in lines:
-        # Job No
-        if not job_no:
-            m_job = re.search(r'(?:job|project|proj)[\s\-_#]*no\.?[\s:]*([a-z0-9\-_]{3,15})', l, re.IGNORECASE)
-            if m_job:
-                job_no = m_job.group(1).upper()
+        job_values.extend(match.group(1).upper() for match in _JOB_RE.finditer(l))
+        sheet_values.extend(
+            match.group(1).upper().replace(" ", "")
+            for match in _SHEET_RE.finditer(l)
+        )
+        revision_values.extend(match.group(1).upper() for match in _REV_RE.finditer(l))
+        scale_values.extend(match.group(1) for match in _SCALE_RE.finditer(l))
+        date_values.extend(match.group(1) for match in _DATE_RE.finditer(l))
 
-        # Sheet No
-        if not sheet_no:
-            m_sheet = re.search(r'(?:dwg|drawing|sheet)[\s\-_#]*no\.?[\s:]*([a-z]{1,2}[\s\-_]?\d{3,4}[a-z]?)', l, re.IGNORECASE)
-            if m_sheet:
-                sheet_no = m_sheet.group(1).upper().replace(" ", "")
-
-        # Revision
-        m_rev = re.search(r'rev(?:ision)?[\s\-_:]*([a-z0-9]{1,3})', l, re.IGNORECASE)
-        if m_rev:
-            revision = m_rev.group(1).upper()
-
-        # Scale
-        if not scale_text:
-            m_scale = re.search(r'scale[\s:]*(1\s*[:/]\s*\d{2,4}(?:\s*@\s*a[130])?)', l, re.IGNORECASE)
-            if m_scale:
-                scale_text = m_scale.group(1)
-
-        # Date
-        if not date_str:
-            m_date = re.search(r'(?:date[\s:]*)?(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4})', l, re.IGNORECASE)
-            if m_date:
-                date_str = m_date.group(1)
-
-        # Legend Keys (e.g. 'P1 - Low Sheen Wall System', 'FC01 = Fibre Cement')
-        m_leg = re.search(r'^\s*([a-z0-9]{1,4})\s*[:=\-]\s*(.{4,50})$', l, re.IGNORECASE)
-        if m_leg:
-            key = m_leg.group(1).upper()
-            val = m_leg.group(2).strip()
-            legend_keys[key] = val
+        legend = _LEGEND_RE.search(l)
+        if legend:
+            key = legend.group(1).upper()
+            legend_values.setdefault(key, []).append(legend.group(2).strip())
 
         # Drawing Title: only a value bound to a title label ("DRAWING TITLE:",
         # "SHEET TITLE:", "TITLE:"; never "PROJECT TITLE"). Text alone has no
         # geometry to tell a sheet title from a note that mentions a plan.
-        if not drawing_title:
-            label = title_authority.parse_label(title_authority.Cell(l, 0.0, 0.0, 1.0, 1.0, 1.0))
-            if (label is not None and label.field == "title" and label.remainder
-                    and title_authority.title_shape(label.remainder, bound=True)[0] > 0):
-                drawing_title = label.remainder
+        label = title_authority.parse_label(title_authority.Cell(l, 0.0, 0.0, 1.0, 1.0, 1.0))
+        if (label is not None and label.field == "title" and label.remainder
+                and title_authority.title_shape(label.remainder, bound=True)[0] > 0):
+            title_values.append(label.remainder)
 
-    # Fail closed: a field the text does not support stays empty. There is no
-    # default title, sheet number, revision, scale, date or party.
+    job_no, job_conflict = _one_printed_value(job_values)
+    sheet_no, sheet_conflict = _one_printed_value(sheet_values)
+    revision, revision_conflict = _one_printed_value(revision_values)
+    scale_text, scale_conflict = _one_printed_value(scale_values)
+    date_str, date_conflict = _one_printed_value(date_values)
+    drawing_title, title_conflict = _one_printed_value(title_values)
+    conflict = any((
+        job_conflict,
+        sheet_conflict,
+        revision_conflict,
+        scale_conflict,
+        date_conflict,
+        title_conflict,
+    ))
+
+    legend_keys: Dict[str, str] = {}
+    for key, descriptions in legend_values.items():
+        description, key_conflict = _one_printed_value(descriptions)
+        if key_conflict:
+            conflict = True
+            continue
+        if description:
+            legend_keys[key] = description
+
+    # Fail closed: a field the text does not support, or that prints two
+    # different values, stays empty. There is no default title, sheet number,
+    # revision, scale, date or party.
+    if conflict:
+        confidence = 0.0
+    elif sheet_no or scale_text:
+        confidence = 0.90
+    else:
+        confidence = 0.60
     return TitleBlockMetadata(
         page_id=page_id,
-        project_name=project_name,
+        project_name="",
         job_no=job_no,
         drawing_title=drawing_title,
         sheet_no=sheet_no,
         revision=revision,
         scale_text=scale_text,
         date_str=date_str,
-        architect_name=architect,
+        architect_name="",
         legend_keys=legend_keys,
-        confidence=0.90 if (sheet_no or scale_text) else 0.60,
+        confidence=confidence,
     )
 
 
@@ -132,7 +179,7 @@ class TitleBlockRegistry:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, page_label, scale_text, file_name
+            SELECT id, page_label, scale_text
             FROM pages
             WHERE workspace_id=?
             ORDER BY id ASC
@@ -146,9 +193,8 @@ class TitleBlockRegistry:
             pid = int(p["id"])
             label = str(p.get("page_label") or "")
             stext = str(p.get("scale_text") or "")
-            fname = str(p.get("file_name") or "")
 
-            meta = extract_title_block_from_text(pid, f"{label}\nScale {stext}\n{fname}")
+            meta = extract_title_block_from_text(pid, f"{label}\nScale {stext}")
             results.append(meta)
 
         return cls(results)

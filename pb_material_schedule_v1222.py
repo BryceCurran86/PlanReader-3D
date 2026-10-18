@@ -173,10 +173,14 @@ def _schedule_page(page: Dict[str, Any]) -> bool:
 
 
 def _infer_substrate(description: Any) -> str:
+    """Return one substrate family. Two different families abstain."""
     low = str(description or "").lower()
+    names: List[str] = []
     for needles, name in _MATERIAL_HINTS:
-        if any(token in low for token in needles):
-            return name
+        if any(token in low for token in needles) and name not in names:
+            names.append(name)
+    if len(names) == 1:
+        return names[0]
     return ""
 
 
@@ -400,7 +404,7 @@ def build_material_dictionary(app: Any, workspace_id: int) -> Dict[str, Any]:
         finish_names = {item.get("finish") for item in items if item.get("finish")}
         dictionary[code] = {
             "code": code,
-            "description": representative["description"],
+            "description": "" if conflicting else representative["description"],
             "substrate": next(iter(substrate_names)) if len(substrate_names) == 1 else "",
             "finish": next(iter(finish_names)) if len(finish_names) == 1 else "",
             "status": status,

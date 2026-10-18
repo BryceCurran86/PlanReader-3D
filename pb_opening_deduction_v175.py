@@ -45,16 +45,27 @@ class OpeningRecord:
         }
 
 
-def parse_opening_dimensions(text: str) -> Tuple[float, float]:
-    """Parse opening height and width in mm e.g. '2040 x 820', '2100h x 1800w', '1200x900'."""
+_OPENING_PAIR_RE = re.compile(
+    r"(\d{3,4})\s*(?:h|mm)?\s*[:x\*\/]\s*(\d{3,4})",
+    re.IGNORECASE,
+)
+_OPENING_QTY_RE = re.compile(r"(?:qty|count)[\s:]*(\d{1,3})", re.IGNORECASE)
+
+
+def parse_opening_dimensions(text: str) -> Optional[Tuple[float, float]]:
+    """Parse one opening size. Two different sizes abstain. No size keeps the legacy default."""
     if not text:
         return (2040.0, 820.0)
 
-    m = re.search(r'(\d{3,4})\s*(?:h|mm)?\s*[:x\*\/]\s*(\d{3,4})', text, re.IGNORECASE)
-    if m:
-        h = float(m.group(1))
-        w = float(m.group(2))
-        return (h, w)
+    pairs: list[Tuple[float, float]] = []
+    for match in _OPENING_PAIR_RE.finditer(text):
+        pair = (float(match.group(1)), float(match.group(2)))
+        if pair not in pairs:
+            pairs.append(pair)
+    if len(pairs) > 1:
+        return None
+    if len(pairs) == 1:
+        return pairs[0]
     return (2040.0, 820.0)
 
 
@@ -84,12 +95,15 @@ class OpeningDeductionRegistry:
         for rid, item_name, status in rows:
             name_str = str(item_name or "")
             otype = "DOOR" if any(k in name_str.upper() for k in ["DOOR", "D0", "D1"]) else ("WINDOW" if "W" in name_str.upper() else "OPENING")
-            h_mm, w_mm = parse_opening_dimensions(name_str)
+            parsed = parse_opening_dimensions(name_str)
+            if parsed is None:
+                continue
+            h_mm, w_mm = parsed
 
-            qty = 1
-            m_qty = re.search(r'(?:qty|count)[\s:]*(\d{1,3})', name_str, re.IGNORECASE)
-            if m_qty:
-                qty = int(m_qty.group(1))
+            quantities = [int(match.group(1)) for match in _OPENING_QTY_RE.finditer(name_str)]
+            if len(set(quantities)) > 1:
+                continue
+            qty = quantities[0] if quantities else 1
 
             single_m2 = (h_mm * w_mm) / 1000000.0
             total_m2 = single_m2 * qty

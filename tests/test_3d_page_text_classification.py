@@ -172,10 +172,25 @@ def test_two_labelled_sheet_numbers_and_two_scales_abstain():
 
     assert _candidate_code("DRAWING NO A-205\nSHEET NO A-301") == ""
     assert _candidate_code("DRAWING NO A-205 | DRAWING NO A-205") == "A-205"
+    assert _candidate_code("A-205") == "A-205"
+    assert _candidate_code("A-205\nA-301") == ""
     assert _unique_scale("SCALE 1:100\nDETAIL 1:20") == ""
     assert _unique_scale("SCALE 1:100") == "1:100"
     assert _unique_revision("REV A\nREV B") == ""
     assert _unique_revision("REV B") == "B"
+    assert _unique_revision("REVISIONS") == ""
+    assert _unique_revision("REVISION B") == "B"
+
+
+def test_a_section_heading_competes_with_a_floor_plan():
+    page_type, _label = classify_page("FLOOR PLAN\nSECTION A", "mixed.pdf", 8)
+    assert page_type == "Other"
+    noted, _noted_label = classify_page(
+        "FLOOR PLAN\nSECTION THROUGH THE STAIR",
+        "mixed.pdf",
+        8,
+    )
+    assert noted == "Floor Plan"
 
 
 class _OfflinePage:

@@ -69,7 +69,12 @@ from pb_source_visibility_authority import (
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
-from pb_raster_unchanged_band_segments import OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
+from pb_raster_unchanged_band_segments import (
+    UNCHANGED_BAND_IDENTITY_VERSION,
+    ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+    ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION,
+    OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS,
+)
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
@@ -3920,12 +3925,49 @@ class PhysicalWallCandidateProducer:
         *,
         page_ids: Optional[Sequence[str]] = None,
     ):
+        """Historical source producer interface; no additional caller inputs."""
         return cls._from_source_visibility_producer(
             source_visibility_producer,
             page_ids=page_ids,
             include_authenticated_viewports=False,
             include_page_scopes=True,
             supplemental_only=False,
+        )
+
+    @classmethod
+    def from_source_revision_shadow(cls,source_visibility_producer,*,revision_id,page_ids=None):
+        """Address one current source root without visiting unrelated revisions."""
+        return cls._from_source_visibility_producer(source_visibility_producer,
+            page_ids=page_ids,include_authenticated_viewports=False,
+            include_page_scopes=True,supplemental_only=False,
+            selected_revision_id=revision_id)
+
+    @classmethod
+    def from_opening_local_source_revision_shadow(cls,source_visibility_producer,*,
+            revision_id,page_ids=None,exact_endpoints_shadow=False):
+        if type(exact_endpoints_shadow) is not bool:
+            raise TypeError("source endpoint policy must be explicit bool")
+        return cls._from_source_visibility_producer(source_visibility_producer,
+            page_ids=page_ids,include_authenticated_viewports=False,
+            include_page_scopes=True,supplemental_only=True,
+            opening_local_exact_source_endpoints_shadow=exact_endpoints_shadow,
+            selected_revision_id=revision_id)
+
+    @classmethod
+    def from_source_visibility_unmeasured_g17_flanks_shadow(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Separate source-owned opt-in capture without altering production API."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+            supplemental_only=False,
+            include_unmeasured_ink_closed_flanks_shadow=True,
         )
 
     @classmethod
@@ -3938,7 +3980,9 @@ class PhysicalWallCandidateProducer:
         include_page_scopes: bool,
         supplemental_only: bool,
         physical_plan_view_shadow: bool = False,
+        include_unmeasured_ink_closed_flanks_shadow: bool = False,
         opening_local_exact_source_endpoints_shadow: bool = False,
+        selected_revision_id: Optional[str] = None,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -3955,6 +3999,17 @@ class PhysicalWallCandidateProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
             )
+
+        if type(opening_local_exact_source_endpoints_shadow) is not bool:
+            raise TypeError("G17 local exact source policy must be a boolean")
+        if opening_local_exact_source_endpoints_shadow and not supplemental_only:
+            raise ValueError("G17 exact endpoints cannot enter complete W4")
+        if selected_revision_id is not None:
+            chosen=source_visibility_producer.published_snapshot_for_revision(selected_revision_id)
+            if (type(selected_revision_id) is not str or chosen is None
+                    or source_visibility_producer._producer.current_revision_id(
+                        chosen.revision.document_id)!=selected_revision_id):
+                raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 
         selected_page_ids: Optional[set[str]] = None
         if page_ids is not None:
@@ -3974,6 +4029,8 @@ class PhysicalWallCandidateProducer:
         for revision_id in tuple(
             sorted(source_visibility_producer._published_by_revision)
         ):
+            if selected_revision_id is not None and revision_id!=selected_revision_id:
+                continue
             pre_augmented = source_visibility_producer._published_by_revision[
                 revision_id
             ]
@@ -3987,9 +4044,14 @@ class PhysicalWallCandidateProducer:
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
             if not physical_plan_view_shadow:
-                # The ordinary production W4 source path retains its
-                # existing producer-owned raster augmentation unchanged.
-                source_visibility_producer.augment_with_raster_visible_segments(
+                # Default production never sets the shadow flag. The opt-in
+                # still relies on the original source producer, not user ink.
+                source_capture = (
+                    source_visibility_producer.augment_with_unmeasured_g17_flanks_source_shadow
+                    if include_unmeasured_ink_closed_flanks_shadow
+                    else source_visibility_producer.augment_with_raster_visible_segments
+                )
+                source_capture(
                     revision_id,
                     page_ids=(
                         tuple(
@@ -4010,6 +4072,8 @@ class PhysicalWallCandidateProducer:
 
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
+        if selected_revision_id is not None:
+            published_by_revision={selected_revision_id:published_by_revision[selected_revision_id]}
         store = source_visibility_producer._producer._store
         scopes: dict[_ScopeKey, PhysicalWallCandidateScopeResult] = {}
 

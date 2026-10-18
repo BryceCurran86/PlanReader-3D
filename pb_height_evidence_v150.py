@@ -783,6 +783,22 @@ def extract_all_height_evidence(
 # Resolver
 # ---------------------------------------------------------------------------
 
+def _sole_ranked_height(
+    candidates: Sequence[HeightEvidence],
+) -> Tuple[Optional[HeightEvidence], bool]:
+    """Return the unique top reading. A tied rank with two heights is a conflict."""
+    if not candidates:
+        return None, False
+    ranked = sorted(candidates, key=lambda ev: (ev.priority, -ev.confidence))
+    best = ranked[0]
+    for ev in ranked[1:]:
+        if ev.priority != best.priority or ev.confidence != best.confidence:
+            break
+        if round(ev.height_m, 4) != round(best.height_m, 4):
+            return None, True
+    return best, False
+
+
 def resolve_height(
     evidence_list: Sequence[HeightEvidence],
     target_type: str = "floor_to_ceiling",
@@ -844,8 +860,16 @@ def resolve_height(
         )
         return round(default_height, 4), default_ev
 
-    compatible.sort(key=lambda e: (e.priority, -e.confidence))
-    best = compatible[0]
+    best, conflicted = _sole_ranked_height(compatible)
+    if conflicted or best is None:
+        return 0.0, HeightEvidence(
+            id="", source_page_id=0, source_page_label="",
+            height_type="generic", raw_text="conflicting height readings",
+            height_m=0.0, extraction_method="conflict",
+            confidence=0.0, confidence_reason="Two top-ranked readings disagree",
+            status="Conflict",
+            evidence=["Two height readings share the top rank"],
+        )
     return round(best.height_m, 4), best
 
 
@@ -915,13 +939,19 @@ def resolve_room_heights(
                 # across rooms — only spatial or default evidence is safe
 
         if candidates:
-            candidates.sort(key=lambda e: (e.priority, -e.confidence))
-            best = candidates[0]
-            h = round(best.height_m, 4)
-            source = best.extraction_method
-            status = best.status
-            conf = best.confidence
-            ev_id = best.id
+            best, conflicted = _sole_ranked_height(candidates)
+            if conflicted or best is None:
+                h = None
+                source = "conflict"
+                status = "Conflict"
+                conf = 0.0
+                ev_id = ""
+            else:
+                h = round(best.height_m, 4)
+                source = best.extraction_method
+                status = best.status
+                conf = best.confidence
+                ev_id = best.id
         else:
             h = default_height
             source = "default"
@@ -1058,7 +1088,7 @@ def apply(app: Any) -> None:
         # v150 is authoritative — NEVER resurrect old v136 RL/dimension results.
         # Build result from v150 exclusively.
         result: Dict[str, Any] = {
-            "height_m": round(h, 4),
+            "height_m": None if best.status == "Conflict" else round(h, 4),
             "height_evidence": asdict(best),
             "status": best.status,
             "confidence": (
@@ -1192,7 +1222,7 @@ def apply(app: Any) -> None:
                 "side": side,
                 "page_id": item.get("page_id"),
                 "page_label": item.get("page_label"),
-                "height_m": round(h, 4),
+                "height_m": None if best.status == "Conflict" else round(h, 4),
                 "status": best.status,
                 "confidence": "Verified" if best.confidence >= 0.90 else
                               "High" if best.confidence >= 0.80 else

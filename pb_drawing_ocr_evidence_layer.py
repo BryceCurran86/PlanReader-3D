@@ -342,11 +342,16 @@ class DrawingEvidenceParser:
         tag = normalized.tag
         trade = normalized.trade_type
 
-        # Dimensions: W x H
-        m_dims = re.search(r"(\d{3,4})\s*(?:mm)?\s*[xX\*]\s*(\d{3,4})\s*(?:mm)?", clean)
-        dims: Optional[List[float]] = None
-        if m_dims:
-            dims = [float(m_dims.group(1)), float(m_dims.group(2))]
+        # Dimensions: one W x H pair. Two different pairs abstain.
+        dim_pairs: List[Tuple[float, float]] = []
+        for m_dims in re.finditer(r"(\d{3,4})\s*(?:mm)?\s*[xX\*]\s*(\d{3,4})\s*(?:mm)?", clean):
+            pair = (float(m_dims.group(1)), float(m_dims.group(2)))
+            if pair not in dim_pairs:
+                dim_pairs.append(pair)
+        dims: Optional[List[float]] = (
+            [dim_pairs[0][0], dim_pairs[0][1]] if len(dim_pairs) == 1 else None
+        )
+        dim_conflict = len(dim_pairs) > 1
 
         # Quantity: Explicit digits preceding "No." or "Nos."
         # Check for hardware/hinge/lock counts which are not opening quantities.
@@ -359,13 +364,17 @@ class DrawingEvidenceParser:
                 re.I,
             )
         )
-        m_valid_qty = None
-        if not is_hardware:
-            m_valid_qty = re.search(r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\b", clean, re.I)
-        else:
-            m_explicit_doors = re.search(r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\s*(?:steel|timber|panelled)?\s*doors?\b", clean, re.I)
-            if m_explicit_doors:
-                m_valid_qty = m_explicit_doors
+        qty_pattern = (
+            r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\s*(?:steel|timber|panelled)?\s*doors?\b"
+            if is_hardware
+            else r"\b(\d{1,3})\s*(?:no\.?s?|nos?)\b"
+        )
+        qty_values: List[float] = []
+        for qty_match in re.finditer(qty_pattern, clean, re.I):
+            value = float(qty_match.group(1))
+            if value not in qty_values:
+                qty_values.append(value)
+        qty_conflict = len(qty_values) > 1
 
         # Check for clipped count: "No." without digits immediately before it
         m_clipped = re.search(r"(?<!\d)\s*(?:no\.?s?|nos?)\b", clean, re.I)
@@ -374,8 +383,12 @@ class DrawingEvidenceParser:
         status = EvidenceStatus.CONFIRMED.value
         notes = ""
 
-        if m_valid_qty:
-            qty = float(m_valid_qty.group(1))
+        if qty_conflict or dim_conflict:
+            qty = qty_values[0] if len(qty_values) == 1 else None
+            status = EvidenceStatus.UNRESOLVED.value
+            notes = "Two different printed dimension or count values; neither is selected."
+        elif len(qty_values) == 1:
+            qty = qty_values[0]
         elif m_clipped:
             # Clipped annotation detected! FAIL CLOSED: Never invent quantity
             qty = None

@@ -1190,6 +1190,9 @@ class PhysicalOpeningAuthority:
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
             if _raster_paired_outer_faces_shadow_override is None else _raster_paired_outer_faces_shadow_override)
         self._raster_outer_face_comparison_cache: dict[tuple, tuple[dict, ...]] = {}
+        # One complete, immutable viewport classification per raster page
+        # candidate universe. Every use still revalidates current source bytes.
+        self._raster_viewport_candidate_cache: dict[tuple, tuple] = {}
         self._visible_viewport_scope_cache: dict[
             tuple[str, str, str, str, str],
             tuple[
@@ -1312,6 +1315,7 @@ class PhysicalOpeningAuthority:
             "_raster_swing_ambiguous_support_cache",
             "_raster_existence_cache",
             "_raster_outer_face_comparison_cache",
+            "_raster_viewport_candidate_cache",
         )
         for name in keys_at_snapshot:
             cache = getattr(self, name)
@@ -2216,15 +2220,32 @@ class PhysicalOpeningAuthority:
             return candidates
         from pb_physical_opening_viewport_scope_authority import (
             classify_opening_candidate_viewport_scopes,
+            _producer_source_bytes,
         )
-        scope_result = classify_opening_candidate_viewport_scopes(
-            source_visibility_producer=producer,
-            revision_id=seed.revision_id,
-            page_id=seed.page_id,
-            snapshot_id=seed.snapshot_id,
-            candidates=candidates,
-            records=records,
-        )
+        key = (seed.document_id, seed.revision_id, seed.source_sha256,
+               seed.snapshot_id, seed.page_id)
+        published = producer.published_snapshot_for_revision(seed.revision_id)
+        if (published is None
+                or published.snapshot.snapshot_id != seed.snapshot_id
+                or published.revision.source_sha256 != seed.source_sha256
+                or _producer_source_bytes(producer, seed.revision_id, seed.source_sha256) is None):
+            self._raster_viewport_candidate_cache.pop(key, None)
+            return ()
+        cached = self._raster_viewport_candidate_cache.get(key)
+        if cached is not None and cached[:2] == (records, candidates):
+            scope_result = cached[2]
+        else:
+            scope_result = classify_opening_candidate_viewport_scopes(
+                source_visibility_producer=producer,
+                revision_id=seed.revision_id,
+                page_id=seed.page_id,
+                snapshot_id=seed.snapshot_id,
+                candidates=candidates,
+                records=records,
+            )
+            if len(self._raster_viewport_candidate_cache) >= 8:
+                self._raster_viewport_candidate_cache.pop(next(iter(self._raster_viewport_candidate_cache)))
+            self._raster_viewport_candidate_cache[key] = (records, candidates, scope_result)
         if scope_result.status is not EvidenceResolutionStatus.CORROBORATED:
             return ()
         if not tuple(scope_result.authenticated_viewports):
@@ -2552,17 +2573,62 @@ class PhysicalOpeningAuthority:
         collapsed = sorted(last_by_geometry.values(), key=lambda row: row[0])
         scoped = tuple(row[1] for row in collapsed)
         cached_lines = tuple(row[2] for row in collapsed)
-        breaks: list[_FaceBreak] = []
-        for first_index, second_index in _candidate_collinear_record_pairs(
+        collinear_pairs = _candidate_collinear_record_pairs(
             scoped, line_geometries=cached_lines
-        ):
+        )
+        collinear_neighbors: dict[int, set[int]] = {}
+        for first_index, second_index in collinear_pairs:
+            collinear_neighbors.setdefault(first_index, set()).add(second_index)
+            collinear_neighbors.setdefault(second_index, set()).add(first_index)
+
+        breaks: list[_FaceBreak] = []
+        for first_index, second_index in collinear_pairs:
             found = _face_break(
                 scoped[first_index],
                 scoped[second_index],
                 first_line=cached_lines[first_index],
                 second_line=cached_lines[second_index],
             )
-            if found is not None:
+            if found is None:
+                continue
+
+            # Positive collinear wall continuation inside a proposed gap means
+            # these two segments are not adjacent face boundaries. Historically
+            # all-pairs discovery could jump across an intervening solid wall
+            # stub and mint a false spanning opening. Only a source-visible gap
+            # with no intervening collinear coverage may become a face break.
+            continuation = False
+            for other_index in (
+                collinear_neighbors.get(first_index, set())
+                | collinear_neighbors.get(second_index, set())
+            ):
+                if other_index in {first_index, second_index}:
+                    continue
+                other = cached_lines[other_index]
+                values = sorted(
+                    (
+                        _projection((other[0], other[1]), found.direction),
+                        _projection((other[2], other[3]), found.direction),
+                    )
+                )
+                overlap = min(values[1], found.gap_end) - max(
+                    values[0], found.gap_start
+                )
+                # A boundary-anchored cap is not independent proof of
+                # physical wall continuation: native dimension ticks and jamb
+                # decoration may start at either gap endpoint. Preserve that
+                # structural hypothesis for the producer-owned annotation
+                # opposition/integrity checks (which can only ABSTAIN).
+                # A positive source-visible stub strictly INSIDE the proposed
+                # gap does prove these are not adjacent wall faces.
+                interior_stub = (
+                    values[0] > found.gap_start + _COORD_EQ_ABS_TOL
+                    and values[1] < found.gap_end - _COORD_EQ_ABS_TOL
+                )
+                if interior_stub and overlap > _COORD_EQ_ABS_TOL:
+                    continuation = True
+                    break
+            if not continuation:
                 breaks.append(found)
 
         if not breaks:

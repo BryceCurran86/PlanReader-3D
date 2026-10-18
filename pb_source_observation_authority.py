@@ -1114,7 +1114,8 @@ class SourceObservationProducer:
         source_sha256: str,
         snapshot_id: str,
         page_id: str,
-    ) -> tuple[tuple[float, float, float, float], ...]:
+        include_native_frame: bool = False,
+    ):
         """Return producer-derived embedded-image regions for one source page.
 
         Callers address immutable source lineage only. Image inventory and
@@ -1171,9 +1172,9 @@ class SourceObservationProducer:
             raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
         key = (revision_id, source_sha256, snapshot_id, page_number)
         cached = self._native_image_scope_cache.get(key)
-        if cached is not None:
+        if cached is not None and (not include_native_frame or not cached[0] or cached[2] is not None):
             self._native_image_scope_cache.move_to_end(key)
-            return cached[0]
+            return (cached[0], cached[2]) if include_native_frame else cached[0]
 
         try:
             pdf = fitz.open(stream=source_bytes, filetype="pdf")
@@ -1228,11 +1229,18 @@ class SourceObservationProducer:
             ordered = tuple(sorted(placements, key=lambda item: (
                 item.bbox_pt, item.pixel_width, item.pixel_height,
             )))
-            self._native_image_scope_cache[key] = (output, ordered)
+            frame = None
+            if output:
+                try:
+                    frame = native_page_frame(page)
+                except NativePageFrameUnresolved:
+                    if include_native_frame:
+                        raise
+            self._native_image_scope_cache[key] = (output, ordered, frame)
             self._native_image_scope_cache.move_to_end(key)
             while len(self._native_image_scope_cache) > _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES:
                 self._native_image_scope_cache.popitem(last=False)
-            return output
+            return (output, frame) if include_native_frame else output
         finally:
             pdf.close()
 

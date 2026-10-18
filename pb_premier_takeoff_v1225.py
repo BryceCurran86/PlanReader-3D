@@ -64,23 +64,30 @@ def _setting_set(app: Any, workspace_id: int, state: Dict[str, Any]) -> None:
 
 
 def _level(value: Any) -> str:
-    text = str(value or "")
-    low = text.lower()
-    if "ground" in low or re.search(r"\b(?:gf|gnd)\b", low):
-        return "Ground"
-    basement = re.search(r"\b(?:basement|b)\s*0*([1-9]\d*)\b", low)
-    if basement:
-        return f"Basement {int(basement.group(1))}"
-    match = re.search(r"\blevel\s*0*([0-9]{1,2})\b", low)
-    if match:
-        return f"Level {int(match.group(1))}"
-    # Unit 501 / Apartment 501 normally means level 5 in multi-unit sets.  Keep
-    # this only as a grouping hint, never a measured geometry assumption.
-    unit = re.search(r"\b(?:unit|apt|apartment)\s*[-#:]*\s*([1-9])(\d{2})\b", low)
-    if unit:
-        return f"Level {int(unit.group(1))}"
-    if "roof" in low:
-        return "Roof"
+    """Return one grouping storey. Two different storeys stay unassigned.
+
+    Unit 501 / Apartment 501 remains only a grouping hint for level 5. A word
+    that merely contains "ground", such as background, is not a storey.
+    """
+    low = str(value or "").lower()
+    found: list[str] = []
+
+    def add(name: str) -> None:
+        if name not in found:
+            found.append(name)
+
+    if re.search(r"\bground(?:\s+floor)?\b|\b(?:gf|gnd)\b", low):
+        add("Ground")
+    for match in re.finditer(r"\b(?:basement|b)\s*0*([1-9]\d*)\b", low):
+        add(f"Basement {int(match.group(1))}")
+    for match in re.finditer(r"\blevel\s*0*([0-9]{1,2})\b", low):
+        add(f"Level {int(match.group(1))}")
+    for match in re.finditer(r"\b(?:unit|apt|apartment)\s*[-#:]*\s*([1-9])(\d{2})\b", low):
+        add(f"Level {int(match.group(1))}")
+    if re.search(r"\broof\b", low):
+        add("Roof")
+    if len(found) == 1:
+        return found[0]
     return "Unassigned"
 
 
