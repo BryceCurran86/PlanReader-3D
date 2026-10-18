@@ -69,6 +69,7 @@ def test_exact_one_to_one_plan_and_schedule_code_pair_has_no_count_or_area_autho
     assert result.eligible_printed_code_pair_count == 2
     assert not result.unresolved_codes
     assert result.source_sha256 == SHA and result.snapshot_id == "original-snapshot"
+    assert result.source_plan_observation_universe_complete is False  # curated test words aren't publisher census
     assert all(p.source_code_correspondence_proven for p in result.pairs)
     assert all(
         p.first_unclosed_gate == "physical_door_symbol_host_and_customer_scope_unproven"
