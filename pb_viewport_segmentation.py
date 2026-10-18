@@ -25,9 +25,18 @@ Safety invariants:
 - scale is associated only after viewport ownership; conflicting scales remain
   unresolved;
 - viewport IDs are provenance only, never semantic prediction features.
+
+Default-off shadow ``source_connected_text_cell_plan_frame_shadow`` (opt-in per
+call, never wired): a repeated same-size cell family only makes a frame a table
+for a plan title / a schedule binding when its cells ALSO share source edges
+and carry text, and a rival frame that is >=90% inside a larger frame as a
+band is collapsed into that frame (the strict +-1pt band rule, relaxed). Every
+lifted veto and every collapsed rival stays in ``provenance``. With the flag
+absent or False the output is unchanged.
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
@@ -35,7 +44,7 @@ import json
 import math
 import re
 import statistics
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 import fitz
 
@@ -171,6 +180,23 @@ _TABLE_CELL_COUNT = 8
 _TABLE_GRID_OCCUPANCY_FRACTION = 0.75
 _TABLE_GRID_FRAME_COVERAGE_FRACTION = 0.20
 _TABLE_CELL_DIMENSION_ROUND_DIGITS = 3
+# Constants of the default-off source_connected_text_cell_plan_frame_shadow only.
+# Two cells share a source edge when the PDF numbers agree this closely (native
+# numerical exactness, not a W2 snap distance).
+_TABLE_CELL_SHARED_EDGE_TOLERANCE_PT = 0.01
+# A repeated family is table evidence only when at least this fraction of its
+# cells (a) lie in a source-edge-connected block and (b) hold a text fragment
+# centre: a bare majority, a stated cut rather than a tuned one (the PR census
+# shows how few frames it has ever been exercised on).
+_TABLE_FAMILY_MAJORITY_FRACTION = 0.5
+# The existing nested-band rule needs the band inside its container to +-1pt;
+# the shadow accepts a band that lies at least this fraction of its own area
+# inside the container (intersection over the SMALLER frame).
+_NEAR_NESTED_BAND_CONTAINMENT_FRACTION = 0.90
+# Runtime bound only. A frame holding more rectangles than this is not
+# edge-meshed and its connectivity is UNKNOWN, which never demotes a table
+# (same bound as the existing source-connected cell gate's rectangle inventory).
+_TABLE_EDGE_MESH_MAX_RECTANGLES = 20000
 _SEMANTIC_TABLE_VIEW_TYPES = frozenset(
     {
         DrawingViewType.SCHEDULE.value,
@@ -434,6 +460,51 @@ def _collapse_nested_band_frames(
         if not nested_band:
             kept.append(frame)
     return kept
+
+
+def _collapse_near_nested_band_frames(
+    frames: Sequence[tuple[float, float, float, float]],
+) -> tuple[
+    list[tuple[float, float, float, float]],
+    list[tuple[tuple[float, float, float, float], tuple[float, float, float, float]]],
+]:
+    """Opt-in relaxation of ``_collapse_nested_band_frames``.
+
+    The legacy rule drops a band only when it is contained in a larger frame to
+    +-1pt. A source wall ring that overhangs the building outline by a few
+    points is the same relation, so the shadow measures containment as the
+    intersection over the SMALLER frame's area and drops a band that lies at
+    least ``_NEAR_NESTED_BAND_CONTAINMENT_FRACTION`` inside a strictly larger
+    frame. Only the band test (span <= ``_NESTED_BAND_SPAN_FRACTION`` of the
+    container in either axis) decides which frame is dropped; two near-equal,
+    partially overlapping or disjoint rivals are never ordered by size and keep
+    competing. Returns the kept frames and ``(dropped, container)`` receipts
+    (smallest container, so the receipt does not depend on input order).
+    """
+    kept: list[tuple[float, float, float, float]] = []
+    dropped: list[tuple[tuple[float, float, float, float], tuple[float, float, float, float]]] = []
+    for frame in frames:
+        area = _bbox_area(frame)
+        width = float(frame[2]) - float(frame[0])
+        height = float(frame[3]) - float(frame[1])
+        containers = []
+        for other in frames:
+            if other == frame:
+                continue
+            other_area = _bbox_area(other)
+            if area <= 0.0 or other_area <= area:
+                continue
+            if _bbox_overlap_area(frame, other) / area < _NEAR_NESTED_BAND_CONTAINMENT_FRACTION:
+                continue
+            other_w = float(other[2]) - float(other[0])
+            other_h = float(other[3]) - float(other[1])
+            if height <= _NESTED_BAND_SPAN_FRACTION * other_h or width <= _NESTED_BAND_SPAN_FRACTION * other_w:
+                containers.append(other)
+        if containers:
+            dropped.append((frame, min(containers, key=lambda box: (_bbox_area(box), box))))
+        else:
+            kept.append(frame)
+    return kept, dropped
 
 
 def _collapse_equivalent_nested_frames(
@@ -827,6 +898,9 @@ def _frame_looks_like_table(
     calibration: ViewportLayoutCalibration,
     *,
     allow_line_grid_only: bool = True,
+    family_filter: Optional[
+        Callable[[Sequence[tuple[float, float, float, float]]], bool]
+    ] = None,
 ) -> bool:
     """Return True only for positive repeated table-grid structure.
 
@@ -835,6 +909,12 @@ def _frame_looks_like_table(
     table evidence. A table requires a repeated same-size cell family arranged
     as a substantially occupied row/column grid spanning a meaningful fraction
     of the candidate frame.
+
+    ``family_filter`` is used only by the default-off
+    ``source_connected_text_cell_plan_frame_shadow``: it receives each family
+    that already passed every structural test above and may only REJECT it, so
+    a filtered answer is never True where the unfiltered one is False. With the
+    default ``None`` the behaviour is exactly the legacy predicate.
     """
 
     frame_area = _bbox_area(frame)
@@ -916,6 +996,8 @@ def _frame_looks_like_table(
             < _TABLE_GRID_FRAME_COVERAGE_FRACTION
         ):
             continue
+        if family_filter is not None and not family_filter(family):
+            continue
         return True
 
     # Closed repeated source cells establish stronger schedule evidence than
@@ -924,6 +1006,202 @@ def _frame_looks_like_table(
     if not allow_line_grid_only:
         return False
     return _frame_looks_like_line_grid_table(frame, page, calibration)
+
+
+def _source_edge_connected_rects(
+    rects: Sequence[tuple[float, float, float, float]],
+) -> frozenset[tuple[float, float, float, float]]:
+    """Rectangles inside a source-edge-connected block of >= ``_TABLE_CELL_COUNT`` rectangles.
+
+    Two rectangles are connected when they share a vertical or horizontal
+    source edge (PDF numbers equal to ``_TABLE_CELL_SHARED_EDGE_TOLERANCE_PT``)
+    with positive overlap along it, and a block counts only when its shared
+    edges run in BOTH axes, as a grid's do. This is the criterion of
+    ``_source_connected_native_cell_family_shadow`` applied to every rectangle
+    of a frame instead of to one same-size family, with edges looked up by
+    quantised coordinate rather than over all pairs. A table's cells are
+    connected through its neighbouring cells (of any size); separate fixtures
+    laid on a regular lattice (open gaps between them) share no edge, so no
+    lattice member is in such a block however regular or labelled it is.
+    """
+    tol = _TABLE_CELL_SHARED_EDGE_TOLERANCE_PT
+    n = len(rects)
+    if n < _TABLE_CELL_COUNT:
+        return frozenset()
+    parent = list(range(n))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    by_left: dict[int, list[int]] = {}
+    by_top: dict[int, list[int]] = {}
+    for index, rect in enumerate(rects):
+        by_left.setdefault(round(rect[0] / tol), []).append(index)
+        by_top.setdefault(round(rect[1] / tol), []).append(index)
+
+    shared: list[tuple[int, int, str]] = []
+    for i, rect in enumerate(rects):
+        right_key = round(rect[2] / tol)
+        for key in (right_key - 1, right_key, right_key + 1):
+            for j in by_left.get(key, ()):
+                other = rects[j]
+                if (
+                    j != i
+                    and abs(rect[2] - other[0]) <= tol
+                    and min(rect[3], other[3]) - max(rect[1], other[1]) > tol
+                ):
+                    shared.append((i, j, "x"))
+        bottom_key = round(rect[3] / tol)
+        for key in (bottom_key - 1, bottom_key, bottom_key + 1):
+            for j in by_top.get(key, ()):
+                other = rects[j]
+                if (
+                    j != i
+                    and abs(rect[3] - other[1]) <= tol
+                    and min(rect[2], other[2]) - max(rect[0], other[0]) > tol
+                ):
+                    shared.append((i, j, "y"))
+
+    for i, j, _axis in shared:
+        root_i, root_j = root(i), root(j)
+        if root_i != root_j:
+            parent[root_j] = root_i
+    members: dict[int, list[int]] = {}
+    for index in range(n):
+        members.setdefault(root(index), []).append(index)
+    axes_by_root: dict[int, set[str]] = {}
+    for i, _j, axis in shared:
+        axes_by_root.setdefault(root(i), set()).add(axis)
+    return frozenset(
+        rects[index]
+        for owner, indices in members.items()
+        if len(indices) >= _TABLE_CELL_COUNT and axes_by_root.get(owner) == {"x", "y"}
+        for index in indices
+    )
+
+
+def _frame_source_edge_mesh(
+    frame: Sequence[float],
+    page: Any,
+) -> frozenset[tuple[float, float, float, float]]:
+    """Source-edge-connected rectangles among the same cell universe the legacy table test uses.
+
+    Above ``_TABLE_EDGE_MESH_MAX_RECTANGLES`` the connectivity is unknown, and
+    every rectangle is returned so that unknown evidence cannot demote a table.
+    """
+    frame_area = _bbox_area(frame)
+    universe = [
+        rect for rect in _page_rectangle_primitives(page)
+        if _bbox_contains(frame, rect, margin=1.0)
+        and 4.0 < _bbox_area(rect) < 0.15 * frame_area
+    ]
+    if len(universe) > _TABLE_EDGE_MESH_MAX_RECTANGLES:
+        return frozenset(universe)
+    return _source_edge_connected_rects(universe)
+
+
+def _cells_text_bearing_fraction(
+    cells: Sequence[tuple[float, float, float, float]],
+    centres: Sequence[tuple[float, float]],
+    centre_xs: Sequence[float],
+) -> float:
+    """Fraction of ``cells`` holding at least one text fragment centre.
+
+    ``centres`` is sorted by x and ``centre_xs`` is its x column, so each cell
+    scans only the centres in its own x range.
+    """
+    if not cells:
+        return 0.0
+    holding = 0
+    for cell in cells:
+        low = bisect_left(centre_xs, float(cell[0]))
+        high = bisect_right(centre_xs, float(cell[2]))
+        if any(
+            float(cell[1]) <= centres[index][1] <= float(cell[3])
+            for index in range(low, high)
+        ):
+            holding += 1
+    return holding / len(cells)
+
+
+def _frame_looks_like_source_connected_text_cell_table(
+    frame: Sequence[float],
+    page: Any,
+    calibration: ViewportLayoutCalibration,
+    fragments: Sequence[tuple[tuple[float, float, float, float], str]],
+    *,
+    allow_line_grid_only: bool = True,
+) -> bool:
+    """Table evidence used by the default-off plan-frame shadow.
+
+    The legacy structural predicate still decides which repeated cell families
+    (and, when allowed, which line grids) qualify. A qualified family must
+    additionally have (1) at least ``_TABLE_FAMILY_MAJORITY_FRACTION`` of its
+    cells inside a source-edge-connected block of rectangles and (2) text in at
+    least that fraction of its cells. A regular lattice of separate, labelled
+    fixtures fails (1); a contiguous grid of blank tiles fails (2); a real
+    schedule passes both. If the frame holds no live text fragment at all the
+    text evidence is unknown and cannot demote a connected family. The answer
+    is never True where the legacy predicate is False, and line-grid-only
+    tables are left exactly as the legacy predicate has them.
+    """
+    centres = sorted(_bbox_center(bbox) for bbox, _text in fragments)
+    centre_xs = [centre[0] for centre in centres]
+    live_text = any(_point_in_bbox(centre, frame) for centre in centres)
+    mesh: Optional[frozenset[tuple[float, float, float, float]]] = None
+
+    def connected_and_text_bearing(
+        family: Sequence[tuple[float, float, float, float]],
+    ) -> bool:
+        nonlocal mesh
+        if mesh is None:
+            mesh = _frame_source_edge_mesh(frame, page)
+        connected = sum(1 for cell in family if cell in mesh) / len(family)
+        if connected < _TABLE_FAMILY_MAJORITY_FRACTION:
+            return False
+        if not live_text:
+            return True
+        return (
+            _cells_text_bearing_fraction(family, centres, centre_xs)
+            >= _TABLE_FAMILY_MAJORITY_FRACTION
+        )
+
+    return _frame_looks_like_table(
+        frame,
+        page,
+        calibration,
+        allow_line_grid_only=allow_line_grid_only,
+        family_filter=connected_and_text_bearing,
+    )
+
+
+def _rejected_ownership_frame_text_cell_shadow(
+    page: Any,
+    frame: Sequence[float],
+    calibration: ViewportLayoutCalibration,
+    fragments: Sequence[tuple[tuple[float, float, float, float], str]],
+    *,
+    view_type: str,
+) -> bool:
+    """``_rejected_ownership_frame`` for the shadow: only a PLAN title's table veto differs.
+
+    Page borders and title-block panels are still rejected for every title.
+    Other view types keep the legacy veto unchanged.
+    """
+    if str(view_type) not in _PLAN_VIEW_TYPES:
+        return _rejected_ownership_frame(
+            page, frame, calibration, fragments, view_type=view_type
+        )
+    if _is_page_or_crop_border(frame, calibration):
+        return True
+    if _frame_has_title_block_labels(frame, fragments, calibration):
+        return True
+    return _frame_looks_like_source_connected_text_cell_table(
+        frame, page, calibration, fragments
+    )
 
 
 def _rejected_ownership_frame(
@@ -1802,10 +2080,26 @@ def _frame_resolved_viewports(
     *,
     page_number: int,
     source_connected_table_cell_shadow: bool = False,
+    source_connected_text_cell_plan_frame_shadow: bool = False,
 ) -> tuple[list[SegmentedViewport], set[int]]:
     if type(source_connected_table_cell_shadow) is not bool:
         raise ValueError("source_table_shadow_requires_explicit_bool")
+    if type(source_connected_text_cell_plan_frame_shadow) is not bool:
+        raise ValueError("source_plan_frame_shadow_requires_explicit_bool")
     fragments = _text_fragments(page)
+    plan_frame_shadow = source_connected_text_cell_plan_frame_shadow
+    # With the shadow off these ARE the legacy predicates, called exactly as
+    # before. The shadow swaps in connected-and-text-bearing table evidence.
+    if plan_frame_shadow:
+        def looks_like_table(frame, page_, calibration_, **kwargs):
+            return _frame_looks_like_source_connected_text_cell_table(
+                frame, page_, calibration_, fragments, **kwargs
+            )
+        rejected_frame = _rejected_ownership_frame_text_cell_shadow
+    else:
+        looks_like_table = _frame_looks_like_table
+        rejected_frame = _rejected_ownership_frame
+    shadow_receipts: dict[int, dict[str, Any]] = {}
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
     for index, anchor in enumerate(anchors):
@@ -1825,7 +2119,7 @@ def _frame_resolved_viewports(
             table_candidates = [
                 frame
                 for frame in candidates
-                if _frame_looks_like_table(frame, page, calibration)
+                if looks_like_table(frame, page, calibration)
             ]
             margin = calibration.median_word_height_pt * 0.25
             enclosed_candidates = [
@@ -1847,7 +2141,7 @@ def _frame_resolved_viewports(
                     # native table-cell geometry may be spatially bound.
                     true_cell_tables = [
                         frame for frame in external_table_candidates
-                        if _frame_looks_like_table(
+                        if looks_like_table(
                             frame, page, calibration,
                             allow_line_grid_only=False,
                         )
@@ -1895,12 +2189,19 @@ def _frame_resolved_viewports(
                 candidates = enclosed_candidates
         usable = [
             frame for frame in candidates
-            if not _rejected_ownership_frame(
+            if not rejected_frame(
                 page,
                 frame,
                 calibration,
                 fragments,
                 view_type=anchor.view_type,
+            )
+        ]
+        # Shadow receipts only: the frames whose table veto the shadow lifted.
+        lifted_veto_frames = [
+            frame for frame in usable
+            if plan_frame_shadow and _rejected_ownership_frame(
+                page, frame, calibration, fragments, view_type=anchor.view_type,
             )
         ]
         usable = _collapse_nested_band_frames(usable)
@@ -1909,14 +2210,32 @@ def _frame_resolved_viewports(
             usable = _collapse_source_repeated_plan_border_pair(
                 page, usable, calibration, fragments
             )
+        near_nested_rivals: list[
+            tuple[tuple[float, float, float, float], tuple[float, float, float, float]]
+        ] = []
+        if plan_frame_shadow and len(usable) > 1:
+            usable, near_nested_rivals = _collapse_near_nested_band_frames(usable)
+        if lifted_veto_frames or near_nested_rivals:
+            shadow_receipts[index] = {
+                "table_veto_lifted_frames": list(lifted_veto_frames),
+                "near_nested_rival_frames": [
+                    {"frame": dropped, "contained_in": container}
+                    for dropped, container in near_nested_rivals
+                ],
+            }
         if len(usable) > 1:
+            ambiguous_provenance: dict[str, Any] = {"candidate_frames": list(usable)}
+            if index in shadow_receipts:
+                ambiguous_provenance[
+                    "source_connected_text_cell_plan_frame_shadow"
+                ] = shadow_receipts[index]
             out.append(SegmentedViewport(
                 view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
                 view_type=anchor.view_type, label=anchor.text, title_bbox=anchor.bbox,
                 bounding_box=None, status=ViewportSegmentationStatus.AMBIGUOUS.value,
                 boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
                 notes=["multiple equivalent vector frames compete for this title"],
-                provenance={"candidate_frames": list(usable)},
+                provenance=ambiguous_provenance,
             ))
             consumed.add(index)
             continue
@@ -1931,24 +2250,34 @@ def _frame_resolved_viewports(
         if len(indices) > 1:
             for index in indices:
                 anchor = anchors[index]
+                shared_provenance: dict[str, Any] = {"candidate_frame": frame}
+                if index in shadow_receipts:
+                    shared_provenance[
+                        "source_connected_text_cell_plan_frame_shadow"
+                    ] = shadow_receipts[index]
                 out.append(SegmentedViewport(
                     view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
                     view_type=anchor.view_type, label=anchor.text, title_bbox=anchor.bbox,
                     bounding_box=None, status=ViewportSegmentationStatus.AMBIGUOUS.value,
                     boundary_source=ViewportBoundarySource.NONE.value, confidence=0.0,
                     notes=["multiple classified titles resolve to the same vector frame"],
-                    provenance={"candidate_frame": frame},
+                    provenance=shared_provenance,
                 )); consumed.add(index)
             continue
         index = indices[0]; anchor = anchors[index]
         raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(page, frame)
+        resolved_provenance: dict[str, Any] = {"frame_bbox": frame, "title_bbox": anchor.bbox}
+        if index in shadow_receipts:
+            resolved_provenance[
+                "source_connected_text_cell_plan_frame_shadow"
+            ] = shadow_receipts[index]
         out.append(SegmentedViewport(
             view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
             view_type=anchor.view_type, label=anchor.text, title_bbox=anchor.bbox,
             bounding_box=frame, status=ViewportSegmentationStatus.RESOLVED.value,
             boundary_source=ViewportBoundarySource.VECTOR_FRAME.value, confidence=1.0,
             scale_raw=raw, scale_denominator=denominator, scale_conflict=scale_conflict,
-            notes=scale_notes, provenance={"frame_bbox": frame, "title_bbox": anchor.bbox},
+            notes=scale_notes, provenance=resolved_provenance,
         )); consumed.add(index)
     return out, consumed
 
@@ -2999,6 +3328,7 @@ def segment_page_viewports(
     page: Any, *, page_number: int,
     source_connected_table_cell_shadow: bool = False,
     source_native_multipath_semantic_frame_shadow: bool = False,
+    source_connected_text_cell_plan_frame_shadow: bool = False,
 ) -> list[SegmentedViewport]:
     if type(source_native_multipath_semantic_frame_shadow) is not bool:
         raise ValueError("source_multipath_frame_shadow_requires_explicit_bool")
@@ -3006,6 +3336,8 @@ def segment_page_viewports(
         raise ValueError("source_multipath_requires_connected_source_cell_guard")
     if type(source_connected_table_cell_shadow) is not bool:
         raise ValueError("source_table_shadow_requires_explicit_bool")
+    if type(source_connected_text_cell_plan_frame_shadow) is not bool:
+        raise ValueError("source_plan_frame_shadow_requires_explicit_bool")
     try:
         calibration = calibrate_viewport_layout(page)
     except NativePageFrameUnresolved:
@@ -3060,6 +3392,10 @@ def segment_page_viewports(
         **(
             {"source_connected_table_cell_shadow": True}
             if source_connected_table_cell_shadow else {}
+        ),
+        **(
+            {"source_connected_text_cell_plan_frame_shadow": True}
+            if source_connected_text_cell_plan_frame_shadow else {}
         ),
     )
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
