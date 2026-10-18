@@ -1,7 +1,8 @@
-"""Real cross-gap wall faces prevent false G17 swing/framed openings.
+"""Cross-gap raster ink is negative for unsupported swing, not positive solid wall.
 
-All assertions are source-neutral original-pixel synthesis. A reported wall
-face is opposing evidence only; no opening count, host or FIRM area is granted.
+Source-neutral pixel synthesis. Inset paired ink may be a real framed window
+or wall/lintel ABOVE an opening; do not delete its positive G17 frame evidence.
+Neither existence case grants kind, a complete host, a count or FIRM area.
 """
 from __future__ import annotations
 
@@ -29,9 +30,19 @@ def test_independently_valid_door_still_proves_exactly_one_swing():
     assert openings[0].structural_pattern == SWING_PATTERN
 
 
-@pytest.mark.parametrize("face_rows", [(150, 164), (151, 163), (152, 162)])
-def test_two_spanning_wall_faces_cannot_mint_a_swing_or_framed_opening(face_rows):
-    assert _records(_results(_source_sheet_with_painted_faces(face_rows))) == ()
+def test_proven_outer_wall_face_continuity_blocks_framed_and_swing_fallback():
+    # These lines sit on the exact original outer face/endpoint rows.
+    assert _records(_results(_source_sheet_with_painted_faces((150, 164)))) == ()
+
+
+@pytest.mark.parametrize("frame_rows", [(151, 163), (152, 162)])
+def test_inset_paired_frame_ink_must_not_be_mistaken_for_solid_wall(frame_rows):
+    # Distinct internal ink rows have the same 2D geometry as a real window
+    # frame; a two-row continuity check alone cannot prove solid wall.
+    records = _records(_results(_source_sheet_with_painted_faces(frame_rows)))
+    assert len(records) == 1
+    assert records[0].structural_pattern == "raster_framed_wall_band_interruption"
+    assert records[0].aperture_bbox_pt is not None
 
 
 def _pair() -> _RasterBandPair:
