@@ -116,3 +116,86 @@ def test_ft3_original_mark_without_independently_proven_W4_cannot_enter_measurem
     assert handoff["status"]=="gpt2_source_to_gpt1_handoff_abstained"
     assert handoff["new_firm_quantities"]==0
     assert not handoff["source_finish_area_quantity_issued"]
+
+
+
+def _w4_source_positive_candidate():
+    # These dicts are handoff-level synthetic fixtures, NOT sealed W4 issuers.
+    return {
+        "status":"source_original_floor_W4_face_candidate_only",
+        "w4_room_face_source_identity_proven":True,
+        "original_source_sha256":SHA,
+        "original_document_id":"source-drawing",
+        "original_revision_id":"source-revision",
+        "original_snapshot_id":"source-snapshot",
+        "original_floor_page":"7",
+        "original_source_floor_polygon_pdf_pts":BOX,
+        "original_physical_room_id":"pwd",
+        "original_canonical_room_id":"canonical-pwd",
+        "original_source_room_face_record_id":"real-w4-face",
+        "original_source_w4_wall_ids":("w1","w2","w3","w4"),
+    }
+
+
+def _material_source_positive_candidate():
+    return {
+        "status":"source_owned_material_on_original_ink_ring_candidate",
+        "original_source_sha256":SHA,
+        "original_document_id":"source-drawing",
+        "original_revision_id":"source-revision",
+        "original_snapshot_id":"source-snapshot",
+        "original_floor_page":7,
+        "original_finish_page":11,
+        "original_source_floor_perimeter_polygon_pdf_pts":BOX,
+        "original_source_finish_perimeter_polygon_pdf_pts":
+            ((30.,20.),(130.,20.),(130.,100.),(30.,100.)),
+        "original_source_scope_ownership_id":"original-finish-scope",
+        "original_finish_viewport_id":"original-a140",
+        "original_finish_code":"FT2",
+        "original_material_definition_id":"source-a140-ft2",
+        "original_mark_source_record_ids":("actual-mark-1",),
+    }
+
+
+def test_source_material_mark_must_be_same_original_physical_floor_polygon():
+    from copy import deepcopy
+    owner=_w4_source_positive_candidate()
+    material=_material_source_positive_candidate()
+    accepted=audit_gpt2_w4_material_to_gpt1(owner,material)
+    assert accepted["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+    assert accepted["new_firm_quantities"]==0
+    assert accepted["source_quantity_sealing_authority_granted"] is False
+    assert accepted["FT2_exclude_wall_footprint"] is True
+    assert accepted["FT2_92mm_wall_widths_already_outside_clear_figures"] is None
+    assert accepted["original_dimension_terminal_to_finished_W4_face_proven"] is False
+    for change in (
+        {"original_source_floor_perimeter_polygon_pdf_pts":
+            ((20.001,20.),(120.,20.),(120.,100.),(20.,100.))},
+        {"original_source_floor_perimeter_polygon_pdf_pts":
+            ((30.,20.),(130.,20.),(130.,100.),(30.,100.))},
+        {"original_floor_page":8},
+        {"original_finish_page":7},
+        {"original_source_finish_perimeter_polygon_pdf_pts":()},
+    ):
+        rival=deepcopy(material)
+        rival.update(change)
+        result=audit_gpt2_w4_material_to_gpt1(owner,rival)
+        assert result["first_failure"]=="original_finish_mark_and_W4_physical_floor_mismatch"
+        assert result["new_firm_quantities"]==0
+
+
+def test_missing_original_mark_source_scope_or_multiple_marks_never_publish():
+    material=_material_source_positive_candidate()
+    for field,value in (
+        ("original_source_scope_ownership_id",None),
+        ("original_finish_viewport_id",None),
+        ("original_material_definition_id",None),
+        ("original_mark_source_record_ids",("mark1","mark2")),
+        ("original_mark_source_record_ids",()),
+    ):
+        rival={**material,field:value}
+        result=audit_gpt2_w4_material_to_gpt1(
+            _w4_source_positive_candidate(),rival)
+        assert result["first_failure"]=="original_finish_scope_or_unique_source_mark_unproven"
+        assert result["source_finish_area_quantity_issued"] is False
+
