@@ -51,3 +51,22 @@ def test_real_engine_availability_signature_stable_when_present():
     assert signature is not None
     assert backend.is_available()
     assert backend._healthy_executable_signature == signature
+
+
+def test_cached_engine_probe_restores_global_executable_across_backends(monkeypatch, tmp_path):
+    first = tmp_path / "tesseract-a"
+    second = tmp_path / "tesseract-b"
+    first.write_text("binary a")
+    second.write_text("binary b")
+    left = TesseractOCRBackend(tesseract_cmd=str(first))
+    right = TesseractOCRBackend(tesseract_cmd=str(second))
+    called = []
+    def positive_probe(*args, **kwargs):
+        called.append(pytesseract.pytesseract.tesseract_cmd)
+        return {"text": []}
+    monkeypatch.setattr(pytesseract, "image_to_data", positive_probe)
+    assert left.is_available()
+    assert right.is_available()
+    assert left.is_available()
+    assert pytesseract.pytesseract.tesseract_cmd == str(first)
+    assert called == [str(first), str(second)]
