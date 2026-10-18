@@ -11,10 +11,11 @@ import csv
 from hashlib import sha256
 import io
 import json
+import math
 from pathlib import Path
 import zipfile
 
-from pb_canonical_building import CanonicalOpening
+from pb_canonical_building import CanonicalOpening, ReviewState
 from pb_migration_contracts import canonical_contract_json
 from pb_opening_source_review_shadow import nominal_opening_obj_shadow
 
@@ -58,8 +59,19 @@ def build_opening_source_review_package(report,output):
             content[f"{branch}/evidence/{identity}.json"]=(canonical_contract_json(packet)+"\n").encode()
             canonical=packet.get("canonical_nominal_review")
             if canonical is not None:
-                obj=nominal_opening_obj_shadow(CanonicalOpening.from_dict(canonical))
-                content[f"{branch}/nominal-review/{identity}.obj"]=obj.encode()
+                opening=CanonicalOpening.from_dict(canonical)
+                if opening.metadata.get("dimension_basis")=="user_approved_single_nominal_width":
+                    if (type(opening.width_m) not in (int,float)
+                            or not math.isfinite(opening.width_m) or opening.width_m<=0
+                            or opening.id!=packet["opening_identity_id"]
+                            or opening.review_state is not ReviewState.REVIEW_REQUIRED
+                            or opening.height_m is not None or opening.takeoff_eligible
+                            or opening.deduction_authority or opening.wall_id is not None
+                            or opening.sill_height_m is not None or opening.offset_along_wall_m is not None):
+                        raise ValueError("partial nominal width review cannot carry height or placement authority")
+                else:
+                    obj=nominal_opening_obj_shadow(opening)
+                    content[f"{branch}/nominal-review/{identity}.obj"]=obj.encode()
             for capability in packet["next_required_evidence"]:
                 queue.append({"source_path":branch,"page_id":packet["page_id"],
                     "physical_opening_id":packet["opening_identity_id"],
