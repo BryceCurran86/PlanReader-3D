@@ -116,6 +116,24 @@ def test_reconstructed_result_cannot_change_canonical_quantity_input(monkeypatch
     assert result.quantities == (original.quantity,)
 
 
+@pytest.mark.parametrize("quantity_field,bad", [
+    ("status", "candidate"),
+    ("authority", "unverified"),
+    ("unit", "kg"),
+])
+def test_reconstructed_result_never_exposes_nonfirm_nonmetric_evidence(
+    monkeypatch, quantity_field, bad,
+):
+    original, _ = _producer_result(monkeypatch)
+    untrusted = replace(
+        original, quantity=replace(
+            original.quantity, **{quantity_field: bad}
+        )
+    )
+    assert _public_result(untrusted).records_by_floor_id == {}
+    assert _public_result(untrusted).quantities == ()
+
+
 def test_enrichment_never_assigns_reused_source_mark_even_for_a_valid_floor(monkeypatch):
     original, floors = _producer_result(monkeypatch)
     rival = _different_room(original)
