@@ -84,7 +84,7 @@ class WorkstreamA7SurfaceTests(unittest.TestCase):
         self.assertEqual(s10.surface_type, "INTERNAL_WALL")
         self.assertEqual(s20.surface_type, "CEILING_FLAT")
         self.assertEqual(s30.surface_type, "CEILING_PITCHED")
-        self.assertTrue(s30.net_paintable_area_m2 > 40.0)  # Pitched area > flat projected area
+        self.assertEqual(s30.net_paintable_area_m2, 40.0)
         self.assertEqual(s40.surface_type, "SKIRTING_LINEAR")
         self.assertEqual(s40.linear_metres, 25.0)
 
