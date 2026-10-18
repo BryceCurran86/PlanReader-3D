@@ -136,6 +136,54 @@ def resolve_explicit_floor_area_evidence(
     if not items:
         return None
 
+    # Reconciling identical *numbers* must never fill a missing source
+    # address from a different PDF or revision. An explicitly unbound legacy
+    # set remains unbound; a mixture of bound and unbound claims abstains.
+    def _typed_original(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return math.isfinite(numeric) and 0.0 < numeric <= 1_000_000.0
+
+    for item in items:
+        if (
+            type(item) is not ExplicitFloorAreaEvidence
+            or item.authority != DECLARED_FLOOR_AREA_AUTHORITY
+            or item.binding != DECLARED_FLOOR_AREA_BINDING
+            or not _typed_original(item.area_m2)
+            or type(item.source_pages) not in (tuple, list)
+            or not item.source_pages
+            or any(type(p) is not int or p <= 0 for p in item.source_pages)
+            or type(item.raw_evidence) not in (tuple, list)
+            or any(type(t) is not str or not t.strip() for t in item.raw_evidence)
+            or (
+                item.source_sha256 is not None
+                and (
+                    type(item.source_sha256) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", item.source_sha256) is None
+                )
+            )
+            or (
+                item.revision_id is not None
+                and (
+                    type(item.revision_id) is not str
+                    or not item.revision_id
+                    or item.revision_id != item.revision_id.strip()
+                )
+            )
+        ):
+            return None
+
+    for field in ("source_sha256", "revision_id"):
+        all_values = tuple(getattr(item, field) for item in items)
+        if any(v is None for v in all_values) and any(
+            v is not None for v in all_values
+        ):
+            return None
+
     distinct = {round(item.area_m2, 3) for item in items}
     if len(distinct) != 1:
         return None
