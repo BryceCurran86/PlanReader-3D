@@ -75,12 +75,25 @@ def _polygon_area(points: Sequence[tuple[float, float]]) -> float:
     if original is None or len(original) < 3:
         return 0.0
     try:
+        # An original room face must be one simple positive-area polygon.
+        # Shoelace alone can report positive m² for crossing/inside-out ink.
+        # This is a veto on existing source geometry, not a new polygon issuer.
+        from shapely.errors import GEOSException
+        from shapely.geometry import Polygon
+        physical_ring = Polygon(original)
+        if (
+            not physical_ring.is_valid
+            or not physical_ring.exterior.is_simple
+            or not math.isfinite(physical_ring.area)
+            or physical_ring.area <= 0.0
+        ):
+            return 0.0
         total = math.fsum(
             original[i][0] * original[(i + 1) % len(original)][1]
             - original[(i + 1) % len(original)][0] * original[i][1]
             for i in range(len(original))
         )
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, GEOSException):
         return 0.0
     return abs(total) / 2.0 if math.isfinite(total) else 0.0
 
@@ -202,10 +215,17 @@ def _validate_common(
         ViewportResolutionStatus.DERIVED,
     ):
         blockers.append("viewport_unresolved")
-    if page_no not in context.trusted_page_numbers():
+    # Python's True == 1 and int(1.9) == 1 are not evidence that a
+    # floor belongs to an authenticated original page. Figured-area
+    # publication bypasses scale checks, so enforce the scope here too.
+    if type(page_no) is not int or page_no <= 0:
+        blockers.append("page_not_owned")
+    elif page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
     mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and int(mapped_page) != int(page_no):
+    if mapped_page is not None and (
+        type(mapped_page) is not int or mapped_page != page_no
+    ):
         blockers.append("viewport_page_mismatch")
     if room.source_page:
         try:
@@ -253,6 +273,20 @@ def _validate_explicit_area(
     entity: EntityEvidence,
 ) -> tuple[str, ...]:
     blockers: list[str] = []
+    # A schedule dimension, finish mark or arbitrary source annotation with a
+    # numeric normalized_value is not a room-area EvidenceAtom. Both original
+    # documented room producers issue exactly explicit_room_area.
+    if type(evidence.kind) is not str or evidence.kind != "explicit_room_area":
+        blockers.append("explicit_area_source_kind_mismatch")
+    # Room-area production has two source-owned dimension issuers. The
+    # vector_text method remains a legacy evidence contract, but unknown
+    # caller methods cannot silently mint a FIRM room area.
+    if type(evidence.method) is not str or evidence.method not in {
+        "authenticated_same_view_figured_dimensions",
+        "authenticated_cross_view_figured_dimensions",
+        "vector_text",
+    }:
+        blockers.append("explicit_area_source_method_untrusted")
     if evidence.evidence_id not in document.evidence_ids:
         blockers.append("explicit_area_evidence_not_owned_by_document")
     if evidence.evidence_id not in entity.evidence_ids:
@@ -544,6 +578,49 @@ def build_room_area_quantities(
             duplicate_ids.add(room.room_ref)
         seen_ids.add(room.room_ref)
         rings.setdefault(_canonical_ring(room.polygon_pdf_pts), []).append(room.room_ref)
+    # One original figured area atom may describe at most one physical
+    # room. Different polygons or labels do not create independent source
+    # measurements when both reuse an identical evidence_id.
+    area_owners_by_evidence: dict[str, set[str]] = {}
+    for room in rooms:
+        owned = explicit.get(room.room_ref)
+        if (
+            type(owned) is EvidenceAtom
+            and type(owned.evidence_id) is str
+            and owned.evidence_id
+        ):
+            area_owners_by_evidence.setdefault(owned.evidence_id, set()).add(
+                room.room_ref
+            )
+    disputed_area_owners = set().union(*(
+        owners for owners in area_owners_by_evidence.values()
+        if len(owners) > 1
+    )) if area_owners_by_evidence else set()
+
+    # Reissuing the same original figured horizontal+vertical source pair
+    # with a different EvidenceAtom ID is still the same physical measurement.
+    # Keep this batch-level protection even if the upstream receipt index was
+    # bypassed; independently proven rooms require independent figured pairs.
+    original_figured_pair_owners: dict[tuple[str, str], set[str]] = {}
+    for room in rooms:
+        atom = explicit.get(room.room_ref)
+        if type(atom) is not EvidenceAtom:
+            continue
+        metadata = atom.metadata if isinstance(atom.metadata, dict) else {}
+        axes = metadata.get("figured_dimension_ids")
+        if (
+            type(axes) in (tuple, list)
+            and len(axes) == 2
+            and all(type(v) is str and v and v == v.strip() for v in axes)
+            and axes[0] != axes[1]
+        ):
+            original_figured_pair_owners.setdefault(
+                tuple(sorted(axes)), set()
+            ).add(room.room_ref)
+    for owners in original_figured_pair_owners.values():
+        if len(owners) > 1:
+            disputed_area_owners.update(owners)
+
     duplicate_face_ids: set[str] = set()
     for ids in rings.values():
         if len(ids) <= 1:
@@ -587,6 +664,8 @@ def build_room_area_quantities(
             blockers.append("duplicate_room_identity")
         if room.room_ref in duplicate_face_ids:
             blockers.append("duplicate_room_face")
+        if room.room_ref in disputed_area_owners:
+            blockers.append("original_area_evidence_owned_by_multiple_rooms")
         if blockers:
             output.append(
                 _abstention(

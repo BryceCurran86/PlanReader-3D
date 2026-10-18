@@ -13,6 +13,7 @@ on:
 jobs:
   original-glyph-true-source:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -38,3 +39,9 @@ jobs:
           python -m pytest -q -rs tests/test_gpt2_symbol_source_optin_native_word_integrity.py
           python scripts/check_full_plan_v2_integrity.py
           python scripts/check_provider_gold_isolation.py
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-glyph-true-source

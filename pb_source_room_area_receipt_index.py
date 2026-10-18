@@ -54,15 +54,42 @@ def unique_source_room_area_evidence_by(
                               if physical is not None)
     evidence_counts = Counter(receipt for _,_,_,receipt in candidates
                               if receipt is not None)
+    # A freshly reissued area evidence_id does not create new horizontal and
+    # vertical figured dimensions. These producer-native source IDs may prove
+    # only one physical room inside one producer batch.
+    def figured_pair(row: object) -> tuple[str, str] | None:
+        evidence = getattr(row, "area_evidence", None)
+        metadata = getattr(evidence, "metadata", {})
+        if not isinstance(metadata, Mapping):
+            return ()  # Malformed receipt, not the absence of a figured pair.
+        if "figured_dimension_ids" not in metadata:
+            return None  # A genuine explicit printed m² may lack dimensions.
+        original = metadata["figured_dimension_ids"]
+        if (
+            type(original) not in (list, tuple)
+            or len(original) != 2
+            or any(type(v) is not str or not v or v != v.strip() for v in original)
+            or original[0] == original[1]
+        ):
+            return ()  # Explicitly invalid original dimension evidence.
+        return tuple(sorted(original))
+
+    pair_counts = Counter(
+        pair for row, _, _, _ in candidates
+        if (pair := figured_pair(row)) is not None
+    )
 
     # A wholly malformed address must not suppress an otherwise fully
     # producer-authenticated independent source room. A collision between two
     # correctly typed original addresses always suppresses both claimants.
     safe = {}
     for row,face,physical,receipt in candidates:
+        pair = figured_pair(row)
         if (face is None or physical is None or receipt is None
                 or face_counts[face]!=1 or physical_counts[physical]!=1
-                or evidence_counts[receipt]!=1):
+                or evidence_counts[receipt]!=1
+                or pair == ()
+                or (pair is not None and pair_counts[pair] != 1)):
             continue
         address=physical if key=="physical_room_id" else face
         safe[address]=row.area_evidence

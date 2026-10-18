@@ -202,3 +202,110 @@ def test_guarded_report_rejects_activation_and_report_fingerprint_mismatch(
     monkeypatch.setattr(module, "_exact_report_module", lambda: _Changed)
     with pytest.raises(ValueError, match="fingerprint mismatch"):
         _run()
+
+
+@pytest.mark.parametrize("payload", [
+    '{"project_id":"a","project_id":"b"}',
+    '{"inner":{"binding":"one","binding":"two"}}',
+    '{"quantity":NaN}',
+    '{"quantity":Infinity}',
+    '{"quantity":1e9999}',
+])
+def test_guarded_identity_ingress_rejects_duplicate_keys_and_nonfinite_numbers(tmp_path, payload):
+    source = tmp_path / "untrusted.json"
+    source.write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError):
+        module._object(source)
+
+
+def test_guarded_customer_ingress_rejects_duplicated_provenance_and_non_objects(tmp_path):
+    path = tmp_path / "customer.json"
+    for body in (
+        '[{"quantity_id":"first","quantity_id":"second"}]',
+        '[{"notes":{"sealed_id":"a","sealed_id":"b"}}]',
+        '[{"quantity_id":"a"}, 12]',
+    ):
+        path.write_text(body, encoding="utf-8")
+        with pytest.raises((ValueError, TypeError)):
+            module._rows(path)
+
+
+def test_guarded_outputs_refuse_aliases_existing_source_and_frozen_truth(tmp_path):
+    inputs = (tmp_path / "sealed.json",)
+    inputs[0].write_text("signed original stays here", encoding="utf-8")
+    good = (tmp_path / "map.json", tmp_path / "activation.json", tmp_path / "exact.json")
+    module._preflight_outputs(good, inputs)
+    for forbidden in (
+        (good[0], good[0], good[2]),
+        (inputs[0], good[1], good[2]),
+        (MANIFEST, good[1], good[2]),
+        (module.FROZEN_ROOT / "illegal.json", good[1], good[2]),
+    ):
+        with pytest.raises((ValueError, FileExistsError)):
+            module._preflight_outputs(forbidden, inputs)
+    assert inputs[0].read_text(encoding="utf-8") == "signed original stays here"
+
+
+def test_guarded_outputs_create_three_verifiable_new_files_and_reject_overwrite(tmp_path):
+    inputs = (tmp_path / "source.json",)
+    inputs[0].write_text("immutable-source", encoding="utf-8")
+    outputs = (tmp_path / "map.json", tmp_path / "receipt.json", tmp_path / "report.json")
+    payloads = ({"sealed_id": "real"}, {"activated_count": 1}, {"score": None})
+    module._write_triplet(outputs, payloads, inputs=inputs)
+    assert [json.loads(p.read_text()) for p in outputs] == list(payloads)
+    with pytest.raises(FileExistsError, match="new"):
+        module._write_triplet(outputs, payloads, inputs=inputs)
+    assert inputs[0].read_text(encoding="utf-8") == "immutable-source"
+
+
+def test_guarded_outputs_roll_back_all_new_files_on_second_write_collision(tmp_path, monkeypatch):
+    inputs = (tmp_path / "original.json",)
+    inputs[0].write_text("do not touch this", encoding="utf-8")
+    outputs = tuple(tmp_path / name for name in ("map.json", "receipt.json", "exact.json"))
+    original_link = module.os.link
+    counter = [0]
+
+    def fail_second(temp, target):
+        counter[0] += 1
+        if counter[0] == 2:
+            raise FileExistsError("synthetic competing writer")
+        return original_link(temp, target)
+
+    monkeypatch.setattr(module.os, "link", fail_second)
+    with pytest.raises(FileExistsError, match="competing"):
+        module._write_triplet(
+            outputs, ({"a": 1}, {"b": 2}, {"c": 3}), inputs=inputs,
+        )
+    assert all(not target.exists() for target in outputs)
+    assert not list(tmp_path.glob(".gpt3-activation-*.tmp"))
+    assert inputs[0].read_text(encoding="utf-8") == "do not touch this"
+
+
+def test_guarded_output_preflight_does_not_invoke_source_or_evaluator_when_unsafe(
+    tmp_path, monkeypatch,
+):
+    doomed = tmp_path / "existing_output.json"
+    doomed.write_text('{"original":true}', encoding="utf-8")
+    called = []
+
+    def forbidden(_):
+        called.append("input parsed")
+        raise AssertionError("source should not be consumed")
+
+    monkeypatch.setattr(module, "_object", forbidden)
+    cli = [
+        "--pending-ledger", str(tmp_path / "missing_pending.json"),
+        "--sealed-run", str(tmp_path / "missing_sealed.json"),
+        "--customer-rows", str(tmp_path / "missing_customers.json"),
+        "--active-identity-map", str(tmp_path / "missing_map.json"),
+        "--manifest", str(MANIFEST),
+        "--source-identity-proof", str(tmp_path / "missing_identity.json"),
+        "--object-universe", str(OBJECT_UNIVERSE),
+        "--output-map", str(doomed),
+        "--output-activation-receipt", str(tmp_path / "activation.json"),
+        "--output-report", str(tmp_path / "report.json"),
+    ]
+    with pytest.raises(FileExistsError, match="new"):
+        module.main(cli)
+    assert called == []
+    assert doomed.read_text(encoding="utf-8") == '{"original":true}'

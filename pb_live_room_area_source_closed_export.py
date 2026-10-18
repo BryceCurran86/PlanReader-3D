@@ -46,6 +46,7 @@ def _firm_room_area_quantities(
 
     out: list[QuantityEvidence] = []
     seen_ids: set[str] = set()
+    figured_pair_owner: dict[tuple[str, str], tuple[str, str]] = {}
     for quantity in claim.room_area_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -121,6 +122,36 @@ def _firm_room_area_quantities(
             raise SourceClosedRunConflictError(
                 f"room-area quantity must reference exactly one source room: {quantity_id}"
             )
+        # Source family and semantic key must describe the exact same
+        # physical room identity, not a different canonical object/finish.
+        if quantity.semantic_key != f"room_area:{quantity.input_entity_ids[0]}":
+            raise SourceClosedRunConflictError(
+                f"room-area original semantic key does not match source room: {quantity_id}"
+            )
+        # Only documented figured area legitimately owns an original H/V pair.
+        # Scaled room-area quantities do not derive metric area from those
+        # optional observations: never veto genuine scaled source receipts.
+        if quantity.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
+            axes = _quantity_metadata(quantity).get("figured_dimension_ids")
+            if axes is not None:
+                if (
+                    type(axes) not in (tuple, list) or len(axes) != 2
+                    or any(type(v) is not str or not v or v != v.strip() for v in axes)
+                    or axes[0] == axes[1]
+                ):
+                    raise SourceClosedRunConflictError(
+                        f"room-area original figured pair invalid: {quantity_id}"
+                    )
+                pair = tuple(sorted(axes))
+                prior = figured_pair_owner.get(pair)
+                if prior is not None:
+                    reason = (
+                        "one original figured pair claimed by competing rooms"
+                        if prior[0] != quantity.input_entity_ids[0]
+                        else "one original figured pair reissued as a second room-area quantity"
+                    )
+                    raise SourceClosedRunConflictError(f"{reason}: {pair}")
+                figured_pair_owner[pair] = (quantity.input_entity_ids[0], quantity_id)
         out.append(quantity)
 
     return tuple(sorted(out, key=lambda item: item.quantity_id))
@@ -137,7 +168,7 @@ def _source_bbox(
     try:
         xs = [float(point[0]) for point in points]
         ys = [float(point[1]) for point in points]
-    except (TypeError, ValueError, IndexError) as exc:
+    except (TypeError, ValueError, IndexError, OverflowError) as exc:
         raise SourceClosedRunConflictError(
             f"canonical floor polygon is invalid: {floor.canonical_floor_id}"
         ) from exc
@@ -165,6 +196,31 @@ def _source_bbox(
     if not math.isfinite(twice_area) or abs(twice_area) <= 2e-9:
         raise SourceClosedRunConflictError(
             f"canonical floor polygon is degenerate: {floor.canonical_floor_id}"
+        )
+    # A positive shoelace answer does not prove original enclosing wall ink:
+    # a bowtie/self-crossing floor can still have an arbitrary positive m².
+    # Veto only. Do not derive a new polygon, source role, or metric value.
+    from shapely.errors import GEOSException
+    from shapely.geometry import Polygon
+    ring = tuple(zip(xs, ys))
+    # A genuine source polygon may repeat its first point as final closure.
+    # Other repetitions are self-touching physical boundary conflicts.
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring = ring[:-1]
+    if len(ring) < 3 or len(set(ring)) != len(ring):
+        raise SourceClosedRunConflictError(
+            f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
+        )
+    try:
+        polygon = Polygon(ring)
+        valid = polygon.is_valid and polygon.exterior.is_simple
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"canonical floor source geometry is invalid: {floor.canonical_floor_id}"
+        ) from exc
+    if not valid:
+        raise SourceClosedRunConflictError(
+            f"canonical floor polygon self-intersects or repeats source vertices: {floor.canonical_floor_id}"
         )
     return bbox
 

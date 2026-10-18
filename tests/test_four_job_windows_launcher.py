@@ -305,3 +305,51 @@ def test_with_ocr_is_off_by_default_and_the_limits_have_safe_defaults():
     assert defaults.with_ocr is False and defaults.max_private_gb == 10.0 and defaults.min_free_commit_gb == 3.0
     assert defaults.timeout_min == 180 and defaults.only is None and defaults.source_only is False
     assert parser.parse_args(["--with-ocr"]).with_ocr is True
+
+
+def test_bounded_owner_source_scope_passes_explicit_family_and_floor_plan_page():
+    code = launcher.handoff_bootstrap(
+        Path("C:/Owner's Run"), Path("C:/Private/Original's Plan.pdf"),
+        launcher.PROJECTS[2], 4, family_group="floor_area",
+        source_plan_page_index=6,
+    )
+    compile(code, "<bounded-owner-bootstrap>", "exec")
+    assert "'--family-group', 'floor_area'" in code
+    assert "'--source-plan-page-index', 6" in code
+    assert "'--project-id', 'au_qld_maryborough_service_station'" in code
+    assert "Official" not in code and "coverage_accuracy" not in code
+
+    unchanged = launcher.handoff_bootstrap(
+        Path("C:/Private/Run"), Path("C:/Private/Plan.pdf"), launcher.PROJECTS[0], 4
+    )
+    assert "'--family-group', 'all'" in unchanged
+    assert "'--source-plan-page-index'" not in unchanged
+
+
+@pytest.mark.parametrize("family,page", [
+    ("not-a-family", None), ("all", -1), ("floor_area", True),
+    ("core", "7"), ("surfaces", -2),
+])
+def test_restrictive_owner_handoff_rejects_unsafe_or_untyped_source_override(family, page):
+    with pytest.raises(ValueError):
+        launcher.handoff_bootstrap(
+            Path("private_run"), Path("original.pdf"),
+            launcher.PROJECTS[0], 1, family_group=family,
+            source_plan_page_index=page,
+        )
+
+
+def test_owner_partial_source_modes_are_explicit_and_default_remains_unmodified():
+    parser = launcher.build_parser()
+    default = parser.parse_args([])
+    assert default.family_group == "all" and default.source_plan_page_index is None
+    selected = parser.parse_args([
+        "--only", "au_qld_maryborough_service_station",
+        "--family-group", "floor_area",
+        "--source-plan-page-index", "6",
+    ])
+    assert selected.only == [launcher.PROJECTS[2]]
+    assert selected.family_group == "floor_area"
+    assert selected.source_plan_page_index == 6
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--family-group", "unverified"])

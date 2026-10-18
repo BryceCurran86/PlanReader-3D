@@ -19,6 +19,7 @@ permissions:
 jobs:
   original-source-and-test:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
@@ -116,3 +117,9 @@ jobs:
           name: gptmax-original-six-unhosted-endpoint-chains
           path: artifacts/*.json
           retention-days: 21
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-source-and-test

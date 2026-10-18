@@ -34,6 +34,9 @@ verified, and nowhere else.
   the originals. Its old body archived the tracked checkout and asserted a PDF was inside it, which the originals-out-of-git
   policy forbids; #3014 replaced it with a code-only, source-free verification, so it no longer reads `documents/sources/`.
   The exclusion stays as a guard: a publishing job must never receive the originals.
+  Likewise `test-gpt2-private-original-ci-policy.yml` (job `absent-private-source-synthetic-policy`) asserts with
+  `test ! -f documents/sources/...` that the private original is absent from the public checkout, so it is excluded, and the
+  transform leaves any job with such an absence assertion alone.
 * **Fork pull requests** receive no secrets, so original-source jobs fail closed on them. That is intended.
 
 ## Owner setup (one time)
@@ -71,6 +74,17 @@ The script inserts one step after the job's first `actions/checkout`, naming exa
 refuses to write if anything other than that one step would change; a second run changes nothing. Pin `--action-ref` to a
 commit SHA so the code that sees the token cannot change under you. Each edited workflow lists itself in its own
 `pull_request` paths, so each runs once on the rollout PR; do it in batches to keep the queue short.
+
+## Push-to-main runs before provisioning is configured
+
+A workflow that sha-checks an original on a push to `main` can never pass while the originals are untracked and
+unprovisioned, so each such job carries `if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''` and a
+sibling job `original-source-not-verified` that calls `original-source-not-run.yml`. While the variable is empty, a push run
+shows the replay as skipped plus a notice `PRIVATE ORIGINAL SOURCE UNAVAILABLE: <workflow> / <job> NOT RUN`; this is not a
+passing verification. Pull request and manual runs are not gated and still fail closed when the original is missing
+(#2989). Setting `ORIGINAL_SOURCES_REPOSITORY` (step 4 above) re-enables the push runs; a job that runs on push still needs
+the provisioning step from the rollout above to find the originals. `tests/test_original_source_push_not_run_gate.py` fails
+a new main-push original-source workflow that lacks the gate and the notice job.
 
 ## Operations
 

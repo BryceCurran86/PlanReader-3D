@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from pb_geometry_takeoff_model import AuthorityStatus
+from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
@@ -24,6 +25,73 @@ from pb_source_closed_run_export import (
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def _original_floor_polygon_is_simple(
+    points: tuple[tuple[float, float], ...],
+) -> bool:
+    """A source floor area cannot be sealed from a self-crossing ring.
+
+    This is a *negative* geometry check on an already source-owned floor,
+    not a replacement physical room issuer, scale or measurement authority.
+    GEOS failures and unavailable validation abstain rather than publish.
+    """
+    if not isinstance(points, (tuple, list)) or len(points) < 3:
+        return False
+    try:
+        if any(
+            not isinstance(point, (tuple, list))
+            or len(point) != 2
+            or any(
+                type(value) not in (int, float)
+                or not math.isfinite(float(value))
+                for value in point
+            )
+            for point in points
+        ):
+            return False
+        from shapely.geometry import Polygon
+
+        # An exact repeated closing coordinate is the only duplicate
+        # allowed in a physical perimeter. Duplicate *interior* vertices
+        # imply a collapsed/backtracked source edge, not a closed face.
+        ring = tuple(tuple(point) for point in points)
+        if ring[0] == ring[-1]:
+            ring = ring[:-1]
+        if len(ring) < 3 or len(set(ring)) != len(ring):
+            return False
+        shape = Polygon(ring)
+        return bool(
+            shape.is_valid
+            and shape.exterior.is_simple
+            and math.isfinite(shape.area)
+            and shape.area > 0.0
+        )
+    except Exception:
+        return False
+
+
+
+def _require_exact_floor_finish_semantic(
+    semantic_key: object,
+    *,
+    canonical_floor_id: str,
+    finish_code: object,
+    semantic_finish: object,
+) -> None:
+    """Original finish code, material and physical floor form one source key."""
+    if (
+        type(semantic_key) is not str
+        or type(finish_code) is not str or not finish_code
+        or finish_code != finish_code.strip()
+        or type(semantic_finish) is not str or not semantic_finish
+        or semantic_finish != semantic_finish.strip()
+        or semantic_key !=
+        f"floor_finish_area:{canonical_floor_id}:{finish_code}:{semantic_finish}"
+    ):
+        raise SourceClosedRunConflictError(
+            "floor finish semantic identity disagrees with original source code"
+        )
 
 
 def build_live_floor_finish_area_source_traces(
@@ -62,6 +130,7 @@ def build_live_floor_finish_area_source_traces(
     quantity_owner_by_floor: dict[str, str] = {}
     quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
     floor_owner_by_occurrence: dict[str, str] = {}
+    floor_owner_by_original_observation: dict[str, str] = {}
     # Original quantity identity is a producer-owned family invariant, not
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
@@ -117,6 +186,17 @@ def build_live_floor_finish_area_source_traces(
         if not _clean(floor.physical_floor_surface_id):
             raise SourceClosedRunConflictError(
                 f"physical floor identity is missing: {floor_id}"
+            )
+        # A source-backed floor finish must consume one original documented
+        # metric-area quantity, not only a copied numeric floor field.
+        area_receipt_id = floor.metric_area_quantity_id
+        if (
+            type(area_receipt_id) is not str
+            or not area_receipt_id
+            or area_receipt_id != area_receipt_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-finish source metric area receipt is missing: {floor_id}"
             )
 
         if (
@@ -176,6 +256,16 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish source SHA mismatch: {quantity.quantity_id}"
             )
+        # Matching invented source strings are still not original hashes.
+        # Reuse the same syntactic source-SHA guard as canonical floor area;
+        # the original SourceVisibilityProducer must separately verify bytes.
+        if (
+            not _valid_original_source_sha(floor.source_sha256)
+            or not _valid_original_source_sha(metadata.get("source_sha256"))
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-finish source SHA is malformed: {quantity.quantity_id}"
+            )
         if _clean(metadata.get("revision_id")) != _clean(floor.revision_id):
             raise SourceClosedRunConflictError(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
@@ -194,11 +284,57 @@ def build_live_floor_finish_area_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        # A semantic role is not a material finish *occurrence* without
+        # its exact authenticated source dictionary code and finish family.
+        if any(
+            type(metadata.get(key)) is not str
+            or not metadata[key]
+            or metadata[key] != metadata[key].strip()
+            for key in ("finish_code", "semantic_finish")
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor-finish source material identity is malformed: {quantity.quantity_id}"
+            )
+        # All original issuer and support addresses have one exact typed form.
+        # Silently stringifying True, numbers or padded values invents source
+        # lineage that the original PDF producer never issued.
+        source_issuer_fields = (
+            "finish_occurrence_record_id",
+            "finish_definition_record_id",
+            "finish_occurrence_evidence_id",
+            "support_snapshot_id",
+            "support_page_id",
+            "support_viewport_id",
+        )
+        if any(
+            type(metadata.get(name)) is not str
+            or (
+                metadata[name]
+                and metadata[name] != metadata[name].strip()
+            )
+            for name in source_issuer_fields
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish source issuer identity is malformed: "
+                f"{quantity.quantity_id}"
+            )
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
-        occurrence_evidence_id = _clean(
-            metadata.get("finish_occurrence_evidence_id")
-        )
+        # An issuer's source observation ID is a typed PDF-address identity,
+        # not a label converted to a string by _clean().
+        raw_observation_id = metadata.get("finish_occurrence_evidence_id")
+        if (
+            type(raw_observation_id) is not str
+            or (
+                raw_observation_id
+                and raw_observation_id != raw_observation_id.strip()
+            )
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original observation source ID malformed: "
+                f"{quantity.quantity_id}"
+            )
+        occurrence_evidence_id = raw_observation_id
         # Occurrence record and source receipt are different producer IDs.
         # Require the exact source occurrence witness actually retained in
         # both QuantityEvidence and its canonical floor; a metadata-only
@@ -244,6 +380,27 @@ def build_live_floor_finish_area_source_traces(
                 "physical floor has competing finish area quantities: "
                 f"{physical_floor_id}"
             )
+        # Check the exact FT code at the customer seal only AFTER the more
+        # specific competing canonical/physical floor owner checks above.
+        # Preserving first-failure ordering avoids changing old conflict gates.
+        _require_exact_floor_finish_semantic(
+            quantity.semantic_key,
+            canonical_floor_id=floor_id,
+            finish_code=metadata.get("finish_code"),
+            semantic_finish=metadata.get("semantic_finish"),
+        )
+        prior_observation_floor = floor_owner_by_original_observation.get(
+            occurrence_evidence_id
+        )
+        if (
+            prior_observation_floor is not None
+            and prior_observation_floor != floor_id
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original observation has competing physical floors: "
+                f"{occurrence_evidence_id}"
+            )
+        floor_owner_by_original_observation[occurrence_evidence_id] = floor_id
         floor_owner_by_occurrence[occurrence_id] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
         quantity_owner_by_physical_floor[physical_floor_id] = (
@@ -342,6 +499,12 @@ def build_live_floor_finish_area_source_traces(
                 if not math.isfinite(twice_area) or abs(twice_area) <= 2e-9:
                     raise SourceClosedRunConflictError(
                         f"floor-finish source polygon is degenerate: {quantity.quantity_id}"
+                    )
+                # A bow-tie or source stroke backtrack can have strictly
+                # positive shoelace area. It is not a physical floor ring.
+                if not _original_floor_polygon_is_simple(points):
+                    raise SourceClosedRunConflictError(
+                        f"floor-finish source polygon self-intersects or is invalid: {quantity.quantity_id}"
                     )
                 source_bbox = (min(xs), min(ys), max(xs), max(ys))
 

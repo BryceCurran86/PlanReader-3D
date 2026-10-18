@@ -27,6 +27,58 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _source_floor_area_simple_bbox(
+    points: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    *,
+    quantity_id: str,
+) -> tuple[float, float, float, float]:
+    """Reject invalid original floor topology; never infer m² from the bbox."""
+    if not isinstance(points, (tuple, list)):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring is not a typed coordinate list: {quantity_id}"
+        )
+    def finite_source_coordinate(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    if any(
+        type(point) not in (tuple, list) or len(point) != 2
+        or any(not finite_source_coordinate(value) for value in point)
+        for point in points
+    ):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring has malformed points: {quantity_id}"
+        )
+    ring = tuple((float(x), float(y)) for x, y in points)
+    if len(ring) > 1 and ring[-1] == ring[0]:
+        ring = ring[:-1]
+    if len(ring) < 3 or len(set(ring)) != len(ring):
+        raise SourceClosedRunConflictError(
+            f"original floor source ring is not simple: {quantity_id}"
+        )
+    from shapely.errors import GEOSException
+    from shapely.geometry import Polygon
+    try:
+        polygon = Polygon(ring)
+        valid = (
+            polygon.is_valid and polygon.exterior.is_simple
+            and math.isfinite(polygon.area) and polygon.area > 0.0
+        )
+    except (GEOSException, ValueError, OverflowError) as exc:
+        raise SourceClosedRunConflictError(
+            f"original floor source ring GEOS geometry invalid: {quantity_id}"
+        ) from exc
+    if not valid:
+        raise SourceClosedRunConflictError(
+            f"original floor source ring is not simple: {quantity_id}"
+        )
+    return polygon.bounds
+
+
 def build_live_floor_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -214,7 +266,11 @@ def build_live_floor_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor source polygon is invalid: {quantity.quantity_id}"
             )
-        source_bbox = (min(xs), min(ys), max(xs), max(ys))
+        # A positive shoelace ring may still cross itself. Do not seal
+        # a geometric physical floor quantity from that non-physical source.
+        source_bbox = _source_floor_area_simple_bbox(
+            checked, quantity_id=quantity.quantity_id
+        )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
