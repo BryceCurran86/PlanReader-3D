@@ -6,6 +6,9 @@ All geometry must be owned by distinct original structural source paths.
 from __future__ import annotations
 from math import isfinite
 
+# Exact source-owned wall layer; annotation and similarly named layers are not structural.
+LOT16_STRUCTURAL_WALL_LAYER = 'S-WALL-25CO'
+
 
 def _finite(*vals):
     return all(type(x) in (int, float) and isfinite(x) for x in vals)
@@ -26,6 +29,50 @@ def _lines(drawings, index, layer):
             raise ValueError('nonfinite original CAD source')
         out.append(((a.x, a.y), (b.x, b.y)))
     return out
+
+
+def _owned_face_unique(lines, a, b, tol):
+    """Require exactly one original line with the requested endpoints."""
+    def close(p, q):
+        return abs(p[0]-q[0]) <= tol and abs(p[1]-q[1]) <= tol
+    return sum(bool((close(u,a) and close(v,b)) or
+                    (close(u,b) and close(v,a))) for u,v in lines) == 1
+
+
+def _same_exact_line(line, face, tol):
+    (u,v),(a,b) = line,face
+    def close(p,q):
+        return abs(p[0]-q[0]) <= tol and abs(p[1]-q[1]) <= tol
+    return (close(u,a) and close(v,b)) or (close(u,b) and close(v,a))
+
+
+def _owner_conflicts(drawings, owned_faces, layer, tol):
+    """Detect duplicate/partial required ink within or between nominated owners.
+
+    The global competitor scan deliberately excludes nominated owners, so
+    owner-to-owner and same-owner duplicates must be checked separately.
+    """
+    ids = sorted(set(i for i,_ in owned_faces))
+    cross, internal = [], []
+    for owner, face in owned_faces:
+        for other in ids:
+            if other == owner:
+                continue
+            if any(_overlaps_required(line,face,tol)
+                   for line in _lines(drawings,other,layer)):
+                cross.append((owner,other))
+    for owner in ids:
+        required = [face for idx,face in owned_faces if idx == owner]
+        remaining = list(_lines(drawings,owner,layer))
+        for face in required:
+            for j,line in enumerate(remaining):
+                if _same_exact_line(line,face,tol):
+                    remaining.pop(j)
+                    break
+        if any(_overlaps_required(line,face,tol)
+               for line in remaining for face in required):
+            internal.append(owner)
+    return sorted(set(cross)), sorted(set(internal))
 
 
 def _has_segment(lines, a, b, tol):
@@ -90,10 +137,14 @@ def source_t_junction(drawings, *, upper_left_path, upper_right_path,
         ((x_gap_right,vertical_right_start_y),(x_gap_right,y_upper)),
         ((x_outer_left,y_opposite),(x_outer_right,y_opposite)),
     ]
+    if wall_layer != LOT16_STRUCTURAL_WALL_LAYER:
+        raise ValueError('original structural wall layer authority missing')
     for idx, (a,b) in zip(ids, required):
-        if not _has_segment(_lines(drawings,idx,wall_layer),a,b,tolerance):
+        if not _owned_face_unique(_lines(drawings,idx,wall_layer),a,b,tolerance):
             raise ValueError('required exact source-owned wall face missing')
     competitors = _uncontested(drawings,set(ids),wall_layer,required,tolerance)
+    owner_cross, owner_internal = _owner_conflicts(
+        drawings,list(zip(ids,required)),wall_layer,tolerance)
     bridge = []
     for idx,path in enumerate(drawings):
         if path.get('layer') != wall_layer:
@@ -104,13 +155,15 @@ def source_t_junction(drawings, *, upper_left_path, upper_right_path,
                 bridge.append(idx)
                 break
     status = ('SOURCE_PERPENDICULAR_T_JUNCTION_OBSERVATION_ONLY'
-              if not competitors and not bridge else
+              if not competitors and not bridge and not owner_cross and not owner_internal else
               'ABSTAIN_COMPETING_OR_BRIDGED_STRUCTURAL_SOURCE')
     return dict(status=status,source_path_ids=ids,
                 exact_cad_gap_pt=x_gap_right-x_gap_left,
                 perpendicular_wall_faces_end_at_gap=True,
                 opposite_wall_face_continuous=True,
                 competing_paths=sorted(set(competitors)),
+                owner_cross_face_overlaps=owner_cross,
+                owner_internal_face_overlaps=owner_internal,
                 horizontal_bridge_paths=sorted(set(bridge)),
                 canonical_w4_host='ABSTAIN',cross_document_same_physical_wall='ABSTAIN',
                 opening_frame='ABSTAIN',opening_area='ABSTAIN',
@@ -134,25 +187,31 @@ def source_perpendicular_return(drawings, *, cap_path, upper_vertical_path,
             or not y_upper_start<y_cap_top<y_cap_bottom<y_lower_end
             or not y_opposite_start<=y_cap_top<y_cap_bottom<=y_opposite_end):
         raise ValueError('invalid perpendicular return source geometry')
+    if wall_layer != LOT16_STRUCTURAL_WALL_LAYER:
+        raise ValueError('original structural wall layer authority missing')
     cap_lines=_lines(drawings,cap_path,wall_layer)
     req=[((x_face,y_cap_top),(x_cap,y_cap_top)),
          ((x_cap,y_cap_top),(x_cap,y_cap_bottom)),
          ((x_cap,y_cap_bottom),(x_face,y_cap_bottom))]
-    if not all(_has_segment(cap_lines,a,b,tolerance) for a,b in req):
+    if not all(_owned_face_unique(cap_lines,a,b,tolerance) for a,b in req):
         raise ValueError('exact three-sided structural return missing')
     other=[((x_face,y_upper_start),(x_face,y_cap_top)),
            ((x_face,y_cap_bottom),(x_face,y_lower_end)),
            ((x_opposite,y_opposite_start),(x_opposite,y_opposite_end))]
     for idx,(a,b) in zip(ids[1:],other):
-        if not _has_segment(_lines(drawings,idx,wall_layer),a,b,tolerance):
+        if not _owned_face_unique(_lines(drawings,idx,wall_layer),a,b,tolerance):
             raise ValueError('required original perpendicular wall face missing')
     competitors=_uncontested(drawings,set(ids),wall_layer,req+other,tolerance)
+    owner_cross, owner_internal = _owner_conflicts(
+        drawings,list(zip([cap_path]*3+ids[1:],req+other)),wall_layer,tolerance)
     return dict(status=('SOURCE_PERPENDICULAR_RETURN_OBSERVATION_ONLY'
-                        if not competitors else 'ABSTAIN_COMPETING_SOURCE'),
+                        if not competitors and not owner_cross and not owner_internal else 'ABSTAIN_COMPETING_SOURCE'),
                 source_path_ids=ids,return_cap_width_pt=x_cap-x_face,
                 vertical_face_gap_pt=y_cap_bottom-y_cap_top,
                 opposite_vertical_face_continuous=True,
-                competing_paths=competitors,canonical_w4_host='ABSTAIN',
+                competing_paths=competitors,owner_cross_face_overlaps=owner_cross,
+                owner_internal_face_overlaps=owner_internal,
+                canonical_w4_host='ABSTAIN',
                 cross_document_same_physical_wall='ABSTAIN',
                 opening_frame='ABSTAIN',opening_area='ABSTAIN',
                 opening_count='ABSTAIN',new_firm_quantity=False)
