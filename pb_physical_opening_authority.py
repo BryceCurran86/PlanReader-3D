@@ -2051,18 +2051,31 @@ class PhysicalOpeningAuthority:
                         common_endpoint_rows=(pair.row0,pair.row1),frame_line_groups=groups,
                         original_common_row_continuity=legacy_face_continues,
                         paired_original_outer_face_continuity=face_continues))
-                # Two full-span printed rows may be glazing/frame lines or
-                # a structural element ABOVE an opening. They contradict a
-                # bare swing fallback, but are not independent proof that an
-                # originally source-supported paired frame is solid wall.
-                # Keep source-authenticated frame groups; the existing exact
-                # endpoint-face opposition still vetoes framed nominations.
+                # In the ordinary original producer, two inset ink tracks
+                # can be WINDOW FRAME or overhead-wall/lintel evidence; the
+                # heuristic double-track check cannot erase an independently
+                # authenticated framed source candidate. The original exact
+                # endpoint-face veto still applies to that ordinary producer.
+                #
+                # The paired-outer-faces SHADOW explicitly changes which
+                # endpoint rows count as physical wall opposition. It must
+                # never mint an opening that was negative under the ordinary
+                # source policy solely by reinterpreting internal paired
+                # tracks. Keep the double-track veto for shadow-only frames.
+                # Both policies retain this guard against bare swing fallback.
                 opposing_wall_faces = _raster_double_continuous_face_gap(
                     work_line, pair,
                 )
                 frames = (
                     frame_support(pair, axis, groups)
-                    if groups and not face_continues
+                    if (
+                        groups
+                        and not face_continues
+                        and not (
+                            self._raster_paired_outer_faces_shadow
+                            and opposing_wall_faces
+                        )
+                    )
                     else ()
                 )
                 if frames:
