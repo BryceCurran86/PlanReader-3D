@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
 import math
+import numbers
 from typing import Dict, List, Optional
 
 from pb_geometry_takeoff_model import AuthorityStatus, ScaleCalibration
@@ -72,15 +73,22 @@ def scale_calibration_fingerprint(calibration: ScaleCalibration) -> str:
 # rather than just being flagged for review.
 _AUTHORITATIVE_SOURCES = {ScaleSourceType.TITLE_BLOCK.value, ScaleSourceType.SCALE_BAR.value, ScaleSourceType.MANUAL.value}
 
+# The closed source vocabulary. A reading from any other source (an "ai", "default" or "assumed" label, a different case of
+# a known label, an empty string) is rejected rather than reconciled: nothing outside this set may reach a FIRM status.
+_KNOWN_SOURCE_TYPES = frozenset(source.value for source in ScaleSourceType)
+
 
 def px_per_m_from_ratio(ratio: float) -> float:
     """Convert a drawing scale ratio denominator (e.g. 100 for "1:100") to px/m.
 
     Matches the established PlanReader convention (~28.35 px/m at 1:100).
     """
-    if not math.isfinite(ratio) or ratio <= 0.0:
+    if isinstance(ratio, bool) or not math.isfinite(ratio) or ratio <= 0.0:
         raise ValueError(f"Scale ratio must be finite and strictly positive, got {ratio}")
-    return POINTS_PER_METRE_AT_1_1 / ratio
+    px_per_m = POINTS_PER_METRE_AT_1_1 / ratio
+    if not math.isfinite(px_per_m) or px_per_m <= 0.0:
+        raise ValueError(f"Scale ratio {ratio} does not give a finite positive points-per-metre value")
+    return px_per_m
 
 
 @dataclass
@@ -109,16 +117,60 @@ def unknown_calibration(page_no: int, sheet_label: str = "") -> ScaleCalibration
     )
 
 
+def _ratio_is_usable(ratio: object) -> bool:
+    """A real, finite, strictly positive ratio whose points-per-metre value is finite and positive too."""
+    if ratio is None or isinstance(ratio, bool) or not isinstance(ratio, numbers.Real):
+        return False
+    try:
+        value = float(ratio)
+    except (OverflowError, ValueError):
+        return False
+    if not math.isfinite(value) or value <= 0.0:
+        return False
+    px_per_m = POINTS_PER_METRE_AT_1_1 / value
+    return math.isfinite(px_per_m) and px_per_m > 0.0
+
+
+def _confidence_is_usable(confidence: object) -> bool:
+    if isinstance(confidence, bool) or not isinstance(confidence, numbers.Real):
+        return False
+    try:
+        return math.isfinite(float(confidence))
+    except (OverflowError, ValueError):
+        return False
+
+
+def _rejection_issue(reading: ScaleSourceReading) -> Optional[str]:
+    """Why a reading cannot take part in reconciliation, or None when it can."""
+    if not isinstance(reading.source_type, str) or reading.source_type not in _KNOWN_SOURCE_TYPES:
+        return f"Rejected scale reading from unrecognised source type {reading.source_type!r} ({reading.scale_text!r})"
+    if not _ratio_is_usable(reading.ratio):
+        return f"Rejected non-finite/non-positive scale reading from {reading.source_type}: {reading.ratio!r} ({reading.scale_text!r})"
+    if not _confidence_is_usable(reading.confidence):
+        return f"Rejected scale reading with non-finite confidence from {reading.source_type}: {reading.confidence!r} ({reading.scale_text!r})"
+    return None
+
+
 def _valid_readings(readings: List[ScaleSourceReading]) -> List[ScaleSourceReading]:
-    return [r for r in readings if r.ratio is not None and math.isfinite(r.ratio) and r.ratio > 0.0]
+    return [r for r in readings if _rejection_issue(r) is None]
 
 
 def _invalid_reading_issues(readings: List[ScaleSourceReading]) -> List[str]:
     issues = []
     for r in readings:
-        if r.ratio is None or not math.isfinite(r.ratio) or r.ratio <= 0.0:
-            issues.append(f"Rejected non-finite/non-positive scale reading from {r.source_type}: {r.ratio!r} ({r.scale_text!r})")
+        issue = _rejection_issue(r)
+        if issue is not None:
+            issues.append(issue)
     return issues
+
+
+def _tolerance_is_usable(max_delta_ratio: object) -> bool:
+    if isinstance(max_delta_ratio, bool) or not isinstance(max_delta_ratio, numbers.Real):
+        return False
+    try:
+        return math.isfinite(float(max_delta_ratio)) and float(max_delta_ratio) >= 0.0
+    except (OverflowError, ValueError):
+        return False
 
 
 def _best_single_reading_status(reading: ScaleSourceReading) -> str:
@@ -169,25 +221,25 @@ def resolve_page_scale_calibration(
         )
 
     if len(valid) == 1:
-        reading = valid[0]
-        status = _best_single_reading_status(reading)
-        px_per_m = px_per_m_from_ratio(reading.ratio)
-        return ScaleCalibration(
-            page_no=page_no,
-            ratio_str=reading.scale_text,
-            px_per_m=px_per_m,
-            method=reading.source_type.upper(),
-            is_verified=status == ScaleCalibrationStatus.VALID.value,
-            confidence=reading.confidence,
-            sheet_label=sheet_label,
-            scale_text=reading.scale_text,
-            source_type=reading.source_type,
-            status=status,
-            issues=issues,
-            revision_id=revision_id,
-        )
+        return _calibration_from_reading(page_no, sheet_label, valid[0], issues, revision_id)
 
     # Multiple valid readings: check pairwise agreement against the max ratio delta.
+    if not _tolerance_is_usable(max_delta_ratio):
+        # NaN or infinity would compare as "within tolerance" and let disagreeing sources through.
+        return ScaleCalibration(
+            page_no=page_no,
+            ratio_str="UNKNOWN",
+            px_per_m=0.0,
+            method="UNKNOWN",
+            is_verified=False,
+            confidence=0.0,
+            sheet_label=sheet_label,
+            scale_text=" vs ".join(r.scale_text for r in valid),
+            source_type=ScaleSourceType.UNKNOWN.value,
+            status=ScaleCalibrationStatus.BLOCKED.value,
+            issues=issues + [f"Rejected scale comparison tolerance: {max_delta_ratio!r} is not finite and non-negative"],
+            revision_id=revision_id,
+        )
     ratios = [r.ratio for r in valid]
     lo, hi = min(ratios), max(ratios)
     delta_ratio = (hi - lo) / lo if lo > 0 else float("inf")
@@ -213,29 +265,88 @@ def resolve_page_scale_calibration(
             confidence=0.0,
             sheet_label=sheet_label,
             scale_text=" vs ".join(r.scale_text for r in valid),
-            source_type=max(valid, key=lambda r: r.confidence).source_type,
+            source_type=_highest_confidence_source_type(valid),
             status=status,
             issues=issues + [conflict_issue],
             revision_id=revision_id,
         )
 
-    # Agreement within tolerance: trust the highest-confidence reading.
-    best = max(valid, key=lambda r: r.confidence)
-    status = _best_single_reading_status(best)
+    # Agreement within tolerance: trust the highest-confidence reading, unless equal-confidence readings would make
+    # the choice (and with it the authority) depend on input order.
+    top_confidence = max(r.confidence for r in valid)
+    tied = [r for r in valid if r.confidence == top_confidence]
+    tied_sources = sorted({r.source_type for r in tied})
+    tied_ratios = {r.ratio for r in tied}
+    # The choice matters when the tied readings would give different measurement authority, or when a FIRM scale
+    # would differ in value. Readings that can never be FIRM and map to the same authority (for example a title
+    # block and an inferred reading, both provisional) keep the established selection below.
+    tied_authorities = {
+        measurement_authority_for_page_scale(_calibration_from_reading(page_no, sheet_label, r, [], revision_id))
+        for r in tied
+    }
+    order_dependent = len(tied) > 1 and (
+        len(tied_authorities) > 1
+        or (AuthorityStatus.FIRM.value in tied_authorities and len(tied_ratios) > 1)
+    )
+    if order_dependent:
+        status = (
+            ScaleCalibrationStatus.MANUAL_REQUIRED.value
+            if set(tied_sources) & _AUTHORITATIVE_SOURCES
+            else ScaleCalibrationStatus.CONFLICTING.value
+        )
+        tie_issue = (
+            "Equal-confidence scale readings would make the selection depend on input order: "
+            + ", ".join(sorted(f"{r.source_type}=1:{r.ratio:g}" for r in tied))
+        )
+        return ScaleCalibration(
+            page_no=page_no,
+            ratio_str="UNKNOWN",
+            px_per_m=0.0,
+            method="CONFLICT",
+            is_verified=False,
+            confidence=0.0,
+            sheet_label=sheet_label,
+            scale_text=" vs ".join(sorted(r.scale_text for r in tied)),
+            source_type=tied_sources[0],
+            status=status,
+            issues=issues + [tie_issue],
+            revision_id=revision_id,
+        )
+    # Remaining ties give the same authority: equivalent readings (same ratio, only the label can differ) are
+    # ordered deterministically here; readings that can never be FIRM keep the established first-reading choice.
+    best = tied[0] if len(tied_ratios) > 1 else min(tied, key=lambda r: (r.scale_text, r.source_type))
+    return _calibration_from_reading(page_no, sheet_label, best, issues, revision_id)
+
+
+def _calibration_from_reading(
+    page_no: int,
+    sheet_label: str,
+    reading: ScaleSourceReading,
+    issues: List[str],
+    revision_id: Optional[str],
+) -> ScaleCalibration:
+    """The calibration a single chosen reading gives (a valid, already-vetted reading)."""
+    status = _best_single_reading_status(reading)
     return ScaleCalibration(
         page_no=page_no,
-        ratio_str=best.scale_text,
-        px_per_m=px_per_m_from_ratio(best.ratio),
-        method=best.source_type.upper(),
+        ratio_str=reading.scale_text,
+        px_per_m=px_per_m_from_ratio(reading.ratio),
+        method=reading.source_type.upper(),
         is_verified=status == ScaleCalibrationStatus.VALID.value,
-        confidence=best.confidence,
+        confidence=reading.confidence,
         sheet_label=sheet_label,
-        scale_text=best.scale_text,
-        source_type=best.source_type,
+        scale_text=reading.scale_text,
+        source_type=reading.source_type,
         status=status,
         issues=issues,
         revision_id=revision_id,
     )
+
+
+def _highest_confidence_source_type(readings: List[ScaleSourceReading]) -> str:
+    """Source label of the conflict record: the top-confidence reading's, ordered deterministically on a tie."""
+    top = max(r.confidence for r in readings)
+    return min(r.source_type for r in readings if r.confidence == top)
 
 
 def check_calibration_freshness(calibration: ScaleCalibration, current_revision_id: Optional[str]) -> ScaleCalibration:
