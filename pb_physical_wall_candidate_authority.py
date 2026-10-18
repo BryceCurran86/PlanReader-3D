@@ -1034,15 +1034,30 @@ def _segment_is_authenticated_vector_frame_edge(
 
 
 def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> bool:
-    """True only for producer-authenticated terminal-band source geometry.
+    """Partition ONLY the genuine source-visible terminal-band raster issuer.
 
-    These observations are deliberately excluded from the canonical page-wide
-    W2/W3/W4 graph. They exist solely to support a later opening-local raster
-    host proposition, preventing additive source capture from re-splitting or
-    rekeying unrelated wall topology.
+    A substring is not a source parent: arbitrary native and malformed raster
+    IDs must not change canonical page/F.07 W4 membership. The real raster
+    issuer uses "raster_segment:<image_sha>:<version>:<full_sha>:<index>"
+    and the source visibility authority has already authenticated its parent
+    and retained the image/full render SHA pair. Reject a malformed declaration
+    of this protected issuer rather than treating it as an ordinary wall.
     """
+    if segment.get("source_kind") != RASTER_PDF_VISIBLE_SEGMENT:
+        return False
     source_id = str(segment.get("id") or "")
-    return f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in source_id
+    parts = source_id.split(":")
+    if UNCHANGED_BAND_IDENTITY_VERSION not in parts:
+        return False
+    if (
+        len(parts) != 5 or parts[0] != "raster_segment"
+        or parts[2] != UNCHANGED_BAND_IDENTITY_VERSION
+        or any(len(parts[i]) != 64 or any(c not in "0123456789abcdef" for c in parts[i])
+               for i in (1, 3))
+        or not parts[4].isdecimal() or str(int(parts[4])) != parts[4]
+    ):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    return True
 
 
 def _partition_opening_local_supplemental_segments(
