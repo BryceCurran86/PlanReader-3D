@@ -1963,6 +1963,8 @@ class GenericPlanReaderExtractor:
                 # incomplete partial sum as the complete whole-building takeoff.
                 # This also protects the DPM, mesh, slab and DPC projections
                 # nested under the exact same area publication gate.
+                from pb_multi_space_footprint_geometry import FootprintStatus
+
                 compound_area_complete = (
                     footprint_res.status == FootprintStatus.CONFIRMED.value
                     and not footprint_res.missing_components
