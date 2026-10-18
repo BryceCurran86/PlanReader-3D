@@ -91,5 +91,3 @@ def _source_truetype_symbol_subtables(program: bytes):
             font.close()
     except Exception:
         return {}, "embedded_symbol_font_parse_unavailable"
-
-

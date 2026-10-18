@@ -200,4 +200,3 @@ def test_missing_original_mark_source_scope_or_multiple_marks_never_publish():
             _w4_source_positive_candidate(),rival)
         assert result["first_failure"]=="original_finish_scope_or_unique_source_mark_unproven"
         assert result["source_finish_area_quantity_issued"] is False
-
