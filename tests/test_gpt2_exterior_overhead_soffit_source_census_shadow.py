@@ -44,6 +44,7 @@ def test_synthetic_original_text_arithmetic_is_not_metric_or_material_authority(
     assert candidates[0]["component_printed_values_untrusted"] == (1000, 2000, 3000)
     assert candidates[0]["source_extension_lines_proven"] is False
     assert candidates[0]["source_ink_line_correspondence_candidates"] == ()
+    assert result["original_individual_figured_stroke_candidates"] == ()
     assert result["source_canopy_union_overlap_proven"] is False
     assert result["source_fascia_or_gutter_quantity_proven"] is False
     assert result["source_contractor_scope_proven"] is False
@@ -139,6 +140,29 @@ def test_original_a253_stp_figured_chain_and_rival_numbers_are_not_soffit_area()
     assert (18, 12, 1, 0) in num_addresses  # 6150 has no proven extension-line span
     assert (18, 53, 0, 0) in num_addresses  # 4960 is not automatically canopy width
     assert (18, 54, 0, 0) in num_addresses
+    # True original perpendicular figured source-line witnesses; still
+    # no permission to call 6150 the *net soffit* width or issue an area.
+    single = result["original_individual_figured_stroke_candidates"]
+    assert any(
+        r["printed_value_untrusted"] == 6150
+        and r["printed_source_word_address"] == (18, 12, 1, 0)
+        and r["original_source_path_item_id"] == (4154, 0)
+        for r in single
+    )
+    assert any(
+        r["printed_value_untrusted"] == 6199
+        and r["original_source_path_item_id"] == (4159, 0)
+        for r in single
+    )
+    assert any(
+        r["printed_value_untrusted"] == 4651
+        and r["original_source_path_item_id"] == (4149, 0)
+        for r in single
+    )
+    assert not [
+        r for r in single if r["printed_value_untrusted"] == 4960
+    ]  # source material mark's elevation number is NOT a figured span
+    assert all(not r["physical_soffit_surface_axis_proven"] for r in single)
     assert not result["physical_overhead_surface_polygon_proven"]
     assert result["exterior_soffit_area_m2"] is None
     assert result["new_firm_quantities"] == 0
