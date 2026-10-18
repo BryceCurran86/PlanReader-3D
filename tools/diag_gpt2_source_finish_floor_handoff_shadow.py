@@ -161,9 +161,14 @@ def audit_gpt2_source_material_floor_handoff(
             not scope.source_viewport_ownership_id or
             scope.unresolved_source_text_observation_ids):
         return {**result,"first_failure":"original_finish_occurrence_scope_incomplete"}
-    polygon=Polygon(source_registration["source_finishes_perimeter_polygon_pdf_pts"])
-    if not polygon.is_valid or polygon.area<=0:
-        return {**result,"first_failure":"original_finish_ink_polygon_invalid"}
+    try:
+        polygon=Polygon(source_registration["source_finishes_perimeter_polygon_pdf_pts"])
+        floor_polygon=Polygon(source_registration["source_floor_perimeter_polygon_pdf_pts"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return {**result,"first_failure":"original_floor_finish_ink_polygon_invalid"}
+    if (not polygon.is_valid or polygon.area<=0
+            or not floor_polygon.is_valid or floor_polygon.area<=0):
+        return {**result,"first_failure":"original_floor_finish_ink_polygon_invalid"}
     inside=[];all_matching=[]
     for occurrence in scope.records:
         if occurrence.code.upper()!=original_finish_code.upper():
@@ -207,6 +212,13 @@ def audit_gpt2_source_material_floor_handoff(
         "original_snapshot_id":occurrence_selector.snapshot_id,
         "original_floor_page":source_registration["original_floor_page"],
         "original_finish_page":source_registration["original_finish_page"],
+        # Exact original cross-sheet candidate geometry is retained so a
+        # W4-bound consumer can reject a same-PDF mark from another room.
+        # These copied candidate polygons are not independently sealed W4.
+        "original_source_floor_perimeter_polygon_pdf_pts":
+            source_registration["source_floor_perimeter_polygon_pdf_pts"],
+        "original_source_finish_perimeter_polygon_pdf_pts":
+            source_registration["source_finishes_perimeter_polygon_pdf_pts"],
         "original_finish_viewport_id":occurrence_selector.viewport_id,
         "original_finish_code":original_finish_code,
         "original_material_definition_id":record.record_id,
