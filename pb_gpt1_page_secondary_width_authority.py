@@ -18,13 +18,13 @@ class SecondaryWidthTextEvidence:
     witnessed_widths_m: tuple[float, ...]
 
 
-_NUMBER = r"(?:\\d{1,3}(?:,\\d{3})+|\\d+(?:[.,]\\d+)?)"
+_NUMBER = r"(?:\d{1,3}(?:,\d{3})+|\d+(?:[.,]\d+)?)"
 _BEFORE = re.compile(
-    rf"\\b(?P<value>{_NUMBER})\\s*(?P<unit>mm|m)\\s+wide\\s+veranda(?:h)?\\b",
+    rf"\b(?P<value>{_NUMBER})\s*(?P<unit>mm|m)\s+wide\s+veranda(?:h)?\b",
     re.IGNORECASE,
 )
 _AFTER = re.compile(
-    rf"\\bveranda(?:h)?\\s*[:\\-\\(]?\\s*(?P<value>{_NUMBER})\\s*(?P<unit>mm|m)\\b",
+    rf"\bveranda(?:h)?\s*[:\-\(]?\s*(?P<value>{_NUMBER})\s*(?P<unit>mm|m)\b",
     re.IGNORECASE,
 )
 
@@ -33,7 +33,7 @@ def _number_in_metres(raw: str, unit: str) -> float | None:
     # Only explicitly printed units authorize a metric width; no "200" ->
     # 200mm or "2" -> 2m interpretation from the raw number's magnitude.
     try:
-        if re.fullmatch(r"\\d{1,3}(?:,\\d{3})+", raw):
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+", raw):
             number = float(raw.replace(",", ""))
         else:
             number = float(raw.replace(",", "."))
