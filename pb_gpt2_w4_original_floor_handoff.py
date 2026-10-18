@@ -209,13 +209,20 @@ def audit_gpt2_w4_material_to_gpt1(
         material_result.get("original_source_floor_perimeter_polygon_pdf_pts"))
     marked_finish=_polygon(
         material_result.get("original_source_finish_perimeter_polygon_pdf_pts"))
+    def source_page(value):
+        if type(value) is int and value>0:
+            return value
+        if (type(value) is str and value.isdecimal()
+                and value==str(int(value)) and int(value)>0):
+            return int(value)
+        return None
+    floor_page=source_page(material_result.get("original_floor_page"))
+    finish_page=source_page(material_result.get("original_finish_page"))
+    w4_page=source_page(w4_result.get("original_floor_page"))
     if (w4_floor is None or marked_floor is None or marked_finish is None
             or not w4_floor.equals(marked_floor)
-            or str(material_result.get("original_floor_page"))!=
-               str(w4_result.get("original_floor_page"))
-            or material_result.get("original_finish_page") is None
-            or str(material_result["original_finish_page"])==
-               str(material_result["original_floor_page"])):
+            or floor_page is None or finish_page is None or w4_page is None
+            or floor_page!=w4_page or finish_page==floor_page):
         return {**base,
             "first_failure":"original_finish_mark_and_W4_physical_floor_mismatch"}
     if (not material_result.get("original_source_scope_ownership_id")
