@@ -49,7 +49,9 @@ def test_manual_suites_do_not_create_duplicate_automatic_triggers():
     assert "        default: full" in text
     for mode in ("full", "focused", "readiness"):
         assert f"          - {mode}" in text
-    assert "  cancel-in-progress: true" in text
+    assert "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in text
+    assert "  group: ci-${{ github.event.pull_request.number || github.run_id }}" in text
+    assert "cancel-in-progress: true" not in text
     assert len(re.findall(r"(?m)^  (?:test|focused|readiness):$", text)) == 3
     assert "workflow_dispatch" in job("focused")
     assert "runs-on: ubuntu-latest" in job("focused")
@@ -89,3 +91,29 @@ def test_full_ci_compiles_outside_source_archives_and_does_not_write_test_byteco
     assert "PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci" in full
     assert "PYTHONPYCACHEPREFIX: ." not in full
     assert "PYTHONPYCACHEPREFIX: documents/" not in full
+
+
+FASTPATH = ROOT / ".github/workflows/performance-fastpath.yml"
+
+
+def _concurrency_block(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    assert text.count("\nconcurrency:\n") == 1
+    return text.split("\nconcurrency:\n", 1)[1].split("\njobs:\n", 1)[0]
+
+
+def test_only_superseded_pull_request_runs_are_cancelled_never_main_pushes_or_manual_runs():
+    """A cancelled main-push run leaves a merge with no required verdict; the repo convention cancels PR runs only."""
+    for path, prefix in ((WORKFLOW, "ci"), (FASTPATH, "performance-fastpath")):
+        block = _concurrency_block(path)
+        assert f"  group: {prefix}-${{{{ github.event.pull_request.number || github.run_id }}}}\n" in block, path.name
+        assert "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n" in block, path.name
+        # a ref- or sha-scoped group would make one main push cancel (or queue behind) another
+        assert "github.ref" not in block and "github.sha" not in block, path.name
+        assert "cancel-in-progress: true" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_fastpath_still_runs_on_pull_requests_and_main_pushes_only():
+    text = FASTPATH.read_text(encoding="utf-8")
+    assert "  pull_request:\n    branches: [main]\n  push:\n    branches: [main]\n" in text
+    assert "pull_request_target" not in text

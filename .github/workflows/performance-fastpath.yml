@@ -6,9 +6,10 @@ on:
   push:
     branches: [main]
 
+# A superseded pull request run is cancelled; every push to main keeps its own run.
 concurrency:
-  group: performance-fastpath-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: performance-fastpath-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   fastpath:
