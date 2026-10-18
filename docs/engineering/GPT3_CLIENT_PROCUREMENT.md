@@ -75,17 +75,29 @@ Events are client-entered, chronological, append-only objects bound to the
   gross_amount for a line with net accepted physical purchases.
 - RECORD_SUPPLIER_PAYMENT — unique payment_id, invoice_id, client
   recorded amount and remittance reference.
+- SUPPLIER_CREDIT_NOTE — unique credit_id, bound existing invoice_id, positive
+  exact-cent gross_amount and client-provided reason (RETURN, PRICE_ADJUSTMENT,
+  OTHER_CLIENT_AUTHORISED). Return credits require a recorded rejected or returned
+  purchase. A credit cannot exceed the unpaid invoice amount, and a payment
+  cannot spend credit-adjusted money twice. These are **customer-recorded
+  credits, not supplier-verifiable credit documents**.
 
 Each event also requires event, po_draft_id, recorded_on and reference.
 Shipment/delivery/invoice records require a previously CLIENT-recorded PO
 sent event; this tool never sends anything. Duplicate event receipts, over
 ordered deliveries, returns beyond accepted stock, invoice gross exceeding
-authorised order value, payments exceeding invoiced balances and
-chronological rewrites are rejected.
+authorised order value, payments exceeding net invoiced balances, repeated
+shipment advice references, client delivery records exceeding previously
+notified shipments (when shipping notices are supplied), credit/payment
+double-spend and events predating approval are rejected. Unannounced direct
+client receipts remain allowed, clearly marked as client-reported, not courier
+verified.
 
 The ledger reports ordered purchase units, accepted/rejected/returned units,
 outstanding stock, partial/complete/unissued order statuses, supplier
-invoiced/paid gross and outstanding payables. Optional --format csv emits a
+invoiced/credited/net invoiced/paid gross and credit-adjusted outstanding
+payables. Credit notes preserve immutable gross invoices and are separately
+recorded as client declarations. Optional --format csv emits a
 purchase-line reconciliation with source quantity IDs.
 
 Cash/payment and receipt events are supplied by the user, **not verified by a
