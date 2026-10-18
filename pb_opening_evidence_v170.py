@@ -144,6 +144,19 @@ def _num(v: Any, default: float = 0.0) -> float:
         return default
 
 
+def _stated_positive_count(value: Any) -> int:
+    """Do not coerce a missing, Boolean, fractional or malformed count into an opening."""
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value if value > 0 else 0
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value.is_integer() and value > 0 else 0
+    if isinstance(value, str) and value.strip().isdecimal():
+        return max(0, int(value.strip()))
+    return 0
+
+
 def _ordered_dedup(items: list) -> list:
     """Remove duplicates preserving order. Uses dict.fromkeys not set."""
     return list(dict.fromkeys(items))
@@ -216,7 +229,7 @@ class OpeningEvidence:
     height_m: Optional[float] = None
     dimension_basis: str = DIMENSION_BASIS_UNKNOWN
     dimension_source: str = ""          # which source provided these dims
-    sill_m: float = 0.0                 # 0.0 for doors, 0.9 for windows
+    sill_m: Optional[float] = None      # None = no supported sill datum; 0.0 is an explicit floor datum
     area_m2: Optional[float] = None     # computed: width x height x quantity
 
     # --- Geometry ---
@@ -847,6 +860,7 @@ def to_v134_record(opening: OpeningEvidence) -> Dict[str, Any]:
         "wall_ref": opening.wall_ref,
         "width_m": opening.width_m or 0.0,
         "height_m": opening.height_m or 0.0,
+        "sill_m": opening.sill_m,
         "quantity": opening.quantity,
         "deduct": opening.deduct,
         "source_reference": "; ".join(opening.evidence) if opening.evidence else "",
@@ -884,11 +898,16 @@ def from_v134_record(
 
     width = _num(record.get("width_m"))
     height = _num(record.get("height_m"))
-    raw_quantity = record.get("quantity")
-    if raw_quantity in (None, ""):
-        quantity = 0
+    quantity = _stated_positive_count(record.get("quantity"))
+    raw_sill = record.get("sill_m")
+    if raw_sill in (None, ""):
+        # A door threshold has a floor datum; plan-only windows do not.
+        sill = 0.0 if opening_type in (OPENING_TYPE_DOOR, OPENING_TYPE_GARAGE, OPENING_TYPE_ROLLER) else None
+    elif isinstance(raw_sill, bool):
+        sill = None
     else:
-        quantity = max(0, int(_num(raw_quantity)))
+        candidate_sill = _num(raw_sill, -1.0)
+        sill = candidate_sill if candidate_sill >= 0.0 else None
 
     ev = OpeningEvidence(
         opening_instance_id=str(record.get("id", uuid.uuid4().hex[:12])),
@@ -900,7 +919,7 @@ def from_v134_record(
         height_m=height if height > 0 else None,
         dimension_basis=DIMENSION_BASIS_UNKNOWN,
         dimension_source="manual",
-        sill_m=_num(record.get("sill_m")) if record.get("sill_m") not in (None, "") else 0.0,
+        sill_m=sill,
         extraction_method="manual",
         evidence=[str(record.get("source_reference", ""))],
     )
