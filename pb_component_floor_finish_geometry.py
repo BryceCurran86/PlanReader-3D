@@ -123,7 +123,9 @@ def _component_rectangles_are_disjoint(components: list) -> bool:
                     return False
             polygons.append(polygon)
         return True
-    except (ImportError, TypeError, ValueError, OverflowError, AttributeError):
+    except Exception:
+        # Invalid GEOS rings, unavailable geometry validation and malformed
+        # source components all fail closed; no fallback guessed finish area.
         return False
 
 
