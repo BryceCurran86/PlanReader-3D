@@ -13,6 +13,7 @@ not invent or reconstruct scale authority.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
@@ -205,19 +206,41 @@ class CrossViewCeilingQuantityResult:
 
     @property
     def quantities(self) -> tuple[QuantityEvidence, ...]:
-        return tuple(record.quantity for record in self.records)
+        # Consumers must share the exact same identity conflict gate as the
+        # canonical ceiling map. Never expose duplicated signed source rows.
+        return tuple(record.quantity for record in self.records_by_ceiling_id.values())
 
     @property
     def canonical_ceilings(self) -> tuple[LiveCanonicalCeilingSurfaceObject, ...]:
-        return tuple(record.canonical_ceiling for record in self.records)
+        return tuple(
+            record.canonical_ceiling
+            for record in self.records_by_ceiling_id.values()
+        )
 
     @property
     def records_by_ceiling_id(
         self,
     ) -> Mapping[str, CrossViewCeilingQuantityRecord]:
-        return MappingProxyType(
-            {record.canonical_ceiling_id: record for record in self.records}
+        counts = Counter(
+            record.canonical_ceiling_id for record in self.records
+            if type(record.canonical_ceiling_id) is str
+            and record.canonical_ceiling_id
+            and record.canonical_ceiling_id == record.canonical_ceiling_id.strip()
         )
+        # Two identical replays are still two attempted original issuances;
+        # keep neither, and never allow a dict to select the last record.
+        # Embedded canonical ceiling/quantity identities must be exact.
+        return MappingProxyType({
+            record.canonical_ceiling_id: record
+            for record in self.records
+            if (
+                counts[record.canonical_ceiling_id] == 1
+                and record.physical_ceiling_surface_id == record.canonical_ceiling_id
+                and record.canonical_ceiling.canonical_ceiling_id == record.canonical_ceiling_id
+                and record.canonical_ceiling.ceiling_quantity_id == record.quantity.quantity_id
+                and record.quantity.input_entity_ids == (record.canonical_ceiling_id,)
+            )
+        })
 
 
 def publish_cross_view_ceiling_quantities(
