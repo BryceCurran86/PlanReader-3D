@@ -133,6 +133,15 @@ def test_original_office_a110_d15_gap_and_a120_ceiling_wall_difference():
                       if word[4]=="D15" and 179.28 < (word[0]+word[2])/2 < 231.36]
         assert len(original_d15)==1
         assert tuple(original_d15[0][5:8]) == (183,0,0)
+        # Independently printed A600 OFFICE door row; not a physical
+        # installation/count/width measurement without a structural host.
+        schedule_words = [word for word in doc[27].get_text("words")
+                          if word[5] == 112]
+        schedule_terms = {word[4] for word in schedule_words}
+        assert {"D15", "OFFICE", "SINGLE", "SWING", "920", "2040"}.issubset(
+            schedule_terms
+        )
+        assert len([w for w in schedule_words if w[4]=="D15"]) == 1
         assert any(row[2]==52239 for row in result["floor_boundary_source_paths"]["left"])
         assert any(row[2]==66216 for row in result["floor_boundary_source_paths"]["right"])
         assert any(row[2]==1112 for row in result["rcp_boundary_source_paths"]["left"])
