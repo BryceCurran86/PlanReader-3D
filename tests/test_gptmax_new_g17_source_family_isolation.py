@@ -15,7 +15,8 @@ from pb_raster_unchanged_band_segments import (
 
 
 def row(version, index):
-    return {"id":f"raster_segment:real-image-sha:{version}:real-full-sha:{index}",
+    return {"id":f"raster_segment:{'a'*64}:{version}:{'b'*64}:{index}",
+            "source_kind":"raster_pdf_visible_segment",
             "source_observation_id":f"original-obs-{index}",
             "geometry":(1.0,2.0,3.0,4.0)}
 

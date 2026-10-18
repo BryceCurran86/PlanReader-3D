@@ -97,6 +97,10 @@ from pb_wall_room_topology_wall_assembly import (
     W4SourceCandidateAddressCollision,
     assemble_wall_topology,
 )
+from pb_filtered_native_primitive_receipts import (
+    FilteredNativePrimitiveReceipt,
+    filtered_native_primitive_receipts,
+)
 from pb_wall_room_topology_typed_negative_evidence import (
     collect_source_lineage_grid_evidence,
 )
@@ -347,6 +351,9 @@ class PhysicalWallCandidateScopeResult:
     # equivalence, records, or reason codes. Downstream consumers must apply
     # their own proposition-specific gates before using these CANDIDATE atoms.
     typed_semantic_evidence_atoms: tuple[object, ...] = ()
+    # Non-authoritative original native lines excluded before W2. Never wall
+    # identity, continuity, room geometry, scale, or quantity evidence.
+    filtered_native_primitive_receipts: tuple[FilteredNativePrimitiveReceipt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1039,23 +1046,30 @@ def _segment_is_authenticated_vector_frame_edge(
 
 
 def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> bool:
-    """Only the exact producer-issued raster ID grammar is local G17 ink.
+    """Partition ONLY registered source-visible opening-local raster issuers.
 
-    The old substring test could treat an unrelated W2 primitive ID with
-    `:<G17 family>:` appearing elsewhere as an opening-local source wall,
-    dropping it from the ordinary W4 competitor universe. This is an
-    identity/provenance boundary, not a heuristic physical role decision.
+    A substring is not a source parent: arbitrary native and malformed raster
+    IDs must not change canonical page/F.07 W4 membership. The real raster
+    issuer uses "raster_segment:<image_sha>:<version>:<full_sha>:<index>"
+    and the source visibility authority has already authenticated its parent
+    and retained the image/full render SHA pair. Reject a malformed declaration
+    of this protected issuer rather than treating it as an ordinary wall.
     """
-    source_id = segment.get("id")
-    if type(source_id) is not str:
+    if segment.get("source_kind") != RASTER_PDF_VISIBLE_SEGMENT:
         return False
-    fields = source_id.split(":")
-    if (len(fields) != 5 or fields[0] != "raster_segment"
-            or not fields[1] or not fields[3]
-            or not fields[4].isdecimal()
-            or str(int(fields[4])) != fields[4]):
+    source_id = str(segment.get("id") or "")
+    parts = source_id.split(":")
+    if not any(identity in parts for identity in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS):
         return False
-    return fields[2] in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
+    if (
+        len(parts) != 5 or parts[0] != "raster_segment"
+        or parts[2] not in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
+        or any(len(parts[i]) != 64 or any(c not in "0123456789abcdef" for c in parts[i])
+               for i in (1, 3))
+        or not parts[4].isdecimal() or str(int(parts[4])) != parts[4]
+    ):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    return True
 
 
 def _partition_opening_local_supplemental_segments(
@@ -1209,25 +1223,23 @@ def _source_page_segments(
     page_visible_ids: list[str] = []
 
     if resolved_visible_observations is None:
-        page_rows: list[tuple[str, object]] = []
-        for observation_id in published.visible_observation_ids:
-            result = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+        # Authenticate the whole published universe once, then keep this page.
+        # A non-corroborated observation on any page still fails closed. Later
+        # calls reuse the identity-bound visible read instead of cloning every
+        # segment again.
+        try:
+            authenticated_rows = visibility.authenticated_visible_observations(
+                published
             )
-            observation = result.observation
-            if (
-                result.status is not EvidenceResolutionStatus.CORROBORATED
-                or observation is None
-            ):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-            if observation.page_id == page_id:
-                page_rows.append((observation_id, observation))
+        except RuntimeError as exc:
+            raise RuntimeError(
+                PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE
+            ) from exc
+        page_rows = [
+            (observation_id, observation)
+            for observation_id, observation in authenticated_rows
+            if observation.page_id == page_id
+        ]
     else:
         page_rows = list(resolved_visible_observations)
 
@@ -2251,7 +2263,11 @@ def _producer_proven_page_opening_records(
         # Cached positive proofs must still reauthenticate the *full* original
         # source, including competitors outside the page and any supplied
         # producer-owned page index, before reuse.
-        _authenticated_page_rows(visibility.authenticated_visible_observations(published))
+        _authenticated_page_rows(
+            visibility.authenticated_visible_observations(
+                published, bind_page_id=str(page_id)
+            )
+        )
         return cached
     proven: dict[str, PhysicalOpeningExistenceRecord] = {}
     # The original source-native dimension transaction fully authenticates
@@ -3121,7 +3137,7 @@ def _assemble_scope_result(
     opening_local_exact_source_endpoints_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     if type(opening_local_exact_source_endpoints_shadow) is not bool:
-        raise TypeError("exact G17 local W2 shadow must be explicit boolean")
+        raise TypeError("exact opening-local W2 policy requires an explicit boolean")
     scope_id = selector.decision_scope_id
     # Source-proven face protection is DIAGNOSTIC ONLY until the original
     # Lot16/W4 candidate, host and frame identity preservation is proved.
@@ -3132,6 +3148,9 @@ def _assemble_scope_result(
         segments,
         page_width=page_width,
         page_height=page_height,
+    )
+    excluded_native_receipts = filtered_native_primitive_receipts(
+        segments, topology_segments
     )
     if len(topology_segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
         return _blocked(
@@ -3144,8 +3163,12 @@ def _assemble_scope_result(
         proven_wall_strips,
     )
     if opening_local_exact_source_endpoints_shadow:
+        # This change never reaches an ordinary/complete W4 wall scope.
+        # Preserve original short source pixels rather than globally joining
+        # nearby endpoints under the 2.5pt production snap policy.
         graph = build_wall_graph_for_viewport(
-            graph_segments, gap_snap_tolerance_pt=0.0,
+            graph_segments,
+            gap_snap_tolerance_pt=0.0,
             exact_endpoint_index_shadow=True,
             exact_split_parent_lineage_shadow=True,
         )
@@ -3375,6 +3398,7 @@ def _assemble_scope_result(
         boundary_evaluation=boundary_evaluation,
         source_metadata_table=source_metadata_table,
         typed_semantic_evidence_atoms=typed_semantic_evidence_atoms,
+        filtered_native_primitive_receipts=excluded_native_receipts,
     )
 
 
@@ -3572,12 +3596,13 @@ def _build_authenticated_viewport_scope_results(
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
         )
-        # Viewport scopes consume the same original W2/W3/W4 structural
-        # universe as page scopes. Opening-local ink families are NOT
-        # canonical wall inputs, even when a source-owned F.07 viewport
-        # happens to fully contain the observation. Preserve the source
-        # opening family only in the incomplete supplemental scope.
-        page_segments, _supplemental = _partition_opening_local_supplemental_segments(
+        # A source-local opening ink fragment is incomplete supplemental W4
+        # evidence, never a canonical F.07 viewport structural wall. The
+        # page-wide W4 path already partitions it. Filtering before iterating
+        # eligible viewports ensures both scope types use the same canonical
+        # source universe and cannot silently rekey existing walls/hosts.
+        # This does not promote the supplemental fragments or change source IDs.
+        page_segments, _opening_local_supplemental = _partition_opening_local_supplemental_segments(
             page_segments,
         )
     except WallPageFrameUnresolved:
@@ -3820,7 +3845,11 @@ class PhysicalWallCandidateProducer:
         cls, source_visibility_producer, *,
         page_ids: Optional[Sequence[str]] = None,
     ):
-        """Original-source exact W2 only inside an incomplete G17 W4 scope."""
+        """An exact source-pixel W2 topology in an INCOMPLETE opening-local scope.
+
+        Default production, complete W4 scopes, count, hosts and customers are
+        unchanged. All source ownership checks remain producer-issued.
+        """
         return cls._from_source_visibility_producer(
             source_visibility_producer,
             page_ids=page_ids,
@@ -3962,6 +3991,10 @@ class PhysicalWallCandidateProducer:
         completeness, roles, quantities, or any other evidence-shaped input.
         The legacy no-argument behavior remains the complete decoded-page build.
         """
+        if type(opening_local_exact_source_endpoints_shadow) is not bool:
+            raise TypeError("exact local W2 source option must be an explicit boolean")
+        if opening_local_exact_source_endpoints_shadow and not supplemental_only:
+            raise ValueError("exact local W2 is prohibited in complete wall scopes")
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError(
                 "source_visibility_producer must be an actual SourceVisibilityProducer"
@@ -4067,10 +4100,7 @@ class PhysicalWallCandidateProducer:
                 if selected_page_ids is not None
                 else sorted(decoded_page_ids, key=lambda value: int(value))
             )
-            visible_by_page = _visible_observations_by_page(
-                source_producer=source_visibility_producer,
-                published=published,
-            )
+            visibility = source_visibility_producer.authority()
             text_receipts_by_page = _text_receipts_by_page(
                 source_producer=source_visibility_producer,
                 published=published,
@@ -4083,7 +4113,13 @@ class PhysicalWallCandidateProducer:
             )
 
             for page_id in materialized_page_ids:
-                page_visible_observations = visible_by_page.get(page_id, ())
+                # Check every visible observation, and keep a bound copy of
+                # this page only while its wall scope is built.
+                page_visible_observations = (
+                    visibility.authenticated_visible_observations(
+                        published, bind_page_id=str(page_id)
+                    )
+                )
                 if include_page_scopes:
                     builder = (
                         _build_opening_local_supplemental_scope_result

@@ -318,15 +318,13 @@ class OpeningEvidence:
         if source == "geometric":
             self.quantity = 1
         else:
-            self.quantity = max(1, int(qty))
+            self.quantity = max(0, int(qty))
 
     def compute_area(self) -> None:
         """Compute area_m2 from dimensions."""
         self._enforce_quantity_invariant()
-        if self.width_m is not None and self.height_m is not None:
-            self.area_m2 = round(
-                self.width_m * self.height_m * max(1, self.quantity), 4
-            )
+        if self.width_m is not None and self.height_m is not None and self.quantity > 0:
+            self.area_m2 = round(self.width_m * self.height_m * self.quantity, 4)
         else:
             self.area_m2 = None
 
@@ -886,7 +884,11 @@ def from_v134_record(
 
     width = _num(record.get("width_m"))
     height = _num(record.get("height_m"))
-    quantity = max(1, int(_num(record.get("quantity"), 1)))
+    raw_quantity = record.get("quantity")
+    if raw_quantity in (None, ""):
+        quantity = 0
+    else:
+        quantity = max(0, int(_num(raw_quantity)))
 
     ev = OpeningEvidence(
         opening_instance_id=str(record.get("id", uuid.uuid4().hex[:12])),
@@ -898,7 +900,7 @@ def from_v134_record(
         height_m=height if height > 0 else None,
         dimension_basis=DIMENSION_BASIS_UNKNOWN,
         dimension_source="manual",
-        sill_m=0.0 if opening_type in (OPENING_TYPE_DOOR, OPENING_TYPE_GARAGE, OPENING_TYPE_ROLLER) else 0.9,
+        sill_m=_num(record.get("sill_m")) if record.get("sill_m") not in (None, "") else 0.0,
         extraction_method="manual",
         evidence=[str(record.get("source_reference", ""))],
     )

@@ -436,9 +436,19 @@ class OpeningDimensionAuthority:
             existence.snapshot_id,
             str(existence.page_id),
         )
-        for observation_id in snapshot_ids:
-            if str(observation_id) not in page_ids:
-                continue
+        # Native visible lines are receipted without a second stored record, so
+        # they are not members of snapshot.observation_ids. Address those
+        # receipts after the stored ids, in stable order.
+        ordered = [
+            observation_id
+            for observation_id in snapshot_ids
+            if str(observation_id) in page_ids
+        ]
+        seen = {str(observation_id) for observation_id in ordered}
+        ordered.extend(
+            sorted(observation_id for observation_id in page_ids if str(observation_id) not in seen)
+        )
+        for observation_id in ordered:
             result = self._visibility.resolve_visible(
                 ObservationSelector(
                     document_id=existence.document_id,

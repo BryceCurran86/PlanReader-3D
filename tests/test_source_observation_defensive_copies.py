@@ -39,6 +39,16 @@ def instances():
     snapshot = max(store.snapshots.values(), key=lambda s: s.producer_generation)
     observation_id = snapshot.observation_ids[0]
     key = (snapshot.snapshot_id, observation_id)
+    if key not in store.verified_resolution_cache:
+        source._producer.authority().resolve(
+            ObservationSelector(
+                document_id=snapshot.document_id,
+                revision_id=snapshot.revision_id,
+                source_sha256=snapshot.source_sha256,
+                snapshot_id=snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
     return {
         "source": source,
         "published": published,
@@ -177,6 +187,7 @@ def test_resolve_returns_what_the_replace_based_read_returned(instances):
                 observation_id=observation_id,
             )
             stored = store.observations[(snapshot.snapshot_id, observation_id)]
+            first = reader.resolve(selector)
             template = store.verified_resolution_cache[(snapshot.snapshot_id, observation_id)][4]
             expected = dataclasses.replace(
                 template,
@@ -186,11 +197,16 @@ def test_resolve_returns_what_the_replace_based_read_returned(instances):
                     stored, snapshot_id=snapshot.snapshot_id, producer_generation=snapshot.producer_generation
                 ),
             )
-            first, second = reader.resolve(selector), reader.resolve(selector)
+            second = reader.resolve(selector)
             assert first.status is EvidenceResolutionStatus.CORROBORATED
             assert first == expected and second == expected
             assert first is not second and first.observation is not second.observation
             assert first.snapshot is not second.snapshot and first.source_revision is not second.source_revision
             assert first.observation is not stored
             checked += 1
-    assert checked > 50
+    # Every stored record of every generation is checked (up to 25 each). The
+    # native visible generation stores no records of its own (its lines are
+    # read views of the native records), so it holds the base id set.
+    assert len(store.snapshots) >= 4
+    assert checked == sum(min(25, len(s.observation_ids)) for s in store.snapshots.values())
+    assert checked > 40

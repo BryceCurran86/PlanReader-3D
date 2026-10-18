@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -82,6 +83,9 @@ from pb_source_observation_authority import (
     SourceObservationProducer,
     SourceObservationRecord,
     SourceRevisionRecord,
+    _content_sha256,
+    _record_payload,
+    committed_record_is_trusted,
 )
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
@@ -171,7 +175,10 @@ def _derive_visibility_page(
     page: fitz.Page,
     *,
     native_page: Optional[Mapping[str, Any]] = None,
+    source_native_finish_text_shadow: bool = False,
 ) -> _CachedVisibilityPage:
+    if type(source_native_finish_text_shadow) is not bool:
+        raise ValueError("source_finish_text_shadow_requires_explicit_bool")
     native = native_page if native_page is not None else extract_native_page(page)
     words: list[_CachedVisibilityWord] = []
     visible_segments: list[_CachedVisibleSegment] = []
@@ -183,7 +190,13 @@ def _derive_visibility_page(
                 raw_text=raw_text,
                 geometry=geometry,
                 primitive_ref=native_word_primitive_ref(word),
-                decision=classify_native_word_integrity(page, word),
+                decision=classify_native_word_integrity(
+                    page, word,
+                    **({
+                        "source_symbol_font_chain_shadow": True,
+                        "source_raw_no_active_text_clip_shadow": True,
+                    } if source_native_finish_text_shadow else {}),
+                ),
                 block_no=word.get("block_no"),
                 line_no=word.get("line_no"),
                 word_no=word.get("word_no"),
@@ -498,6 +511,68 @@ def _visible_observation_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+def _native_visible_alias(
+    parent: SourceObservationRecord,
+    snapshot: ProducerSnapshotRecord,
+    visible_id: str,
+    origin_kind: str,
+) -> SourceObservationRecord:
+    """One visible reading of a native line, sharing that line's geometry.
+
+    The returned record is a read view. It is not a second stored geometry.
+    """
+
+    if origin_kind not in (
+        VISIBLE_SEGMENT_ORIGIN_KIND,
+        RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+    ):
+        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+    view = replace(
+        parent,
+        observation_id=str(visible_id),
+        snapshot_id=snapshot.snapshot_id,
+        producer_generation=snapshot.producer_generation,
+        observation_kind=NATIVE_PDF_VISIBLE_SEGMENT,
+        source_primitive_ref=f"visible:{parent.source_primitive_ref}",
+        origin_kind=origin_kind,
+        derivation_parent_ids=(parent.observation_id,),
+        raw_text="",
+        viewport_id=None,
+        observation_payload_sha256="",
+    )
+    return replace(
+        view,
+        observation_payload_sha256=_content_sha256(_record_payload(view)),
+    )
+
+
+def _native_visible_alias_identity_holds(
+    parent: SourceObservationRecord,
+    visible_id: str,
+    origin_kind: str,
+) -> bool:
+    """True when ``visible_id`` is the id this native record's visible line was issued under.
+
+    A visible id hashes the line's document, revision, page, partition, parent id, geometry and origin kind. The view
+    is built from the parent, so comparing view fields with the parent proves nothing; recomputing the id does: a
+    receipt re-pointed at a different native record, or a parent whose geometry was replaced, yields another id.
+    """
+
+    try:
+        return str(visible_id) == _visible_observation_id(
+            document_id=parent.document_id,
+            revision_id=parent.revision_id,
+            page_id=parent.page_id,
+            partition_id=parent.source_partition_id,
+            primitive_ref=f"visible:{parent.source_primitive_ref}",
+            parent_observation_id=parent.observation_id,
+            geometry=parent.geometry,
+            origin_kind=origin_kind,
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def _canonical_raster_geometry(
     geometry: Sequence[float],
 ) -> tuple[float, float, float, float]:
@@ -768,18 +843,23 @@ class SourceVisibilityProducer:
 
     def __init__(self, *, producer_method: str, producer_version: str,
                  raster_paired_outer_faces_shadow: bool = False,
-                 exact_g17_nomination_shadow: bool = False) -> None:
+                 exact_g17_nomination_shadow: bool = False,
+                 source_native_finish_text_shadow: bool = False) -> None:
         if type(raster_paired_outer_faces_shadow) is not bool:
             raise ValueError("raster paired outer faces shadow must be explicit boolean")
         self._raster_paired_outer_faces_shadow = raster_paired_outer_faces_shadow
         if type(exact_g17_nomination_shadow) is not bool:
             raise ValueError("exact G17 nomination shadow must be explicit boolean")
         self._exact_g17_nomination_shadow = exact_g17_nomination_shadow
+        if type(source_native_finish_text_shadow) is not bool:
+            raise ValueError("source_finish_text_shadow_requires_explicit_bool")
+        self._source_native_finish_text_shadow = source_native_finish_text_shadow
         self._producer = SourceObservationProducer(
             producer_method=producer_method,
             producer_version=producer_version,
         )
         self._visibility_receipts: dict[tuple[str, str], str] = {}
+        self._visible_origin_kinds: dict[tuple[str, str], str] = {}
         self._raster_visibility_receipts: dict[
             tuple[str, str], RasterSegmentVisibilityReceipt
         ] = {}
@@ -832,6 +912,7 @@ class SourceVisibilityProducer:
         self._native_paint_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_page_text_dirs_cache: OrderedDict = OrderedDict()
+        self._native_dimension_page_word_cache: OrderedDict = OrderedDict()
         # Exactly one immutable original G17 page render pair. Bound to source
         # revision+snapshot+page+DPI; never reusable after augmentation or
         # across independent SourceVisibilityProducer instances. Opt-in only.
@@ -899,6 +980,7 @@ class SourceVisibilityProducer:
             self._visibility_receipts,
             self._raster_visibility_receipts,
             self._raster_opening_primitive_receipts,
+            visible_origin_kinds=self._visible_origin_kinds,
             _seal=_VISIBILITY_AUTHORITY_SEAL,
         )
 
@@ -1106,10 +1188,13 @@ class SourceVisibilityProducer:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         if self.published_snapshot_for_revision(published.revision.revision_id) != published:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-        rows = self.authority().authenticated_visible_observations(published)
+        rows = self.authority().authenticated_visible_observations(
+            published, bind_page_id=str(page_id)
+        )
         batch = dict(published=published, page_id=str(page_id), rows=rows,
                      first_selector=None, first_support=(), cache_key=None,
-                     components=(), source_segment_ids=frozenset())
+                     components=(), source_segment_ids=frozenset(),
+                     selected_evidence_cache=OrderedDict())
         self._native_dimension_proof_batch = batch
         try:
             # Independently authenticate original source bytes and ALL native
@@ -1151,7 +1236,9 @@ class SourceVisibilityProducer:
             # Revalidate the FULL original visible source, including original
             # parent lineage and the complete competitor inventory.
             self._native_dimension_proof_batch = None
-            fresh = self.authority().authenticated_visible_observations(published)
+            fresh = self.authority().authenticated_visible_observations(
+                published, bind_page_id=str(page_id)
+            )
             if fresh != rows or self.published_snapshot_for_revision(
                 published.revision.revision_id
             ) != published:
@@ -1245,13 +1332,33 @@ class SourceVisibilityProducer:
             if (not selected or selector.observation_id not in selected
                 or not selected <= batch['source_segment_ids']):
                 raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            return native_dimension_cap_evidence_from_components(
-                components=batch['components'], selected_ids=tuple(selected),
-                document_id=selector.document_id, page_id=batch['page_id'],
-                revision_id=selector.revision_id,
-                source_sha256=selector.source_sha256,
-                snapshot_id=selector.snapshot_id,
-            )
+            # The complete source was authenticated on batch entry and will
+            # be re-proved on exit. Repeated OPENING candidates routinely
+            # address the same immutable set of original page fragments.
+            # Cache the compiled candidate atoms only within THIS
+            # unpublished source-proof transaction; the standalone public
+            # entrypoint continues to prove the whole original source.
+            # EvidenceAtom is frozen, but its metadata is a dict: never
+            # return a cached object to a caller without a defensive clone.
+            ordered_ids = tuple(sorted(selected))
+            cached = batch['selected_evidence_cache'].get(ordered_ids)
+            if cached is None:
+                cached = native_dimension_cap_evidence_from_components(
+                    components=batch['components'], selected_ids=ordered_ids,
+                    document_id=selector.document_id, page_id=batch['page_id'],
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                )
+                # Even a genuine empty source-negative result is worth
+                # caching: it does not assert wall or opening nonexistence.
+                cache = batch['selected_evidence_cache']
+                cache[ordered_ids] = cached
+                if len(cache) > 64:
+                    cache.popitem(last=False)
+            else:
+                batch['selected_evidence_cache'].move_to_end(ordered_ids)
+            return deepcopy(cached)
         if authenticated is None:
             rows = visibility.authenticated_visible_observations(published)
         else:
@@ -1288,24 +1395,84 @@ class SourceVisibilityProducer:
         self._native_dimension_page_text_dirs_cache.move_to_end(directions_key)
         text_authority = self.text_integrity_authority()
         source_authority = self._producer.authority()
-        words = []
-        for observation_id in published.text_observation_ids:
-            word_selector = replace(selector, observation_id=observation_id)
-            source_result = source_authority.resolve(word_selector)
-            record = source_result.observation
-            if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
-                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            if record.page_id != page_id:
-                continue
-            text = text_authority.resolve_text(word_selector)
-            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
-                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-            if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
-                continue
-            receipt = text.receipt
-            words.append(dict(id=observation_id, text=text.trusted_text,
-                bbox=receipt.geometry,
-                axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+        store = self._producer._store
+        revision = store.revisions.get(selector.revision_id)
+        snapshot_obj = store.snapshots.get(selector.snapshot_id)
+        text_identity: list[tuple] = []
+        identity_reusable = revision is not None and snapshot_obj is not None
+        if identity_reusable:
+            for observation_id in published.text_observation_ids:
+                key = (selector.snapshot_id, observation_id)
+                record = store.observations.get(key)
+                verified = store.verified_resolution_cache.get(key)
+                fingerprint = store.record_fingerprints.get(key)
+                if (
+                    record is None
+                    or verified is None
+                    or verified[0] is not revision
+                    or verified[1] is not snapshot_obj
+                    or verified[2] is not record
+                    or verified[3] != fingerprint
+                    or any(
+                        (selector.snapshot_id, parent_id) not in store.observations
+                        for parent_id in record.derivation_parent_ids
+                    )
+                ):
+                    identity_reusable = False
+                    break
+                receipt = self._text_integrity_receipts.get(key)
+                text_identity.append((
+                    observation_id, record, record.raw_text, record.geometry, receipt,
+                ))
+        word_key = (selector.source_sha256, selector.snapshot_id, str(page_id))
+        cached_words = self._native_dimension_page_word_cache.get(word_key)
+        if (
+            identity_reusable
+            and cached_words is not None
+            and cached_words[0] == tuple(text_identity)
+        ):
+            words = cached_words[1]
+        else:
+            words = []
+            page_records = text_identity if identity_reusable else None
+            if page_records is None:
+                for observation_id in published.text_observation_ids:
+                    word_selector = replace(selector, observation_id=observation_id)
+                    source_result = source_authority.resolve(word_selector)
+                    record = source_result.observation
+                    if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
+                        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                    if record.page_id != page_id:
+                        continue
+                    text = text_authority.resolve_text(word_selector)
+                    if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                    if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                        continue
+                    receipt = text.receipt
+                    words.append(dict(id=observation_id, text=text.trusted_text,
+                        bbox=receipt.geometry,
+                        axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+            else:
+                for observation_id, record, _raw_text, _geometry, _receipt in page_records:
+                    if record.page_id != page_id:
+                        continue
+                    word_selector = replace(selector, observation_id=observation_id)
+                    text = text_authority.resolve_text(word_selector)
+                    if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                        raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                    if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                        continue
+                    receipt = text.receipt
+                    words.append(dict(id=observation_id, text=text.trusted_text,
+                        bbox=receipt.geometry,
+                        axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+                self._native_dimension_page_word_cache[word_key] = (
+                    tuple(text_identity), words,
+                )
+                while len(self._native_dimension_page_word_cache) > 2:
+                    self._native_dimension_page_word_cache.popitem(last=False)
+                self._native_dimension_page_word_cache.move_to_end(word_key)
         # Cache immutable geometry facts only. Every source byte, observation
         # and text receipt above is reauthenticated before even a cache hit.
         # The full authenticated inputs key the cache, not a caller's role or
@@ -1332,10 +1499,21 @@ class SourceVisibilityProducer:
             batch['source_segment_ids'] = frozenset(
                 i for i, r in records.items() if str(r.page_id) == str(page_id)
             )
-        return native_dimension_cap_evidence_from_components(components=components,
+        atoms = native_dimension_cap_evidence_from_components(components=components,
             selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
             revision_id=selector.revision_id, source_sha256=selector.source_sha256,
             snapshot_id=selector.snapshot_id)
+        # Seed the per-source transaction's same-selector positive/negative
+        # memo only after the original source, receipt and page component
+        # ownership gates above succeed. Full independent exit proof
+        # deliberately does NOT reuse this memo.
+        if batch is not None:
+            cache = batch['selected_evidence_cache']
+            cache[tuple(sorted(selected))] = atoms
+            if len(cache) > 64:
+                cache.popitem(last=False)
+            return deepcopy(atoms)
+        return atoms
 
     def raster_opening_image_placements(
         self,
@@ -1515,6 +1693,10 @@ class SourceVisibilityProducer:
             native_parent = self._visibility_receipts.get((old_snapshot_id, observation_id))
             if native_parent is not None:
                 self._visibility_receipts[(final_snapshot_id, observation_id)] = native_parent
+                origin_kind = self._visible_origin_kinds.get((old_snapshot_id, observation_id))
+                if origin_kind is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                self._visible_origin_kinds[(final_snapshot_id, observation_id)] = origin_kind
             raster_receipt = self._raster_visibility_receipts.get((old_snapshot_id, observation_id))
             if raster_receipt is not None:
                 self._raster_visibility_receipts[(final_snapshot_id, observation_id)] = raster_receipt
@@ -1765,7 +1947,7 @@ class SourceVisibilityProducer:
 
         snapshot = base.snapshot
         visible_ids: list[str] = []
-        visible_specs: list[dict[str, object]] = []
+        visible_aliases: list[tuple[str, str, str, tuple[float, ...]]] = []
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
         pdf: Optional[fitz.Document] = None
         try:
@@ -1777,6 +1959,7 @@ class SourceVisibilityProducer:
                     base.revision.source_sha256,
                     base.snapshot.snapshot_id,
                     int(page_number),
+                    self._source_native_finish_text_shadow,
                 )
                 derived = self._visibility_page_cache.get(visibility_cache_key)
                 if derived is not None:
@@ -1795,6 +1978,9 @@ class SourceVisibilityProducer:
                             if native_cached is None or native_cached.failed
                             else native_cached.native_page
                         ),
+                        **({
+                            "source_native_finish_text_shadow": True
+                        } if self._source_native_finish_text_shadow else {}),
                     )
                     self._visibility_page_cache[visibility_cache_key] = derived
                     self._visibility_page_cache.move_to_end(visibility_cache_key)
@@ -1858,31 +2044,25 @@ class SourceVisibilityProducer:
                         geometry=segment.geometry,
                         origin_kind=origin_kind,
                     )
-                    visible_specs.append(
-                        {
-                            "page_id": page_id,
-                            "source_partition_id": partition_id,
-                            "observation_kind": NATIVE_PDF_VISIBLE_SEGMENT,
-                            "source_primitive_ref": visible_ref,
-                            "origin_kind": origin_kind,
-                            "parent_observation_ids": (parent_id,),
-                            "raw_text": "",
-                            "geometry": segment.geometry,
-                            "viewport_id": None,
-                            "observation_id": visible_id,
-                        }
+                    visible_aliases.append(
+                        (
+                            visible_id,
+                            parent_id,
+                            origin_kind,
+                            tuple(float(value) for value in segment.geometry),
+                        )
                     )
                     visible_ids.append(visible_id)
         finally:
             if pdf is not None:
                 pdf.close()
 
-        if visible_specs:
-            snapshot = self._producer.publish_derived_observations(
+        if visible_aliases:
+            snapshot = self._producer.fork_derived_snapshot(
                 document_id=base.revision.document_id,
                 revision_id=base.revision.revision_id,
                 base_snapshot_id=base.snapshot.snapshot_id,
-                observations=visible_specs,
+                derived_observation_ids=visible_ids,
             )
 
         published = PublishedVisibleSourceSnapshot(
@@ -1893,37 +2073,37 @@ class SourceVisibilityProducer:
             visible_observation_ids=tuple(sorted(set(visible_ids))),
             text_observation_ids=tuple(sorted({item[0] for item in text_receipts})),
         )
-        source_authority = self._producer.authority()
-        for visible_id in published.visible_observation_ids:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=visible_id,
-                )
+        store = self._producer._store
+        for visible_id, parent_id, origin_kind, geometry in visible_aliases:
+            parent = store.observations.get(
+                (published.snapshot.snapshot_id, parent_id)
             )
-            if result.observation is None or len(result.observation.derivation_parent_ids) != 1:
-                raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: visible receipt missing parent")
+            if (
+                parent is None
+                or parent.observation_kind != "native_pdf_segment"
+                or parent.origin_kind != "native"
+                or tuple(parent.geometry) != geometry
+                or origin_kind not in (
+                    VISIBLE_SEGMENT_ORIGIN_KIND,
+                    RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+                )
+            ):
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: visible receipt missing parent"
+                )
             self._visibility_receipts[
                 (published.snapshot.snapshot_id, visible_id)
-            ] = result.observation.derivation_parent_ids[0]
+            ] = parent_id
+            self._visible_origin_kinds[
+                (published.snapshot.snapshot_id, visible_id)
+            ] = origin_kind
 
         for observation_id, receipt in text_receipts:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+            observation = store.observations.get(
+                (published.snapshot.snapshot_id, observation_id)
             )
-            observation = result.observation
             if (
                 observation is None
-                or result.status != EvidenceResolutionStatus.CORROBORATED
                 or observation.observation_kind != "native_pdf_word"
                 or observation.origin_kind != "native"
                 or observation.observation_id != receipt.parent_observation_id
@@ -1945,6 +2125,18 @@ class SourceVisibilityProducer:
                     f"{PRODUCER_INTEGRITY_FAILURE}: text integrity receipt differs"
                 )
             self._text_integrity_receipts[key] = receipt
+
+        # The committed records and receipts are the source. The raw page
+        # decode and the derived page used to build them are not read again.
+        source_sha = published.revision.source_sha256
+        for cache_key in [
+            key for key in self._producer._native_page_decode_cache if key[0] == source_sha
+        ]:
+            self._producer._native_page_decode_cache.pop(cache_key, None)
+        for cache_key in [
+            key for key in self._visibility_page_cache if key[0] == source_sha
+        ]:
+            self._visibility_page_cache.pop(cache_key, None)
 
         self._published_by_revision[published.revision.revision_id] = published
         return published
@@ -2087,21 +2279,20 @@ class SourceVisibilityProducer:
         if published is None:
             raise ValueError(OBSERVATION_UNAVAILABLE)
 
-        source_authority = self._producer.authority()
         old_snapshot_id = published.snapshot.snapshot_id
         pages_with_visible: set[str] = set()
+        store = self._producer._store
         for observation_id in published.visible_observation_ids:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=old_snapshot_id,
-                    observation_id=observation_id,
+            parent_id = self._visibility_receipts.get((old_snapshot_id, observation_id))
+            if parent_id is not None:
+                observation = store.observations.get((old_snapshot_id, parent_id))
+            else:
+                observation = store.observations.get((old_snapshot_id, observation_id))
+            if observation is None:
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: visible observation missing"
                 )
-            )
-            if result.observation is not None:
-                pages_with_visible.add(str(result.observation.page_id))
+            pages_with_visible.add(str(observation.page_id))
 
         snapshot = published.snapshot
         visible_ids = list(published.visible_observation_ids)
@@ -2443,6 +2634,14 @@ class SourceVisibilityProducer:
                 self._visibility_receipts[
                     (final_snapshot_id, observation_id)
                 ] = native_parent
+                origin_kind = self._visible_origin_kinds.get(
+                    (old_snapshot_id, observation_id)
+                )
+                if origin_kind is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                self._visible_origin_kinds[
+                    (final_snapshot_id, observation_id)
+                ] = origin_kind
             raster_receipt = self._raster_visibility_receipts.get(
                 (old_snapshot_id, observation_id)
             )
@@ -2709,14 +2908,18 @@ class SourceVisibilityProducer:
             if attempt_key in self._raster_opening_primitive_attempted_pages:
                 continue
 
-            image_regions = self._producer.native_page_image_regions(
+            image_regions, source_frame = self._producer.native_page_image_regions(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
                 snapshot_id=snapshot.snapshot_id,
                 page_id=page_id,
+                include_native_frame=True,
             )
-            if not image_regions:
+            if not image_regions or source_frame.rotation != 0:
+                # Existing raster-opening evidence cannot be registered from
+                # rotated images-only pixels. Preserve the original ABSTAIN
+                # without cloning/redacting/rendering an unusable CAD page.
                 self._raster_opening_primitive_attempted_pages.add(attempt_key)
                 continue
 
@@ -2853,6 +3056,14 @@ class SourceVisibilityProducer:
                 self._visibility_receipts[(final_snapshot_id, observation_id)] = (
                     native_parent
                 )
+                origin_kind = self._visible_origin_kinds.get(
+                    (old_snapshot_id, observation_id)
+                )
+                if origin_kind is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                self._visible_origin_kinds[(final_snapshot_id, observation_id)] = (
+                    origin_kind
+                )
             raster_receipt = self._raster_visibility_receipts.get(
                 (old_snapshot_id, observation_id)
             )
@@ -2899,6 +3110,26 @@ class SourceVisibilityProducer:
         return updated
 
 
+def _bound_clone_matches(clone, record, snapshot) -> bool:
+    """True when a returned frozen clone still matches the store record.
+
+    snapshot_id and producer_generation are taken from the snapshot being
+    read. Every other field must still equal the stored record, so an
+    object.__setattr__ on the returned clone cannot be served again.
+    """
+    for field in fields(type(clone)):
+        value = getattr(clone, field.name)
+        if field.name == "snapshot_id":
+            if value != snapshot.snapshot_id:
+                return False
+        elif field.name == "producer_generation":
+            if value != snapshot.producer_generation:
+                return False
+        elif getattr(record, field.name) != value:
+            return False
+    return True
+
+
 class SourceVisibilityAuthority:
     """Read-only authority for producer-receipted visible segment observations.
 
@@ -2917,6 +3148,7 @@ class SourceVisibilityAuthority:
             tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
         ],
         *,
+        visible_origin_kinds: Mapping[tuple[str, str], str] | None = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _VISIBILITY_AUTHORITY_SEAL:
@@ -2929,6 +3161,9 @@ class SourceVisibilityAuthority:
         self._raster_visibility_receipts = raster_visibility_receipts
         self._raster_opening_primitive_receipts = (
             raster_opening_primitive_receipts
+        )
+        self._visible_origin_kinds = (
+            {} if visible_origin_kinds is None else visible_origin_kinds
         )
 
     def _blocked(self, reason: str) -> SourceObservationAuthorityResult:
@@ -3111,11 +3346,12 @@ class SourceVisibilityAuthority:
         for receipt_snapshot_id, observation_id in self._visibility_receipts:
             if receipt_snapshot_id != snapshot_id:
                 continue
-            record = store.observations.get((snapshot_id, observation_id))
+            parent_id = self._visibility_receipts[(receipt_snapshot_id, observation_id)]
+            record = store.observations.get((snapshot_id, parent_id))
             if (
                 record is not None
                 and str(record.page_id) == page_id
-                and store.snapshot_contains_observation(snapshot, observation_id)
+                and store.snapshot_contains_observation(snapshot, parent_id)
             ):
                 ids.add(str(observation_id))
         for (
@@ -3137,8 +3373,156 @@ class SourceVisibilityAuthority:
                     ids.add(str(observation_id))
         return frozenset(ids)
 
+    def _reusable_visible_rows(
+        self,
+        store,
+        snapshot_id: str,
+        snapshot,
+        published: "PublishedVisibleSourceSnapshot",
+    ):
+        """Return the prior bound rows only while every store object is unchanged.
+
+        A mutated returned clone, a replaced record, or a replaced receipt misses
+        and the caller rebuilds from the store. That keeps the batch exit check
+        able to see a row that was changed after it was first returned.
+        """
+        cached = store.visible_authentication_cache.get(snapshot_id)
+        if cached is None:
+            return None
+        cached_snapshot, identity, rows = cached
+        visible_ids = tuple(str(item) for item in published.visible_observation_ids)
+        if cached_snapshot is not snapshot or len(identity) != len(visible_ids):
+            return None
+        for item, observation_id in zip(identity, visible_ids):
+            key = (snapshot_id, observation_id)
+            record = store.observations.get(key)
+            native = self._visibility_receipts.get(key)
+            raster = self._raster_visibility_receipts.get(key)
+            if native is None and raster is None:
+                return None
+            if raster is None:
+                parent = store.observations.get((snapshot_id, native))
+                page_parent = None
+                if parent is None:
+                    return None
+            else:
+                if record is None:
+                    return None
+                parent = store.observations.get(
+                    (snapshot_id, raster.parent_observation_id)
+                )
+                page_parent = store.observations.get(
+                    (snapshot_id, raster.page_parent_observation_id)
+                )
+            (
+                cached_id, cached_record, cached_native, cached_raster,
+                cached_parent, cached_page_parent,
+            ) = item
+            # A native visible line is not a second stored record. Reuse holds
+            # while the native parent object and the receipt are unchanged.
+            alias = native is not None and record is None
+            if (
+                cached_id != observation_id
+                or (not alias and cached_record is not record)
+                or cached_native is not native
+                or cached_raster is not raster
+                or cached_parent is not parent
+                or cached_page_parent is not page_parent
+            ):
+                return None
+        for (observation_id, bound), item in zip(rows, identity):
+            if observation_id != item[0] or not _bound_clone_matches(
+                bound, item[1], snapshot
+            ):
+                return None
+        # Python may return the same tuple from tuple() or a full slice.
+        # Unpacking builds a distinct exit tuple while the bound records stay
+        # shared, so the universe is not cloned again.
+        return (*rows,)
+
+    def _remember_page_index(
+        self, store, snapshot_id, snapshot, published, page_ids, receipts
+    ) -> None:
+        ensure_observations = getattr(store.observations, "ensure_flat", None)
+        ensure_fingerprints = getattr(store.record_fingerprints, "ensure_flat", None)
+        if ensure_observations is None or ensure_fingerprints is None:
+            store.visible_page_index.pop(snapshot_id, None)
+            return
+        observations = ensure_observations(snapshot_id)
+        fingerprints = ensure_fingerprints(snapshot_id)
+        if observations is None or fingerprints is None:
+            store.visible_page_index.pop(snapshot_id, None)
+            return
+        store.visible_page_index[snapshot_id] = (
+            published,
+            snapshot,
+            observations,
+            fingerprints,
+            {page_id: tuple(ids) for page_id, ids in page_ids.items()},
+            tuple(receipts),
+        )
+
+    def _reusable_page_rows(
+        self, store, snapshot_id, snapshot, published, bind_page_id: str
+    ):
+        cached = store.visible_page_index.get(snapshot_id)
+        if cached is None:
+            return None
+        (
+            cached_published,
+            cached_snapshot,
+            observations,
+            fingerprints,
+            ids_by_page,
+            receipts,
+        ) = cached
+        if cached_published is not published or cached_snapshot is not snapshot:
+            return None
+        observation_snaps = getattr(store.observations, "_snaps", None)
+        fingerprint_snaps = getattr(store.record_fingerprints, "_snaps", None)
+        if observation_snaps is None or fingerprint_snaps is None:
+            return None
+        observation_snap = observation_snaps.get(snapshot_id)
+        fingerprint_snap = fingerprint_snaps.get(snapshot_id)
+        if (
+            observation_snap is None
+            or fingerprint_snap is None
+            or observation_snap.flat is not observations
+            or fingerprint_snap.flat is not fingerprints
+        ):
+            return None
+        for observation_id, parent, raster in receipts:
+            if (
+                self._visibility_receipts.get((snapshot_id, observation_id))
+                is not parent
+                or self._raster_visibility_receipts.get(
+                    (snapshot_id, observation_id)
+                )
+                is not raster
+            ):
+                return None
+        rows: list[tuple[str, object]] = []
+        for observation_id in ids_by_page.get(bind_page_id, ()):
+            record = observations.get(observation_id)
+            if record is None:
+                parent_id = self._visibility_receipts.get((snapshot_id, observation_id))
+                origin_kind = self._visible_origin_kinds.get(
+                    (snapshot_id, observation_id)
+                )
+                parent = None if parent_id is None else observations.get(parent_id)
+                if parent is None or origin_kind is None:
+                    return None
+                record = _native_visible_alias(
+                    parent, snapshot, observation_id, origin_kind
+                )
+            rows.append((observation_id, _bind_record_to_snapshot(record, snapshot)))
+        return tuple(rows)
+
     def authenticated_visible_observations(
-        self, published: "PublishedVisibleSourceSnapshot"
+        self,
+        published: "PublishedVisibleSourceSnapshot",
+        *,
+        bind_page_id: str | None = None,
     ) -> tuple[tuple[str, object], ...]:
         """Bulk-authenticate the producer-owned visible universe for one snapshot.
 
@@ -3176,6 +3560,23 @@ class SourceVisibilityAuthority:
         ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
 
+        # A page proof still checks every visible observation. After one
+        # successful check, a later page keeps a bound copy of that page only
+        # while the snapshot's records and receipts are still the same objects.
+        if bind_page_id is not None:
+            store.visible_authentication_cache.pop(snapshot_id, None)
+            reused_page = self._reusable_page_rows(
+                store, snapshot_id, snapshot, published, str(bind_page_id)
+            )
+            if reused_page is not None:
+                return reused_page
+        else:
+            reused = self._reusable_visible_rows(
+                store, snapshot_id, snapshot, published
+            )
+            if reused is not None:
+                return reused
+
         def _record(observation_id: str):
             observation_id = str(observation_id)
             key = (snapshot_id, observation_id)
@@ -3186,7 +3587,7 @@ class SourceVisibilityAuthority:
                 raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
             expected = store.record_fingerprints.get(key)
             cached = store.verified_resolution_cache.get(key)
-            if not (
+            cache_hit = (
                 expected is not None
                 and cached is not None
                 and cached[0] is revision
@@ -3197,6 +3598,9 @@ class SourceVisibilityAuthority:
                     (snapshot_id, parent_id) in store.observations
                     for parent_id in record.derivation_parent_ids
                 )
+            )
+            if not cache_hit and not committed_record_is_trusted(
+                store, snapshot_id, record, expected
             ):
                 resolved = self._source_authority.resolve(
                     ObservationSelector(
@@ -3218,6 +3622,9 @@ class SourceVisibilityAuthority:
             return record
 
         rows: list[tuple[str, object]] = []
+        identity: list[tuple] = []
+        page_ids: dict[str, list[str]] = {}
+        receipts: list[tuple] = []
         for observation_id in published.visible_observation_ids:
             observation_id = str(observation_id)
             expected_parent = self._visibility_receipts.get(
@@ -3229,8 +3636,34 @@ class SourceVisibilityAuthority:
             if expected_parent is None and raster_receipt is None:
                 raise RuntimeError(VISIBILITY_RECEIPT_UNAVAILABLE)
 
-            observation = _record(observation_id)
             if expected_parent is not None:
+                parent = _record(expected_parent)
+                origin_kind = self._visible_origin_kinds.get(
+                    (snapshot_id, observation_id)
+                )
+                if origin_kind not in (
+                    VISIBLE_SEGMENT_ORIGIN_KIND,
+                    RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                if not _native_visible_alias_identity_holds(
+                    parent, observation_id, origin_kind
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+                page_parent = None
+                page_key = str(parent.page_id)
+                if bind_page_id is not None and page_key != str(bind_page_id):
+                    if (
+                        parent.observation_kind != "native_pdf_segment"
+                        or parent.origin_kind != "native"
+                    ):
+                        raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+                    page_ids.setdefault(page_key, []).append(observation_id)
+                    receipts.append((observation_id, expected_parent, raster_receipt))
+                    continue
+                observation = _native_visible_alias(
+                    parent, snapshot, observation_id, origin_kind
+                )
                 if (
                     observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
                     or observation.origin_kind not in (
@@ -3239,11 +3672,7 @@ class SourceVisibilityAuthority:
                     )
                     or observation.viewport_id is not None
                     or observation.derivation_parent_ids != (expected_parent,)
-                ):
-                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-                parent = _record(expected_parent)
-                if (
-                    parent.observation_kind != "native_pdf_segment"
+                    or parent.observation_kind != "native_pdf_segment"
                     or parent.origin_kind != "native"
                     or parent.document_id != observation.document_id
                     or parent.revision_id != observation.revision_id
@@ -3256,6 +3685,7 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
             else:
+                observation = _record(observation_id)
                 assert raster_receipt is not None
                 if (
                     observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
@@ -3302,7 +3732,30 @@ class SourceVisibilityAuthority:
                 ):
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
 
-            rows.append((observation_id, _bind_record_to_snapshot(observation, snapshot)))
+            page_key = str(observation.page_id)
+            page_ids.setdefault(page_key, []).append(observation_id)
+            receipts.append((observation_id, expected_parent, raster_receipt))
+            if bind_page_id is not None and page_key != str(bind_page_id):
+                continue
+            bound = _bind_record_to_snapshot(observation, snapshot)
+            rows.append((observation_id, bound))
+            identity.append((
+                observation_id,
+                observation,
+                expected_parent,
+                raster_receipt,
+                parent,
+                page_parent,
+            ))
+        self._remember_page_index(
+            store, snapshot_id, snapshot, published, page_ids, receipts
+        )
+        if bind_page_id is not None:
+            return tuple(rows)
+        store.visible_authentication_cache.clear()
+        store.visible_authentication_cache[snapshot_id] = (
+            snapshot, tuple(identity), tuple(rows),
+        )
         return tuple(rows)
 
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
@@ -3314,6 +3767,68 @@ class SourceVisibilityAuthority:
         )
         if expected_parent is None and raster_receipt is None:
             return self._blocked(VISIBILITY_RECEIPT_UNAVAILABLE)
+
+        if expected_parent is not None and (
+            selector.snapshot_id, selector.observation_id
+        ) not in self._source_authority._store.observations:
+            parent_result = self._source_authority.resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=expected_parent,
+                )
+            )
+            parent = parent_result.observation
+            if parent_result.status != EvidenceResolutionStatus.CORROBORATED:
+                # The visible line is a read view of this native record, so it fails exactly as the stored visible
+                # record used to: a stale revision stays stale_revision, an integrity conflict stays a conflict.
+                return parent_result
+            if parent is None:
+                return self._blocked(OBSERVATION_UNAVAILABLE)
+            origin_kind = self._visible_origin_kinds.get(
+                (selector.snapshot_id, selector.observation_id)
+            )
+            if origin_kind not in (
+                VISIBLE_SEGMENT_ORIGIN_KIND,
+                RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+            ):
+                return self._conflict(PRODUCER_INTEGRITY_FAILURE)
+            if (
+                parent.observation_kind != "native_pdf_segment"
+                or parent.origin_kind != "native"
+                or parent_result.snapshot is None
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
+            if not _native_visible_alias_identity_holds(
+                parent, selector.observation_id, origin_kind
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
+            observation = _native_visible_alias(
+                parent,
+                parent_result.snapshot,
+                selector.observation_id,
+                origin_kind,
+            )
+            if (
+                parent.document_id != observation.document_id
+                or parent.revision_id != observation.revision_id
+                or parent.source_sha256 != observation.source_sha256
+                or parent.page_id != observation.page_id
+                or parent.source_partition_id != observation.source_partition_id
+                or parent.geometry != observation.geometry
+                or observation.source_primitive_ref
+                != f"visible:{parent.source_primitive_ref}"
+                or observation.derivation_parent_ids != (expected_parent,)
+            ):
+                return self._conflict(VISIBILITY_PARENT_MISMATCH)
+            return replace(
+                parent_result,
+                proposition=VISIBLE_SOURCE_OBSERVATION_EXISTS,
+                reason_codes=("producer_owned_visible_source_observation_resolved",),
+                observation=observation,
+            )
 
         result = self._source_authority.resolve(selector)
         observation = result.observation

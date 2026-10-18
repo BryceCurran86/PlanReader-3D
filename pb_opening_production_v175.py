@@ -166,12 +166,22 @@ def _safe_legacy_save(original_save, safe_normalise):
     return safe_save
 
 
+def _stated_quantity(raw: Dict[str, Any]) -> int:
+    """Opening count only when the row states one. A blank count is not one opening."""
+    value = raw.get("quantity")
+    # _num coerces bool, fractions and scientific notation to apparently
+    # valid counts. Never infer an integer opening count from such values.
+    if not _is_valid_positive_int(value):
+        return 0
+    return int(value)
+
+
 def _safe_deducted_area(openings: Iterable[Dict[str, Any]]) -> float:
     total = 0.0
     for raw in openings or []:
         row = dict(raw or {})
         if is_authorised_deduction(row):
-            total += _num(row.get("width_m")) * _num(row.get("height_m")) * max(1, int(_num(row.get("quantity"), 1)))
+            total += _num(row.get("width_m")) * _num(row.get("height_m")) * _stated_quantity(row)
     return round(total, 4)
 
 
@@ -693,7 +703,7 @@ def merge_b5_authoritative(
         rec.setdefault("resolved_wall_ref", rec.get("wall_ref") or "")
         area = round(
             _num(rec.get("width_m")) * _num(rec.get("height_m"))
-            * max(1, int(_num(rec.get("quantity"), 1))), 4)
+            * _stated_quantity(rec), 4)
         rec["area_m2"] = area
         rec["deduct"] = True
         rec["deduction_decision"] = DEDUCTION_DEDUCTED

@@ -74,7 +74,10 @@ def test_nearby_or_touching_coarse_render_never_suppresses_new_original_span():
 
 @pytest.mark.parametrize("family",OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS)
 def test_registered_source_families_stay_out_of_canonical_page_and_viewport_w4(family):
-    assert _is_opening_local_supplemental_segment({"id":f"raster_segment:im:{family}:full:0"})
+    assert _is_opening_local_supplemental_segment({
+        "id":f"raster_segment:{'a'*64}:{family}:{'b'*64}:0",
+        "source_kind":"raster_pdf_visible_segment",
+    })
     assert not _is_opening_local_supplemental_segment({"id":f"native:im:{family}:full:0"})
 
 

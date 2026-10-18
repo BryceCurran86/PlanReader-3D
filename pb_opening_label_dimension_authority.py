@@ -927,7 +927,8 @@ _AUTHORITY_SEAL = object()
 
 
 class OpeningLabelDimensionProducer:
-    def __init__(self, source: SourceVisibilityProducer, *, _seal: object = None) -> None:
+    def __init__(self, source: SourceVisibilityProducer, *, _seal: object = None,
+                 bifold_descriptor_shadow: bool = False) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
                 "OpeningLabelDimensionProducer must be obtained from "
@@ -935,6 +936,9 @@ class OpeningLabelDimensionProducer:
             )
         if type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be producer-owned")
+        if type(bifold_descriptor_shadow) is not bool:
+            raise ValueError("bifold descriptor shadow must be explicit boolean")
+        self._bifold_descriptor_shadow = bifold_descriptor_shadow
         self._source = source
         self._physical = source.physical_opening_authority()
         self._results: dict[_Key, OpeningLabelDimensionResult] = {}
@@ -973,8 +977,9 @@ class OpeningLabelDimensionProducer:
     def from_source_visibility_producer(
         cls,
         source: SourceVisibilityProducer,
+        *, bifold_descriptor_shadow: bool = False,
     ) -> "OpeningLabelDimensionProducer":
-        return cls(source, _seal=_PRODUCER_SEAL)
+        return cls(source, _seal=_PRODUCER_SEAL, bifold_descriptor_shadow=bifold_descriptor_shadow)
 
     def publish_scope(self, selector: ObservationSelector) -> OpeningLabelDimensionResult:
         if type(selector) is not ObservationSelector:
@@ -1023,7 +1028,8 @@ class OpeningLabelDimensionProducer:
 
         semantic_result = (
             OpeningLabelSemanticProducer.from_source_visibility_producer(
-                self._source
+                self._source,
+                **({"bifold_descriptor_shadow": True} if self._bifold_descriptor_shadow else {})
             ).publish_scope(selector)
         )
         semantic_evidence = getattr(semantic_result, "evidence", None)

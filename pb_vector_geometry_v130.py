@@ -682,17 +682,33 @@ def solve_scale(evidence: Sequence[Dict[str, Any]], tolerance: float = 0.035) ->
     valid = [dict(e) for e in evidence if 5.0 <= _num(e.get("px_per_m")) <= 5000.0]
     if not valid:
         return {"px_per_m": 0.0, "verified": False, "confidence": 0, "evidence": [], "agreement_percent": None}
-    best_group: List[Dict[str, Any]] = []
-    best_weight = -1.0
+    grouped: List[Tuple[float, float, List[Dict[str, Any]]]] = []
     for candidate in valid:
         base = _num(candidate["px_per_m"])
         group = [e for e in valid if abs(_num(e["px_per_m"]) - base) / max(base, 1e-9) <= tolerance]
-        weight = sum(max(0.25, _num(e.get("weight"), 1.0)) for e in group)
-        if weight > best_weight:
-            best_weight, best_group = weight, group
+        weight = math.fsum(max(0.25, _num(e.get("weight"), 1.0)) for e in group)
+        weights_now = [max(0.25, _num(e.get("weight"), 1.0)) for e in group]
+        values_now = [_num(e["px_per_m"]) for e in group]
+        solved_now = math.fsum(v * w for v, w in zip(values_now, weights_now)) / math.fsum(weights_now)
+        grouped.append((weight, solved_now, group))
+    best_weight = max(item[0] for item in grouped)
+    winners = [item for item in grouped if abs(item[0] - best_weight) <= 1e-9]
+    distinct_scales: List[float] = []
+    for _weight, solved_now, _group in winners:
+        if not any(math.isclose(solved_now, prior, rel_tol=1e-12, abs_tol=1e-9) for prior in distinct_scales):
+            distinct_scales.append(solved_now)
+    if len(distinct_scales) != 1:
+        return {"px_per_m": 0.0, "verified": False, "confidence": 0, "evidence": [], "agreement_percent": None}
+    # A unique solved value may have multiple supporting hypotheses. Retain
+    # their union rather than electing whichever source group appeared first.
+    best_group = []
+    for _weight, _solved_now, group in winners:
+        for reading in group:
+            if reading not in best_group:
+                best_group.append(reading)
     weights = [max(0.25, _num(e.get("weight"), 1.0)) for e in best_group]
     values = [_num(e["px_per_m"]) for e in best_group]
-    solved = sum(v * w for v, w in zip(values, weights)) / sum(weights)
+    solved = distinct_scales[0]
     spread = max(abs(v - solved) / solved for v in values) if values else 1.0
     methods = {str(e.get("method")) for e in best_group}
     dimension_count = sum(1 for e in best_group if e.get("method") == "dimension_line")

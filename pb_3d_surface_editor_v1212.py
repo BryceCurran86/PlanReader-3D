@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 import plotly.graph_objects as go
@@ -82,8 +83,7 @@ def substrate_color(code: str, fallback: str = "#C9BFA6") -> str:
     return fallback
 
 
-def infer_substrate(finish: Any) -> str:
-    text = str(finish or "").lower()
+def _substrate_code(text: str) -> str:
     rules = [
         (("soffit", "eave"), "SOF"),
         (("linea", "lineaboard"), "EC1"),
@@ -103,6 +103,22 @@ def infer_substrate(finish: Any) -> str:
         if any(needle in text for needle in needles):
             return code
     return "OTHER"
+
+
+def infer_substrate(finish: Any) -> str:
+    text = str(finish or "").lower()
+    parts = [part.strip() for part in re.split(r"\b(?:and|or)\b", text) if part.strip()]
+    if len(parts) > 1:
+        codes = []
+        for part in parts:
+            code = _substrate_code(part)
+            if code != "OTHER" and code not in codes:
+                codes.append(code)
+        if len(codes) > 1:
+            return "OTHER"
+        if len(codes) == 1:
+            return codes[0]
+    return _substrate_code(text)
 
 
 def _quad(surface_id: str, mass: Dict[str, Any], face: str, points: Sequence[Tuple[float, float, float]], area_m2: float) -> Dict[str, Any]:

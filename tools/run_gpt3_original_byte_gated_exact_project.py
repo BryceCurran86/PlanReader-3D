@@ -14,7 +14,7 @@ from pathlib import Path
 import sys
 from typing import Any, Sequence
 
-from scripts.report_full_plan_v2_readiness import _write_readiness_report
+from tools.gpt3_safe_original_report_output import (preflight_new_diagnostic, write_new_diagnostic)
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
@@ -270,16 +270,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    protected = (FROZEN_ROOT, args.manifest, args.sealed_run,
+                 args.identity_map, *args.source)
+    # The report destination must not replace another result, even if that
+    # existing JSON looks like our diagnostic. Reject before source IO.
+    preflight_new_diagnostic(args.output, protected_roots=protected)
     report = build_original_byte_gated_project_report(
         manifest_path=args.manifest, sealed_run_path=args.sealed_run,
         identity_map_path=args.identity_map, original_files=args.source,
     )
-    _write_readiness_report(
+    write_new_diagnostic(
         args.output, json.dumps(report, indent=2, sort_keys=True) + "\n",
-        protected_roots=(
-            FROZEN_ROOT, args.manifest, args.sealed_run,
-            args.identity_map, *args.source,
-        ),
+        protected_roots=protected,
     )
     return 0
 

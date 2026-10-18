@@ -18,7 +18,10 @@ import importlib
 import importlib.util
 import sys
 
-from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
+from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+from tools.gpt3_safe_original_report_output import (
+    preflight_new_diagnostic, write_new_diagnostic,
+)
 from pb_customer_output_verification import (
     _customer_quantity_id,
     verify_sealed_customer_output,
@@ -250,12 +253,14 @@ def build_four_project_evidence_ledger(
             "reconciliation_complete": False,
             "reason_codes": [],
             "exact_project_report": None,
+            "first_failing_authority_stage": None,
         }
         rows.append(entry)
         original_files, path_conflicts = _resolve_original_paths(
             source_dir, project_id, manifest.source_documents,
         )
         if path_conflicts:
+            entry["first_failing_authority_stage"] = "original_source_path_conflict"
             entry["publication_status"] = "CONFLICT"
             entry["reason_codes"] = path_conflicts
             continue
@@ -264,6 +269,7 @@ def build_four_project_evidence_ledger(
             if not path.is_file()
         ]
         if missing:
+            entry["first_failing_authority_stage"] = "original_source_file_absent"
             missing_names = set(missing)
             entry["missing_original_source_document_count"] = len(missing)
             entry["missing_original_source_document_roles"] = sorted(
@@ -282,6 +288,7 @@ def build_four_project_evidence_ledger(
             original_manifest, original_files,
         )
         if not verified:
+            entry["first_failing_authority_stage"] = "original_source_sha_rejected"
             entry["publication_status"] = "CONFLICT"
             entry["reason_codes"] = source_reasons
             continue
@@ -299,6 +306,7 @@ def build_four_project_evidence_ledger(
             ) if not path.is_file()
         ]
         if missing_evidence:
+            entry["first_failing_authority_stage"] = "sealed_reconciliation_artifact_absent"
             entry["reconciliation_input_presence_status"] = "MISSING"
             entry["missing_signed_reconciliation_artifacts"] = missing_evidence
             entry["reason_codes"] = [
@@ -308,13 +316,17 @@ def build_four_project_evidence_ledger(
             continue
 
         entry["reconciliation_input_presence_status"] = "PRESENT_UNVERIFIED"
+        first_failure_stage = "signed_artifact_byte_read"
         try:
             signed_hashes = {
                 path: _sha256(path)
                 for path in (canonical_manifest, sealed_path, identity_path, customer_path)
             }
+            first_failure_stage = "sealed_source_run_parse_or_signature"
             sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
+            first_failure_stage = "independent_identity_map_parse"
             mapping = identity_map_from_dict(_json_object(identity_path))
+            first_failure_stage = "signed_source_document_envelope"
             actual_hashes = set(hashes)
             if (
                 sealed.project_id != project_id
@@ -325,13 +337,18 @@ def build_four_project_evidence_ledger(
                 or set(mapping.source_sha256s) != actual_hashes
             ):
                 raise ValueError("source envelope or project identity mismatch")
+            first_failure_stage = "customer_projection_parse"
             customer_rows = _json_customer_rows(customer_path, allow_manual=True)
+            first_failure_stage = "signed_customer_bijection"
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
+            first_failure_stage = "source_owned_trade_semantics"
             _enforce_mapped_production_family_trade(manifest, sealed, mapping)
+            first_failure_stage = "source_owned_physical_identity_mapping"
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
+            first_failure_stage = "frozen_exact_project_reconciliation"
             exact = _unchanged_frozen_exact_report(
                 canonical_manifest, sealed_path, identity_path,
             )
@@ -342,12 +359,14 @@ def build_four_project_evidence_ledger(
                 or exact["denominator"] != entry["denominator"]
             ):
                 raise ValueError("unchanged frozen per-project evaluator rejected evidence")
+            first_failure_stage = "original_and_signed_input_immutability"
             _assert_inputs_unchanged(
                 manifest=original_manifest,
                 originals=original_files,
                 expected_hashes=hashes,
                 signed_hashes=signed_hashes,
             )
+            first_failure_stage = "cross_project_signed_quantity_uniqueness"
             _enforce_cross_project_quantity_uniqueness(
                 sealed, project_id=project_id, seen=seen_signed_quantity_ids,
             )
@@ -356,6 +375,7 @@ def build_four_project_evidence_ledger(
             entry["reconciliation_complete"] = True
             entry["exact_project_report"] = exact
             if manifest.status != "VERIFIED" or not manifest.source_package_complete:
+                entry["first_failing_authority_stage"] = "frozen_project_source_universe_incomplete"
                 entry["publication_status"] = "DIAGNOSTIC_UNPUBLISHED"
                 entry["reason_codes"] = [
                     "frozen_project_source_universe_incomplete",
@@ -368,6 +388,7 @@ def build_four_project_evidence_ledger(
                 source_hashes_by_project[project_id] = tuple(sorted(hashes))
                 completed_by_project[project_id] = True
         except (OSError, UnicodeError, TypeError, ValueError, RuntimeError, KeyError) as exc:
+            entry["first_failing_authority_stage"] = first_failure_stage
             entry["publication_status"] = "CONFLICT"
             entry["reconciliation_input_presence_status"] = "REJECTED"
             entry["reconciliation_complete"] = False
@@ -421,17 +442,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--customer-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    protected = (
+        FROZEN_ROOT, args.source_dir, args.sealed_dir,
+        args.identity_map_dir, args.customer_dir,
+    )
+    # Reject an existing output or alias BEFORE reading original source PDFs
+    # and all four projects' sealed/customer data. No two jobs can race to
+    # replace an earlier signed-release decision.
+    preflight_new_diagnostic(args.output, protected_roots=protected)
     report = build_four_project_evidence_ledger(
         source_dir=args.source_dir, sealed_dir=args.sealed_dir,
         identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
     )
-    _write_readiness_report(
+    write_new_diagnostic(
         args.output,
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        protected_roots=(
-            FROZEN_ROOT, args.source_dir, args.sealed_dir,
-            args.identity_map_dir, args.customer_dir,
-        ),
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        protected_roots=protected,
     )
     print(json.dumps({
         "publication_status": report["publication_status"],

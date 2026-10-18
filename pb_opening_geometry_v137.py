@@ -32,7 +32,8 @@ def attach_openings(app:Any,workspace_id:int,walls:List[Dict[str,Any]])->List[Di
         wall=by_ref.get(wall_ref)
         if not wall and wall_ref in {"North","East","South","West"}:
             side_walls=[w for w in walls if w.get("side")==wall_ref]
-            wall=max(side_walls,key=lambda w:_num(w.get("length_m")),default=None)
+            if len(side_walls)==1:
+                wall=side_walls[0]
         length=_num(wall.get("length_m")) if wall else 0.0
         width=_num(item.get("width_m")); height=_num(item.get("height_m"))
         # Without explicit positional evidence, centre placement is visual-only.

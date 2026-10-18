@@ -623,3 +623,114 @@ def test_bare_grid_without_authenticated_material_meaning_cannot_mint_ceiling():
             source_definition_ids=("independent-source-definition",),
         )
     ) is False
+
+
+def _independent_ceiling_source_records(monkeypatch):
+    source, published = _source()
+    _patch_material(monkeypatch, published)
+    label = _line(
+        text="OFFICE", block_no=7, line_no=0,
+        bbox=(50.0, 50.0, 90.0, 62.0),
+    )
+    monkeypatch.setattr(
+        ceiling, "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
+    )
+    original = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=source, rooms=_rooms(published, _room(published)),
+    ).publish()
+    assert original.status is EvidenceResolutionStatus.CORROBORATED
+    first = original.records[0]
+    second = replace(
+        first, record_id="ceiling-2", physical_room_id="room-2",
+        canonical_room_id="canonical-room-2",
+        source_room_face_record_id="face-room-2",
+        room_label="LAUNDRY", room_label_observation_ids=("label-obs-2",),
+        room_label_receipt_ids=("label-receipt-2",),
+        occurrence_record_id="occ-grid-2",
+        occurrence_evidence_id="occ-evidence-2",
+        occurrence_observation_ids=("mark-obs-2",),
+        occurrence_receipt_ids=("mark-receipt-2",),
+    )
+    return first, second
+
+
+def test_independent_ceiling_source_receipts_survive_regardless_of_input_order(
+    monkeypatch,
+) -> None:
+    first, second = _independent_ceiling_source_records(monkeypatch)
+    for rows in ((first, second), (second, first)):
+        accepted, rejected = ceiling._quarantine_reused_ceiling_source_ownership(rows)
+        assert {row.physical_room_id for row in accepted} == {"room-1", "room-2"}
+        assert rejected == ()
+        result = ceiling.CrossViewCeilingFinishResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(ceiling.CROSS_VIEW_CEILING_FINISH_RESOLVED,),
+            records=rows,
+            unresolved_physical_room_ids=(),
+        )
+        assert set(result.records_by_physical_room_id) == {"room-1", "room-2"}
+        assert not hasattr(result.records_by_physical_room_id, "__setitem__")
+
+
+def test_reused_ceiling_source_owner_fields_abstain_both_rooms(monkeypatch) -> None:
+    first, second = _independent_ceiling_source_records(monkeypatch)
+    distinct_source_fields = (
+        "canonical_room_id", "source_room_face_record_id",
+        "occurrence_record_id", "occurrence_evidence_id",
+        "room_label_observation_ids", "room_label_receipt_ids",
+        "occurrence_observation_ids", "occurrence_receipt_ids",
+    )
+    for field in distinct_source_fields:
+        rival = replace(second, **{field: getattr(first, field)})
+        for rows in ((first, rival), (rival, first)):
+            accepted, rejected = ceiling._quarantine_reused_ceiling_source_ownership(rows)
+            assert accepted == (), field
+            assert rejected == ("room-1", "room-2"), field
+            result = ceiling.CrossViewCeilingFinishResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(ceiling.CROSS_VIEW_CEILING_FINISH_RESOLVED,),
+                records=rows,
+                unresolved_physical_room_ids=(),
+            )
+            assert result.records_by_physical_room_id == {}, field
+    # Authenticated schedule definition provenance can serve many ceilings.
+    assert first.definition_record_id == second.definition_record_id
+    assert first.definition_evidence_ids == second.definition_evidence_ids
+
+
+def test_duplicate_physical_ceiling_room_is_never_last_wins(monkeypatch) -> None:
+    first, second = _independent_ceiling_source_records(monkeypatch)
+    duplicate = replace(second, physical_room_id=first.physical_room_id)
+    accepted, rejected = ceiling._quarantine_reused_ceiling_source_ownership(
+        (first, duplicate)
+    )
+    assert accepted == ()
+    assert rejected == ("room-1",)
+    result = ceiling.CrossViewCeilingFinishResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(ceiling.CROSS_VIEW_CEILING_FINISH_RESOLVED,),
+        records=(first, duplicate), unresolved_physical_room_ids=(),
+    )
+    assert result.records_by_physical_room_id == {}
+
+
+def test_ceiling_contested_pair_does_not_poison_unrelated_room(monkeypatch) -> None:
+    first, second = _independent_ceiling_source_records(monkeypatch)
+    third = replace(
+        second, record_id="ceiling-3", physical_room_id="room-3",
+        canonical_room_id="canonical-room-3",
+        source_room_face_record_id="face-room-3",
+        occurrence_record_id="occ-grid-3",
+        occurrence_evidence_id="occ-evidence-3",
+        room_label_observation_ids=("label-obs-3",),
+        room_label_receipt_ids=("label-receipt-3",),
+        occurrence_observation_ids=("mark-obs-3",),
+        occurrence_receipt_ids=("mark-receipt-3",),
+    )
+    conflicting = replace(second, occurrence_record_id=first.occurrence_record_id)
+    accepted, rejected = ceiling._quarantine_reused_ceiling_source_ownership(
+        (third, conflicting, first)
+    )
+    assert accepted == (third,)
+    assert rejected == ("room-1", "room-2")

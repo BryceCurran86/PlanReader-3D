@@ -17,7 +17,9 @@ from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _json_object, _json_customer_rows,
 )
 from tools.source_report_scoped_equality import evidence_swap_matches
-from scripts.report_full_plan_v2_readiness import _write_readiness_report
+from tools.gpt3_safe_original_report_output import (
+    preflight_new_diagnostic, write_new_diagnostic,
+)
 
 
 # Compare separately: no text similarity, value similarity or "same room" guess.
@@ -218,11 +220,10 @@ def main(argv: list[str] | None = None) -> int:
         args.archived_v1, args.candidate_v1,
         args.archived_customers, args.candidate_customers,
     ]
-    output = args.output.resolve()
-    if output.is_relative_to(FROZEN_ROOT.resolve()) or any(
-        source is not None and output == source.resolve() for source in source_paths
-    ):
-        raise ValueError("diagnostic may not overwrite original evidence")
+    protected = (FROZEN_ROOT, *(path for path in source_paths if path is not None))
+    # Historical V1 runs/customer rows are immutable, including on a second
+    # invocation or a racing output writer. Preflight BEFORE reading source.
+    preflight_new_diagnostic(args.output, protected_roots=protected)
     report = inspect_signed_v1_replay(
         archived_run=_json_object(args.archived_v1),
         candidate_run=_json_object(args.candidate_v1),
@@ -232,21 +233,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.candidate_customers else None
         ),
     )
-    # Protect exact original evidence paths, not the entire parent directory:
-    # diagnostics may safely live beside immutable source/customer inputs.
-    if args.output.is_symlink():
-        raise ValueError("diagnostic cannot follow an output symlink")
-    if args.output.exists():
-        try:
-            existing = _json_object(args.output)
-        except (OSError, UnicodeError, ValueError) as exc:
-            raise ValueError("diagnostic cannot overwrite unrelated evidence") from exc
-        if existing.get("schema_version") != "gpt3-v1-replay-drift-v1":
-            raise ValueError("diagnostic cannot overwrite unrelated evidence")
-    _write_readiness_report(
-        args.output,
-        json.dumps(report, sort_keys=True, indent=2) + "\n",
-        protected_roots=(FROZEN_ROOT, *(path for path in source_paths if path is not None)),
+    write_new_diagnostic(
+        args.output, json.dumps(report, sort_keys=True, indent=2) + "\n",
+        protected_roots=protected,
     )
     print(json.dumps({
         "publication_status": report["publication_status"],

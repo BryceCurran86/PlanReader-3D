@@ -37,6 +37,7 @@ from pb_source_observation_authority import (
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationRecord,
+    _observation_ids_with_derived,
 )
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
@@ -927,6 +928,37 @@ def _raster_wall_face_continues(
     return False
 
 
+def _raster_double_continuous_face_gap(
+    line_mask: np.ndarray,
+    pair: _RasterBandPair,
+) -> bool:
+    """Find two independently painted wall faces spanning an alleged opening.
+
+    A wall band may have complete upper/lower source faces slightly inside its
+    morphological bounds. These are incompatible with positive G17 framed or
+    swing aperture evidence. Requiring BOTH separated outer-quarter face
+    traces prevents a centerline or isolated door-threshold line from being
+    mistaken for a structural wall. This is NEGATIVE opening evidence, never
+    proof of a canonical W4 host or material quantity.
+    """
+    if pair.row1 - pair.row0 < 4:
+        return False
+    low = max(pair.row0, 0)
+    high = min(pair.row1, line_mask.shape[0] - 1)
+    if high - low < 4 or pair.gap_x0 < 0 or pair.gap_x1 >= line_mask.shape[1]:
+        return False
+    gap = line_mask[:, pair.gap_x0:pair.gap_x1 + 1]
+    if gap.size == 0:
+        return False
+    quarter = max(1, (high - low) // 4)
+    upper = range(low, low + quarter + 1)
+    lower = range(high - quarter, high + 1)
+    def covered(row: int) -> bool:
+        return float(gap[row].mean()) >= _RASTER_LINE_COVERAGE
+    return any(covered(row) for row in upper) and any(
+        covered(row) for row in lower)
+
+
 def _raster_hairline_mask(
     line_mask: np.ndarray,
     thick: np.ndarray,
@@ -1440,11 +1472,15 @@ class PhysicalOpeningAuthority:
         visibility = self._source_visibility_authority
         if visibility is None or seed.snapshot is None or seed.source_revision is None:
             return (), ()
+        page_id = (
+            seed.observation.page_id if seed.observation is not None else None
+        )
         cache_key = (
             seed.snapshot.document_id,
             seed.snapshot.revision_id,
             seed.snapshot.source_sha256,
             seed.snapshot.snapshot_id,
+            page_id,
         )
         cached = self._visible_snapshot_cache.get(cache_key)
         if cached is not None:
@@ -1459,34 +1495,60 @@ class PhysicalOpeningAuthority:
         batch_rows = None
         producer = self._source_visibility_producer
         if producer is not None:
-            published = producer.published_snapshot_for_revision(
-                seed.snapshot.revision_id
-            )
+            active = producer._native_dimension_proof_batch
             if (
-                published is not None
-                and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+                active is not None
+                and active.get("published") is not None
+                and active["published"].snapshot.snapshot_id
+                == seed.snapshot.snapshot_id
+                and (
+                    page_id is None
+                    or str(active.get("page_id")) == str(page_id)
+                )
             ):
-                try:
-                    batch_rows = visibility.authenticated_visible_observations(
-                        published
-                    )
-                except RuntimeError:
-                    batch_rows = None
+                batch_rows = active["rows"]
+            else:
+                published = producer.published_snapshot_for_revision(
+                    seed.snapshot.revision_id
+                )
+                if (
+                    published is not None
+                    and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+                ):
+                    try:
+                        batch_rows = visibility.authenticated_visible_observations(
+                            published,
+                            bind_page_id=None if page_id is None else str(page_id),
+                        )
+                    except RuntimeError:
+                        batch_rows = None
         if batch_rows is not None:
             by_id = {
                 str(observation_id): record
                 for observation_id, record in batch_rows
             }
+            ordered_ids = _observation_ids_with_derived(
+                tuple(seed.snapshot.observation_ids),
+                tuple(by_id),
+            )
             records.extend(
                 replace(by_id[observation_id])
-                for observation_id in seed.snapshot.observation_ids
+                for observation_id in ordered_ids
                 if observation_id in by_id
+                and (
+                    page_id is None
+                    or by_id[observation_id].page_id == page_id
+                )
             )
         else:
             visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
                 seed.snapshot.snapshot_id
             )
-            for observation_id in seed.snapshot.observation_ids:
+            ordered_ids = _observation_ids_with_derived(
+                tuple(seed.snapshot.observation_ids),
+                tuple(visible_observation_ids),
+            )
+            for observation_id in ordered_ids:
                 # Non-visible source observations historically resolve to
                 # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
                 if observation_id not in visible_observation_ids:
@@ -1504,7 +1566,11 @@ class PhysicalOpeningAuthority:
                     result.status is EvidenceResolutionStatus.CORROBORATED
                     and result.observation
                 ):
-                    records.append(result.observation)
+                    if (
+                        page_id is None
+                        or result.observation.page_id == page_id
+                    ):
+                        records.append(result.observation)
                 elif result.status is EvidenceResolutionStatus.CONFLICT:
                     failures.append(result)
                 elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:
@@ -1985,9 +2051,15 @@ class PhysicalOpeningAuthority:
                         common_endpoint_rows=(pair.row0,pair.row1),frame_line_groups=groups,
                         original_common_row_continuity=legacy_face_continues,
                         paired_original_outer_face_continuity=face_continues))
+                # A pair of independently continuous source-painted outer
+                # faces within a candidate gap contradicts an aperture even
+                # when morphology missed their precise endpoint row.
+                opposing_wall_faces = _raster_double_continuous_face_gap(
+                    work_line, pair,
+                )
                 frames = (
                     frame_support(pair, axis, groups)
-                    if groups and not face_continues
+                    if groups and not face_continues and not opposing_wall_faces
                     else ()
                 )
                 if frames:
@@ -2018,6 +2090,12 @@ class PhysicalOpeningAuthority:
                         self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
                         framed_gap_boxes.add(gap_box_pt)
                         continue
+
+                # Do not let the door-swing fallback override separately
+                # authenticated continuous wall-face ink. This guard applies
+                # equally to framed and swing nomination paths.
+                if face_continues or opposing_wall_faces:
+                    continue
 
                 swing_scale_ratio = _raster_swing_perpendicular_scale_ratio(
                     gap_box_pt,
@@ -2495,17 +2573,62 @@ class PhysicalOpeningAuthority:
         collapsed = sorted(last_by_geometry.values(), key=lambda row: row[0])
         scoped = tuple(row[1] for row in collapsed)
         cached_lines = tuple(row[2] for row in collapsed)
-        breaks: list[_FaceBreak] = []
-        for first_index, second_index in _candidate_collinear_record_pairs(
+        collinear_pairs = _candidate_collinear_record_pairs(
             scoped, line_geometries=cached_lines
-        ):
+        )
+        collinear_neighbors: dict[int, set[int]] = {}
+        for first_index, second_index in collinear_pairs:
+            collinear_neighbors.setdefault(first_index, set()).add(second_index)
+            collinear_neighbors.setdefault(second_index, set()).add(first_index)
+
+        breaks: list[_FaceBreak] = []
+        for first_index, second_index in collinear_pairs:
             found = _face_break(
                 scoped[first_index],
                 scoped[second_index],
                 first_line=cached_lines[first_index],
                 second_line=cached_lines[second_index],
             )
-            if found is not None:
+            if found is None:
+                continue
+
+            # Positive collinear wall continuation inside a proposed gap means
+            # these two segments are not adjacent face boundaries. Historically
+            # all-pairs discovery could jump across an intervening solid wall
+            # stub and mint a false spanning opening. Only a source-visible gap
+            # with no intervening collinear coverage may become a face break.
+            continuation = False
+            for other_index in (
+                collinear_neighbors.get(first_index, set())
+                | collinear_neighbors.get(second_index, set())
+            ):
+                if other_index in {first_index, second_index}:
+                    continue
+                other = cached_lines[other_index]
+                values = sorted(
+                    (
+                        _projection((other[0], other[1]), found.direction),
+                        _projection((other[2], other[3]), found.direction),
+                    )
+                )
+                overlap = min(values[1], found.gap_end) - max(
+                    values[0], found.gap_start
+                )
+                # A boundary-anchored cap is not independent proof of
+                # physical wall continuation: native dimension ticks and jamb
+                # decoration may start at either gap endpoint. Preserve that
+                # structural hypothesis for the producer-owned annotation
+                # opposition/integrity checks (which can only ABSTAIN).
+                # A positive source-visible stub strictly INSIDE the proposed
+                # gap does prove these are not adjacent wall faces.
+                interior_stub = (
+                    values[0] > found.gap_start + _COORD_EQ_ABS_TOL
+                    and values[1] < found.gap_end - _COORD_EQ_ABS_TOL
+                )
+                if interior_stub and overlap > _COORD_EQ_ABS_TOL:
+                    continuation = True
+                    break
+            if not continuation:
                 breaks.append(found)
 
         if not breaks:

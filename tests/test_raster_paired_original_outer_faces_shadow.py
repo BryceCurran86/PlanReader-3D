@@ -228,7 +228,7 @@ def _source_records(payload, enabled):
 @pytest.mark.parametrize(
     "turns,scale", [(0, 1.0), (1, 1.0), (2, 1.0), (3, 1.0), (0, 0.5)]
 )
-def test_actual_original_raster_producer_reproves_notched_source_under_transforms(
+def test_paired_shadow_retains_double_painted_face_opposition_under_transforms(
     turns, scale
 ):
     payload = _notched_source_pdf(turns, scale)
@@ -236,8 +236,10 @@ def test_actual_original_raster_producer_reproves_notched_source_under_transform
     source, pub, records = _source_records(payload, True)
     assert old_pub == pub
     assert not old_records
-    assert len(records) == 1
-    assert len(records[0].source_observation_ids) >= 8
+    # The exact original fixture paints two uninterrupted tracks at the
+    # upper/lower band quarters. The separate double-face opposing evidence
+    # introduced on main must survive a paired-outer-face shadow nomination.
+    assert not records
     comparisons = [
         r
         for rs in source.physical_opening_authority()._raster_outer_face_comparison_cache.values()
@@ -271,7 +273,7 @@ def test_new_physical_policy_cannot_expand_original_source_capture_or_reissue_sn
     payload = _notched_source_pdf()
     old, old_pub, old_records = _source_records(payload, False)
     source, pub, records = _source_records(payload, True)
-    assert not old_records and len(records) == 1 and old_pub == pub
+    assert not old_records and not records and old_pub == pub
     expected = old._proven_raster_opening_flank_boxes(old_pub, "1")
     actual = source._proven_raster_opening_flank_boxes(pub, "1")
     assert actual == expected == ()

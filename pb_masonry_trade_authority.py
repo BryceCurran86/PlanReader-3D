@@ -35,7 +35,7 @@ class MasonryWallSpec:
     description: str
     section: str = "External"  # "External", "Internal", "Substructure"
     length_m: float = 0.0
-    height_m: float = 2.70
+    height_m: float = 0.0
     openings: List[Dict[str, float]] = field(default_factory=list)  # [{"width": 1.8, "height": 1.2, "area": 2.16}]
     core_fill: str = "none"    # "none", "full", "half" (at 800mm), "quarter" (at 1200mm)
     has_bond_beam: bool = False

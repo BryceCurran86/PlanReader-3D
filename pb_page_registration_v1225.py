@@ -28,7 +28,10 @@ _REGISTRATION_CACHE: Dict[Tuple[int, int], str] = {}
 
 _DRAWING_CODE_RE = re.compile(r"\b([A-Z]{1,5}(?:[-_.]?[A-Z]{0,3})?[-_.]?\d{2,4}(?:[-_.][A-Z0-9]{1,4})?)\b", re.I)
 _SCALE_RE = re.compile(r"(?<!\d)1\s*:\s*(\d{2,4})(?!\d)", re.I)
-_REV_RE = re.compile(r"\b(?:REV(?:ISION)?\s*[:#-]?\s*)([A-Z0-9]{1,4})\b", re.I)
+_REV_RE = re.compile(
+    r"\bREV(?:ISION)?(?:\s*[:#-]\s*|\s+)([A-Z0-9]{1,4})\b",
+    re.I,
+)
 _EXCLUDED_CODE_PREFIXES = {
     "PT", "PF", "WF", "EC", "FC", "IP", "EP", "CEIL", "SOF", "RBL", "SCR",
     "SHD", "DP", "GD", "RS", "BC", "BA", "SK", "D", "W",
@@ -232,33 +235,42 @@ def _unique_revision(text: Any) -> str:
     return next(iter(found))
 
 
+def _accepted_sheet_code(value: str) -> str:
+    code = value.upper().strip(" ._-:")
+    if not code or ":" in code:
+        return ""
+    prefix_match = re.match(r"[A-Z]+", code)
+    prefix = prefix_match.group(0) if prefix_match else ""
+    if prefix in _EXCLUDED_CODE_PREFIXES:
+        return ""
+    if code.isdigit() or len(code) < 3:
+        return ""
+    return code
+
+
 def _candidate_code(text: Any) -> str:
     """Pick a drawing/sheet number while rejecting finish/door/detail tags.
 
-    Two different labelled sheet numbers abstain. The first code in the text
-    is not a winner.
+    One labelled sheet number is that number. Two labelled numbers abstain.
+    With no label, one remaining code is kept and two remaining codes abstain.
     """
     raw = str(text or "")
-    labelled = []
+    labelled: List[str] = []
     for match in _LABELLED_SHEET_RE.finditer(raw):
-        code = match.group(1).upper().strip(" ._-:")
+        code = _accepted_sheet_code(match.group(1))
         if code and code not in labelled:
             labelled.append(code)
+    if len(labelled) == 1:
+        return labelled[0]
     if len(labelled) > 1:
         return ""
-    candidates = list(labelled)
-    candidates.extend(match.group(1) for match in _DRAWING_CODE_RE.finditer(raw))
-    for value in candidates:
-        code = value.upper().strip(" ._-:")
-        if not code or ":" in code:
-            continue
-        prefix_match = re.match(r"[A-Z]+", code)
-        prefix = prefix_match.group(0) if prefix_match else ""
-        if prefix in _EXCLUDED_CODE_PREFIXES:
-            continue
-        if code.isdigit() or len(code) < 3:
-            continue
-        return code
+    found: List[str] = []
+    for match in _DRAWING_CODE_RE.finditer(raw):
+        code = _accepted_sheet_code(match.group(1))
+        if code and code not in found:
+            found.append(code)
+    if len(found) == 1:
+        return found[0]
     return ""
 
 

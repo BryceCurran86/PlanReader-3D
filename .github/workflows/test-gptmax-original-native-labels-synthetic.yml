@@ -1,0 +1,43 @@
+name: GPT MAX Native 2127 1215 Source Label Synthetics
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_original_2127_crossview_native.py"
+      - "tools/diag_gptmax_original_1215_sgw_legend.py"
+      - "tests/test_gptmax_original_2127_crossview_native.py"
+      - "tests/test_gptmax_original_1215_sgw_legend.py"
+      - ".github/workflows/test-gptmax-original-native-labels-synthetic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-label-abstention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest pymupdf ruff
+      - name: Synthetic original native label pairing and wrong SHA negative
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python -m pytest -q -rs tests/test_gptmax_original_2127_crossview_native.py tests/test_gptmax_original_1215_sgw_legend.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_2127_crossview_native.py tools/diag_gptmax_original_1215_sgw_legend.py tests/test_gptmax_original_2127_crossview_native.py tests/test_gptmax_original_1215_sgw_legend.py
+      - name: Preserve unknown physical host and private original status
+        run: |
+          echo 'Native printed labels only; private original PDF-positive tests are NOT RUN in public CI.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Neither 2127 STACKER nor 1215 SGW is granted a cross-page physical SAME, W4 host, frame, count or signed area.' >> "$GITHUB_STEP_SUMMARY"

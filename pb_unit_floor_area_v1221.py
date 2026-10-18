@@ -80,26 +80,39 @@ def extract_unit_area_candidates(text: Any) -> List[Dict[str, Any]]:
         label = _match_unit_label(line, allow_short=True)
         if not label:
             continue
-        # Schedules often put the area two or three rows away from the unit name.
-        candidates: List[Tuple[int, str]] = []
-        for delta in range(0, 4):
-            for pos in ({idx + delta, idx - delta} if delta else {idx}):
-                if 0 <= pos < len(lines):
-                    candidates.append((abs(pos - idx), lines[pos]))
-        area = 0.0
-        source = line
-        for _distance, candidate in sorted(candidates, key=lambda item: item[0]):
-            match = auto._AREA_RE.search(candidate)
-            if not match:
+        next_idx = len(lines)
+        previous_idx = -1
+        for other_idx, other_line in enumerate(lines):
+            other = _match_unit_label(other_line, allow_short=True)
+            if not other or other == label:
                 continue
-            value = auto._num(match.group(1))
-            if 8.0 <= value <= 1000.0:
-                area = value
-                source = candidate
-                break
+            if other_idx < idx:
+                previous_idx = other_idx
+            elif other_idx < next_idx:
+                next_idx = other_idx
+        forward_end = min(next_idx, idx + 4)
+
+        def _areas_between(start: int, stop: int, step: int) -> List[Tuple[float, str]]:
+            found: List[Tuple[float, str]] = []
+            for pos in range(start, stop, step):
+                if not (0 <= pos < len(lines)):
+                    continue
+                for match in auto._AREA_RE.finditer(lines[pos]):
+                    value = auto._num(match.group(1))
+                    if 8.0 <= value <= 1000.0:
+                        found.append((round(value, 2), lines[pos]))
+            return found
+
+        areas = _areas_between(idx, forward_end, 1)
+        if not areas:
+            backward_start = max(previous_idx + 1, idx - 3)
+            areas = _areas_between(idx - 1, backward_start - 1, -1)
+        distinct = {value for value, _source in areas}
         key = label.lower()
-        if area > 0 and key not in used:
-            out.append({"label": label, "area_m2": round(area, 2), "confidence": "Documented", "source": source})
+        if len(distinct) == 1 and key not in used:
+            area = next(iter(distinct))
+            source = next(item_source for value, item_source in areas if value == area)
+            out.append({"label": label, "area_m2": area, "confidence": "Documented", "source": source})
             used.add(key)
     return out
 

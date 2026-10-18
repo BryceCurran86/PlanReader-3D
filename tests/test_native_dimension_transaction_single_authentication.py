@@ -25,8 +25,8 @@ def _counting_authentications():
     original = SourceVisibilityAuthority.authenticated_visible_observations
     seen: list = []
 
-    def wrapped(self, published):
-        rows = original(self, published)
+    def wrapped(self, published, **kwargs):
+        rows = original(self, published, **kwargs)
         seen.append((published, rows))
         return rows
 
@@ -128,6 +128,8 @@ def test_damage_in_either_phase_still_aborts_the_transaction(phase):
     source, published, selector, support = _native_source()
     store = source._producer._store
     key = (selector.snapshot_id, support[0])
+    if key not in store.observations:
+        key = (selector.snapshot_id, source._visibility_receipts[key])
     record = store.observations[key]
     damaged = replace(record, geometry=(0.0, 0.0, 20.0, 0.0))
     if phase == "entry":

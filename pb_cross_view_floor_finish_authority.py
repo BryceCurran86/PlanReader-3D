@@ -533,18 +533,105 @@ class CrossViewFloorFinishResult:
 
     @property
     def records_by_floor_id(self) -> Mapping[str, CrossViewFloorFinishRecord]:
-        # A direct consumer must never silently choose the last of two
-        # competing finish claims for one canonical physical floor.
-        counts = Counter(
-            record.canonical_floor_id for record in self.records
-            if isinstance(record.canonical_floor_id, str)
-            and record.canonical_floor_id
+        # Consumers may receive a reconstructed result dataclass instead of
+        # the producer's already-quarantined records. Reapply BOTH the native
+        # material-mark ownership gate and the physical room/surface gate here:
+        # two independently keyed floors cannot reuse one source occurrence,
+        # source face, physical room, or physical floor. Never elect by order.
+        sealed = tuple(
+            record for record in self.records
+            if type(record) is CrossViewFloorFinishRecord
         )
+        survivors, _ = _quarantine_reused_floor_finish_occurrences(sealed)
+        source_fields = (
+            "canonical_floor_id",
+            "physical_floor_surface_id",
+            "physical_room_id",
+            "source_room_face_record_id",
+        )
+        # Count ALL submitted records, including those that the lower-level
+        # gate rejected for a malformed floor ID. Otherwise a caller could
+        # rekey one rival as invalid and let its contested sibling survive.
+        duplicates = {
+            field: Counter(getattr(record, field, None) for record in sealed)
+            for field in source_fields + (
+                "occurrence_record_id", "occurrence_evidence_id",
+            )
+        }
+        quantity_ids = Counter(
+            getattr(record.quantity, "quantity_id", None)
+            for record in sealed
+        )
+        # Count an occurrence mark carried as *secondary* evidence on a
+        # different floor too. A rekeyed record cannot conceal reuse by
+        # changing just its primary occurrence_evidence_id.
+        primary_original_marks = {
+            record.occurrence_evidence_id for record in sealed
+            if type(record.occurrence_evidence_id) is str
+            and record.occurrence_evidence_id
+        }
+        source_mark_references = Counter(
+            source_id
+            for record in sealed
+            if type(record.quantity) is QuantityEvidence
+            for source_id in set(record.quantity.evidence_ids)
+            if source_id in primary_original_marks
+        )
+        def unique_owner(record: CrossViewFloorFinishRecord) -> bool:
+            if (
+                type(record.quantity) is not QuantityEvidence
+                or record.quantity.family != "floor_finish_area"
+                or record.quantity.status != AuthorityStatus.FIRM.value
+                or record.quantity.authority !=
+                   MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+                or record.quantity.abstained
+                or record.quantity.unit not in ("m2", "m²")
+                or record.quantity.input_entity_ids != (record.canonical_floor_id,)
+                or type(record.quantity.quantity_id) is not str
+                or not record.quantity.quantity_id
+                or quantity_ids[record.quantity.quantity_id] != 1
+                or source_mark_references[record.occurrence_evidence_id] != 1
+                or any(
+                    source_id != record.occurrence_evidence_id
+                    and source_id in primary_original_marks
+                    for source_id in record.quantity.evidence_ids
+                )
+            ):
+                return False
+            # An independently rekeyed result cannot keep the ORIGINAL
+            # measurement's internal provenance on its new floor. Even when
+            # its top-level input ID is altered, the signed quantity metadata
+            # must still name the same source face and exact material mark.
+            metadata = record.quantity.metadata
+            if not isinstance(metadata, Mapping):
+                return False
+            owner_fields = {
+                "canonical_floor_id": record.canonical_floor_id,
+                "physical_floor_surface_id": record.physical_floor_surface_id,
+                "source_room_face_record_id": record.source_room_face_record_id,
+                "source_dimension_page_id": record.source_dimension_page_id,
+                "finish_occurrence_record_id": record.occurrence_record_id,
+                "finish_occurrence_evidence_id": record.occurrence_evidence_id,
+                "finish_definition_record_id": record.definition_record_id,
+                "finish_code": record.finish_code,
+                "support_snapshot_id": record.support_snapshot_id,
+            }
+            if (
+                any(metadata.get(key) != expected
+                    for key, expected in owner_fields.items())
+                or record.occurrence_evidence_id not in record.quantity.evidence_ids
+            ):
+                return False
+            return all(
+                type(getattr(record, field, None)) is str
+                and bool(getattr(record, field))
+                and getattr(record, field) == getattr(record, field).strip()
+                and duplicates[field][getattr(record, field)] == 1
+                for field in duplicates
+            )
         return MappingProxyType({
-            record.canonical_floor_id: record for record in self.records
-            if isinstance(record.canonical_floor_id, str)
-            and record.canonical_floor_id == record.canonical_floor_id.strip()
-            and counts[record.canonical_floor_id] == 1
+            record.canonical_floor_id: record
+            for record in survivors if unique_owner(record)
         })
 
 
@@ -1333,12 +1420,16 @@ def enrich_live_canonical_floor_finishes(
     if type(finishes) is not CrossViewFloorFinishResult:
         raise TypeError("finishes must be CrossViewFloorFinishResult")
 
-    by_floor: dict[str, list[CrossViewFloorFinishRecord]] = {}
-    for record in finishes.records:
-        by_floor.setdefault(record.canonical_floor_id, []).append(record)
-
+    # The public result may have been reconstructed from individually valid
+    # producer records with rekeyed physical owners. Enrichment must consume
+    # the same cross-room-quarantined view as downstream QuantityEvidence, not
+    # the raw tuple which can contain aliases of one source material mark.
+    eligible = finishes.records_by_floor_id
+    by_floor: dict[str, list[CrossViewFloorFinishRecord]] = {
+        floor_id: [record] for floor_id, record in eligible.items()
+    }
     enriched: list[LiveCanonicalFloorSurfaceObject] = []
-    conflict = False
+    conflict = len(eligible) != len(finishes.records)
     resolved = 0
     for floor in floors.floors:
         matches = by_floor.get(floor.canonical_floor_id, ())

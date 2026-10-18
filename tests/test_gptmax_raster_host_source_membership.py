@@ -1050,7 +1050,10 @@ def test_warm_cache_rejects_actual_producer_store_tampering(damage):
     if damage == "source-bytes":
         store.source_bytes_by_revision[existence.revision_id] = b"tampered-source-bytes"
     else:
-        key = (existence.snapshot_id, ids[0])
+        # A native visible line is a read view of its native parent (it has no stored record of its own), so the
+        # stored record that can be tampered with is the parent.
+        parent_id = producer._visibility_receipts[(existence.snapshot_id, ids[0])]
+        key = (existence.snapshot_id, parent_id)
         record = store.observations[key]
         store.observations[key] = replace(record, geometry=tuple(v + 1. for v in record.geometry))
     with pytest.raises(RuntimeError, match="producer_integrity_failure"):

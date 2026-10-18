@@ -7,6 +7,7 @@ on:
       # every module the replayed production chain can import must re-run the signed-output replay
       - "pb_*.py"
       - "tools/diag_pdf_symbol_byte_glyph_shadow.py"
+      - "tools/diag_original_pdf_active_clip_operator_authority.py"
       - "tools/run_source_closed_project_handoff.py"
       - "tools/diag_gptmax_raster_unhosted_flank_source.py"
       - "tools/diag_gptmax_source_authority_stages.py"

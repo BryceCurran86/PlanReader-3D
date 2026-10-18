@@ -91,8 +91,8 @@ class WorkstreamA4TitleBlockTests(unittest.TestCase):
     def test_03_workspace_title_block_registry(self):
         """derive_title_block_metadata extracts metadata for all pages in workspace."""
         cur = self.conn.cursor()
-        cur.execute("INSERT INTO pages VALUES (10, 1, 'DWG NO: A-101 Floor Plan', '1:100', 'A-101_Rev_A.pdf')")
-        cur.execute("INSERT INTO pages VALUES (20, 1, 'DWG NO: A-201 RCP', '1:50', 'A-201_Rev_B.pdf')")
+        cur.execute("INSERT INTO pages VALUES (10, 1, 'DWG NO: A-101 Floor Plan\nREV: A', '1:100', 'A-101_Rev_C.pdf')")
+        cur.execute("INSERT INTO pages VALUES (20, 1, 'DWG NO: A-201 RCP\nREV: B', '1:50', 'A-201_Rev_C.pdf')")
         self.conn.commit()
 
         registry = derive_title_block_metadata(self.conn, 1)

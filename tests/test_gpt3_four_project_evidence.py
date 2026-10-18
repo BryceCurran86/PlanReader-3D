@@ -37,6 +37,7 @@ def test_missing_original_sources_keep_all_120_items_unpublished(tmp_path, monke
         assert project["customer_bijection_verified"] is False
         assert project["reconciliation_complete"] is False
         assert project["exact_project_report"] is None
+        assert project["first_failing_authority_stage"] == "original_source_file_absent"
 
 
 def test_present_but_corrupt_original_bytes_report_conflict_not_zero(tmp_path):
@@ -50,6 +51,7 @@ def test_present_but_corrupt_original_bytes_report_conflict_not_zero(tmp_path):
     observed = next(x for x in result["projects"] if x["project_id"] == manifest.project_id)
     assert observed["publication_status"] == "CONFLICT"
     assert observed["source_sha_verified"] is False
+    assert observed["first_failing_authority_stage"] == "original_source_sha_rejected"
     assert observed["reconciliation_complete"] is False
     assert observed["exact_project_report"] is None
     assert any(
@@ -79,6 +81,7 @@ def test_verified_source_without_signed_run_stays_unavailable(tmp_path, monkeypa
     assert observed["source_sha_verified"] is True
     assert observed["publication_status"] == "UNAVAILABLE"
     assert "signed_production_evidence_unavailable" in observed["reason_codes"]
+    assert observed["first_failing_authority_stage"] == "sealed_reconciliation_artifact_absent"
     assert observed["customer_bijection_verified"] is False
     assert observed["exact_project_report"] is None
     assert result["official_suite_result"] is None
@@ -170,18 +173,18 @@ def test_report_destination_cannot_overwrite_signed_inputs_or_alias(tmp_path):
         "--identity-map-dir", str(dirs["identity_map_dir"]),
         "--customer-dir", str(dirs["customer_dir"]),
     ]
-    with pytest.raises(ValueError, match="may not overwrite evidence"):
+    with pytest.raises(ValueError, match="may not overwrite protected evidence"):
         module.main([*args, "--output", str(input_path)])
     assert input_path.read_text(encoding="utf-8") == "unchanged signed bytes"
 
     alias = tmp_path / "alias-to-signed"
     symlink_or_skip(alias, dirs["sealed_dir"], target_is_directory=True)
-    with pytest.raises(ValueError, match="may not overwrite evidence"):
+    with pytest.raises(ValueError, match="may not overwrite protected evidence"):
         module.main([*args, "--output", str(alias / "new-report.json")])
     assert not (dirs["sealed_dir"] / "new-report.json").exists()
 
     # Never allow a diagnostic to overwrite frozen benchmark truth.
-    with pytest.raises(ValueError, match="may not overwrite evidence"):
+    with pytest.raises(ValueError, match="may not overwrite protected evidence"):
         module.main([
             *args, "--output",
             str(module.FROZEN_ROOT / "manifest.json"),
@@ -796,3 +799,130 @@ def test_unavailable_source_never_claims_signed_files_missing_or_verified(tmp_pa
         assert target["missing_signed_reconciliation_artifacts"] == []
         assert target["exact_project_report"] is None
     assert report["publication_status"] == "UNPUBLISHED"
+
+
+def test_first_failing_stage_rejects_corrupt_signed_run_before_identity_or_customer(tmp_path, monkeypatch):
+    dirs = _dirs(tmp_path)
+    manifest = module.load_suite_manifests(module.FROZEN_ROOT)[0]
+    root = dirs["source_dir"] / manifest.project_id
+    root.mkdir(parents=True)
+    for doc in manifest.source_documents:
+        (root / doc.name).write_bytes(b"%PDF-synthetic-source-only")
+    monkeypatch.setattr(
+        module, "_original_sha_gate",
+        lambda raw, files: (True, [], [d.sha256 for d in manifest.source_documents]),
+    )
+    for path in (
+        dirs["sealed_dir"] / (manifest.project_id + ".json"),
+        dirs["identity_map_dir"] / (manifest.project_id + ".identity_map.json"),
+        dirs["customer_dir"] / (manifest.project_id + ".customer_rows.json"),
+    ):
+        path.parent.mkdir(parents=True)
+        path.write_text('{"not":"a signed run"}', encoding="utf-8")
+    observed = module.build_four_project_evidence_ledger(**dirs)
+    row = next(q for q in observed["projects"] if q["project_id"] == manifest.project_id)
+    assert row["publication_status"] == "CONFLICT"
+    assert row["first_failing_authority_stage"] == "sealed_source_run_parse_or_signature"
+    assert row["reconciliation_input_presence_status"] == "REJECTED"
+    assert row["source_sha_verified"] is True
+    assert row["customer_bijection_verified"] is False
+    assert row["exact_project_report"] is None
+    assert observed["coverage_accuracy"] is None
+    assert observed["official_suite_result"] is None
+
+
+def test_first_failing_stage_uses_only_fixed_share_safe_identifiers(tmp_path):
+    report = module.build_four_project_evidence_ledger(**_dirs(tmp_path))
+    for row in report["projects"]:
+        stage = row["first_failing_authority_stage"]
+        assert type(stage) is str and stage.replace("_", "").isascii()
+        assert "/" not in stage and "\\\\" not in stage
+        assert "original" in stage or "source" in stage
+        assert row["denominator"] > 0
+    assert report["frozen_denominator"] == 120
+    assert report["publication_status"] == "UNPUBLISHED"
+
+
+def test_full_four_project_cli_refuses_existing_report_before_original_pdf_and_seal_reads(
+    tmp_path, monkeypatch,
+):
+    dirs = _dirs(tmp_path)
+    report = tmp_path / "already-owned-customer.json"
+    report.write_text('{"customer":"preserve"}', encoding="utf-8")
+    monkeypatch.setattr(
+        module, "build_four_project_evidence_ledger",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("unsafe output path must fail before source/quantity reads")
+        ),
+    )
+    args = [
+        "--source-dir", str(dirs["source_dir"]),
+        "--sealed-dir", str(dirs["sealed_dir"]),
+        "--identity-map-dir", str(dirs["identity_map_dir"]),
+        "--customer-dir", str(dirs["customer_dir"]),
+        "--output", str(report),
+    ]
+    with pytest.raises(FileExistsError, match="new path"):
+        module.main(args)
+    assert report.read_text(encoding="utf-8") == '{"customer":"preserve"}'
+
+
+def test_full_four_project_cli_refuses_reusing_even_its_own_previous_diagnostic(tmp_path):
+    dirs = _dirs(tmp_path)
+    report = tmp_path / "first-source-readiness.json"
+    args = [
+        "--source-dir", str(dirs["source_dir"]),
+        "--sealed-dir", str(dirs["sealed_dir"]),
+        "--identity-map-dir", str(dirs["identity_map_dir"]),
+        "--customer-dir", str(dirs["customer_dir"]),
+        "--output", str(report),
+    ]
+    assert module.main(args) == 2
+    original = report.read_bytes()
+    with pytest.raises(FileExistsError, match="new path"):
+        module.main(args)
+    assert report.read_bytes() == original
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_full_four_project_cli_competing_writer_does_not_replace_existing_file(
+    tmp_path, monkeypatch,
+):
+    from tools import gpt3_safe_original_report_output as safe
+    dirs = _dirs(tmp_path)
+    report = tmp_path / "racing-report.json"
+    original_link = safe.os.link
+
+    def competing_writer(temp, target):
+        from pathlib import Path
+        Path(target).write_text('{"another-run":"already-published"}')
+        return original_link(temp, target)
+
+    monkeypatch.setattr(safe.os, "link", competing_writer)
+    with pytest.raises(FileExistsError):
+        module.main([
+            "--source-dir", str(dirs["source_dir"]),
+            "--sealed-dir", str(dirs["sealed_dir"]),
+            "--identity-map-dir", str(dirs["identity_map_dir"]),
+            "--customer-dir", str(dirs["customer_dir"]),
+            "--output", str(report),
+        ])
+    assert report.read_text(encoding="utf-8") == '{"another-run":"already-published"}'
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_full_four_project_report_output_cannot_follow_symlink_to_customer_file(tmp_path):
+    dirs = _dirs(tmp_path)
+    customer = tmp_path / "customer-lines.json"
+    customer.write_text('{"valid":"customer-output"}')
+    alias = tmp_path / "report-alias.json"
+    symlink_or_skip(alias, customer)
+    with pytest.raises(FileExistsError, match="new path"):
+        module.main([
+            "--source-dir", str(dirs["source_dir"]),
+            "--sealed-dir", str(dirs["sealed_dir"]),
+            "--identity-map-dir", str(dirs["identity_map_dir"]),
+            "--customer-dir", str(dirs["customer_dir"]),
+            "--output", str(alias),
+        ])
+    assert customer.read_text() == '{"valid":"customer-output"}'

@@ -161,6 +161,8 @@ class TestPostTensionTradeAuthority(unittest.TestCase):
                 section="Structure",
                 description="Band beam",
                 length_m=20.0,
+                width_m=1.2,
+                thickness_m=0.45,
             ),
         ]
 

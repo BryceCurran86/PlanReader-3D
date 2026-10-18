@@ -65,6 +65,13 @@ def refresh_zone_masses(app: Any, workspace_id: int) -> int:
         notes = "Auto-built from calibrated PlanReader mapped zone."
         if original_source:
             notes += f" Original source: {original_source}."
+        raw_height = zone.get("wall_height_m")
+        if raw_height is None or str(raw_height).strip() == "":
+            continue
+        height = _num(raw_height)
+        if height <= 0.0:
+            continue
+        level_name = str(zone.get("level_name") or "").strip()
         app.lexecute(
             """INSERT INTO model_masses(
                 workspace_id,label,level_name,x,y,z,width,depth,height,finish,
@@ -73,13 +80,13 @@ def refresh_zone_masses(app: Any, workspace_id: int) -> int:
             (
                 workspace_id,
                 str(zone.get("name") or f"Zone {zone_id}"),
-                "Ground",
+                level_name,
                 _num(zone.get("x_px")) / pxpm,
                 _num(zone.get("y_px")) / pxpm,
                 0.0,
                 _num(zone.get("w_px")) / pxpm,
                 _num(zone.get("h_px")) / pxpm,
-                max(0.1, _num(zone.get("wall_height_m"), 2.7)),
+                height,
                 str(zone.get("finish_system") or zone.get("substrate") or ""),
                 source,
                 confidence,

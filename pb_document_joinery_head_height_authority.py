@@ -81,20 +81,28 @@ def _normalize_note_text(text: str) -> str:
     return re.sub(r"[^A-Z0-9]+", " ", str(text or "").upper()).strip()
 
 
-def _parse_joinery_head_height_mm(text: str) -> Optional[float]:
+def _joinery_head_height_values(text: str) -> tuple[float, ...]:
     normalized = _normalize_note_text(text)
-    match = _NOTE_RE.search(normalized)
-    if match is None:
+    values: list[float] = []
+    for match in _NOTE_RE.finditer(normalized):
+        try:
+            value = float(match.group("value"))
+        except (TypeError, ValueError):
+            continue
+        if (
+            math.isfinite(value)
+            and _MIN_HEAD_HEIGHT_MM <= value <= _MAX_HEAD_HEIGHT_MM
+        ):
+            values.append(value)
+    return tuple(values)
+
+
+def _parse_joinery_head_height_mm(text: str) -> Optional[float]:
+    values = _joinery_head_height_values(text)
+    distinct = {round(value, 6) for value in values}
+    if len(distinct) != 1:
         return None
-    try:
-        value = float(match.group("value"))
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(value):
-        return None
-    if not (_MIN_HEAD_HEIGHT_MM <= value <= _MAX_HEAD_HEIGHT_MM):
-        return None
-    return value
+    return values[0]
 
 
 class DocumentJoineryHeadHeightProducer:
@@ -178,9 +186,19 @@ class DocumentJoineryHeadHeightProducer:
         for (page_id, _block, _line), rows in grouped.items():
             rows.sort(key=lambda item: (item[0], item[1]))
             text_value = " ".join(row[2] for row in rows)
-            height_mm = _parse_joinery_head_height_mm(text_value)
-            if height_mm is None:
+            heights = _joinery_head_height_values(text_value)
+            distinct_heights = {round(value, 6) for value in heights}
+            if len(distinct_heights) > 1:
+                return self._store(
+                    key,
+                    _blocked(
+                        EvidenceResolutionStatus.CONFLICT,
+                        JOINERY_HEAD_HEIGHT_CONFLICT,
+                    ),
+                )
+            if len(distinct_heights) != 1:
                 continue
+            height_mm = heights[0]
             matches.append(
                 (
                     height_mm,

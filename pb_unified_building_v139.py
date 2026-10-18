@@ -66,7 +66,14 @@ def build_registered_walls(app:Any,workspace_id:int)->List[Dict[str,Any]]:
     for row in base:
         side=str(row.get("side") or ""); seg=segments.get(row.get("wall_ref"),{})
         profile=profiles.get(side,{})
-        height=max(.5,_num(profile.get("height_m"),row.get("height_m") or 2.7))
+        profile_height=profile.get("height_m")
+        row_height=row.get("height_m")
+        if profile_height not in (None,""):
+            height=_num(profile_height)
+        elif row_height not in (None,""):
+            height=_num(row_height)
+        else:
+            height=0.0
         wall={**row,**{"a":seg.get("a"),"b":seg.get("b"),"height_m":round(height,3),
              "height_status":profile.get("status") or row.get("height_status"),"height_confidence":profile.get("confidence") or "Review"}}
         walls.append(wall)
@@ -88,7 +95,7 @@ def build_registered_walls(app:Any,workspace_id:int)->List[Dict[str,Any]]:
 def build_figure(walls:Sequence[Dict[str,Any]],xray:bool=False)->go.Figure:
     fig=go.Figure()
     for wall in walls:
-        origin,u,width=_wall_basis(wall); height=_num(wall.get("height_m"),2.7)
+        origin,u,width=_wall_basis(wall); height=_num(wall.get("height_m"))
         if width<=0 or height<=0: continue
         rects=_opening_rects(wall.get("openings") or [],str(wall.get("wall_ref")),width,height)
         for xa,xb,za,zb in wall_cells(width,height,rects):
