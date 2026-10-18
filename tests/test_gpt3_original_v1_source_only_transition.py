@@ -132,3 +132,36 @@ def test_source_only_cli_refuses_source_alias_and_existing_customer_file_before_
             "--candidate-v1", str(FRESH),
             "--output", str(HIST),
         ])
+
+
+def test_source_only_real_signed_abstention_does_not_raise_or_become_zero(monkeypatch):
+    from pb_source_closed_run_export import seal_source_closed_run
+    from test_source_closed_run_export import quantity, trace
+
+    abstained = quantity(
+        quantity_id="qty-abstained", value=None,
+        input_entity_ids=(), evidence_ids=(),
+        abstained=True, blocking_reasons=("source_geometry_open",),
+        status="abstained",
+    )
+    firm = quantity(quantity_id="qty-firm")
+    run = seal_source_closed_run(
+        [abstained, firm], project_id="project-a",
+        traces_by_quantity_id={
+            "qty-abstained": trace(evidence_ids=(), canonical_entity_ids=()),
+            "qty-firm": trace(),
+        },
+    )
+    monkeypatch.setattr(diag, "_canonical_manifest_for", lambda _: {
+        "source_documents": [{"sha256": "a" * 64}],
+    })
+    report = diag.inspect_signed_source_only_v1_transition(
+        archived_run=run.to_dict(), candidate_run=run.to_dict(),
+    )
+    assert report["historical_quantity_count"] == 2
+    assert report["historical_unmeasured_quantity_count"] == 1
+    assert report["candidate_unmeasured_quantity_count"] == 1
+    assert report["historical_values"] == [13.270425]
+    assert report["candidate_values"] == [13.270425]
+    assert report["new_firm_quantities_authorized"] == 0
+    assert report["official_four_project_accuracy"] is None
