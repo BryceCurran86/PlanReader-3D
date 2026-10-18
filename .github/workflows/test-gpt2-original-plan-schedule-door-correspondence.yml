@@ -1,0 +1,41 @@
+name: GPT2 Original Plan-to-Door Schedule Source-Owner Tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_plan_door_correspondence_authority.py"
+      - "tests/test_gpt2_plan_door_schedule_correspondence.py"
+      - ".github/workflows/test-gpt2-original-plan-schedule-door-correspondence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-codes-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify producer-issued Dxx code correspondence and count abstention
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+        run: |
+          python -m pytest -q -rs tests/test_gpt2_plan_door_schedule_correspondence.py
+          python -m ruff check --select F821,F823 pb_source_plan_door_correspondence_authority.py tests/test_gpt2_plan_door_schedule_correspondence.py
+      - name: Keep source-positive PDF owner-only and customer count blocked
+        run: |
+          echo "Original 31-page Maryborough PDF is deliberately absent in public CI." >> "$GITHUB_STEP_SUMMARY"
+          echo "The exact-source test SKIPS here; no physical installed-door count or FIRM quantity is authorized." >> "$GITHUB_STEP_SUMMARY"
