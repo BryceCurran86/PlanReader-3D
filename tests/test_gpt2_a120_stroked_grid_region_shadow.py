@@ -4,7 +4,7 @@ from pathlib import Path
 import fitz
 import pytest
 
-from tools.diag_gpt2_a120_stroked_grid_region_shadow import (
+from tools.diag_gpt2_a120_grid_ring_shadow import (
     original_stroked_grid_rectangles_shadow as audit,
 )
 
@@ -22,6 +22,11 @@ def _document(*, offset=(0, 0), scale=1, rotation=0, competing="", omit_side=Fal
         page.draw_line(at(points[i]), at(points[(i + 1) % 4]), color=(0, 0, 0), width=.48 * scale)
     if repeat_top:
         page.draw_line(at(points[0]), at(points[1]), color=(0, 0, 0), width=.48 * scale)
+    # Genuine two-axis source grid lattice, independently of the outer ring.
+    for y in (175, 250, 325, 400, 475, 550):
+        page.draw_line(at((120, y)), at((580, y)), color=(0, 0, 0), width=.30 * scale)
+    for x in (175, 250, 325, 400, 475, 550):
+        page.draw_line(at((x, 120)), at((x, 630)), color=(0, 0, 0), width=.30 * scale)
     page.insert_text(at((250, 300)), "GRID")
     if competing:
         page.insert_text(at((270, 370)), competing)
