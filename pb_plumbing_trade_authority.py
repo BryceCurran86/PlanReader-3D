@@ -29,7 +29,7 @@ class PlumbingFixtureSpec:
     fixture_mark: str          # e.g. "WC-01", "BASIN-01", "SINK-01", "HWS-01"
     description: str
     location: str              # e.g. "Master Ensuite", "Main Bathroom", "Kitchen"
-    count: int = 1
+    count: int = 0
     section: str = "Internal"  # "Internal", "External", "Substructure"
     source_page: str = ""
     source_reference: str = ""
@@ -100,7 +100,9 @@ class PlumbingTakeoffItem:
 def calculate_fixture_items(spec: PlumbingFixtureSpec) -> List[PlumbingTakeoffItem]:
     """Calculate trade items for sanitary fixtures and connected tapware."""
     items: List[PlumbingTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0:
+        return items
+    count = spec.count
 
     # 1. Primary Fixture Supply & Install (No.)
     items.append(PlumbingTakeoffItem(
