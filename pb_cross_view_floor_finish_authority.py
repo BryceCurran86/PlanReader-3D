@@ -538,7 +538,11 @@ class CrossViewFloorFinishResult:
         # material-mark ownership gate and the physical room/surface gate here:
         # two independently keyed floors cannot reuse one source occurrence,
         # source face, physical room, or physical floor. Never elect by order.
-        survivors, _ = _quarantine_reused_floor_finish_occurrences(self.records)
+        sealed = tuple(
+            record for record in self.records
+            if type(record) is CrossViewFloorFinishRecord
+        )
+        survivors, _ = _quarantine_reused_floor_finish_occurrences(sealed)
         source_fields = (
             "canonical_floor_id",
             "physical_floor_surface_id",
@@ -549,7 +553,20 @@ class CrossViewFloorFinishResult:
             field: Counter(getattr(record, field, None) for record in survivors)
             for field in source_fields
         }
+        quantity_ids = Counter(
+            getattr(record.quantity, "quantity_id", None)
+            for record in survivors
+        )
         def unique_owner(record: CrossViewFloorFinishRecord) -> bool:
+            if (
+                type(record.quantity) is not QuantityEvidence
+                or record.quantity.family != "floor_finish_area"
+                or record.quantity.input_entity_ids != (record.canonical_floor_id,)
+                or type(record.quantity.quantity_id) is not str
+                or not record.quantity.quantity_id
+                or quantity_ids[record.quantity.quantity_id] != 1
+            ):
+                return False
             return all(
                 type(getattr(record, field, None)) is str
                 and bool(getattr(record, field))
