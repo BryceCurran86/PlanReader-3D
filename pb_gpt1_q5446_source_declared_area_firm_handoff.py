@@ -90,6 +90,14 @@ def _issued_row(
     # Evidence entity is the ORIGINAL PRINTED SOURCE ROW, not an invented
     # canonical floor polygon. Physical wall/finish owner remains unresolved.
     source_entity = f"q5446_original_source_schedule_{row.original_row_id}"
+    # A label-only row is NOT a source-verified numeric area. Both source
+    # vectors are independently mandatory; a populated label family may
+    # never hide a missing numeric glyph path family in their combined tuple.
+    if (
+        not row.original_numeric_vector_path_ids
+        or not row.original_label_vector_path_ids
+    ):
+        raise ValueError("original source vector-path families unavailable")
     # Pinned original page-1 native stroke paths; each witness must be
     # individually source-unique, typed and bound to the SHA-verified PDF.
     paths = (
