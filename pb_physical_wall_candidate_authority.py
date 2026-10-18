@@ -92,6 +92,10 @@ from pb_wall_room_topology_wall_assembly import (
     W4SourceCandidateAddressCollision,
     assemble_wall_topology,
 )
+from pb_filtered_native_primitive_receipts import (
+    FilteredNativePrimitiveReceipt,
+    filtered_native_primitive_receipts,
+)
 from pb_wall_room_topology_typed_negative_evidence import (
     collect_source_lineage_grid_evidence,
 )
@@ -342,6 +346,9 @@ class PhysicalWallCandidateScopeResult:
     # equivalence, records, or reason codes. Downstream consumers must apply
     # their own proposition-specific gates before using these CANDIDATE atoms.
     typed_semantic_evidence_atoms: tuple[object, ...] = ()
+    # Non-authoritative original native lines excluded before W2. Never wall
+    # identity, continuity, room geometry, scale, or quantity evidence.
+    filtered_native_primitive_receipts: tuple[FilteredNativePrimitiveReceipt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3137,6 +3144,9 @@ def _assemble_scope_result(
         page_width=page_width,
         page_height=page_height,
     )
+    excluded_native_receipts = filtered_native_primitive_receipts(
+        segments, topology_segments
+    )
     if len(topology_segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
         return _blocked(
             selector,
@@ -3383,6 +3393,7 @@ def _assemble_scope_result(
         boundary_evaluation=boundary_evaluation,
         source_metadata_table=source_metadata_table,
         typed_semantic_evidence_atoms=typed_semantic_evidence_atoms,
+        filtered_native_primitive_receipts=excluded_native_receipts,
     )
 
 
