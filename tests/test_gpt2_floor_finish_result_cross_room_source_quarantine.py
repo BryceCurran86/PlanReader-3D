@@ -158,6 +158,21 @@ def test_secondary_quantity_evidence_cannot_reuse_another_floors_original_mark(m
         assert result.quantities == ()
 
 
+def test_reconstructed_quantity_missing_own_original_material_mark_is_rejected(monkeypatch):
+    original, _ = _producer_result(monkeypatch)
+    detached = replace(
+        original,
+        quantity=replace(
+            original.quantity,
+            evidence_ids=tuple(source_id for source_id in original.quantity.evidence_ids
+                               if source_id != original.occurrence_evidence_id),
+        ),
+    )
+    assert original.occurrence_evidence_id not in detached.quantity.evidence_ids
+    assert _public_result(detached).records_by_floor_id == {}
+    assert _public_result(detached).quantities == ()
+
+
 def test_reconstructed_result_cannot_change_canonical_quantity_input(monkeypatch):
     original, _ = _producer_result(monkeypatch)
     other = _different_room(original)
