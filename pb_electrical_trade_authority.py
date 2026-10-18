@@ -30,7 +30,7 @@ class ElectricalDeviceSpec:
     device_mark: str           # e.g. "MSB", "DB-1", "L1", "GPO-D", "DATA-1", "EXIT-1"
     description: str
     location: str              # e.g. "Main Switchroom", "Office 101", "Corridor"
-    count: int = 1
+    count: int = 0
     section: str = "Internal"  # "Internal", "External", "Substructure"
     is_dedicated_circuit: bool = False
     source_page: str = ""
@@ -100,7 +100,9 @@ class ElectricalTakeoffItem:
 def calculate_switchboard_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for main switchboards and distribution boards."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0:
+        return items
+    count = spec.count
 
     items.append(ElectricalTakeoffItem(
         section=spec.section,
@@ -125,7 +127,9 @@ def calculate_switchboard_items(spec: ElectricalDeviceSpec) -> List[ElectricalTa
 def calculate_lighting_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for luminaires, switches, and emergency fittings."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0:
+        return items
+    count = spec.count
 
     if spec.device_type == "emergency":
         element_name = f"Emergency / exit lighting fitting ({spec.description})"
@@ -160,7 +164,9 @@ def calculate_lighting_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeo
 def calculate_power_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for general power outlets and dedicated circuits."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0:
+        return items
+    count = spec.count
 
     if spec.is_dedicated_circuit:
         element_name = f"Dedicated power circuit & isolator ({spec.description})"
@@ -192,7 +198,9 @@ def calculate_power_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffI
 def calculate_data_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for data/communications outlets and racks."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.count <= 0:
+        return items
+    count = spec.count
 
     items.append(ElectricalTakeoffItem(
         section=spec.section,
