@@ -17,6 +17,8 @@ from pb_gpt1_q5446_original_area_schedule_shadow import (
     _table_witnesses_valid,
     _numeric_vector_digit,
     _original_numeric_glyph_receipts,
+    _original_label_stroke_receipts,
+    ORIGINAL_LABEL_STROKE_PATHS,
     ORIGINAL_ROW_Y_BOUNDS,
     inspect_original_q5446_printed_area_schedule,
 )
@@ -140,6 +142,33 @@ def _synthetic_numeric_table():
     return result
 
 
+def _synthetic_label_strokes():
+    strokes = [{} for _ in range(max(max(row) for row in ORIGINAL_LABEL_STROKE_PATHS) + 1)]
+    for (start, end), ids in zip(ORIGINAL_ROW_Y_BOUNDS, ORIGINAL_LABEL_STROKE_PATHS):
+        for position, idx in enumerate(ids):
+            strokes[idx] = {
+                "type": "s", "color": (0.0, 0.0, 0.0),
+                "width": .72, "rect": _Rect(
+                    981.0 + position * 3.0, start + 2.0,
+                    982.0 + position * 3.0, start + 5.6,
+                ),
+            }
+    return strokes
+
+
+def test_original_label_ink_receipts_are_distinct_and_row_scoped():
+    labels = _original_label_stroke_receipts(_synthetic_label_strokes())
+    assert labels == ORIGINAL_LABEL_STROKE_PATHS
+    assert len(set(index for row in labels for index in row)) == sum(len(row) for row in labels)
+
+
+def test_label_strokes_cannot_be_borrowed_from_another_area_row():
+    strokes = _synthetic_label_strokes()
+    first = ORIGINAL_LABEL_STROKE_PATHS[0][0]
+    strokes[first]["rect"] = _Rect(981.0, 658.0, 982.0, 661.0)
+    assert _original_label_stroke_receipts(strokes) is None
+
+
 def test_all_ten_vector_decimal_glyph_shapes_are_independently_decoded():
     for char in "0123456789.":
         assert _numeric_vector_digit(_outlined_numeral(char, 1045, 650)) == char
@@ -176,6 +205,8 @@ def test_private_original_positive_is_optional_not_mocked():
     assert sum(not r.is_rollup for r in report.rows) == 5
     assert all(r.status == "CANDIDATE" for r in report.rows)
     assert all(r.glyph_correspondence_authenticated for r in report.rows)
+    assert all(r.label_stroke_presence_verified for r in report.rows)
+    assert tuple(r.original_label_vector_path_ids for r in report.rows) == ORIGINAL_LABEL_STROKE_PATHS
     assert [len(r.original_numeric_vector_path_ids) for r in report.rows] == [
         6, 6, 6, 4, 5, 5, 6,
     ]
