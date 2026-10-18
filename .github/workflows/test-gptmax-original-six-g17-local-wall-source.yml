@@ -21,6 +21,7 @@ env:
 jobs:
   verified-original-six:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
@@ -70,3 +71,9 @@ jobs:
           name: gptmax-original-six-g17-source-local-w4
           path: artifacts/gptmax-six-source-local-g17-wall-shadows.json
           retention-days: 21
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: verified-original-six

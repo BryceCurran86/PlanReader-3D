@@ -25,6 +25,7 @@ env:
 jobs:
   original-source-positive-join:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
@@ -88,3 +89,9 @@ jobs:
           name: gptmax-original-shared-g17-dual-ended-pier-evidence
           path: artifacts/gptmax-original-shared-dual-ends.json
           retention-days: 21
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-source-positive-join
