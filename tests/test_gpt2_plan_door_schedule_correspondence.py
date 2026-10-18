@@ -159,7 +159,6 @@ def test_authentication_status_cannot_overrule_untrusted_or_missing_source_row_r
     for bad_row in (
         replace(authenticated, complete_native_row_text_trusted=False),
         replace(authenticated, observation_ids=()),
-        replace(authenticated, observation_ids=("source:28:D13", "source:28:D13")),
         replace(authenticated, source_title_observation_ids=()),
     ):
         result = pair(
@@ -173,6 +172,17 @@ def test_authentication_status_cannot_overrule_untrusted_or_missing_source_row_r
             "original_schedule_row_or_universe_unverified"
         )
         assert result.pairs[0].opening_count is None
+    duplicated = replace(
+        authenticated, observation_ids=("source:28:D13", "source:28:D13")
+    )
+    conflict = pair(
+        plan_words=(_word("D13", 1),),
+        schedule=_schedule(duplicated), plan_page_id="7",
+    )
+    assert conflict.pairs[0].first_unclosed_gate == (
+        "original_schedule_shared_word_observation_conflict"
+    )
+    assert conflict.eligible_printed_code_pair_count == 0
 
 
 def test_untrusted_and_duplicate_native_plan_source_address_abstain():
