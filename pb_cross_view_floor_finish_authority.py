@@ -549,13 +549,18 @@ class CrossViewFloorFinishResult:
             "physical_room_id",
             "source_room_face_record_id",
         )
+        # Count ALL submitted records, including those that the lower-level
+        # gate rejected for a malformed floor ID. Otherwise a caller could
+        # rekey one rival as invalid and let its contested sibling survive.
         duplicates = {
-            field: Counter(getattr(record, field, None) for record in survivors)
-            for field in source_fields
+            field: Counter(getattr(record, field, None) for record in sealed)
+            for field in source_fields + (
+                "occurrence_record_id", "occurrence_evidence_id",
+            )
         }
         quantity_ids = Counter(
             getattr(record.quantity, "quantity_id", None)
-            for record in survivors
+            for record in sealed
         )
         def unique_owner(record: CrossViewFloorFinishRecord) -> bool:
             if (
@@ -572,7 +577,7 @@ class CrossViewFloorFinishResult:
                 and bool(getattr(record, field))
                 and getattr(record, field) == getattr(record, field).strip()
                 and duplicates[field][getattr(record, field)] == 1
-                for field in source_fields
+                for field in duplicates
             )
         return MappingProxyType({
             record.canonical_floor_id: record
