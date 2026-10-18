@@ -611,7 +611,7 @@ def test_explicit_manual_include_persists_and_stays_authorised():
         prod.install_legacy_safety_fence(app)
         legacy_v134._save(app, 7, [{
             "kind": "Door", "label": "D01", "wall_ref": "W01",
-            "width_m": 0.82, "height_m": 2.1, "deduct": True,
+            "width_m": 0.82, "height_m": 2.1, "quantity": 1, "deduct": True,
         }], confirm_all=True)
         loaded = legacy_v134._load(app, 7)
         assert len(loaded) == 1
