@@ -1348,12 +1348,16 @@ def enrich_live_canonical_floor_finishes(
     if type(finishes) is not CrossViewFloorFinishResult:
         raise TypeError("finishes must be CrossViewFloorFinishResult")
 
-    by_floor: dict[str, list[CrossViewFloorFinishRecord]] = {}
-    for record in finishes.records:
-        by_floor.setdefault(record.canonical_floor_id, []).append(record)
-
+    # The public result may have been reconstructed from individually valid
+    # producer records with rekeyed physical owners. Enrichment must consume
+    # the same cross-room-quarantined view as downstream QuantityEvidence, not
+    # the raw tuple which can contain aliases of one source material mark.
+    eligible = finishes.records_by_floor_id
+    by_floor: dict[str, list[CrossViewFloorFinishRecord]] = {
+        floor_id: [record] for floor_id, record in eligible.items()
+    }
     enriched: list[LiveCanonicalFloorSurfaceObject] = []
-    conflict = False
+    conflict = len(eligible) != len(finishes.records)
     resolved = 0
     for floor in floors.floors:
         matches = by_floor.get(floor.canonical_floor_id, ())
