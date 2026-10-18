@@ -126,6 +126,11 @@ def test_duplicate_or_missing_vector_sources_never_issue_quantity():
             replace(row, original_numeric_vector_path_ids=()),
             key="ground_floor", workspace_id=1,
         )
+    with pytest.raises(ValueError, match="source vector-path"):
+        _issued_row(
+            replace(row, original_label_vector_path_ids=()),
+            key="ground_floor", workspace_id=1,
+        )
 
 
 @pytest.mark.parametrize("lost", ["numeric", "label", "both"])
