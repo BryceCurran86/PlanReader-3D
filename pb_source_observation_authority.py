@@ -47,6 +47,7 @@ PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 # leaking decoded observations or cache state across independent producers.
 _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
+_NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES = 3
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
 # Representation cache only. Lookups stay the same above and below this size.
 _SNAPSHOT_FLATTEN_MIN = 4096
@@ -735,6 +736,7 @@ class SourceObservationProducer:
         self._native_page_decode_cache: (
             "OrderedDict[tuple[str, int], _NativePageDecodeCacheEntry]"
         ) = OrderedDict()
+        self._native_image_scope_cache: "OrderedDict[tuple[str, str, str, int], tuple]" = OrderedDict()
         # One immutable native-decode scope per revision on this producer.
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
@@ -1167,6 +1169,11 @@ class SourceObservationProducer:
         coverage = self._store.coverage_by_revision.get(revision_id)
         if coverage is None or page_number not in coverage.decoded_pages:
             raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} was not decoded")
+        key = (revision_id, source_sha256, snapshot_id, page_number)
+        cached = self._native_image_scope_cache.get(key)
+        if cached is not None:
+            self._native_image_scope_cache.move_to_end(key)
+            return cached[0]
 
         try:
             pdf = fitz.open(stream=source_bytes, filetype="pdf")
@@ -1179,6 +1186,8 @@ class SourceObservationProducer:
                 raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} out of range")
             page = pdf.load_page(page_number - 1)
             regions: set[tuple[float, float, float, float]] = set()
+            placements: set[NativePageImagePlacement] = set()
+            rects_by_xref: dict[int, tuple] = {}
             for image in page.get_images(full=True) or ():
                 if not image:
                     continue
@@ -1186,10 +1195,13 @@ class SourceObservationProducer:
                     xref = int(image[0])
                 except (TypeError, ValueError):
                     continue
-                try:
-                    rects = page.get_image_rects(xref) or ()
-                except Exception:
-                    continue
+                rects = rects_by_xref.get(xref)
+                if rects is None:
+                    try:
+                        rects = tuple(page.get_image_rects(xref) or ())
+                    except Exception:
+                        continue
+                    rects_by_xref[xref] = rects
                 for rect in rects:
                     geometry = (
                         float(rect.x0),
@@ -1202,7 +1214,25 @@ class SourceObservationProducer:
                     if geometry[2] <= geometry[0] or geometry[3] <= geometry[1]:
                         continue
                     regions.add(tuple(round(value, 4) for value in geometry))
-            return tuple(sorted(regions))
+                    if len(image) >= 4:
+                        try:
+                            width, height = int(image[2]), int(image[3])
+                        except (TypeError, ValueError):
+                            continue
+                        if width > 0 and height > 0:
+                            placements.add(NativePageImagePlacement(
+                                bbox_pt=tuple(round(value, 6) for value in geometry),
+                                pixel_width=width, pixel_height=height,
+                            ))
+            output = tuple(sorted(regions))
+            ordered = tuple(sorted(placements, key=lambda item: (
+                item.bbox_pt, item.pixel_width, item.pixel_height,
+            )))
+            self._native_image_scope_cache[key] = (output, ordered)
+            self._native_image_scope_cache.move_to_end(key)
+            while len(self._native_image_scope_cache) > _NATIVE_IMAGE_PLACEMENT_CACHE_MAX_PAGES:
+                self._native_image_scope_cache.popitem(last=False)
+            return output
         finally:
             pdf.close()
 
@@ -1229,75 +1259,17 @@ class SourceObservationProducer:
             page_id=page_id,
         )
 
-        revision = self._store.revisions.get(revision_id)
-        source_bytes = self._store.source_bytes_by_revision.get(revision_id)
-        if revision is None or source_bytes is None:
+        # The region read above rechecks source SHA, current revision,
+        # snapshot and coverage on every call. It records all original image
+        # XObject rectangles and intrinsic sizes from the SAME verified pass.
+        key = (revision_id, source_sha256, snapshot_id, int(page_id))
+        record = self._native_image_scope_cache.get(key)
+        if record is None:
             raise ProducerIntegrityError(
-                f"{PRODUCER_INTEGRITY_FAILURE}: source lineage unavailable"
+                f"{PRODUCER_INTEGRITY_FAILURE}: original image placement scope missing"
             )
-        try:
-            page_number = int(page_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}"
-            ) from exc
-
-        try:
-            pdf = fitz.open(stream=source_bytes, filetype="pdf")
-        except Exception as exc:
-            raise ProducerIntegrityError(
-                f"{PRODUCER_INTEGRITY_FAILURE}: stored PDF no longer decodes"
-            ) from exc
-        try:
-            if page_number > int(pdf.page_count):
-                raise ValueError(
-                    f"{SOURCE_UNAVAILABLE}: page {page_id} out of range"
-                )
-            page = pdf.load_page(page_number - 1)
-            placements: set[NativePageImagePlacement] = set()
-            for image in page.get_images(full=True) or ():
-                if len(image) < 4:
-                    continue
-                try:
-                    xref = int(image[0])
-                    pixel_width = int(image[2])
-                    pixel_height = int(image[3])
-                except (TypeError, ValueError):
-                    continue
-                if pixel_width <= 0 or pixel_height <= 0:
-                    continue
-                try:
-                    rects = page.get_image_rects(xref) or ()
-                except Exception:
-                    continue
-                for rect in rects:
-                    bbox = (
-                        float(rect.x0),
-                        float(rect.y0),
-                        float(rect.x1),
-                        float(rect.y1),
-                    )
-                    if (
-                        not all(math.isfinite(value) for value in bbox)
-                        or bbox[2] <= bbox[0]
-                        or bbox[3] <= bbox[1]
-                    ):
-                        continue
-                    placements.add(NativePageImagePlacement(
-                        bbox_pt=tuple(round(value, 6) for value in bbox),
-                        pixel_width=pixel_width,
-                        pixel_height=pixel_height,
-                    ))
-            return tuple(sorted(
-                placements,
-                key=lambda item: (
-                    item.bbox_pt,
-                    item.pixel_width,
-                    item.pixel_height,
-                ),
-            ))
-        finally:
-            pdf.close()
+        self._native_image_scope_cache.move_to_end(key)
+        return record[1]
 
     def ingest_native_pdf_bytes(
         self,
