@@ -162,3 +162,61 @@ def test_original_lot16_p3_58_source_image_pixel_columns_cross_tile_seam():
     assert report["source_painted_pixel_columns"] == 58
     assert report["source_pixel_columns_per_image_root"] == [29, 29]
     assert not report["structural_host_granted"]
+
+
+def test_original_lot16_tiles_have_positive_axis_aligned_unmirrored_transforms():
+    from pb_gptmax_raster_tile_seam_shadow import _canonical_source_image_placement
+    source = os.environ.get("LOT16_ARCH_ORIGINAL")
+    if not source or not Path(source).is_file():
+        pytest.skip("private SHA-verified original source not provisioned")
+    data = Path(source).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    with fitz.open(stream=data, filetype="pdf") as document:
+        for index, xrefs in ((2, (95, 97)), (4, (115, 117))):
+            page = document[index]
+            for xref in xrefs:
+                placements = page.get_image_rects(xref, transform=True)
+                assert len(placements) == 1
+                rect, matrix = placements[0]
+                assert _canonical_source_image_placement(rect, matrix)
+                assert abs(rect.x0 - 714.36) < .02 or abs(rect.x1 - 714.36) < .02
+
+
+def test_image_rotation_cannot_masquerade_as_native_unrotated_source_root():
+    from pb_gptmax_raster_tile_seam_shadow import (
+        _canonical_source_image_placement, prove_tile_seam_source_pixels,
+    )
+    data = _source()
+    with fitz.open(stream=data, filetype="pdf") as input_pdf:
+        original = input_pdf[0]
+        left_xref, right_xref = [int(t[0]) for t in original.get_images(full=True)]
+        assert len(original.get_image_rects(left_xref, transform=True)) == 1
+        assert len(original.get_image_rects(right_xref, transform=True)) == 1
+        left_blob = input_pdf.extract_image(left_xref)["image"]
+        right_blob = input_pdf.extract_image(right_xref)["image"]
+    out = fitz.open()
+    page = out.new_page(width=250, height=150)
+    page.insert_image(fitz.Rect(0, 0, 100, 100), stream=left_blob)
+    page.insert_image(fitz.Rect(100, 0, 200, 100), stream=right_blob, rotate=90)
+    raw = out.tobytes()
+    right_placements = page.get_image_rects(page.get_images(full=True)[1][0], transform=True)
+    assert any(not _canonical_source_image_placement(rect, matrix)
+               for rect, matrix in right_placements)
+    out.close()
+    report = prove_tile_seam_source_pixels(
+        raw, expected_sha256=hashlib.sha256(raw).hexdigest(),
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=4,
+    )
+    assert report["status"] == ABSTAIN
+    assert "source_tile_image_transform_unsupported" in report["reason_codes"]
+
+
+def test_image_transform_mirror_shear_and_duplicate_boxes_all_fail_closed():
+    from pb_gptmax_raster_tile_seam_shadow import _canonical_source_image_placement
+    rect = fitz.Rect(0, 0, 100, 100)
+    assert _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0, 100, 0, 0))
+    assert not _canonical_source_image_placement(rect, fitz.Matrix(-100, 0, 0, 100, 100, 0))
+    assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0, -100, 0, 100))
+    assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0.02, 0, 100, 0, 0))
+    assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0.02, 100, 0, 0))
+    assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0, 100, 0.1, 0))
