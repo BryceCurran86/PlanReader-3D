@@ -74,6 +74,30 @@ def test_equal_measured_value_with_different_physical_id_is_missing_plus_new_nev
     assert result["historical_to_candidate_quantity_equivalence_proven"] is False
 
 
+def test_two_unrelated_genuine_equal_area_receipts_have_no_shared_byte_exactness():
+    old_payload, _ = _runs()
+    sealed = sealed_source_closed_run_from_dict(old_payload)
+    a, b = sealed.quantities[0], sealed.quantities[1]
+    assert a.quantity_id != b.quantity_id
+    assert a.value == b.value == 2.16
+    result = diag._diff({a.quantity_id: a}, {b.quantity_id: b})
+    assert result["shared_quantity_id_count"] == 0
+    assert result["all_shared_fingerprints_byte_exact"] is False
+    assert result["same_quantity_id_universe"] is False
+    assert result["historical_to_candidate_quantity_equivalence_proven"] is False
+    assert [r["quantity_id"] for r in result["missing_historical_quantities"]] == [a.quantity_id]
+    assert [r["quantity_id"] for r in result["new_candidate_quantities"]] == [b.quantity_id]
+
+
+def test_source_only_identical_receipt_still_reports_shared_byte_exact_without_authorizing_reuse():
+    sealed_raw, _ = _runs()
+    row = sealed_source_closed_run_from_dict(sealed_raw).quantities[0]
+    comparison = diag._diff({row.quantity_id: row}, {row.quantity_id: row})
+    assert comparison["shared_quantity_id_count"] == 1
+    assert comparison["all_shared_fingerprints_byte_exact"] is True
+    assert comparison["historical_to_candidate_quantity_equivalence_proven"] is False
+
+
 def test_same_id_changed_physical_semantic_identity_is_proposition_conflict():
     original, _ = _runs()
     a = sealed_source_closed_run_from_dict(original).quantities[0]
