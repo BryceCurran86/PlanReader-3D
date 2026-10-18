@@ -1,0 +1,113 @@
+"""Original source-neutral raster tile seam proofs and exact original optional test."""
+import hashlib
+from io import BytesIO
+import os
+from pathlib import Path
+
+import fitz
+import pytest
+from PIL import Image, ImageDraw
+
+from pb_gptmax_raster_tile_seam_shadow import (
+    prove_tile_seam_source_pixels, SOURCE_ONLY, ABSTAIN,
+)
+
+
+def _source(*, gap=0, same=False, right_dark=True, vector_override=False, rotated=False):
+    doc = fitz.open()
+    page = doc.new_page(width=250, height=150)
+    images = []
+    for side in range(2):
+        im = Image.new("RGB", (100, 100), "white")
+        draw = ImageDraw.Draw(im)
+        if side == 0 or right_dark:
+            draw.rectangle((0, 48, 99, 53), fill=(0, 0, 0))
+        if side == 1 and not same:
+            draw.point((12, 12), fill=(255, 0, 0))
+        stream = BytesIO()
+        im.save(stream, format="PNG")
+        images.append(stream.getvalue())
+    page.insert_image(fitz.Rect(0, 0, 100, 100), stream=images[0])
+    page.insert_image(fitz.Rect(100 + gap, 0, 200 + gap, 100), stream=images[0] if same else images[1])
+    if vector_override:
+        page.draw_line(fitz.Point(95, 50), fitz.Point(110, 50), color=(0, 0, 0), width=3)
+    if rotated:
+        page.set_rotation(90)
+    output = doc.tobytes()
+    doc.close()
+    return output
+
+
+def _proof(pdf, **kw):
+    return prove_tile_seam_source_pixels(
+        pdf, expected_sha256=hashlib.sha256(pdf).hexdigest(),
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=4, **kw,
+    )
+
+
+def test_independent_image_roots_and_rendered_source_ink():
+    pdf = _source()
+    got = _proof(pdf)
+    assert got["status"] == SOURCE_ONLY
+    assert len(got["image_roots"]) == 2
+    assert got["image_roots"][0]["xref"] != got["image_roots"][1]["xref"]
+    assert got["image_roots"][0]["image_sha256"] != got["image_roots"][1]["image_sha256"]
+    assert all(not got[k] for k in (
+        "structural_host_granted", "whole_wall_frame_granted", "opening_count_granted", "quantity_granted"
+    ))
+    assert got == _proof(pdf)
+
+
+def test_one_identical_xref_cannot_pretend_to_be_two_source_roots():
+    got = _proof(_source(same=True))
+    assert got["status"] == ABSTAIN
+    assert "distinct_abutting_unmasked_image_roots_unproven" in got["reason_codes"]
+
+
+def test_gapped_image_roots_do_not_prove_continuity():
+    got = _proof(_source(gap=2))
+    assert got["status"] == ABSTAIN
+
+
+def test_vector_paint_over_white_tile_does_not_prove_source_image_ink():
+    got = _proof(_source(right_dark=False, vector_override=True))
+    assert got["status"] == ABSTAIN
+    assert "source_ink_or_render_corroboration_failed" in got["reason_codes"]
+
+
+def test_rotated_page_is_not_treated_as_unrotated_source_frame():
+    got = _proof(_source(rotated=True))
+    assert got["status"] == ABSTAIN
+    assert "unresolved_source_page_frame" in got["reason_codes"]
+
+
+def test_pinned_source_and_bounded_explicit_parameters_fail_closed():
+    pdf = _source()
+    digest = hashlib.sha256(pdf).hexdigest()
+    with pytest.raises(ValueError, match="SHA-256"):
+        prove_tile_seam_source_pixels(pdf, expected_sha256="0" * 64, page_no=1, seam_x=100, source_y=50)
+    for invalid in (float("nan"), float("inf"), True):
+        with pytest.raises(ValueError):
+            prove_tile_seam_source_pixels(pdf, expected_sha256=digest, page_no=1, seam_x=invalid, source_y=50)
+    with pytest.raises(ValueError, match="dpi"):
+        _proof(pdf, dpi=20)
+    with pytest.raises(ValueError, match="page"):
+        prove_tile_seam_source_pixels(pdf, expected_sha256=digest, page_no=0, seam_x=100, source_y=50)
+
+
+def test_original_lot16_page5_seam_requires_owner_source_if_available():
+    source = os.environ.get("LOT16_ARCH_ORIGINAL")
+    if not source or not Path(source).is_file():
+        pytest.skip("private immutable source not provisioned: NOT an original-source verification")
+    pdf = Path(source).read_bytes()
+    digest = hashlib.sha256(pdf).hexdigest()
+    assert digest == "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    report = prove_tile_seam_source_pixels(
+        pdf, expected_sha256=digest, page_no=5,
+        seam_x=714.36, source_y=514, flank_offset_pt=4,
+    )
+    assert report["status"] == SOURCE_ONLY
+    assert [r["xref"] for r in report["image_roots"]] == [115, 117]
+    assert all(not report[k] for k in (
+        "structural_host_granted", "whole_wall_frame_granted", "opening_count_granted", "quantity_granted"
+    ))
