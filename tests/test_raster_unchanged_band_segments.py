@@ -185,3 +185,57 @@ def test_actual_source_capture_closes_host_and_figured_area_without_default_coun
     assert quantities[0].abstained is False
     assert voids.canonical_openings[0].schedule_count_explicit is False
     assert voids.canonical_openings[0].schedule_declared_count is None
+
+
+def test_registered_one_ended_g17_source_parent_reauthenticates_and_routes_only_to_supplemental_w4():
+    from pb_source_visibility_authority import (
+        _raster_segment_observation_id, _raster_segment_receipt_matches_parent,
+    )
+    from pb_physical_wall_candidate_authority import (
+        _is_opening_local_supplemental_segment,
+        RASTER_PDF_VISIBLE_SEGMENT,
+    )
+    assert capture.OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS == frozenset((
+        capture.UNCHANGED_BAND_IDENTITY_VERSION,
+        capture.ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION,
+    ))
+    source = SourceVisibilityProducer(producer_method="original-one-ended-parent-test", producer_version="1")
+    selected = source.ingest_native_pdf_bytes(document_id="one-ended-parent",
+        source_bytes=_pdf(), source_locator="memory://source.pdf")
+    selected = source.augment_with_raster_opening_primitives(selected.revision.revision_id)
+    selected = source.augment_with_raster_visible_segments(selected.revision.revision_id)
+    observed = source.authority().authenticated_visible_observations(selected)
+    rows = [(oid, parent) for oid, parent in observed if
+        capture.UNCHANGED_BAND_IDENTITY_VERSION in parent.source_primitive_ref]
+    assert len(rows) >= 1
+    oid, parent = rows[0]
+    receipt = source._raster_visibility_receipts[(selected.snapshot.snapshot_id, oid)]
+    prefix, image_sha, version, full_sha, index = parent.source_primitive_ref.split(":")
+    assert version == capture.UNCHANGED_BAND_IDENTITY_VERSION
+    assert _raster_segment_receipt_matches_parent(receipt, parent)
+    new_version = capture.ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION
+    new_ref = ":".join((prefix, image_sha, new_version, full_sha, index))
+    new_id = _raster_segment_observation_id(
+        document_id=receipt.document_id, revision_id=receipt.revision_id,
+        page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+        image_sha256=receipt.image_sha256, identity_version=new_version,
+        pixel_geometry=receipt.pixel_geometry, geometry=receipt.geometry,
+        index=int(index), visibility_render_sha256=receipt.visibility_render_sha256,
+    )
+    reissued = replace(parent, observation_id=new_id, source_primitive_ref=new_ref)
+    assert _raster_segment_receipt_matches_parent(receipt, reissued)
+    row = {"source_kind": RASTER_PDF_VISIBLE_SEGMENT, "id": new_ref,
+           "source_observation_id": new_id}
+    assert _is_opening_local_supplemental_segment(row)
+    assert not _is_opening_local_supplemental_segment({
+        **row, "source_kind": "native_pdf_visible_segment"
+    })
+    # No reusing the historical observation ID or other issuer's receipt.
+    assert not _raster_segment_receipt_matches_parent(receipt,
+        replace(parent, source_primitive_ref=new_ref))
+    assert not _raster_segment_receipt_matches_parent(receipt,
+        replace(reissued, source_primitive_ref=new_ref.replace(full_sha, "f"*64)))
+    assert not _raster_segment_receipt_matches_parent(receipt,
+        replace(reissued, source_primitive_ref=new_ref.replace(new_version, "foreign_g17_v1")))
+    assert not _raster_segment_receipt_matches_parent(
+        replace(receipt, dpi=144), reissued)
