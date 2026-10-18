@@ -1485,18 +1485,20 @@ class GenericPlanReaderExtractor:
                 spatial_evidence = resolve_secondary_footprint_width_m(
                     doc[p_idx], page_num=p_idx + 1
                 )
-                if spatial_evidence is not None:
-                    verandah_width_by_page[p_idx + 1] = spatial_evidence.width_m
+                from pb_gpt1_page_secondary_width_authority import (
+                    bind_page_secondary_width,
+                )
 
-                if (p_idx + 1) not in verandah_width_by_page:
-                    vm = re.search(r"(\d+(?:[,.]\d+)?)\s*(?:m|mm)?\s*wide\s*veranda", norm_pg)
-                    if not vm:
-                        vm = re.search(r"veranda[h]?\s*[:\-\(]?\s*(\d+(?:[,.]\d+)?)\s*(?:m|mm)", norm_pg)
-                    if vm:
-                        raw_v = float(vm.group(1).replace(",", "."))
-                        verandah_width_by_page[p_idx + 1] = (
-                            raw_v / 1000.0 if raw_v > 10 else raw_v
-                        )
+                # Exact original-page witnesses must agree: do not borrow a
+                # dimension from another drawing or select the first of two
+                # contradicting printed widths. A conflicting annotation
+                # leaves this component partial and blocks total-area issue.
+                _page_width = bind_page_secondary_width(
+                    pg_txt,
+                    spatial_evidence.width_m if spatial_evidence is not None else None,
+                )
+                if _page_width.width_m is not None:
+                    verandah_width_by_page[p_idx + 1] = _page_width.width_m
 
             # Roof pitch angle: only if explicitly specified
             if global_roof_pitch_deg is None:
