@@ -249,3 +249,161 @@ def test_nonpositive_datum_difference_abstains() -> None:
     assert qty.abstained
     assert "nonpositive_or_invalid_datum_height" in qty.blocking_reasons
     assert AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE in qty.blocking_reasons
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# run-level revision and viewport ownership (the holes _validate_owned_evidence leaves open)
+# ---------------------------------------------------------------------------------------------------------------------
+
+import copy
+from dataclasses import replace
+
+import pytest
+
+from pb_measurement_input_authority import _validate_ownership
+from pb_wall_height_authority import _context_viewport_blockers
+
+BASELINE_QUANTITY_ID = "qty_a2d32a08f5b8b15838c3"  # the unchanged R1/R1 RESOLVED fixture, computed before this change
+
+
+def _direct(*, context=None, document=None, viewport=None, evidence=None):
+    ev = evidence or _ev("h", "wall_height_dimension", 2.7, "m")
+    return build_wall_height_quantity(
+        wall_id="w1",
+        context=context or _context(),
+        document=document or _document(("h",)),
+        viewport=viewport or _viewport(),
+        entity=_entity(("h",)),
+        direct_height_evidence=ev,
+    )
+
+
+def _page9():
+    return (
+        replace(_viewport(), page_id="page-9"),
+        replace(_ev("h", "wall_height_dimension", 2.7, "m"), page_id="page-9"),
+    )
+
+
+def test_unchanged_resolved_r1_fixture_stays_firm_with_the_same_quantity_id() -> None:
+    qty = _direct()
+    assert (qty.status, qty.value, qty.abstained, qty.blocking_reasons) == ("firm", 2.7, False, ())
+    assert qty.quantity_id == BASELINE_QUANTITY_ID
+
+
+def test_derived_viewport_is_still_firm() -> None:
+    qty = _direct(viewport=replace(_viewport(), status=ViewportResolutionStatus.DERIVED))
+    assert qty.status == "firm" and qty.quantity_id == BASELINE_QUANTITY_ID
+
+
+@pytest.mark.parametrize(
+    ("context_changes", "expected"),
+    [
+        ({"revision_id": "R0"}, "stale_revision"),
+        ({"revision_id": None}, "revision_unbound"),
+        ({"revision_id": ""}, "revision_unbound"),
+        ({"current_revision_id": None}, "revision_unbound"),
+        ({"current_revision_id": ""}, "revision_unbound"),
+    ],
+)
+def test_stale_or_unbound_run_revision_abstains(context_changes, expected) -> None:
+    qty = _direct(context=replace(_context(), **context_changes))
+    assert qty.abstained and qty.value is None
+    assert expected in qty.blocking_reasons
+
+
+@pytest.mark.parametrize(
+    "status", [ViewportResolutionStatus.AMBIGUOUS, ViewportResolutionStatus.UNSUPPORTED]
+)
+def test_unresolved_viewport_abstains(status) -> None:
+    qty = _direct(viewport=replace(_viewport(), status=status))
+    assert qty.abstained and qty.value is None
+    assert "viewport_unresolved" in qty.blocking_reasons
+
+
+def test_viewport_from_another_document_abstains() -> None:
+    qty = _direct(viewport=replace(_viewport(), document_id="other-doc"))
+    assert qty.abstained and qty.value is None
+    assert "viewport_document_mismatch" in qty.blocking_reasons
+
+
+def test_viewport_page_not_owned_by_the_document_abstains() -> None:
+    viewport, evidence = _page9()
+    qty = _direct(viewport=viewport, evidence=evidence)
+    assert qty.abstained and qty.value is None
+    assert "viewport_page_not_owned_by_document" in qty.blocking_reasons
+
+
+def test_every_hole_at_once_reports_every_reason_in_a_stable_order() -> None:
+    viewport, evidence = _page9()
+    viewport = replace(viewport, document_id="other-doc", status=ViewportResolutionStatus.AMBIGUOUS)
+    context = replace(_context(), revision_id="R0")
+    first = _direct(context=context, viewport=viewport, evidence=evidence)
+    second = _direct(context=context, viewport=viewport, evidence=evidence)
+    assert first == second  # deterministic replay, same ids
+    assert first.blocking_reasons[:4] == (
+        "stale_revision",
+        "viewport_document_mismatch",
+        "viewport_page_not_owned_by_document",
+        "viewport_unresolved",
+    )
+
+
+def test_datum_path_stays_blocked_and_also_reports_the_context_blockers() -> None:
+    lower = _ev("d1", "floor_level_datum", 12.4, "m", role="wall_base")
+    upper = _ev("d2", "wall_top_level_datum", 15.2, "m", role="wall_top")
+    ids = (lower.evidence_id, upper.evidence_id)
+    qty = build_wall_height_quantity(
+        wall_id="w1", wall_segment_id=SEGMENT,
+        context=replace(_context(), revision_id="R0"), document=_document(ids),
+        viewport=replace(_viewport(), status=ViewportResolutionStatus.AMBIGUOUS), entity=_entity(ids),
+        lower_datum_evidence=lower, upper_datum_evidence=upper,
+    )
+    assert qty.abstained and qty.value is None
+    assert {"stale_revision", "viewport_unresolved", AUTHORITATIVE_WALL_DATUM_RELATIONSHIP_UNAVAILABLE} <= set(
+        qty.blocking_reasons
+    )
+
+
+@pytest.mark.parametrize(
+    ("context_changes", "viewport_changes"),
+    [
+        ({"revision_id": "R0"}, {}),
+        ({"revision_id": None}, {}),
+        ({}, {"status": ViewportResolutionStatus.AMBIGUOUS}),
+        ({}, {"status": ViewportResolutionStatus.UNSUPPORTED}),
+        ({}, {"document_id": "other-doc"}),
+        ({}, {"page_id": "page-9"}),
+        ({"revision_id": "R0"}, {"document_id": "other-doc", "page_id": "page-9"}),
+    ],
+)
+def test_new_reasons_reuse_the_vocabulary_of_the_measurement_input_ownership_check(
+    context_changes, viewport_changes
+) -> None:
+    context = replace(_context(), **context_changes)
+    viewport = replace(_viewport(), **viewport_changes)
+    ours = set(_context_viewport_blockers(context=context, document=_document(("h",)), viewport=viewport))
+    sibling = set(
+        _validate_ownership(
+            context=context, document=_document(("h",)), viewport=viewport, page_no=1, entity=_entity(("h",)),
+        )
+    )
+    assert ours and ours <= sibling  # no second vocabulary: every code is one the sibling seam emits
+
+
+def test_inputs_are_not_mutated() -> None:
+    context, document, viewport = replace(_context(), revision_id="R0"), _document(("h",)), _viewport()
+    entity, evidence = _entity(("h",)), _ev("h", "wall_height_dimension", 2.7, "m")
+    before = copy.deepcopy((context, document, viewport, entity, evidence))
+    build_wall_height_quantity(
+        wall_id="w1", context=context, document=document, viewport=viewport, entity=entity,
+        direct_height_evidence=evidence,
+    )
+    assert (context, document, viewport, entity, evidence) == before
+
+
+def test_unrelated_extra_document_content_does_not_change_the_outcome() -> None:
+    plain = _direct()
+    wider = _direct(document=replace(_document(("h", "unrelated-1", "unrelated-2")), page_count=1))
+    assert wider.status == plain.status == "firm"
+    assert wider.quantity_id == plain.quantity_id == BASELINE_QUANTITY_ID
