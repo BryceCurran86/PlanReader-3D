@@ -18,6 +18,7 @@ on:
 jobs:
   original-maryborough-a120-f07-negative:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || vars.ORIGINAL_SOURCES_REPOSITORY != ''
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -52,3 +53,9 @@ jobs:
           name: gpt2-a120-original-semantic-frame-acceptance
           path: /tmp/gpt2_a120_semantic_frame_acceptance.json
           if-no-files-found: warn
+
+  original-source-not-verified:
+    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-maryborough-a120-f07-negative

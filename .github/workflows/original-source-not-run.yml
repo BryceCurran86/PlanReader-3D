@@ -1,0 +1,30 @@
+name: Original source NOT RUN notice
+
+# Reusable only. A push-to-main original-source replay is skipped while the private original source is not provisioned
+# (repository variable ORIGINAL_SOURCES_REPOSITORY is empty); the caller then runs this job so the skip is an explicit
+# record. A skipped replay is NOT a passing original-source verification, and pull_request / workflow_dispatch runs of
+# the same workflows are unchanged: they still fail closed when the original is missing.
+on:
+  workflow_call:
+    inputs:
+      job:
+        description: Id of the original-source job that was not run
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  notice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report NOT RUN
+        env:
+          CALLER_WORKFLOW: ${{ github.workflow }}
+          CALLER_JOB: ${{ inputs.job }}
+        run: |
+          set -euo pipefail
+          msg="${CALLER_WORKFLOW} / ${CALLER_JOB} NOT RUN - this is not a passing original-source verification. The private original source is not provisioned for this push (repository variable ORIGINAL_SOURCES_REPOSITORY is empty)."
+          echo "::notice title=PRIVATE ORIGINAL SOURCE UNAVAILABLE::${msg}"
+          echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
