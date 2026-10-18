@@ -27,17 +27,21 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 def normalise_opening(raw: Dict[str, Any]) -> Dict[str, Any]:
     raw = dict(raw or {})
-    kind = str(raw.get("kind") or "Window")
-    if kind not in KINDS:
+    kind = str(raw.get("kind") or "").strip()
+    if kind and kind not in KINDS:
         kind = "Other opening"
     width = max(0.0, _num(raw.get("width_m")))
     height = max(0.0, _num(raw.get("height_m")))
-    quantity = max(1, int(_num(raw.get("quantity"), 1)))
+    raw_quantity = raw.get("quantity")
+    if raw_quantity in (None, ""):
+        quantity = 0
+    else:
+        quantity = max(0, int(_num(raw_quantity)))
     return {
         "id": str(raw.get("id") or uuid.uuid4().hex[:12]),
         "kind": kind,
         "label": str(raw.get("label") or kind).strip(),
-        "wall_ref": str(raw.get("wall_ref") or "Unassigned wall").strip(),
+        "wall_ref": str(raw.get("wall_ref") or "").strip(),
         "width_m": round(width, 4),
         "height_m": round(height, 4),
         "quantity": quantity,
