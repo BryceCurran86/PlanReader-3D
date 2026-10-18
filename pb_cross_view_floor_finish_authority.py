@@ -533,18 +533,33 @@ class CrossViewFloorFinishResult:
 
     @property
     def records_by_floor_id(self) -> Mapping[str, CrossViewFloorFinishRecord]:
-        # A direct consumer must never silently choose the last of two
-        # competing finish claims for one canonical physical floor.
-        counts = Counter(
-            record.canonical_floor_id for record in self.records
-            if isinstance(record.canonical_floor_id, str)
-            and record.canonical_floor_id
+        # Consumers may receive a reconstructed result dataclass instead of
+        # the producer's already-quarantined records. Reapply BOTH the native
+        # material-mark ownership gate and the physical room/surface gate here:
+        # two independently keyed floors cannot reuse one source occurrence,
+        # source face, physical room, or physical floor. Never elect by order.
+        survivors, _ = _quarantine_reused_floor_finish_occurrences(self.records)
+        source_fields = (
+            "canonical_floor_id",
+            "physical_floor_surface_id",
+            "physical_room_id",
+            "source_room_face_record_id",
         )
+        duplicates = {
+            field: Counter(getattr(record, field, None) for record in survivors)
+            for field in source_fields
+        }
+        def unique_owner(record: CrossViewFloorFinishRecord) -> bool:
+            return all(
+                type(getattr(record, field, None)) is str
+                and bool(getattr(record, field))
+                and getattr(record, field) == getattr(record, field).strip()
+                and duplicates[field][getattr(record, field)] == 1
+                for field in source_fields
+            )
         return MappingProxyType({
-            record.canonical_floor_id: record for record in self.records
-            if isinstance(record.canonical_floor_id, str)
-            and record.canonical_floor_id == record.canonical_floor_id.strip()
-            and counts[record.canonical_floor_id] == 1
+            record.canonical_floor_id: record
+            for record in survivors if unique_owner(record)
         })
 
 
