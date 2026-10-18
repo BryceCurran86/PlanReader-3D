@@ -37,7 +37,7 @@ class ConcreteElementSpec:
     width_m: float = 0.0
     thickness_m: float = 0.0
     height_m: float = 0.0
-    count: int = 1
+    count: int = 0
     area_m2: float = 0.0
     perimeter_lm: float = 0.0
     is_suspended: bool = False
@@ -96,8 +96,8 @@ def calculate_slab_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
     """Calculate all trade items for a concrete slab (ground-bearing or suspended)."""
     items: List[ConcreteTakeoffItem] = []
     area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    thickness = spec.thickness_m if spec.thickness_m > 0.0 else 0.100  # Default 100mm
-    if area <= 0.0:
+    thickness = spec.thickness_m
+    if area <= 0.0 or thickness <= 0.0:
         return items
 
     vol_m3 = round(area * thickness, 2)
@@ -207,9 +207,9 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
     items: List[ConcreteTakeoffItem] = []
     if "strip" in spec.element_type:
         length = spec.length_m
-        width = spec.width_m if spec.width_m > 0.0 else 0.400
-        depth = spec.thickness_m if spec.thickness_m > 0.0 else 0.450
-        if length <= 0.0:
+        width = spec.width_m
+        depth = spec.thickness_m
+        if length <= 0.0 or width <= 0.0 or depth <= 0.0:
             return items
         vol_m3 = round(length * width * depth, 2)
 
@@ -246,10 +246,12 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
             row_role="",
         ))
     elif "pad" in spec.element_type:
-        count = max(1, spec.count)
-        length = spec.length_m if spec.length_m > 0.0 else 1.0
-        width = spec.width_m if spec.width_m > 0.0 else 1.0
-        depth = spec.thickness_m if spec.thickness_m > 0.0 else 0.500
+        count = spec.count
+        length = spec.length_m
+        width = spec.width_m
+        depth = spec.thickness_m
+        if count <= 0 or length <= 0.0 or width <= 0.0 or depth <= 0.0:
+            return items
         vol_per_pad = length * width * depth
         total_vol_m3 = round(count * vol_per_pad, 2)
 
@@ -270,9 +272,11 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
             row_role="",
         ))
     elif "bored_pier" in spec.element_type:
-        count = max(1, spec.count)
-        diam = spec.width_m if spec.width_m > 0.0 else 0.450
-        depth = spec.height_m if spec.height_m > 0.0 else 2.500
+        count = spec.count
+        diam = spec.width_m
+        depth = spec.height_m
+        if count <= 0 or diam <= 0.0 or depth <= 0.0:
+            return items
         radius = diam / 2.0
         vol_per_pier = math.pi * (radius ** 2) * depth
         total_vol_m3 = round(count * vol_per_pier, 2)
@@ -299,10 +303,12 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
 def calculate_column_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTakeoffItem]:
     """Calculate trade items for reinforced concrete columns."""
     items: List[ConcreteTakeoffItem] = []
-    count = max(1, spec.count)
-    w = spec.width_m if spec.width_m > 0.0 else 0.350
-    d = spec.length_m if spec.length_m > 0.0 else 0.350
-    h = spec.height_m if spec.height_m > 0.0 else 2.700
+    count = spec.count
+    w = spec.width_m
+    d = spec.length_m
+    h = spec.height_m
+    if count <= 0 or w <= 0.0 or d <= 0.0 or h <= 0.0:
+        return items
 
     vol_per_col = w * d * h
     total_vol = round(count * vol_per_col, 2)
@@ -352,9 +358,9 @@ def calculate_beam_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
     """Calculate trade items for reinforced concrete beams."""
     items: List[ConcreteTakeoffItem] = []
     length = spec.length_m
-    w = spec.width_m if spec.width_m > 0.0 else 0.400
-    d = spec.thickness_m if spec.thickness_m > 0.0 else 0.600
-    if length <= 0.0:
+    w = spec.width_m
+    d = spec.thickness_m
+    if length <= 0.0 or w <= 0.0 or d <= 0.0:
         return items
 
     vol_m3 = round(length * w * d, 2)
@@ -401,9 +407,11 @@ def calculate_beam_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
 def calculate_stairs_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTakeoffItem]:
     """Calculate trade items for reinforced concrete stairs."""
     items: List[ConcreteTakeoffItem] = []
-    flights = max(1, spec.count)
-    steps = max(1, int(spec.height_m * 6)) if spec.height_m > 0 else 16  # approx 16 steps per storey
-    width = spec.width_m if spec.width_m > 0.0 else 1.000
+    flights = spec.count
+    width = spec.width_m
+    if flights <= 0 or spec.height_m <= 0.0 or width <= 0.0:
+        return items
+    steps = max(1, int(spec.height_m * 6))
     # Average waist slab + steps volume: ~0.15 m³ per step per metre width
     vol_m3 = round(flights * steps * width * 0.08, 2)
     formwork_m2 = round(flights * steps * (width * 0.18 + width * 0.28), 2)
