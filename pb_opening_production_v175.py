@@ -169,13 +169,11 @@ def _safe_legacy_save(original_save, safe_normalise):
 def _stated_quantity(raw: Dict[str, Any]) -> int:
     """Opening count only when the row states one. A blank count is not one opening."""
     value = raw.get("quantity")
-    if value in (None, ""):
+    # _num coerces bool, fractions and scientific notation to apparently
+    # valid counts. Never infer an integer opening count from such values.
+    if not _is_valid_positive_int(value):
         return 0
-    try:
-        count = int(_num(value))
-    except (TypeError, ValueError):
-        return 0
-    return count if count > 0 else 0
+    return int(value)
 
 
 def _safe_deducted_area(openings: Iterable[Dict[str, Any]]) -> float:
