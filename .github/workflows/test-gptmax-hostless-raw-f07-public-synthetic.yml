@@ -1,0 +1,45 @@
+name: GPT MAX Hostless G17 F07 Source-Root Synthetics
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_original_hostless_source_census.py"
+      - "tools/diag_gptmax_original_raw_and_w4_ancestry.py"
+      - "tools/diag_gptmax_f07_g17_original_scope_join.py"
+      - "tests/test_gptmax_original_hostless_source_census.py"
+      - "tests/test_gptmax_original_raw_and_w4_ancestry.py"
+      - "tests/test_gptmax_f07_g17_original_scope_join.py"
+      - ".github/workflows/test-gptmax-hostless-raw-f07-public-synthetic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-unproven-host-and-source-negative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install pytest ruff
+      - name: Deterministic source-first-failure and cross-snapshot negatives
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gptmax_original_hostless_source_census.py tests/test_gptmax_original_raw_and_w4_ancestry.py tests/test_gptmax_f07_g17_original_scope_join.py
+          ruff check --select F821,F823 tools/diag_gptmax_original_hostless_source_census.py tools/diag_gptmax_original_raw_and_w4_ancestry.py tools/diag_gptmax_f07_g17_original_scope_join.py
+      - name: No commercial or original-source acceptance
+        run: |
+          echo 'Source-neutral cross-snapshot and unhosted opening negatives only.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Private original PDF-positive source replay is NOT RUN on public runners; do not infer any host, frame, count, quantity or frozen score.' >> "$GITHUB_STEP_SUMMARY"
