@@ -1,0 +1,61 @@
+name: GPT1 Figured Measurement Shadow
+
+on:
+  pull_request:
+    paths:
+      - "pb_gpt1_*_shadow.py"
+      - "tools/gpt1_native_stroke_pair_census.py"
+      - "tests/test_gpt1_*_shadow.py"
+      - "tests/test_gpt1_native_stroke_pair_census.py"
+      - ".github/workflows/test-gpt1-figured-shadow.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt1-figured-shadow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metric-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: |
+          python -m pip install "pytest>=8,<10" "shapely>=2.0,<3" \
+            "PyMuPDF==1.28.0" "Pillow==12.3.0" "numpy==2.3.5" \
+            "opencv-python-headless==4.14.0.94" "pytesseract==0.3.13"
+      - name: Source-figured synthetic calculation regressions only
+        run: >-
+          python -m pytest -q
+          tests/test_gpt1_figured_chain_metric_shadow.py
+          tests/test_gpt1_figured_source_side_assembly_shadow.py
+          tests/test_gpt1_figured_zone_net_area_shadow.py
+          tests/test_gpt1_documented_raked_ceiling_shadow.py
+          tests/test_gpt1_figured_takeoff_families_shadow.py
+          tests/test_gpt1_general_figured_polygon_shadow.py
+          tests/test_gpt1_figured_metric_plane_shadow.py
+          tests/test_gpt1_original_crosssheet_finish_binding_shadow.py
+          tests/test_gpt1_original_firm_area_finish_handoff_shadow.py
+          tests/test_gpt1_original_material_producer_finish_bridge_shadow.py
+          tests/test_gpt1_original_two_view_wall_frame_shadow.py
+          tests/test_gpt1_original_figured_extension_to_face_shadow.py
+          tests/test_gpt1_original_crosssheet_marked_sections_shadow.py
+          tests/test_gpt1_original_figured_room_3d_shell_shadow.py
+          tests/test_gpt1_original_rcp_ceiling_material_zones_shadow.py
+          tests/test_gpt1_producer_figured_area_ring_bridge_shadow.py
+          tests/test_gpt1_source_producer_floor_finish_pipeline_shadow.py
+          tests/test_gpt1_native_stroke_pair_census.py
+          tests/test_gpt1_producer_sealed_w4_metric_floor_shadow.py
+          tests/test_gpt1_source_sealed_w4_gross_wall_lining_shadow.py
