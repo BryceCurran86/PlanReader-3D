@@ -128,6 +128,34 @@ def test_duplicate_or_missing_vector_sources_never_issue_quantity():
         )
 
 
+@pytest.mark.parametrize("lost", ["numeric", "label", "both"])
+def test_scheduled_area_requires_independent_numeric_and_label_stroke_witnesses(lost):
+    row = _synthetic_verified_shape("garage")
+    kwargs = {
+        "original_numeric_vector_path_ids": ()
+        if lost in ("numeric", "both") else row.original_numeric_vector_path_ids,
+        "original_label_vector_path_ids": ()
+        if lost in ("label", "both") else row.original_label_vector_path_ids,
+    }
+    with pytest.raises(ValueError, match="source vector-path identities unavailable"):
+        _issued_row(replace(row, **kwargs), key="garage", workspace_id=1)
+
+
+def test_scheduled_numeric_and_label_glyphs_must_be_distinct_original_source_paths():
+    row = _synthetic_verified_shape("ground_floor")
+    with pytest.raises(ValueError, match="source vector-path identities duplicate"):
+        _issued_row(
+            replace(
+                row,
+                original_label_vector_path_ids=(
+                    row.original_numeric_vector_path_ids[0],
+                    *row.original_label_vector_path_ids[1:],
+                ),
+            ),
+            key="ground_floor", workspace_id=1,
+        )
+
+
 def test_original_sha_positive_issues_five_firm_source_area_receipts_only():
     private = os.environ.get("PLANREADER_ORIGINAL_Q5446_STANDARD_PLANS")
     if not private:

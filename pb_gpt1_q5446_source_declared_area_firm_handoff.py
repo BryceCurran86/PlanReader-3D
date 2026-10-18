@@ -92,11 +92,16 @@ def _issued_row(
     source_entity = f"q5446_original_source_schedule_{row.original_row_id}"
     # Pinned original page-1 native stroke paths; each witness must be
     # individually source-unique, typed and bound to the SHA-verified PDF.
+    # Both original numeric glyphs and printed category-label strokes must
+    # be present. A populated label alone cannot prove an area value, and
+    # numeric glyphs alone cannot prove the source schedule row's category.
+    if not row.original_numeric_vector_path_ids or not row.original_label_vector_path_ids:
+        raise ValueError("original source vector-path identities unavailable")
     paths = (
         *row.original_numeric_vector_path_ids,
         *row.original_label_vector_path_ids,
     )
-    if not paths or any(type(p) is not int or p < 0 for p in paths):
+    if any(type(p) is not int or p < 0 for p in paths):
         raise ValueError("original source vector-path identities unavailable")
     if len(set(paths)) != len(paths):
         raise ValueError("original source vector-path identities duplicate")
