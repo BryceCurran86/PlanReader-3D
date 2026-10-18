@@ -208,8 +208,19 @@ def test_registered_one_ended_g17_source_parent_reauthenticates_and_routes_only_
     rows = [(oid, parent) for oid, parent in observed if
         capture.UNCHANGED_BAND_IDENTITY_VERSION in parent.source_primitive_ref]
     assert len(rows) >= 1
-    oid, parent = rows[0]
+    oid, visible = rows[0]
     receipt = source._raster_visibility_receipts[(selected.snapshot.snapshot_id, oid)]
+    from pb_source_observation_authority import ObservationSelector
+    parent_proof = source._producer.authority().resolve(ObservationSelector(
+        document_id=receipt.document_id, revision_id=receipt.revision_id,
+        source_sha256=receipt.source_sha256,
+        snapshot_id=selected.snapshot.snapshot_id,
+        observation_id=receipt.parent_observation_id,
+    ))
+    assert parent_proof.status is Status.CORROBORATED
+    parent = parent_proof.observation
+    assert parent is not None
+    assert visible.source_primitive_ref == f"visible:{parent.source_primitive_ref}"
     prefix, image_sha, version, full_sha, index = parent.source_primitive_ref.split(":")
     assert version == capture.UNCHANGED_BAND_IDENTITY_VERSION
     assert _raster_segment_receipt_matches_parent(receipt, parent)
