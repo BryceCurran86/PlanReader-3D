@@ -153,6 +153,10 @@ def publish_live_opening_dimension_quantities(
                     "source_axis_record_ids": axis_receipts,
                     "material_finish_authority": "unavailable",
                     "commercial_projection_allowed": False,
+                    # Original producer owns a fully measured axis, but the
+                    # metric is an internal source-closed handoff rather than
+                    # an independently approved customer trade line.
+                    "quantity_handoff_only": True,
                     "do_not_infer_opening_count": True,
                 },
             )
