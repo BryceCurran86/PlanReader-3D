@@ -335,15 +335,13 @@ def build_verified_customer_quote(
     before_tax = before_discount - discount
     tax = (before_tax * percentages["tax_pct"] / _HUNDRED).quantize(_CENT, rounding=ROUND_HALF_UP)
     total = before_tax + tax
-    complete = not unpriced
-    report: dict[str, Any] = {
-        "schema_version": "gpt3-client-verified-quote-v1",
+    # An empty signed source execution is NOT a completed zero-cost project.\n    # Manual allowances and zero rates never create source-measured work.\n    complete = bool(signed) and not unpriced\n    quote_status = (\n        "NO_VERIFIED_SOURCE_QUANTITIES" if not signed else\n        "INCOMPLETE_UNPRICED_QUANTITIES" if unpriced else\n        "CLIENT_PRICED_QUOTE"\n    )\n    report: dict[str, Any] = {\n        "schema_version": "gpt3-client-verified-quote-v1",
         "project_id": sealed.project_id,
         "signed_run_id": sealed.run_id,
         "signed_run_fingerprint": sealed.fingerprint,
         "currency": currency, **dates,
         "evidence_scope": "SIGNED_V1_CUSTOMER_ONLY_NOT_FROZEN_V2_SCORE",
-        "publication_status": "CLIENT_PRICED_QUOTE" if complete else "INCOMPLETE_UNPRICED_QUANTITIES",
+        "publication_status": quote_status,
         "signed_quantity_count": len(signed),
         "unpriced_quantity_ids": unpriced,
         "unpriced_quantity_count": len(unpriced),
