@@ -18,7 +18,9 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _retention(composition, voids, *, verify_customer_rows=False):
+def _retention(composition, voids, *, verify_customer_rows=False,
+               audit_project_id=audit_project_id):
+    """Use the selected project only for read-only audit sealing, never detection."""
     result = {
         "hosts": [asdict(r) for r in composition.opening_bindings],
         "frames": [asdict(r) for r in composition.host_frames],
@@ -38,7 +40,7 @@ def _retention(composition, voids, *, verify_customer_rows=False):
         )
         quantities = publish_live_opening_area_quantities(voids)
         traces = build_live_opening_area_source_traces(
-            voids, workspace_id=1, project_id="original-source-retention")
+            voids, workspace_id=1, project_id=audit_project_id)
         authorities = {}
         for q in quantities:
             record_id = q.metadata.get("measurement_record_id")
@@ -49,7 +51,7 @@ def _retention(composition, voids, *, verify_customer_rows=False):
         rows = quantities_to_takeoff_output_rows(quantities,
             traces_by_quantity_id=traces, authorities_by_quantity_id=authorities)
         sealed = seal_live_opening_area_run(
-            voids, workspace_id=1, project_id="original-source-retention")
+            voids, workspace_id=1, project_id=audit_project_id)
         verified = verify_sealed_customer_output(sealed, rows)
         result.update(quantities=[q.to_dict() for q in quantities],
             sealed_run=sealed.to_dict(), customer_rows=rows,
