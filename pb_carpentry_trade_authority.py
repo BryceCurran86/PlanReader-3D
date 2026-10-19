@@ -314,7 +314,11 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
     elif spec.element_type == "eaves":
         perimeter = spec.perimeter_lm if spec.perimeter_lm > 0.0 else spec.length_m
         overhang = spec.overhang_width_m or 0.600
-        if perimeter > 0.0:
+        # Eave dimensions/materials are modelling inputs, not issued drawing
+        # geometry or a verified material schedule. Never promote this generic
+        # fallback to measured customer quantities without a source authority.
+        if (perimeter > 0.0 and overhang > 0.0
+                and math.isfinite(perimeter) and math.isfinite(overhang)):
             eave_area = round(perimeter * overhang, 2)
             # Eave soffit lining (m²)
             items.append(CarpentryTakeoffItem(
@@ -325,12 +329,13 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
                 finish_system="Fixed to eave bearer/truss overhang with eave mould trim",
                 quantity=eave_area,
                 unit="m²",
-                quantity_status="Measured",
+                quantity_status="Provisional",
                 source_page=spec.source_page,
                 source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-                inclusion_status="INCLUSION",
-                confidence="Verified",
-                notes=f"Eaves area: {perimeter:.2f} lm × {overhang:.2f}m width = {eave_area:.2f} m².",
+                inclusion_status="PROVISIONAL",
+                confidence="Provisional",
+                notes=(f"Provisional eaves estimate: {perimeter:.2f} lm × {overhang:.2f}m = {eave_area:.2f} m²; "
+                       "perimeter, overhang, 4.5mm FC material and physical soffit face NOT source-authenticated."),
                 row_role="",
             ))
             # Timber Fascia (lm)
@@ -342,12 +347,13 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
                 finish_system="Fixed to truss tails ready to receive gutter",
                 quantity=round(perimeter, 2),
                 unit="lm",
-                quantity_status="Measured",
+                quantity_status="Provisional",
                 source_page=spec.source_page,
                 source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-                inclusion_status="INCLUSION",
-                confidence="Verified",
-                notes=f"Fascia perimeter: {perimeter:.2f} lm.",
+                inclusion_status="PROVISIONAL",
+                confidence="Provisional",
+                notes=(f"Provisional fascia estimate: {perimeter:.2f} lm; "
+                       "timber fascia material and actual fascia extent NOT source-authenticated."),
                 row_role="",
             ))
 
