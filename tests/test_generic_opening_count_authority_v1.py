@@ -1257,3 +1257,76 @@ def test_differing_dimensions_do_not_affect_count_reconciliation() -> None:
     assert res.record is not None
     assert res.record.count == 2
     assert res.record.schedule_corroborated is True
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_same_physical_id_with_conflicting_source_record_fails_closed(reverse):
+    """Two original source observations cannot silently elect one record ID."""
+    from dataclasses import replace
+
+    physical_left = _physical("raw-left")
+    physical_right = _physical("raw-right")
+    observations = (physical_right, physical_left) if reverse else (
+        physical_left, physical_right)
+    producer, selector = _setup(openings=observations)
+    common = replace(physical_left, record_id="physical-shared")
+    foreign = replace(
+        common,
+        source_observation_ids=("foreign-raw-parent",),
+        source_lineage_root_ids=("foreign-raw-root",),
+        structural_pattern="different-source-pattern",
+    )
+
+    def evidence(sel: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        record = common if sel.observation_id == "raw-left" else foreign
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence="exists",
+            reason_codes=(),
+            existence_record=record,
+        )
+
+    object.__setattr__(producer._physical, "prove_existence", evidence)
+    result = producer.publish(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.record is None
+    assert GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION in result.reason_codes
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_two_observations_proving_exact_same_physical_record_count_once(reverse):
+    """Identical repeat evidence remains a valid one-opening source universe."""
+    from dataclasses import replace
+
+    observations = (_physical("raw-left"), _physical("raw-right"))
+    producer, selector = _setup(openings=observations[::-1] if reverse else observations)
+    shared = replace(_physical("raw-left"), record_id="physical-shared")
+
+    def evidence(sel: ObservationSelector) -> PhysicalOpeningExistenceResult:
+        assert sel.observation_id in {"raw-left", "raw-right"}
+        return PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence="exists",
+            reason_codes=(),
+            existence_record=shared,
+        )
+
+    object.__setattr__(producer._physical, "prove_existence", evidence)
+    result = producer.publish(selector)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.quantity.value == 1.0
+
+
+def test_cross_page_physical_opening_cannot_enter_complete_plan_universe():
+    """Matching document SHA is insufficient for a different source page."""
+    from dataclasses import replace
+
+    foreign = replace(_physical("raw-on-another-page"), page_id="2")
+    producer, selector = _setup(openings=(foreign,))
+    result = producer.publish(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.record is None
+    assert GENERIC_OPENING_COUNT_LINEAGE_MISMATCH in result.reason_codes
