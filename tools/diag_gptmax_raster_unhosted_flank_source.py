@@ -178,3 +178,39 @@ def audit_g17_unhosted_flank_original_ancestry(
             "metric_quantity_granted":False,
         })
     return sorted(result,key=lambda row:row["physical_opening_id"])
+
+
+def attach_end_reach_shadow_to_unhosted_rows(
+    ancestry_rows: list[dict[str, Any]],
+    end_reach_by_opening_id: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach G17→W4 end-reach ledgers to unhosted ancestry rows without hosting.
+
+    ``end_reach_by_opening_id`` must already be produced by
+    ``pb_g17_flank_w4_end_reach_shadow.build_g17_flank_w4_end_reach_ledger``
+    (or an equivalent shadow). Missing ledgers stay absent; present ledgers
+    cannot flip ``host_granted``.
+    """
+    if not isinstance(end_reach_by_opening_id, Mapping):
+        raise TypeError("end-reach mapping required")
+    attached = []
+    for row in ancestry_rows:
+        if not isinstance(row, Mapping):
+            raise TypeError("ancestry row must be a mapping")
+        oid = _clean(row.get("physical_opening_id"))
+        if not oid or row.get("host_granted") is not False:
+            raise RuntimeError("unhosted ancestry row lost fail-closed host denial")
+        copy = dict(row)
+        ledger = end_reach_by_opening_id.get(oid)
+        if ledger is not None:
+            if not isinstance(ledger, Mapping):
+                raise TypeError("end-reach ledger must be a mapping")
+            if ledger.get("host_granted") is not False:
+                raise RuntimeError("end-reach ledger attempted host grant")
+            if ledger.get("shadow_only") is not True:
+                raise RuntimeError("end-reach ledger must be shadow_only")
+            copy["g17_flank_w4_end_reach_shadow"] = dict(ledger)
+        copy["host_granted"] = False
+        copy["metric_quantity_granted"] = False
+        attached.append(copy)
+    return sorted(attached, key=lambda row: row["physical_opening_id"])
