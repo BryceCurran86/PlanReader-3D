@@ -276,8 +276,17 @@ def _quarantine_reused_ceiling_source_ownership(
                     or len(set(receipts)) != len(receipts)):
                 disputed.add(room_id)
                 continue
+            # Source observation/receipt ownership is independent of whether
+            # a caller named the role "room label" or "finish occurrence".
+            # Do not let one original ink/text receipt own two physical rooms
+            # merely by relabelling the consumer field.
+            source_namespace = (
+                "physical_source_observation"
+                if field.endswith("_observation_ids")
+                else "physical_source_receipt"
+            )
             for value in receipts:
-                owners[(field, value)].add(room_id)
+                owners[(source_namespace, value)].add(room_id)
 
     disputed.update(
         room_id for room_id, count in by_physical.items() if count > 1
