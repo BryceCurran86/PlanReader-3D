@@ -878,17 +878,49 @@ def derive_space_trade_quantities(
         spec_evidence = _spec_evidence(skirting)
         section = _spec_section(skirting)
         widths: list[float] = []
-        valid_widths = True
-        for door in doors:
-            width = _positive(
-                door.get("width_m") if isinstance(door, Mapping) else None
-            )
-            if width is None:
-                valid_widths = False
-                break
-            widths.append(width)
+        doorway_ids: set[str] = set()
+        valid_widths = (
+            type(skirting.get("door_universe_complete")) is bool
+            and skirting.get("door_universe_complete") is True
+            and type(skirting.get("door_source_scope_id")) is str
+            and skirting.get("door_source_scope_id") == space_id
+            and isinstance(doors,(tuple,list))
+        )
+        if valid_widths:
+            for door in doors:
+                if not isinstance(door,Mapping):
+                    valid_widths=False
+                    break
+                raw_width=door.get("width_m")
+                doorway=door.get("opening_identity_id")
+                source_ids=door.get("source_width_evidence_ids")
+                if (
+                    type(door.get("canonical_room_id")) is not str
+                    or door.get("canonical_room_id")!=space_id
+                    or type(doorway) is not str or not doorway
+                    or doorway!=doorway.strip()
+                    or doorway in doorway_ids
+                    or type(raw_width) not in (int,float)
+                    or not isinstance(source_ids,(list,tuple))
+                    or not source_ids
+                    or any(type(eid) is not str or not eid or eid!=eid.strip()
+                           for eid in source_ids)
+                    or len(set(source_ids))!=len(source_ids)
+                ):
+                    valid_widths=False
+                    break
+                try:
+                    width=float(raw_width)
+                except (TypeError,ValueError,OverflowError):
+                    valid_widths=False
+                    break
+                if not math.isfinite(width) or width<=0.0:
+                    valid_widths=False
+                    break
+                doorway_ids.add(doorway)
+                widths.append(width)
         if material and spec_evidence and section and valid_widths:
-            door_deduction_m = sum(widths)
+            door_deduction_m = math.fsum(widths)
             if door_deduction_m <= perimeter_m:
                 quantity_m = perimeter_m - door_deduction_m
                 if quantity_m > 0.0:

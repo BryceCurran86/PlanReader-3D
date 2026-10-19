@@ -413,6 +413,8 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
                 "material": "MDF skirting",
                 "section": "Internal",
                 "evidence_ids": ["spec-skirting"],
+                "door_universe_complete": True,
+                "door_source_scope_id": "room_101",
             },
             "cornice": {
                 "material": "90mm cove cornice",
@@ -424,7 +426,12 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
         quantities = derive_space_trade_quantities(
             _space(),
             specs=specs,
-            doors=[{"width_m": 0.9}],
+            doors=[{
+                "canonical_room_id":"room_101",
+                "opening_identity_id":"door-1",
+                "width_m":0.9,
+                "source_width_evidence_ids":["ev-door-width-1"],
+            }],
         )
 
         self.assertEqual(len(quantities), 2)
@@ -440,6 +447,8 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
                 "material": "MDF skirting",
                 "section": "Internal",
                 "evidence_ids": ["spec-skirting"],
+                "door_universe_complete": True,
+                "door_source_scope_id": "room_101",
             },
             "cornice": {
                 "material": "90mm cove cornice",
