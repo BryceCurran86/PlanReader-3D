@@ -62,7 +62,20 @@ def census_native_plan_material_words(
         raise ValueError("original_native_word_census_safety_cap")
     selected = set(codes)
     inside, outside = [], []
+    seen_native_addresses = set()
     for word in rows:
+        # Only unique producer-native block/line/word identity can be
+        # carried to a future physical-owner receipt. Never silently
+        # overwrite two different original source words with one address.
+        if (
+            not isinstance(word, (tuple, list)) or len(word) < 8
+            or any(type(value) is not int or value < 0 for value in word[5:8])
+        ):
+            raise ValueError("malformed_original_source_word_address")
+        native_address = (page_number, word[5], word[6], word[7])
+        if native_address in seen_native_addresses:
+            raise ValueError("duplicate_original_source_word_address")
+        seen_native_addresses.add(native_address)
         if str(word[4]).strip() not in selected:
             continue
         bbox = tuple(float(v) for v in word[:4])
@@ -70,7 +83,7 @@ def census_native_plan_material_words(
             raise ValueError("malformed_original_source_word")
         source = {
             "material_code_untrusted": str(word[4]).strip(),
-            "source_word_address": (page_number, int(word[5]), int(word[6]), int(word[7])),
+            "source_word_address": native_address,
             "native_bbox_pdf_pts": bbox,
             "original_text_source_only": True,
             "material_issuer_authenticated": False,
