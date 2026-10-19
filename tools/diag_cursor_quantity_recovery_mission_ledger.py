@@ -15,11 +15,15 @@ MISSION_LEDGER: dict[str, Any] = {
         {"number": 3351, "items": ["2", "8"], "note": "end-reach attach to unhosted census"},
         {"number": 3350, "items": ["1", "3-4", "9-12", "14-18", "23-24", "26", "28"], "note": "arch + first shadow batch"},
         {"number": 3354, "items": ["1", "2-shadow", "4-collision"], "note": "receipt refresh, host identity, W4 collision"},
-        {"number": 3356, "items": ["4", "6", "10", "13", "19-22", "25", "27"], "note": "batch2 readiness/dedupe/lineage/trade/seal"},
+        {
+            "number": 3356,
+            "items": ["3", "4", "6", "7-shadow", "10", "13", "19-22", "25", "27", "29-30-refuse"],
+            "note": "batch2 readiness/dedupe/lineage/trade/seal/frame/eval/bifold shadow",
+        },
     ],
     "blocked_without_other_lanes_or_owner": [
         {"item": 5, "blocker": "STACKER host/frame identity — GPT MAX + owner PDF"},
-        {"item": 7, "blocker": "BIFOLD kind FIRM — source glyph/schedule + MAX"},
+        {"item": 7, "blocker": "BIFOLD kind FIRM promotion — needs source-closed MAX/GPT1"},
         {"item": 12, "blocker": "door height — owner USER_APPROVED or source height"},
         {"item": 16, "blocker": "wall length/height FIRM — GPT1 seams with owned evidence"},
         {"item": 19, "blocker": "room/finish producers — GPT2"},
