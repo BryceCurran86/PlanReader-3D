@@ -139,7 +139,18 @@ def build_publishing_package_from_workspace(
         unit = str(r["unit"] or "m²")
         qty = float(r["quantity"] or 0.0)
         rate = float(r["rate"] or 0.0)
-        tot = float(r["total_price"] or (qty * rate))
+        # Price is a client-owned commercial input. A zero entered amount is
+        # never permission to silently replace it with quantity × rate, nor
+        # is a missing price approval to quote a computed line to JobHub.
+        if r["total_price"] is None and mode == PublishingMode.COMMERCIAL:
+            raise ValueError(
+                f"Missing client commercial line total for takeoff row #{row_id}"
+            )
+        tot = (
+            float(r["total_price"])
+            if r["total_price"] is not None
+            else (qty * rate)  # draft estimate only, never a published sale
+        )
 
         # Missing provenance cannot become source-authenticated FIRM by a
         # schema fallback or NULL from an older PlanReader workspace.
