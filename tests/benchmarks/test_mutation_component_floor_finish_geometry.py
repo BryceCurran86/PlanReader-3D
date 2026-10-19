@@ -293,3 +293,20 @@ def test_rotated_evidenced_rectangle_keeps_clear_face_area() -> None:
     result = derive_component_aware_floor_finish_area(footprint, 0.2)
     assert result is not None
     assert result.floor_finish_area_m2 == pytest.approx(7.6 * 5.6)
+
+
+@pytest.mark.parametrize("bad_thickness", [
+    True, False, "0.20", "200mm", object(), 10**400, -10**400,
+])
+def test_replayed_untyped_or_overflow_wall_thickness_does_not_mint_floor_finish(bad_thickness):
+    footprint, _ = _confirmed_main_and_verandah()
+    assert derive_component_aware_floor_finish_area(footprint, bad_thickness) is None
+
+
+def test_source_owned_exact_metric_wall_thickness_keeps_internal_wall_face_area():
+    footprint, result = _confirmed_main_and_verandah(thickness_m=0.20)
+    assert result is not None
+    assert result.wall_thickness_m == pytest.approx(0.2)
+    assert result.main_clear_length_m == pytest.approx(11.6)
+    assert result.main_clear_width_m == pytest.approx(7.6)
+    assert result.main_clear_area_m2 == pytest.approx(88.16)
