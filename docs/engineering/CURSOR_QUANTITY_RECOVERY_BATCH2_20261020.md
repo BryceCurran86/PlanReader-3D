@@ -17,11 +17,15 @@ Continues the autonomous mission after #3348 / #3350 / #3351 / #3354.
 | 3 | `pb_whole_wall_frame_readiness_shadow` |
 | 25/27 | `pb_source_closed_seal_readiness_shadow`, `pb_trade_quantity_evidence_readiness_shadow` |
 | 29–30 | `pb_frozen_v2_eval_readiness_shadow` (refuse-closed; no score claim) |
+| 5-shadow | `pb_stacker_host_frame_readiness_shadow` (image frame ≠ host) |
+| 7-shadow | `pb_bifold_filling_kind_shadow` |
+| 12-shadow | `pb_door_height_owner_gate_shadow` (never invents 2100) |
+| compose | `tools/diag_cursor_quantity_recovery_compose_shadow.py` |
 | ledger | `tools/diag_cursor_quantity_recovery_mission_ledger.py` |
 
 All shadow / review-only. No FIRM, no gold inputs, no JobHub activation.
 
-## Still blocked for Cursor alone
+## Still blocked for Cursor alone (FIRM / eval)
 
-Door-height convention (12), STACKER host proof (5), GPT2 room producers (19
-implementation), GPT3 seal + frozen V2 eval (25, 29–30).
+STACKER host FIRM (5), BIFOLD kind FIRM (7), door-height FIRM without owner
+atom (12), GPT2 room producers (19), GPT3 seal + frozen V2 eval (25, 29–30).
