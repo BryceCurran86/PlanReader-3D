@@ -9,8 +9,7 @@ select physical walls, or publish/rekey quantities.
 """
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 import math
 
 from pb_live_physical_opening_void_composition import (
@@ -122,10 +121,6 @@ def audit_max_area_review_against_live_issuer(
     # quantity ID or review status can never be a substitute.
     published = publish_live_opening_area_quantities(live_composition)
     by_quantity = _index(published, "quantity_id", role="live source area publisher")
-    publisher_by_physical = _index(
-        published, "semantic_key", role="live source semantic key"
-    )
-    del publisher_by_physical  # quantity must still be linked by physical ID below
     owners: dict[str, QuantityEvidence] = {}
     for quantity in published:
         if (
@@ -142,6 +137,21 @@ def audit_max_area_review_against_live_issuer(
         owners[owner] = quantity
 
     if archive_required:
+        # Actual complete customer lineage verification, not merely embedded
+        # quantity comparisons or a claimed "verified" status in a report.
+        from pb_customer_output_verification import verify_sealed_customer_output
+        from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+        checked_run = sealed_source_closed_run_from_dict(
+            current_source_retention["sealed_run"]
+        )
+        checked_customers = verify_sealed_customer_output(
+            checked_run, current_source_retention["customer_rows"]
+        )
+        if set(checked_customers.verified_quantity_ids) != set(by_quantity):
+            raise SourceIssuerConvergenceConflict(
+                "real issuer and sealed customer quantities differ"
+            )
         retained = _index(current_source_retention.get("quantities"), "quantity_id",
                           role="actual source issued quantity bodies")
         if set(retained) != set(by_quantity) or any(
@@ -177,6 +187,31 @@ def audit_max_area_review_against_live_issuer(
         ):
             raise SourceIssuerConvergenceConflict("historical signed opening remapped as new review")
 
+    # Only a truly producer-issued, independently customer-verified row that
+    # is NOT part of the immutable predecessor set is a *new source quantity*.
+    # The MAX observer must retain the exact quantity ID for EVERY issuer row.
+    # Review-only candidates can never be counted as newly signed quantities.
+    new_sealed_issuer_areas: list[dict[str, object]] = []
+    for pid, quantity in sorted(owners.items()):
+        observed_id = decisions[pid].get("prior_signed_quantity_id")
+        if observed_id != quantity.quantity_id:
+            raise SourceIssuerConvergenceConflict(
+                "MAX source issuer receipt differs from production QuantityEvidence"
+            )
+        if archive_required and pid not in historical_by_owner:
+            new_sealed_issuer_areas.append({
+                "physical_opening_id": pid,
+                "quantity_id": quantity.quantity_id,
+                "value_m2": quantity.value,
+                "opening_kind": quantity.metadata.get("opening_kind"),
+                "area_basis": quantity.metadata.get("area_basis"),
+                "source_sha256": quantity.metadata.get("source_sha256"),
+                "host_binding_record_id": quantity.metadata.get(
+                    "host_binding_record_id"
+                ),
+                "customer_output_verified": True,
+                "frozen_v2_score_granted": False,
+            })
     findings = []
     for pid in sorted(decisions):
         decision = decisions[pid]
@@ -245,7 +280,13 @@ def audit_max_area_review_against_live_issuer(
         "real_producer_issued_opening_area_count": len(published),
         "historical_full_signed_and_customer_bodies_verified": archive_required,
         "review_candidates": findings,
-        "source_verified_new_quantity_count": 0,
+        # No archive => do not infer a new quantity by subtracting eight
+        # from an unrelated current inventory. Verified source quantities
+        # still require independent official V2 identity reconciliation.
+        "source_verified_new_quantity_count": (
+            len(new_sealed_issuer_areas) if archive_required else None
+        ),
+        "new_source_issued_customer_verified_areas": new_sealed_issuer_areas,
         "customer_release_authorized": False,
         "benchmark_score_authorized": False,
     }
