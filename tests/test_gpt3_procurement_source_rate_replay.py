@@ -110,3 +110,33 @@ def test_procurement_cli_replays_rate_book_and_never_replaces_existing_source(tm
     assert report["order_transmitted"] is False
     with pytest.raises(FileExistsError):
         procurement.main(args)
+
+def test_expired_client_quote_cannot_trigger_new_supplier_award():
+    quote, sealed, customer, book, rates = _inputs()
+    book["as_of"] = "2026-12-01"
+    with pytest.raises(ValueError, match="quote expired"):
+        procurement.build_procurement_plan(
+            quote, sealed, customer, book, client_rate_book=rates,
+        )
+
+
+def test_future_issued_quote_cannot_authorize_past_procurement_approval():
+    quote, sealed, customer, book, rates = _inputs()
+    book["as_of"] = "2026-10-16"
+    with pytest.raises(ValueError, match="not yet issued"):
+        procurement.build_procurement_plan(
+            quote, sealed, customer, book, client_rate_book=rates,
+        )
+
+
+def test_client_quote_with_no_expiry_can_be_source_rate_replayed():
+    quote, sealed, customer, book, rates = _inputs()
+    new_rates = deepcopy(rates)
+    new_rates["expires_on"] = None
+    new_quote = build_verified_customer_quote(sealed, customer, new_rates)
+    book["quote_fingerprint"] = new_quote["quote_fingerprint"]
+    plan = procurement.build_procurement_plan(
+        new_quote, sealed, customer, book, client_rate_book=new_rates,
+    )
+    assert plan["client_rate_source_replay_status"].startswith("EXACT_V1")
+    assert plan["purchase_order_drafts"][0]["status"] == "DRAFT_NOT_TRANSMITTED"
