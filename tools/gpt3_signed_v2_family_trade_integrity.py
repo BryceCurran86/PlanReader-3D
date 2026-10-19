@@ -25,6 +25,10 @@ _COMPATIBLE_TRADES = {
     "floor_area": frozenset({"flooring"}),
     "floor_finish_area": frozenset({"tiling", "flooring"}),
     "ceiling_area": frozenset({"ceilings"}),
+    # Both current source producers issue the typed canonical ceiling_lining
+    # family. An independently sealed/mapped original ceiling must not be
+    # discarded just because older consumer receipts said ceiling_area.
+    "ceiling_lining": frozenset({"ceilings"}),
     "ceiling_finish_area": frozenset({"ceilings"}),
     "opening_area": frozenset({"doors", "windows"}),
     "opening_count": frozenset({"doors", "windows"}),
@@ -38,6 +42,7 @@ _SOURCE_FAMILY_UNITS = {
     "floor_area": _AREA_UNITS,
     "floor_finish_area": _AREA_UNITS,
     "ceiling_area": _AREA_UNITS,
+    "ceiling_lining": _AREA_UNITS,
     "ceiling_finish_area": _AREA_UNITS,
     "opening_area": _AREA_UNITS,
     "opening_count": _COUNT_UNITS,
