@@ -197,12 +197,12 @@ def build_g17_flank_w4_end_reach_ledger(
 
         if source_member_count == 0:
             disposition = f"raster_source_band_{role}_source_primitive_unmapped"
-        elif not local_owners:
-            disposition = f"raster_source_band_{role}_local_wall_owner_unmapped"
         elif conflicting_parents:
             # Source ancestry itself is in conflict; no unique role can be
             # inferred even if a different W4 record has a positive parent.
             disposition = f"raster_source_band_{role}_source_parent_end_reach_conflict_abstained"
+        elif not local_owners:
+            disposition = f"raster_source_band_{role}_local_wall_owner_unmapped"
         elif len(local_owners) > 1:
             disposition = f"raster_source_band_{role}_multiple_local_w4_end_reach_retained"
         else:
