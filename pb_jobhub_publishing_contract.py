@@ -167,29 +167,36 @@ class PublishingPackagePayload:
 
     def compute_payload_hash(self) -> str:
         """Compute deterministic payload hash across all quantities, pricing, and identities."""
+        # V2 fingerprint binds EVERY source/customer authority field used by
+        # this publishing contract. Prior fingerprint silently rounded signed
+        # quantities to four decimals and ignored source page, approvals,
+        # geometry refs, warnings and source preflight entirely. Those changes
+        # could therefore bypass the TOCTOU/duplicate guard.
+        #
+        # Deliberately omit created_at: identical content created on different
+        # days must retain one fingerprint so duplicate import is detectable.
         normalized_data = {
+            "hash_contract": "planreader-jobhub-full-evidence-v2",
             "workspace_id": self.workspace_id,
             "mode": self.mode,
             "project": self.project_identity.to_dict(),
             "revision": self.drawing_revision.to_dict(),
             "quantities": [
-                {
-                    "id": q.row_id,
-                    "sec": q.section,
-                    "loc": q.location,
-                    "sub": q.substrate,
-                    "tag": q.finish_tag,
-                    "elem": q.element,
-                    "u": q.unit,
-                    "qty": round(q.quantity, 4),
-                    "rate": round(q.rate, 2),
-                    "tot": round(q.total_price, 2),
-                    "auth": q.authority_type,
-                    "st": q.authority_status,
-                }
+                q.to_dict()
                 for q in sorted(self.quantities, key=lambda x: x.row_id)
             ],
-            "excluded": [e.to_dict() for e in sorted(self.excluded_items, key=lambda x: x.item_code)],
+            "excluded": [
+                e.to_dict()
+                for e in sorted(self.excluded_items, key=lambda x: x.item_code)
+            ],
+            "warnings": [
+                w.to_dict() for w in self.warnings
+            ],
+            "benchmark_status": (
+                self.benchmark_status.to_dict() if self.benchmark_status else None
+            ),
+            "preflight_fingerprint": self.preflight_fingerprint,
+            "created_by": self.created_by,
         }
         raw_json = json.dumps(normalized_data, sort_keys=True, allow_nan=False)
         return hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
@@ -273,6 +280,12 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
     # 3. Quantities Sanity
     if not package.quantities:
         blocking_reasons.append("Zero takeoff quantities in publishing payload")
+
+    row_ids = [q.row_id for q in package.quantities]
+    if len(row_ids) != len(set(row_ids)):
+        blocking_reasons.append(
+            "Duplicate physical takeoff row IDs cannot enter JobHub publishing"
+        )
 
     for q in package.quantities:
         # Non-finite or negative checks
