@@ -130,3 +130,22 @@ def test_selected_visible_observation_identity_must_match_producer_receipt(monke
     result = _run(source)
     assert result.lines == ()
     assert result.unresolved_parent_ids == ("parent-A",)
+
+def test_conflicted_source_inventory_never_certifies_remaining_parent(monkeypatch):
+    rows = {
+        "valid": _visible("parent-A", "valid"),
+        "unverified": _visible("other-parent", "unverified"),
+    }
+    source = _source(monkeypatch, rows)
+    def resolving(self, selector):
+        if selector.observation_id == "unverified":
+            return NS(status=EvidenceResolutionStatus.CONFLICT, observation=None)
+        return NS(status=EvidenceResolutionStatus.CORROBORATED,
+                  observation=rows[selector.observation_id])
+    monkeypatch.setattr(SourceVisibilityProducer, "resolve_raster_opening_primitive",
+                        resolving)
+    result = _run(source)
+    assert result.status == "PARTIAL_ABSTAIN"
+    assert result.lines == ()
+    assert result.unresolved_parent_ids == ("parent-A",)
+    assert result.reason_codes == ("original_raster_opening_source_inventory_conflict",)
