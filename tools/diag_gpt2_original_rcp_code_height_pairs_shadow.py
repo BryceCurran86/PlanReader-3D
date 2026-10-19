@@ -31,9 +31,9 @@ def audit_original_rcp_native_material_height_pairs(
         raise ValueError("original_rcp_page_required")
     if (type(material_codes) not in (tuple,list)
             or not material_codes
-            or len(set(material_codes))!=len(material_codes)
             or any(type(x) is not str or x not in _ALLOWED_CEILING_MARK_CODES
-                   for x in material_codes)):
+                   for x in material_codes)
+            or len(set(material_codes))!=len(material_codes)):
         raise ValueError("original_rcp_material_code_not_ceiling_role")
     if type(max_source_words) is not int or max_source_words<=0:
         raise ValueError("bounded_original_rcp_source_words_required")
