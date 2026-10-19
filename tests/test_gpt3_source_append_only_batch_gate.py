@@ -54,8 +54,18 @@ def _fixture(*, extra=True, change=None, duplicate_area=False,
     )
 
 
+def _own_trace(q):
+    source_trace = trace(q)
+    # Producer-authenticated revision is supplied by the original source
+    # fixture in each independently sealed quantity/customer epoch.
+    return replace(
+        source_trace, revision_id=q.metadata["revision_id"],
+        current_revision_id=q.metadata["revision_id"],
+    )
+
+
 def _sealed(*quantities):
-    traces = {q.quantity_id: trace(q) for q in quantities}
+    traces = {q.quantity_id: _own_trace(q) for q in quantities}
     return seal_source_closed_run(
         quantities, project_id="project-7",
         traces_by_quantity_id=traces,
@@ -63,7 +73,7 @@ def _sealed(*quantities):
 
 
 def _customers(*quantities):
-    traces = {q.quantity_id: trace(q) for q in quantities}
+    traces = {q.quantity_id: _own_trace(q) for q in quantities}
     return quantities_to_takeoff_output_rows(
         quantities,
         traces_by_quantity_id=traces,
