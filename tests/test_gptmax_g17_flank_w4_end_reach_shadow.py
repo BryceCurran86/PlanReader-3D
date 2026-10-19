@@ -218,7 +218,8 @@ def test_conflicting_local_parent_span_end_reach_abstains_not_first_or_nearest()
     records[0].physical_identity.source_primitive_ids = (
         "raw:left", "raw:leftshort"
     )
-    assert _ledger(tuple(reversed(records)), dict(reversed(tuple(lines.items())))) == first
+    reordered_lines = dict(reversed(list(lines.items())))
+    assert _ledger(tuple(reversed(records)), reordered_lines) == first
 
 
 def test_duplicate_source_parent_id_rejected_not_normalized_to_one_w4_owner():
