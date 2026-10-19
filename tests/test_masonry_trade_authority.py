@@ -135,7 +135,7 @@ class TestMasonryTradeAuthority(unittest.TestCase):
         # 2. Core fill grout item: 5.50 m³
         grout_item = items[1]
         self.assertEqual(grout_item.quantity, 5.50)
-        self.assertEqual(grout_item.unit, "item")
+        self.assertEqual(grout_item.unit, "m³")
         self.assertIn("5.50 m³", grout_item.notes)
 
         # 3. Bond beam lm
