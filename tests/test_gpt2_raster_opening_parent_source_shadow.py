@@ -122,3 +122,11 @@ def test_stale_snapshot_fails_closed(monkeypatch):
             source, revision_id="rev", snapshot_id="other",
             page_id="3", required_parent_ids=("parent-A",),
         )
+
+def test_selected_visible_observation_identity_must_match_producer_receipt(monkeypatch):
+    source = _source(monkeypatch, {
+        "v": _visible("parent-A", "foreign-visible-id"),
+    })
+    result = _run(source)
+    assert result.lines == ()
+    assert result.unresolved_parent_ids == ("parent-A",)
