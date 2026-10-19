@@ -205,17 +205,33 @@ def _validate_common(
         blockers.append("source_sha256_mismatch")
     if viewport.document_id != context.document_id:
         blockers.append("viewport_document_mismatch")
+    # DocumentEvidence.page_ids is an optional original manifest index:
+    # the live SHA-bound source producer publishes page_count and an exact
+    # ProviderContext viewport->native-page edge, but no duplicate text
+    # manifest of those pages. Do not veto that independently authenticated
+    # source. When a page-id manifest IS supplied, require it to be exact,
+    # complete as an identity set and contain this viewport's source page.
     page_inventory = document.page_ids
-    if (
-        not isinstance(page_inventory, (tuple, list))
-        or not page_inventory
-        or any(
-            type(page) is not str or not page or page != page.strip()
-            for page in page_inventory
+    page_inventory_bad = (
+        type(page_inventory) not in (tuple, list)
+        or (
+            bool(page_inventory)
+            and (
+                any(
+                    type(page) is not str or not page or page != page.strip()
+                    for page in page_inventory
+                )
+                or len(set(page_inventory)) != len(page_inventory)
+                or viewport.page_id not in page_inventory
+            )
         )
-        or len(set(page_inventory)) != len(page_inventory)
-        or viewport.page_id not in page_inventory
-    ):
+        or type(document.page_count) is not int
+        or document.page_count <= 0
+        or type(page_no) is not int
+        or page_no <= 0
+        or page_no > document.page_count
+    )
+    if page_inventory_bad:
         blockers.append("viewport_page_not_owned_by_document")
     if room.viewport_id != viewport.viewport_id:
         blockers.append("room_viewport_mismatch")
