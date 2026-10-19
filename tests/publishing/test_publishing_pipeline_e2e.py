@@ -48,7 +48,8 @@ def test_dbs():
     CREATE TABLE documents (
         id INTEGER PRIMARY KEY,
         workspace_id INTEGER,
-        file_name TEXT
+        file_name TEXT,
+        sha256 TEXT
     )
     """)
     pr_cur.execute("""
@@ -84,7 +85,7 @@ def test_dbs():
     INSERT INTO workspaces (id, job_no, job_name, builder_client, site_address, drawing_issue, jobhub_job_id, estimator)
     VALUES (1, '26-017', '60-62 School Rd Maroochydore', 'Balleo Pty Ltd', '60-62 School Rd, Maroochydore', 'BA Issue', 501, 'Bryce Curran')
     """)
-    pr_cur.execute("INSERT INTO documents (workspace_id, file_name) VALUES (1, '26-017_BA_Drawings.pdf')")
+    pr_cur.execute("INSERT INTO documents (workspace_id, file_name, sha256) VALUES (1, '26-017_BA_Drawings.pdf', ?)", ("a" * 64,))
     pr_cur.execute("INSERT INTO pages (workspace_id, page_no) VALUES (1, 1), (1, 2), (1, 3)")
 
     # 2. Remote JobHub Database

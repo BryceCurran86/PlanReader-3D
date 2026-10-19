@@ -246,6 +246,12 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
     if not ident.job_name or not ident.job_name.strip():
         blocking_reasons.append("Missing project job name in publishing payload")
     if is_commercial:
+        if not re.fullmatch(
+            r"[0-9a-f]{64}", str(package.drawing_revision.source_files_hash or "")
+        ):
+            blocking_reasons.append(
+                "Commercial publishing requires original document SHA-256 revision evidence"
+            )
         if not ident.estimator or not str(ident.estimator).strip():
             blocking_reasons.append("Missing estimator attribution for commercial publishing")
         if not package.created_by or not str(package.created_by).strip():

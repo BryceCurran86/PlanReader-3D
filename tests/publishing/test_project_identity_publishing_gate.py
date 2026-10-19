@@ -26,7 +26,7 @@ def _base_package(job_no="26-017", job_name="60-62 School Rd Maroochydore", addr
         drawing_issue="BA",
         drawing_date="2026-06-09",
         sheet_count=36,
-        source_files_hash="hash123",
+        source_files_hash="a" * 64,
     )
     q = QuantityLineItemPayload(
         row_id=1,
