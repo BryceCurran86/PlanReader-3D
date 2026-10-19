@@ -61,6 +61,25 @@ def _frame_valid(frame: dict | None, host: dict | None, identity: str) -> bool:
     return True
 
 
+def _axis_values_match_figured_pair(width_m: object, height_m: object,
+                                    dimension_values_mm: object) -> bool:
+    """Reject equal-area but physically different axis pairs in a shadow handoff.
+
+    Figured pairs are treated as unordered here: their source-owned axis-order
+    receipt is checked independently. Neither an area product nor this helper
+    grants dimension authority or selects a width/height orientation.
+    """
+    if (not _positive(width_m) or not _positive(height_m)
+            or not isinstance(dimension_values_mm, (list, tuple))
+            or len(dimension_values_mm) != 2
+            or not all(_positive(v) for v in dimension_values_mm)):
+        return False
+    measured_mm = sorted((width_m * 1000.0, height_m * 1000.0))
+    figured_mm = sorted(dimension_values_mm)
+    return all(math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-6)
+               for a, b in zip(measured_mm, figured_mm))
+
+
 def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                                     f07: dict, *, source_root: dict) -> dict:
     """Fail-closed review queue, not a new measurement or signed authority."""
@@ -122,6 +141,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             and c["width_record_id"] != c["height_record_id"]
             and _positive(c.get("width_m")) and _positive(c.get("height_m"))
             and bool(c.get("geometry_complete"))
+            and _axis_values_match_figured_pair(
+                c["width_m"], c["height_m"], e["dimension_values_mm"])
             and math.isclose(
                 c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-6)
         )
