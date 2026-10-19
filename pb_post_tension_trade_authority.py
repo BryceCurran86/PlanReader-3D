@@ -108,6 +108,7 @@ def _valid_pt_tendon_design(spec: PTExtractionSpec) -> bool:
         and _positive_pt_metric(spec.tendon_spacing_m)
         and type(spec.strands_per_tendon) is int
         and spec.strands_per_tendon>0
+        and _positive_pt_metric(spec.strands_per_tendon)
         and type(spec.is_bonded) is bool
     )
 
@@ -115,7 +116,11 @@ def _valid_pt_tendon_design(spec: PTExtractionSpec) -> bool:
 def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
     """Calculate post-tensioning trade items for a suspended PT slab."""
     items: List[PTTakeoffItem] = []
-    if not _valid_pt_tendon_design(spec) or not _positive_pt_metric(spec.thickness_m):
+    if (
+        not _valid_pt_tendon_design(spec)
+        or not _positive_pt_metric(spec.thickness_m)
+        or not math.isfinite(spec.thickness_m*1000.0)
+    ):
         return items
     if type(spec.area_m2) not in (int,float):
         return items
