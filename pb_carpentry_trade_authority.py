@@ -313,7 +313,9 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
             ))
     elif spec.element_type == "eaves":
         perimeter = spec.perimeter_lm if spec.perimeter_lm > 0.0 else spec.length_m
-        overhang = spec.overhang_width_m or 0.600
+        # A zero-width overhang is not an invitation to invent 600 mm.
+        # The dataclass's 0.60 default is itself only a provisional estimate.
+        overhang = spec.overhang_width_m
         # Eave dimensions/materials are modelling inputs, not issued drawing
         # geometry or a verified material schedule. Never promote this generic
         # fallback to measured customer quantities without a source authority.
