@@ -23,6 +23,7 @@ from pb_quantity_takeoff_adapter import (
 from pb_live_opening_area_quantity_publication import (
     publish_live_opening_area_quantities,
 )
+import tools.diag_gpt3_max_area_review_source_issuer_bijection as issuer_audit
 from tools.diag_gpt3_max_area_review_source_issuer_bijection import (
     SourceIssuerConvergenceConflict, audit_max_area_review_against_live_issuer,
 )
@@ -286,8 +287,22 @@ def _eight_plus_new_source_retention():
     return report, nine, original, current
 
 
-def test_new_source_issued_area_requires_verified_signed_and_customer_successors():
+def _synthetic_predecessor_scope(monkeypatch, original):
+    """Only tests may substitute a synthetic first-eight signer universe."""
+    monkeypatch.setattr(
+        issuer_audit, "ORIGINAL_LOT16_ARCHIVED_EIGHT_FINGERPRINT",
+        original["sealed_run"]["fingerprint"],
+    )
+    monkeypatch.setattr(
+        issuer_audit, "ORIGINAL_LOT16_SOURCE_SHA256", ROOT["source_sha256"],
+    )
+
+
+def test_new_source_issued_area_requires_verified_signed_and_customer_successors(monkeypatch):
     report, composition, original, current = _eight_plus_new_source_retention()
+    # Product code pins the REAL eight predecessor fingerprint and source SHA;
+    # test-only fixture uses an independent eight→nine synthetic signer universe.
+    _synthetic_predecessor_scope(monkeypatch, original)
     outcome = audit_max_area_review_against_live_issuer(
         report, composition,
         archived_signed_run=original["sealed_run"],
@@ -323,8 +338,9 @@ def test_new_source_issued_area_requires_verified_signed_and_customer_successors
     "original_customer_mutation",
     "signed_observer_mismatch",
 ])
-def test_ninth_area_is_never_counted_without_complete_source_and_customer_parity(corrupt):
+def test_ninth_area_is_never_counted_without_complete_source_and_customer_parity(corrupt, monkeypatch):
     report, composition, original, current = _eight_plus_new_source_retention()
+    _synthetic_predecessor_scope(monkeypatch, original)
     qid = current["quantities"][-1]["quantity_id"]
     row = next(x for x in current["customer_rows"] if x["quantity_id"] == qid)
     if corrupt == "new_customer_value":
@@ -346,6 +362,18 @@ def test_ninth_area_is_never_counted_without_complete_source_and_customer_parity
     elif corrupt == "signed_observer_mismatch":
         report["opening_decisions"][-1]["prior_signed_quantity_id"] = "fabricated-9th"
     with pytest.raises((ValueError, RuntimeError)):
+        audit_max_area_review_against_live_issuer(
+            report, composition,
+            archived_signed_run=original["sealed_run"],
+            archived_customer_rows=original["customer_rows"],
+            current_source_retention=current,
+        )
+
+
+def test_arbitrary_eight_row_baseline_cannot_replace_pinned_original_lot16_archive():
+    report, composition, original, current = _eight_plus_new_source_retention()
+    with pytest.raises(SourceIssuerConvergenceConflict,
+                       match="immutable original Lot16 eight"):
         audit_max_area_review_against_live_issuer(
             report, composition,
             archived_signed_run=original["sealed_run"],
