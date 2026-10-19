@@ -117,6 +117,7 @@ def build_g17_flank_w4_end_reach_ledger(
         lo, hi, cross_lo, cross_hi, edge = flanks[role]
         remote_only: list[dict[str, Any]] = []
         local_owners: list[dict[str, Any]] = []
+        conflicting_parents: list[dict[str, Any]] = []
         source_member_count = 0
         skipped: list[dict[str, Any]] = []
 
@@ -128,8 +129,11 @@ def build_g17_flank_w4_end_reach_ledger(
                 })
                 continue
             identity = record.physical_identity
-            matched_parent: str | None = None
-            parent_span: tuple[float, float, float] | None = None
+            # A single W4 candidate may carry MULTIPLE original source
+            # primitives reaching this flank. Never silently choose the first
+            # parent: different owned source spans may disagree on whether the
+            # local W4 centerline reaches the sealed G17 end.
+            matches: list[dict[str, Any]] = []
             for primitive_id in identity.source_primitive_ids:
                 line = source_lines_by_primitive.get(str(primitive_id))
                 data = None if line is None else _source_line_axis_data(line, opening)
@@ -144,41 +148,61 @@ def build_g17_flank_w4_end_reach_ledger(
                     or min(p_hi, hi) - max(p_lo, lo) <= pixel_tol
                 ):
                     continue
-                matched_parent = str(primitive_id)
-                parent_span = (p_lo, p_hi, offset)
-                break
-            if matched_parent is None or parent_span is None:
+                reaches = _local_chain_reaches_flank_end(
+                    record,
+                    opening,
+                    role=role,
+                    edge=edge,
+                    cross_lo=cross_lo,
+                    cross_hi=cross_hi,
+                    parent_lo=p_lo,
+                    parent_hi=p_hi,
+                    snap_tol=snap_tol,
+                    pixel_tol=pixel_tol,
+                )
+                matches.append({
+                    "source_primitive_id": str(primitive_id),
+                    "local_chain_reaches_flank_end": reaches,
+                })
+            if not matches:
                 continue
+            if len({x["source_primitive_id"] for x in matches}) != len(matches):
+                raise ValueError("duplicate W4 source primitive parent identity")
+            matches.sort(key=lambda row: row["source_primitive_id"])
             source_member_count += 1
-            p_lo, p_hi, _offset = parent_span
-            reaches = _local_chain_reaches_flank_end(
-                record,
-                opening,
-                role=role,
-                edge=edge,
-                cross_lo=cross_lo,
-                cross_hi=cross_hi,
-                parent_lo=p_lo,
-                parent_hi=p_hi,
-                snap_tol=snap_tol,
-                pixel_tol=pixel_tol,
-            )
+            statuses = {x["local_chain_reaches_flank_end"] for x in matches}
             row = {
                 "wall_candidate_id": record.wall_candidate_id,
                 "candidate_identity_id": identity.candidate_identity_id,
-                "matched_source_primitive_id": matched_parent,
-                "local_chain_reaches_flank_end": reaches,
+                # Preserve the older single-parent receipt without falsely
+                # electing an arbitrary first source parent for multi-parent.
+                "matched_source_primitive_id": (
+                    matches[0]["source_primitive_id"] if len(matches) == 1 else None
+                ),
+                "matched_source_primitive_ids": [
+                    x["source_primitive_id"] for x in matches
+                ],
+                "source_parent_end_reach": matches,
+                "local_chain_reaches_flank_end": (
+                    next(iter(statuses)) if len(statuses) == 1 else None
+                ),
                 "host_publication_allowed": False,
             }
-            if reaches:
+            if statuses == {True}:
                 local_owners.append(row)
-            else:
+            elif statuses == {False}:
                 remote_only.append(row)
+            else:
+                conflicting_parents.append(row)
 
         if source_member_count == 0:
             disposition = f"raster_source_band_{role}_source_primitive_unmapped"
         elif not local_owners:
             disposition = f"raster_source_band_{role}_local_wall_owner_unmapped"
+        elif conflicting_parents:
+            # Source ancestry itself is in conflict; no unique role can be
+            # inferred even if a different W4 record has a positive parent.
+            disposition = f"raster_source_band_{role}_source_parent_end_reach_conflict_abstained"
         elif len(local_owners) > 1:
             disposition = f"raster_source_band_{role}_multiple_local_w4_end_reach_retained"
         else:
@@ -196,6 +220,9 @@ def build_g17_flank_w4_end_reach_ledger(
             ),
             "remote_ancestry_only_candidates": sorted(
                 remote_only, key=lambda r: r["wall_candidate_id"]
+            ),
+            "conflicting_source_parent_candidates": sorted(
+                conflicting_parents, key=lambda r: r["wall_candidate_id"]
             ),
             "skipped_candidates": sorted(
                 skipped, key=lambda r: r["wall_candidate_id"]
