@@ -934,12 +934,12 @@ def _raster_double_continuous_face_gap(
 ) -> bool:
     """Find two independently painted wall faces spanning an alleged opening.
 
-    A wall band may have complete upper/lower source faces slightly inside its
-    morphological bounds. These are incompatible with positive G17 framed or
-    swing aperture evidence. Requiring BOTH separated outer-quarter face
-    traces prevents a centerline or isolated door-threshold line from being
-    mistaken for a structural wall. This is NEGATIVE opening evidence, never
-    proof of a canonical W4 host or material quantity.
+    Two painted traces across a gap are negative evidence for a bare
+    door-swing fallback, NOT independently proved solid-wall continuity.
+    The same 2D ink can represent paired window glazing/frame lines, or
+    lintel/overhead wall above a real opening. This source negative MUST NOT
+    veto independently source-supported framed candidates. It never proves
+    a canonical W4 host, opening kind or commercial area.
     """
     if pair.row1 - pair.row0 < 4:
         return False
@@ -1830,9 +1830,12 @@ class PhysicalOpeningAuthority:
             and record.page_id == seed.page_id
             and record.viewport_id is None
         )
+        # Identical pixels do not prove two source observations are the same
+        # physical primitive. Keep all owned candidates, never overwrite one
+        # observation with the last row visited in a source snapshot.
         by_kind_geometry: dict[
             tuple[str, tuple[float, float, float, float]],
-            SourceObservationRecord,
+            list[SourceObservationRecord],
         ] = {}
         line_runs: list[SourceObservationRecord] = []
         thin_runs: list[SourceObservationRecord] = []
@@ -1840,7 +1843,7 @@ class PhysicalOpeningAuthority:
             geometry = tuple(round(float(value), 6) for value in record.geometry)
             if len(geometry) != 4:
                 continue
-            by_kind_geometry[(record.observation_kind, geometry)] = record
+            by_kind_geometry.setdefault((record.observation_kind, geometry), []).append(record)
             if record.observation_kind == RASTER_LINE_RUN:
                 line_runs.append(record)
             if record.observation_kind == RASTER_THIN_INK_RUN:
@@ -1854,7 +1857,14 @@ class PhysicalOpeningAuthority:
                 round(value, 6)
                 for value in _raster_geometry_pt(geometry_px, dpi)
             )
-            return by_kind_geometry.get((kind, geometry_pt))
+            owners = by_kind_geometry.get((kind, geometry_pt), ())
+            if len(owners) != 1:
+                if owners:
+                    # Source row ancestry is ambiguous, not a valid opening
+                    # whose primitive identity can be selected by input order.
+                    self._raster_gap_audit_incomplete.add(cache_key)
+                return None
+            return owners[0]
 
         def band_support(
             page_box: tuple[int, int, int, int],
@@ -2135,15 +2145,31 @@ class PhysicalOpeningAuthority:
                         common_endpoint_rows=(pair.row0,pair.row1),frame_line_groups=groups,
                         original_common_row_continuity=legacy_face_continues,
                         paired_original_outer_face_continuity=face_continues))
-                # A pair of independently continuous source-painted outer
-                # faces within a candidate gap contradicts an aperture even
-                # when morphology missed their precise endpoint row.
+                # In the ordinary original producer, two inset ink tracks
+                # can be WINDOW FRAME or overhead-wall/lintel evidence; the
+                # heuristic double-track check cannot erase an independently
+                # authenticated framed source candidate. The original exact
+                # endpoint-face veto still applies to that ordinary producer.
+                #
+                # The paired-outer-faces SHADOW explicitly changes which
+                # endpoint rows count as physical wall opposition. It must
+                # never mint an opening that was negative under the ordinary
+                # source policy solely by reinterpreting internal paired
+                # tracks. Keep the double-track veto for shadow-only frames.
+                # Both policies retain this guard against bare swing fallback.
                 opposing_wall_faces = _raster_double_continuous_face_gap(
                     work_line, pair,
                 ) if self._raster_double_face_negative_shadow else False
                 frames = (
                     frame_support(pair, axis, groups)
-                    if groups and not face_continues and not opposing_wall_faces
+                    if (
+                        groups
+                        and not face_continues
+                        and not (
+                            self._raster_paired_outer_faces_shadow
+                            and opposing_wall_faces
+                        )
+                    )
                     else ()
                 )
                 if opposing_wall_faces:

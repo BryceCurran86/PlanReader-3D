@@ -14,7 +14,10 @@ from pb_migration_contracts import EvidenceResolutionStatus as Status, stable_co
 from pb_opening_host_binding_authority import _opening_geometry
 from pb_opening_host_frame_authority import OpeningHostFrameProducer
 from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
-from pb_nominal_opening_canonical_shadow import build_nominal_opening_canonical_shadow
+from pb_nominal_opening_canonical_shadow import (
+    build_nominal_opening_canonical_shadow, _build_approved_single_width_review,
+)
+from pb_geometry_takeoff_model import MeasurementRecord
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
@@ -130,7 +133,8 @@ def _wall_review_rows(composition,page_id):
     return sorted(rows,key=lambda r:(r["scope"],r["wall_candidate_id"]))
 
 
-def build_opening_review_packets(source,composition,*,source_fragment_roles_shadow=False):
+def build_opening_review_packets(source,composition,*,source_fragment_roles_shadow=False,
+                                nominal_width_approvals=()):
     """Collect geometry, label, lineage and candidate-frame facts per opening.
 
     All physical openings are retained, including unhosted or unmeasured ones.
@@ -138,6 +142,24 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
     """
     if type(source_fragment_roles_shadow) is not bool:
         raise TypeError("explicit fragment policy required")
+    if not isinstance(nominal_width_approvals, (tuple, list)):
+        raise TypeError("explicit per-opening width approval records required")
+    approvals={}
+    for approval in nominal_width_approvals:
+        if type(approval) is not MeasurementRecord:
+            raise TypeError("existing MeasurementRecord approval required")
+        if approval.geometry_ref in approvals:
+            raise ValueError("duplicate nominal width approval target")
+        approvals[approval.geometry_ref]=approval
+    opening_ids={t.opening_identity_id for t in composition.opening_bindings}
+    if set(approvals)-opening_ids:
+        raise ValueError("nominal width approval target absent from source composition")
+    current_openings={}
+    if approvals:
+        from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+        voids=compose_live_physical_opening_voids(
+            source_visibility_producer=source,wall_opening_composition=composition)
+        current_openings={o.physical_opening_id:o for o in voids.canonical_openings}
     published=source.published_snapshot_for_revision(composition.revision_id)
     if published is None:
         raise ValueError("review source revision unavailable")
@@ -170,6 +192,9 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
         axes=labels.ordered_compact_axes_shadow(selector)
         lineage=opening_source_lineage_packet(source,selector)
         canonical=build_nominal_opening_canonical_shadow(source,selector)
+        if opening.record_id in approvals:
+            canonical=_build_approved_single_width_review(source,selector,
+                approval=approvals[opening.record_id],current_opening=current_openings.get(opening.record_id))
         binding=composition.binding_selectors.get(opening.record_id)
         local=None if binding is None else frames.local_source_frame_shadow(
             opening_selector=selector,host_binding_selector=binding,
@@ -183,7 +208,12 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
                 blockers.extend(lineage.get("source_proof_blockers", ()))
         if not trace.host_wall_id: blockers.append("source_owned_unique_host")
         if whole is None or not whole.record_id: blockers.append("connected_whole_wall_frame")
-        if axes.evidence is None: blockers.append("owned_ordered_nominal_dimensions")
+        if (opening.record_id in approvals
+                and not canonical.metadata["opening_kind_resolved"]):
+            blockers.append("source_owned_filling_kind")
+        if axes.evidence is None:
+            blockers.append("owned_nominal_height" if opening.record_id in approvals
+                            else "owned_ordered_nominal_dimensions")
         # Source-plan geometry cannot establish any of these missing facts.
         blockers.extend(("rough_opening_geometry","metric_wall_placement","opening_universe_completeness"))
         packet={"opening_identity_id":opening.record_id,"page_id":opening.page_id,
