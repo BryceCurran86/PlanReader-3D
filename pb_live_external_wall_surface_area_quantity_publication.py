@@ -103,6 +103,7 @@ def publish_live_per_wall_surface_area_quantities(
             or type(wall.source_sha256) is not str
             or len(wall.source_sha256) != 64
             or any(c not in "0123456789abcdefABCDEF" for c in wall.source_sha256)
+            or set(wall.source_sha256) == {"0"}
             or _exact_ids(wall.evidence_ids) is None
             or not wall.gross_geometry_record_id
             or not wall.whole_wall_role_record_id
