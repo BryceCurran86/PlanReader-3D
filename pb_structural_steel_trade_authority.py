@@ -89,18 +89,46 @@ class SteelTakeoffItem:
         }
 
 
+def _original_steel_count(value: object) -> bool:
+    if type(value) is not int or value <= 0:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _positive_steel_metric(value: object) -> bool:
+    if type(value) not in (int,float):
+        return False
+    try:
+        numeric=float(value)
+    except (TypeError,ValueError,OverflowError):
+        return False
+    return math.isfinite(numeric) and numeric>0.0
+
+
 def calculate_primary_member_items(spec: SteelMemberSpec) -> List[SteelTakeoffItem]:
     """Calculate trade takeoff items for primary structural steel members (beams, columns, rafters)."""
     items: List[SteelTakeoffItem] = []
-    if spec.count <= 0 or spec.length_m <= 0.0:
+    if (
+        not _original_steel_count(spec.count)
+        or not _positive_steel_metric(spec.length_m)
+        or type(spec.section_mark) is not str or not spec.section_mark.strip()
+    ):
         return items
-    count = spec.count
-    total_length_m = round(count * spec.length_m, 2)
-    if total_length_m <= 0.0:
+    count=spec.count
+    full_length=count * spec.length_m
+    if not math.isfinite(full_length):
         return items
-
-    total_mass_kg = round(total_length_m * spec.mass_kg_per_m, 2)
-    total_mass_tonnes = round(total_mass_kg / 1000.0, 3)
+    total_length_m=round(full_length,2)
+    if total_length_m<=0:
+        return items
+    has_mass=_positive_steel_metric(spec.mass_kg_per_m)
+    if has_mass and not math.isfinite(full_length * spec.mass_kg_per_m):
+        return items
+    total_mass_kg=round(full_length * spec.mass_kg_per_m,2) if has_mass else 0.0
+    total_mass_tonnes=round(total_mass_kg/1000.0,3) if has_mass else 0.0
 
     # 1. Primary Member Run (lm)
     items.append(SteelTakeoffItem(
@@ -111,36 +139,39 @@ def calculate_primary_member_items(spec: SteelMemberSpec) -> List[SteelTakeoffIt
         finish_system="Supply, fabricate and erect",
         quantity=total_length_m,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{STEEL_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{count} No. {spec.section_mark} × {spec.length_m:.2f}m. Total mass: {total_mass_tonnes:.3f} t ({total_mass_kg:.1f} kg @ {spec.mass_kg_per_m:.1f} kg/m).",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {count} members at {spec.length_m:.2f} m each; mass {total_mass_tonnes:.3f} t only where a section mass is supplied. Section identity/source member placement unverified.",
         row_role="",
     ))
 
-    # 2. Fabricated Steel Weight (tonnes represented as item)
-    items.append(SteelTakeoffItem(
-        section=spec.section,
-        element=f"Steel fabrication & erection tonnage ({spec.section_mark})",
-        location=f"{spec.element_type.title()} tonnage · {spec.element_id}",
-        substrate=f"{spec.section_mark} structural steel",
-        finish_system="Shop fabrication, delivery to site and crane erection",
-        quantity=total_mass_tonnes,
-        unit="item",
-        quantity_status="Measured",
-        source_page=spec.source_page,
-        source_reference=f"{STEEL_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Tonnage: {total_mass_tonnes:.3f} tonnes ({total_mass_kg:.1f} kg). Derived as {total_length_m:.2f} lm × {spec.mass_kg_per_m:.2f} kg/m.",
-        row_role="",
-    ))
+    # 2. Tonnage follows positive section mass; never default 0 tonnes.
+    if has_mass and total_mass_tonnes > 0:
+        items.append(SteelTakeoffItem(
+            section=spec.section,
+            element=f"Steel fabrication & erection tonnage ({spec.section_mark})",
+            location=f"{spec.element_type.title()} tonnage · {spec.element_id}",
+            substrate=f"{spec.section_mark} structural steel",
+            finish_system="Shop fabrication, delivery to site and crane erection",
+            quantity=total_mass_tonnes,
+            unit="t",
+            quantity_status="Provisional",
+            source_page=spec.source_page,
+            source_reference=f"{STEEL_SOURCE_PREFIX} · {spec.element_id}",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Tonnage: {total_mass_tonnes:.3f} tonnes ({total_mass_kg:.1f} kg). Derived as {total_length_m:.2f} lm × {spec.mass_kg_per_m:.2f} kg/m.",
+            row_role="",
+        ))
 
     # 3. Surface Protective Treatment / Coating (m²)
-    if spec.surface_area_m2_per_m > 0.0:
-        total_coating_m2 = round(total_length_m * spec.surface_area_m2_per_m, 2)
+    if _positive_steel_metric(spec.surface_area_m2_per_m):
+        if not math.isfinite(full_length * spec.surface_area_m2_per_m):
+            return items
+        total_coating_m2 = round(full_length * spec.surface_area_m2_per_m, 2)
         items.append(SteelTakeoffItem(
             section=spec.section,
             element=f"Steel surface coating: {spec.coating}",
@@ -149,11 +180,11 @@ def calculate_primary_member_items(spec: SteelMemberSpec) -> List[SteelTakeoffIt
             finish_system=spec.coating,
             quantity=total_coating_m2,
             unit="m²",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{STEEL_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
             notes=f"Coating surface area: {total_coating_m2:.2f} m² ({total_length_m:.2f} lm × {spec.surface_area_m2_per_m:.2f} m²/m).",
             row_role="",
         ))
