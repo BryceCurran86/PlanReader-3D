@@ -55,11 +55,13 @@ def _load_unchanged_frozen_modules():
     evaluator = importlib.import_module(f"{package_name}.evaluator")
     manifest_io = importlib.import_module(f"{package_name}.manifest_io")
     reconciliation = importlib.import_module(f"{package_name}.sealed_reconciliation")
+    development = importlib.import_module(f"{package_name}.development_scoreboard")
     return (
         evaluator.evaluate_suite_v2,
         manifest_io.load_suite_manifests,
         reconciliation.identity_map_from_dict,
         reconciliation.reconcile_sealed_run_v2,
+        development.evaluate_development_suite_v2,
     )
 
 
@@ -68,6 +70,7 @@ def _load_unchanged_frozen_modules():
     load_suite_manifests,
     identity_map_from_dict,
     reconcile_sealed_run_v2,
+    evaluate_development_suite_v2,
 ) = _load_unchanged_frozen_modules()
 
 
@@ -234,6 +237,10 @@ def build_four_project_evidence_ledger(
 
     rows: list[dict[str, Any]] = []
     scored: dict[str, tuple] = {}
+    # A source/customer-verified project may still have an INCOMPLETE frozen
+    # manifest. Retain its genuine production evidence for development-only
+    # scoring, separately from the official-publication eligible set.
+    verified_development: dict[str, tuple] = {}
     source_hashes_by_project: dict[str, tuple[str, ...]] = {}
     completed_by_project: dict[str, bool] = {}
     seen_signed_quantity_ids: dict[str, str] = {}
@@ -370,6 +377,7 @@ def build_four_project_evidence_ledger(
             _enforce_cross_project_quantity_uniqueness(
                 sealed, project_id=project_id, seen=seen_signed_quantity_ids,
             )
+            verified_development[project_id] = produced
             entry["customer_bijection_verified"] = True
             entry["reconciliation_input_presence_status"] = "INDEPENDENTLY_VERIFIED"
             entry["reconciliation_complete"] = True
@@ -405,9 +413,34 @@ def build_four_project_evidence_ledger(
         "projects": rows,
         "reason_codes": [],
         "official_suite_result": None,
+        # Development-only results must be absent unless every project's
+        # original bytes, V1 seal, customer bijection and identity mapping
+        # were independently verified. Never infer missing outputs as zeros.
+        "development_suite_result": None,
+        "independently_verified_execution_count": len(verified_development),
     }
     if len(scored) != 4:
-        result["reason_codes"] = ["four_project_signed_source_universe_not_complete"]
+        if len(verified_development) == 4:
+            # All four original production/customer executions are complete,
+            # but the unchanged frozen evaluator may still refuse to publish
+            # because a project *manifest* is INCOMPLETE. Invoke only the
+            # existing development scorer, with the genuine source-verified
+            # produced objects. No synthetic VERIFIED manifest is persisted.
+            development = evaluate_development_suite_v2(
+                manifests, verified_development,
+            )
+            result["development_suite_result"] = asdict(development)
+            result["reason_codes"] = ["frozen_project_manifests_incomplete"]
+        else:
+            result["reason_codes"] = [
+                "four_project_signed_source_universe_not_complete",
+                *(
+                    f'{entry["project_id"]}:{entry["first_failing_authority_stage"]}'
+                    for entry in rows
+                    if entry["first_failing_authority_stage"] is not None
+                    and entry["publication_status"] != "DIAGNOSTIC_UNPUBLISHED"
+                ),
+            ]
         return result
     # The unchanged evaluator fails closed unless the caller supplies BOTH
     # complete original-source SHA receipts and independent reconciliation
