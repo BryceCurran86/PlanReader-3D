@@ -55,6 +55,13 @@ def build_scenario_comparison(
         raise ValueError("rate scenarios must use one currency and one source-signed run")
 
     original = quotes[baseline]
+    if (
+        original["signed_quantity_count"] == 0
+        or any(q["signed_quantity_count"] == 0 for q in quotes.values())
+    ):
+        raise ValueError(
+            "scenario comparison cannot price an empty signed source universe"
+        )
     reference_items = {
         row["quantity_id"]: row for row in original["items"]
     }
@@ -91,7 +98,20 @@ def build_scenario_comparison(
         before = original["summary"].get("grand_total")
         after = q["summary"].get("grand_total")
         cap = _decimal(budgets[name], f"scenario budget {name}") if name in budgets else None
+        shortfall = (
+            max(Decimal("0"), Decimal(after) - cap)
+            if cap is not None and after is not None else None
+        )
+        budget_status = (
+            "NOT_SUPPLIED" if cap is None else
+            "UNPRICED_CANNOT_ASSESS_BUDGET" if after is None else
+            "EXCEEDS_CLIENT_BUDGET" if shortfall > 0 else
+            "WITHIN_CLIENT_BUDGET"
+        )
         comparisons.append({
+            "client_budget_status": budget_status,
+            "client_budget_shortfall": _money(shortfall) if shortfall is not None else None,
+
             "scenario": name,
             "is_baseline": name == baseline,
             "publication_status": q["publication_status"],
@@ -133,6 +153,11 @@ def build_scenario_comparison(
             for (name, family, unit), value in sorted(impact.items())
         ],
         "supplier_rate_requests": request_lines,
+        "client_budget_approval_granted": False,
+        "over_budget_scenarios": [
+            row["scenario"] for row in comparisons
+            if row["client_budget_status"] == "EXCEEDS_CLIENT_BUDGET"
+        ],
         "official_four_project_accuracy": None,
     }
     payload["comparison_fingerprint"] = hashlib.sha256(json.dumps(
