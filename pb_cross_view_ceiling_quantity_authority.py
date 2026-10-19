@@ -244,6 +244,20 @@ class CrossViewCeilingQuantityResult:
         signed_quantity_counts = Counter(
             record.quantity.quantity_id for record in self.records
         )
+        # One source-owned physical room/room-area receipt must never mint
+        # multiple full-room ceiling areas under independently rekeyed
+        # ceiling IDs or material codes. A multi-zone ceiling needs its own
+        # source-proved zone geometry and a different publication path.
+        physical_ownership_fields = (
+            "physical_room_id",
+            "canonical_room_id",
+            "source_room_face_record_id",
+            "upstream_room_area_quantity_id",
+        )
+        physical_ownership_counts = {
+            field: Counter(getattr(record, field) for record in self.records)
+            for field in physical_ownership_fields
+        }
         counts = Counter(
             record.canonical_ceiling_id for record in self.records
             if type(record.canonical_ceiling_id) is str
@@ -260,6 +274,15 @@ class CrossViewCeilingQuantityResult:
                 type(record.canonical_ceiling_id) is str
                 and counts.get(record.canonical_ceiling_id, 0) == 1
                 and signed_quantity_counts.get(record.quantity.quantity_id, 0) == 1
+                and all(
+                    type(getattr(record, field)) is str
+                    and bool(getattr(record, field))
+                    and getattr(record, field) == getattr(record, field).strip()
+                    and physical_ownership_counts[field].get(
+                        getattr(record, field), 0
+                    ) == 1
+                    for field in physical_ownership_fields
+                )
                 and record.physical_ceiling_surface_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.canonical_ceiling_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.ceiling_quantity_id == record.quantity.quantity_id
