@@ -33,7 +33,7 @@ _COMPATIBLE_TRADES = {
 # Dimensional constraints on already-sealed source units, independent of
 # benchmark expected values. Not a measurement unit conversion mechanism.
 _AREA_UNITS = frozenset({"m²", "m2", "sqm"})
-_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number", "count"})
+_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number"})
 _SOURCE_FAMILY_UNITS = {
     "floor_area": _AREA_UNITS,
     "floor_finish_area": _AREA_UNITS,
@@ -144,7 +144,12 @@ def require_signed_v2_family_trade_integrity(
                 # signed count as an exact independently mapped door/window
                 # item. Abstentions remain unscored by the unchanged evaluator.
                 value = _field(quantity, "value")
-                if value is not None and not _field(quantity, "abstained"):
+                abstained = _field(quantity, "abstained")
+                if abstained is False and value is None:
+                    raise ValueError(
+                        "mapped non-abstained opening count requires source-owned numeric cardinality"
+                    )
+                if value is not None and abstained is False:
                     if (
                         type(value) not in (int, float)
                         or not math.isfinite(value)

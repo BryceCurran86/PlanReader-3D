@@ -31,7 +31,7 @@ def apply(*, family, semantic, unit, trade):
     ("opening_area", "door_area:qualified-1", "m²", "doors"),
     ("opening_area", "window_area:qualified-1", "m2", "windows"),
     ("opening_count", "door_count:qualified-1", "ea", "doors"),
-    ("opening_count", "window_count:qualified-1", "count", "windows"),
+    ("opening_count", "window_count:qualified-1", "nr", "windows"),
 ])
 def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
     family, semantic, unit, trade,
@@ -46,6 +46,7 @@ def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
     ("opening_area", "door_area:source-id", "ea", "doors"),
     ("opening_count", "door_count:source-id", "m2", "doors"),
     ("opening_area", "window_area:source-id", "m3", "windows"),
+    ("opening_count", "door_count:source-id", "count", "doors"),
 ])
 def test_incompatible_count_area_volume_units_fail_before_benchmark_score(
     family, semantic, unit, trade,
@@ -156,3 +157,39 @@ def test_mapped_production_without_source_owned_family_cannot_claim_opening_area
                 "production_object_identity_refs": refs,
             }],
         )
+
+
+def test_non_abstained_producer_count_without_a_number_cannot_map_as_real_object():
+    items = [{"item_id": "count", "denominator_eligible": True,
+              "trade_category": "doors"}]
+    source = [{
+        "object_identity_refs": ["source-door"],
+        "family": "opening_count", "semantic_key": "door_count:source-door",
+        "unit": "nr", "value": None, "abstained": False,
+    }]
+    bindings = [{
+        "benchmark_item_id": "count", "production_family": "opening_count",
+        "production_object_identity_refs": ["source-door"],
+    }]
+    with pytest.raises(ValueError, match="requires source-owned numeric cardinality"):
+        veto(verified_items=items, sealed_quantities=source,
+             identity_bindings=bindings)
+
+
+def test_explicit_source_count_three_and_true_abstention_are_separate_authorities():
+    def source(value, abstained):
+        return [{
+            "object_identity_refs": ["source-door-group"],
+            "family": "opening_count",
+            "semantic_key": "door_count:source-door-group",
+            "unit": "nr", "value": value, "abstained": abstained,
+        }]
+    manifest = [{"item_id": "count", "denominator_eligible": True,
+                 "trade_category": "doors"}]
+    bindings = [{
+        "benchmark_item_id": "count", "production_family": "opening_count",
+        "production_object_identity_refs": ["source-door-group"],
+    }]
+    for value, abstained in [(3, False), (None, True)]:
+        veto(verified_items=manifest, sealed_quantities=source(value, abstained),
+             identity_bindings=bindings)
