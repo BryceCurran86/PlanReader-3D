@@ -11,13 +11,14 @@ signature-verified JSON used by the original-byte project-only scorer.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any, Iterable
 
 
 def _field(record: Any, name: str) -> Any:
     if isinstance(record, Mapping):
         return record.get(name)
-    return getattr(record, name)
+    return getattr(record, name, None)
 
 
 _COMPATIBLE_TRADES = {
@@ -27,6 +28,19 @@ _COMPATIBLE_TRADES = {
     "ceiling_finish_area": frozenset({"ceilings"}),
     "opening_area": frozenset({"doors", "windows"}),
     "opening_count": frozenset({"doors", "windows"}),
+}
+
+# Dimensional constraints on already-sealed source units, independent of
+# benchmark expected values. Not a measurement unit conversion mechanism.
+_AREA_UNITS = frozenset({"m²", "m2", "sqm"})
+_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number", "count"})
+_SOURCE_FAMILY_UNITS = {
+    "floor_area": _AREA_UNITS,
+    "floor_finish_area": _AREA_UNITS,
+    "ceiling_area": _AREA_UNITS,
+    "ceiling_finish_area": _AREA_UNITS,
+    "opening_area": _AREA_UNITS,
+    "opening_count": _COUNT_UNITS,
 }
 
 def require_signed_v2_family_trade_integrity(
@@ -71,15 +85,32 @@ def require_signed_v2_family_trade_integrity(
         ):
             raise ValueError("bound production object identity refs are not canonical")
         refs = tuple(sorted(raw_refs))
-        for quantity in by_refs.get(refs, ()):
+        candidates = by_refs.get(refs, ())
+        declared_family = _field(binding, "production_family")
+        if candidates and (
+            type(declared_family) is not str
+            or declared_family != declared_family.strip()
+        ):
+            raise ValueError(
+                "mapped quantity identity requires its explicit original production family"
+            )
+        typed_candidates = [
+            quantity for quantity in candidates
+            if _field(quantity, "family") == declared_family
+        ]
+        if candidates and not typed_candidates:
+            raise ValueError(
+                "mapped quantity identity requires its explicit original production family"
+            )
+        for quantity in candidates:
             family = _field(quantity, "family")
-            if (
-                _field(binding, "production_family") is None
-                or family != _field(binding, "production_family")
-            ):
-                raise ValueError(
-                    "mapped quantity identity requires its explicit original production family"
-                )
+            if family != declared_family:
+                # One independently sealed physical door can legitimately
+                # produce BOTH an opening_area and an opening_count.  The
+                # unchanged exact-identity reconciler independently joins on
+                # refs PLUS production_family, so cross-family quantities
+                # here are not mapped or misclassified by this binding.
+                continue
             trade = _field(item, "trade_category")
             # An unknown source-owned family has NO audited trade meaning.
             # Never interpret absence from the allowlist as permission to
@@ -94,6 +125,35 @@ def require_signed_v2_family_trade_integrity(
                 raise ValueError(
                     "bound production family cannot be reclassified as benchmark trade"
                 )
+            # The higher-level V1 signed receipt verifier guarantees a unit
+            # exists. A missing unit in source-neutral helper-only test data
+            # is left to that gate; a PRESENT incompatible source-owned unit
+            # can never be silently reclassified as a benchmark area/count.
+            unit = _field(quantity, "unit")
+            if unit is not None and (
+                type(unit) is not str
+                or unit != unit.strip()
+                or unit.casefold() not in _SOURCE_FAMILY_UNITS[family]
+            ):
+                raise ValueError(
+                    "bound signed source unit disagrees with physical family dimension"
+                )
+            if family == "opening_count":
+                # A source-authenticated count has an integer cardinality.
+                # Do not accept a fractional, negative, boolean or nonfinite
+                # signed count as an exact independently mapped door/window
+                # item. Abstentions remain unscored by the unchanged evaluator.
+                value = _field(quantity, "value")
+                if value is not None and not _field(quantity, "abstained"):
+                    if (
+                        type(value) not in (int, float)
+                        or not math.isfinite(value)
+                        or value < 1
+                        or value != int(value)
+                    ):
+                        raise ValueError(
+                            "mapped opening count must be a positive whole number"
+                        )
             if family in {"opening_area", "opening_count"}:
                 semantic_key = _field(quantity, "semantic_key")
                 if type(semantic_key) is not str:
