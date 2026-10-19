@@ -324,7 +324,8 @@ class OpeningHostFrameProducer:
 
     def _scope_records_by_id(self, wall_scope, selector) -> dict[str, PhysicalWallCandidateRecord]:
         records_by_id = {str(record.wall_candidate_id): record for record in wall_scope.records}
-        if self._supplemental_walls is not None:
+        supp_walls = getattr(self, "_supplemental_walls", None)
+        if supp_walls is not None:
             supp_selector = PhysicalWallCandidateSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
@@ -333,7 +334,7 @@ class OpeningHostFrameProducer:
                 page_id=selector.page_id,
                 decision_scope_id=selector.decision_scope_id,
             )
-            supp_scope = self._supplemental_walls.resolve_scope(supp_selector)
+            supp_scope = supp_walls.resolve_scope(supp_selector)
             if supp_scope.status is EvidenceResolutionStatus.CORROBORATED:
                 for r in supp_scope.records:
                     records_by_id.setdefault(str(r.wall_candidate_id), r)
@@ -743,23 +744,26 @@ class OpeningHostFrameProducer:
             and tuple(host_resolution.bands[0].member_ids) == tuple(binding.member_wall_candidate_ids)
         )
         if not single_member_host:
-            selector = OpeningHostBindingSelector(
-                document_id=binding.document_id,
-                revision_id=binding.revision_id,
-                source_sha256=binding.source_sha256,
-                snapshot_id=binding.snapshot_id,
-                page_id=binding.page_id,
-                decision_scope_id=binding.decision_scope_id,
-                opening_identity_id=binding.opening_identity_id,
-            )
-            bound = self._host.resolve(selector)
-            if (
-                bound.status is EvidenceResolutionStatus.CORROBORATED
-                and bound.record is not None
-                and bound.record.record_id == binding.record_id
-                and tuple(bound.record.member_wall_candidate_ids) == tuple(binding.member_wall_candidate_ids)
-            ):
-                single_member_host = True
+            host_auth = getattr(self, "_host", None)
+            opening_id = getattr(binding, "opening_identity_id", None)
+            if host_auth is not None and opening_id is not None:
+                selector = OpeningHostBindingSelector(
+                    document_id=binding.document_id,
+                    revision_id=binding.revision_id,
+                    source_sha256=binding.source_sha256,
+                    snapshot_id=binding.snapshot_id,
+                    page_id=binding.page_id,
+                    decision_scope_id=binding.decision_scope_id,
+                    opening_identity_id=opening_id,
+                )
+                bound = host_auth.resolve(selector)
+                if (
+                    bound.status is EvidenceResolutionStatus.CORROBORATED
+                    and bound.record is not None
+                    and bound.record.record_id == binding.record_id
+                    and tuple(bound.record.member_wall_candidate_ids) == tuple(binding.member_wall_candidate_ids)
+                ):
+                    single_member_host = True
         if not single_member_host:
             return None
 
