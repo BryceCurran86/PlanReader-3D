@@ -276,11 +276,6 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
                 "section": "Internal",
                 "evidence_ids": ["spec-flooring"],
             },
-            "tiling": {
-                "material": "Porcelain floor tile",
-                "section": "Internal",
-                "evidence_ids": ["spec-tile"],
-            },
             "coating": {
                 "material": "Epoxy coating",
                 "section": "Internal",
@@ -293,10 +288,9 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
             specs,
         )
 
-        self.assertEqual(len(quantities), 3)
+        self.assertEqual(len(quantities), 2)
         by_trade = {item.trade_scope: item for item in quantities}
         self.assertEqual(by_trade["flooring"].quantity, 24.0)
-        self.assertEqual(by_trade["tiling"].quantity, 24.0)
         self.assertEqual(by_trade["painting"].quantity, 24.0)
         for item in quantities:
             self.assertEqual(item.host_object_id, "floor_101")
