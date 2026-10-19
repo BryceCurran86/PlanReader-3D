@@ -128,6 +128,7 @@ class LivePhysicalNetWallClaim:
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    opening_dimension_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     floor_finish_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     ceiling_lining_quantity_evidence: tuple[QuantityEvidence, ...] = ()
@@ -981,6 +982,12 @@ def collect_live_physical_net_wall_claim(
     opening_quantity_evidence = publish_live_opening_area_quantities(
         physical_void
     )
+    # Original measured frame/physical axes only. Area-only figured products
+    # are not inverted to invent widths or heights. Remains independent of
+    # the signed m² opening-area family and customer permission.
+    opening_dimension_quantity_evidence = (
+        physical_void.physical_opening_dimension_quantities
+    )
     opening_count_quantity_evidence = (
         publish_live_authenticated_opening_count_quantities(
             source_visibility_producer=source,
@@ -1065,6 +1072,7 @@ def collect_live_physical_net_wall_claim(
             canonical_space_reason_codes=canonical_space_core.reason_codes,
             opening_quantity_evidence=opening_quantity_evidence,
             opening_count_quantity_evidence=opening_count_quantity_evidence,
+            opening_dimension_quantity_evidence=opening_dimension_quantity_evidence,
             room_area_quantity_evidence=tuple(room_area_quantity_evidence),
             floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
             ceiling_lining_quantity_evidence=tuple(
@@ -1118,6 +1126,7 @@ def collect_live_physical_net_wall_claim(
         canonical_space_reason_codes=canonical_space_core.reason_codes,
         opening_quantity_evidence=opening_quantity_evidence,
         opening_count_quantity_evidence=opening_count_quantity_evidence,
+        opening_dimension_quantity_evidence=opening_dimension_quantity_evidence,
         room_area_quantity_evidence=tuple(room_area_quantity_evidence),
         floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
         ceiling_lining_quantity_evidence=tuple(
