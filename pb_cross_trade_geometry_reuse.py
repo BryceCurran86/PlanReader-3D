@@ -917,10 +917,14 @@ def derive_space_trade_quantities(
     CEILING surface objects instead.
     """
 
-    space_id = _clean(space.get("canonical_room_id"))
+    space_id = space.get("canonical_room_id")
     perimeter_m = _positive(space.get("perimeter_m"))
     host_evidence = _evidence_ids(space.get("evidence_ids"))
-    if not space_id or perimeter_m is None or not host_evidence:
+    if (
+        type(space_id) is not str or not space_id
+        or space_id != space_id.strip()
+        or perimeter_m is None or not host_evidence
+    ):
         return []
 
     results: List[DerivedTradeQuantity] = []
@@ -932,6 +936,7 @@ def derive_space_trade_quantities(
         section = _spec_section(skirting)
         widths: list[float] = []
         doorway_ids: set[str] = set()
+        claimed_original_width_ids: set[str] = set()
         valid_widths = (
             type(skirting.get("door_universe_complete")) is bool
             and skirting.get("door_universe_complete") is True
@@ -959,6 +964,7 @@ def derive_space_trade_quantities(
                     or any(type(eid) is not str or not eid or eid!=eid.strip()
                            for eid in source_ids)
                     or len(set(source_ids))!=len(source_ids)
+                    or not claimed_original_width_ids.isdisjoint(source_ids)
                 ):
                     valid_widths=False
                     break
@@ -971,6 +977,7 @@ def derive_space_trade_quantities(
                     valid_widths=False
                     break
                 doorway_ids.add(doorway)
+                claimed_original_width_ids.update(source_ids)
                 widths.append(width)
         if material and spec_evidence and section and valid_widths:
             door_deduction_m = math.fsum(widths)
