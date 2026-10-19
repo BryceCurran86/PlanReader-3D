@@ -15,6 +15,9 @@ from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
 from tools.diag_gptmax_original_stacker_image_frame import (
     source_verified_stacker_image_frame,
 )
+from tools.diag_gptmax_original_2127_crossview_native import (
+    original_2127_crossview_receipt,
+)
 from tools.diag_gptmax_original_stacker_shared_pier_reproof import (
     original_shared_pier_candidate_w4_reproof,
 )
@@ -254,6 +257,20 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
     rows, physical_count, host_count, duplicate_physical_ids = (
         _source_unique_original_opening_host_rows(comp.opening_bindings)
     )
+    original_crossview = original_2127_crossview_receipt(pdf)
+    if (type(original_crossview) is not dict
+            or original_crossview.get("source_sha256") != expected_sha256
+            or type(original_crossview.get("native_marks")) is not list
+            or [row.get("page_number") for row in original_crossview["native_marks"]]
+               != [3, 5]
+            or original_crossview.get("exact_cross_page_physical_identity_proven") is not False
+            or original_crossview.get("unique_structural_host_proven") is not False
+            or original_crossview.get("whole_wall_frame_proven") is not False
+            or original_crossview.get("door_window_semantic_role_proven") is not False
+            or original_crossview.get("quantity_promotion_granted") is not False
+            or original_crossview.get("opening_count_completeness_proven") is not False
+            or original_crossview.get("source_only_evidence") is not True):
+        raise ValueError("original 2127 cross-view source scope or authority conflict")
     return {
         "status": "original_source_ink_closed_g17_capture_counterfactual",
         "source_sha256": expected_sha256,
@@ -268,6 +285,10 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         "stacker_2127_native_image_frame_source": (
             source_verified_stacker_image_frame(pdf)
         ),
+        # A separate original page-3 plan / page-5 elevation label issuer.
+        # Physical cross-sheet SAME, host, whole-wall frame, kind, ordered
+        # dimensions, count and quantity remain independently blocked.
+        "stacker_2127_original_crossview_native_label_source": original_crossview,
         "physical_paired_source_policy_replayed_on_original":True,
         "separate_elevation_witness_page_5":elevation_witness_shadow,
         "opt_in_source_fragment_roles_evaluated": source_fragment_roles_shadow,
