@@ -11,7 +11,7 @@ import re
 
 import fitz
 
-_ID = re.compile(r"d(0|[1-9][0-9]*)i(0|[1-9][0-9]*)\\Z")
+_ID = re.compile(r"d(0|[1-9][0-9]*)i(0|[1-9][0-9]*)$")
 
 
 def audit_original_parallel_wall_ink_rivals(
