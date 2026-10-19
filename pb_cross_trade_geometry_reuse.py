@@ -160,16 +160,28 @@ def _polygon_perimeter_m(value: object) -> Optional[float]:
         for point in value:
             if not isinstance(point, (list, tuple)) or len(point) != 2:
                 return None
+            if any(type(axis) not in (int, float) for axis in point):
+                return None
             x, y = float(point[0]), float(point[1])
             if not math.isfinite(x) or not math.isfinite(y):
                 return None
             points.append((x, y))
-    except (TypeError, ValueError, OverflowError):
+        # An explicit closing vertex is legitimate; repeated interior
+        # vertices, self-crossings and degenerate rings do not establish a
+        # physical pour edge.
+        if points[0] == points[-1]:
+            points.pop()
+        if len(points) < 3 or len(set(points)) != len(points):
+            return None
+        from shapely.geometry import Polygon
+        polygon = Polygon(points)
+        if not polygon.is_valid or not polygon.exterior.is_simple:
+            return None
+        if not math.isfinite(polygon.area) or polygon.area <= 0.0:
+            return None
+        perimeter = float(polygon.length)
+    except (TypeError, ValueError, OverflowError, ImportError):
         return None
-    perimeter = 0.0
-    for index, first in enumerate(points):
-        second = points[(index + 1) % len(points)]
-        perimeter += math.hypot(second[0] - first[0], second[1] - first[1])
     return perimeter if math.isfinite(perimeter) and perimeter > 0.0 else None
 
 
