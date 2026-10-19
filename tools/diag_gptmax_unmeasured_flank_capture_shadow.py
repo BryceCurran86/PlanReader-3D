@@ -15,6 +15,9 @@ from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
 from tools.diag_gptmax_original_stacker_image_frame import (
     source_verified_stacker_image_frame,
 )
+from tools.diag_gptmax_original_2127_crossview_native import (
+    original_2127_crossview_receipt,
+)
 from tools.diag_gptmax_original_stacker_shared_pier_reproof import (
     original_shared_pier_candidate_w4_reproof,
 )
@@ -267,6 +270,12 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         # full-wall frame, filling semantics, count or metric quantity.
         "stacker_2127_native_image_frame_source": (
             source_verified_stacker_image_frame(pdf)
+        ),
+        # A separate original page-3 plan / page-5 elevation label issuer.
+        # Physical cross-sheet SAME, host, whole-wall frame, kind, ordered
+        # dimensions, count and quantity remain independently blocked.
+        "stacker_2127_original_crossview_native_label_source": (
+            original_2127_crossview_receipt(pdf)
         ),
         "physical_paired_source_policy_replayed_on_original":True,
         "separate_elevation_witness_page_5":elevation_witness_shadow,
