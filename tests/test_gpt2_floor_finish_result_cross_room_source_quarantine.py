@@ -237,5 +237,15 @@ def test_invalidly_rekeyed_rival_cannot_launder_the_shared_original_source_mark(
 
 def test_duplicate_same_floor_or_unsealed_record_cannot_enter_public_quantities(monkeypatch):
     original, _ = _producer_result(monkeypatch)
+    # Positive: one intact, uniquely source-owned record still issues exactly
+    # the original FIRM quantity. This is the real same-scope control.
+    assert _public_result(original).quantities == (original.quantity,)
+    # Negative: identical duplicated physical issuance is not counted twice.
     assert _public_result(original, original).quantities == ()
-    assert _public_result(original, None).quantities == (original.quantity,)
+    # A reconstructed untyped/null sibling cannot prove that the competing
+    # original floor/mark universe was exhausted. Filtering it would launder
+    # a potentially reused physical source mark into a FIRM quantity.
+    for order in ((original, None), (None, original)):
+        unsealed = _public_result(*order)
+        assert unsealed.records_by_floor_id == {}
+        assert unsealed.quantities == ()
