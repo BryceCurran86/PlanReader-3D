@@ -82,6 +82,7 @@ jobs:
           assert len({x['physical_opening_id'] for x in decisions})==len(decisions)
           assert len(decisions)==r['original_physical_opening_count']
           assert sum(r['first_gate_counts'].values())==len(decisions)
+          assert sum(r['area_first_gate_counts'].values())==len(decisions)
           assert sum(bool(x['authenticated_frame_record_id']) for x in decisions)==r['original_complete_host_frames']
           assert sum(bool(x['authenticated_host_record_id']) for x in decisions)==r['original_authenticated_hosts']
           # No quantity rekey: every PREVIOUSLY signed opening must remain in
@@ -100,6 +101,17 @@ jobs:
           assert all(not x['measurement_published']
               and not x['customer_seal_granted']
               and not x['opening_count_granted'] for x in decisions)
+          for x in r['gpt1_new_area_review_candidates']:
+            assert x in decisions
+            assert x['new_gpt1_area_candidate_handoff'] is True
+            assert x['prior_signed_quantity_id'] is None
+            assert x['authenticated_host_record_id']
+            assert x['authenticated_frame_record_id']
+            assert x['filling_kind_source_supported']
+            assert x['figured_pair_area_support']
+            assert x['figured_area_receipt_bound']
+            assert x['opening_area_first_remaining_gate']==(
+                'independent_gpt1_opening_area_measurement_validation_required')
           for x in r['gpt1_new_handoff_candidates']:
             assert x in decisions
             assert x['new_gpt1_candidate_handoff'] is True

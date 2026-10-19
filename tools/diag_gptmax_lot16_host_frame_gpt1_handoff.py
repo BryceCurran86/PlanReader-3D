@@ -173,6 +173,33 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
+        # A source-issued area from an unordered two-number label does NOT
+        # imply width/height order. Review opening AREA independently from
+        # 3D axis geometry; neither review flag signs a quantity.
+        figured_receipt_bound = bool(
+            pair_ok and type(c.get("figured_area_record_id")) is str
+            and c["figured_area_record_id"]
+            and c["figured_area_record_id"] == e.get("evidence_id")
+        )
+        if not supported:
+            area_gate = "source_owned_floor_plan_unavailable"
+        elif host is None:
+            area_gate = "structural_host_unavailable"
+        elif not frame_ok:
+            area_gate = "whole_wall_frame_unavailable"
+        elif not typed:
+            area_gate = "opening_filling_kind_unproven"
+        elif not pair_ok:
+            area_gate = "source_figured_dimension_pair_unproven"
+        elif not figured_receipt_bound:
+            area_gate = "original_figured_area_receipt_unbound"
+        elif row.get("quantity_id"):
+            area_gate = "original_signed_area_already_retained"
+        else:
+            area_gate = "independent_gpt1_opening_area_measurement_validation_required"
+        area_review_ready = (
+            area_gate == "independent_gpt1_opening_area_measurement_validation_required"
+        )
         if not supported:
             gate = "source_owned_floor_plan_unavailable"
         elif host is None:
@@ -199,6 +226,9 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "frame_reason_codes": list(row["frame_reason_codes"]),
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
+            "figured_area_receipt_bound": figured_receipt_bound,
+            "opening_area_first_remaining_gate": area_gate,
+            "new_gpt1_area_candidate_handoff": area_review_ready,
             "axis_order_authenticated": axis_ok,
             "original_figured_label_order_source_resolved": (
                 e.get("axis_order_resolved") is True if pair_ok else False
@@ -226,6 +256,11 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
         "original_complete_host_frames": sum(r["frame_record"] is not None for r in rows),
         "original_signed_area_quantities": sum(bool(r.get("quantity_id")) for r in rows),
         "first_gate_counts": dict(sorted(Counter(r["first_remaining_gate"] for r in assessed).items())),
+        "area_first_gate_counts": dict(sorted(
+            Counter(r["opening_area_first_remaining_gate"] for r in assessed).items())),
+        "gpt1_new_area_review_candidates": [
+            r for r in assessed if r["new_gpt1_area_candidate_handoff"]
+        ],
         "source_floor_plan_support_only": supported,
         "gpt1_new_handoff_candidates": [r for r in assessed if r["new_gpt1_candidate_handoff"]],
         "opening_decisions": assessed,

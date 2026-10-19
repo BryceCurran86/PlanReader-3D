@@ -122,3 +122,66 @@ def test_missing_independent_axis_cannot_be_invented_from_area():
     result = run(rows, canonical)
     assert result["first_gate_counts"]["width_height_axis_authority_unproven"] == 1
     assert not result["gpt1_new_handoff_candidates"]
+
+
+def test_unordered_original_pair_does_not_block_independent_area_review():
+    rows, canonical = fixture()
+    result = run(rows, canonical)
+    x = result["opening_decisions"][2]
+    assert x["figured_area_receipt_bound"]
+    assert x["opening_area_first_remaining_gate"] == (
+        "independent_gpt1_opening_area_measurement_validation_required"
+    )
+    assert x["new_gpt1_area_candidate_handoff"]
+    assert len(result["gpt1_new_area_review_candidates"]) == 1
+    assert not x["axis_order_authenticated"]
+    assert not x["new_gpt1_candidate_handoff"]
+    assert not x["measurement_published"] and not x["customer_seal_granted"]
+
+
+def test_unowned_figured_area_receipt_never_enters_area_review():
+    rows, canonical = fixture()
+    canonical[2]["figured_area_record_id"] = "foreign-source-receipt"
+    result = run(rows, canonical)
+    assert result["opening_decisions"][2]["opening_area_first_remaining_gate"] == (
+        "original_figured_area_receipt_unbound"
+    )
+    assert not result["gpt1_new_area_review_candidates"]
+
+
+def test_area_review_still_requires_owned_kind_and_complete_host_frame():
+    rows, canonical = fixture()
+    canonical[2]["opening_kind"] = None
+    result = run(rows, canonical)
+    assert result["opening_decisions"][2]["opening_area_first_remaining_gate"] == (
+        "opening_filling_kind_unproven"
+    )
+    assert not result["gpt1_new_area_review_candidates"]
+    rows, canonical = fixture()
+    rows[2]["frame_record"] = None
+    canonical[2]["host_frame_record_id"] = None
+    result = run(rows, canonical)
+    assert result["opening_decisions"][2]["opening_area_first_remaining_gate"] == (
+        "whole_wall_frame_unavailable"
+    )
+    assert not result["gpt1_new_area_review_candidates"]
+
+
+def test_prior_source_sealed_area_is_not_sent_for_ninth_area_review():
+    rows, canonical = fixture()
+    rows[2]["quantity_id"] = "archived-original-quantity"
+    result = run(rows, canonical)
+    assert result["opening_decisions"][2]["opening_area_first_remaining_gate"] == (
+        "original_signed_area_already_retained"
+    )
+    assert not result["gpt1_new_area_review_candidates"]
+
+
+def test_area_first_gate_counts_are_complete_deterministic_inventory():
+    result = run()
+    assert result["area_first_gate_counts"] == {
+        "independent_gpt1_opening_area_measurement_validation_required": 1,
+        "structural_host_unavailable": 1,
+        "whole_wall_frame_unavailable": 1,
+    }
+    assert sum(result["area_first_gate_counts"].values()) == 3
