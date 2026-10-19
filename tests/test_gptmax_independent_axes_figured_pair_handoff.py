@@ -142,11 +142,11 @@ def test_unordered_original_pair_does_not_block_independent_area_review():
 def test_unowned_figured_area_receipt_never_enters_area_review():
     rows, canonical = fixture()
     canonical[2]["figured_area_record_id"] = "foreign-source-receipt"
-    result = run(rows, canonical)
-    assert result["opening_decisions"][2]["opening_area_first_remaining_gate"] == (
-        "original_figured_area_receipt_unbound"
-    )
-    assert not result["gpt1_new_area_review_candidates"]
+    # Existing original producer scope already rejects a contradictory
+    # canonical figured receipt. Retain that stronger first failure instead
+    # of asking the optional review queue to soften the source-integrity gate.
+    with pytest.raises(ValueError, match="canonical source dimension identity mismatch"):
+        run(rows, canonical)
 
 
 def test_area_review_still_requires_owned_kind_and_complete_host_frame():
