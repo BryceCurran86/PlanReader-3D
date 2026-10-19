@@ -217,6 +217,12 @@ class CrossViewCeilingFinishResult:
     ) -> Mapping[str, CrossViewCeilingFinishRecord]:
         # Never expose source receipt aliases or a last-wins room dictionary,
         # including when a public result dataclass is reconstructed.
+        # A reconstructed public result is not an issuer receipt. A rogue
+        # record object cannot be discarded and let a competing legitimate
+        # record appear uniquely owned; quarantine the entire projection.
+        if any(type(record) is not CrossViewCeilingFinishRecord
+               for record in self.records):
+            return MappingProxyType({})
         survivors, _disputed = _quarantine_reused_ceiling_source_ownership(
             self.records
         )
