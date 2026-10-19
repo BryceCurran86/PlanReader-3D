@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from typing import Optional, Sequence
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType, ScaleCalibration
@@ -329,6 +330,40 @@ def _validate_explicit_area(
         blockers.append("explicit_area_figured_receipts_invalid")
     if str(evidence.unit or "").strip().lower() not in {"m2", "m²"}:
         blockers.append("explicit_area_unit_not_m2")
+    # A legacy native-vector text value can have its normalized m² replayed
+    # independently of the original printed source. When an explicit printed
+    # square-metre token exists, the source bytes must not disagree with the
+    # claimed area. Authenticated two-axis producers use separate dimension
+    # receipts and are intentionally not subjected to this one-token check.
+    if (
+        evidence.method == "vector_text"
+        and type(evidence.raw_text) is str
+        and type(evidence.normalized_value) in (int, float)
+    ):
+        printed = re.findall(
+            r"(?<![A-Za-z0-9.,])"
+            r"((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?)"
+            r"\\s*(?:m\\s*(?:\\^\\s*)?[2²]|sq\\.?\\s*m)(?![A-Za-z0-9])",
+            evidence.raw_text,
+            flags=re.IGNORECASE,
+        )
+        if printed:
+            try:
+                genuine_area = float(evidence.normalized_value)
+                printed_areas = tuple(float(value.replace(",", "")) for value in printed)
+            except (TypeError, ValueError, OverflowError):
+                blockers.append("explicit_area_printed_source_mismatch")
+            else:
+                if (
+                    not math.isfinite(genuine_area)
+                    or any(
+                        not math.isfinite(value) or not math.isclose(
+                            value, genuine_area, rel_tol=0.0, abs_tol=1e-6
+                        )
+                        for value in printed_areas
+                    )
+                ):
+                    blockers.append("explicit_area_printed_source_mismatch")
     return tuple(blockers)
 
 
