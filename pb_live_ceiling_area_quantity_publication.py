@@ -135,6 +135,22 @@ def _publish_one(
         return None
 
     meta = source.metadata if isinstance(source.metadata, Mapping) else {}
+    # An exact FIRM ceiling lineage cannot be assembled by stripping spaces
+    # or casting untyped source receipts until unrelated objects appear equal.
+    original_sha = meta.get("source_sha256")
+    original_revision = meta.get("revision_id")
+    original_upstream_area_id = meta.get("upstream_area_quantity_id")
+    if (
+        type(original_sha) is not str
+        or len(original_sha) != 64
+        or original_sha.lower() != source_sha.lower()
+        or type(original_revision) is not str
+        or original_revision != ceiling.revision_id
+        or type(original_upstream_area_id) is not str
+        or not original_upstream_area_id
+        or original_upstream_area_id != ceiling.room_area_quantity_id
+    ):
+        return None
     # Optional original producer scope cannot be replayed onto a different
     # canonical document or physical room snapshot.  Missing metadata is
     # tolerated for legacy legitimate producers, never inferred from names.
@@ -180,12 +196,8 @@ def _publish_one(
     ):
         return None
     if (
-        _clean(meta.get("upstream_area_quantity_id"))
-        != _clean(ceiling.room_area_quantity_id)
-        or _clean(meta.get("source_sha256")).lower()
-        != _clean(ceiling.source_sha256).lower()
-        or _clean(meta.get("revision_id")) != _clean(ceiling.revision_id)
-        or _clean(meta.get("viewport_id")) != _clean(ceiling.viewport_id)
+        type(meta.get("viewport_id")) is not str
+        or meta.get("viewport_id") != ceiling.viewport_id
         or _clean(meta.get("page_no")) != str(ceiling.source_page)
         or not ceiling.evidence_ids
         or not source.evidence_ids
