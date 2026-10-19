@@ -69,9 +69,6 @@ def test_original_lot16_fragment_roles_capture_reports_all_release_blocks():
     assert report["new_metric_handoff_granted"] is False
     assert report["new_signed_area_granted"] is False
     assert report["new_benchmark_match_granted"] is False
-    assert report["signed_snapshot_rekey_approved"] if (
-        "signed_snapshot_rekey_approved" in report
-    ) else True  # This key belongs to the nested strict comparison.
     comparison = report["original_change_receipt_parity"]
     assert comparison["signed_snapshot_rekey_approved"] is False
     assert comparison["new_benchmark_match_granted"] is False
