@@ -1,0 +1,43 @@
+"""Read-only mission ledger for Cursor quantity-recovery PRs (not a score)."""
+from __future__ import annotations
+
+from typing import Any
+
+
+# Static ledger of Cursor deliverables in this autonomous session. Update when
+# new PRs land; never encode expected BOQ or match counts as targets.
+MISSION_LEDGER: dict[str, Any] = {
+    "status": "UNPUBLISHED_CURSOR_QUANTITY_RECOVERY_LEDGER",
+    "shadow_only": True,
+    "benchmark_score_granted": False,
+    "prs": [
+        {"number": 3348, "items": ["8-precursor"], "note": "G17 flank W4 end-reach ledger"},
+        {"number": 3351, "items": ["2", "8"], "note": "end-reach attach to unhosted census"},
+        {"number": 3350, "items": ["1", "3-4", "9-12", "14-18", "23-24", "26", "28"], "note": "arch + first shadow batch"},
+        {"number": 3354, "items": ["1", "2-shadow", "4-collision"], "note": "receipt refresh, host identity, W4 collision"},
+        {"number": 3356, "items": ["4", "6", "10", "13", "19-22", "25", "27"], "note": "batch2 readiness/dedupe/lineage/trade/seal"},
+    ],
+    "blocked_without_other_lanes_or_owner": [
+        {"item": 5, "blocker": "STACKER host/frame identity — GPT MAX + owner PDF"},
+        {"item": 7, "blocker": "BIFOLD kind FIRM — source glyph/schedule + MAX"},
+        {"item": 12, "blocker": "door height — owner USER_APPROVED or source height"},
+        {"item": 16, "blocker": "wall length/height FIRM — GPT1 seams with owned evidence"},
+        {"item": 19, "blocker": "room/finish producers — GPT2"},
+        {"item": 25, "blocker": "seal activation — GPT3 + owner promotion"},
+        {"item": 29, "blocker": "frozen V2 eval after sealed appends — GPT3"},
+        {"item": 30, "blocker": "verified score — post-eval only"},
+    ],
+}
+
+
+def mission_ledger() -> dict[str, Any]:
+    return dict(MISSION_LEDGER)
+
+
+def main() -> None:
+    import json
+    print(json.dumps(mission_ledger(), indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

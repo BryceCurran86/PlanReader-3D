@@ -14,6 +14,10 @@ Continues the autonomous mission after #3348 / #3350 / #3351 / #3354.
 | 20 | `pb_pitched_ceiling_readiness_shadow` |
 | 21 | `pb_canonical_quantity_attach_shadow` |
 | 22 | `pb_source_lineage_required_fields_shadow` |
+| 3 | `pb_whole_wall_frame_readiness_shadow` |
+| 25/27 | `pb_source_closed_seal_readiness_shadow`, `pb_trade_quantity_evidence_readiness_shadow` |
+| 29–30 | `pb_frozen_v2_eval_readiness_shadow` (refuse-closed; no score claim) |
+| ledger | `tools/diag_cursor_quantity_recovery_mission_ledger.py` |
 
 All shadow / review-only. No FIRM, no gold inputs, no JobHub activation.
 
