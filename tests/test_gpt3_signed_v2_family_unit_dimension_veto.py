@@ -93,3 +93,67 @@ def test_mapped_group_of_three_source_issued_openings_may_have_count_three():
                "production_object_identity_refs": ["original-door-group"]}
     veto(verified_items=[item], sealed_quantities=[source],
          identity_bindings=[binding])
+
+
+def test_one_source_owned_physical_door_can_separately_map_area_and_count():
+    """Previously rejected because area/count shared one canonical physical ID."""
+    original_refs = ["lot16:door:opening-101"]
+    items = [
+        {"item_id": "door-area", "denominator_eligible": True, "trade_category": "doors"},
+        {"item_id": "door-count", "denominator_eligible": True, "trade_category": "doors"},
+    ]
+    quantities = [
+        {"object_identity_refs": original_refs, "family": "opening_area",
+         "semantic_key": "door_area:lot16-opening-101", "unit": "m2",
+         "value": 1.8, "abstained": False},
+        {"object_identity_refs": original_refs, "family": "opening_count",
+         "semantic_key": "door_count:lot16-opening-101", "unit": "nr",
+         "value": 1, "abstained": False},
+    ]
+    bindings = [
+        {"benchmark_item_id": "door-area", "production_object_identity_refs": original_refs,
+         "production_family": "opening_area"},
+        {"benchmark_item_id": "door-count", "production_object_identity_refs": original_refs,
+         "production_family": "opening_count"},
+    ]
+    veto(verified_items=items, sealed_quantities=quantities,
+         identity_bindings=bindings)
+
+
+def test_different_family_same_physical_refs_cannot_transmute_window_to_door():
+    refs = ["shared-original-open"]
+    source = [
+        {"object_identity_refs": refs, "family": "opening_area",
+         "semantic_key": "window_area:owner-native", "unit": "m2"},
+        {"object_identity_refs": refs, "family": "opening_count",
+         "semantic_key": "door_count:owner-native", "unit": "nr", "value": 1},
+    ]
+    with pytest.raises(ValueError, match="kind disagrees"):
+        veto(
+            verified_items=[{"item_id": "door-area", "denominator_eligible": True,
+                             "trade_category": "doors"}],
+            sealed_quantities=source,
+            identity_bindings=[{
+                "benchmark_item_id": "door-area",
+                "production_family": "opening_area",
+                "production_object_identity_refs": refs,
+            }],
+        )
+
+
+def test_mapped_production_without_source_owned_family_cannot_claim_opening_area():
+    refs = ["original-shared-opening"]
+    with pytest.raises(ValueError, match="explicit original production family"):
+        veto(
+            verified_items=[{"item_id": "area", "denominator_eligible": True,
+                             "trade_category": "doors"}],
+            sealed_quantities=[{
+                "object_identity_refs": refs, "family": "opening_area",
+                "semantic_key": "door_area:owner-id", "unit": "m2",
+            }],
+            identity_bindings=[{
+                "benchmark_item_id": "area",
+                "production_family": None,
+                "production_object_identity_refs": refs,
+            }],
+        )
