@@ -804,6 +804,11 @@ def derive_floor_surface_trade_quantities(
 
     if floor.get("geometry_complete") is not True:
         return []
+    # One physical, whole-room finished floor cannot be 100% timber/vinyl
+    # covering and 100% tile simultaneously. Without disjoint source-owned
+    # zones, the metric area must not be priced twice as incompatible work.
+    if _trade_spec(specs, "flooring") is not None and _trade_spec(specs, "tiling") is not None:
+        return []
     return _derive_area_surface_trade_quantities(
         surface=floor,
         specs=specs,
