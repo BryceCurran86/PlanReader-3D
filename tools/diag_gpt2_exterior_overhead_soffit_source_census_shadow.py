@@ -8,6 +8,7 @@ No customer QuantityEvidence or CarpentryTakeoffItem is created.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import re
 from collections import defaultdict
 
@@ -15,6 +16,11 @@ import fitz
 
 _NUMERIC = re.compile(r"[0-9]{2,6}\Z")
 _CODE = re.compile(r"[A-Z][A-Z0-9]{1,7}\Z")
+
+# Diagnostic-only work bounds. Hitting either reports an incomplete universe,
+# never a complete source census or commercial measurement.
+_MAX_INK_COMBINATION_TRIALS = 16_384
+_MAX_INK_MATCHES = 128
 
 
 def audit_exterior_overhead_source_census_shadow(
@@ -156,6 +162,8 @@ def audit_exterior_overhead_source_census_shadow(
         # every complete stroke ancestry. Nearby labels/ink are candidates,
         # not extension-line ownership or measured geometry authority.
         original_ink_chains = []
+        ink_census_complete = True
+        ink_combination_trials = 0
         grouped_words = sorted(
             members, key=lambda member: (member[1][1] + member[1][3]) / 2
         )
@@ -175,8 +183,11 @@ def audit_exterior_overhead_source_census_shadow(
                     component_rows.append(near)
                 if any(not options for options in component_rows):
                     continue
-                import itertools
                 for combination in itertools.product(*component_rows):
+                    if ink_combination_trials >= _MAX_INK_COMBINATION_TRIALS:
+                        ink_census_complete = False
+                        break
+                    ink_combination_trials += 1
                     ids = tuple((line[3], line[4]) for line in combination)
                     if len(set(ids)) != len(members):
                         continue
@@ -194,11 +205,12 @@ def audit_exterior_overhead_source_census_shadow(
                         "physical_soffit_dimension_axis_proven": False,
                         "firm_metric_authority": False,
                     })
-                    if len(original_ink_chains) >= 128:
+                    if len(original_ink_chains) >= _MAX_INK_MATCHES:
+                        ink_census_complete = False
                         break
-                if len(original_ink_chains) >= 128:
+                if not ink_census_complete:
                     break
-            if len(original_ink_chains) >= 128:
+            if not ink_census_complete:
                 break
         chains.append({
             "component_source_word_addresses": tuple(
@@ -211,9 +223,14 @@ def audit_exterior_overhead_source_census_shadow(
             ),
             "source_extension_lines_proven": False,
             "source_ink_line_correspondence_candidates": tuple(original_ink_chains),
+            "source_ink_line_correspondence_complete": ink_census_complete,
+            "source_ink_combination_trials": ink_combination_trials,
             "physical_soffit_axes_proven": False,
         })
     chains.sort(key=lambda c: c["component_source_word_addresses"])
+    all_ink_rivals_complete = all(
+        row["source_ink_line_correspondence_complete"] for row in chains
+    )
     return {
         "status": (
             "original_exterior_overhead_source_candidates_only"
@@ -229,6 +246,7 @@ def audit_exterior_overhead_source_census_shadow(
             individual_figure_stroke_candidates
         ),
         "all_competing_figured_arithmetic_chains": tuple(chains),
+        "all_source_ink_correspondence_rivals_complete": all_ink_rivals_complete,
         "external_material_issuer_authenticated": False,
         "source_clip_and_active_paint_authenticated": False,
         "original_dimension_axes_and_extension_lines_proven": False,
@@ -239,7 +257,9 @@ def audit_exterior_overhead_source_census_shadow(
         "exterior_soffit_area_m2": None,
         "new_firm_quantities": 0,
         "first_unclosed_gate": (
-            "source_active_paint_clip_material_and_physical_overhead_owner"
+            "bounded_original_ink_correspondence_universe_incomplete"
+            if not all_ink_rivals_complete
+            else "source_active_paint_clip_material_and_physical_overhead_owner"
             if codes else "original_source_material_mark_unavailable"
         ),
     }
