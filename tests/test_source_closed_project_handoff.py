@@ -435,9 +435,13 @@ def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
     assert summary["topology_mode"] == "source_classified_scope"
 
 
+@pytest.mark.parametrize("unowned_wall_publication", [
+    None, SimpleNamespace(), "not-an-original-wall-source",
+])
 def test_surface_family_group_scopes_geometry_but_keeps_full_semantic_evidence(
     tmp_path,
     monkeypatch,
+    unowned_wall_publication,
 ) -> None:
     pdf = tmp_path / "source.pdf"
     pdf.write_bytes(b"source-bytes")
@@ -460,6 +464,7 @@ def test_surface_family_group_scopes_geometry_but_keeps_full_semantic_evidence(
         opening_quantity_evidence=(),
         opening_count_quantity_evidence=(),
     )
+    claim.publication = unowned_wall_publication
     seen = {}
     ceiling_seen = {}
 
@@ -508,6 +513,8 @@ def test_surface_family_group_scopes_geometry_but_keeps_full_semantic_evidence(
     assert summary["execution_pages"] == [1, 3]
     assert summary["semantic_execution_pages"] == [1, 2, 3, 4, 5]
     assert summary["topology_mode"] == "source_classified_scope"
+    assert summary["family_counts"]["wall_net_area"] == 0
+    assert summary["family_counts"]["floor_finish_area"] == 0
 
 
 def test_project_handoff_rejects_family_run_from_different_source(
