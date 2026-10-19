@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 import hashlib
 import io
 import json
@@ -148,6 +148,41 @@ def _manual_allowances(book: Mapping[str, Any]) -> list[dict]:
     return sorted(allowances, key=lambda row: row["id"])
 
 
+def _cent_exact_cost_components(
+    billable: Decimal, card: Mapping[str, Decimal],
+) -> tuple[dict[str, str], Decimal]:
+    """Allocate final cents once, keeping component totals equal to exact unit cost.
+
+    Independently rounding four 0.5-cent subcomponents creates a 2-cent
+    overstatement. Largest residual allocation gives each component no more
+    than a cent above its truncated amount, with stable source-independent ties.
+    Client rates, source quantity and physical units are never changed.
+    """
+    if not billable.is_finite() or billable < 0:
+        raise ValueError("billable physical quantity must be finite and nonnegative")
+    exact = {key: billable * card[key] for key in _COMPONENTS}
+    total = sum(exact.values(), Decimal("0"))
+    if not total.is_finite() or total < 0 or total > _MAX_MONEY:
+        raise ValueError("client physical line cost exceeds safe financial bound")
+    rounded_total = total.quantize(_CENT, rounding=ROUND_HALF_UP)
+    allocated = {
+        key: amount.quantize(_CENT, rounding=ROUND_DOWN)
+        for key, amount in exact.items()
+    }
+    pennies = (rounded_total - sum(allocated.values(), Decimal("0"))) / _CENT
+    if pennies != pennies.to_integral_value() or not 0 <= pennies <= len(_COMPONENTS):
+        raise ValueError("cost component cent reconciliation is invalid")
+    # Never produce a negative component to counteract half-up rounding.
+    priority = sorted(_COMPONENTS, key=lambda key: (
+        -(exact[key] - allocated[key]), _COMPONENTS.index(key),
+    ))
+    for key in priority[:int(pennies)]:
+        allocated[key] += _CENT
+    if sum(allocated.values(), Decimal("0")) != rounded_total:
+        raise ValueError("source-linked customer costs fail cent reconciliation")
+    return {key: _money(allocated[key]) for key in _COMPONENTS}, rounded_total
+
+
 def build_verified_customer_quote(
     sealed_run: Mapping[str, Any], customer_rows: list[dict],
     rate_book: Mapping[str, Any],
@@ -234,8 +269,7 @@ def build_verified_customer_quote(
         else:
             billable = quantity * (Decimal("1") + card["waste_pct"] / _HUNDRED)
             unit_cost = sum((card[component] for component in _COMPONENTS), Decimal("0"))
-            components = {kind: _money(billable * card[kind]) for kind in _COMPONENTS}
-            cost = (billable * unit_cost).quantize(_CENT, rounding=ROUND_HALF_UP)
+            components, cost = _cent_exact_cost_components(billable, card)
             sell = (cost * (Decimal("1") + card["markup_pct"] / _HUNDRED)).quantize(
                 _CENT, rounding=ROUND_HALF_UP)
             hours = billable * card["labour_hours_per_unit"]
