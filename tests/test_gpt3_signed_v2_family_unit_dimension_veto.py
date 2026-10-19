@@ -31,7 +31,7 @@ def apply(*, family, semantic, unit, trade):
     ("opening_area", "door_area:qualified-1", "m²", "doors"),
     ("opening_area", "window_area:qualified-1", "m2", "windows"),
     ("opening_count", "door_count:qualified-1", "ea", "doors"),
-    ("opening_count", "window_count:qualified-1", "count", "windows"),
+    ("opening_count", "window_count:qualified-1", "nr", "windows"),
 ])
 def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
     family, semantic, unit, trade,
@@ -46,6 +46,7 @@ def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
     ("opening_area", "door_area:source-id", "ea", "doors"),
     ("opening_count", "door_count:source-id", "m2", "doors"),
     ("opening_area", "window_area:source-id", "m3", "windows"),
+    ("opening_count", "door_count:source-id", "count", "doors"),
 ])
 def test_incompatible_count_area_volume_units_fail_before_benchmark_score(
     family, semantic, unit, trade,
@@ -65,3 +66,30 @@ def test_noncanonical_signed_source_unit_cannot_be_silent_trade_reclassification
         with pytest.raises(ValueError, match="unit disagrees"):
             apply(family="opening_area", semantic="door_area:source-id",
                   unit=unit, trade="doors")
+
+
+@pytest.mark.parametrize("value", [0, -1, 0.5, 1.01, True, False,
+                                    float("nan"), float("inf"), "1"])
+def test_mapped_source_opening_count_never_becomes_fractional_or_default_one(value):
+    item = {"item_id": "item", "denominator_eligible": True,
+            "trade_category": "windows"}
+    source = {"object_identity_refs": ["original-window"],
+              "family": "opening_count", "semantic_key": "window_count:source",
+              "unit": "nr", "value": value, "abstained": False}
+    binding = {"benchmark_item_id": "item", "production_family": "opening_count",
+               "production_object_identity_refs": ["original-window"]}
+    with pytest.raises(ValueError, match="positive whole number"):
+        veto(verified_items=[item], sealed_quantities=[source],
+             identity_bindings=[binding])
+
+
+def test_mapped_group_of_three_source_issued_openings_may_have_count_three():
+    item = {"item_id": "item", "denominator_eligible": True,
+            "trade_category": "doors"}
+    source = {"object_identity_refs": ["original-door-group"],
+              "family": "opening_count", "semantic_key": "door_count:source",
+              "unit": "nr", "value": 3, "abstained": False}
+    binding = {"benchmark_item_id": "item", "production_family": "opening_count",
+               "production_object_identity_refs": ["original-door-group"]}
+    veto(verified_items=[item], sealed_quantities=[source],
+         identity_bindings=[binding])
