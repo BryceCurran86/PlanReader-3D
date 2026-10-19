@@ -82,9 +82,19 @@ def _nonnegative(value: object) -> Optional[float]:
 
 
 def _evidence_ids(value: object) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set, frozenset)):
+    """Preserve literal original evidence identity; no trimming/cast/dedup.
+
+    A canonical source with colliding, padded or untyped receipts must abstain
+    rather than laundering a false proof into wall, floor or ceiling quantities.
+    """
+    if type(value) not in (list, tuple) or not value:
         return ()
-    return tuple(dict.fromkeys(_clean(item) for item in value if _clean(item)))
+    if any(type(item) is not str or not item or item != item.strip()
+           for item in value):
+        return ()
+    if len(set(value)) != len(value):
+        return ()
+    return tuple(value)
 
 
 def _trade_spec(
