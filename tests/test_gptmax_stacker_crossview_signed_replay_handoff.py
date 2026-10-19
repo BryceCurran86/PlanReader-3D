@@ -52,7 +52,11 @@ def test_signed_old_eight_and_native_crossview_are_one_opt_in_original_replay(mo
             "native_marks":[{"page_number":3},{"page_number":5}],
             "exact_cross_page_physical_identity_proven":False,
             "unique_structural_host_proven":False,
+            "whole_wall_frame_proven":False,
+            "door_window_semantic_role_proven":False,
             "quantity_promotion_granted":False,
+            "opening_count_completeness_proven":False,
+            "source_only_evidence":True,
         }
     monkeypatch.setattr(audit,"original_2127_crossview_receipt",source_crossview)
     report=audit.replay_opt_in(raw,expected_sha256=digest)
@@ -89,4 +93,49 @@ def test_native_crossview_gate_aborts_replay_on_false_original_label(monkeypatch
         raise ValueError("unique native 2127 STACKER mark is unproved")
     monkeypatch.setattr(audit,"original_2127_crossview_receipt",reject)
     with pytest.raises(ValueError,match="unique native 2127 STACKER"):
+        audit.replay_opt_in(raw,expected_sha256=digest)
+
+
+@pytest.mark.parametrize("spoof", [
+    {"source_sha256":"0"*64},
+    {"native_marks":[{"page_number":3}]},
+    {"native_marks":[{"page_number":5},{"page_number":3}]},
+    {"native_marks":None},
+    {"exact_cross_page_physical_identity_proven":True},
+    {"unique_structural_host_proven":True},
+    {"whole_wall_frame_proven":True},
+    {"door_window_semantic_role_proven":True},
+    {"opening_count_completeness_proven":True},
+    {"quantity_promotion_granted":True},
+    {"source_only_evidence":False},
+])
+def test_reconstructed_2127_source_receipt_cannot_overclaim_opening_authority(
+    monkeypatch,spoof
+):
+    raw=b"synthetic, not the original"
+    digest=sha256(raw).hexdigest()
+    comp=SimpleNamespace(opening_bindings=[])
+    monkeypatch.setattr(audit,"_one_source_policy",
+        lambda data,sha,*,shadow,**kwargs: (_source(sha,"same"),comp,{"signed":8}))
+    monkeypatch.setattr(audit,"compare_original_g17_release_receipts",
+                        lambda a,b:_parity())
+    monkeypatch.setattr(audit,"_original_eight_firm_customer_retention",
+                        lambda a,b,p:True)
+    monkeypatch.setattr(audit,"source_verified_stacker_image_frame",
+                        lambda data:{"single_native_image_frame_proven":True})
+    native={
+        "source_sha256":digest,
+        "native_marks":[{"page_number":3},{"page_number":5}],
+        "exact_cross_page_physical_identity_proven":False,
+        "unique_structural_host_proven":False,
+        "whole_wall_frame_proven":False,
+        "door_window_semantic_role_proven":False,
+        "opening_count_completeness_proven":False,
+        "quantity_promotion_granted":False,
+        "source_only_evidence":True,
+    }
+    native.update(spoof)
+    monkeypatch.setattr(audit,"original_2127_crossview_receipt",
+                        lambda data:native)
+    with pytest.raises(ValueError,match="cross-view source scope or authority conflict"):
         audit.replay_opt_in(raw,expected_sha256=digest)
