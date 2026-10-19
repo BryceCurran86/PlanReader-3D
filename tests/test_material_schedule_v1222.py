@@ -113,6 +113,67 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
             "tile",
         )
 
+    def test_unfilled_finish_field_keeps_original_primary_tile_not_epoxy_grout(self):
+        source_row = (
+            'Amber Tiles Liverpool FLOOR TILE - 600x600 "Dura Grey". '
+            'Minimum R12 slip rating. GROUT: GREY EPOXY.'
+        )
+        for finish in ("", None, source_row):
+            with self.subTest(finish=finish):
+                self.assertEqual(
+                    mat.semantic_finish_from_schedule_entry({
+                        "code": "FT3", "status": "Confirmed",
+                        "description": source_row, "finish": finish,
+                    }), "tile")
+        for status in ("Conflict", "Unverified", "Abstained"):
+            self.assertEqual(
+                mat.semantic_finish_from_schedule_entry({
+                    "code": "FT3", "status": status,
+                    "description": source_row, "finish": "",
+                }), "")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "code": "EF1", "status": "Confirmed",
+                "description": "Epoxy floor coating", "finish": "",
+            }), "epoxy")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "code": "FT3", "status": "Confirmed",
+                "description": source_row,
+                "finish": "Independently authenticated epoxy floor coating",
+            }), "epoxy")
+
+    def test_sha_pinned_maryborough_original_ft2_and_ft3_native_schedule_primary_semantics(self):
+        import hashlib
+        import fitz
+        source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+        if not source.is_file():
+            self.skipTest("private original unavailable: cannot claim source-positive CI")
+        raw = source.read_bytes()
+        expected = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+        with fitz.open(stream=raw, filetype="pdf") as pdf:
+            self.assertEqual(len(pdf), 31)
+            page_words = pdf[10].get_text("words", sort=False)
+            definitions = {
+                code: " ".join(word[4] for word in sorted(
+                    (word for word in page_words if word[5] == block),
+                    key=lambda word: (word[6], word[7])))
+                for code, block in (("FT2", 243), ("FT3", 244))
+            }
+        self.assertIn("800x400", definitions["FT2"])
+        self.assertIn("STOCKTON", definitions["FT2"])
+        self.assertIn("600x600", definitions["FT3"])
+        self.assertIn("DURA", definitions["FT3"])
+        self.assertIn("EPOXY", definitions["FT3"])
+        for code, original_text in definitions.items():
+            self.assertEqual(
+                mat.semantic_finish_from_schedule_entry({
+                    "code": code, "status": "Confirmed",
+                    "description": original_text, "finish": "",
+                }), "tile")
+        self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), expected)
+
     def test_distinct_explicit_finish_still_beats_description_material(self):
         self.assertEqual(
             mat.semantic_finish_from_schedule_entry(
