@@ -274,10 +274,27 @@ def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
     length = _positive_metric(spec.length_m)
     span = _positive_metric(spec.width_m)
     explicit_area = _positive_metric(spec.area_m2)
-    area = explicit_area if explicit_area is not None else (
+    physical_rectangle_area = (
         length * span if length is not None and span is not None else None
     )
-    if area is None:
+    if (
+        explicit_area is not None and physical_rectangle_area is not None
+        and not math.isclose(explicit_area, physical_rectangle_area,
+                             rel_tol=0.0, abs_tol=0.011)
+    ):
+        return items
+    # Missing/zero is the legacy absent-area sentinel. A nonzero, invalid
+    # original area claim must not be hidden by substituting an L x W guess.
+    if type(spec.area_m2) not in (int, float):
+        return items
+    try:
+        claimed_area = float(spec.area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return items
+    if not math.isfinite(claimed_area) or claimed_area < 0.0:
+        return items
+    area = explicit_area if explicit_area is not None else physical_rectangle_area
+    if area is None or not math.isfinite(area) or area <= 0.0:
         return items
 
     if length is None or span is None:
