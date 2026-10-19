@@ -2552,6 +2552,16 @@ class GenericPlanReaderExtractor:
                         dpc_meta["dpc_envelope_reason"] = _envelope.reason
                         dpc_meta["dpc_envelope_source"] = _envelope.source
                         dpc_meta["dpc_envelope_base_m"] = dpc_envelope_base_m
+                        # A fallback wall perimeter is a diagnostic, not the
+                        # authenticated external envelope of an incomplete
+                        # compound. Preserve its numeric legacy quantity but
+                        # distinguish it from source-complete DPC for all
+                        # future customer quantity consumers.
+                        dpc_source_complete = (
+                            _envelope.status == "confirmed_external"
+                            and dpc_meta.get("commercial_area_authorized") is True
+                        )
+                        dpc_meta["commercial_perimeter_authorized"] = dpc_source_complete
                         if internal_partition_dpc_length_m is not None:
                             dpc_meta["internal_partition_length_m"] = internal_partition_dpc_length_m
                             dpc_meta["transverse_runs_count"] = transverse_runs_count
@@ -2584,7 +2594,7 @@ class GenericPlanReaderExtractor:
                                 description=dpc_description,
                                 quantity=dpc_qty,
                                 unit="M",
-                                confidence=0.90,
+                                confidence=0.90 if dpc_source_complete else 0.45,
                                 source_page=page_num,
                                 sheet_number=sheet_no,
                                 metadata=dpc_meta,
