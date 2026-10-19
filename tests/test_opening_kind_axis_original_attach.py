@@ -45,6 +45,7 @@ def test_pair_without_axis_order_stays_unproven():
         canonical_by_id={"op-2": {
             "opening_kind": "window",
             "opening_kind_evidence_id": "kind-ev",
+            "evidence_ids": ["kind-ev", "fig-1"],
             "width_record_id": None,
             "height_record_id": None,
             "width_m": None,
