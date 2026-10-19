@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-import pytesseract
+pytesseract = pytest.importorskip("pytesseract")
 from pb_portable_raster_ocr_authority import TesseractOCRBackend
 
 
