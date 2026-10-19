@@ -209,13 +209,41 @@ def reconstruct_room_candidates(
     """
     if type(source_boundary_owner_conflicts_shadow) is not bool:
         raise ValueError("source boundary owner conflict shadow requires literal boolean")
+    # Source evidence must be audited BEFORE W3 graph dedup. Coincident
+    # original ink strokes can have two distinct W4 owner claims even if W3
+    # subsequently suppresses one geometric copy.
+    competing_boundary_keys: set[FrozenSet[Tuple[float, float]]] = set()
+    competing_component_positions: set[Tuple[float, float]] = set()
+    if source_boundary_owner_conflicts_shadow:
+        original_owners: Dict[FrozenSet[Tuple[float, float]], set[str]] = {}
+        for original_edge in graph["edges"]:
+            if original_edge.get("_removed"):
+                continue
+            claimed_wall = edge_id_to_wall_candidate_id.get(str(original_edge.get("id")))
+            if not isinstance(claimed_wall, str) or not claimed_wall:
+                continue
+            original_key = frozenset({
+                _round_pt((original_edge["x1"], original_edge["y1"])),
+                _round_pt((original_edge["x2"], original_edge["y2"])),
+            })
+            original_owners.setdefault(original_key, set()).add(claimed_wall)
+        competing_boundary_keys.update(
+            k for k, candidates in original_owners.items() if len(candidates) > 1
+        )
+        original_components = _connected_components(graph)
+        original_positions: Dict[Tuple[float, float], set[int]] = {}
+        for node in graph["nodes"]:
+            key = _round_pt((node["x"], node["y"]))
+            original_positions.setdefault(key, set()).add(original_components[node["id"]])
+        competing_component_positions.update(
+            k for k, candidates in original_positions.items() if len(candidates) > 1
+        )
+
     graph, _ = deduplicate_coincident_edges(graph)
     live_edges = [e for e in graph["edges"] if not e.get("_removed")]
 
     edge_lookup: Dict[FrozenSet[Tuple[float, float]], str] = {}
-    # Review-only W2/W4 source collision gate. Rounded coordinates can alias
-    # distinct source members. No first/last owner can be physical authority.
-    competing_boundary_keys: set[FrozenSet[Tuple[float, float]]] = set()
+    # Also inspect source conflicts surviving dedup; never elect an owner.
     for edge in live_edges:
         wall_id = edge_id_to_wall_candidate_id.get(str(edge.get("id")))
         if wall_id is None:
@@ -230,16 +258,15 @@ def reconstruct_room_candidates(
     node_component_by_position: Dict[Tuple[float, float], int] = {
         _round_pt((n["x"], n["y"])): components[n["id"]] for n in graph["nodes"]
     }
-    competing_component_positions: set[Tuple[float, float]] = set()
     if source_boundary_owner_conflicts_shadow:
         source_components: Dict[Tuple[float, float], set[int]] = {}
         for node in graph["nodes"]:
             location = _round_pt((node["x"], node["y"]))
             source_components.setdefault(location, set()).add(components[node["id"]])
-        competing_component_positions = {
+        competing_component_positions.update(
             location for location, source_ids in source_components.items()
             if len(source_ids) > 1
-        }
+        )
 
     segments = [((e["x1"], e["y1"]), (e["x2"], e["y2"])) for e in live_edges]
     raw_faces = extract_planar_faces(segments, min_area=_MIN_AREA_PASSED_TO_LIBRARY)

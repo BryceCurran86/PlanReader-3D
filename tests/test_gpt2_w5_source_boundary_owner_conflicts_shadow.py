@@ -87,6 +87,24 @@ def test_two_w4_owners_same_source_geometry_abstain_without_electing_one(monkeyp
     assert shadow[0].geometry_confidence == 0
 
 
+def test_prior_original_source_rival_cannot_be_erased_by_dedup(monkeypatch):
+    graph, owners = _fixture(monkeypatch, conflicting_wall=True)
+    def dedup_drops_second_claim(input_graph):
+        g = deepcopy(input_graph)
+        g["edges"] = [e for e in g["edges"]
+                      if e["id"] != "rival_original_source"]
+        return g, ()
+    monkeypatch.setattr(w5, "deduplicate_coincident_edges", dedup_drops_second_claim)
+    old = _rooms(graph, owners)
+    guarded = _rooms(graph, owners, shadow=True)
+    assert old[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert guarded[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert guarded[0].reason_codes == ("source_boundary_competing_w4_owners",)
+    assert "w4_0" not in guarded[0].bounding_wall_candidate_ids
+    assert "different_w4_owner" not in guarded[0].bounding_wall_candidate_ids
+    assert len(guarded[0].bounding_wall_candidate_ids) == 3
+
+
 def test_duplicate_source_component_at_room_vertex_abstains(monkeypatch):
     graph, mapping = _fixture(monkeypatch, conflicting_component=True)
     original = _rooms(graph, mapping)
