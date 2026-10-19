@@ -48,11 +48,12 @@ class RasterOpeningParentSourceHandoff:
     customer_publication_granted: bool = False
 
 
-def _source_line(record, *, parent_id: str, root: tuple[str, str, str, str], page_id: str):
+def _source_line(record, *, parent_id: str, visible_id: str, root: tuple[str, str, str, str], page_id: str):
     """Recheck source ancestry already authenticated by the producer reader."""
     document_id, revision_id, sha256, snapshot_id = root
     if (
         record is None
+        or record.observation_id != visible_id
         or record.document_id != document_id
         or record.revision_id != revision_id
         or record.source_sha256 != sha256
@@ -139,7 +140,7 @@ def recover_original_raster_opening_parent_lines_shadow(
         parent_id = record.derivation_parent_ids[0]
         if parent_id not in sought:
             continue
-        line = _source_line(record, parent_id=parent_id, root=root, page_id=page_id)
+        line = _source_line(record, parent_id=parent_id, visible_id=visible_id, root=root, page_id=page_id)
         if line is not None:
             found[parent_id].append(line)
     verified, blocked = [], []
