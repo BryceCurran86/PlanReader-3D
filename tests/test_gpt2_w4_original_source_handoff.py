@@ -210,8 +210,10 @@ def test_all_laid_floor_finishes_stop_at_internal_faces_and_door_thresholds():
             _w4_source_positive_candidate(),candidate)
         assert result["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
         assert result["floor_finish_measurement_boundary_basis"]==(
-            "inside_finished_wall_faces_required_unverified")
+            "inside_finished_wall_faces")
         assert result["all_floor_finishes_exclude_wall_footprint"] is True
+        assert result["FT2_exclude_wall_footprint"] is (code == "FT2")
+        assert result["FT3_exclude_wall_footprint"] is (code == "FT3")
         assert result["floor_finish_doorway_transition_boundary_required"] is True
         assert result["original_finished_wall_face_boundary_authenticated"] is False
         assert result["original_doorway_finish_transition_boundary_authenticated"] is False
