@@ -23,6 +23,8 @@ def _independent_source_axes():
         width_m=1.2,
         height_m=1.8,
         geometry_complete=True,
+        evidence_ids=["figured", "original-width:physical-3",
+                      "original-height:physical-3"],
     )
     # Original two-number label is corroborated only as an unordered pair.
     assert rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"] is False
@@ -49,6 +51,36 @@ def test_unordered_label_plus_independent_producer_axes_is_gpt1_candidate_only()
     assert not target["customer_seal_granted"]
     assert not target["opening_count_granted"]
     assert not result["signed_customer_publisher_activated"]
+
+
+@pytest.mark.parametrize("claimed_receipts", [
+    ["figured"],
+    ["figured", "original-width:physical-3"],
+    ["figured", "original-height:physical-3"],
+    None,
+    "figured original-width:physical-3 original-height:physical-3",
+])
+def test_unowned_axis_ids_cannot_claim_authentication(claimed_receipts):
+    rows, canonical = _independent_source_axes()
+    canonical[2]["evidence_ids"] = claimed_receipts
+    result = run(rows, canonical)
+    opening = result["opening_decisions"][2]
+    assert opening["figured_pair_area_support"]
+    assert not opening["axis_order_authenticated"]
+    assert opening["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert not opening["new_gpt1_candidate_handoff"]
+    assert not result["gpt1_new_handoff_candidates"]
+
+
+def test_area_receipt_id_must_be_in_producer_evidence_set():
+    rows, canonical = fixture()
+    canonical[2]["evidence_ids"] = ["unrelated-receipt"]
+    result = run(rows, canonical)
+    opening = result["opening_decisions"][2]
+    assert opening["figured_pair_area_support"]
+    assert not opening["figured_area_receipt_bound"]
+    assert opening["opening_area_first_remaining_gate"] == "original_figured_area_receipt_unbound"
+    assert not result["gpt1_new_area_review_candidates"]
 
 
 def test_equal_area_product_but_different_axes_does_not_enter_review_queue():
