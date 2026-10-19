@@ -100,9 +100,14 @@ def compare_original_g17_release_receipts(original, alternate):
     }
 
 
-def _one_source_policy(pdf, digest, *, shadow, elevation_witness_shadow=False):
-    if type(shadow) is not bool or type(elevation_witness_shadow) is not bool:
+def _one_source_policy(pdf, digest, *, shadow, elevation_witness_shadow=False,
+                       source_fragment_roles_shadow=False):
+    if any(type(flag) is not bool for flag in (
+        shadow, elevation_witness_shadow, source_fragment_roles_shadow,
+    )):
         raise ValueError("original source policy must be an explicit boolean")
+    if source_fragment_roles_shadow and not shadow:
+        raise ValueError("fragment source roles require isolated original G17 capture")
     # The paired-face physical opening policy MUST accompany the opt-in G17
     # ink capture, otherwise the additional original 2127 STACKER is never
     # visible to its source flank candidate universe.
@@ -127,6 +132,10 @@ def _one_source_policy(pdf, digest, *, shadow, elevation_witness_shadow=False):
         page_ids=("3",),
         evidence_page_ids=("5",) if elevation_witness_shadow else (),
         include_unmeasured_ink_closed_flanks_shadow=shadow,
+        # Reuse the existing producer-owned exact-source W4 fragment role
+        # reader ONLY in a fresh opt-in original capture. Original W2/W3/W4
+        # wall equivalence and exact source parents still decide every host.
+        source_fragment_roles_shadow=source_fragment_roles_shadow,
     )
     voids=compose_live_physical_opening_voids(
         source_visibility_producer=source,wall_opening_composition=composition)
@@ -217,9 +226,12 @@ def _source_unique_original_opening_host_rows(traces):
 
 
 def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
-                  elevation_witness_shadow: bool = False) -> dict:
-    if type(elevation_witness_shadow) is not bool:
-        raise ValueError("elevation source witness policy must be an explicit boolean")
+                  elevation_witness_shadow: bool = False,
+                  source_fragment_roles_shadow: bool = False) -> dict:
+    if any(type(flag) is not bool for flag in (
+        elevation_witness_shadow, source_fragment_roles_shadow,
+    )):
+        raise ValueError("original source policy must be an explicit boolean")
     if type(pdf) is not bytes or sha256(pdf).hexdigest() != expected_sha256:
         raise ValueError("immutable original Lot16 source SHA mismatch")
     old_source, old_composition, old_receipt = _one_source_policy(
@@ -229,6 +241,7 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
     snapshot, comp, new_receipt = _one_source_policy(
         pdf, expected_sha256, shadow=True,
         elevation_witness_shadow=elevation_witness_shadow,
+        source_fragment_roles_shadow=source_fragment_roles_shadow,
     )
     parity = compare_original_g17_release_receipts(old_receipt,new_receipt)
     if old_source.revision.source_sha256 != snapshot.revision.source_sha256:
@@ -254,6 +267,8 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         ),
         "physical_paired_source_policy_replayed_on_original":True,
         "separate_elevation_witness_page_5":elevation_witness_shadow,
+        "opt_in_source_fragment_roles_evaluated": source_fragment_roles_shadow,
+        "source_fragment_host_authority_requires_original_reproof": True,
         "old_source_snapshot_may_differ": True,
         "old_21_15_9_8_source_baseline_NOT_replayed_or_assumed": True,
         "opt_in_physical_opening_count": physical_count,
@@ -288,9 +303,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--include-elevation-witness", action="store_true",
         help="Decode page5 separately as evidence, never as an opening topology page")
+    parser.add_argument("--include-source-fragment-roles", action="store_true",
+        help="Reprove authentic W4 fragment roles in opt-in source only; no host grant")
     args = parser.parse_args()
     result = replay_opt_in(args.pdf.read_bytes(), expected_sha256=args.sha256,
-                           elevation_witness_shadow=args.include_elevation_witness)
+                           elevation_witness_shadow=args.include_elevation_witness,
+                           source_fragment_roles_shadow=args.include_source_fragment_roles)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n",
