@@ -155,12 +155,22 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
         with fitz.open(stream=raw, filetype="pdf") as pdf:
             self.assertEqual(len(pdf), 31)
             page_words = pdf[10].get_text("words", sort=False)
-            definitions = {
-                code: " ".join(word[4] for word in sorted(
-                    (word for word in page_words if word[5] == block),
-                    key=lambda word: (word[6], word[7])))
-                for code, block in (("FT2", 243), ("FT3", 244))
-            }
+            # Native block ordinals can change across supported MuPDF
+            # versions; prove each complete schedule row from its own
+            # original code and FLOOR TILE words rather than pinning 243/244.
+            native_blocks = {}
+            for word in page_words:
+                native_blocks.setdefault(word[5], []).append(word)
+            definitions = {}
+            for code in ("FT2", "FT3"):
+                candidate_rows = []
+                for block_words in native_blocks.values():
+                    ordered = sorted(block_words, key=lambda w: (w[6], w[7]))
+                    tokens = [w[4].upper() for w in ordered]
+                    if code in tokens and "FLOOR" in tokens and "TILE" in tokens:
+                        candidate_rows.append(" ".join(w[4] for w in ordered))
+                self.assertEqual(len(candidate_rows), 1)
+                definitions[code] = candidate_rows[0]
         self.assertIn("800x400", definitions["FT2"])
         self.assertIn("STOCKTON", definitions["FT2"])
         self.assertIn("600x600", definitions["FT3"])
