@@ -80,6 +80,8 @@ def _binding(wall_id: str = "wall:host"):
         page_id="1",
         decision_scope_id="wall-source:page-1",
         member_wall_candidate_ids=(wall_id,),
+        member_candidate_identity_ids=(f"candidate:{wall_id}",),
+        member_equivalence_groups=((wall_id,),),
     )
 
 
