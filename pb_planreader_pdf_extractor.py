@@ -1981,8 +1981,27 @@ class GenericPlanReaderExtractor:
                     and math.isfinite(structural_bed_area_m2)
                     and structural_bed_area_m2 > 0.0
                 )
+                # Legacy output retains one envelope per document. A larger
+                # *incomplete* compound cannot displace a smaller complete
+                # footprint simply because its partial arithmetic is bigger.
+                # Equally, a subsequently proved complete physical envelope
+                # must replace an older incomplete estimate even when its m²
+                # is smaller. With equal proof status retain the established
+                # largest-area behaviour. FIRM floor/finish source issuers
+                # remain separate and require their own physical source scope.
+                previous_complete = (
+                    existing_area is not None
+                    and (existing_area.metadata or {}).get(
+                        "commercial_area_authorized"
+                    ) is True
+                )
                 should_replace_area = page_has_plan_footprint_authority and (
-                    total_floor_screed > current_best_area or current_best_area == 0
+                    existing_area is None
+                    or (compound_area_complete and not previous_complete)
+                    or (
+                        compound_area_complete == previous_complete
+                        and (total_floor_screed > current_best_area or current_best_area == 0)
+                    )
                 )
 
                 if should_replace_area:
