@@ -18,7 +18,7 @@ def _label_fields(row: Mapping[str, Any]) -> dict[str, Any]:
     values = evidence.get("dimension_values_mm")
     return {
         "dimension_values_mm": tuple(values) if values else (),
-        "axis_order_resolved": bool(evidence.get("axis_order_resolved")),
+        "axis_order_resolved": evidence.get("axis_order_resolved") is True,
         "area_m2": evidence.get("area_m2"),
         "label_evidence_id": evidence.get("evidence_id"),
     }
@@ -87,6 +87,8 @@ def attach_kind_and_axis_shadows(
             width_m=canonical.get("width_m"),
             height_m=canonical.get("height_m"),
             area_m2=label["area_m2"],
+            canonical_evidence_ids=canonical.get("evidence_ids"),
+            geometry_complete=canonical.get("geometry_complete"),
         )
         kind_gates[kind["first_remaining_gate"]] = (
             kind_gates.get(kind["first_remaining_gate"], 0) + 1
