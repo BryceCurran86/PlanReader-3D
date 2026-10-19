@@ -67,6 +67,23 @@ def _percentage(book: Mapping[str, Any], name: str) -> Decimal:
     return _decimal(book[name], name, cap=_HUNDRED)
 
 
+def _equivalent_pricing_unit(unit: str) -> str:
+    """Normalize exact notation equivalence, never transform a measured value.
+
+    Rate cards may use m² where the source-owned sealed unit is m2, or 'each'
+    where the signed physical count is ea. These are notation aliases only:
+    area, volume, linear distance and object counts never cross dimensions.
+    """
+    aliases = {
+        "m²": "m2", "sqm": "m2", "m2": "m2",
+        "m³": "m3", "m3": "m3",
+        "lm": "m", "m": "m",
+        "ea": "ea", "each": "ea", "nr": "ea",
+        "no": "ea", "no.": "ea", "number": "ea",
+    }
+    return aliases.get(unit.lower(), unit)
+
+
 def _rates(rate_book: Mapping[str, Any]) -> dict[tuple[str, str, str], dict]:
     raw = rate_book.get("rates")
     if type(raw) is not list:
@@ -80,7 +97,7 @@ def _rates(rate_book: Mapping[str, Any]) -> dict[tuple[str, str, str], dict]:
             or key != key.strip() or type(unit) is not str or not unit
             or unit != unit.strip()):
             raise ValueError("rate card requires exact scope, source key and unit")
-        identity = (scope, key, unit)
+        identity = (scope, key, _equivalent_pricing_unit(unit))
         if identity in cards:
             raise ValueError("duplicate client rate card")
         values = {name: _decimal(card[name], name)
@@ -103,7 +120,7 @@ def _choose_rate(quantity: Any, cards: dict) -> tuple[tuple[str, str, str] | Non
         ("semantic", quantity.semantic_key),
         ("family", quantity.family),
     ):
-        card_id = (scope, key, quantity.unit)
+        card_id = (scope, key, _equivalent_pricing_unit(quantity.unit))
         if card_id in cards:
             return card_id, cards[card_id]
     return None, None
