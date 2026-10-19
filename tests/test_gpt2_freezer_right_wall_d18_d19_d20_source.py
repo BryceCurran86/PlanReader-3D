@@ -20,9 +20,9 @@ def _sample():
     p.insert_text((50,70),"D19")
     p.insert_text((50,110),"D20")
     p=doc.new_page()
-    p.insert_text((20,20),"D18 FREEZER AS PER MANUFACTURER")
-    p.insert_text((20,40),"D19 FREEZER AS PER MANUFACTURER")
-    p.insert_text((20,60),"D20 COLD ROOM AS PER MANUFACTURER")
+    p.insert_text((20,20),"D18\nFREEZER\nAS PER MANUFACTURER")
+    p.insert_text((20,100),"D19\nFREEZER\nAS PER MANUFACTURER")
+    p.insert_text((20,180),"D20\nCOLD ROOM\nAS PER MANUFACTURER")
     raw=doc.tobytes()
     doc.close()
     return raw
