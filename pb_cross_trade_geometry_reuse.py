@@ -108,13 +108,19 @@ def _trade_spec(
 
 
 def _material(spec: Mapping[str, Any]) -> Optional[str]:
-    value = _clean(
-        spec.get("material")
-        or spec.get("system")
-        or spec.get("profile")
-        or spec.get("substrate")
-    )
-    return value or None
+    """Preserve literal source-defined material; do not stringify truthy fields."""
+    for key in ("material", "system", "profile", "substrate"):
+        if key not in spec:
+            continue
+        value = spec.get(key)
+        # Explicit unset fields may fall through to an independent semantic
+        # description, but an invalid nonempty original field is a conflict.
+        if value is None or value == "":
+            continue
+        if type(value) is not str or not value or value != value.strip():
+            return None
+        return value
+    return None
 
 
 def _spec_evidence(spec: Mapping[str, Any]) -> tuple[str, ...]:
