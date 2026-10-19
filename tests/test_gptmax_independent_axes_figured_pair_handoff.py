@@ -12,7 +12,53 @@ import pytest
 from tests.test_gptmax_lot16_host_frame_gpt1_handoff import fixture, run
 from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import (
     _source_owned_axes_agree_with_figured_pair,
+    _signed_quantity_body_sha256,
 )
+
+
+def test_archived_signed_quantity_body_digest_retains_value_and_metadata():
+    original = {
+        "quantity_id": "original-quantity",
+        "family": "opening_area",
+        "status": "corroborated",
+        "value": 2.16,
+        "unit": "m2",
+        "evidence_ids": ["physical-source", "original-figured-area"],
+        "metadata": {"snapshot_id": "original-snapshot", "host_wall_id": "wall"},
+    }
+    digest = _signed_quantity_body_sha256([deepcopy(original)])
+    assert set(digest) == {"original-quantity"}
+    assert digest == _signed_quantity_body_sha256([deepcopy(original)])
+    assert len(digest["original-quantity"]) == 64
+    for mutate in (
+        lambda x: x.update(value=3.16),
+        lambda x: x["metadata"].update(snapshot_id="foreign-snapshot"),
+        lambda x: x["metadata"].update(host_wall_id="foreign-wall"),
+        lambda x: x["evidence_ids"].append("forged-source"),
+        lambda x: x.update(status="abstained"),
+        lambda x: x.update(family="opening_count"),
+    ):
+        changed = deepcopy(original)
+        mutate(changed)
+        assert _signed_quantity_body_sha256([changed]) != digest
+    other = deepcopy(original)
+    other["quantity_id"] = "fresh-quantity"
+    assert _signed_quantity_body_sha256([other, original]) == (
+        _signed_quantity_body_sha256([original, other])
+    )
+
+
+@pytest.mark.parametrize("bad", [
+    None, {}, "signed", [None],
+    [{"quantity_id": None}],
+    [{"quantity_id": " "}],
+    [{"quantity_id": "padded "}],
+    [{"quantity_id": "dup"}, {"quantity_id": "dup"}],
+    [{"quantity_id": "nonfinite", "value": float("nan")}],
+])
+def test_original_source_body_digest_fail_closed_on_invalid_rows(bad):
+    with pytest.raises((TypeError, ValueError)):
+        _signed_quantity_body_sha256(bad)
 
 
 def _independent_source_axes():
