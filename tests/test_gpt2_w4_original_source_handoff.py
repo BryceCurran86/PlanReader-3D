@@ -367,3 +367,15 @@ def test_closed_room_floor_finish_does_not_invent_doorway_source_gap():
     assert result["source_original_doorway_ink_gap_w4_candidate_only"] is False
     assert result["source_original_floor_door_ink_gap_pdf_pts"] is None
     assert result["source_original_doorway_gap_is_finished_threshold"] is False
+
+
+def test_unowned_door_gap_cannot_be_smuggled_without_original_source_flag():
+    normal=_material_source_positive_candidate()
+    forged={**normal,
+            "source_original_doorway_ink_gap_candidate_only":False,
+            "source_original_floor_door_ink_gap_pdf_pts":(
+                (20.,20.),(120.,20.))}
+    result=audit_gpt2_w4_material_to_gpt1(
+        _w4_source_positive_candidate(),forged)
+    assert result["first_failure"]=="source_original_door_gap_receipt_invalid"
+    assert result["source_finish_area_quantity_issued"] is False
