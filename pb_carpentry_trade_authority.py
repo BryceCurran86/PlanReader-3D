@@ -350,12 +350,33 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
     """Calculate trade items for external cladding and eave soffits."""
     items: List[CarpentryTakeoffItem] = []
     if spec.element_type == "cladding":
-        if spec.area_m2 > 0.0:
-            gross_area = spec.area_m2
-        elif spec.length_m > 0.0 and spec.height_m > 0.0:
-            gross_area = spec.length_m * spec.height_m
-        else:
-            gross_area = 0.0
+        # Claimed gross area and explicit elevation dimensions are separate
+        # original metric witnesses. A contradictory pair is not resolved by
+        # choosing whichever value creates a plausible net cladding quantity.
+        def _native_nonnegative(value: object) -> float | None:
+            if type(value) not in (int, float):
+                return None
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            return number if math.isfinite(number) and number >= 0.0 else None
+
+        claimed = _native_nonnegative(spec.area_m2)
+        length = _native_nonnegative(spec.length_m)
+        height = _native_nonnegative(spec.height_m)
+        if None in (claimed, length, height):
+            return items
+        rectangle = length * height if length > 0.0 and height > 0.0 else None
+        if (
+            claimed > 0.0 and rectangle is not None
+            and not math.isclose(claimed, rectangle,
+                                 rel_tol=0.0, abs_tol=0.011)
+        ):
+            return items
+        gross_area = claimed if claimed > 0.0 else (
+            rectangle if rectangle is not None else 0.0
+        )
         # The cladding gross/net area must remain an actual possible
         # physical surface. A missing original opening area is not a zero-
         # area proof, and deductions larger than their containing elevation
