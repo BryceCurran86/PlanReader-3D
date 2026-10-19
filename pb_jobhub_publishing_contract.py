@@ -234,6 +234,10 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
     blocking_reasons: List[str] = []
     warnings: List[str] = []
     is_commercial = (package.mode == PublishingMode.COMMERCIAL.value)
+    if package.mode not in {
+        PublishingMode.COMMERCIAL.value, PublishingMode.DRAFT.value,
+    }:
+        blocking_reasons.append("Unsupported publishing mode cannot bypass commercial authority")
 
     # 1. Project Identity Validation
     ident = package.project_identity
@@ -276,6 +280,8 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
             blocking_reasons.append(f"Row #{q.row_id} has non-finite quantity: {q.quantity}")
         elif q.quantity < 0.0:
             blocking_reasons.append(f"Row #{q.row_id} has negative quantity ({q.quantity} {q.unit})")
+        elif is_commercial and q.quantity == 0.0:
+            blocking_reasons.append(f"Row #{q.row_id} has no measured commercial quantity")
 
         if not math.isfinite(q.rate) or q.rate < 0.0:
             blocking_reasons.append(f"Row #{q.row_id} has invalid rate: {q.rate}")
@@ -285,6 +291,29 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
 
         # Commercial Mode Authority Gates
         if is_commercial:
+            if q.authority_status not in {
+                AuthorityStatus.FIRM.value,
+                AuthorityStatus.USER_APPROVED.value,
+            }:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} has no approved FIRM source quantity authority"
+                )
+            if q.authority_type not in {authority.value for authority in MeasurementAuthorityType}:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} has unrecognised measurement source authority"
+                )
+            if q.authority_type in {
+                MeasurementAuthorityType.PROVISIONAL.value,
+                MeasurementAuthorityType.EXCLUDED.value,
+                MeasurementAuthorityType.REFERENCE_ONLY.value,
+            }:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} is not commercially measurable source work"
+                )
+            if q.authority_status == AuthorityStatus.USER_APPROVED.value and not q.approved_by:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} lacks named estimator user approval"
+                )
             if q.authority_status == AuthorityStatus.PROVISIONAL.value:
                 blocking_reasons.append(
                     f"Row #{q.row_id} ('{q.element}') is PROVISIONAL and cannot enter commercial publishing"
@@ -297,8 +326,12 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
             if q.authority_type in (
                 MeasurementAuthorityType.AI_DETECTED.value,
                 MeasurementAuthorityType.MODEL_DERIVED.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
             ):
-                if not q.approved_by or q.authority_status != AuthorityStatus.FIRM.value:
+                if not q.approved_by or q.authority_status not in (
+                    AuthorityStatus.FIRM.value,
+                    AuthorityStatus.USER_APPROVED.value,
+                ):
                     blocking_reasons.append(
                         f"Row #{q.row_id} ('{q.element}') is {q.authority_type} without estimator approval"
                     )
