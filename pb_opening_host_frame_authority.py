@@ -811,7 +811,15 @@ class OpeningHostFrameProducer:
         single_member_host = (
             host_resolution.status is EvidenceResolutionStatus.CORROBORATED
             and len(host_resolution.bands) == 1
-            and tuple(host_resolution.bands[0].member_ids) == tuple(binding.member_wall_candidate_ids)
+            # The wall address alone is not its physical identity. Reprove
+            # the exact W4 candidate identity and equivalence membership that
+            # the opening-host binding originally authenticated.
+            and tuple(host_resolution.bands[0].member_ids)
+            == tuple(binding.member_wall_candidate_ids)
+            and tuple(host_resolution.bands[0].member_candidate_identity_ids)
+            == tuple(binding.member_candidate_identity_ids)
+            and tuple(host_resolution.bands[0].member_equivalence_groups)
+            == tuple(binding.member_equivalence_groups)
         )
         if not single_member_host:
             return None
