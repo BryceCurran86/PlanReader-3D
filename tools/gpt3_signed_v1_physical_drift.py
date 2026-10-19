@@ -68,6 +68,15 @@ def compare_signed_v1_physical_runs(
         # A hash-consistent empty V1 envelope is not an executed original
         # source universe. Never count an empty=empty comparison as success,
         # and never re-key a prior physical quantity into an empty run.
+        # Inventory-only deltas: exact signed IDs, not source equivalence.
+        if baseline.quantities and not candidate.quantities:
+            result["removed_quantity_ids"] = sorted(
+                quantity.quantity_id for quantity in baseline.quantities
+            )
+        elif candidate.quantities and not baseline.quantities:
+            result["added_quantity_ids"] = sorted(
+                quantity.quantity_id for quantity in candidate.quantities
+            )
         result["comparison_status"] = "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE"
         return result
     if not source_equal:
