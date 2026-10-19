@@ -370,14 +370,46 @@ def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
                !=tuple(translation_pdf_pts)):
         return {**base,"first_failure":"original_competing_translation_not_authenticated"}
     paired=source_registration.get("original_witnesses",{})
-    if type(paired) is not dict or not paired:
+    # The actual four-edge original PDF issuer produces exactly these roles.
+    # An arbitrary subset can never authenticate both opposite wall sides.
+    original_roles=("left","right","bottom","top_partial")
+    if type(paired) is not dict or set(paired)!=set(original_roles):
         return {**base,"first_failure":"original_four_side_witnesses_missing"}
-    actual_floor=set(floor["original_source_perimeter_side_ids"])
-    actual_finish=set(finish["original_source_perimeter_side_ids"])
-    for row in paired.values():
-        if (row.get("floor_source",{}).get("identity") not in actual_floor or
-                row.get("finish_source",{}).get("identity") not in actual_finish):
-            return {**base,"first_failure":"independently_proven_doorway_perimeter_membership_conflict"}
+    raw_floor_ids=floor.get("original_source_perimeter_side_ids")
+    raw_finish_ids=finish.get("original_source_perimeter_side_ids")
+    if (type(raw_floor_ids) not in (tuple,list)
+            or type(raw_finish_ids) not in (tuple,list)
+            or any(type(value) is not str or not value or value != value.strip()
+                   for collection in (raw_floor_ids,raw_finish_ids)
+                   for value in collection)):
+        return {**base,
+            "first_failure":"independently_proven_doorway_perimeter_membership_conflict"}
+    actual_floor=set(raw_floor_ids)
+    actual_finish=set(raw_finish_ids)
+    registered_floor=[]
+    registered_finish=[]
+    for role in original_roles:
+        row=paired[role]
+        if (type(row) is not dict
+                or row.get("matched_original_ink_only") is not True
+                or type(row.get("floor_source")) is not dict
+                or type(row.get("finish_source")) is not dict):
+            return {**base,"first_failure":"original_four_side_witnesses_missing"}
+        floor_id=row["floor_source"].get("identity")
+        finish_id=row["finish_source"].get("identity")
+        if (type(floor_id) is not str or type(finish_id) is not str
+                or not floor_id or not finish_id
+                or floor_id != floor_id.strip()
+                or finish_id != finish_id.strip()
+                or floor_id not in actual_floor or finish_id not in actual_finish):
+            return {**base,
+                "first_failure":"independently_proven_doorway_perimeter_membership_conflict"}
+        registered_floor.append(floor_id)
+        registered_finish.append(finish_id)
+    if (len(set(registered_floor)) != len(original_roles)
+            or len(set(registered_finish)) != len(original_roles)):
+        return {**base,
+            "first_failure":"original_four_side_source_witness_alias_conflict"}
     fx,fy=translation_pdf_pts
     original_floor = floor.get(
         "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"
@@ -402,6 +434,16 @@ def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
     if (translated_gap is None or translated_gap != finish_gap
             or translated_gap not in translated_edges
             or finish_gap not in finish_edges):
+        return {**base,
+            "first_failure":"source_original_doorway_registration_gap_conflict"}
+    # The original four-edge source issuer also records the REAL top ink
+    # interruption. Do not let a separate caller move the door connector to
+    # some other otherwise valid polygon side after source registration.
+    authentic_top_gap = _original_virtual_door_gap_edge(
+        source_registration.get("original_top_gap_pdf_pts"),
+        translation=(fx,fy),
+    )
+    if (authentic_top_gap is None or authentic_top_gap != translated_gap):
         return {**base,
             "first_failure":"source_original_doorway_registration_gap_conflict"}
     return {

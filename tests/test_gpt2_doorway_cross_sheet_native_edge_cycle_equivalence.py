@@ -22,14 +22,14 @@ def _case():
         "source_wall_and_jamb_geometry_independently_recomputed": True,
         "original_source_sha256": SHA,
         "original_page_1_based": 7,
-        "original_source_perimeter_side_ids": ("f1", "f2", "f3"),
+        "original_source_perimeter_side_ids": ("f1", "f2", "f3", "f4"),
         "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts": FLOOR,
         "source_virtual_door_connector_pdf_pts": (FLOOR[-1], FLOOR[0]),
     }
     finish = {
         **floor,
         "original_page_1_based": 11,
-        "original_source_perimeter_side_ids": ("t1", "t2", "t3"),
+        "original_source_perimeter_side_ids": ("t1", "t2", "t3", "t4"),
         "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts": FINISH,
         "source_virtual_door_connector_pdf_pts": (FINISH[-1], FINISH[0]),
     }
@@ -39,19 +39,16 @@ def _case():
         "original_floor_page_id": 7,
         "original_finish_page_id": 11,
         "source_translation_candidate_pdf_pts": SHIFT,
+        "original_top_gap_pdf_pts": (FLOOR[-1], FLOOR[0]),
         "original_witnesses": {
-            "x0": {
-                "floor_source": {"identity": "f1"},
-                "finish_source": {"identity": "t1"},
-            },
-            "x1": {
-                "floor_source": {"identity": "f2"},
-                "finish_source": {"identity": "t2"},
-            },
-            "y0": {
-                "floor_source": {"identity": "f3"},
-                "finish_source": {"identity": "t3"},
-            },
+            role: {
+                "floor_source": {"identity": "f" + str(index)},
+                "finish_source": {"identity": "t" + str(index)},
+                "matched_original_ink_only": True,
+            }
+            for index, role in enumerate(
+                ("left", "right", "bottom", "top_partial"), start=1
+            )
         },
     }
     return floor, finish, registration
@@ -131,4 +128,63 @@ def test_original_source_jamb_sha_or_registration_still_gate_correspondence():
     corrupted["original_source_sha256"] = "0" * 64
     result = _audit(floor, corrupted, reg)
     assert result["first_failure"] == "original_cross_sheet_doorway_source_sha_conflict"
+    assert result["new_firm_quantities"] == 0
+
+
+@pytest.mark.parametrize("omitted", [
+    "left", "right", "bottom", "top_partial",
+])
+def test_missing_one_of_four_original_side_witnesses_never_claims_correspondence(
+    omitted,
+):
+    floor, finish, reg = _case()
+    del reg["original_witnesses"][omitted]
+    result = _audit(floor, finish, reg)
+    assert result["first_failure"] == "original_four_side_witnesses_missing"
+    assert result["new_firm_quantities"] == 0
+
+
+@pytest.mark.parametrize("role", ["left", "right", "bottom", "top_partial"])
+def test_missing_original_ink_role_match_requires_abstention(role):
+    floor, finish, reg = _case()
+    reg["original_witnesses"][role]["matched_original_ink_only"] = False
+    result = _audit(floor, finish, reg)
+    assert result["first_failure"] == "original_four_side_witnesses_missing"
+
+
+@pytest.mark.parametrize("page_role", ["floor_source", "finish_source"])
+def test_repeated_native_wall_ink_source_receipt_cannot_own_two_distinct_sides(
+    page_role,
+):
+    floor, finish, reg = _case()
+    pair = reg["original_witnesses"]
+    pair["right"][page_role]["identity"] = pair["left"][page_role]["identity"]
+    result = _audit(floor, finish, reg)
+    assert result["first_failure"] == "original_four_side_source_witness_alias_conflict"
+
+
+@pytest.mark.parametrize("bad_gap", [
+    ((0., 0.), (4., 0.)),   # existing wall edge, not source ink doorway gap
+    ((0., 0.), (4., 4.)),   # diagonal between corners
+    ((0., 0.), (0., 0.)),   # no opening
+    ((0., 0.), ("missing", 4.)),
+    None,
+])
+def test_original_issuer_top_gap_must_be_same_as_both_source_bound_doorways(
+    bad_gap,
+):
+    floor, finish, reg = _case()
+    reg["original_top_gap_pdf_pts"] = bad_gap
+    result = _audit(floor, finish, reg)
+    assert result["first_failure"] == "source_original_doorway_registration_gap_conflict"
+    assert result["new_firm_quantities"] == 0
+
+
+def test_reversed_native_gap_order_is_not_a_new_doorway():
+    floor, finish, reg = _case()
+    reg["original_top_gap_pdf_pts"] = tuple(
+        reversed(reg["original_top_gap_pdf_pts"])
+    )
+    result = _audit(floor, finish, reg)
+    assert result["status"] == "original_source_ink_ring_translation_candidate"
     assert result["new_firm_quantities"] == 0
