@@ -60,6 +60,9 @@ def require_evidence_ids(value: object, name: str) -> tuple[str, ...]:
 
 
 def _positive(value: object) -> Optional[float]:
+    """Canonical metric amounts must be native numeric, never coerced text or booleans."""
+    if type(value) not in (int, float):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -68,6 +71,9 @@ def _positive(value: object) -> Optional[float]:
 
 
 def _nonnegative(value: object) -> Optional[float]:
+    """Native source deductions may be zero, but not cast text or True."""
+    if type(value) not in (int, float):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
