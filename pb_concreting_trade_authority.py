@@ -145,6 +145,12 @@ def calculate_slab_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
         return items
     thickness = float(spec.thickness_m)
 
+    if (
+        type(spec.is_suspended) is not bool
+        or not math.isfinite(area * thickness)
+        or area * thickness <= 0.0
+    ):
+        return items
     vol_m3 = round(area * thickness, 2)
     slab_type = "Suspended slab" if spec.is_suspended else "Slab on ground"
     sec = "Structure" if spec.is_suspended else "Substructure"
@@ -256,6 +262,8 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
         depth = spec.thickness_m
         if not _positive_original_metric(length, width, depth):
             return items
+        if not math.isfinite(length * width * depth):
+            return items
         vol_m3 = round(length * width * depth, 2)
 
         items.append(ConcreteTakeoffItem(
@@ -298,6 +306,8 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
         if not _positive_original_count(count) or not _positive_original_metric(length, width, depth):
             return items
         vol_per_pad = length * width * depth
+        if not math.isfinite(count * vol_per_pad):
+            return items
         total_vol_m3 = round(count * vol_per_pad, 2)
 
         items.append(ConcreteTakeoffItem(
@@ -323,7 +333,9 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
         if not _positive_original_count(count) or not _positive_original_metric(diam, depth):
             return items
         radius = diam / 2.0
-        vol_per_pier = math.pi * (radius ** 2) * depth
+        vol_per_pier = math.pi * (radius * radius) * depth
+        if not math.isfinite(count * vol_per_pier):
+            return items
         total_vol_m3 = round(count * vol_per_pier, 2)
 
         items.append(ConcreteTakeoffItem(
@@ -356,8 +368,12 @@ def calculate_column_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteT
         return items
 
     vol_per_col = w * d * h
+    if not math.isfinite(count * vol_per_col):
+        return items
     total_vol = round(count * vol_per_col, 2)
     perimeter = 2 * (w + d)
+    if not math.isfinite(count * perimeter * h):
+        return items
     formwork_m2 = round(count * perimeter * h, 2)
 
     # 1. Column Count (No.)
@@ -408,8 +424,12 @@ def calculate_beam_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
     if not _positive_original_metric(length, w, d):
         return items
 
+    if not math.isfinite(length * w * d):
+        return items
     vol_m3 = round(length * w * d, 2)
     # Formwork: soffit + 2 sides (2 * d + w)
+    if not math.isfinite(length * (w + 2 * d)):
+        return items
     formwork_m2 = round(length * (w + 2 * d), 2)
 
     items.append(ConcreteTakeoffItem(
@@ -456,10 +476,14 @@ def calculate_stairs_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteT
     width = spec.width_m
     if not _positive_original_count(flights) or not _positive_original_metric(spec.height_m, width):
         return items
+    if not math.isfinite(spec.height_m * 6):
+        return items
     steps = max(1, int(spec.height_m * 6))
     # Average waist slab + steps volume: ~0.15 m³ per step per metre width
     vol_m3 = round(flights * steps * width * 0.08, 2)
     formwork_m2 = round(flights * steps * (width * 0.18 + width * 0.28), 2)
+    if not math.isfinite(vol_m3) or not math.isfinite(formwork_m2):
+        return items
 
     items.append(ConcreteTakeoffItem(
         section="Structure",
@@ -486,12 +510,12 @@ def calculate_stairs_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteT
         finish_system="Form, prop and strip",
         quantity=formwork_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CONCRETE_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Formwork area: {formwork_m2:.2f} m² across {steps} steps.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional stairs formwork {formwork_m2:.2f} m² based on inferred {steps} steps; actual rise, going, waist and formwork faces require source dimensions.",
         row_role="",
     ))
 
