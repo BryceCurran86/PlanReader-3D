@@ -718,15 +718,13 @@ class OpeningHostFrameProducer:
             if flanks is None:
                 return None
             center = _dot(context.geometry.origin, normal)
-            offsets.extend((center + flank[2], center + flank[3])
+            # Use the frame payload's existing coordinate precision. Distinct
+            # pairs must not be elected by discovery order within a tolerance.
+            offsets.extend((round(center + flank[2], 9), round(center + flank[3], 9))
                 for flank in flanks.values())
-        if not offsets:
+        if not offsets or len(set(offsets)) != 1:
             return None
-        first = offsets[0]
-        if any(abs(lo - first[0]) > _COORD_TOL or abs(hi - first[1]) > _COORD_TOL
-                for lo, hi in offsets):
-            return None
-        return first
+        return offsets[0]
 
     @staticmethod
     def _selected_component(contexts: tuple[_ScopeBinding, ...], selected_binding):

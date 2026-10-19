@@ -171,3 +171,18 @@ def test_all_unknown_source_wall_pairs_remain_visible_in_sorted_replay(monkeypat
     monkeypatch.setattr(producer._walls,'resolve_scope',
         lambda _: replace(scope,records=tuple(reversed(scope.records))))
     assert _publish(producer,bound) == results
+
+
+def test_distinct_source_offsets_are_not_elected_within_coordinate_tolerance(monkeypatch):
+    _,_,producer,bound=_fixture()
+    ctx=contexts(producer,bound)
+    original=host._raster_source_band_flanks
+    def nearby(support,geometry):
+        flanks=original(support,geometry)
+        if flanks is not None and geometry == ctx[1].geometry:
+            flanks={role:(lo,hi,nlo+0.0000002,nhi+0.0000002,edge)
+                for role,(lo,hi,nlo,nhi,edge) in flanks.items()}
+        return flanks
+    monkeypatch.setattr(host,'_raster_source_band_flanks',nearby)
+    assert producer._raster_component_source_faces(ctx,ctx[0].geometry.normal) is None
+    assert producer._raster_component_source_faces(tuple(reversed(ctx)),ctx[0].geometry.normal) is None
