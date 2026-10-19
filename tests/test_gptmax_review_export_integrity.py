@@ -152,7 +152,7 @@ def test_export_rejects_contradictory_physical_source_packet_before_writing(
         alternative = deepcopy(p)
         alternative["packet_id"] = "opening_source_review_shadow_" + "f" * 32
         assert alternative["packet_id"] != p["packet_id"]
-        packets.append(alternative)
+        data["original_opening_review_packets"] = list(packets) + [alternative]
     elif damage == "unowned-source-ancestry":
         p["physical_opening"] = None
         p["opening_identity_id"] = None
@@ -172,6 +172,7 @@ def test_review_export_keeps_original_and_alternate_identity_spaces_separate(rep
     output = tmp_path / "review.zip"
     export.build_opening_source_review_package(report, output)
     with zipfile.ZipFile(output) as archive:
-        manifest = archive.read("manifest.json")
-        assert b'"authority_import_allowed":false' in manifest
+        import json
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["authority_import_allowed"] is False
         assert archive.testzip() is None
