@@ -202,13 +202,14 @@ def _notched_source_pdf(turns=0, scale=1.0, outer_continuation=False):
     return payload
 
 
-def _source_records(payload, enabled):
+def _source_records(payload, enabled, *, double_face_negative=False):
     from tests.test_raster_framed_opening_g17_contract import _corroborated_records
 
     source = SourceVisibilityProducer(
         producer_method="paired-source-test",
         producer_version="1",
         raster_paired_outer_faces_shadow=enabled,
+        raster_double_face_negative_shadow=double_face_negative,
     )
     pub = source.ingest_native_pdf_bytes(
         document_id="paired-source-test",
@@ -233,7 +234,7 @@ def test_paired_shadow_retains_double_painted_face_opposition_under_transforms(
 ):
     payload = _notched_source_pdf(turns, scale)
     old, old_pub, old_records = _source_records(payload, False)
-    source, pub, records = _source_records(payload, True)
+    source, pub, records = _source_records(payload, True, double_face_negative=True)
     assert old_pub == pub
     assert not old_records
     # The exact original fixture paints two uninterrupted tracks at the
@@ -250,6 +251,17 @@ def test_paired_shadow_retains_double_painted_face_opposition_under_transforms(
         and not r["paired_original_outer_face_continuity"]
         for r in comparisons
     )
+
+
+def test_paired_face_policy_does_not_enable_the_separate_double_face_negative():
+    payload = _notched_source_pdf()
+    source, pub, records = _source_records(payload, True)
+    negative, negative_pub, negative_records = _source_records(
+        payload, True, double_face_negative=True)
+    assert pub == negative_pub
+    assert records and not negative_records
+    assert source.physical_opening_authority()._raster_double_face_negative_shadow is False
+    assert negative.physical_opening_authority()._raster_double_face_negative_shadow is True
 
 
 def test_actual_outer_face_negative_survives_original_raster_source_replay():
@@ -272,7 +284,7 @@ def test_scaling_outside_existing_band_thickness_domain_does_not_relax_detector_
 def test_new_physical_policy_cannot_expand_original_source_capture_or_reissue_snapshot():
     payload = _notched_source_pdf()
     old, old_pub, old_records = _source_records(payload, False)
-    source, pub, records = _source_records(payload, True)
+    source, pub, records = _source_records(payload, True, double_face_negative=True)
     assert not old_records and not records and old_pub == pub
     expected = old._proven_raster_opening_flank_boxes(old_pub, "1")
     actual = source._proven_raster_opening_flank_boxes(pub, "1")

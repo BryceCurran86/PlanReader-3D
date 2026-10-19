@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 import math
+import re
 
 from pb_migration_contracts import EvidenceResolutionStatus as Status, stable_contract_id
 from pb_opening_host_binding_authority import _opening_geometry
@@ -100,9 +101,15 @@ def opening_source_lineage_packet(source, selector, *, additional_text_ids=()):
             raise ValueError("foreign source parent in opening proof")
         records[oid]=asdict(observation)
         pending.extend(observation.derivation_parent_ids)
-    return {"roots":roots, "observations":[records[k] for k in sorted(records)],
-            "unresolved_parent_ids":tuple(sorted(missing)),
-            "source_proof_closed":not missing, "authority_import_allowed":False}
+    packet = {"roots":roots, "observations":[records[k] for k in sorted(records)],
+              "unresolved_parent_ids":tuple(sorted(missing)),
+              "source_proof_closed":not missing, "authority_import_allowed":False}
+    _, blockers = _source_support_signature({"physical_opening":asdict(opening),
+        "opening_identity_id":opening.record_id, "page_id":opening.page_id,
+        "source_lineage":packet})
+    packet["source_proof_closed"] = not blockers
+    packet["source_proof_blockers"] = blockers
+    return packet
 
 
 def _wall_review_rows(composition,page_id):
@@ -172,6 +179,8 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
         blockers=[]
         if lineage is None or not lineage["source_proof_closed"]:
             blockers.append("original_source_parent_lineage")
+            if lineage is not None:
+                blockers.extend(lineage.get("source_proof_blockers", ()))
         if not trace.host_wall_id: blockers.append("source_owned_unique_host")
         if whole is None or not whole.record_id: blockers.append("connected_whole_wall_frame")
         if axes.evidence is None: blockers.append("owned_ordered_nominal_dimensions")
@@ -198,38 +207,105 @@ def build_opening_review_packets(source,composition,*,source_fragment_roles_shad
     return tuple(sorted(packets,key=lambda p:(p["page_id"] or "",p["opening_identity_id"] or p["packet_id"])))
 
 
+def _source_support_signature(packet):
+    """Check explanation-DAG structure; this never authenticates an import."""
+    def blocked(reason):
+        return None, (reason,)
+    def identifiers(values):
+        return (isinstance(values, (tuple, list)) and bool(values)
+                and all(type(v) is str and v and v == v.strip() for v in values)
+                and len(values) == len(set(values)))
+    if not isinstance(packet, dict):
+        return blocked("source_packet_malformed")
+    opening, lineage = packet.get("physical_opening"), packet.get("source_lineage")
+    if not isinstance(opening, dict) or not isinstance(lineage, dict):
+        return blocked("physical_source_packet_unavailable")
+    if (packet.get("opening_identity_id") != opening.get("record_id")
+            or not opening.get("record_id") or packet.get("page_id") != opening.get("page_id")):
+        return blocked("source_packet_opening_identity_mismatch")
+    if (lineage.get("source_proof_closed") is not True
+            or not isinstance(lineage.get("unresolved_parent_ids"), (tuple,list))
+            or lineage["unresolved_parent_ids"]):
+        return blocked("source_parent_closure_unproven")
+    physical_roots = opening.get("source_observation_ids")
+    roots = lineage.get("roots", physical_roots)
+    if not identifiers(physical_roots) or not identifiers(roots) or not set(physical_roots) <= set(roots):
+        return blocked("source_packet_roots_invalid")
+    rows = lineage.get("observations")
+    if not isinstance(rows, (tuple, list)) or len(rows) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+        return blocked("source_parent_evidence_budget_exceeded")
+    scope = ("document_id", "revision_id", "source_sha256", "snapshot_id", "page_id")
+    if any(type(opening.get(k)) is not str or not opening[k] for k in scope):
+        return blocked("source_packet_scope_invalid")
+    if len(opening["source_sha256"]) != 64 or any(c not in "0123456789abcdef" for c in opening["source_sha256"]):
+        return blocked("source_packet_scope_invalid")
+    selector = packet.get("selector")
+    if selector is not None and (not isinstance(selector, dict) or any(
+            selector.get(k) != opening[k] for k in scope if k != "page_id")):
+        return blocked("source_packet_selector_mismatch")
+    by_id, parents = {}, {}
+    edge_count = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            return blocked("source_parent_record_malformed")
+        oid = row.get("observation_id")
+        if type(oid) is not str or not oid or oid in by_id:
+            return blocked("source_parent_identity_invalid_or_duplicate")
+        if any(row.get(k) != opening[k] for k in scope):
+            return blocked("source_parent_scope_mismatch")
+        parent_ids = row.get("derivation_parent_ids", ())
+        if parent_ids and not identifiers(parent_ids):
+            return blocked("source_parent_links_malformed")
+        if not isinstance(parent_ids, (tuple, list)):
+            return blocked("source_parent_links_malformed")
+        geometry = row.get("geometry")
+        if (not isinstance(geometry, (tuple, list)) or any(
+                type(v) not in (int, float) or not math.isfinite(v) for v in geometry)
+                or any(type(row.get(k)) is not str or not row[k]
+                       for k in ("observation_kind", "source_primitive_ref"))):
+            return blocked("source_parent_geometry_or_kind_invalid")
+        edge_count += len(parent_ids)
+        if len(rows) + edge_count > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+            return blocked("source_parent_evidence_budget_exceeded")
+        by_id[oid], parents[oid] = row, tuple(parent_ids)
+    if not set(roots) <= set(by_id) or any(set(p)-set(by_id) for p in parents.values()):
+        return blocked("source_parent_records_missing")
+    reachable, pending = set(), list(roots)
+    while pending:
+        oid = pending.pop()
+        if oid not in reachable:
+            reachable.add(oid)
+            pending.extend(parents[oid])
+    if reachable != set(by_id):
+        return blocked("source_parent_records_unreachable")
+    children = {oid:[] for oid in by_id}
+    remaining = {oid:len(p) for oid,p in parents.items()}
+    for oid, parent_ids in parents.items():
+        for parent in parent_ids:
+            children[parent].append(oid)
+    ready = [oid for oid in by_id if not remaining[oid]]
+    signatures = {}
+    while ready:
+        oid = ready.pop()
+        row = by_id[oid]
+        signatures[oid] = stable_contract_id("opening_source_parent_review", {
+            "kind":row["observation_kind"], "source_primitive_ref":row["source_primitive_ref"],
+            "geometry":tuple(row["geometry"]),
+            "parents":tuple(sorted(signatures[p] for p in parents[oid]))}, digest_chars=32)
+        for child in children[oid]:
+            remaining[child] -= 1
+            if not remaining[child]:
+                ready.append(child)
+    if len(signatures) != len(by_id):
+        return blocked("source_parent_cycle")
+    return ((opening["document_id"], opening["revision_id"], opening["source_sha256"],
+             opening["page_id"], tuple(sorted(signatures[oid] for oid in physical_roots))), ())
+
+
 def compare_opening_source_correspondence(original_packets,alternate_packets):
     """Retain all source-support matches, including many-to-many alternatives."""
     def signature(packet):
-        lineage=packet["source_lineage"]
-        if (not lineage or lineage["source_proof_closed"] is not True
-                or lineage.get("unresolved_parent_ids") or not packet["physical_opening"]):
-            return None
-        observation_ids = [row["observation_id"] for row in lineage["observations"]]
-        if len(observation_ids) != len(set(observation_ids)):
-            return None
-        opening=packet["physical_opening"]
-        if packet["page_id"]!=opening["page_id"]:
-            return None
-        # Every exported parent, not only the opening roots, must have the
-        # same authenticated source issuer and source page. Review packets
-        # are explanations and cannot waive the native producer's scope gate.
-        source_scope=("document_id","revision_id","source_sha256","snapshot_id")
-        if any(row.get("page_id") != opening["page_id"] or any(
-                row.get(field) != opening[field] for field in source_scope)
-                for row in lineage["observations"]):
-            return None
-        source_roots=opening["source_observation_ids"]
-        if not source_roots or len(source_roots)!=len(set(source_roots)):
-            return None
-        roots=set(source_roots)
-        rows=[r for r in lineage["observations"] if r["observation_id"] in roots]
-        if len(rows)!=len(roots) or {r["observation_id"] for r in rows}!=roots:
-            return None
-        return (packet["physical_opening"]["document_id"],
-                packet["physical_opening"]["revision_id"],
-                packet["physical_opening"]["source_sha256"],packet["page_id"],tuple(sorted(
-            (r["observation_kind"],r["source_primitive_ref"],tuple(r["geometry"])) for r in rows)))
+        return _source_support_signature(packet)[0]
     old={p["packet_id"]:signature(p) for p in original_packets}
     if len(old) != len(original_packets):
         raise ValueError("duplicate original review packet ID")
@@ -238,12 +314,13 @@ def compare_opening_source_correspondence(original_packets,alternate_packets):
         raise ValueError("duplicate alternate review packet ID")
     relationships=[]
     for new in alternate_packets:
-        sig=signature(new)
-        exact=[p["opening_identity_id"] for p in original_packets
-               if sig is not None and old[p["packet_id"]]==sig]
+        sig, blockers = _source_support_signature(new)
+        exact={p["opening_identity_id"] for p in original_packets
+               if sig is not None and old[p["packet_id"]]==sig}
         relationships.append({"alternate_opening_id":new["opening_identity_id"],
             "exact_source_support_original_ids":sorted(exact),
             "source_support_packet_complete":sig is not None,
+            "source_support_blockers":list(blockers),
             "source_relationship":"exact_source_support" if exact else "additional_or_changed_source_support",
             "physical_identity_alias_granted":False,"signed_record_migration_granted":False})
     return relationships
@@ -258,8 +335,11 @@ def nominal_opening_obj_shadow(canonical):
     from pb_canonical_building import CanonicalOpening, ReviewState
     if type(canonical) is not CanonicalOpening:
         raise TypeError("existing canonical opening required")
+    if (type(canonical.id) is not str or len(canonical.id) > 256
+            or re.fullmatch(r"[A-Za-z0-9_.:-]+", canonical.id) is None):
+        raise ValueError("safe nominal OBJ object identifier required")
     if (canonical.review_state is not ReviewState.REVIEW_REQUIRED
-            or canonical.takeoff_eligible or canonical.deduction_authority
+            or canonical.takeoff_eligible is not False or canonical.deduction_authority is not False
             or canonical.wall_id is not None or canonical.sill_height_m is not None
             or canonical.offset_along_wall_m is not None
             or canonical.metadata.get("dimension_basis")!="nominal_compact_HHWW"):

@@ -121,3 +121,19 @@ def test_unresolved_metric_geometry_is_not_replaced_by_label_area():
     new = _opening(canonical_id="new-geometry", area_basis="resolved_opening_geometry",
         figured_area_record_id=None, opening_void_record_id="void-source")
     assert run([old], [new])["additional_area_reviews"] == []
+
+
+def test_additive_review_requires_original_occurrence_packet_coverage():
+    old, new = _opening(), _opening(canonical_id="new-id")
+    with pytest.raises(ValueError, match="original source packet occurrence coverage"):
+        run([old], [new], old_packets=[])
+
+
+def test_incomplete_original_parent_graph_blocks_distinct_addition_review():
+    old, new = _opening(), _opening(canonical_id="new-id")
+    original = packet(old, closed=False)
+    result = run([old], [new], old_packets=[original])
+    row, = result["additional_area_reviews"]
+    assert result["original_source_packet_coverage_complete"] is False
+    assert row["source_parent_dag_closed"] is False
+    assert row["first_remaining_gate"] == "original_source_parent_dag_required"

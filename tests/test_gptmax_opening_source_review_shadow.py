@@ -70,6 +70,7 @@ def test_source_correspondence_retains_all_exact_alternatives_without_alias():
     p,c,*_=_fixture()
     packet=build_opening_review_packets(p,c)[0]
     other=deepcopy(packet);other["packet_id"]+="_other";other["opening_identity_id"]="second"
+    other["physical_opening"]["record_id"]="second"
     result=compare_opening_source_correspondence((other,packet),(packet,))[0]
     assert set(result["exact_source_support_original_ids"])=={packet["opening_identity_id"],"second"}
     assert result["physical_identity_alias_granted"] is False

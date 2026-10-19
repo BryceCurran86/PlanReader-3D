@@ -16,6 +16,7 @@ def _packet(oid="opening-a", document="document-a", revision="revision-a"):
         "opening_identity_id": oid,
         "page_id": "page-3",
         "physical_opening": {
+            "record_id": oid,
             "document_id": document,
             "revision_id": revision,
             "source_sha256": "a" * 64,
@@ -25,6 +26,7 @@ def _packet(oid="opening-a", document="document-a", revision="revision-a"):
         },
         "source_lineage": {
             "source_proof_closed": True,
+            "unresolved_parent_ids": [],
             "observations": [{
                 "observation_id": "source-1",
                 "document_id": document,
@@ -45,10 +47,22 @@ def test_same_revision_source_support_remains_review_correspondence():
     new = deepcopy(old)
     new["packet_id"] = "alternate-packet"
     new["opening_identity_id"] = "alternate-opening"
+    new["physical_opening"]["record_id"] = "alternate-opening"
     result = compare_opening_source_correspondence([old], [new])
     assert result[0]["exact_source_support_original_ids"] == ["opening-a"]
     assert result[0]["physical_identity_alias_granted"] is False
     assert result[0]["signed_record_migration_granted"] is False
+
+
+@pytest.mark.parametrize("missing", ["record_id", "unresolved_parent_ids"])
+def test_legacy_packet_without_identity_or_closure_inventory_cannot_match(missing):
+    old = _packet()
+    incomplete = deepcopy(old)
+    section = "physical_opening" if missing == "record_id" else "source_lineage"
+    incomplete[section].pop(missing)
+    result = compare_opening_source_correspondence([old], [incomplete])
+    assert result[0]["exact_source_support_original_ids"] == []
+    assert result[0]["source_support_packet_complete"] is False
 
 
 def test_identical_ink_from_another_revision_is_not_same_source_support():
