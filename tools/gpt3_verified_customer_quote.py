@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 import hashlib
 import io
 import json
@@ -70,6 +70,23 @@ def _percentage(book: Mapping[str, Any], name: str) -> Decimal:
     return _decimal(book[name], name, cap=_HUNDRED)
 
 
+def _equivalent_pricing_unit(unit: str) -> str:
+    """Normalize exact notation equivalence, never transform a measured value.
+
+    Rate cards may use m² where the source-owned sealed unit is m2, or 'each'
+    where the signed physical count is ea. These are notation aliases only:
+    area, volume, linear distance and object counts never cross dimensions.
+    """
+    aliases = {
+        "m²": "m2", "sqm": "m2", "m2": "m2",
+        "m³": "m3", "m3": "m3",
+        "lm": "m", "m": "m",
+        "ea": "ea", "each": "ea", "nr": "ea",
+        "no": "ea", "no.": "ea", "number": "ea",
+    }
+    return aliases.get(unit.lower(), unit)
+
+
 def _rates(rate_book: Mapping[str, Any]) -> dict[tuple[str, str, str], dict]:
     raw = rate_book.get("rates")
     if type(raw) is not list:
@@ -83,7 +100,7 @@ def _rates(rate_book: Mapping[str, Any]) -> dict[tuple[str, str, str], dict]:
             or key != key.strip() or type(unit) is not str or not unit
             or unit != unit.strip()):
             raise ValueError("rate card requires exact scope, source key and unit")
-        identity = (scope, key, unit)
+        identity = (scope, key, _equivalent_pricing_unit(unit))
         if identity in cards:
             raise ValueError("duplicate client rate card")
         values = {name: _decimal(card[name], name)
@@ -106,7 +123,7 @@ def _choose_rate(quantity: Any, cards: dict) -> tuple[tuple[str, str, str] | Non
         ("semantic", quantity.semantic_key),
         ("family", quantity.family),
     ):
-        card_id = (scope, key, quantity.unit)
+        card_id = (scope, key, _equivalent_pricing_unit(quantity.unit))
         if card_id in cards:
             return card_id, cards[card_id]
     return None, None
@@ -149,6 +166,41 @@ def _manual_allowances(book: Mapping[str, Any]) -> list[dict]:
             "authority": "CLIENT_MANUAL_NOT_SOURCE_VERIFIED",
         })
     return sorted(allowances, key=lambda row: row["id"])
+
+
+def _cent_exact_cost_components(
+    billable: Decimal, card: Mapping[str, Decimal],
+) -> tuple[dict[str, str], Decimal]:
+    """Allocate final cents once, keeping component totals equal to exact unit cost.
+
+    Independently rounding four 0.5-cent subcomponents creates a 2-cent
+    overstatement. Largest residual allocation gives each component no more
+    than a cent above its truncated amount, with stable source-independent ties.
+    Client rates, source quantity and physical units are never changed.
+    """
+    if not billable.is_finite() or billable < 0:
+        raise ValueError("billable physical quantity must be finite and nonnegative")
+    exact = {key: billable * card[key] for key in _COMPONENTS}
+    total = sum(exact.values(), Decimal("0"))
+    if not total.is_finite() or total < 0 or total > _MAX_MONEY:
+        raise ValueError("client physical line cost exceeds safe financial bound")
+    rounded_total = total.quantize(_CENT, rounding=ROUND_HALF_UP)
+    allocated = {
+        key: amount.quantize(_CENT, rounding=ROUND_DOWN)
+        for key, amount in exact.items()
+    }
+    pennies = (rounded_total - sum(allocated.values(), Decimal("0"))) / _CENT
+    if pennies != pennies.to_integral_value() or not 0 <= pennies <= len(_COMPONENTS):
+        raise ValueError("cost component cent reconciliation is invalid")
+    # Never produce a negative component to counteract half-up rounding.
+    priority = sorted(_COMPONENTS, key=lambda key: (
+        -(exact[key] - allocated[key]), _COMPONENTS.index(key),
+    ))
+    for key in priority[:int(pennies)]:
+        allocated[key] += _CENT
+    if sum(allocated.values(), Decimal("0")) != rounded_total:
+        raise ValueError("source-linked customer costs fail cent reconciliation")
+    return {key: _money(allocated[key]) for key in _COMPONENTS}, rounded_total
 
 
 def build_verified_customer_quote(
@@ -242,8 +294,7 @@ def build_verified_customer_quote(
         else:
             billable = quantity * (Decimal("1") + card["waste_pct"] / _HUNDRED)
             unit_cost = sum((card[component] for component in _COMPONENTS), Decimal("0"))
-            components = {kind: _money(billable * card[kind]) for kind in _COMPONENTS}
-            cost = (billable * unit_cost).quantize(_CENT, rounding=ROUND_HALF_UP)
+            components, cost = _cent_exact_cost_components(billable, card)
             sell = (cost * (Decimal("1") + card["markup_pct"] / _HUNDRED)).quantize(
                 _CENT, rounding=ROUND_HALF_UP)
             hours = billable * card["labour_hours_per_unit"]
@@ -292,7 +343,13 @@ def build_verified_customer_quote(
     before_tax = before_discount - discount
     tax = (before_tax * percentages["tax_pct"] / _HUNDRED).quantize(_CENT, rounding=ROUND_HALF_UP)
     total = before_tax + tax
-    complete = not unpriced
+    # Do not issue a completed quote for an empty authenticated source run.
+    complete = bool(signed) and not unpriced
+    quote_status = (
+        "NO_VERIFIED_SOURCE_QUANTITIES" if not signed else
+        "INCOMPLETE_UNPRICED_QUANTITIES" if unpriced else
+        "CLIENT_PRICED_QUOTE"
+    )
     report: dict[str, Any] = {
         "schema_version": "gpt3-client-verified-quote-v1",
         "project_id": sealed.project_id,
@@ -300,7 +357,7 @@ def build_verified_customer_quote(
         "signed_run_fingerprint": sealed.fingerprint,
         "currency": currency, **dates,
         "evidence_scope": "SIGNED_V1_CUSTOMER_ONLY_NOT_FROZEN_V2_SCORE",
-        "publication_status": "CLIENT_PRICED_QUOTE" if complete else "INCOMPLETE_UNPRICED_QUANTITIES",
+        "publication_status": quote_status,
         "signed_quantity_count": len(signed),
         "unpriced_quantity_ids": unpriced,
         "unpriced_quantity_count": len(unpriced),
