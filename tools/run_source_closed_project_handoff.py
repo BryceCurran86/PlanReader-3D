@@ -52,6 +52,9 @@ from pb_live_external_wall_surface_area_quantity_publication import (
     publish_live_per_wall_surface_area_quantities,
     seal_live_per_wall_surface_area_run,
 )
+from pb_live_external_physical_net_wall_publication import (
+    LiveExternalPhysicalNetWallPublication,
+)
 from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
 from pb_live_floor_finish_customer_projection import (
     project_live_floor_finish_customer_rows,
@@ -537,16 +540,21 @@ def _generate_project_handoff_locked(
     # plastering, painting, cladding or two-face trade-material quantity.
     wall_surface_quantities: tuple[QuantityEvidence, ...] = ()
     if clean_family_group == "surfaces":
-        wall_surface_quantities = _non_abstained(
-            publish_live_per_wall_surface_area_quantities(claim.publication)
-        )
+        # Floor/ceiling-only source claims may legitimately carry no external
+        # wall publication. Never manufacture a wall issuer or abort other
+        # independently source-proven families on a missing optional lane.
+        wall_publication = getattr(claim, "publication", None)
+        if type(wall_publication) is LiveExternalPhysicalNetWallPublication:
+            wall_surface_quantities = _non_abstained(
+                publish_live_per_wall_surface_area_quantities(wall_publication)
+            )
         summary["family_counts"]["wall_net_area"] = len(wall_surface_quantities)
         if wall_surface_quantities:
             family_runs.append(
                 (
                     "wall_net_area",
                     seal_live_per_wall_surface_area_run(
-                        claim.publication,
+                        wall_publication,
                         workspace_id=workspace_id,
                         project_id=project_id,
                     ),
