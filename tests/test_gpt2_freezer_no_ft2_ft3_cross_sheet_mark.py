@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 from pathlib import Path
+import fitz
 
 import pytest
 from tests.test_gpt2_native_ft2_ft3_original_mark_census import _synthetic
@@ -16,7 +17,7 @@ SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 def _call(raw,**updates):
     kw={
         "expected_sha256":hashlib.sha256(raw).hexdigest(),
-        "original_floor_page_1_based":7,
+        "original_floor_page_1_based":2,
         "original_finish_page_1_based":1,
         "candidate_original_floor_bbox_pdf_pts":(10.,0.,50.,50.),
         "unproven_original_source_translation_pdf_pts":(20.,0.),
@@ -27,7 +28,10 @@ def _call(raw,**updates):
 
 
 def test_positive_printed_source_word_never_grants_physical_floor():
-    source=_synthetic()
+    doc=fitz.open(stream=_synthetic(),filetype="pdf")
+    doc.new_page()
+    source=doc.tobytes()
+    doc.close()
     row=_call(source)
     assert len(row["native_finish_words_inside_candidate"])==1
     assert row["cross_page_structural_room_equivalence_proven"] is False
@@ -41,8 +45,12 @@ def test_positive_printed_source_word_never_grants_physical_floor():
     {"original_floor_page_1_based":1},
 ])
 def test_false_source_sha_geometry_or_page_identity_fail_closed(invalid):
+    doc=fitz.open(stream=_synthetic(),filetype="pdf")
+    doc.new_page()
+    data=doc.tobytes()
+    doc.close()
     with pytest.raises(ValueError):
-        _call(_synthetic(),**invalid)
+        _call(data,**invalid)
 
 
 @pytest.mark.skipif(not ORIGINAL.is_file(),reason="private original not provisioned")
