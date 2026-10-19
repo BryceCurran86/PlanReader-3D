@@ -48,6 +48,10 @@ from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
 )
 from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+from pb_live_external_wall_surface_area_quantity_publication import (
+    publish_live_per_wall_surface_area_quantities,
+    seal_live_per_wall_surface_area_run,
+)
 from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
 from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
@@ -518,6 +522,28 @@ def _generate_project_handoff_locked(
             )
         )
 
+    # The existing combined/all-project source fingerprints stay unchanged.
+    # Surface-focused execution may separately seal one physical opening-
+    # deducted net area per authenticated external wall. This is not a
+    # plastering, painting, cladding or two-face trade-material quantity.
+    wall_surface_quantities: tuple[QuantityEvidence, ...] = ()
+    if clean_family_group == "surfaces":
+        wall_surface_quantities = _non_abstained(
+            publish_live_per_wall_surface_area_quantities(claim.publication)
+        )
+        summary["family_counts"]["wall_net_area"] = len(wall_surface_quantities)
+        if wall_surface_quantities:
+            family_runs.append(
+                (
+                    "wall_net_area",
+                    seal_live_per_wall_surface_area_run(
+                        claim.publication,
+                        workspace_id=workspace_id,
+                        project_id=project_id,
+                    ),
+                )
+            )
+
     if clean_family_group in {"all", "surfaces"}:
         floor_finish_quantities = _non_abstained(
             getattr(claim, "floor_finish_quantity_evidence", ())
@@ -749,6 +775,7 @@ def _generate_project_handoff_locked(
 
     expected_by_family = {
         "floor_area": floor_quantities,
+        "wall_net_area": wall_surface_quantities,
         "floor_finish_area": floor_finish_quantities,
         "opening_area": opening_area_quantities,
         "opening_count": opening_count_quantities,
