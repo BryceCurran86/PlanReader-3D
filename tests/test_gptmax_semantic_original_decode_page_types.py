@@ -32,6 +32,7 @@ def _corrupt_original_coverage(*, total, decoded, failed=(), two_pages=False):
             published.coverage,
             total_pages=total, decoded_pages=decoded,
             failed_pages=failed,
+            state="partial" if failed else published.coverage.state,
         ),
     )
     return source, published.revision.revision_id
