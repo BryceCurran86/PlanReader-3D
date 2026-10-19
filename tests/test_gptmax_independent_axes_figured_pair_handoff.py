@@ -6,12 +6,16 @@ Every test uses source-neutral producer-shaped receipts.
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
 import pytest
 
 from tests.test_gptmax_lot16_host_frame_gpt1_handoff import fixture, run
 from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import (
     _source_owned_axes_agree_with_figured_pair,
+    verify_archived_signed_predecessors,
+    original_host_frame_dimension_report,
 )
 
 
@@ -217,3 +221,61 @@ def test_area_first_gate_counts_are_complete_deterministic_inventory():
         "whole_wall_frame_unavailable": 1,
     }
     assert sum(result["area_first_gate_counts"].values()) == 3
+
+
+
+_ARCHIVE = Path("docs/engineering/lot16_original_signed_eight_row_20261015/production")
+
+
+def _historical_archive():
+    """Repository-pinned eight real historical rows; never a prediction input."""
+    signed = json.loads((_ARCHIVE / "source_sealed_run.json").read_text())
+    customers = json.loads((_ARCHIVE / "verified_customer_rows.json").read_text())
+    assert len(signed["quantities"]) == len(customers) == 8
+    return signed, customers
+
+
+def test_reissued_historical_sealed_and_customer_bodies_require_exact_parity():
+    signed, customers = _historical_archive()
+    current = {"sealed_run": deepcopy(signed), "customer_rows": deepcopy(customers)}
+    verify_archived_signed_predecessors(signed, customers, current)
+    # Consumer order is not a physical identity or historical-body mutation.
+    current["customer_rows"].reverse()
+    verify_archived_signed_predecessors(signed, customers, current)
+
+
+@pytest.mark.parametrize("change", [
+    "quantity_value", "quantity_fingerprint", "quantity_lineage",
+    "signed_row_missing", "customer_nested_quantity", "customer_fingerprint",
+    "customer_missing", "customer_duplicate",
+])
+def test_predecessor_mutations_cannot_hide_behind_unchanged_quantity_id(change):
+    signed, customers = _historical_archive()
+    current = {"sealed_run": deepcopy(signed), "customer_rows": deepcopy(customers)}
+    if change == "quantity_value":
+        current["sealed_run"]["quantities"][0]["value"] += 1
+    elif change == "quantity_fingerprint":
+        current["sealed_run"]["quantities"][0]["fingerprint"] = "0" * 64
+    elif change == "quantity_lineage":
+        current["sealed_run"]["quantities"][0]["evidence_ids"].pop()
+    elif change == "signed_row_missing":
+        current["sealed_run"]["quantities"].pop()
+    elif change == "customer_nested_quantity":
+        current["customer_rows"][0]["commercial_projection_provenance"]["quantity"]["value"] += 1
+    elif change == "customer_fingerprint":
+        current["customer_rows"][0]["commercial_projection_fingerprint"] = "0" * 64
+    elif change == "customer_missing":
+        current["customer_rows"].pop()
+    elif change == "customer_duplicate":
+        current["customer_rows"].append(deepcopy(current["customer_rows"][0]))
+    with pytest.raises((RuntimeError, ValueError)):
+        verify_archived_signed_predecessors(signed, customers, current)
+
+
+def test_signed_customer_archive_cannot_be_half_supplied_before_source_ingestion():
+    signed, _ = _historical_archive()
+    with pytest.raises(ValueError, match="supplied together"):
+        original_host_frame_dimension_report(
+            b"synthetic input, never client original", page_id="3",
+            archived_signed_run=signed,
+        )
