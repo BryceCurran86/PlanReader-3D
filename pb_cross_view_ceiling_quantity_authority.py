@@ -196,6 +196,60 @@ class CrossViewCeilingQuantityRecord:
             raise TypeError("CrossViewCeilingQuantityRecord is producer-owned")
 
 
+def _reconstructed_ceiling_source_row_is_firm(
+    record: CrossViewCeilingQuantityRecord,
+) -> bool:
+    """Do not trust the public result's status in place of source row receipts."""
+    quantity = record.quantity
+    ceiling = record.canonical_ceiling
+    if (
+        type(quantity) is not QuantityEvidence
+        or type(ceiling) is not LiveCanonicalCeilingSurfaceObject
+        or quantity.family != "ceiling_lining"
+        or quantity.status != AuthorityStatus.FIRM.value
+        or quantity.authority != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+        or quantity.abstained
+        or quantity.unit not in ("m2", "m²")
+        or type(quantity.value) not in (int, float)
+        or not math.isfinite(quantity.value)
+        or quantity.value <= 0
+        or type(ceiling.area_m2) not in (int, float)
+        or not math.isfinite(ceiling.area_m2)
+        or abs(float(quantity.value) - float(ceiling.area_m2)) > 1e-9
+        or quantity.formula != "reuse_firm_documented_room_area_with_authenticated_rcp_finish"
+        or not isinstance(quantity.metadata, Mapping)
+    ):
+        return False
+    meta = quantity.metadata
+    expected = {
+        "canonical_ceiling_id": record.canonical_ceiling_id,
+        "physical_ceiling_surface_id": record.physical_ceiling_surface_id,
+        "physical_room_id": record.physical_room_id,
+        "canonical_room_id": record.canonical_room_id,
+        "source_room_face_record_id": record.source_room_face_record_id,
+        "upstream_room_area_quantity_id": record.upstream_room_area_quantity_id,
+        "room_area_quantity_id": record.upstream_room_area_quantity_id,
+        "finish_code": record.finish_code,
+        "semantic_finish": record.semantic_finish,
+        "support_page_id": record.support_page_id,
+        "support_viewport_id": record.support_viewport_id,
+        "document_id": ceiling.document_id,
+        "revision_id": ceiling.revision_id,
+        "source_sha256": ceiling.source_sha256,
+        "snapshot_id": ceiling.snapshot_id,
+    }
+    if any(meta.get(key) != value for key, value in expected.items()):
+        return False
+    return (
+        ceiling.room_entity_id == record.canonical_room_id
+        and ceiling.room_area_quantity_id == record.upstream_room_area_quantity_id
+        and ceiling.finish_descriptor == record.semantic_finish
+        and ceiling.ceiling_quantity_id == quantity.quantity_id
+        and ceiling.canonical_ceiling_id == record.canonical_ceiling_id
+        and meta.get("finish_occurrence_evidence_id") in quantity.evidence_ids
+    )
+
+
 @dataclass(frozen=True)
 class CrossViewCeilingQuantityResult:
     status: EvidenceResolutionStatus
@@ -244,6 +298,28 @@ class CrossViewCeilingQuantityResult:
         signed_quantity_counts = Counter(
             record.quantity.quantity_id for record in self.records
         )
+        # One source-owned physical room/room-area receipt must never mint
+        # multiple full-room ceiling areas under independently rekeyed
+        # ceiling IDs or material codes. A multi-zone ceiling needs its own
+        # source-proved zone geometry and a different publication path.
+        physical_ownership_fields = (
+            "physical_room_id",
+            "canonical_room_id",
+            "source_room_face_record_id",
+            "upstream_room_area_quantity_id",
+        )
+        if any(
+            type(getattr(record, field)) is not str
+            or not getattr(record, field)
+            or getattr(record, field) != getattr(record, field).strip()
+            for record in self.records
+            for field in physical_ownership_fields
+        ):
+            return MappingProxyType({})
+        physical_ownership_counts = {
+            field: Counter(getattr(record, field) for record in self.records)
+            for field in physical_ownership_fields
+        }
         counts = Counter(
             record.canonical_ceiling_id for record in self.records
             if type(record.canonical_ceiling_id) is str
@@ -260,6 +336,16 @@ class CrossViewCeilingQuantityResult:
                 type(record.canonical_ceiling_id) is str
                 and counts.get(record.canonical_ceiling_id, 0) == 1
                 and signed_quantity_counts.get(record.quantity.quantity_id, 0) == 1
+                and _reconstructed_ceiling_source_row_is_firm(record)
+                and all(
+                    type(getattr(record, field)) is str
+                    and bool(getattr(record, field))
+                    and getattr(record, field) == getattr(record, field).strip()
+                    and physical_ownership_counts[field].get(
+                        getattr(record, field), 0
+                    ) == 1
+                    for field in physical_ownership_fields
+                )
                 and record.physical_ceiling_surface_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.canonical_ceiling_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.ceiling_quantity_id == record.quantity.quantity_id
