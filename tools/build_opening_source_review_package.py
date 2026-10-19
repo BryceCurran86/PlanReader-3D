@@ -42,6 +42,7 @@ def _validate_review_report(report):
         if (not isinstance(packets, (tuple, list)) or not isinstance(receipt, dict)
                 or any(not isinstance(receipt.get(k), (tuple, list)) for k in ("hosts", "frames", "quantities"))):
             raise ValueError("complete source review packets and receipts required")
+        physical_ids = set()
         for packet in packets:
             if not isinstance(packet, dict) or any(packet.get(k) is not False
                     for k in ("takeoff_eligible", "deduction_authority")):
@@ -58,6 +59,28 @@ def _validate_review_report(report):
                     or not packet["page_id"].isdigit() or str(int(packet["page_id"])) != packet["page_id"]
                     or int(packet["page_id"]) < 1):
                 raise ValueError("canonical source page required")
+            # A review export cannot rename or reissue a physical occurrence.
+            # This structural check does not authenticate the imported packet.
+            opening = packet.get("physical_opening")
+            identity = packet.get("opening_identity_id")
+            if opening is None:
+                if identity is not None or packet.get("source_lineage") is not None:
+                    raise ValueError("absent physical opening cannot claim identity or source ancestry")
+            else:
+                if (not isinstance(opening, dict) or not safe_token(identity)
+                        or opening.get("record_id") != identity
+                        or opening.get("page_id") != packet["page_id"]
+                        or any(opening.get(k) != selector[k] for k in
+                               ("document_id", "revision_id", "source_sha256", "snapshot_id"))):
+                    raise ValueError("physical opening identity or original source scope disagrees")
+                roots = opening.get("source_observation_ids")
+                if (not isinstance(roots, (tuple, list)) or not roots
+                        or any(type(v) is not str or not v or v != v.strip() for v in roots)
+                        or len(roots) != len(set(roots))):
+                    raise ValueError("physical opening source observations must be uniquely owned")
+                if identity in physical_ids:
+                    raise ValueError("duplicate physical opening identity in one source review branch")
+                physical_ids.add(identity)
             blockers = packet.get("next_required_evidence")
             if not isinstance(blockers, (tuple, list)) or not blockers or any(type(v) is not str or not v
                     or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_" for c in v) for v in blockers):
@@ -70,7 +93,11 @@ def _validate_review_report(report):
                 raise ValueError("source review packet contradicts its closed parent graph")
             issuer_scopes.add((selector["document_id"], selector["revision_id"]))
             local = packet.get("local_aperture_frame")
+            if local is not None and not isinstance(local, dict):
+                raise ValueError("local aperture review must be a typed review record")
             if local is not None and local.get("evidence") is not None:
+                if not isinstance(local["evidence"], dict):
+                    raise ValueError("local aperture source evidence must be a typed record")
                 if (local.get("status") != "candidate"
                         or local["evidence"].get("whole_wall_frame_id") is not None
                         or local["evidence"].get("whole_wall_length_pt") is not None):
