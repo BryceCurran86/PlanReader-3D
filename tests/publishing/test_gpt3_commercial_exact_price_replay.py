@@ -23,7 +23,7 @@ def _approved():
     (13.270425, 150.0, 1990.57),
     (10.0, 5.0, 0.0),
     (10.0, 0.0, 15.0),
-    (10.0, 1.001, 10.01),
+    (10.0, 1.001, 10.02),
     (10.0, 5.0, 50.001),
     (1e308, 1e308, 1e308),
 ])
@@ -47,6 +47,16 @@ def test_six_decimal_source_area_with_cent_rounded_customer_rate_is_valid():
     line.quantity = 13.270425
     line.rate = 150.0
     line.total_price = 1990.56
+    pkg.payload_hash = pkg.compute_payload_hash()
+    assert validate_publishing_gate(pkg).is_publishable
+
+
+def test_high_precision_customer_unit_rate_can_create_cent_exact_price():
+    pkg = _approved()
+    line = pkg.quantities[0]
+    line.quantity = 10.0
+    line.rate = 1.001
+    line.total_price = 10.01
     pkg.payload_hash = pkg.compute_payload_hash()
     assert validate_publishing_gate(pkg).is_publishable
 
