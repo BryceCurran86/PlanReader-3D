@@ -173,6 +173,7 @@ def _polygon_perimeter_m(value: object) -> Optional[float]:
             points.pop()
         if len(points) < 3 or len(set(points)) != len(points):
             return None
+        from shapely.errors import GEOSException
         from shapely.geometry import Polygon
         polygon = Polygon(points)
         if not polygon.is_valid or not polygon.exterior.is_simple:
@@ -180,7 +181,7 @@ def _polygon_perimeter_m(value: object) -> Optional[float]:
         if not math.isfinite(polygon.area) or polygon.area <= 0.0:
             return None
         perimeter = float(polygon.length)
-    except (TypeError, ValueError, OverflowError, ImportError):
+    except (TypeError, ValueError, OverflowError, ImportError, GEOSException):
         return None
     return perimeter if math.isfinite(perimeter) and perimeter > 0.0 else None
 
