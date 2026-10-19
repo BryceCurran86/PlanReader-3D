@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import copy
 
 import pytest
 
@@ -45,10 +46,12 @@ def test_invalid_signed_quantity_id_fails_closed_even_when_other_record_valid(
     bad_quantity_id,
 ):
     issued = _issued()
-    invalid = replace(
-        issued.records[0],
-        quantity=replace(issued.records[0].quantity, quantity_id=bad_quantity_id),
-    )
+    # QuantityEvidence's normal constructor rejects empty IDs. Model an
+    # untrusted reconstructed/partially deserialized object bypassing that
+    # constructor, to exercise this public result guard independently.
+    malformed = copy.copy(issued.records[0].quantity)
+    object.__setattr__(malformed, "quantity_id", bad_quantity_id)
+    invalid = replace(issued.records[0], quantity=malformed)
     result = replace(issued, records=(issued.records[0], invalid))
     assert result.records_by_ceiling_id == {}
     assert result.quantities == ()
