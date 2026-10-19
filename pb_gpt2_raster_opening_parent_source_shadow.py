@@ -124,6 +124,7 @@ def recover_original_raster_opening_parent_lines_shadow(
     found: dict[str, list[AuthenticatedRasterOpeningParentLine]] = {
         key: [] for key in requested
     }
+    source_inventory_conflict = False
     # Addressing only: every visible opening primitive must be resolved with
     # the EXISTING producer-owned parent/page/render/visibility receipt.
     for visible_id in sorted(source.raster_opening_primitive_observation_ids_for_snapshot(snapshot_id)):
@@ -133,6 +134,9 @@ def recover_original_raster_opening_parent_lines_shadow(
         )
         result = source.resolve_raster_opening_primitive(selector)
         if result.status is not EvidenceResolutionStatus.CORROBORATED:
+            # A missing/invalid source primitive receipt could hide competing
+            # ancestry. Do not report a complete source line inventory.
+            source_inventory_conflict = True
             continue
         record = result.observation
         if record is None or len(record.derivation_parent_ids) != 1:
@@ -143,6 +147,13 @@ def recover_original_raster_opening_parent_lines_shadow(
         line = _source_line(record, parent_id=parent_id, visible_id=visible_id, root=root, page_id=page_id)
         if line is not None:
             found[parent_id].append(line)
+    if source_inventory_conflict:
+        return RasterOpeningParentSourceHandoff(
+            status="PARTIAL_ABSTAIN", source_sha256=sha,
+            requested_parent_ids=requested, lines=(),
+            unresolved_parent_ids=requested,
+            reason_codes=("original_raster_opening_source_inventory_conflict",),
+        )
     verified, blocked = [], []
     for parent_id in requested:
         matches = found[parent_id]
