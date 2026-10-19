@@ -144,3 +144,39 @@ def test_no_candidate_owner_is_physical_wall_quantity_authority(monkeypatch):
     assert candidate.status is EvidenceResolutionStatus.CANDIDATE
     assert candidate.floor_area_m2 is None
     assert candidate.label == ""
+
+
+def test_sha_pinned_original_freezer_source_ink_has_distinct_duplicate_drawings():
+    """Original PDF confirms duplicate source ink, NOT distinct structural W4."""
+    from pathlib import Path
+    import hashlib
+    import fitz
+
+    source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+    if not source.is_file():
+        pytest.skip("PRIVATE ORIGINAL absent: actual source ink NOT verified by public CI")
+    raw = source.read_bytes()
+    digest = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert hashlib.sha256(raw).hexdigest() == digest
+    expected_spans = (
+        ((368.639984, 1275.920044, 588.239990, 1275.920044),
+         (0.96, 0.48)),
+        ((368.639984, 1179.440063, 368.639984, 1275.920044),
+         (0.96, 0.48)),
+    )
+    with fitz.open(stream=raw, filetype="pdf") as pdf:
+        assert len(pdf) == 31
+        source_drawings = pdf[6].get_drawings()
+        for bbox, expected_widths in expected_spans:
+            matched = [
+                line for line in source_drawings
+                if len(line.get("items", ())) == 1
+                and line["items"][0][0] == "l"
+                and all(abs(a - b) < 0.0001
+                        for a, b in zip(line["rect"], bbox))
+                and tuple(line.get("color") or ()) == (0.0, 0.0, 0.0)
+            ]
+            widths = [round(float(line["width"]), 2) for line in matched]
+            assert all(width in widths for width in expected_widths)
+    # This is a native PDF observation: two strokes != two W4 physical walls.
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
