@@ -193,7 +193,8 @@ class TestStructuralSteelTradeAuthority(unittest.TestCase):
         self.assertIsNotNone(conn_row)
         self.assertEqual(conn_row["quantity"], 0.254)
         self.assertEqual(conn_row["unit"], "t")
-        self.assertIn("10.0% connection allowance", conn_row["notes"])
+        self.assertIn("10.0% fittings weight allowance", conn_row["notes"])
+        self.assertEqual(conn_row["quantity_status"], "Provisional")
 
     def test_sqlite_publication_and_contract_compliance(self) -> None:
         """Verify that steel takeoff rows satisfy 21-field core contract in SQLite."""
