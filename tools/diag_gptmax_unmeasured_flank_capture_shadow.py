@@ -15,6 +15,9 @@ from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
 from tools.diag_gptmax_original_stacker_image_frame import (
     source_verified_stacker_image_frame,
 )
+from tools.diag_gptmax_original_stacker_shared_pier_reproof import (
+    original_shared_pier_candidate_w4_reproof,
+)
 
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -269,6 +272,14 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         "separate_elevation_witness_page_5":elevation_witness_shadow,
         "opt_in_source_fragment_roles_evaluated": source_fragment_roles_shadow,
         "source_fragment_host_authority_requires_original_reproof": True,
+        # Share NO physical identifiers between neighbouring openings merely
+        # for occupying one W4-looking image region. Reissue both original
+        # sources and require identical G17 face obs + distinct original end
+        # caps, then run isolated original W2/W3/W4 at 2.5pt and zero snap.
+        "source_owned_shared_g17_pier_w4_reproof": (
+            original_shared_pier_candidate_w4_reproof(snapshot, comp)
+            if source_fragment_roles_shadow else None
+        ),
         "old_source_snapshot_may_differ": True,
         "old_21_15_9_8_source_baseline_NOT_replayed_or_assumed": True,
         "opt_in_physical_opening_count": physical_count,
