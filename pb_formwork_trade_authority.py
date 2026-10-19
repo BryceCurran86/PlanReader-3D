@@ -102,7 +102,7 @@ def _positive_original_metres(*values: object) -> bool:
             measured = float(value)
         except (TypeError, ValueError, OverflowError):
             return False
-        if not math.isfinite(measured) or measured <= 0.0:
+        if not math.isfinite(measured) or measured <= 0.0 or not math.isfinite(measured * 1000.0):
             return False
     return True
 
@@ -127,6 +127,10 @@ def _closed_original_wall_opening_areas(openings: object) -> list[float] | None:
         recorded = opening.get("area")
         width, height = opening.get("width"), opening.get("height")
         axes = _positive_original_metres(width, height)
+        if ((width is None) != (height is None)):
+            return None
+        if (width is not None and height is not None and not axes):
+            return None
         if recorded is None and not axes:
             return None
         if recorded is not None and not _positive_original_metres(recorded):
@@ -206,6 +210,8 @@ def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
     ):
         panel_area = spec.count * (spec.length_m * spec.width_m)
         panel_edge = spec.count * 2 * (spec.length_m + spec.width_m)
+        if not math.isfinite(panel_area + panel_edge * spec.depth_m):
+            return items
         items.append(FormworkTakeoffItem(
             section=spec.section or "Structure",
             element=f"Drop panel formwork ({int(spec.depth_m*1000)}mm drop)",
@@ -234,6 +240,8 @@ def calculate_edge_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     if not _positive_original_metres(length, depth):
         return items
 
+    if not math.isfinite(length * depth):
+        return items
     contact_area = round(length * depth, 2)
     depth_band = f"depth <= {int(depth*1000)}mm" if depth <= 0.300 else f"depth {int(depth*1000)}mm"
 
@@ -280,6 +288,16 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     ):
         return items
     net_face = gross_face - total_ded
+    if not math.isfinite(net_face * 2.0):
+        return items
+    if type(spec.depth_m) not in (int, float):
+        return items
+    try:
+        source_depth = float(spec.depth_m)
+    except (TypeError, ValueError, OverflowError):
+        return items
+    if not math.isfinite(source_depth) or source_depth < 0.0:
+        return items
 
     if spec.is_single_faced:
         total_form_area = round(net_face, 2)
@@ -360,6 +378,8 @@ def calculate_column_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
         element_name = f"Rectangular column formwork ({int(w*1000)}×{int(d*1000)}mm)"
         substrate="Plywood column boxes with steel column clamps"
 
+    if not math.isfinite(total_form_area) or total_form_area <= 0.0:
+        return items
     items.append(FormworkTakeoffItem(
         section=spec.section or "Structure",
         element=element_name,
@@ -412,6 +432,8 @@ def calculate_beam_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     soffit_area = length * w
     sides_area = length * (2 * d)
     total_form_area = round(soffit_area + sides_area, 2)
+    if not math.isfinite(total_form_area) or total_form_area <= 0.0:
+        return items
 
     items.append(FormworkTakeoffItem(
         section=spec.section or "Structure",
