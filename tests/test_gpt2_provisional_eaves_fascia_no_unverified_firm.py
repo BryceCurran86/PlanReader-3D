@@ -46,6 +46,19 @@ def test_invalid_overhang_cannot_issue_customer_area(width):
     assert generate_workspace_carpentry_takeoff([spec], 1, "now") == []
 
 
+def test_missing_drawing_reference_is_named_unverified_not_invented_as_carpentry_plan():
+    spec = CarpentryElementSpec(
+        element_type="eaves", element_id="NO_SOURCE",
+        description="Model-only preview", perimeter_lm=18.0,
+    )
+    rows = generate_workspace_carpentry_takeoff([spec], 1, "now")
+    assert len(rows) == 2
+    assert {row["source_page"] for row in rows} == {
+        "UNVERIFIED - model input only"
+    }
+    assert all(row["quantity_status"] == "Provisional" for row in rows)
+
+
 @pytest.mark.parametrize("perimeter", [float("nan"), float("inf"), -40])
 def test_invalid_perimeter_cannot_issue_customer_fascia_or_soffit(perimeter):
     spec = CarpentryElementSpec(
