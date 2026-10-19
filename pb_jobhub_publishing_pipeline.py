@@ -114,7 +114,7 @@ def build_publishing_package_from_workspace(
     ORDER BY id ASC
     """ if "commercial_authority_status" in cols else """
     SELECT id, section, location, substrate, '' AS finish_tag, element, unit, quantity, rate, total_price,
-           'firm' AS commercial_authority_status, 'documented_dimension' AS commercial_authority_source,
+           'provisional' AS commercial_authority_status, 'provisional' AS commercial_authority_source,
            NULL AS commercial_authority_reviewed_by, NULL AS commercial_authority_reviewed_at,
            '' AS source_page, '' AS notes
     FROM takeoff_rows
@@ -141,8 +141,14 @@ def build_publishing_package_from_workspace(
         rate = float(r["rate"] or 0.0)
         tot = float(r["total_price"] or (qty * rate))
 
-        auth_status = str(r["commercial_authority_status"] or AuthorityStatus.FIRM.value).lower()
-        auth_src = str(r["commercial_authority_source"] or MeasurementAuthorityType.DOCUMENTED_DIMENSION.value).lower()
+        # Missing provenance cannot become source-authenticated FIRM by a
+        # schema fallback or NULL from an older PlanReader workspace.
+        auth_status = str(
+            r["commercial_authority_status"] or AuthorityStatus.PROVISIONAL.value
+        ).lower()
+        auth_src = str(
+            r["commercial_authority_source"] or MeasurementAuthorityType.PROVISIONAL.value
+        ).lower()
         reviewed_by = r["commercial_authority_reviewed_by"]
         reviewed_at = r["commercial_authority_reviewed_at"]
         source_page = str(r["source_page"] or "")
@@ -212,9 +218,16 @@ def execute_jobhub_publishing(
     if not bridge:
         raise RuntimeError("JobHub bridge is unavailable")
 
+    # Historical override flag was a commercial safety bypass: a blocked
+    # source / wrong project / fabricated quantity could be written as Published.
+    # Keep the parameter for callers but never allow a gate override.
+    if override_preflight_check:
+        raise RuntimeError(
+            "Publishing gate override is prohibited: correct evidence and rerun preflight"
+        )
     # 1. Evaluate Publishing Gate
     gate_result = validate_publishing_gate(package)
-    if not gate_result.is_publishable and not override_preflight_check:
+    if not gate_result.is_publishable:
         reasons = "; ".join(gate_result.blocking_reasons)
         raise RuntimeError(f"Publishing blocked by gate QA checks: {reasons}")
 
