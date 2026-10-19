@@ -441,6 +441,20 @@ def _definition_is_ceiling_finish(
     # such as SIGNAGE-CONTRACTOR; tokenize semantics without source guessing.
     import re
     role_tokens = set(re.findall(r"[a-z]+", original_material_text))
+    # A refrigerated-panel enclosure can have a genuine ceiling role when
+    # independently identified on the RCP. It is not a suspended plaster
+    # GRID definition just because a stale semantic class says ceiling_grid.
+    is_coldroom = (
+        "coldroom" in role_tokens
+        or {"cold", "room"}.issubset(role_tokens)
+    )
+    if (
+        semantic == "ceiling_grid"
+        and is_coldroom
+        and bool(role_tokens.intersection({"panel", "panels"}))
+        and "grid" not in role_tokens
+    ):
+        return False
     # A schedule's original material description takes precedence over a
     # stale ceiling-grid semantic. Exterior soffit/eaves/canopy cladding is
     # NOT the internal suspended GRID/IPF1 ceiling finish, even when drawn
