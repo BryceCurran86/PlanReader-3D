@@ -89,3 +89,14 @@ def test_create_only_cli_never_overwrites_original_pdf_or_v1_seal(tmp_path):
     args[-1] = str(pdf)
     with pytest.raises(ValueError, match="protected evidence"):
         main(args)
+
+def test_audit_rejects_symlink_before_hashing_original(tmp_path):
+    pdf, sealed = _synthetic_source(tmp_path)
+    seal_file = tmp_path / "signed-v1.json"
+    seal_file.write_text(json.dumps(sealed.to_dict()), encoding="utf-8")
+    alias = tmp_path / "original-alias.pdf"
+    alias.symlink_to(pdf)
+    with pytest.raises(ValueError, match="non-symlink"):
+        build_original_source_sha_report(
+            sealed_path=seal_file, original_paths=[alias],
+        )
