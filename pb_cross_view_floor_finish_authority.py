@@ -543,6 +543,13 @@ class CrossViewFloorFinishResult:
 
     @property
     def records_by_floor_id(self) -> Mapping[str, CrossViewFloorFinishRecord]:
+        # A reconstructed ABSTAINED/CONFLICT result cannot emit signed floor
+        # quantities merely by carrying stale prior-run records.
+        if self.status not in (
+            EvidenceResolutionStatus.CORROBORATED,
+            EvidenceResolutionStatus.CANDIDATE,
+        ):
+            return MappingProxyType({})
         # Consumers may receive a reconstructed result dataclass instead of
         # the producer's already-quarantined records. Reapply BOTH the native
         # material-mark ownership gate and the physical room/surface gate here:
