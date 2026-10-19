@@ -28,6 +28,10 @@ def _original_like_source(*, changes=None, pages=2, opaque_mask=None):
                     region = fitz.Rect(target[:4])
                 elif opaque_mask == "whole_schedule":
                     region = fitz.Rect(295, 695, 580, 816)
+                elif opaque_mask == "hidden_heading":
+                    target = next(w for w in p.get_text("words")
+                                  if w[4] == "CALCULATIONS")
+                    region = fitz.Rect(target[:4])
                 elif opaque_mask == "unrelated_late_decor":
                     region = fitz.Rect(20, 20, 70, 40)
                 else:
@@ -66,7 +70,7 @@ def test_two_repeated_schedule_sheets_issue_only_three_source_firm_quantities():
 
 
 def test_later_opaque_source_paint_over_one_numeric_word_invalidates_firm():
-    for mask in ("numeric_word", "whole_schedule"):
+    for mask in ("numeric_word", "whole_schedule", "hidden_heading"):
         raw = _original_like_source(opaque_mask=mask)
         with fitz.open(stream=raw, filetype="pdf") as document:
             page = document[0]
