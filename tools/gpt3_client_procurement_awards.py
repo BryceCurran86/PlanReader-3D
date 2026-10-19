@@ -173,6 +173,14 @@ def build_procurement_plan(
     if currency != quote["currency"]:
         raise ValueError("procurement currency must match explicit client quote")
     as_of = _date(book.get("as_of"), "procurement offer evaluation date")
+    issued_on = _date(quote.get("issued_on"), "source client quote issued_on")
+    expires_on = quote.get("expires_on")
+    if as_of < issued_on:
+        raise ValueError("client quote is not yet issued at procurement approval date")
+    if expires_on is not None and as_of > _date(
+        expires_on, "source client quote expires_on"
+    ):
+        raise ValueError("client quote expired before procurement approval date")
     suppliers = _suppliers(book.get("suppliers"), currency)
     raw_demand = book.get("requisitions")
     if type(raw_demand) is not list:
