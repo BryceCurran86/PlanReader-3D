@@ -186,8 +186,33 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
 def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTakeoffItem]:
     """Calculate trade items for timber floor bearers, joists, and structural sheet flooring."""
     items: List[CarpentryTakeoffItem] = []
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    if area <= 0.0:
+    # Source area and independently supplied rectangle axes may not
+    # contradict one another. Do not coerce text, bool, NaN, infinite or
+    # overflowing values into an apparently verified subfloor.
+    def _metric_or_none(value: object) -> float | None:
+        if type(value) not in (int, float):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) and number >= 0.0 else None
+
+    source_area = _metric_or_none(spec.area_m2)
+    source_length = _metric_or_none(spec.length_m)
+    source_width = _metric_or_none(spec.width_m)
+    if None in (source_area, source_length, source_width):
+        return items
+    rectangular_area = (
+        source_length * source_width
+        if source_length > 0.0 and source_width > 0.0 else None
+    )
+    if (source_area > 0.0 and rectangular_area is not None
+            and not math.isclose(source_area, rectangular_area,
+                                 rel_tol=0.0, abs_tol=0.011)):
+        return items
+    area = source_area if source_area > 0.0 else rectangular_area
+    if area is None or not math.isfinite(area) or area <= 0.0:
         return items
 
     # 1. Structural Subfloor Sheets (m²)
@@ -199,12 +224,12 @@ def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[Carpent
         finish_system="Glued and screw-fixed to floor joists",
         quantity=round(area, 2),
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Structural subfloor area: {area:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional subfloor area: {area:.2f} m²; 19mm particleboard material not authenticated from original drawing.",
         row_role="floor_area",
     ))
 
@@ -218,12 +243,12 @@ def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[Carpent
         finish_system="Spaced @ 450mm centres, blocked at ends and over bearers",
         quantity=joists_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Estimated joist run: {joists_lm:.2f} lm across {area:.2f} m² floor.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional 2.4 lm/m² joist estimate: {joists_lm:.2f} lm across {area:.2f} m²; structural layout and sizing unverified.",
         row_role="",
     ))
 
