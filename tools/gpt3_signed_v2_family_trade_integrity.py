@@ -33,7 +33,7 @@ _COMPATIBLE_TRADES = {
 # Dimensional constraints on already-sealed source units, independent of
 # benchmark expected values. Not a measurement unit conversion mechanism.
 _AREA_UNITS = frozenset({"m²", "m2", "sqm"})
-_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number", "count"})
+_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number"})
 _SOURCE_FAMILY_UNITS = {
     "floor_area": _AREA_UNITS,
     "floor_finish_area": _AREA_UNITS,
