@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import math
 from types import MappingProxyType
 from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
+from pb_repeated_room_label_source_shadow import uniquely_owned_repeated_label_lines
 from typing import Mapping
 
 from pb_cross_view_room_area_authority import (
@@ -117,7 +118,11 @@ class SameViewRoomAreaProducer:
     ) -> "SameViewRoomAreaProducer":
         return cls(source=source, rooms=rooms, _seal=_PRODUCER_SEAL)
 
-    def publish(self) -> SameViewRoomAreaResult:
+    def publish(
+        self, *, repeated_label_source_ownership_shadow: bool = False,
+    ) -> SameViewRoomAreaResult:
+        if type(repeated_label_source_ownership_shadow) is not bool:
+            raise TypeError('repeated_label_source_ownership_shadow must be bool')
         rooms = tuple(self._rooms.rooms)
         if not rooms:
             return SameViewRoomAreaResult(
@@ -189,7 +194,7 @@ class SameViewRoomAreaProducer:
         duplicate_room_ids = {
             str(room.physical_room_id)
             for group in labels.values()
-            if len(group) != 1
+            if len(group) != 1 and not repeated_label_source_ownership_shadow
             for room in group
         }
         # Two canonical rows asserting one physical room, even under different
@@ -246,29 +251,58 @@ class SameViewRoomAreaProducer:
         )
         records: list[SameViewRoomAreaRecord] = []
 
+        # Default iterates exactly the same unique-label candidates as before.
+        # Repeated text is opt-in: never disambiguate by nearest geometry.
+        area_rows: list[tuple[str, str, LiveCanonicalRoomObject, object | None]] = []
         for (page_id, label), grouped_rooms in sorted(labels.items()):
-            if len(grouped_rooms) != 1:
+            if len(grouped_rooms) == 1:
+                area_rows.append((page_id, label, grouped_rooms[0], None))
                 continue
-            room = grouped_rooms[0]
+            if not repeated_label_source_ownership_shadow:
+                continue
+            source_lines = tuple(
+                line for line in _trusted_lines_for_page(
+                    self._source, revision_id=revision_id, page_id=page_id,
+                    candidate_labels=(grouped_rooms[0].room_label,),
+                ) if _norm_label(line.text) == label
+            )
+            owned = uniquely_owned_repeated_label_lines(
+                {
+                    str(room.physical_room_id): tuple(room.room_label_evidence_ids)
+                    for room in grouped_rooms
+                }, source_lines,
+            )
+            if len(owned) != len(grouped_rooms):
+                for room in grouped_rooms:
+                    room_id = str(room.physical_room_id)
+                    unresolved.add(room_id)
+                    first_failures[room_id] = (
+                        "same_view_repeated_label_source_observation_ambiguous"
+                    )
+                conflict_seen = True
+                continue
+            for room in sorted(grouped_rooms, key=lambda r: str(r.physical_room_id)):
+                area_rows.append((
+                    page_id, label, room, owned[str(room.physical_room_id)],
+                ))
+
+        for page_id, label, room, owned_line in area_rows:
             if (
                 str(room.physical_room_id) in duplicate_physical_ids
                 or str(room.physical_room_id) in duplicate_face_room_ids
             ):
                 continue
-
-            lines = tuple(
-                line
-                for line in _trusted_lines_for_page(
-                    self._source,
-                    revision_id=revision_id,
-                    page_id=page_id,
-                    candidate_labels=(room.room_label,),
+            lines = (
+                (owned_line,) if owned_line is not None
+                else tuple(
+                    line for line in _trusted_lines_for_page(
+                        self._source,
+                        revision_id=revision_id,
+                        page_id=page_id,
+                        candidate_labels=(room.room_label,),
+                    ) if _norm_label(line.text) == label
                 )
-                if _norm_label(line.text) == label
             )
-            # Same-view ownership is stricter than cross-view: the already
-            # room-owned semantic label must resolve to one exact trusted native
-            # line on this physical room page.
             if len(lines) != 1:
                 unresolved.add(str(room.physical_room_id))
                 first_failures[str(room.physical_room_id)] = (
