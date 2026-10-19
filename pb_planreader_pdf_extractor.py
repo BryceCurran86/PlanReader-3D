@@ -752,12 +752,42 @@ class GenericPlanReaderExtractor:
         replacement privilege. Existing behaviour remains deterministic: a
         positive later physical quantity replaces only a smaller existing one.
         """
-        del new_metadata
-        if new_quantity <= 0:
+        # Partial compound floor arithmetic is useful for diagnostics but
+        # must never displace a smaller complete structural bed/DPM/mesh
+        # quantity. Conversely, authentic complete geometry can replace a
+        # larger provisional estimate. Neither declared areas nor unrelated
+        # receipt strings confer this status; it comes from source geometry.
+        try:
+            if isinstance(new_quantity, bool):
+                return False
+            new_m2 = float(new_quantity)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(new_m2) or new_m2 <= 0:
             return False
         if existing is None:
             return True
-        return new_quantity > float(existing.quantity or 0)
+        current = getattr(existing, "quantity", None)
+        try:
+            if isinstance(current, bool):
+                return False
+            current_m2 = float(current) if current is not None else 0.0
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(current_m2):
+            return False
+        source_complete = (
+            isinstance(new_metadata, dict)
+            and new_metadata.get("commercial_area_authorized") is True
+        )
+        previous_meta = getattr(existing, "metadata", None)
+        previous_complete = (
+            isinstance(previous_meta, dict)
+            and previous_meta.get("commercial_area_authorized") is True
+        )
+        if source_complete != previous_complete:
+            return source_complete
+        return new_m2 > current_m2
 
     @staticmethod
     def _has_dpc_specification(page_text: str) -> bool:
