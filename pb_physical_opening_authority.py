@@ -1325,6 +1325,13 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             tuple[tuple[str, frozenset[str], tuple[float, ...]], ...],
         ] = {}
+        # Diagnostic-only first failing source predicate per raw raster-gap ID.
+        # Multiple exact-source alternatives remain explicit, never first-wins.
+        # Nothing consumes this cache to publish opening, host, count or area.
+        self._raster_gap_first_gate_shadow_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[tuple[str, tuple[str, ...]], ...],
+        ] = {}
         self._raster_gap_audit_incomplete: set[tuple[str, str, str, str, str]] = set()
         self._raster_candidate_gap_box_cache: dict[
             str, tuple[float, float, float, float]
@@ -1364,6 +1371,7 @@ class PhysicalOpeningAuthority:
             "_raster_primitive_snapshot_cache",
             "_raster_framed_candidate_cache",
             "_raster_gap_candidate_audit_cache",
+            "_raster_gap_first_gate_shadow_cache",
             "_raster_swing_ambiguous_support_cache",
             "_raster_existence_cache",
             "_raster_outer_face_comparison_cache",
@@ -2017,6 +2025,11 @@ class PhysicalOpeningAuthority:
         ambiguous_support_ids: set[str] = set()
         framed_gap_boxes: set[tuple[float, float, float, float]] = set()
         gap_audit: dict[str, tuple[str, frozenset[str], tuple[float, ...]]] = {}
+        source_first_gates: dict[str, set[str]] = {}
+        def review_gate(gap_id: str, gate: str) -> None:
+            # A raw gap can have multiple equally owned band alternatives.
+            # Preserve their typed outcomes, without electing input order.
+            source_first_gates.setdefault(gap_id, set()).add(gate)
         face_comparisons = []
         for axis in ("horizontal", "vertical"):
             along_scale, cross_scale = _raster_axis_registration_scales(
@@ -2083,6 +2096,7 @@ class PhysicalOpeningAuthority:
                 }, digest_chars=32)
                 gap_audit[gap_id] = (gap_id, gap_support, gap_box_pt)
                 if pair.reasons:
+                    review_gate(gap_id, str(pair.reasons[0]))
                     continue
 
                 groups = _raster_frame_line_groups(
@@ -2116,6 +2130,12 @@ class PhysicalOpeningAuthority:
                     if groups and not face_continues and not opposing_wall_faces
                     else ()
                 )
+                if opposing_wall_faces:
+                    review_gate(gap_id, "raster_double_face_negative_shadow")
+                elif face_continues:
+                    review_gate(gap_id, "raster_wall_face_ink_continues")
+                elif not groups:
+                    review_gate(gap_id, "raster_frame_line_groups_unavailable")
                 if frames:
                     support = (*support_a, *support_b, *frames)
                     support_by_id = {
@@ -2143,7 +2163,9 @@ class PhysicalOpeningAuthority:
                         )
                         self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
                         framed_gap_boxes.add(gap_box_pt)
+                        review_gate(gap_id, "framed_source_candidate")
                         continue
+                    review_gate(gap_id, "raster_frame_parent_support_incomplete")
 
                 # Do not let the door-swing fallback override separately
                 # authenticated continuous wall-face ink. This guard applies
@@ -2157,6 +2179,7 @@ class PhysicalOpeningAuthority:
                     image_placements,
                 )
                 if swing_scale_ratio is None:
+                    review_gate(gap_id, "raster_source_image_affine_unavailable")
                     continue
                 solutions = _raster_door_swing_solutions(
                     work_thin,
@@ -2166,12 +2189,14 @@ class PhysicalOpeningAuthority:
                     along_scale=along_scale,
                 )
                 if len(solutions) > 1:
+                    review_gate(gap_id, "raster_swing_source_alternatives_ambiguous")
                     ambiguous_support_ids.update(
                         record.observation_id
                         for record in (*support_a, *support_b)
                     )
                     continue
                 if len(solutions) != 1 or gap_box_pt in framed_gap_boxes:
+                    review_gate(gap_id, "raster_unique_swing_source_unavailable")
                     continue
                 leaf = swing_leaf_support(
                     solutions[0],
@@ -2179,12 +2204,14 @@ class PhysicalOpeningAuthority:
                     along_scale,
                 )
                 if not leaf:
+                    review_gate(gap_id, "raster_door_leaf_source_unavailable")
                     continue
                 support = (*support_a, *support_b, *leaf)
                 support_by_id = {
                     record.observation_id: record for record in support
                 }
                 if len(support_by_id) < 7:
+                    review_gate(gap_id, "raster_swing_parent_support_incomplete")
                     continue
                 payload = {
                     "document_id": seed.document_id,
@@ -2206,6 +2233,7 @@ class PhysicalOpeningAuthority:
                     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
                 )
                 self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
+                review_gate(gap_id, "swing_source_candidate")
 
         for candidate_id in tuple(sorted(discovered)):
             if (
@@ -2255,6 +2283,10 @@ class PhysicalOpeningAuthority:
         result = tuple(candidates)
         self._raster_gap_candidate_audit_cache[cache_key] = tuple(
             gap_audit[key] for key in sorted(gap_audit)
+        )
+        self._raster_gap_first_gate_shadow_cache[cache_key] = tuple(
+            (gap_id, tuple(sorted(gates)))
+            for gap_id, gates in sorted(source_first_gates.items())
         )
         self._raster_swing_ambiguous_support_cache[cache_key] = frozenset(
             ambiguous_support_ids
