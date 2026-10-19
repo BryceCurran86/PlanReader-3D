@@ -30,6 +30,9 @@ def _fixture(*, extra=True, change=None, duplicate_area=False,
     else:
         first_new = first
     if revision_changed:
+        first_new = replace(first_new, metadata={
+            **first_new.metadata, "revision_id": "rev-next",
+        })
         added = replace(added, metadata={
             **added.metadata, "revision_id": "rev-next",
         })
