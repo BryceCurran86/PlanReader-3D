@@ -1,0 +1,76 @@
+{
+  "ancestry_rows_with_end_reach": 6,
+  "benchmark_score_granted": false,
+  "end_reach_attach": {
+    "flank_disposition_counts": {
+      "raster_source_band_left_source_primitive_unmapped": 6,
+      "raster_source_band_right_source_primitive_unmapped": 6
+    },
+    "opening_count": 6,
+    "openings": [
+      {
+        "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "flank_dispositions": [
+          "raster_source_band_left_source_primitive_unmapped",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+      },
+      {
+        "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "flank_dispositions": [
+          "raster_source_band_left_source_primitive_unmapped",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d"
+      },
+      {
+        "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "flank_dispositions": [
+          "raster_source_band_left_source_primitive_unmapped",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f"
+      },
+      {
+        "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "flank_dispositions": [
+          "raster_source_band_left_source_primitive_unmapped",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd"
+      },
+      {
+        "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "flank_dispositions": [
+          "raster_source_band_left_source_primitive_unmapped",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b"
+      },
+      {
+        "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "flank_dispositions": [
+          "raster_source_band_left_source_primitive_unmapped",
+          "raster_source_band_right_source_primitive_unmapped"
+        ],
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787"
+      }
+    ],
+    "status": "UNPUBLISHED_UNHOSTED_END_REACH_ORIGINAL_ATTACH"
+  },
+  "host_granted": false,
+  "measurement_published": false,
+  "page_id": "3",
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_UNHOSTED_END_REACH_SHADOW",
+  "unhosted_opening_count": 6
+}
