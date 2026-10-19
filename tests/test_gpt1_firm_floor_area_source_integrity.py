@@ -206,3 +206,30 @@ def test_valid_case_folded_sha_keeps_original_producer_firm_floor_and_room():
     assert len(publish_live_floor_area_quantities(claim)) == 1
     assert len(publish_live_canonical_room_area_quantities(claim)) == 1
     assert len(publish_live_floor_area_quantities(_claim_with(src))) == 1
+
+
+@pytest.mark.parametrize("alias", [True, 1, 1.0, " 1", "1 ", "", None])
+def test_source_room_area_page_alias_never_mints_firm_canonical_floor(alias):
+    source = _source_area()
+    forged = replace(source, metadata={**source.metadata, "page_no": alias})
+    assert publish_live_floor_area_quantities(_claim_with(forged)) == ()
+    assert publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(forged)
+    ) == ()
+
+
+@pytest.mark.parametrize("alias", [True, 1, 1.0, " 1", "1 ", "", None])
+def test_canonical_floor_original_page_alias_cannot_launder_source_area(alias):
+    floor = replace(_floor(), page_id=alias)
+    claim = replace(
+        _claim_with_canonical_room(_source_area()),
+        canonical_floors=(floor,),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+
+
+def test_original_exact_room_to_floor_source_page_remains_firm():
+    assert len(publish_live_floor_area_quantities(_claim_with(_source_area()))) == 1
+    assert len(publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(_source_area())
+    )) == 1
