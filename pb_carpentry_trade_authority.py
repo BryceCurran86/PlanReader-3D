@@ -292,8 +292,36 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
             gross_area = spec.length_m * spec.height_m
         else:
             gross_area = 0.0
-        op_ded = sum(float(op.get("area") or 0.0) for op in spec.openings)
-        net_area = round(max(0.0, gross_area - op_ded), 2)
+        # The cladding gross/net area must remain an actual possible
+        # physical surface. A missing original opening area is not a zero-
+        # area proof, and deductions larger than their containing elevation
+        # cannot be silently clamped into a credible measured takeoff.
+        if type(gross_area) not in (int, float):
+            return items
+        try:
+            gross_area = float(gross_area)
+        except (TypeError, ValueError, OverflowError):
+            return items
+        if not math.isfinite(gross_area) or gross_area <= 0.0:
+            return items
+        deduction_areas = []
+        for opening in spec.openings:
+            if not isinstance(opening, dict):
+                return items
+            value = opening.get("area")
+            if type(value) not in (int, float):
+                return items
+            try:
+                area = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return items
+            if not math.isfinite(area) or area <= 0.0:
+                return items
+            deduction_areas.append(area)
+        op_ded = math.fsum(deduction_areas)
+        if not math.isfinite(op_ded) or op_ded >= gross_area:
+            return items
+        net_area = round(gross_area - op_ded, 2)
         if net_area > 0.0:
             items.append(CarpentryTakeoffItem(
                 section="External",
