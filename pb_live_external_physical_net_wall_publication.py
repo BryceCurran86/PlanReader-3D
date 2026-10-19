@@ -259,9 +259,9 @@ class LiveExternalPhysicalNetWallPublication:
         boundary rather than caching a separately replayable partial result.
         """
         from pb_live_external_wall_surface_area_quantity_publication import (
-            publish_live_external_wall_net_area_quantities,
+            publish_live_per_wall_surface_area_quantities,
         )
-        return publish_live_external_wall_net_area_quantities(self)
+        return publish_live_per_wall_surface_area_quantities(self)
 
 
 def _clean(value: object) -> str:
