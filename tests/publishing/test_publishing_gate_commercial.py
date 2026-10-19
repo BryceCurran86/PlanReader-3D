@@ -25,7 +25,7 @@ def _make_valid_commercial_package():
         drawing_issue="BA",
         drawing_date="2026-06-09",
         sheet_count=36,
-        source_files_hash="hash123",
+        source_files_hash="a" * 64,
     )
     q = QuantityLineItemPayload(
         row_id=1,
