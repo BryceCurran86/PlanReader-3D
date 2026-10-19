@@ -1,3 +1,5 @@
+import pytest
+
 from pb_wall_length_height_quantity_shadow import assess_wall_length_height_face_shadow
 
 
@@ -24,5 +26,5 @@ def test_authenticated_length_and_height_still_review_only():
         height_authority="corroborated",
     )
     assert r["first_remaining_gate"] == "wall_face_area_review_only"
-    assert r["face_area_m2_review_only"] == 8.1
+    assert r["face_area_m2_review_only"] == pytest.approx(8.1)
     assert r["customer_seal_granted"] is False
