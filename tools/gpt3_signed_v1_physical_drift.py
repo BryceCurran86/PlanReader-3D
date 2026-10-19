@@ -61,6 +61,15 @@ def compare_signed_v1_physical_runs(
         "added_quantity_ids": [],
         "quantity_ids_alias_inferred": False,
     }
+    if (
+        not baseline.quantities or not candidate.quantities
+        or not baseline.source_sha256s or not candidate.source_sha256s
+    ):
+        # A hash-consistent empty V1 envelope is not an executed original
+        # source universe. Never count an empty=empty comparison as success,
+        # and never re-key a prior physical quantity into an empty run.
+        result["comparison_status"] = "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE"
+        return result
     if not source_equal:
         # A shared quantity ID from a different source package is not proof
         # that either document, wall or floor represents the same object.
