@@ -20,6 +20,7 @@ def _rcp():
         "original_snapshot_id":"snapshot-one",
         "original_rcp_page":9,
         "original_rcp_viewport_id":"source-a120-rcp",
+        "original_document_id":"source-document",
         "source_ceiling_ink_polygon_pdf_pts":
             ((98.,20.),(198.,20.),(198.,120.),(98.,120.)),
         "source_ceiling_polygon_area_pdf_pt2_not_m2":10000.,
@@ -51,6 +52,9 @@ def _material():
         "original_material_definition_record_id":"source-A120-CL03-schedule",
         "original_rcp_scope_ownership_id":"F07-source-viewport-receipt",
         "original_source_finish_code":"CL03",
+        "original_document_id":"source-document",
+        "original_rcp_page":9,
+        "original_rcp_viewport_id":"source-a120-rcp",
         "source_ceiling_ink_polygon_pdf_pts":
             ((98.,20.),(198.,20.),(198.,120.),(98.,120.)),
     }
@@ -233,4 +237,46 @@ def test_original_ceiling_material_scope_cannot_be_reconstructed_with_invalid_id
     material[key]=val
     result=_authenticated_upstream_result(monkeypatch,material=material)
     assert result["first_failure"]=="A120_original_issuers_or_mark_missing"
+    assert result["new_firm_quantities"]==0
+
+
+@pytest.mark.parametrize("where,key,wrong",[
+    ("material","original_rcp_page","9"),
+    ("material","original_rcp_page",True),
+    ("material","original_rcp_page",8),
+    ("material","original_rcp_viewport_id","foreign-viewport"),
+    ("material","original_rcp_viewport_id"," source-a120-rcp "),
+    ("material","original_rcp_viewport_id",None),
+    ("material","original_document_id","foreign-document"),
+    ("material","original_document_id"," source-document "),
+    ("material","original_document_id",None),
+    ("ink","original_rcp_viewport_id","foreign-viewport"),
+    ("ink","original_document_id","foreign-document"),
+    ("w4","original_document_id","foreign-document"),
+])
+def test_rcp_ceiling_material_mark_cannot_reuse_foreign_page_view_or_document(
+    monkeypatch,where,key,wrong,
+):
+    rcp=_rcp()
+    material=_material()
+    room=_source_owned_w4()
+    candidate={"material":material,"ink":rcp,"w4":room}[where]
+    candidate[key]=wrong
+    result=_authenticated_upstream_result(
+        monkeypatch,w4=room,ink=rcp,material=material,
+    )
+    assert result["first_failure"]==(
+        "A120_material_original_page_view_or_document_conflict")
+    assert result["ceiling_quantity_m2_issued"] is False
+    assert result["new_firm_quantities"]==0
+
+
+def test_same_authenticated_rcp_material_view_page_and_document_stays_candidate(
+    monkeypatch,
+):
+    result=_authenticated_upstream_result(monkeypatch)
+    assert result["status"]=="original_A120_RCP_material_on_W4_room_candidate_for_GPT1"
+    assert result["original_rcp_page"]==9
+    assert result["original_rcp_viewport_id"]=="source-a120-rcp"
+    assert result["original_document_id"]=="source-document"
     assert result["new_firm_quantities"]==0

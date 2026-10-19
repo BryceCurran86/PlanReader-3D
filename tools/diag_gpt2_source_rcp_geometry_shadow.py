@@ -223,6 +223,11 @@ def audit_original_rcp_source_finish_occurrence(
         "source_ceiling_ink_polygon_pdf_pts":
             rcp_candidate["source_ceiling_ink_polygon_pdf_pts"],
         "original_source_sha256":root,
+        # Original document, RCP page and F07-issued viewport belong to the
+        # material occurrence. Never use polygon coincidence as a substitute.
+        "original_document_id":rcp_candidate["original_document_id"],
+        "original_rcp_page":rcp_candidate["original_rcp_page"],
+        "original_rcp_viewport_id":rcp_candidate["original_rcp_viewport_id"],
         "original_revision_id":rcp_candidate["original_revision_id"],
         "original_snapshot_id":rcp_candidate["original_snapshot_id"],
     }

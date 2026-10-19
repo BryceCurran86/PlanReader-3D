@@ -90,6 +90,26 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
             or sha!=original_rcp_material.get("original_source_sha256")
             or finish_page!=rcp_page):
         return {**blocked,"first_failure":"A120_source_root_or_original_page_mismatch"}
+    # Ceiling material marks must retain the EXACT original F07 RCP page,
+    # viewport and document issued by the upstream source geometry producer.
+    # Identical-looking polygons on another sheet/view are not source proof.
+    material_page=original_rcp_material.get("original_rcp_page")
+    material_view=original_rcp_material.get("original_rcp_viewport_id")
+    ink_view=original_rcp_ink.get("original_rcp_viewport_id")
+    material_doc=original_rcp_material.get("original_document_id")
+    ink_doc=original_rcp_ink.get("original_document_id")
+    room_doc=w4_room_result.get("original_document_id")
+    if (type(material_page) is not int or material_page!=rcp_page
+            or type(material_view) is not str or not material_view
+            or material_view!=material_view.strip()
+            or type(ink_view) is not str or not ink_view
+            or ink_view!=material_view
+            or any(type(value) is not str or not value
+                   or value!=value.strip()
+                   for value in (material_doc, ink_doc, room_doc))
+            or not (material_doc==ink_doc==room_doc)):
+        return {**blocked,"first_failure":
+            "A120_material_original_page_view_or_document_conflict"}
     if (w4_room_result.get("original_revision_id")!=
             original_rcp_ink.get("original_revision_id")
             or original_rcp_ink.get("original_revision_id")!=
