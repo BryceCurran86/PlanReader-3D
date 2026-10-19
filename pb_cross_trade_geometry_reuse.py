@@ -45,6 +45,9 @@ def normalise_trade_unit(unit: object) -> str:
         return "m²"
     if cleaned in {"m3", "cum", "m^3"}:
         return "m³"
+    if cleaned.lower() in {"t", "tonne", "tonnes", "metric tonne", "metric tonnes"}:
+        return "t"
+    # Imperial short/long tons are not metric tonnes and must NEVER alias.
     if cleaned.lower() in {"ea", "count", "nr", "no"}:
         return "No."
     if cleaned in {"m", "lin.m", "linear_m"}:
