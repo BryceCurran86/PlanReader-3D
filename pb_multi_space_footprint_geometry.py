@@ -279,6 +279,24 @@ def _source_compound_geometry_conflicts(
     if len(set(ids)) != len(ids):
         return ("duplicate_physical_space_identity",)
 
+    # Source-page identity is not a physical joining operation. A verandah
+    # polygon from another sheet cannot be unioned with a room from this
+    # sheet until an independent cross-sheet physical correspondence exists.
+    # SpaceComponent has no such proof field, so mixed-page compounds must
+    # remain partial rather than silently become FIRM area/perimeter.
+    pages = tuple(component.source_page for component in components)
+    if any(
+        page is not None and (type(page) is not int or page <= 0)
+        for page in pages
+    ):
+        return ("invalid_source_component_page",)
+    known_pages = {page for page in pages if page is not None}
+    if len(components) > 1 and (
+        len(known_pages) > 1
+        or (known_pages and any(page is None for page in pages))
+    ):
+        return ("cross_page_component_union_without_correspondence",)
+
     try:
         from shapely.geometry import Polygon
         from shapely.ops import unary_union
