@@ -21,6 +21,15 @@ from tools.gpt3_safe_original_report_output import (
 from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object
 
 
+def _file_sha256(path: Path) -> str:
+    """Bound memory to a 1-MiB chunk for arbitrarily large original drawings."""
+    digest = sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def verify_original_source_sha_envelope(
     sealed: SealedSourceClosedRun, source_files: list[Path],
 ) -> dict:
@@ -36,11 +45,7 @@ def verify_original_source_sha_envelope(
             raise ValueError("source original must be a regular non-symlink file")
         # Do not trust filenames or caller-provided hashes. Digest real bytes
         # from the original file on this run.
-        with path.open("rb") as stream:
-            digest = sha256()
-            while piece := stream.read(1024 * 1024):
-                digest.update(piece)
-        source_sha = digest.hexdigest()
+        source_sha = _file_sha256(path)
         if source_sha not in expected:
             raise ValueError("original source file bytes do not match signed V1 envelope")
         if source_sha in found:
@@ -68,10 +73,10 @@ def build_original_source_sha_report(
     *, sealed_path: Path, original_paths: list[Path],
 ) -> dict:
     sources = [sealed_path, *original_paths]
-    originals = [sha256(path.read_bytes()).hexdigest() for path in sources]
+    originals = [_file_sha256(path) for path in sources]
     sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
     report = verify_original_source_sha_envelope(sealed, original_paths)
-    if originals != [sha256(path.read_bytes()).hexdigest() for path in sources]:
+    if originals != [_file_sha256(path) for path in sources]:
         raise ValueError("original source bytes changed during audit")
     report["sealed_v1_file_sha256"] = originals[0]
     return report
