@@ -19,6 +19,8 @@ from pb_live_external_physical_net_wall_publication import (
 from pb_migration_contracts import (
     EvidenceResolutionStatus, QuantityEvidence, stable_contract_id,
 )
+from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
+from pb_source_closed_run_export import SealedSourceClosedRun, seal_source_closed_run
 
 
 def _exact_ids(value: object) -> tuple[str, ...] | None:
@@ -185,4 +187,50 @@ def publish_live_per_wall_surface_area_quantities(
     return tuple(sorted(output, key=lambda q:q.quantity_id))
 
 
-__all__ = ["publish_live_per_wall_surface_area_quantities"]
+def seal_live_per_wall_surface_area_run(
+    publication: LiveExternalPhysicalNetWallPublication,
+    *,
+    workspace_id: int,
+    project_id: str,
+) -> SealedSourceClosedRun:
+    """Seal per-wall physical net m²; material/customer permission is separate."""
+    quantities = publish_live_per_wall_surface_area_quantities(publication)
+    if not quantities:
+        raise ValueError("no source-complete original external wall surfaces")
+    walls = {w.canonical_wall_id:w for w in publication.canonical_walls}
+    traces = {}
+    for quantity in quantities:
+        wall = walls[quantity.input_entity_ids[0]]
+        traces[quantity.quantity_id] = CommercialTakeoffSourceTrace(
+            workspace_id=workspace_id,
+            project_id=project_id,
+            document_id=wall.document_id,
+            source_sha256=wall.source_sha256,
+            source_page=wall.page_id,
+            viewport_id=wall.plan_members[0].viewport_id,
+            revision_id=wall.revision_id,
+            current_revision_id=wall.revision_id,
+            evidence_ids=tuple(quantity.evidence_ids),
+            canonical_entity_ids=tuple(quantity.input_entity_ids),
+            metadata={
+                "producer":"original_external_physical_net_wall_union",
+                "one_physical_face_only":True,
+                "commercial_finish_permission":False,
+            },
+        )
+    run = seal_source_closed_run(
+        quantities,project_id=project_id,traces_by_quantity_id=traces
+    )
+    if (
+        len(run.quantities)!=len(quantities)
+        or any(not q.lineage_ok or q.abstained for q in run.quantities)
+    ):
+        raise ValueError("original per-wall source lineage could not seal")
+    return run
+
+
+__all__ = [
+    "publish_live_per_wall_surface_area_quantities",
+    "seal_live_per_wall_surface_area_run",
+]
+
