@@ -85,15 +85,25 @@ def require_signed_v2_family_trade_integrity(
         ):
             raise ValueError("bound production object identity refs are not canonical")
         refs = tuple(sorted(raw_refs))
-        for quantity in by_refs.get(refs, ()):
+        candidates = by_refs.get(refs, ())
+        declared_family = _field(binding, "production_family")
+        if candidates and (
+            type(declared_family) is not str
+            or not declared_family
+            or declared_family != declared_family.strip()
+        ):
+            raise ValueError(
+                "mapped quantity identity requires its explicit original production family"
+            )
+        for quantity in candidates:
             family = _field(quantity, "family")
-            if (
-                _field(binding, "production_family") is None
-                or family != _field(binding, "production_family")
-            ):
-                raise ValueError(
-                    "mapped quantity identity requires its explicit original production family"
-                )
+            if family != declared_family:
+                # One independently sealed physical door can legitimately
+                # produce BOTH an opening_area and an opening_count.  The
+                # unchanged exact-identity reconciler independently joins on
+                # refs PLUS production_family, so cross-family quantities
+                # here are not mapped or misclassified by this binding.
+                continue
             trade = _field(item, "trade_category")
             # An unknown source-owned family has NO audited trade meaning.
             # Never interpret absence from the allowlist as permission to
