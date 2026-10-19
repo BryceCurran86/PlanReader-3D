@@ -79,7 +79,11 @@ def audit_source_enclosure_correspondence(
             or any(not isinstance(n,(int,float)) or not math.isfinite(n)
                    for n in expected_translation_pdf_pts)):
         raise ValueError("finite_source_translation_candidate_required")
-    if len({a for v in original_side_pairs.values() for a in v})!=8:
+    # PyMuPDF d<path>i<item> addresses are sheet-local. d0i0 on p7 and
+    # d0i0 on p11 are distinct original observations under (SHA,page,ID).
+    # Enforce four independent sources PER page, not globally different names.
+    if (len({pair[0] for pair in original_side_pairs.values()}) != 4
+            or len({pair[1] for pair in original_side_pairs.values()}) != 4):
         raise ValueError("distinct_source_path_item_owners_required")
     with fitz.open(stream=original_pdf_bytes,filetype="pdf") as pdf:
         if (type(floor_page_1_based) is not int or type(finish_page_1_based) is not int
