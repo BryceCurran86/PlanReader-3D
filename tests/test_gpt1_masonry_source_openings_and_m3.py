@@ -46,7 +46,7 @@ def test_real_grout_volume_is_m3_provisional_not_item():
     assert grout.inclusion_status=="PROVISIONAL"
 
 
-@pytest.mark.parametrize("bad",[True,0,0.3,"2.0",None,float("nan"),float("inf"),10**400])
+@pytest.mark.parametrize("bad",[True,0,-0.3,"2.0",None,float("nan"),float("inf"),10**400])
 def test_no_partial_lintel_set_can_ignore_one_bad_original_opening(bad):
     assert calculate_lintel_items(_s(openings=[
        {"width":1.2,"height":1.0},{"width":bad,"height":2.1}
