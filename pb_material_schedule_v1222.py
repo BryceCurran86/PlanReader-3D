@@ -275,6 +275,11 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         or "satin" in finish_text
     ):
         return "paint"
+    # Suspended ceiling infill described by the original schedule is not
+    # vinyl floor covering merely because its face is vinyl. The physical
+    # ceiling role still needs separate authenticated RCP source ownership.
+    if "vinyl faced plaster tile" in finish_text:
+        return "ceiling_grid"
     if "epoxy" in finish_text:
         return "epoxy"
     if "vinyl" in finish_text:
@@ -304,6 +309,8 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         or "suspended grid" in text
         or "suspended ceiling grid" in text
     ):
+        return "ceiling_grid"
+    if "vinyl faced plaster tile" in text:
         return "ceiling_grid"
     if "epoxy" in text:
         return "epoxy"
