@@ -24,8 +24,8 @@ def _approved():
     )
 
 
-def test_previous_override_argument_cannot_publish_even_valid_package_without_gate():
-    _, hub, bridge = test_dbs.__wrapped__()
+def test_previous_override_argument_cannot_publish_even_valid_package_without_gate(test_dbs):
+    _, hub, bridge = test_dbs
     package = _approved()
     package.project_identity.target_jobhub_job_id = 501
     with pytest.raises(RuntimeError, match="override is prohibited"):
@@ -36,8 +36,8 @@ def test_previous_override_argument_cannot_publish_even_valid_package_without_ga
     assert hub.execute("SELECT COUNT(*) FROM painting_takeoff_packages").fetchone()[0] == 0
 
 
-def test_old_schema_missing_authority_cannot_become_firm():
-    local, hub, bridge = test_dbs.__wrapped__()
+def test_old_schema_missing_authority_cannot_become_firm(test_dbs):
+    local, hub, bridge = test_dbs
     local.executescript("""
         DROP TABLE takeoff_rows;
         CREATE TABLE takeoff_rows (
@@ -62,8 +62,8 @@ def test_old_schema_missing_authority_cannot_become_firm():
     assert hub.execute("SELECT COUNT(*) FROM painting_takeoff_packages").fetchone()[0] == 0
 
 
-def test_present_but_null_source_authority_can_never_default_to_firm():
-    local, hub, bridge = test_dbs.__wrapped__()
+def test_present_but_null_source_authority_can_never_default_to_firm(test_dbs):
+    local, hub, bridge = test_dbs
     local.execute("""
         INSERT INTO takeoff_rows (
             id,workspace_id,section,location,substrate,finish_tag,
@@ -134,8 +134,8 @@ def test_customer_approved_quantity_must_identify_human_approver():
     assert not validate_publishing_gate(package).is_publishable
 
 
-def test_draft_stays_draft_and_records_provisional_rows():
-    local, hub, bridge = test_dbs.__wrapped__()
+def test_draft_stays_draft_and_records_provisional_rows(test_dbs):
+    local, hub, bridge = test_dbs
     local.execute("""
         INSERT INTO takeoff_rows (
             id,workspace_id,section,location,substrate,finish_tag,
@@ -152,8 +152,8 @@ def test_draft_stays_draft_and_records_provisional_rows():
     assert hub.execute("SELECT status FROM painting_takeoff_packages").fetchone()[0] == "Draft"
 
 
-def test_original_firm_documented_takeoff_still_publishes_without_override():
-    local, hub, bridge = test_dbs.__wrapped__()
+def test_original_firm_documented_takeoff_still_publishes_without_override(test_dbs):
+    local, hub, bridge = test_dbs
     local.execute("""
         INSERT INTO takeoff_rows (
             id,workspace_id,section,location,substrate,finish_tag,
