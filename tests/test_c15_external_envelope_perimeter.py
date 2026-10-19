@@ -266,3 +266,35 @@ def test_confidence_not_an_input_to_resolver() -> None:
     assert "confidence" not in params
     assert "expected" not in params
     assert "benchmark" not in params
+
+
+@pytest.mark.parametrize("untyped", [True, False, "32", "32.0", 10**400, -10**400, float("inf"), float("nan")])
+def test_original_external_envelope_never_coerces_untyped_or_overflow_m(untyped):
+    result = resolve_external_envelope_perimeter_m(
+        external_perimeter_m=untyped,
+        footprint_status=FootprintStatus.CONFIRMED.value,
+        fallback_wall_perimeter_m=None,
+    )
+    assert result.perimeter_m is None
+    assert result.status == "abstained"
+
+
+@pytest.mark.parametrize("untyped", [True, False, "32", "32.0", 10**400, -10**400, float("inf"), float("nan")])
+def test_partial_dpc_wall_fallback_never_promotes_untyped_metre_quantity(untyped):
+    result = resolve_external_envelope_perimeter_m(
+        external_perimeter_m=None,
+        footprint_status=FootprintStatus.PARTIAL_MISSING_COMPONENTS.value,
+        fallback_wall_perimeter_m=untyped,
+    )
+    assert result.perimeter_m is None
+    assert result.status == "abstained"
+
+
+def test_source_measured_external_overrides_invalid_fallback_without_coercion():
+    result = resolve_external_envelope_perimeter_m(
+        external_perimeter_m=32.0,
+        footprint_status=FootprintStatus.CONFIRMED.value,
+        fallback_wall_perimeter_m="999",
+    )
+    assert result.status == "confirmed_external"
+    assert result.perimeter_m == 32.0
