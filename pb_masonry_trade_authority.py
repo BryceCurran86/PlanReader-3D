@@ -302,11 +302,22 @@ def calculate_blockwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
 def calculate_lintel_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]:
     """Calculate steel/concrete lintels over wall openings."""
     items: List[MasonryTakeoffItem] = []
-    for i, op in enumerate(spec.openings):
-        w = float(op.get("width") or 0.0)
-        if w <= 0.0:
-            continue
-        # Standard bearing: 150mm each side (total length = w + 0.30m)
+    if spec.wall_type not in {
+        "brickwork_veneer","double_brick",
+        "blockwork_100","blockwork_150","blockwork_200",
+    } or not isinstance(spec.openings,(list,tuple)):
+        return items
+    # Do not quietly drop one incomplete opening from the lintel universe.
+    widths=[]
+    for op in spec.openings:
+        if not isinstance(op,dict):
+            return items
+        width=_source_positive_metric(op.get("width"))
+        if width is None:
+            return items
+        widths.append(width)
+    for i,w in enumerate(widths):
+        # 150mm end bearings on each side are only a provisional design assumption.
         lintel_length_m = round(w + 0.30, 2)
         desc = "Galvanized steel angle lintel (100x100x6)" if w <= 1.8 else "Galvanized T-bar / heavy lintel (150UB)"
 
@@ -318,12 +329,12 @@ def calculate_lintel_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]:
             finish_system="Bedded on mortar with 150mm end bearings",
             quantity=lintel_length_m,
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Lintel over {w:.2f}m opening (Length: {lintel_length_m:.2f} lm including bearings).",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional lintel {lintel_length_m:.2f} lm over {w:.2f}m opening, assuming two 150mm end bearings; steel section and actual support unverified.",
             row_role="",
         ))
 
