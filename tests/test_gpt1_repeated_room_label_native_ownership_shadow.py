@@ -1,12 +1,11 @@
 """Fail-closed source-owner regression tests for repeated same-label rooms."""
 from dataclasses import dataclass
-from dataclasses import replace
 
 import pytest
 
 from pb_repeated_room_label_source_shadow import uniquely_owned_repeated_label_lines
 from pb_same_view_room_area_authority import SameViewRoomAreaProducer
-from tests.test_same_view_room_area_authority_v1 import _source_and_rooms
+from test_same_view_room_area_authority_v1 import _source_and_rooms
 
 
 @dataclass(frozen=True)
