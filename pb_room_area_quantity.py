@@ -222,9 +222,19 @@ def _validate_common(
         blockers.append("page_not_owned")
     elif page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
-    mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and (
-        type(mapped_page) is not int or mapped_page != page_no
+    # page_for_viewport() coerces numbers with int() and returns None for
+    # missing ownership. Neither a missing binding nor True/1.9/"1" can
+    # corroborate a physical room's exact native PDF page. Source-owned
+    # FIRM room area must have one unique typed viewport-to-page edge.
+    owned_edges = tuple(
+        edge for edge in context.viewport_page_ownership
+        if isinstance(edge, (tuple, list)) and len(edge) == 2
+        and type(edge[0]) is str and edge[0] == viewport.viewport_id
+    )
+    if (
+        len(owned_edges) != 1
+        or type(owned_edges[0][1]) is not int
+        or owned_edges[0][1] != page_no
     ):
         blockers.append("viewport_page_mismatch")
     if room.source_page:
