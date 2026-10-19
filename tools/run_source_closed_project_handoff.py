@@ -41,6 +41,9 @@ from pb_live_opening_count_source_closed_export import (
 from pb_live_opening_source_closed_export import (
     seal_live_opening_area_claim_run,
 )
+from pb_live_opening_metric_dimensions_source_closed_export import (
+    seal_live_opening_dimension_claim_run,
+)
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
@@ -602,6 +605,31 @@ def _generate_project_handoff_locked(
                 ),
             )
         )
+
+    # True original opening widths and heights are distinct measured linear
+    # quantities, not inferred dimensions from an area product. Separate
+    # producer/seal from the immutable area family and absent count scope.
+    if clean_family_group in {"all", "core"}:
+        opening_dimension_quantities = _non_abstained(
+            getattr(claim, "opening_dimension_quantity_evidence", ())
+        )
+    else:
+        opening_dimension_quantities = ()
+    summary["family_counts"]["opening_width"] = sum(
+        q.family == "opening_width" for q in opening_dimension_quantities
+    )
+    summary["family_counts"]["opening_height"] = sum(
+        q.family == "opening_height" for q in opening_dimension_quantities
+    )
+    if opening_dimension_quantities:
+        run = seal_live_opening_dimension_claim_run(
+            claim,
+            workspace_id=int(workspace_id),
+            project_id=project_id,
+        )
+        if len(run.quantities) != len(opening_dimension_quantities):
+            raise RuntimeError("opening axis source seal differs from actual original family")
+        family_runs.append(("opening_metric_axes", run))
 
     if clean_family_group in {"all", "core"}:
         opening_count_quantities = _non_abstained(

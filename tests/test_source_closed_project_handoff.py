@@ -289,6 +289,8 @@ def test_project_handoff_combines_only_available_source_closed_families(
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 1,
+        "opening_width": 0,
+        "opening_height": 0,
     }
     assert summary["combined_quantity_count"] == 5
     assert (output / f"{project_id}.json").is_file()
@@ -860,6 +862,8 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 0,
+        "opening_width": 0,
+        "opening_height": 0,
     }
     assert summary["combined_quantity_count"] == 2
     assert summary["status"] == "sealed"
