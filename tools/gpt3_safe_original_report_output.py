@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import tempfile
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 def preflight_new_diagnostic(
@@ -35,6 +35,7 @@ def preflight_new_diagnostic(
 
 def write_new_diagnostic(
     output: Path, encoded: str, *, protected_roots: Iterable[Path | None],
+    verify_inputs: Callable[[], None] | None = None,
 ) -> None:
     """Stage/fsync report before exclusive hard-link; unlink on failure.
 
@@ -48,6 +49,7 @@ def write_new_diagnostic(
         raise TypeError("diagnostic payload must be a Unicode string")
     output.parent.mkdir(parents=True, exist_ok=True)
     temp: Path | None = None
+    our_output_created = False
     try:
         with tempfile.NamedTemporaryFile(
             "w", dir=output.parent, encoding="utf-8", newline="\n",
@@ -58,7 +60,24 @@ def write_new_diagnostic(
             stream.flush()
             os.fsync(stream.fileno())
         preflight_new_diagnostic(output, protected_roots=protected)
+        # Exact source/customer/frozen-input receipts must remain stable
+        # through output staging, not just while the report was calculated.
+        if verify_inputs is not None:
+            verify_inputs()
         os.link(temp, output)
+        our_output_created = True
+        if verify_inputs is not None:
+            verify_inputs()
+    except BaseException:
+        if our_output_created and temp is not None:
+            # Retain another writer's output if it replaced ours after link.
+            try:
+                still_ours = output.samefile(temp)
+            except OSError:
+                still_ours = False
+            if still_ours:
+                output.unlink(missing_ok=True)
+        raise
     finally:
         if temp is not None:
             temp.unlink(missing_ok=True)
