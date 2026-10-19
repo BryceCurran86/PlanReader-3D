@@ -42,3 +42,32 @@ def test_one_invalid_opening_cannot_be_filtered_away_before_net_area():
         {"area": 8.0}, {"width": 1.0, "height": 1.5},
     ]))
     assert rows == []
+
+
+def test_independently_evidenced_cladding_gross_area_and_axes_cannot_disagree():
+    spec = CarpentryElementSpec(
+        element_type="cladding",element_id="synthetic-wall",
+        description="cladding",area_m2=50.0,length_m=10.0,height_m=6.0,
+        openings=[{"area": 8.0}],
+    )
+    assert calculate_eaves_and_cladding_items(spec) == []
+
+
+def test_matching_elevation_gross_area_axes_keep_correct_net_cladding():
+    spec = CarpentryElementSpec(
+        element_type="cladding",element_id="synthetic-wall",
+        description="cladding",area_m2=50.0,length_m=10.0,height_m=5.0,
+        openings=[{"area": 8.0}],
+    )
+    result = calculate_eaves_and_cladding_items(spec)
+    assert len(result) == 1
+    assert result[0].quantity == pytest.approx(42.0)
+
+
+@pytest.mark.parametrize("bad", [True,"50",float("nan"),float("inf"),10**400,-10.0])
+def test_invalid_original_cladding_gross_area_not_replaced_by_plausible_dimensions(bad):
+    spec = CarpentryElementSpec(
+        element_type="cladding",element_id="synthetic-wall",
+        description="cladding",area_m2=bad,length_m=10.0,height_m=5.0,
+    )
+    assert calculate_eaves_and_cladding_items(spec) == []
