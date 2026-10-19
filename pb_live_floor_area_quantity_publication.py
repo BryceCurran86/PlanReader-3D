@@ -295,7 +295,19 @@ def publish_live_floor_area_quantities(
             and source_room_face_id != floor.source_room_face_record_id
         ):
             continue
-        if _clean(metadata.get("page_no")) != str(floor.page_id):
+        # The room-area producer's original page is a physical source ID,
+        # not a number to cast or trim until it matches the canonical floor.
+        # Reject bools/floats/whitespace aliases even if their text happens
+        # to look like the floor's page.
+        area_page_id = metadata.get("page_no")
+        if (
+            type(area_page_id) is not str
+            or type(floor.page_id) is not str
+            or not area_page_id
+            or area_page_id != area_page_id.strip()
+            or floor.page_id != floor.page_id.strip()
+            or area_page_id != floor.page_id
+        ):
             continue
         q_viewport = _clean(metadata.get("viewport_id"))
         if not q_viewport:
@@ -459,8 +471,13 @@ def publish_live_canonical_room_area_quantities(
         source_viewport = _clean(metadata.get("viewport_id"))
         if room.viewport_id and source_viewport and _clean(room.viewport_id) != source_viewport:
             continue
-        if str(room.page_id) != _clean(
-            floor_quantity.metadata.get("page_no")
+        raw_page_id = floor_quantity.metadata.get("page_no")
+        if (
+            type(room.page_id) is not str
+            or type(raw_page_id) is not str
+            or not room.page_id
+            or room.page_id != room.page_id.strip()
+            or raw_page_id != room.page_id
         ):
             continue
         # Metric-area evidence is deliberately attached to the canonical floor
