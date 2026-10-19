@@ -87,7 +87,13 @@ def _four_source_verified_projects(tmp_path: Path, monkeypatch):
         lambda value: SimpleNamespace(
             project_id=value["project_id"],
             source_sha256s=value["source_sha256s"],
-            quantities=(),
+            # Synthetic original-source attempt with an explicit ABSTAIN;
+            # unlike a completely empty V1 producer this is an execution.
+            quantities=(SimpleNamespace(
+                quantity_id=f"attempt-{value['project_id']}",
+                abstained=True,
+                object_identity_refs=(),
+            ),),
             to_dict=lambda: value,
         ),
     )
@@ -103,9 +109,9 @@ def _four_source_verified_projects(tmp_path: Path, monkeypatch):
         report, "verify_sealed_customer_output",
         lambda sealed, _: SimpleNamespace(
             project_id=sealed.project_id,
-            sealed_quantity_count=0,
+            sealed_quantity_count=1,
             valid_quantity_count=0,
-            abstained_quantity_count=0,
+            abstained_quantity_count=1,
             customer_row_count=0,
             verified_quantity_ids=(),
         ),
