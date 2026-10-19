@@ -227,6 +227,16 @@ def audit_gpt2_source_material_floor_handoff(
         "original_mark_text_observation_ids":matched.source_text_observation_ids,
         "all_same_code_source_occurrence_record_ids":
             tuple(sorted(x.record_id for x in all_matching)),
+        # Optional only for independently rechecked original doorway rings;
+        # never synthesize a threshold for ordinary closed-room polygons.
+        "source_original_floor_door_ink_gap_pdf_pts":
+            source_registration.get("source_original_floor_door_ink_gap_pdf_pts"),
+        "source_original_finish_door_ink_gap_pdf_pts":
+            source_registration.get("source_original_finish_door_ink_gap_pdf_pts"),
+        "source_original_doorway_ink_gap_candidate_only":
+            source_registration.get(
+                "source_real_door_ink_gap_virtual_closure_only") is True,
+        "source_original_doorway_gap_is_finish_threshold_proof":False,
     }
 
 
@@ -461,6 +471,15 @@ def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
         "source_floor_perimeter_polygon_pdf_pts":
             floor["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"],
         "source_real_door_ink_gap_virtual_closure_only":True,
+        # Exact original native PDF endpoint pairs, NOT measured thresholds:
+        # downstream W4/GPT1 still has to prove finished-face positions.
+        "source_original_floor_door_ink_gap_pdf_pts":
+            tuple(tuple(vertex) for vertex in
+                  floor["source_virtual_door_connector_pdf_pts"]),
+        "source_original_finish_door_ink_gap_pdf_pts":
+            tuple(tuple(vertex) for vertex in
+                  finish["source_virtual_door_connector_pdf_pts"]),
+        "source_original_doorway_gap_is_finish_threshold_proof":False,
         "source_both_original_doorway_jambs_sha_authenticated":True,
         "geometric_ink_correspondence_only":True,
     }
