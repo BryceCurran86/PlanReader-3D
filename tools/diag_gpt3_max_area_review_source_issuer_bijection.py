@@ -26,6 +26,15 @@ from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import (
 )
 
 
+ORIGINAL_LOT16_ARCHIVED_EIGHT_FINGERPRINT = (
+    "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb"
+)
+ORIGINAL_LOT16_SOURCE_SHA256 = (
+    "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+)
+ORIGINAL_LOT16_PROJECT_ID = "au_qld_lot16_power"
+
+
 class SourceIssuerConvergenceConflict(ValueError):
     """Stop on an inconsistent/forged review or original production ledger."""
 
@@ -113,6 +122,29 @@ def audit_max_area_review_against_live_issuer(
     ):
         raise SourceIssuerConvergenceConflict("signed and customer archive/retention must be supplied together")
     if archive_required:
+        # Do not accept an arbitrary self-consistent eight-row predecessor
+        # as "the original Lot16 eight". The actual original archived signed
+        # run is immutable and must match the independent 2026-10-15 seal.
+        if (archived_signed_run.get("fingerprint")
+                != ORIGINAL_LOT16_ARCHIVED_EIGHT_FINGERPRINT
+                or archived_signed_run.get("project_id")
+                != ORIGINAL_LOT16_PROJECT_ID
+                or len(archived_signed_run.get("quantities") or ()) != 8
+                or any(
+                    row.get("source_sha256") != ORIGINAL_LOT16_SOURCE_SHA256
+                    or row.get("project_id") != ORIGINAL_LOT16_PROJECT_ID
+                    for row in archived_signed_run["quantities"]
+                )):
+            raise SourceIssuerConvergenceConflict(
+                "archived signed predecessor is not the immutable original Lot16 eight"
+            )
+        if any(
+            member.source_sha256 != ORIGINAL_LOT16_SOURCE_SHA256
+            for member in live_composition.canonical_openings
+        ):
+            raise SourceIssuerConvergenceConflict(
+                "current source opening inventory differs from original Lot16 PDF"
+            )
         verify_archived_signed_predecessors(
             archived_signed_run, archived_customer_rows,
             current_source_retention
