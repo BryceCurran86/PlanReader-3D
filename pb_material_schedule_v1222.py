@@ -254,7 +254,11 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         return ""
     description_text = _normalise(entry.get("description"))
     finish_text = _normalise(entry.get("finish"))
-    if finish_text and finish_text == description_text:
+    # The material schedule may omit an independent finish field. In that
+    # case the SOURCE description owns the primary material role: floor tile
+    # remains tile even when its ancillary grout is epoxy. An independently
+    # specified nonempty finish still takes precedence over this description.
+    if not finish_text or finish_text == description_text:
         leading_semantic = _leading_composite_finish_semantic(description_text)
         if leading_semantic:
             return leading_semantic
