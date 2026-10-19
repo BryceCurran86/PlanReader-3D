@@ -388,15 +388,27 @@ def _coverage_complete(
         reasons.append(SOURCE_DECODE_SCOPE_MISMATCH)
 
     try:
-        total_pages = int(getattr(coverage, "total_pages"))
-        decoded_pages = tuple(int(value) for value in getattr(coverage, "decoded_pages"))
-        failed_pages = tuple(int(value) for value in getattr(coverage, "failed_pages"))
+        total_pages = getattr(coverage, "total_pages")
+        decoded_pages = tuple(getattr(coverage, "decoded_pages"))
+        failed_pages = tuple(getattr(coverage, "failed_pages"))
     except (AttributeError, TypeError, ValueError):
+        reasons.append(SOURCE_DECODE_INCOMPLETE)
+        return False, _ordered_unique(reasons)
+    # Page source receipts are integers issued by the original decoder.
+    # int(True), int(1.9) or int("1") are NOT source-authenticated pages.
+    if (type(total_pages) is not int or total_pages <= 0
+            or any(type(page) is not int or page <= 0
+                   for page in (*decoded_pages, *failed_pages))):
         reasons.append(SOURCE_DECODE_INCOMPLETE)
         return False, _ordered_unique(reasons)
 
     decoded_set = set(decoded_pages)
     failed_set = set(failed_pages)
+    if (len(decoded_set) != len(decoded_pages)
+            or len(failed_set) != len(failed_pages)
+            or decoded_set & failed_set):
+        reasons.append(SOURCE_DECODE_INCOMPLETE)
+        return False, _ordered_unique(reasons)
     if scope.decision_scope_kind == "document":
         expected_pages = set(range(1, total_pages + 1))
         # A complete drawing source covers actual page identities, not just
@@ -508,6 +520,10 @@ class OpeningUniverseCompletenessProducer:
         xobject_traversal_truncated: bool,
         semantic_enumeration_proven: bool = True,
     ) -> OpeningUniverseCompletenessRecord:
+        if type(semantic_enumeration_proven) is not bool:
+            raise TypeError("semantic enumeration proof must be explicit boolean")
+        if type(xobject_traversal_truncated) is not bool:
+            raise TypeError("xobject traversal state must be explicit boolean")
         scope = build_opening_universe_scope(
             decision_scope_id=decision_scope_id,
             decision_scope_kind=decision_scope_kind,
