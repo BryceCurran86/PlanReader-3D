@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 import hashlib
 import json
@@ -288,6 +289,28 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
 
         if not math.isfinite(q.total_price) or q.total_price < 0.0:
             blocking_reasons.append(f"Row #{q.row_id} has invalid total price: {q.total_price}")
+
+        if is_commercial and all(
+            math.isfinite(number) and number >= 0.0
+            for number in (q.quantity, q.rate, q.total_price)
+        ):
+            # Material and labour rates are customer supplied. The quoted
+            # line total MUST correspond to the source physical quantity and
+            # that exact rate. A self-hashed but altered amount cannot become
+            # a purchase, invoice or JobHub customer commitment.
+            rate = Decimal(str(q.rate))
+            actual = Decimal(str(q.total_price))
+            expected = (
+                Decimal(str(q.quantity)) * rate
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if (
+                rate != rate.quantize(Decimal("0.01"))
+                or actual != actual.quantize(Decimal("0.01"))
+                or actual != expected
+            ):
+                blocking_reasons.append(
+                    f"Row #{q.row_id} commercial line cost disagrees with client quantity and rate"
+                )
 
         # Commercial Mode Authority Gates
         if is_commercial:
