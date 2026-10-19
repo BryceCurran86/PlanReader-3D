@@ -170,3 +170,63 @@ def test_original_firm_documented_takeoff_still_publishes_without_override(test_
     receipt = execute_jobhub_publishing(pkg, bridge, "Source Estimator")
     assert receipt["status"] == "Published"
     assert receipt["total_cost"] == 120.0
+
+
+def test_source_proven_jobhub_numeric_id_but_wrong_job_number_cannot_publish(test_dbs):
+    local, hub, bridge = test_dbs
+    local.execute("""
+        INSERT INTO takeoff_rows (
+            id,workspace_id,section,location,substrate,finish_tag,
+            element,unit,quantity,rate,total_price,
+            commercial_authority_status,commercial_authority_source,
+            commercial_authority_reviewed_by
+        ) VALUES (1,1,'Walls','Unit 1','PB','PB01','Wall','m2',
+                  10,12,120,'firm','documented_dimension','Source Estimator')
+    """)
+    pkg = build_publishing_package_from_workspace(
+        local, 1, PublishingMode.COMMERCIAL, acting_user="Source Estimator",
+    )
+    assert validate_publishing_gate(pkg).is_publishable
+    hub.execute("UPDATE jobs SET job_no='DIFFERENT-JOB' WHERE id=501")
+    with pytest.raises(RuntimeError, match="target job number conflicts"):
+        execute_jobhub_publishing(pkg, bridge, "Source Estimator")
+    assert hub.execute("SELECT COUNT(*) FROM painting_takeoff_packages").fetchone()[0] == 0
+
+
+def test_provisional_jobhub_export_cannot_leak_to_different_project(test_dbs):
+    local, hub, bridge = test_dbs
+    local.execute("""
+        INSERT INTO takeoff_rows (
+            id,workspace_id,section,location,substrate,finish_tag,
+            element,unit,quantity,rate,total_price,
+            commercial_authority_status,commercial_authority_source
+        ) VALUES (1,1,'Walls','Unit 1','PB','PB01','Wall','m2',
+                  10,12,120,'provisional','pdf_scaled')
+    """)
+    pkg = build_publishing_package_from_workspace(
+        local, 1, PublishingMode.DRAFT,
+    )
+    hub.execute("UPDATE jobs SET job_no='OTHER-SITE' WHERE id=501")
+    with pytest.raises(RuntimeError, match="target job number conflicts"):
+        execute_jobhub_publishing(pkg, bridge, "Source Estimator")
+    assert hub.execute("SELECT COUNT(*) FROM painting_takeoff_packages").fetchone()[0] == 0
+
+
+def test_job_number_missing_from_jobhub_target_cannot_be_accepted(test_dbs):
+    local, hub, bridge = test_dbs
+    local.execute("""
+        INSERT INTO takeoff_rows (
+            id,workspace_id,section,location,substrate,finish_tag,
+            element,unit,quantity,rate,total_price,
+            commercial_authority_status,commercial_authority_source,
+            commercial_authority_reviewed_by
+        ) VALUES (1,1,'Walls','Unit 1','PB','PB01','Wall','m2',
+                  10,12,120,'firm','documented_dimension','Source Estimator')
+    """)
+    pkg = build_publishing_package_from_workspace(
+        local, 1, PublishingMode.COMMERCIAL, acting_user="Source Estimator",
+    )
+    hub.execute("UPDATE jobs SET job_no=NULL WHERE id=501")
+    with pytest.raises(RuntimeError, match="target job number conflicts"):
+        execute_jobhub_publishing(pkg, bridge, "Source Estimator")
+    assert hub.execute("SELECT COUNT(*) FROM painting_takeoff_packages").fetchone()[0] == 0

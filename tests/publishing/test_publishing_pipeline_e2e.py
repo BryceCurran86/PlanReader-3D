@@ -95,10 +95,11 @@ def test_dbs():
     CREATE TABLE jobs (
         id INTEGER PRIMARY KEY,
         status TEXT,
-        notes TEXT
+        notes TEXT,
+        job_no TEXT
     )
     """)
-    hub_cur.execute("INSERT INTO jobs (id, status, notes) VALUES (501, 'Active', 'Commercial Townhouses')")
+    hub_cur.execute("INSERT INTO jobs (id, status, notes, job_no) VALUES (501, 'Active', 'Commercial Townhouses', '26-017')")
 
     hub_cur.execute("""
     CREATE TABLE painting_takeoff_packages (
