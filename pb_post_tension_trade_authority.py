@@ -73,7 +73,7 @@ class PTTakeoffItem:
             "location": str(self.location),
             "substrate": str(self.substrate),
             "finish_system": str(self.finish_system),
-            "quantity": round(float(self.quantity), 2),
+            "quantity": round(float(self.quantity), 3 if self.unit == "t" else 2),
             "unit": str(self.unit),
             "quantity_status": str(self.quantity_status),
             "source_page": str(self.source_page or "Structural PT S103"),
@@ -91,11 +91,56 @@ class PTTakeoffItem:
         }
 
 
+def _positive_pt_metric(value: object) -> bool:
+    if type(value) not in (int,float):
+        return False
+    try:
+        n=float(value)
+    except (TypeError,ValueError,OverflowError):
+        return False
+    return math.isfinite(n) and n>0.0
+
+
+def _valid_pt_tendon_design(spec: PTExtractionSpec) -> bool:
+    return (
+        _positive_pt_metric(spec.strand_diameter_mm)
+        and _positive_pt_metric(spec.tendon_density_kg_per_m2)
+        and _positive_pt_metric(spec.tendon_spacing_m)
+        and type(spec.strands_per_tendon) is int
+        and spec.strands_per_tendon>0
+        and _positive_pt_metric(spec.strands_per_tendon)
+        and type(spec.is_bonded) is bool
+    )
+
+
 def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
     """Calculate post-tensioning trade items for a suspended PT slab."""
     items: List[PTTakeoffItem] = []
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    if area <= 0.0 or spec.thickness_m <= 0.0:
+    if (
+        not _valid_pt_tendon_design(spec)
+        or not _positive_pt_metric(spec.thickness_m)
+        or not math.isfinite(spec.thickness_m*1000.0)
+    ):
+        return items
+    if type(spec.area_m2) not in (int,float):
+        return items
+    try:
+        written_area=float(spec.area_m2)
+    except (TypeError,ValueError,OverflowError):
+        return items
+    if not math.isfinite(written_area) or written_area < 0.0:
+        return items
+    valid_axes=_positive_pt_metric(spec.length_m) and _positive_pt_metric(spec.width_m)
+    physical_rect=spec.length_m * spec.width_m if valid_axes else None
+    if physical_rect is not None and not math.isfinite(physical_rect):
+        return items
+    if (
+        written_area > 0.0 and physical_rect is not None
+        and not math.isclose(written_area,physical_rect,rel_tol=0.0,abs_tol=0.011)
+    ):
+        return items
+    area=written_area if written_area > 0.0 else physical_rect
+    if area is None or area<=0.0 or not math.isfinite(area*spec.tendon_density_kg_per_m2):
         return items
 
     # 1. Primary PT Slab Area (m²)
@@ -107,18 +152,20 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Install ducts, profile tendons, stress and grout",
         quantity=round(area, 2),
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"PT slab area: {area:.2f} m² with {spec.tendon_density_kg_per_m2:.1f} kg/m² design tendon density.",
         row_role="floor_area",
     ))
 
     # 2. Total Tendon Strand Weight (tonnes / kg represented in item with explicit math)
-    total_strand_mass_kg = round(area * spec.tendon_density_kg_per_m2, 2)
-    total_strand_tonnes = round(total_strand_mass_kg / 1000.0, 3)
+    total_strand_mass_kg=round(area*spec.tendon_density_kg_per_m2,2)
+    total_strand_tonnes=round(total_strand_mass_kg/1000.0,3)
+    if total_strand_tonnes<=0.0:
+        return items
     items.append(PTTakeoffItem(
         section=spec.section or "Structure",
         element=f"PT strand supply ({spec.strand_diameter_mm}mm 1860MPa strand)",
@@ -126,12 +173,12 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         substrate=f"Super grade 1860MPa low-relaxation strand ({spec.strand_diameter_mm}mm)",
         finish_system="Supplied to site in coils / pre-cut lengths",
         quantity=total_strand_tonnes,
-        unit="item",
-        quantity_status="Measured",
+        unit="t",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Strand mass: {total_strand_tonnes:.3f} tonnes ({total_strand_mass_kg:.1f} kg). Derived as {area:.2f} m² × {spec.tendon_density_kg_per_m2:.2f} kg/m².",
         row_role="",
     ))
@@ -139,7 +186,7 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
     # 3. Tendon Ducting Run (lm)
     mass_per_m = LARGE_STRAND_MASS_KG_PER_M if spec.strand_diameter_mm >= 15.0 else DEFAULT_STRAND_MASS_KG_PER_M
     total_strand_length_m = total_strand_mass_kg / mass_per_m
-    ducting_length_m = round(total_strand_length_m / max(1, spec.strands_per_tendon), 2)
+    ducting_length_m = round(total_strand_length_m / spec.strands_per_tendon, 2)
 
     items.append(PTTakeoffItem(
         section=spec.section or "Structure",
@@ -149,11 +196,11 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Placed on bar chairs and profiled to parabolic draped path",
         quantity=ducting_length_m,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Ducting length: {ducting_length_m:.2f} lm (housing {total_strand_length_m:.1f} lm total strand).",
         row_role="",
     ))
@@ -173,11 +220,11 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Cast into edge board, clear pocket and seat wedges",
         quantity=float(live_ends),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"{live_ends} No. live-end anchorages with pocket formers.",
         row_role="",
     ))
@@ -190,11 +237,11 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Embedded in concrete with anti-burst spiral",
         quantity=float(dead_ends),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"{dead_ends} No. fixed dead-end anchorages.",
         row_role="",
     ))
@@ -208,11 +255,11 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Stress, record elongations, check gauges and lock off",
         quantity=float(tendon_count),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Stressing {tendon_count} No. tendons in 2 stages with elongation QA sign-off.",
         row_role="",
     ))
@@ -226,11 +273,11 @@ def calculate_pt_slab_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
             finish_system="High-pressure pumped through grout vents to full refusal",
             quantity=ducting_length_m,
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
             notes=f"Pressure grouting {ducting_length_m:.2f} lm of bonded tendon ducts.",
             row_role="",
         ))
@@ -244,10 +291,17 @@ def calculate_pt_band_beam_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
     length = spec.length_m
     w = spec.width_m
     d = spec.thickness_m
-    if length <= 0.0 or w <= 0.0 or d <= 0.0:
+    if (
+        not _valid_pt_tendon_design(spec)
+        or not _positive_pt_metric(length)
+        or not _positive_pt_metric(w)
+        or not _positive_pt_metric(d)
+        or not math.isfinite(length * 12.0)
+    ):
         return items
 
-    # Band beams typically carry higher tendon density: 8 to 15 kg per metre length
+    # Provisional design estimate: 12 kg/m and 2 duct runs are NOT
+    # source-owned tendon counts or a structural stressing schedule.
     kg_per_m = 12.0
     total_strand_kg = round(length * kg_per_m, 2)
     total_strand_tonnes = round(total_strand_kg / 1000.0, 3)
@@ -262,11 +316,11 @@ def calculate_pt_band_beam_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Profile on beam bolsters, tie, stress and grout",
         quantity=round(length, 2),
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Band beam run {length:.2f} lm. Strand weight: {total_strand_tonnes:.3f} t ({total_strand_kg:.1f} kg).",
         row_role="",
     ))
@@ -279,12 +333,12 @@ def calculate_pt_band_beam_items(spec: PTExtractionSpec) -> List[PTTakeoffItem]:
         finish_system="Cast into beam end, stress with multi-strand jack",
         quantity=float(duct_runs * 2),  # 2 ducts * 2 ends
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PT_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{duct_runs * 2} No. beam anchorages ({duct_runs} live ends + {duct_runs} dead ends).",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {duct_runs * 2} anchorages inferred from two assumed ducts, not source-verified live/dead end locations.",
         row_role="",
     ))
 

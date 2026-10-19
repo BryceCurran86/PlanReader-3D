@@ -91,7 +91,7 @@ class TestPostTensionTradeAuthority(unittest.TestCase):
         self.assertEqual(area_item.quantity, 400.0)
 
         # 2. Strand mass item: 400 m² * 3.5 kg/m² = 1400 kg = 1.4 tonnes
-        strand_item = next(i for i in items if i.unit == "item" and "strand supply" in i.element)
+        strand_item = next(i for i in items if i.unit == "t" and "strand supply" in i.element)
         self.assertEqual(strand_item.quantity, 1.400)
         self.assertIn("1400.0 kg", strand_item.notes)
 
