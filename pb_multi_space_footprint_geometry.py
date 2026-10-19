@@ -140,10 +140,10 @@ def resolve_external_envelope_perimeter_m(
     - Never chooses among candidates by closeness to an expected BOQ value.
     """
     ext: Optional[float] = None
-    if external_perimeter_m is not None:
+    if type(external_perimeter_m) in (int, float):
         try:
             candidate = float(external_perimeter_m)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             candidate = float("nan")
         if math.isfinite(candidate) and candidate > 0.0:
             ext = candidate
@@ -158,10 +158,10 @@ def resolve_external_envelope_perimeter_m(
         )
 
     fallback: Optional[float] = None
-    if fallback_wall_perimeter_m is not None:
+    if type(fallback_wall_perimeter_m) in (int, float):
         try:
             fb = float(fallback_wall_perimeter_m)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             fb = float("nan")
         if math.isfinite(fb) and fb > 0.0:
             fallback = round(fb, 2)
