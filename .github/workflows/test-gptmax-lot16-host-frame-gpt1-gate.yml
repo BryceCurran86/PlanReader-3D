@@ -58,6 +58,8 @@ jobs:
           PYTHONPATH=. python -u tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py \
             --pdf "$PDF" --page-id 3 \
             --sha256 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --archived-signed-run docs/engineering/lot16_original_signed_eight_row_20261015/production/source_sealed_run.json \
+            --archived-customer-rows docs/engineering/lot16_original_signed_eight_row_20261015/production/verified_customer_rows.json \
             --output artifacts/gptmax-original-lot16-host-frame-dimension-gate.json
       - name: Verify all 21 own-host/own-frame records and refuse unowned dimensions
         run: |
@@ -79,6 +81,8 @@ jobs:
           assert r['original_complete_host_frames']>=9
           assert r['original_signed_area_quantities']>=8
           assert r['source_snapshot_and_original_sealed_receipts_unchanged']
+          assert r['historical_signed_quantity_bodies_exact'] is True
+          assert r['historical_verified_customer_bodies_exact'] is True
           assert len({x['physical_opening_id'] for x in decisions})==len(decisions)
           assert len(decisions)==r['original_physical_opening_count']
           assert sum(r['first_gate_counts'].values())==len(decisions)
