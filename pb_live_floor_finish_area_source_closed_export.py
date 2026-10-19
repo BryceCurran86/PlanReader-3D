@@ -278,7 +278,17 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish source room face mismatch: "
                 f"{quantity.quantity_id}"
             )
-        if _clean(metadata.get("page_no")) != _clean(floor.page_id):
+        original_source_page = metadata.get("page_no")
+        canonical_source_page = floor.page_id
+        if (
+            type(original_source_page) is not str
+            or type(canonical_source_page) is not str
+            or not original_source_page
+            or not canonical_source_page
+            or original_source_page != original_source_page.strip()
+            or canonical_source_page != canonical_source_page.strip()
+            or original_source_page != canonical_source_page
+        ):
             raise SourceClosedRunConflictError(
                 "floor-finish source page mismatch: "
                 f"{quantity.quantity_id}"

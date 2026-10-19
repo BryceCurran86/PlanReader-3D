@@ -24,6 +24,9 @@ from pb_customer_output_verification import (
     verify_sealed_customer_output,
 )
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from pb_source_scope_sidecar_v2_preview import (
+    verify_v2_preview_scope_customer_receipts,
+)
 from tools.report_gpt3_four_project_evidence import _read_json_without_duplicate_keys
 from tools.run_gpt3_original_byte_gated_exact_project import FROZEN_ROOT
 
@@ -151,12 +154,17 @@ def _manual_allowances(book: Mapping[str, Any]) -> list[dict]:
 def build_verified_customer_quote(
     sealed_run: Mapping[str, Any], customer_rows: list[dict],
     rate_book: Mapping[str, Any],
+    *, scope_preview: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Price only independently verified, exactly signed quantities."""
     if type(sealed_run) is not dict or type(customer_rows) is not list or type(rate_book) is not dict:
         raise ValueError("signed run, customer rows and client rate book are required")
     sealed = sealed_source_closed_run_from_dict(sealed_run)
     verified = verify_sealed_customer_output(sealed, customer_rows)
+    if scope_preview is not None:
+        verify_v2_preview_scope_customer_receipts(
+            scope_preview, sealed, customer_rows,
+        )
     if (rate_book.get("schema_version") != "gpt3-client-rates-v1"
         or rate_book.get("project_id") != sealed.project_id):
         raise ValueError("client rate book project/schema does not match signed issuer")
@@ -320,6 +328,12 @@ def build_verified_customer_quote(
         },
         "official_four_project_accuracy": None,
     }
+    if scope_preview is not None:
+        # Scope parity is self-attested, not original PDF issuer authority.
+        # Do not change any legacy V1-only quote output or fingerprint.
+        report["scope_preview_customer_parity"] = "SELF_ATTESTED_MATCH_ONLY"
+        report["scope_preview_source_authenticated"] = False
+        report["scope_preview_sealed_run_fingerprint"] = sealed.fingerprint
     digest = hashlib.sha256(json.dumps(
         report, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
         allow_nan=False).encode("utf-8")).hexdigest()
@@ -469,10 +483,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--customers", type=Path, required=True)
     parser.add_argument("--client-rates", type=Path, required=True)
+    parser.add_argument("--scope-preview", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--format", choices=("json", "csv"), default="json")
     args = parser.parse_args(argv)
     inputs = (args.sealed_run, args.customers, args.client_rates)
+    if args.scope_preview is not None:
+        inputs += (args.scope_preview,)
     if (args.output.exists() or args.output.is_symlink()
         or args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
         or any(args.output.resolve() == source.resolve() for source in inputs)):
@@ -480,7 +497,13 @@ def main(argv: list[str] | None = None) -> int:
     sealed = _read_json_without_duplicate_keys(args.sealed_run)
     customers = _read_json_without_duplicate_keys(args.customers)
     rates = _read_json_without_duplicate_keys(args.client_rates)
-    quote = build_verified_customer_quote(sealed, customers, rates)
+    scope_preview = (
+        _read_json_without_duplicate_keys(args.scope_preview)
+        if args.scope_preview is not None else None
+    )
+    quote = build_verified_customer_quote(
+        sealed, customers, rates, scope_preview=scope_preview,
+    )
     body = (quote_csv(quote) if args.format == "csv"
             else json.dumps(quote, sort_keys=True, indent=2, allow_nan=False) + "\n")
     _write_new(args.output, body, inputs)

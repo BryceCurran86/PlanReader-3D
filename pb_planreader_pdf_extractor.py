@@ -752,12 +752,42 @@ class GenericPlanReaderExtractor:
         replacement privilege. Existing behaviour remains deterministic: a
         positive later physical quantity replaces only a smaller existing one.
         """
-        del new_metadata
-        if new_quantity <= 0:
+        # Partial compound floor arithmetic is useful for diagnostics but
+        # must never displace a smaller complete structural bed/DPM/mesh
+        # quantity. Conversely, authentic complete geometry can replace a
+        # larger provisional estimate. Neither declared areas nor unrelated
+        # receipt strings confer this status; it comes from source geometry.
+        try:
+            if isinstance(new_quantity, bool):
+                return False
+            new_m2 = float(new_quantity)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(new_m2) or new_m2 <= 0:
             return False
         if existing is None:
             return True
-        return new_quantity > float(existing.quantity or 0)
+        current = getattr(existing, "quantity", None)
+        try:
+            if isinstance(current, bool):
+                return False
+            current_m2 = float(current) if current is not None else 0.0
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(current_m2):
+            return False
+        source_complete = (
+            isinstance(new_metadata, dict)
+            and new_metadata.get("commercial_area_authorized") is True
+        )
+        previous_meta = getattr(existing, "metadata", None)
+        previous_complete = (
+            isinstance(previous_meta, dict)
+            and previous_meta.get("commercial_area_authorized") is True
+        )
+        if source_complete != previous_complete:
+            return source_complete
+        return new_m2 > current_m2
 
     @staticmethod
     def _has_dpc_specification(page_text: str) -> bool:
@@ -1975,9 +2005,18 @@ class GenericPlanReaderExtractor:
                 # floor correspondence, independent metric proof and material.
                 from pb_multi_space_footprint_geometry import FootprintStatus
 
+                # A figured secondary depth is not an authenticated
+                # FULL-LENGTH frontage. The legacy builder synthesizes the
+                # entire 'front' strip from the main rectangle. Its quantity
+                # remains diagnostic; no source-complete floor can be sealed
+                # until the secondary span, edge and polygon are corroborated.
+                secondary_span_source_owned = (
+                    page_num not in verandah_mention_pages
+                )
                 compound_area_complete = (
                     footprint_res.status == FootprintStatus.CONFIRMED.value
                     and not footprint_res.missing_components
+                    and secondary_span_source_owned
                     and math.isfinite(structural_bed_area_m2)
                     and structural_bed_area_m2 > 0.0
                 )
@@ -2049,6 +2088,7 @@ class GenericPlanReaderExtractor:
                         dimensions=[length_m, width_m],
                         metadata={
                             "commercial_area_authorized": compound_area_complete,
+                            "secondary_span_source_owned": secondary_span_source_owned,
                             "original_source_compound_complete": compound_area_complete,
                             "component_areas": footprint_res.component_areas,
                             "gross_floor_area_m2": footprint_res.gross_floor_area_m2,
@@ -2542,6 +2582,16 @@ class GenericPlanReaderExtractor:
                         dpc_meta["dpc_envelope_reason"] = _envelope.reason
                         dpc_meta["dpc_envelope_source"] = _envelope.source
                         dpc_meta["dpc_envelope_base_m"] = dpc_envelope_base_m
+                        # A fallback wall perimeter is a diagnostic, not the
+                        # authenticated external envelope of an incomplete
+                        # compound. Preserve its numeric legacy quantity but
+                        # distinguish it from source-complete DPC for all
+                        # future customer quantity consumers.
+                        dpc_source_complete = (
+                            _envelope.status == "confirmed_external"
+                            and dpc_meta.get("commercial_area_authorized") is True
+                        )
+                        dpc_meta["commercial_perimeter_authorized"] = dpc_source_complete
                         if internal_partition_dpc_length_m is not None:
                             dpc_meta["internal_partition_length_m"] = internal_partition_dpc_length_m
                             dpc_meta["transverse_runs_count"] = transverse_runs_count
@@ -2574,7 +2624,7 @@ class GenericPlanReaderExtractor:
                                 description=dpc_description,
                                 quantity=dpc_qty,
                                 unit="M",
-                                confidence=0.90,
+                                confidence=0.90 if dpc_source_complete else 0.45,
                                 source_page=page_num,
                                 sheet_number=sheet_no,
                                 metadata=dpc_meta,

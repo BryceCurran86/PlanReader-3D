@@ -134,6 +134,30 @@ def _opening_quantity(
                 or measurement_record_id != measurement_record_id.strip()
                 or measurement_record_id not in evidence_ids):
             return None
+        # Some authenticated figured-label quantities have independent
+        # canonical metric axes, while older source-proven labels legitimately
+        # lack those unresolved fields. When BOTH axes are present, prevent a
+        # replayed area from disagreeing with their physical product. A
+        # 0.005 m2 allowance covers an original two-decimal printed area;
+        # absence of axes does not replace signed figured-label authority.
+        if opening.width_m is not None and opening.height_m is not None:
+            if (
+                type(opening.width_m) not in (int, float)
+                or type(opening.height_m) not in (int, float)
+            ):
+                return None
+            width = float(opening.width_m)
+            height = float(opening.height_m)
+            if (
+                not math.isfinite(width)
+                or not math.isfinite(height)
+                or width <= 0.0
+                or height <= 0.0
+                or not math.isclose(
+                    value, width * height, rel_tol=0.0, abs_tol=0.0050001
+                )
+            ):
+                return None
         quantity_authority = LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
     elif basis == "resolved_opening_geometry":
         measurement_record_id = opening.opening_void_record_id
@@ -313,9 +337,26 @@ def publish_live_opening_area_quantities(
     # favourable member and conceal contradictory identity lineage.
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
+    source_scope: tuple[str, str, str] | None = None
     for opening in composition.canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
+        # One published source-visibility snapshot owns this canonical
+        # composition. A foreign document/hash/snapshot cannot hide among
+        # unsupported openings while the matching member seals FIRM area.
+        # Different source PAGES within the same PDF remain independent
+        # eligible physical openings.
+        owner = (
+            opening.document_id,
+            opening.source_sha256,
+            opening.snapshot_id,
+        )
+        if source_scope is None:
+            source_scope = owner
+        elif source_scope != owner:
+            raise ValueError(
+                "canonical opening source snapshot conflicts with quantity composition"
+            )
         # A stale foreign-revision member cannot be filtered out as
         # unsupported while the favourable member becomes a commercial
         # quantity. The canonical composition is revision-scoped.

@@ -8,6 +8,7 @@ No customer QuantityEvidence or CarpentryTakeoffItem is created.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import re
 from collections import defaultdict
 
@@ -15,6 +16,12 @@ import fitz
 
 _NUMERIC = re.compile(r"[0-9]{2,6}\Z")
 _CODE = re.compile(r"[A-Z][A-Z0-9]{1,7}\Z")
+
+# Diagnostic-only work bounds. Hitting either reports an incomplete universe,
+# never a complete source census or commercial measurement.
+_MAX_INK_COMBINATION_TRIALS = 16_384
+_MAX_INK_MATCHES = 128
+_MAX_INK_SOURCE_STROKE_PROBES = 262_144
 
 
 def audit_exterior_overhead_source_census_shadow(
@@ -102,6 +109,18 @@ def audit_exterior_overhead_source_census_shadow(
                 "native_description_literals_untrusted": tuple(strings),
                 "material_definition_issued": False,
             })
+    # A source word used by a material-definition candidate is not also
+    # evidence for a physical installed-finish occurrence. Retain EVERY
+    # remaining printed occurrence without pretending it is in the plan:
+    # other legends, schedules and drawing annotations can share the code.
+    definition_addresses = tuple(sorted({
+        tuple(row["material_code_word_address"]) for row in definitions
+    }))
+    definition_address_set = set(definition_addresses)
+    nondefinition_codes = tuple(
+        row for row in codes
+        if tuple(row["source_word_address"]) not in definition_address_set
+    )
     # Enumerate all source-number groups and ALL arithmetic competitors.
     # An equality does not bind any printed figure to physical endpoints.
     number_rows = [
@@ -134,16 +153,21 @@ def audit_exterior_overhead_source_census_shadow(
         "original_bbox_pdf_pts": tuple(float(v) for v in w[:4]),
     } for value, w in number_rows)
     by_numeric_block = defaultdict(list)
+    # Preserve the complete original text order within each printed number
+    # while replacing a repeated full-page scan with an exact-value index.
+    # A matching arithmetic total is only an untrusted source candidate.
+    by_number_value = defaultdict(list)
     for value, w in number_rows:
         by_numeric_block[int(w[5])].append((value, w))
+        by_number_value[value].append(w)
     chains = []
     for block, members in by_numeric_block.items():
         if not 2 <= len(members) <= 12:
             continue
         total = sum(value for value, _ in members)
         rivals = [
-            w for value, w in number_rows
-            if value == total and int(w[5]) != block
+            w for w in by_number_value.get(total, ())
+            if int(w[5]) != block
         ]
         if not rivals:
             continue
@@ -151,27 +175,48 @@ def audit_exterior_overhead_source_census_shadow(
         # every complete stroke ancestry. Nearby labels/ink are candidates,
         # not extension-line ownership or measured geometry authority.
         original_ink_chains = []
+        ink_census_complete = True
+        ink_combination_trials = 0
+        ink_source_stroke_probes = 0
         grouped_words = sorted(
             members, key=lambda member: (member[1][1] + member[1][3]) / 2
         )
         source_letters_x2 = sum(w[2] for _, w in members) / len(members)
         for overall_word in rivals:
             for overall in native_dim_strokes:
+                # The Cartesian-product cap cannot protect scans which
+                # generate zero products. Account for every original stroke
+                # visited, including rejected source-ink competitors.
+                if ink_source_stroke_probes >= _MAX_INK_SOURCE_STROKE_PROBES:
+                    ink_census_complete = False
+                    break
+                ink_source_stroke_probes += 1
                 if not 0 < overall[0] - overall_word[2] < 3.0:
                     continue
                 component_rows = []
                 for _value, word in grouped_words:
                     center_y = (word[1] + word[3]) / 2
-                    near = tuple(
-                        stroke for stroke in native_dim_strokes
-                        if 0 < stroke[0] - source_letters_x2 < 3.0
-                        and stroke[1] <= center_y <= stroke[2]
-                    )
-                    component_rows.append(near)
+                    near = []
+                    for stroke in native_dim_strokes:
+                        if ink_source_stroke_probes >= _MAX_INK_SOURCE_STROKE_PROBES:
+                            ink_census_complete = False
+                            break
+                        ink_source_stroke_probes += 1
+                        if (0 < stroke[0] - source_letters_x2 < 3.0
+                                and stroke[1] <= center_y <= stroke[2]):
+                            near.append(stroke)
+                    if not ink_census_complete:
+                        break
+                    component_rows.append(tuple(near))
+                if not ink_census_complete:
+                    break
                 if any(not options for options in component_rows):
                     continue
-                import itertools
                 for combination in itertools.product(*component_rows):
+                    if ink_combination_trials >= _MAX_INK_COMBINATION_TRIALS:
+                        ink_census_complete = False
+                        break
+                    ink_combination_trials += 1
                     ids = tuple((line[3], line[4]) for line in combination)
                     if len(set(ids)) != len(members):
                         continue
@@ -189,11 +234,12 @@ def audit_exterior_overhead_source_census_shadow(
                         "physical_soffit_dimension_axis_proven": False,
                         "firm_metric_authority": False,
                     })
-                    if len(original_ink_chains) >= 128:
+                    if len(original_ink_chains) >= _MAX_INK_MATCHES:
+                        ink_census_complete = False
                         break
-                if len(original_ink_chains) >= 128:
+                if not ink_census_complete:
                     break
-            if len(original_ink_chains) >= 128:
+            if not ink_census_complete:
                 break
         chains.append({
             "component_source_word_addresses": tuple(
@@ -206,9 +252,15 @@ def audit_exterior_overhead_source_census_shadow(
             ),
             "source_extension_lines_proven": False,
             "source_ink_line_correspondence_candidates": tuple(original_ink_chains),
+            "source_ink_line_correspondence_complete": ink_census_complete,
+            "source_ink_combination_trials": ink_combination_trials,
+            "source_ink_stroke_probes": ink_source_stroke_probes,
             "physical_soffit_axes_proven": False,
         })
     chains.sort(key=lambda c: c["component_source_word_addresses"])
+    all_ink_rivals_complete = all(
+        row["source_ink_line_correspondence_complete"] for row in chains
+    )
     return {
         "status": (
             "original_exterior_overhead_source_candidates_only"
@@ -218,12 +270,16 @@ def audit_exterior_overhead_source_census_shadow(
         "original_page_number": page_number,
         "original_source_sha256": expected_sha256,
         "all_original_code_word_candidates": tuple(codes),
+        "original_material_definition_code_addresses": definition_addresses,
+        "unclassified_nondefinition_source_code_word_candidates": nondefinition_codes,
+        "nondefinition_code_physical_finish_owner_proven": False,
         "original_soffit_material_description_candidates": tuple(definitions),
         "original_figured_number_candidates": numbers,
         "original_individual_figured_stroke_candidates": tuple(
             individual_figure_stroke_candidates
         ),
         "all_competing_figured_arithmetic_chains": tuple(chains),
+        "all_source_ink_correspondence_rivals_complete": all_ink_rivals_complete,
         "external_material_issuer_authenticated": False,
         "source_clip_and_active_paint_authenticated": False,
         "original_dimension_axes_and_extension_lines_proven": False,
@@ -234,7 +290,9 @@ def audit_exterior_overhead_source_census_shadow(
         "exterior_soffit_area_m2": None,
         "new_firm_quantities": 0,
         "first_unclosed_gate": (
-            "source_active_paint_clip_material_and_physical_overhead_owner"
+            "bounded_original_ink_correspondence_universe_incomplete"
+            if not all_ink_rivals_complete
+            else "source_active_paint_clip_material_and_physical_overhead_owner"
             if codes else "original_source_material_mark_unavailable"
         ),
     }
