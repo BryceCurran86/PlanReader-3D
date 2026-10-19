@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import re
+import math
 
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
@@ -47,6 +48,48 @@ class NativeArchitecturalScheduleResult:
 
 def _reject(sha: str, reason: str) -> NativeArchitecturalScheduleResult:
     return NativeArchitecturalScheduleResult("ABSTAIN", (reason,), sha)
+
+
+def _native_word_has_painted_glyphs(word: tuple, text_traces: tuple) -> bool:
+    """Bind EACH source word to its own visible native glyph bounding boxes.
+
+    A concatenation of unrelated text paint cannot corroborate a hidden,
+    overwritten or displaced original source value. Both word and glyph
+    geometry are native unrotated PDF coordinates: do not use page.rect.
+    """
+    try:
+        import fitz
+        original = str(word[4])
+        native_box = fitz.Rect(*(float(x) for x in word[:4]))
+        if (
+            not original or native_box.is_empty or native_box.is_infinite
+            or not all(math.isfinite(float(v)) for v in native_box)
+        ):
+            return False
+        hits = 0
+        for trace in text_traces:
+            if trace.get("type") != 0 or trace.get("opacity") != 1.0:
+                continue
+            glyphs = tuple(trace.get("chars", ()))
+            if len(glyphs) < len(original):
+                continue
+            for pos in range(len(glyphs) - len(original) + 1):
+                fragment = glyphs[pos:pos + len(original)]
+                if "".join(chr(g[0]) for g in fragment) != original:
+                    continue
+                glyph_box = fitz.Rect(fragment[0][3])
+                for glyph in fragment[1:]:
+                    glyph_box |= fitz.Rect(glyph[3])
+                if glyph_box.is_empty or glyph_box.is_infinite:
+                    continue
+                coverage = (native_box & glyph_box).get_area() / native_box.get_area()
+                if coverage >= 0.75:
+                    hits += 1
+                    if hits > 1:
+                        return False
+        return hits == 1
+    except (TypeError, ValueError, OverflowError, IndexError, KeyError, AttributeError):
+        return False
 
 
 def _native_receipts(page, block_no: int, lines: tuple[str, ...], page_no: int):
@@ -85,10 +128,15 @@ def _native_receipts(page, block_no: int, lines: tuple[str, ...], page_no: int):
                 text_runs.append("".join(chr(glyph[0]) for glyph in trace["chars"]))
             except (ValueError, TypeError, OverflowError):
                 return None
-    painted = "".join(text_runs).replace(" ", "").casefold()
-    for label_or_value in lines:
-        if "".join(label_or_value.split()).casefold() not in painted:
-            return None
+    # The aggregate painted line alone is insufficient: a copied value
+    # drawn elsewhere in this table could mask an unpainted native word.
+    # Require native per-word glyph+position correspondence, uniquely.
+    visible_traces = tuple(page.get_texttrace())
+    if not text_runs or any(
+        not _native_word_has_painted_glyphs(word, visible_traces)
+        for _, line_words in native_lines for word in line_words
+    ):
+        return None
     return tuple(
         (line_no, tuple(
             f"p{page_no}:b{block_no}:l{line_no}:w{int(w[7])}"
