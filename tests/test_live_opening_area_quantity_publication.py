@@ -687,3 +687,33 @@ def test_figured_source_opening_does_not_fabricate_missing_axis_from_area():
     # A single genuine corroborated metric axis does not by itself prove a
     # second axis. Existing figured-label receipt authority remains separate.
     assert _opening_quantity(replace(valid, width_m=1.2)) is not None
+
+
+@pytest.mark.parametrize("field,foreign", [
+    ("document_id", "foreign-document"),
+    ("source_sha256", "f" * 64),
+    ("snapshot_id", "foreign-snapshot"),
+])
+def test_canonical_opening_inventory_rejects_foreign_source_scope(field, foreign):
+    original = _opening(canonical_id="source-opening")
+    foreign_member = replace(
+        _opening(canonical_id="foreign-opening"), **{field: foreign},
+    )
+    with pytest.raises(ValueError, match="source snapshot conflicts"):
+        publish_live_opening_area_quantities(_composition(original, foreign_member))
+
+    # An unsupported member cannot evade the whole-producer source inventory
+    # check just because its positive opening area would not be exported.
+    unsupported = replace(foreign_member, area_m2=None)
+    with pytest.raises(ValueError, match="source snapshot conflicts"):
+        publish_live_opening_area_quantities(_composition(original, unsupported))
+
+
+def test_openings_from_multiple_original_pages_keep_one_document_snapshot():
+    first = _opening(canonical_id="first-floor-door")
+    second = replace(
+        _opening(canonical_id="second-floor-window"), page_id="11",
+    )
+    quantities = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(quantities) == 2
+    assert {q.metadata["page_no"] for q in quantities} == {"3", "11"}
