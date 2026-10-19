@@ -197,6 +197,80 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
             "paint",
         )
 
+    def test_authenticated_vinyl_faced_plaster_ceiling_tile_is_grid_not_vinyl_floor(self):
+        description = "VINYL FACED PLASTER TILE 600x1200"
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "code": "GRID", "status": "Confirmed",
+                "description": description, "finish": "",
+            }), "ceiling_grid")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "code": "GRID", "status": "Confirmed",
+                "description": description, "finish": description,
+            }), "ceiling_grid")
+        self.assertEqual(
+            mat._source_defined_alpha_code("GRID " + description), "GRID")
+        rows = mat.parse_schedule_text(
+            "CEILING FINISHES SCHEDULE\nGRID " + description + "\\n"
+            "WFPB WET AREA FLUSHSET PLASTERBOARD"
+        )
+        row = next(item for item in rows if item["code"] == "GRID")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                **row, "status": "Confirmed"
+            }), "ceiling_grid")
+        for raw in ("GRID", "GRID 600x1200",
+                    "GRID vinyl flooring", "GRID floor tile 600x1200",
+                    "GRID generic cladding"):
+            with self.subTest(raw=raw):
+                self.assertEqual(mat._source_defined_alpha_code(raw), "")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "code": "GRID", "status": "Conflict",
+                "description": description, "finish": "",
+            }), "")
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry({
+                "code": "VN1", "status": "Confirmed",
+                "description": "Commercial vinyl sheet flooring",
+                "finish": "",
+            }), "vinyl")
+
+    def test_sha_pinned_maryborough_a120_original_ceiling_legend_grid_row_source(self):
+        import hashlib
+        import fitz
+        source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+        if not source.is_file():
+            self.skipTest("private original ceiling legend absent; source not CI-verified")
+        original = source.read_bytes()
+        sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+        self.assertEqual(hashlib.sha256(original).hexdigest(), sha)
+        with fitz.open(stream=original, filetype="pdf") as document:
+            self.assertEqual(len(document), 31)
+            words = document[8].get_text("words", sort=False)
+        by_block = {}
+        for word in words:
+            by_block.setdefault(word[5], {}).setdefault(word[6], []).append(word)
+        positive_rows = []
+        for lines in by_block.values():
+            for line_no, items in lines.items():
+                literal = " ".join(w[4] for w in sorted(items, key=lambda w: w[7]))
+                next_words = lines.get(line_no + 1, ())
+                next_literal = " ".join(
+                    w[4] for w in sorted(next_words, key=lambda w: w[7]))
+                if literal == "GRID" and "VINYL FACED PLASTER TILE" in next_literal.upper():
+                    positive_rows.append((literal, next_literal))
+        self.assertEqual(len(positive_rows), 1)
+        row = " ".join(positive_rows[0])
+        self.assertIn("600x1200", row)
+        self.assertEqual(mat._source_defined_alpha_code(row), "GRID")
+        self.assertEqual(mat.semantic_finish_from_schedule_entry({
+            "status": "Confirmed", "code": "GRID",
+            "description": positive_rows[0][1], "finish": "",
+        }), "ceiling_grid")
+        self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), sha)
+
     def test_resolved_substrates_support_schedule_defined_generic_codes(self):
         resolver = {
             "WT1": {
