@@ -62,6 +62,10 @@ from pb_live_floor_area_customer_projection import project_live_floor_area_custo
 from pb_live_floor_finish_customer_projection import (
     project_live_floor_finish_customer_rows,
 )
+from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+from pb_live_ceiling_area_customer_projection import (
+    project_live_ceiling_area_customer_rows,
+)
 from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
@@ -432,6 +436,10 @@ def _generate_project_handoff_locked(
         "floor_finish_customer_row_count": 0,
         "floor_finish_customer_rows_file": None,
         "floor_finish_customer_first_gate": "NO_SEALED_FLOOR_FINISH",
+        "ceiling_customer_rows_verified": False,
+        "ceiling_customer_row_count": 0,
+        "ceiling_customer_rows_file": None,
+        "ceiling_customer_first_gate": "NO_SEALED_CEILING",
         "canonical_counts": {},
         # Source-owned canonical-wall authority is distinct from overall
         # publication status. A local canonical-ID conflict must be visible
@@ -983,6 +991,60 @@ def _generate_project_handoff_locked(
                 "floor_finish_customer_projection_unverified"
             )
 
+    # Legacy same-scope and new cross-view RCP ceilings can both issue
+    # source-closed ceiling_lining areas. Project each through its OWN source
+    # customer authority, then verify the union against the actual combined
+    # sealed ceiling family. A ceiling-only receipt is never full-project
+    # customer approval.
+    verified_ceiling_customer_rows = None
+    if ceiling_quantities:
+        ceiling_family_runs = tuple(
+            run for family, run in family_runs if family == "ceiling_area"
+        )
+        if len(ceiling_family_runs) != 1:
+            raise RuntimeError("source ceiling family seal is ambiguous")
+        try:
+            ceiling_customer_rows = []
+            if new_ceiling_quantities:
+                ceiling_customer_rows.extend(project_live_ceiling_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
+            if legacy_ceiling_quantities:
+                if ceiling_result is None:
+                    raise RuntimeError("legacy ceiling has no source-owned result")
+                ceiling_customer_rows.extend(
+                    project_live_ceiling_area_customer_rows(
+                        ceiling_result, workspace_id=workspace_id,
+                        project_id=project_id,
+                    )
+                )
+            ceiling_verified = verify_sealed_customer_output(
+                ceiling_family_runs[0], ceiling_customer_rows,
+            )
+            ceiling_ids = tuple(
+                row.quantity_id for row in ceiling_family_runs[0].quantities
+            )
+            if (
+                len(ceiling_ids) != len(set(ceiling_ids))
+                or len(ceiling_customer_rows) != len(ceiling_ids)
+                or ceiling_verified.customer_row_count != len(ceiling_ids)
+                or set(ceiling_verified.verified_quantity_ids) != set(ceiling_ids)
+            ):
+                raise RuntimeError(
+                    "sealed ceiling customer quantity bijection unavailable"
+                )
+            verified_ceiling_customer_rows = tuple(ceiling_customer_rows)
+            summary["ceiling_customer_first_gate"] = "FAMILY_VERIFIED"
+        except Exception as exc:
+            # Keep independently verified producer seals, but grant no
+            # customer permission to ANY ceiling in a disputed family.
+            summary["ceiling_customer_first_gate"] = (
+                f"CEILING_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
+            )
+            # Customer-family first failure is a separate diagnostic;
+            # never mutate original-source claim reason codes merely because
+            # an optional customer projection did not pass.
+
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
         summary["family_run_ids"][family] = run.run_id
@@ -1010,6 +1072,17 @@ def _generate_project_handoff_locked(
             if _source_complexity_blocked(summary["claim_reason_codes"])
             else "no_sealable_quantities"
         )
+
+    if verified_ceiling_customer_rows is not None:
+        ceiling_customer_path = (
+            output_dir / "verified_ceiling_customer_rows.json"
+        )
+        _write_json(ceiling_customer_path, list(verified_ceiling_customer_rows))
+        summary["ceiling_customer_rows_verified"] = True
+        summary["ceiling_customer_row_count"] = len(
+            verified_ceiling_customer_rows
+        )
+        summary["ceiling_customer_rows_file"] = str(ceiling_customer_path)
 
     if verified_floor_finish_customer_rows is not None:
         finish_customer_path = (
