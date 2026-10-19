@@ -61,23 +61,56 @@ def _frame_valid(frame: dict | None, host: dict | None, identity: str) -> bool:
     return True
 
 
-def _axis_values_match_figured_pair(width_m: object, height_m: object,
-                                    dimension_values_mm: object) -> bool:
-    """Reject equal-area but physically different axis pairs in a shadow handoff.
+def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) -> bool:
+    """Independent original axis receipts must agree with printed dimensions.
 
-    Figured pairs are treated as unordered here: their source-owned axis-order
-    receipt is checked independently. Neither an area product nor this helper
-    grants dimension authority or selects a width/height orientation.
+    A PDF callout such as 1215 SGW gives a *pair* without proving which
+    printed number is the width. The separate live canonical producer may
+    resolve both width and height from frame/schedule/physical witnesses.
+    Do not veto those independently source-owned axes solely because the
+    callout's order is unresolved; equally, never permit a matching area
+    product with unrelated or swapped dimensions to pass this review gate.
+    This is diagnostic compatibility only, NEVER a measurement issuer.
     """
-    if (not _positive(width_m) or not _positive(height_m)
-            or not isinstance(dimension_values_mm, (list, tuple))
-            or len(dimension_values_mm) != 2
-            or not all(_positive(v) for v in dimension_values_mm)):
+    width_id = canonical.get("width_record_id")
+    height_id = canonical.get("height_record_id")
+    if (type(width_id) is not str or not width_id or width_id != width_id.strip()
+            or type(height_id) is not str or not height_id
+            or height_id != height_id.strip() or width_id == height_id
+            or canonical.get("geometry_complete") is not True):
         return False
-    measured_mm = sorted((width_m * 1000.0, height_m * 1000.0))
-    figured_mm = sorted(dimension_values_mm)
-    return all(math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-6)
-               for a, b in zip(measured_mm, figured_mm))
+    # Canonical record IDs are claims until present in the original producer's
+    # own evidence collection. Match the downstream _measurement_axes gate.
+    receipts = canonical.get("evidence_ids")
+    if (type(receipts) not in (tuple, list)
+            or width_id not in receipts or height_id not in receipts):
+        return False
+    width = canonical.get("width_m")
+    height = canonical.get("height_m")
+    if not _positive(width) or not _positive(height):
+        return False
+    raw_pair = evidence.get("dimension_values_mm")
+    if (type(raw_pair) not in (tuple, list) or len(raw_pair) != 2
+            or any(not _positive(v) for v in raw_pair)):
+        return False
+    dimensions = sorted(float(v) / 1000 for v in raw_pair)
+    axes = sorted((float(width), float(height)))
+    if not all(math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-9)
+               for a, b in zip(dimensions, axes)):
+        return False
+    # If the original label authority *also* claims width/height order, it
+    # must not contradict the independently issued canonical axis records.
+    figured_width, figured_height = evidence.get("width_mm"), evidence.get("height_mm")
+    if (figured_width is None) != (figured_height is None):
+        return False
+    if figured_width is not None:
+        if (not _positive(figured_width) or not _positive(figured_height)
+                or not math.isclose(float(figured_width) / 1000, width,
+                                    rel_tol=1e-8, abs_tol=1e-9)
+                or not math.isclose(float(figured_height) / 1000, height,
+                                    rel_tol=1e-8, abs_tol=1e-9)):
+            return False
+    return True
 
 
 def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
@@ -135,18 +168,46 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             if (c.get("figured_area_record_id")
                     and e.get("evidence_id") != c["figured_area_record_id"]):
                 raise ValueError("canonical source dimension identity mismatch")
+        # The printed pair is order-invariant; the canonical producer's
+        # distinct source-owned width and height records are independently
+        # ordered. Require both actual axis values to match the printed pair,
+        # not merely their product, without using the label to invent order.
         axis_ok = (
-            pair_ok and bool(e.get("axis_order_resolved"))
-            and bool(c.get("width_record_id")) and bool(c.get("height_record_id"))
-            and c["width_record_id"] != c["height_record_id"]
-            and _positive(c.get("width_m")) and _positive(c.get("height_m"))
-            and bool(c.get("geometry_complete"))
-            and _axis_values_match_figured_pair(
-                c["width_m"], c["height_m"], e["dimension_values_mm"])
+            pair_ok
+            and _source_owned_axes_agree_with_figured_pair(c, e)
             and math.isclose(
-                c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-6)
+                c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
+        # A source-issued area from an unordered two-number label does NOT
+        # imply width/height order. Review opening AREA independently from
+        # 3D axis geometry; neither review flag signs a quantity.
+        figured_receipt_bound = bool(
+            pair_ok and type(c.get("figured_area_record_id")) is str
+            and c["figured_area_record_id"]
+            and c["figured_area_record_id"] == e.get("evidence_id")
+            and type(c.get("evidence_ids")) in (tuple, list)
+            and c["figured_area_record_id"] in c["evidence_ids"]
+        )
+        if not supported:
+            area_gate = "source_owned_floor_plan_unavailable"
+        elif host is None:
+            area_gate = "structural_host_unavailable"
+        elif not frame_ok:
+            area_gate = "whole_wall_frame_unavailable"
+        elif not typed:
+            area_gate = "opening_filling_kind_unproven"
+        elif not pair_ok:
+            area_gate = "source_figured_dimension_pair_unproven"
+        elif not figured_receipt_bound:
+            area_gate = "original_figured_area_receipt_unbound"
+        elif row.get("quantity_id"):
+            area_gate = "original_signed_area_already_retained"
+        else:
+            area_gate = "independent_gpt1_opening_area_measurement_validation_required"
+        area_review_ready = (
+            area_gate == "independent_gpt1_opening_area_measurement_validation_required"
+        )
         if not supported:
             gate = "source_owned_floor_plan_unavailable"
         elif host is None:
@@ -173,7 +234,18 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "frame_reason_codes": list(row["frame_reason_codes"]),
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
+            "figured_area_receipt_bound": figured_receipt_bound,
+            "opening_area_first_remaining_gate": area_gate,
+            "new_gpt1_area_candidate_handoff": area_review_ready,
             "axis_order_authenticated": axis_ok,
+            "original_figured_label_order_source_resolved": (
+                e.get("axis_order_resolved") is True if pair_ok else False
+            ),
+            "independent_source_axis_record_ids": (
+                [c["width_record_id"], c["height_record_id"]]
+                if axis_ok else []
+            ),
+            "independent_axes_agree_with_original_pair": axis_ok,
             "filling_kind_source_supported": typed,
             "prior_signed_quantity_id": row.get("quantity_id"),
             "first_remaining_gate": gate,
@@ -192,6 +264,11 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
         "original_complete_host_frames": sum(r["frame_record"] is not None for r in rows),
         "original_signed_area_quantities": sum(bool(r.get("quantity_id")) for r in rows),
         "first_gate_counts": dict(sorted(Counter(r["first_remaining_gate"] for r in assessed).items())),
+        "area_first_gate_counts": dict(sorted(
+            Counter(r["opening_area_first_remaining_gate"] for r in assessed).items())),
+        "gpt1_new_area_review_candidates": [
+            r for r in assessed if r["new_gpt1_area_candidate_handoff"]
+        ],
         "source_floor_plan_support_only": supported,
         "gpt1_new_handoff_candidates": [r for r in assessed if r["new_gpt1_candidate_handoff"]],
         "opening_decisions": assessed,
@@ -200,11 +277,64 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
     }
 
 
-def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
+def verify_archived_signed_predecessors(
+    archived_signed_run: dict, archived_customer_rows: list,
+    current_receipts: dict,
+) -> None:
+    """Fail closed on ANY predecessor body change, not merely a retained ID.
+
+    The archive is checked only after live source/geometry/quantity issuance.
+    It never participates in object detection, gate decisions or publishing.
+    Additional newly signed rows may exist; every historical row stays exact.
+    """
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+    for run in (archived_signed_run, current_receipts.get("sealed_run")):
+        sealed_source_closed_run_from_dict(run)
+
+    def index(rows, *, name):
+        if type(rows) is not list:
+            raise ValueError(f"{name} must be a list")
+        result = {}
+        for row in rows:
+            if type(row) is not dict:
+                raise ValueError(f"{name} contains a malformed row")
+            key = row.get("quantity_id")
+            if type(key) is not str or not key or key in result:
+                raise ValueError(f"{name} has missing or duplicate quantity identity")
+            result[key] = row
+        return result
+
+    archived_quantities = index(archived_signed_run["quantities"], name="archived signed")
+    current_quantities = index(current_receipts["sealed_run"]["quantities"], name="current signed")
+    archived_customers = index(archived_customer_rows, name="archived customer")
+    current_customers = index(current_receipts["customer_rows"], name="current customer")
+    if not archived_quantities or set(archived_customers) != set(archived_quantities):
+        raise ValueError("archived signed/customer predecessor universe inconsistent")
+    for quantity_id, original in archived_quantities.items():
+        if current_quantities.get(quantity_id) != original:
+            raise RuntimeError(f"historical signed quantity body changed: {quantity_id}")
+        if current_customers.get(quantity_id) != archived_customers[quantity_id]:
+            raise RuntimeError(f"historical verified customer body changed: {quantity_id}")
+
+
+def original_host_frame_dimension_report(
+    pdf: bytes, *, page_id: str,
+    archived_signed_run: dict | None = None,
+    archived_customer_rows: list | None = None,
+) -> dict:
     if type(pdf) is not bytes or not pdf:
         raise TypeError("original source PDF bytes required")
     if type(page_id) is not str or not page_id.isdecimal() or int(page_id) < 1 or str(int(page_id)) != page_id:
         raise ValueError("canonical page required")
+    if (archived_signed_run is None) != (archived_customer_rows is None):
+        raise ValueError("archived signed run and customer rows must be supplied together")
+    if archived_signed_run is not None and (
+        type(archived_signed_run) is not dict
+        or type(archived_signed_run.get("project_id")) is not str
+        or not archived_signed_run["project_id"]
+    ):
+        raise ValueError("an archived signed project scope is required")
     digest = sha256(pdf).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -221,7 +351,11 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
     voids = compose_live_physical_opening_voids(
         source_visibility_producer=source, wall_opening_composition=comp)
     published = source.published_snapshot_for_revision(pub.revision.revision_id)
-    before = _retention(comp, voids, verify_customer_rows=True)
+    audit_project_id = (archived_signed_run["project_id"]
+                        if archived_signed_run is not None
+                        else "original-source-retention")
+    before = _retention(comp, voids, verify_customer_rows=True,
+                        audit_project_id=audit_project_id)
     existing = _observe(source, published, comp, voids)
     views = segment_source_page_viewports(
         source, revision_id=pub.revision.revision_id, page_id=page_id,
@@ -229,8 +363,12 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
     view = classify_live_view(views, expected_page=int(page_id))
     if (source.published_snapshot_for_revision(pub.revision.revision_id) != published
             or sha256(source._producer._store.source_bytes_by_revision[pub.revision.revision_id]).hexdigest() != digest
-            or _retention(comp, voids, verify_customer_rows=True) != before):
+            or _retention(comp, voids, verify_customer_rows=True,
+                           audit_project_id=audit_project_id) != before):
         raise RuntimeError("source snapshot or original sealed customer receipt mutated")
+    if archived_signed_run is not None:
+        verify_archived_signed_predecessors(
+            archived_signed_run, archived_customer_rows, before)
     root = {key: getattr(pub.revision, key) for key in
             ("document_id", "revision_id", "source_sha256")}
     root["snapshot_id"] = published.snapshot.snapshot_id
@@ -243,6 +381,8 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
         "revision_id": root["revision_id"],
         "page_id": page_id,
         "source_snapshot_and_original_sealed_receipts_unchanged": True,
+        "historical_signed_quantity_bodies_exact": archived_signed_run is not None,
+        "historical_verified_customer_bodies_exact": archived_signed_run is not None,
         "same_root_f07": view,
         "signed_source_lineage_handoff_granted": False,
     }
@@ -253,12 +393,20 @@ def main() -> None:
     p.add_argument("--pdf", type=Path, required=True)
     p.add_argument("--page-id", required=True)
     p.add_argument("--sha256", required=True)
+    p.add_argument("--archived-signed-run", type=Path)
+    p.add_argument("--archived-customer-rows", type=Path)
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
     raw = args.pdf.read_bytes()
     if sha256(raw).hexdigest() != args.sha256:
         raise ValueError("immutable original PDF SHA mismatch")
-    result = original_host_frame_dimension_report(raw, page_id=args.page_id)
+    result = original_host_frame_dimension_report(
+        raw, page_id=args.page_id,
+        archived_signed_run=(json.loads(args.archived_signed_run.read_text())
+                             if args.archived_signed_run else None),
+        archived_customer_rows=(json.loads(args.archived_customer_rows.read_text())
+                                if args.archived_customer_rows else None),
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print({"hosted": result["original_authenticated_hosts"],
