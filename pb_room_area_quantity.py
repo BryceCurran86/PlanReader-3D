@@ -227,20 +227,24 @@ def _validate_common(
         type(mapped_page) is not int or mapped_page != page_no
     ):
         blockers.append("viewport_page_mismatch")
-    if room.source_page:
-        try:
-            original_page = room.source_page
-            if (
-                type(original_page) not in (str, int)
-                or (type(original_page) is str and (
-                    original_page != original_page.strip()
-                    or not original_page.isdecimal()
-                ))
-                or int(original_page) != int(page_no)
-            ):
-                blockers.append("room_source_page_mismatch")
-        except (TypeError, ValueError, OverflowError):
-            blockers.append("room_source_page_mismatch")
+    # A falsy source-page identity (zero/empty string) is still a source
+    # identity error, not permission to skip page binding. An exact original
+    # page number is required even when an independent printed area exists.
+    source_page = room.source_page
+    if (
+        type(source_page) is int and source_page > 0
+        and source_page == page_no
+    ):
+        pass
+    elif (
+        type(source_page) is str
+        and source_page == str(page_no)
+        and source_page.isascii()
+        and source_page.isdecimal()
+    ):
+        pass
+    else:
+        blockers.append("room_source_page_mismatch")
     document_receipts = _original_room_receipts(document.evidence_ids)
     entity_receipts = _original_room_receipts(entity.evidence_ids)
     room_receipts = _original_room_receipts(room.evidence)
