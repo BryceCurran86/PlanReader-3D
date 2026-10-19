@@ -21,6 +21,7 @@ _CODE = re.compile(r"[A-Z][A-Z0-9]{1,7}\Z")
 # never a complete source census or commercial measurement.
 _MAX_INK_COMBINATION_TRIALS = 16_384
 _MAX_INK_MATCHES = 128
+_MAX_INK_SOURCE_STROKE_PROBES = 262_144
 
 
 def audit_exterior_overhead_source_census_shadow(
@@ -164,23 +165,39 @@ def audit_exterior_overhead_source_census_shadow(
         original_ink_chains = []
         ink_census_complete = True
         ink_combination_trials = 0
+        ink_source_stroke_probes = 0
         grouped_words = sorted(
             members, key=lambda member: (member[1][1] + member[1][3]) / 2
         )
         source_letters_x2 = sum(w[2] for _, w in members) / len(members)
         for overall_word in rivals:
             for overall in native_dim_strokes:
+                # The Cartesian-product cap cannot protect scans which
+                # generate zero products. Account for every original stroke
+                # visited, including rejected source-ink competitors.
+                if ink_source_stroke_probes >= _MAX_INK_SOURCE_STROKE_PROBES:
+                    ink_census_complete = False
+                    break
+                ink_source_stroke_probes += 1
                 if not 0 < overall[0] - overall_word[2] < 3.0:
                     continue
                 component_rows = []
                 for _value, word in grouped_words:
                     center_y = (word[1] + word[3]) / 2
-                    near = tuple(
-                        stroke for stroke in native_dim_strokes
-                        if 0 < stroke[0] - source_letters_x2 < 3.0
-                        and stroke[1] <= center_y <= stroke[2]
-                    )
-                    component_rows.append(near)
+                    near = []
+                    for stroke in native_dim_strokes:
+                        if ink_source_stroke_probes >= _MAX_INK_SOURCE_STROKE_PROBES:
+                            ink_census_complete = False
+                            break
+                        ink_source_stroke_probes += 1
+                        if (0 < stroke[0] - source_letters_x2 < 3.0
+                                and stroke[1] <= center_y <= stroke[2]):
+                            near.append(stroke)
+                    if not ink_census_complete:
+                        break
+                    component_rows.append(tuple(near))
+                if not ink_census_complete:
+                    break
                 if any(not options for options in component_rows):
                     continue
                 for combination in itertools.product(*component_rows):
@@ -225,6 +242,7 @@ def audit_exterior_overhead_source_census_shadow(
             "source_ink_line_correspondence_candidates": tuple(original_ink_chains),
             "source_ink_line_correspondence_complete": ink_census_complete,
             "source_ink_combination_trials": ink_combination_trials,
+            "source_ink_stroke_probes": ink_source_stroke_probes,
             "physical_soffit_axes_proven": False,
         })
     chains.sort(key=lambda c: c["component_source_word_addresses"])
