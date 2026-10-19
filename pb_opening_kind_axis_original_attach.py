@@ -45,7 +45,10 @@ def attach_kind_and_axis_shadows(
     attached: list[dict[str, Any]] = []
     kind_gates: dict[str, int] = {}
     axis_gates: dict[str, int] = {}
-    for decision in opening_decisions:
+    for decision in sorted(
+        opening_decisions,
+        key=lambda item: str(item.get("physical_opening_id") or ""),
+    ):
         oid = str(decision.get("physical_opening_id") or "").strip()
         if not oid:
             raise ValueError("physical opening identity required")
