@@ -92,7 +92,7 @@ class TestConcretingTradeAuthority(unittest.TestCase):
         self.assertEqual(area_item.quantity, 150.0)
         self.assertIn("Concrete volume: 15.00 m³", area_item.notes)
 
-        pump_item = next(i for i in items if i.unit == "item")
+        pump_item = next(i for i in items if i.unit == "m³")
         self.assertEqual(pump_item.quantity, 15.0)  # 15 m³
         self.assertIn("15.00 m³", pump_item.notes)
 
