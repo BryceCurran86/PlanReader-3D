@@ -139,6 +139,17 @@ def _page_schedule(page, page_no: int):
     if len(headings) != 1:
         return None
     heading = headings[0][1]
+    # The actual SOURCE heading must be painted and unobscured too. Merely
+    # finding AREA CALCULATIONS in extracted Unicode is not permission to
+    # issue a FIRM source schedule from invisible/overpainted title text.
+    original_heading_lines = tuple(
+        line.strip() for line in heading[4].splitlines() if line.strip()
+    )
+    if (not original_heading_lines
+            or _native_receipts(
+                page, headings[0][0], original_heading_lines, page_no
+            ) is None):
+        return None
     tables = []
     for index, block in enumerate(blocks):
         if len(block) <= 6 or block[6] != 0 or index == headings[0][0]:
