@@ -289,6 +289,7 @@ class OpeningHostFrameProducer:
             PhysicalWallCandidateAuthority
         ] = None,
         raster_split_frame_shadow: bool = False,
+        source_fragment_roles_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -308,12 +309,17 @@ class OpeningHostFrameProducer:
             raise TypeError("supplemental_wall_candidate_authority must be producer-owned")
         if type(raster_split_frame_shadow) is not bool:
             raise TypeError("raster_split_frame_shadow must be a bool")
+        if type(source_fragment_roles_shadow) is not bool:
+            raise TypeError("source_fragment_roles_shadow must be a bool")
+        if source_fragment_roles_shadow and supplemental_wall_candidate_authority is None:
+            raise ValueError("source fragment roles require a supplemental source authority")
         self._opening = physical_opening_authority
         self._host = host_binding_authority
         self._walls = physical_wall_candidate_authority
         self._supplemental_walls = supplemental_wall_candidate_authority
         # Opt-in diagnostic ONLY: never enabled in the default composition.
         self._raster_split_frame_shadow = raster_split_frame_shadow
+        self._source_fragment_roles_shadow = source_fragment_roles_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
 
     @classmethod
@@ -327,6 +333,7 @@ class OpeningHostFrameProducer:
             PhysicalWallCandidateAuthority
         ] = None,
         raster_split_frame_shadow: bool = False,
+        source_fragment_roles_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
@@ -334,6 +341,7 @@ class OpeningHostFrameProducer:
             physical_wall_candidate_authority,
             supplemental_wall_candidate_authority=supplemental_wall_candidate_authority,
             raster_split_frame_shadow=raster_split_frame_shadow,
+            source_fragment_roles_shadow=source_fragment_roles_shadow,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -488,8 +496,12 @@ class OpeningHostFrameProducer:
             supplemental = self._supplemental_walls.resolve_scope(selector)
             if (
                 supplemental.status is EvidenceResolutionStatus.CORROBORATED
+                and supplemental.proposition == PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
                 and supplemental.scope_complete is False
                 and supplemental.equivalence is not None
+                and all(getattr(supplemental, field, None) == getattr(binding, field)
+                    for field in ("document_id", "revision_id", "source_sha256",
+                        "snapshot_id", "page_id", "decision_scope_id"))
             ):
                 mixed = host_geometry._resolve_opening_local_mixed_scope_source_band(
                     self._opening,
@@ -499,6 +511,7 @@ class OpeningHostFrameProducer:
                     supplemental.records,
                     wall_scope.source_observation_ids,
                     supplemental.source_observation_ids,
+                    source_fragment_roles_shadow=self._source_fragment_roles_shadow,
                 )
                 if (
                     mixed.status is EvidenceResolutionStatus.CORROBORATED
@@ -674,6 +687,46 @@ class OpeningHostFrameProducer:
         if not selected_seen:
             return fail("opening_host_frame_selected_opening_not_discovered")
         return tuple(contexts)
+
+    def _raster_component_source_faces(self, contexts, normal):
+        """Re-prove one constant solid-wall band from every connected edge.
+
+        The aperture bbox is not a whole-wall thickness witness. Only exact
+        agreement of all independently owned flank faces may replace it.
+        A thickness step, competing endcap or missing receipt stays unknown.
+        """
+        offsets = []
+        visibility = self._opening.source_visibility_authority()
+        for context in contexts:
+            opening = context.opening
+            support = []
+            for observation_id in opening.source_observation_ids:
+                result = visibility.resolve_raster_opening_primitive(ObservationSelector(
+                    document_id=opening.document_id,
+                    revision_id=opening.revision_id,
+                    source_sha256=opening.source_sha256,
+                    snapshot_id=opening.snapshot_id,
+                    observation_id=observation_id,
+                ))
+                observation = result.observation
+                if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                        or observation is None
+                        or observation.page_id != opening.page_id):
+                    return None
+                support.append(observation)
+            flanks = host_geometry._raster_source_band_flanks(support, context.geometry)
+            if flanks is None:
+                return None
+            center = _dot(context.geometry.origin, normal)
+            offsets.extend((center + flank[2], center + flank[3])
+                for flank in flanks.values())
+        if not offsets:
+            return None
+        first = offsets[0]
+        if any(abs(lo - first[0]) > _COORD_TOL or abs(hi - first[1]) > _COORD_TOL
+                for lo, hi in offsets):
+            return None
+        return first
 
     @staticmethod
     def _selected_component(contexts: tuple[_ScopeBinding, ...], selected_binding):
@@ -999,14 +1052,20 @@ class OpeningHostFrameProducer:
 
         if raster_component:
             center_n = _dot(geometry.origin, normal)
-            if any(
+            if self._source_fragment_roles_shadow:
+                face_offsets = self._raster_component_source_faces(component_contexts, normal)
+                if face_offsets is None:
+                    return fail("opening_host_frame_raster_source_faces_inconsistent")
+                wall_thickness = face_offsets[1] - face_offsets[0]
+            elif any(
                 abs(_dot(context.geometry.origin, normal) - center_n) > _COORD_TOL
                 or abs(context.geometry.thickness - geometry.thickness) > _COORD_TOL
                 for context in component_contexts
             ):
                 return fail("opening_host_frame_raster_band_geometry_inconsistent")
-            wall_thickness = float(geometry.thickness)
-            face_offsets = (center_n - wall_thickness / 2.0, center_n + wall_thickness / 2.0)
+            else:
+                wall_thickness = float(geometry.thickness)
+                face_offsets = (center_n - wall_thickness / 2.0, center_n + wall_thickness / 2.0)
         else:
             face_offsets = _cluster_offsets(component_offsets, face_tol)
             if len(face_offsets) != 2:
@@ -1026,6 +1085,7 @@ class OpeningHostFrameProducer:
         if self._raster_split_frame_shadow and raster_component:
             motif_ids = repeated_raster_drafting_motif_wall_ids(wall_scope.records)
         skipped_motif_wall_ids: list[str] = []
+        unproven_pairs: set[tuple[str, str]] = set()
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
@@ -1072,7 +1132,20 @@ class OpeningHostFrameProducer:
                 ):
                     skipped_motif_wall_ids.append(wall_id)
                     continue
+                if self._source_fragment_roles_shadow:
+                    # Keep all unresolved source competitors reviewable. This
+                    # is diagnostic addressing, never DISTINCT or exclusion.
+                    unproven_pairs.add((str(wall_id), str(member_id)))
+                    continue
                 return fail("opening_host_frame_aligned_fragment_distinctness_unproven")
+
+        if unproven_pairs:
+            if failure_reasons is not None:
+                failure_reasons.extend(
+                    f"opening_host_frame_unproven_wall_pair:{wall_id}:{member_id}"
+                    for wall_id, member_id in sorted(unproven_pairs)
+                )
+            return fail("opening_host_frame_aligned_fragment_distinctness_unproven")
 
         host_min_u = min(axis_values)
         host_max_u = max(axis_values)

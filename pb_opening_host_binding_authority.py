@@ -2915,6 +2915,63 @@ def _resolve_raster_source_primitive_host(
     )
 
 
+def _raster_source_band_flanks(support, opening):
+    """Read face/end closure only; the caller must authenticate every receipt.
+
+    A physical aperture bbox describes the gap. It need not have the same
+    cross-band bounds as the independently observed solid wall faces.
+    This helper grants no host, equivalence or whole-wall authority.
+    """
+    faces = [r for r in support if r.observation_kind == "raster_wall_band_face"]
+    ends = [r for r in support if r.observation_kind == "raster_wall_band_end"]
+    if len(faces) != 4 or len(ends) != 2:
+        return None
+    by_interval: dict[tuple[float, float], list[float]] = {}
+    for face in faces:
+        line = _line(face)
+        data = None if line is None else _source_line_axis_data(line, opening)
+        if data is None:
+            return None
+        lo, hi, offset = data
+        by_interval.setdefault((lo, hi), []).append(offset)
+    if len(by_interval) != 2 or any(len(v) != 2 for v in by_interval.values()):
+        return None
+
+    flanks: dict[str, tuple[float, float, float, float, float]] = {}
+    pixel_tol = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+    for (lo, hi), offsets in by_interval.items():
+        cross_lo, cross_hi = sorted(offsets)
+        if cross_hi - cross_lo <= _COORD_TOL:
+            return None
+        if cross_lo > pixel_tol or cross_hi < -pixel_tol:
+            return None
+        if lo < -pixel_tol and abs(hi) <= pixel_tol:
+            role, edge = "left", hi
+        elif hi > opening.length + pixel_tol and abs(lo - opening.length) <= pixel_tol:
+            role, edge = "right", lo
+        else:
+            return None
+        matching_ends = []
+        for end in ends:
+            line = _line(end)
+            if line is None:
+                return None
+            points = _endpoints(line)
+            along = tuple(_project(p, opening.origin, opening.axis) for p in points)
+            cross = sorted(_project(p, opening.origin, opening.normal) for p in points)
+            if (all(abs(v - edge) <= _COORD_TOL for v in along)
+                    and abs(cross[0] - cross_lo) <= _COORD_TOL
+                    and abs(cross[1] - cross_hi) <= _COORD_TOL):
+                matching_ends.append(end)
+        if len(matching_ends) != 1 or role in flanks:
+            return None
+        flanks[role] = (lo, hi, cross_lo, cross_hi, edge)
+    if set(flanks) != {"left", "right"}:
+        return None
+
+    return flanks
+
+
 def _resolve_raster_source_band_host_from_records(
     support: Sequence[SourceObservationRecord],
     records: Sequence[PhysicalWallCandidateRecord],
@@ -2930,53 +2987,11 @@ def _resolve_raster_source_band_host_from_records(
     flank, including its authenticated end. No global wall identity is inferred.
     """
     empty = _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, ())
-    faces = [r for r in support if r.observation_kind == "raster_wall_band_face"]
-    ends = [r for r in support if r.observation_kind == "raster_wall_band_end"]
-    if len(faces) != 4 or len(ends) != 2:
+    flanks = _raster_source_band_flanks(support, opening)
+    if flanks is None:
         return empty
-    by_interval: dict[tuple[float, float], list[float]] = {}
-    for face in faces:
-        line = _line(face)
-        data = None if line is None else _source_line_axis_data(line, opening)
-        if data is None:
-            return empty
-        lo, hi, offset = data
-        by_interval.setdefault((lo, hi), []).append(offset)
-    if len(by_interval) != 2 or any(len(v) != 2 for v in by_interval.values()):
-        return empty
-
-    flanks: dict[str, tuple[float, float, float, float, float]] = {}
     pixel_tol = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
     snap_tol = DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
-    for (lo, hi), offsets in by_interval.items():
-        cross_lo, cross_hi = sorted(offsets)
-        if cross_hi - cross_lo <= _COORD_TOL:
-            return empty
-        if cross_lo > pixel_tol or cross_hi < -pixel_tol:
-            return empty
-        if lo < -pixel_tol and abs(hi) <= pixel_tol:
-            role, edge = "left", hi
-        elif hi > opening.length + pixel_tol and abs(lo - opening.length) <= pixel_tol:
-            role, edge = "right", lo
-        else:
-            return empty
-        matching_ends = []
-        for end in ends:
-            line = _line(end)
-            if line is None:
-                return empty
-            points = _endpoints(line)
-            along = tuple(_project(p, opening.origin, opening.axis) for p in points)
-            cross = sorted(_project(p, opening.origin, opening.normal) for p in points)
-            if (all(abs(v - edge) <= _COORD_TOL for v in along)
-                    and abs(cross[0] - cross_lo) <= _COORD_TOL
-                    and abs(cross[1] - cross_hi) <= _COORD_TOL):
-                matching_ends.append(end)
-        if len(matching_ends) != 1 or role in flanks:
-            return empty
-        flanks[role] = (lo, hi, cross_lo, cross_hi, edge)
-    if set(flanks) != {"left", "right"}:
-        return empty
 
     selected: list[_RoleCandidate] = []
     for role in ("left", "right"):
