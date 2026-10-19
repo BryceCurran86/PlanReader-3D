@@ -212,7 +212,7 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
         self.assertEqual(
             mat._source_defined_alpha_code("GRID " + description), "GRID")
         rows = mat.parse_schedule_text(
-            "CEILING FINISHES SCHEDULE\nGRID " + description + "\\n"
+            "CEILING FINISHES SCHEDULE\nGRID " + description + "\n"
             "WFPB WET AREA FLUSHSET PLASTERBOARD"
         )
         row = next(item for item in rows if item["code"] == "GRID")
