@@ -23,6 +23,32 @@ from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
 from tools.diag_gptmax_same_root_f07_g17_original import classify_live_view
 
 
+def _signed_quantity_body_sha256(issuer_quantities: list[dict]) -> dict[str, str]:
+    """Audit COMPLETE producer-issued quantity bodies; never create quantities.
+
+    Kept strictly outside live quantity/measurement authority. An unchanged ID
+    with altered value, evidence, status, physical scope or metadata MUST change
+    its fingerprint before the historical archive release check can pass.
+    """
+    if type(issuer_quantities) not in (list, tuple):
+        raise TypeError("original issued quantities must be a sequence")
+    hashes: dict[str, str] = {}
+    for row in issuer_quantities:
+        if type(row) is not dict:
+            raise ValueError("original signed source quantity body unavailable")
+        quantity_id = row.get("quantity_id")
+        if (type(quantity_id) is not str or not quantity_id
+                or quantity_id != quantity_id.strip()
+                or quantity_id in hashes):
+            raise ValueError("duplicate or invalid original signed quantity ID")
+        # Stable JSON over the actual body, not only an ID/value/count subset.
+        # Reject non-finite values and unrepresentable metadata.
+        body = json.dumps(row, sort_keys=True, ensure_ascii=False,
+                          allow_nan=False, separators=(",", ":"))
+        hashes[quantity_id] = sha256(body.encode("utf-8")).hexdigest()
+    return dict(sorted(hashes.items()))
+
+
 def _positive(value: object) -> bool:
     if type(value) not in (float, int):
         return False
@@ -319,6 +345,11 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
         "snapshot_id": root["snapshot_id"],
         "revision_id": root["revision_id"],
         "page_id": page_id,
+        # SHA-only diagnostic: no private source/customer body exposed.
+        # Full archived eight-body comparison lives in the owner-source CI.
+        "original_source_issued_quantity_body_sha256": (
+            _signed_quantity_body_sha256(before["quantities"])
+        ),
         "source_snapshot_and_original_sealed_receipts_unchanged": True,
         "same_root_f07": view,
         "signed_source_lineage_handoff_granted": False,
