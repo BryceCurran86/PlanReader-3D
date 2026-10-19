@@ -420,9 +420,20 @@ def test_project_only_strict_json_accepts_normal_nested_original_source_receipt(
         tmp_path, monkeypatch, status="VERIFIED"
     )
     assert module._strict_original_json_object(manifest)["project_id"] == "source-project"
-    assert module._strict_original_json_object(sealed)["source_sha256s"] == [sha]
+    receipt = module._strict_original_json_object(sealed)
+    assert receipt["source_sha256s"] == [sha]
     assert module._strict_original_json_object(identity)["source_sha256s"] == [sha]
-    assert not module._strict_original_json_object(sealed).get("quantities")
+    # The shared fixture now models a real source attempt with one explicit
+    # ABSTAIN. Strict JSON parsing must retain that attempt, not silently
+    # erase it or manufacture an empty successfully executed project.
+    assert receipt["quantities"] == [{
+        "quantity_id": "synthetic-abstention",
+        "family": "floor_area",
+        "semantic_key": "floor.area",
+        "abstained": True,
+        "value": None,
+        "object_identity_refs": ["attempted-physical-floor"],
+    }]
 
 
 def test_original_sha_verified_but_empty_sealed_project_does_not_mint_zero_score(
