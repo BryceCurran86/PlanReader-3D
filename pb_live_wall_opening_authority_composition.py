@@ -195,8 +195,6 @@ def compose_live_wall_opening_authority(
     if published is None:
         raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
 
-    if include_unmeasured_ink_closed_flanks_shadow:
-        source_visibility_producer._include_unmeasured_ink_closed_flanks_shadow = True
     published = source_visibility_producer.augment_with_raster_opening_primitives(
         revision_id,
         page_ids=selected_pages,
@@ -494,7 +492,8 @@ def compose_live_wall_opening_authority(
         physical_opening_authority=physical_opening_authority,
         host_binding_authority=binding_authority,
         physical_wall_candidate_authority=wall_authority,
-        supplemental_wall_candidate_authority=supplemental_wall_authority,
+        **({"supplemental_wall_candidate_authority": supplemental_wall_authority}
+           if include_unmeasured_ink_closed_flanks_shadow else {}),
     )
     host_frame_traces: list[LiveOpeningHostFrameTrace] = []
     host_frame_selectors: dict[str, OpeningHostFrameSelector] = {}

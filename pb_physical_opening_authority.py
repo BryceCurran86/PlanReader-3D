@@ -973,6 +973,8 @@ def _raster_swing_perpendicular_scale_ratio(
     gap_box_pt: tuple[float, float, float, float],
     axis: str,
     placements: Sequence[NativePageImagePlacement],
+    *,
+    tiled_gap_shadow: bool = False,
 ) -> Optional[float]:
     """Return the producer-proved affine scale ratio for one raster gap.
 
@@ -982,6 +984,8 @@ def _raster_swing_perpendicular_scale_ratio(
     fail closed.
     """
 
+    if type(tiled_gap_shadow) is not bool:
+        raise TypeError("tiled gap capture requires an explicit boolean")
     x0, y0, x1, y1 = (float(value) for value in gap_box_pt)
     matches: list[float] = []
     tol = 1e-6
@@ -1007,6 +1011,11 @@ def _raster_swing_perpendicular_scale_ratio(
         if math.isfinite(ratio) and ratio > 0.0:
             matches.append(float(ratio))
     if not matches:
+        if not tiled_gap_shadow:
+            return None
+        # An overlapping image cannot witness pixels outside its placement.
+        # Prove the entire aperture is covered by compatible source tiles.
+        clipped = []
         for placement in placements:
             bx0, by0, bx1, by1 = placement.bbox_pt
             if (
@@ -1026,11 +1035,25 @@ def _raster_swing_perpendicular_scale_ratio(
             ratio = sy / sx if axis == "horizontal" else sx / sy
             if math.isfinite(ratio) and ratio > 0.0:
                 matches.append(float(ratio))
+                clipped.append((max(x0, bx0), max(y0, by0), min(x1, bx1), min(y1, by1)))
         if not matches:
             return None
+        cuts = sorted({x0, x1, *(v for box in clipped for v in (box[0], box[2]))})
+        for left, right in zip(cuts, cuts[1:]):
+            if right - left <= tol:
+                continue
+            intervals = sorted((box[1], box[3]) for box in clipped
+                               if box[0] <= left + tol and box[2] >= right - tol)
+            covered = y0
+            for bottom, top in intervals:
+                if bottom > covered + tol:
+                    return None
+                covered = max(covered, top)
+            if covered < y1 - tol:
+                return None
         first = matches[0]
         if any(
-            not math.isclose(value, first, rel_tol=1e-3, abs_tol=1e-6)
+            not math.isclose(value, first, rel_tol=1e-6, abs_tol=1e-9)
             for value in matches[1:]
         ):
             return None
@@ -1212,6 +1235,8 @@ class PhysicalOpeningAuthority:
         self._source_visibility_producer = _source_visibility_producer
         self._raster_source_policy_at_creation = getattr(
             _source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+        self._raster_double_face_negative_shadow = getattr(
+            _source_visibility_producer, "_raster_double_face_negative_shadow", False)
         if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
             raise ValueError("raster paired outer faces override must be explicit boolean")
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
@@ -1702,8 +1727,10 @@ class PhysicalOpeningAuthority:
         records: tuple[SourceObservationRecord, ...],
     ) -> tuple[CandidateSemanticOpening, ...]:
         if (self._source_visibility_producer is not None
-                and self._raster_source_policy_at_creation != getattr(
-                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)):
+                and (self._raster_source_policy_at_creation != getattr(
+                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+                    or self._raster_double_face_negative_shadow != getattr(
+                        self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         cache_key = self._visible_page_candidate_key(seed)
         cached = self._raster_framed_candidate_cache.get(cache_key)
@@ -2083,7 +2110,7 @@ class PhysicalOpeningAuthority:
                 # when morphology missed their precise endpoint row.
                 opposing_wall_faces = _raster_double_continuous_face_gap(
                     work_line, pair,
-                )
+                ) if self._raster_double_face_negative_shadow else False
                 frames = (
                     frame_support(pair, axis, groups)
                     if groups and not face_continues and not opposing_wall_faces
@@ -4058,8 +4085,11 @@ class PhysicalOpeningAuthority:
         ))
 
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
-        if (self._source_visibility_producer is not None and self._raster_source_policy_at_creation != getattr(
-                self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)):
+        if (self._source_visibility_producer is not None and (
+                self._raster_source_policy_at_creation != getattr(
+                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+                or self._raster_double_face_negative_shadow != getattr(
+                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")

@@ -104,22 +104,17 @@ def _cluster_offsets(values: list[float], tolerance: float) -> tuple[float, ...]
     return tuple(sum(group) / len(group) for group in groups)
 
 
-def _equivalence_group_for(equivalence, wall_id: str) -> _Group:
-    for group in equivalence.equivalence_groups:
-        if wall_id in group:
-            return tuple(sorted(str(member) for member in group))
-    return (str(wall_id),)
+def _equivalence_group_for(equivalence, wall_id: str) -> _Group | None:
+    matches = {tuple(sorted(str(member) for member in group))
+               for group in equivalence.equivalence_groups if wall_id in group}
+    if len(matches) > 1:
+        return None
+    return next(iter(matches)) if matches else (str(wall_id),)
 
 
-def _band_node(side_ids: tuple[str, ...], equivalence) -> _BandNode:
-    return tuple(
-        sorted(
-            {
-                _equivalence_group_for(equivalence, wall_id)
-                for wall_id in side_ids
-            }
-        )
-    )
+def _band_node(side_ids: tuple[str, ...], equivalence) -> _BandNode | None:
+    groups = {_equivalence_group_for(equivalence, wall_id) for wall_id in side_ids}
+    return None if None in groups else tuple(sorted(groups))
 
 
 def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
@@ -129,11 +124,31 @@ def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
 def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for left, right, raw in equivalence.pair_classifications:
+        key = tuple(sorted((str(left), str(right))))
         try:
-            result[tuple(sorted((str(left), str(right))))] = PhysicalEquivalenceClass(raw)
+            classification = PhysicalEquivalenceClass(raw)
         except ValueError:
-            continue
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if key in result and result[key] is not classification:
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        result[key] = classification
     return result
+
+
+def _valid_aperture_geometry(geometry) -> bool:
+    try:
+        if any(len(getattr(geometry, key)) != 2 for key in ("origin", "axis", "normal")):
+            return False
+        values = (*geometry.origin, *geometry.axis, *geometry.normal,
+                  geometry.length, geometry.thickness)
+        return (all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and math.isfinite(v) for v in values)
+                and geometry.length > 0.0 and geometry.thickness > 0.0
+                and math.isclose(math.hypot(*geometry.axis), 1.0, rel_tol=1e-9, abs_tol=1e-9)
+                and math.isclose(math.hypot(*geometry.normal), 1.0, rel_tol=1e-9, abs_tol=1e-9)
+                and abs(_dot(geometry.axis, geometry.normal)) <= 1e-9)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -323,7 +338,15 @@ class OpeningHostFrameProducer:
         )
 
     def _scope_records_by_id(self, wall_scope, selector) -> dict[str, PhysicalWallCandidateRecord]:
-        records_by_id = {str(record.wall_candidate_id): record for record in wall_scope.records}
+        fields = ("document_id", "revision_id", "source_sha256", "snapshot_id", "page_id", "decision_scope_id")
+        if any(getattr(wall_scope, name, None) != getattr(selector, name) for name in fields):
+            return {}
+        records_by_id = {}
+        for record in wall_scope.records:
+            key = str(record.wall_candidate_id)
+            if key in records_by_id and records_by_id[key] != record:
+                return {}
+            records_by_id[key] = record
         supp_walls = getattr(self, "_supplemental_walls", None)
         if supp_walls is not None:
             supp_selector = PhysicalWallCandidateSelector(
@@ -335,9 +358,18 @@ class OpeningHostFrameProducer:
                 decision_scope_id=selector.decision_scope_id,
             )
             supp_scope = supp_walls.resolve_scope(supp_selector)
-            if supp_scope.status is EvidenceResolutionStatus.CORROBORATED:
+            if (supp_scope.status is EvidenceResolutionStatus.CORROBORATED
+                    and supp_scope.proposition == PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+                    and supp_scope.scope_complete is False
+                    and supp_scope.equivalence is not None
+                    and all(getattr(supp_scope, name) == getattr(selector, name) for name in fields)):
                 for r in supp_scope.records:
+                    existing = records_by_id.get(str(r.wall_candidate_id))
+                    if existing is not None and existing != r:
+                        return {}
                     records_by_id.setdefault(str(r.wall_candidate_id), r)
+            else:
+                return {}
         return records_by_id
 
     @staticmethod
@@ -506,7 +538,7 @@ class OpeningHostFrameProducer:
         if set(sides) != {"left", "right"}:
             return None
         nodes = tuple(_band_node((sides[role],), wall_scope.equivalence) for role in ("left", "right"))
-        return nodes if nodes[0] != nodes[1] else None
+        return nodes if all(nodes) and nodes[0] != nodes[1] else None
 
     def _scope_bindings(
         self, *, wall_scope, selected_binding, selected_geometry,
@@ -647,10 +679,20 @@ class OpeningHostFrameProducer:
     def _selected_component(contexts: tuple[_ScopeBinding, ...], selected_binding):
         adjacency: dict[_BandNode, set[_BandNode]] = {}
         selected_nodes: tuple[_BandNode, _BandNode] | None = None
+        edges = {}
+        bindings = {}
         for context in contexts:
             left_node, right_node = context.left_node, context.right_node
-            if left_node == right_node:
+            if not left_node or not right_node or left_node == right_node:
                 return None
+            edge = tuple(sorted((left_node, right_node)))
+            prior = edges.get(edge)
+            prior_binding = bindings.get(context.binding.record_id)
+            if ((prior is not None and prior != context)
+                    or (prior_binding is not None and prior_binding != context)):
+                return None
+            edges[edge] = context
+            bindings[context.binding.record_id] = context
             adjacency.setdefault(left_node, set()).add(right_node)
             adjacency.setdefault(right_node, set()).add(left_node)
             if context.binding.record_id == selected_binding.record_id:
@@ -677,7 +719,9 @@ class OpeningHostFrameProducer:
         return frozenset(component)
 
     @staticmethod
-    def _record_projection(record, axis: _Point, normal: _Point):
+    def _record_projection(record, axis: _Point, normal: _Point, *, strict_collinearity_shadow=False):
+        if type(strict_collinearity_shadow) is not bool:
+            raise TypeError("strict frame projection requires an explicit boolean")
         wall = record.wall_candidate
         if wall.is_curved or len(wall.centerline_pts) < 2:
             return None
@@ -686,6 +730,10 @@ class OpeningHostFrameProducer:
             return None
         projected_u = tuple(_dot(point, axis) for point in points)
         projected_n = tuple(_dot(point, normal) for point in points)
+        # Ordered extents are insufficient: a monotone bent chain cannot be
+        # flattened to its mean offset. Raster snap drift needs source reproof.
+        if strict_collinearity_shadow and max(projected_n) - min(projected_n) > _COORD_TOL:
+            return None
         differences = tuple(b - a for a, b in zip(projected_u, projected_u[1:]))
         # One wall frame requires an ordered run. Extents alone can conceal
         # retraced segments or repeated vertices; reversing a valid run is OK.
@@ -744,30 +792,9 @@ class OpeningHostFrameProducer:
             and tuple(host_resolution.bands[0].member_ids) == tuple(binding.member_wall_candidate_ids)
         )
         if not single_member_host:
-            host_auth = getattr(self, "_host", None)
-            opening_id = getattr(binding, "opening_identity_id", None)
-            if host_auth is not None and opening_id is not None:
-                selector = OpeningHostBindingSelector(
-                    document_id=binding.document_id,
-                    revision_id=binding.revision_id,
-                    source_sha256=binding.source_sha256,
-                    snapshot_id=binding.snapshot_id,
-                    page_id=binding.page_id,
-                    decision_scope_id=binding.decision_scope_id,
-                    opening_identity_id=opening_id,
-                )
-                bound = host_auth.resolve(selector)
-                if (
-                    bound.status is EvidenceResolutionStatus.CORROBORATED
-                    and bound.record is not None
-                    and bound.record.record_id == binding.record_id
-                    and tuple(bound.record.member_wall_candidate_ids) == tuple(binding.member_wall_candidate_ids)
-                ):
-                    single_member_host = True
-        if not single_member_host:
             return None
 
-        records_by_id = self._scope_records_by_id(wall_scope, binding)
+        records_by_id = {str(record.wall_candidate_id): record for record in wall_scope.records}
         wall_id = str(binding.member_wall_candidate_ids[0])
         record = records_by_id.get(wall_id)
         if record is None:
@@ -779,25 +806,20 @@ class OpeningHostFrameProducer:
         if projection is None:
             return None
         host_min_u, host_max_u, center_n = projection
-        tolerance = host_geometry.DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
-
-        op_u0 = _dot(geometry.origin, axis)
-        op_u1 = op_u0 + float(geometry.length) * _dot(geometry.axis, axis)
-        op_min = min(op_u0, op_u1)
-        op_max = max(op_u0, op_u1)
-
-        wall_min_u = min(host_min_u, op_min)
-        wall_max_u = max(host_max_u, op_max)
-        host_length = wall_max_u - wall_min_u
+        # Whole-wall reproof, not the opening extent or local binding, owns
+        # the limits. Expanding to contain the opening makes containment tautological.
+        host_length = host_max_u - host_min_u
         if host_length <= _COORD_TOL:
             return None
 
-        origin = _point_from_basis(wall_min_u, center_n, axis, normal)
-        u0 = op_min - wall_min_u
-        u1 = op_max - wall_min_u
-        if abs(u0) <= tolerance:
+        origin = _point_from_basis(host_min_u, center_n, axis, normal)
+        u0 = _dot((geometry.origin[0] - origin[0], geometry.origin[1] - origin[1]), axis)
+        end = (geometry.origin[0] + axis[0] * geometry.length,
+               geometry.origin[1] + axis[1] * geometry.length)
+        u1 = _dot((end[0] - origin[0], end[1] - origin[1]), axis)
+        if abs(u0) <= _COORD_TOL:
             u0 = 0.0
-        if abs(u1 - host_length) <= tolerance:
+        if abs(u1 - host_length) <= _COORD_TOL:
             u1 = host_length
         if (
             u0 < -_COORD_TOL
@@ -929,7 +951,17 @@ class OpeningHostFrameProducer:
                     data[1] + _dot(geometry.origin, axis),
                     data[2] + _dot(geometry.origin, normal))
             else:
-                projection = self._record_projection(records_by_id[wall_id], axis, normal)
+                projection = self._record_projection(records_by_id[wall_id], axis, normal,
+                    strict_collinearity_shadow=self._raster_split_frame_shadow)
+                if projection is None and raster_component:
+                    source = self._raster_source_projection(record=records_by_id[wall_id],
+                        opening=opening, geometry=geometry, wall_scope=wall_scope)
+                    if source is not None:
+                        data, observation_ids = source
+                        projection_observation_ids.update(observation_ids)
+                        projection = (data[0] + _dot(geometry.origin, axis),
+                                      data[1] + _dot(geometry.origin, axis),
+                                      data[2] + _dot(geometry.origin, normal))
             if projection is None:
                 return None
             u_min, u_max, offset = projection
@@ -1159,34 +1191,7 @@ class OpeningHostFrameProducer:
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_GEOMETRY_UNAVAILABLE,
             )
-        values = (
-            *geometry.origin,
-            *geometry.axis,
-            *geometry.normal,
-            geometry.length,
-            geometry.thickness,
-        )
-        if (
-            not all(math.isfinite(float(value)) for value in values)
-            or geometry.length <= 0.0
-            or geometry.thickness <= 0.0
-            or not math.isclose(
-                math.hypot(*geometry.axis),
-                1.0,
-                rel_tol=1e-9,
-                abs_tol=1e-9,
-            )
-            or not math.isclose(
-                math.hypot(*geometry.normal),
-                1.0,
-                rel_tol=1e-9,
-                abs_tol=1e-9,
-            )
-            or abs(
-                geometry.axis[0] * geometry.normal[0]
-                + geometry.axis[1] * geometry.normal[1]
-            ) > 1e-9
-        ):
+        if not _valid_aperture_geometry(geometry):
             return _blocked(
                 EvidenceResolutionStatus.CONFLICT,
                 OPENING_HOST_FRAME_GEOMETRY_INVALID,
@@ -1301,10 +1306,18 @@ class OpeningHostFrameProducer:
         bound = self._host.resolve(host_binding_selector)
         binding = bound.record
         if (physical.status is not EvidenceResolutionStatus.CORROBORATED or opening is None
-                or bound.status is not EvidenceResolutionStatus.CORROBORATED or binding is None):
+                or physical.proposition != PHYSICAL_OPENING_EXISTS
+                or bound.status is not EvidenceResolutionStatus.CORROBORATED or binding is None
+                or OPENING_HOST_BINDING_RESOLVED not in bound.reason_codes):
             return _blocked(EvidenceResolutionStatus.ABSTAINED,
                             OPENING_HOST_FRAME_HOST_UNAVAILABLE)
         if (opening.record_id != binding.opening_identity_id
+                or binding.opening_identity_id != host_binding_selector.opening_identity_id
+                or binding.decision_scope_id != host_binding_selector.decision_scope_id
+                or any(getattr(opening, field) != getattr(opening_selector, field) for field in (
+                    "document_id", "revision_id", "source_sha256", "snapshot_id"))
+                or any(getattr(binding, field) != getattr(host_binding_selector, field) for field in (
+                    "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id"))
                 or any(getattr(opening, field) != getattr(binding, field) for field in (
                     "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id"))):
             return _blocked(EvidenceResolutionStatus.CONFLICT, OPENING_HOST_FRAME_SCOPE_MISMATCH)
@@ -1336,9 +1349,7 @@ class OpeningHostFrameProducer:
                 or proof.bands[0].member_ids != tuple(sorted(binding.member_wall_candidate_ids))):
             return _blocked(EvidenceResolutionStatus.ABSTAINED,
                             "opening_local_source_frame_membership_unproven", *proof.reason_codes)
-        if (not all(math.isfinite(float(x)) for x in (*geometry.origin, *geometry.axis,
-                *geometry.normal, geometry.length, geometry.thickness))
-                or min(geometry.length, geometry.thickness) <= 0):
+        if not _valid_aperture_geometry(geometry):
             return _blocked(EvidenceResolutionStatus.CONFLICT, OPENING_HOST_FRAME_GEOMETRY_INVALID)
         frame_selector = OpeningHostFrameSelector(binding.document_id, binding.revision_id,
             binding.source_sha256, binding.snapshot_id, binding.page_id,
