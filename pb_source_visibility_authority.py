@@ -2250,7 +2250,14 @@ class SourceVisibilityProducer:
                 raise ValueError("source fork original bytes unavailable or changed")
             if coverage is None or not coverage.decoded_pages or coverage.failed_pages:
                 raise ValueError("source fork requires successfully decoded original pages")
-            lineage.append((cursor, payload, tuple(sorted(coverage.decoded_pages))))
+            if (coverage.document_id != cursor.document_id or coverage.revision_id != cursor.revision_id
+                    or type(coverage.total_pages) is not int or coverage.total_pages < 1
+                    or coverage.state not in ("complete", "partial")
+                    or any(type(p) is not int or not 1 <= p <= coverage.total_pages for p in coverage.decoded_pages)
+                    or tuple(sorted(set(coverage.decoded_pages))) != coverage.decoded_pages
+                    or (coverage.state == "complete" and coverage.decoded_pages != tuple(range(1, coverage.total_pages+1)))):
+                raise ValueError("source fork original decode coverage is contradictory")
+            lineage.append((cursor, payload, coverage))
             parent = cursor.supersedes_revision_id
             cursor = None if parent is None else store.revisions.get(parent)
             if parent is not None and cursor is None:
@@ -2262,12 +2269,14 @@ class SourceVisibilityProducer:
             exact_g17_nomination_shadow=exact_g17_nomination_shadow,
             raster_double_face_negative_shadow=raster_double_face_negative_shadow,
         )
-        for ancestor, payload, decoded in reversed(lineage):
+        for ancestor, payload, coverage in reversed(lineage):
             replay = fork.ingest_native_pdf_bytes(
                 document_id=ancestor.document_id, source_bytes=payload,
-                source_locator=ancestor.source_locator, page_ids=decoded)
+                source_locator=ancestor.source_locator,
+                page_ids=None if coverage.state == "complete" else coverage.decoded_pages)
             if (replay.revision.revision_id != ancestor.revision_id
-                    or replay.revision.supersedes_revision_id != ancestor.supersedes_revision_id):
+                    or replay.revision.supersedes_revision_id != ancestor.supersedes_revision_id
+                    or fork._producer._store.coverage_by_revision.get(ancestor.revision_id) != coverage):
                 raise ValueError("source fork revision ancestry changed during native replay")
         if self.published_snapshot_for_revision(revision_id) is not published:
             raise RuntimeError("source fork mutated original issuer")

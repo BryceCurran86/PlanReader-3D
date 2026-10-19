@@ -31,6 +31,31 @@ def _freeze(value):
     return canonical_contract_json(value).encode("utf-8")
 
 
+def _validate_recovery_request(source, revision_id, page_ids, *flags):
+    if type(source) is not SourceVisibilityProducer:
+        raise TypeError("original source must be producer-owned")
+    if any(type(flag) is not bool for flag in flags):
+        raise ValueError("recovery policies must be explicit booleans")
+    if (type(revision_id) is not str or not revision_id or revision_id != revision_id.strip()
+            or not isinstance(page_ids, tuple) or not page_ids
+            or any(type(p) is not str or not p.isascii() or not p.isdigit()
+                   or str(int(p)) != p or int(p) < 1 for p in page_ids)
+            or len(set(page_ids)) != len(page_ids)):
+        raise ValueError("exact revision and unique positive original topology pages required")
+    if (source._raster_paired_outer_faces_shadow or source._exact_g17_nomination_shadow
+            or source._raster_double_face_negative_shadow):
+        raise ValueError("original issuer must use its default source policy")
+    published = source.published_snapshot_for_revision(revision_id)
+    if published is None or source._producer.current_revision_id(published.revision.document_id) != revision_id:
+        raise ValueError("source recovery requires the current authenticated revision")
+    if published.revision.supersedes_revision_id is not None and not flags[2]:
+        raise ValueError("source recovery requires original revision ancestry replay")
+    coverage = source._producer._store.coverage_by_revision.get(revision_id)
+    if coverage is None or any(int(p) not in coverage.decoded_pages or int(p) in coverage.failed_pages for p in page_ids):
+        raise ValueError("source recovery page was not decoded by this original issuer")
+    return published
+
+
 def opening_quantity_addition_review(original_voids, alternate_voids, *,
         original_packets, alternate_packets):
     """Separate new producer-owned areas from reissued original source rows.
@@ -54,6 +79,18 @@ def opening_quantity_addition_review(original_voids, alternate_voids, *,
             for o in alternate_voids.canonical_openings)):
         raise ValueError("additional source review must retain the original document/revision/SHA")
     correspondence = compare_opening_source_correspondence(original_packets, alternate_packets)
+    def packet_occurrences(packets):
+        ids = [p["opening_identity_id"] for p in packets if p["opening_identity_id"] is not None]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate physical opening in additional source review")
+        return set(ids)
+    if packet_occurrences(original_packets) != original_objects:
+        raise ValueError("original source packet occurrence coverage is incomplete")
+    alternate_objects = {o.physical_opening_id for o in alternate_voids.canonical_openings}
+    if packet_occurrences(alternate_packets) != alternate_objects:
+        raise ValueError("additional area lacks complete alternate source packet occurrence coverage")
+    original_complete = all(r["source_support_packet_complete"] for r in
+        compare_opening_source_correspondence(original_packets, original_packets))
     packet_by_opening = {}
     for packet in alternate_packets:
         physical = packet["opening_identity_id"]
@@ -85,7 +122,7 @@ def opening_quantity_addition_review(original_voids, alternate_voids, *,
                 or opening.get("page_id") != quantity.metadata.get("page_no")):
             raise ValueError("additional quantity and physical source packet disagree")
         lineage = packet.get("source_lineage") or {}
-        closed = packet_complete.get(physical) is True
+        closed = packet_complete.get(physical) is True and original_complete
         continuation = physical in original_objects or bool(matches.get(physical))
         if not closed:
             gate = "original_source_parent_dag_required"
@@ -125,6 +162,7 @@ def opening_quantity_addition_review(original_voids, alternate_voids, *,
     return {
         "status": "candidate",
         "original_quantity_ids_retained_separately": sorted(original_ids),
+        "original_source_packet_coverage_complete": original_complete,
         "excluded_reissued_quantity_ids": sorted(
             original_ids & {q.quantity_id for q in alternate}),
         "additional_area_reviews": sorted(reviews, key=lambda r: r["proposed_quantity_id"]),
@@ -138,17 +176,9 @@ def opening_quantity_addition_review(original_voids, alternate_voids, *,
 def recover_source_preserving_openings_shadow(source, *, revision_id, page_ids,
         exact_nomination_shadow=False, source_fragment_roles_shadow=False,
         include_revision_ancestry_shadow=False):
-    if type(source) is not SourceVisibilityProducer:
-        raise TypeError("original source must be producer-owned")
-    if any(type(flag) is not bool for flag in (
-            exact_nomination_shadow, source_fragment_roles_shadow, include_revision_ancestry_shadow)):
-        raise ValueError("recovery policies must be explicit booleans")
-    if (source._raster_paired_outer_faces_shadow or source._exact_g17_nomination_shadow
-            or source._raster_double_face_negative_shadow):
-        raise ValueError("original issuer must use its default source policy")
-    if (not isinstance(page_ids, tuple) or len(page_ids)!=1
-            or any(type(p) is not str or not p.isdigit() or str(int(p))!=p or int(p)<1 for p in page_ids)
-            or len(set(page_ids))!=len(page_ids)):
+    _validate_recovery_request(source, revision_id, page_ids, exact_nomination_shadow,
+        source_fragment_roles_shadow, include_revision_ancestry_shadow)
+    if len(page_ids)!=1:
         raise ValueError("one positive original topology page required; use page-isolated batch for multiple pages")
     page_ids=tuple(sorted(page_ids,key=int))
     baseline = compose_live_wall_opening_authority(
@@ -229,9 +259,8 @@ def recover_source_preserving_openings_pages_shadow(source,*,revision_id,page_id
     Page reports deliberately retain separate snapshots/seals. They are not a
     new cross-page opening universe or an aggregate signed customer output.
     """
-    if (not isinstance(page_ids,tuple) or not page_ids or len(set(page_ids))!=len(page_ids)
-            or any(type(p) is not str or not p.isdigit() or str(int(p))!=p or int(p)<1 for p in page_ids)):
-        raise ValueError("unique positive original topology page addresses required")
+    _validate_recovery_request(source, revision_id, page_ids, exact_nomination_shadow,
+        source_fragment_roles_shadow, include_revision_ancestry_shadow)
     page_ids=tuple(sorted(page_ids,key=int))
     original=compose_live_wall_opening_authority(source_visibility_producer=source,
         revision_id=revision_id,page_ids=page_ids,source_revision_scope_shadow=True)
