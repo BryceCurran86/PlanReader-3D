@@ -1,0 +1,40 @@
+name: GPT3 MAX Opening Area Review vs Source Issuer
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gpt3_max_area_review_source_issuer_bijection.py
+      - tests/test_gpt3_max_area_review_source_issuer_bijection.py
+      - pb_live_opening_area_quantity_publication.py
+      - tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py
+      - .github/workflows/test-gpt3-max-area-review-source-issuer.yml
+permissions:
+  contents: read
+jobs:
+  synthetic-and-signed-archive-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Independent publisher and original-eight signed archive parity
+        run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_gpt3_max_area_review_source_issuer_bijection.py \
+            tests/test_live_opening_area_quantity_publication.py \
+            tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
+          ruff check --select F821,F823 \
+            tools/diag_gpt3_max_area_review_source_issuer_bijection.py \
+            tests/test_gpt3_max_area_review_source_issuer_bijection.py
+      # Exact client-original PDF is not checked into this public repository.
+      # A missing-original test is SKIPPED, never source-positive verified.
