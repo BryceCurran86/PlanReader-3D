@@ -494,6 +494,7 @@ def compose_live_wall_opening_authority(
         physical_wall_candidate_authority=wall_authority,
         **({"supplemental_wall_candidate_authority": supplemental_wall_authority}
            if include_unmeasured_ink_closed_flanks_shadow else {}),
+        **({"source_fragment_roles_shadow": True} if source_fragment_roles_shadow else {}),
     )
     host_frame_traces: list[LiveOpeningHostFrameTrace] = []
     host_frame_selectors: dict[str, OpeningHostFrameSelector] = {}
