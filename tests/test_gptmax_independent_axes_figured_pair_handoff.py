@@ -1,0 +1,124 @@
+"""GPT MAX -> GPT1: original unordered callout versus independently issued axes.
+
+No test here issues an opening, trusts an inferred height, or maps frozen V2.
+Every test uses source-neutral producer-shaped receipts.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from tests.test_gptmax_lot16_host_frame_gpt1_handoff import fixture, run
+from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import (
+    _source_owned_axes_agree_with_figured_pair,
+)
+
+
+def _independent_source_axes():
+    rows, canonical = fixture()
+    canonical[2].update(
+        width_record_id="original-width:physical-3",
+        height_record_id="original-height:physical-3",
+        width_m=1.2,
+        height_m=1.8,
+        geometry_complete=True,
+    )
+    # Original two-number label is corroborated only as an unordered pair.
+    assert rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"] is False
+    return rows, canonical
+
+
+def test_unordered_label_plus_independent_producer_axes_is_gpt1_candidate_only():
+    rows, canonical = _independent_source_axes()
+    originals = deepcopy((rows, canonical))
+    result = run(rows, canonical)
+    target = next(x for x in result["opening_decisions"]
+                  if x["physical_opening_id"] == "physical-3")
+    assert target["figured_pair_area_support"]
+    assert target["axis_order_authenticated"]
+    assert target["original_figured_label_order_source_resolved"] is False
+    assert target["independent_source_axis_record_ids"] == [
+        "original-width:physical-3", "original-height:physical-3",
+    ]
+    assert target["first_remaining_gate"] == "independent_gpt1_measurement_validation_required"
+    assert target["new_gpt1_candidate_handoff"]
+    assert len(result["gpt1_new_handoff_candidates"]) == 1
+    assert (rows, canonical) == originals
+    assert not target["measurement_published"]
+    assert not target["customer_seal_granted"]
+    assert not target["opening_count_granted"]
+    assert not result["signed_customer_publisher_activated"]
+
+
+def test_equal_area_product_but_different_axes_does_not_enter_review_queue():
+    rows, canonical = _independent_source_axes()
+    # 900 x 2400 gives the identical 2.16 m² product as the real label
+    # 1200 x 1800. A product check alone cannot establish source axes.
+    canonical[2].update(width_m=0.9, height_m=2.4)
+    result = run(rows, canonical)
+    record = result["opening_decisions"][2]
+    assert record["figured_pair_area_support"]
+    assert not record["axis_order_authenticated"]
+    assert record["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert not result["gpt1_new_handoff_candidates"]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda c,e:c.update(width_record_id=""),
+    lambda c,e:c.update(width_record_id="original-height:physical-3"),
+    lambda c,e:c.update(height_record_id=True),
+    lambda c,e:c.update(width_record_id=" padded "),
+    lambda c,e:c.update(geometry_complete="true"),
+    lambda c,e:c.update(width_m=True),
+    lambda c,e:c.update(height_m=float("inf")),
+    lambda c,e:c.update(width_m=0.0),
+    lambda c,e:e.update(dimension_values_mm=[1200]),
+    lambda c,e:e.update(dimension_values_mm=[1200, True]),
+    lambda c,e:e.update(dimension_values_mm=[1200, 1900]),
+    lambda c,e:e.update(width_mm=1200.0),
+    lambda c,e:e.update(width_mm=1800.0, height_mm=1200.0),
+])
+def test_unissued_foreign_untyped_or_disagreeing_axes_cannot_be_gpt1_candidate(mutate):
+    rows, canonical = _independent_source_axes()
+    e = rows[2]["original_label_dimension_result"]["evidence"]
+    mutate(canonical[2], e)
+    # If a forged dimension payload invalidates the figured area entirely,
+    # the existing strict source pair check raises; in either case NO positive.
+    try:
+        result = run(rows, canonical)
+    except (ValueError, TypeError):
+        return
+    assert not result["gpt1_new_handoff_candidates"]
+    assert result["opening_decisions"][2]["first_remaining_gate"] in {
+        "width_height_axis_authority_unproven",
+        "source_figured_dimension_pair_unproven",
+    }
+
+
+def test_corresponding_typed_width_height_claims_remain_source_only():
+    rows, canonical = _independent_source_axes()
+    e = rows[2]["original_label_dimension_result"]["evidence"]
+    e.update(axis_order_resolved=True, width_mm=1200.0, height_mm=1800.0)
+    result = run(rows, canonical)
+    assert result["opening_decisions"][2]["original_figured_label_order_source_resolved"]
+    assert result["opening_decisions"][2]["axis_order_authenticated"]
+    assert result["opening_decisions"][2]["new_gpt1_candidate_handoff"]
+    assert not result["global_opening_count_granted"]
+
+
+def test_prior_signed_area_never_reappears_as_new_gpt1_candidate():
+    rows, canonical = _independent_source_axes()
+    rows[2]["quantity_id"] = "old-source-sealed-opening-area-id"
+    result = run(rows, canonical)
+    assert result["opening_decisions"][2]["axis_order_authenticated"]
+    assert result["original_signed_area_quantities"] == 1
+    assert not result["gpt1_new_handoff_candidates"]
+
+
+def test_missing_independent_axis_cannot_be_invented_from_area():
+    rows, canonical = _independent_source_axes()
+    canonical[2].update(height_record_id=None, height_m=None)
+    result = run(rows, canonical)
+    assert result["first_gate_counts"]["width_height_axis_authority_unproven"] == 1
+    assert not result["gpt1_new_handoff_candidates"]
