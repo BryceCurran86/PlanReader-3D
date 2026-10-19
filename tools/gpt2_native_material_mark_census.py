@@ -61,7 +61,7 @@ def census_native_plan_material_words(
     if len(rows) > 100000:
         raise ValueError("original_native_word_census_safety_cap")
     selected = set(codes)
-    inside, outside = [], []
+    inside, crossing, outside = [], [], []
     seen_native_addresses = set()
     for word in rows:
         # Only unique producer-native block/line/word identity can be
@@ -90,9 +90,17 @@ def census_native_plan_material_words(
             "physical_floor_owner_authenticated": False,
             "metric_floor_finish_area_m2": None,
         }
-        (inside if (bbox[0] >= x0 and bbox[1] >= y0
-                    and bbox[2] <= x1 and bbox[3] <= y1)
-         else outside).append(source)
+        wholly_inside = (
+            bbox[0] >= x0 and bbox[1] >= y0
+            and bbox[2] <= x1 and bbox[3] <= y1
+        )
+        intersects = (
+            bbox[0] < x1 and bbox[2] > x0
+            and bbox[1] < y1 and bbox[3] > y0
+        )
+        # A partly clipped word cannot be counted as an owned plan finish
+        # OR treated as an unrelated schedule/legend word.
+        (inside if wholly_inside else crossing if intersects else outside).append(source)
     def stable(rows):
         return tuple(sorted(rows, key=lambda row: row["source_word_address"]))
     return {
@@ -102,7 +110,9 @@ def census_native_plan_material_words(
         "source_viewport_id_unverified_by_census": viewport_id,
         "requested_codes": tuple(sorted(codes)),
         "within_supplied_plan_view": stable(inside),
+        "boundary_crossing_plan_words": stable(crossing),
         "outside_supplied_plan_view": stable(outside),
+        "viewport_word_membership_unambiguous": not crossing,
         "source_word_partition_complete": True,
         "cross_sheet_floor_correspondence_proven": False,
         "new_firm_floor_finish_quantities": 0,
