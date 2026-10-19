@@ -61,6 +61,24 @@ def _frame_valid(frame: dict | None, host: dict | None, identity: str) -> bool:
     return True
 
 
+def _axis_values_match_figured_pair(
+    width_m: object, height_m: object, raw_pair: object,
+) -> bool:
+    """Compare both figured metric axis lengths, never only their product.
+
+    Source neutral: source-owned physical ID, width/height receipt membership
+    and exact snapshot must be proved independently by the caller.
+    """
+    if (not _positive(width_m) or not _positive(height_m)
+            or type(raw_pair) not in (tuple, list) or len(raw_pair) != 2
+            or any(not _positive(value) for value in raw_pair)):
+        return False
+    dimensions = sorted(float(value) / 1000 for value in raw_pair)
+    axes = sorted((float(width_m), float(height_m)))
+    return all(math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-9)
+               for a, b in zip(dimensions, axes))
+
+
 def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) -> bool:
     """Independent original axis receipts must agree with printed dimensions.
 
@@ -89,14 +107,9 @@ def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) 
     height = canonical.get("height_m")
     if not _positive(width) or not _positive(height):
         return False
-    raw_pair = evidence.get("dimension_values_mm")
-    if (type(raw_pair) not in (tuple, list) or len(raw_pair) != 2
-            or any(not _positive(v) for v in raw_pair)):
-        return False
-    dimensions = sorted(float(v) / 1000 for v in raw_pair)
-    axes = sorted((float(width), float(height)))
-    if not all(math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-9)
-               for a, b in zip(dimensions, axes)):
+    if not _axis_values_match_figured_pair(
+        width, height, evidence.get("dimension_values_mm")
+    ):
         return False
     # If the original label authority *also* claims width/height order, it
     # must not contradict the independently issued canonical axis records.
