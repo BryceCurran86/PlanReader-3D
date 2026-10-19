@@ -288,6 +288,13 @@ def audit_gpt2_w4_material_to_gpt1(
     has_door_gap = material_result.get(
         "source_original_doorway_ink_gap_candidate_only") is True
     floor_gap = finish_gap = None
+    if (not has_door_gap and any(
+            material_result.get(field) is not None
+            for field in (
+                "source_original_floor_door_ink_gap_pdf_pts",
+                "source_original_finish_door_ink_gap_pdf_pts",
+            ))):
+        return {**base,"first_failure":"source_original_door_gap_receipt_invalid"}
     if has_door_gap:
         floor_gap = native_gap(
             material_result.get("source_original_floor_door_ink_gap_pdf_pts")
