@@ -12,6 +12,9 @@ import pytest
 from tools.diag_gptmax_unmeasured_flank_capture_shadow import (
     SOURCE_SHA, _one_source_policy, replay_opt_in,
 )
+from tools.diag_gptmax_original_stacker_shared_pier_reproof import (
+    original_shared_pier_candidate_w4_reproof,
+)
 
 
 ORIGINAL = Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
@@ -69,7 +72,31 @@ def test_original_lot16_fragment_roles_capture_reports_all_release_blocks():
     assert report["new_metric_handoff_granted"] is False
     assert report["new_signed_area_granted"] is False
     assert report["new_benchmark_match_granted"] is False
+    source_piers = report["source_owned_shared_g17_pier_w4_reproof"]
+    assert source_piers["all_g17_face_and_parent_ids_reproven_from_current_source"]
+    assert source_piers["source_sha256"] == SOURCE_SHA
+    assert source_piers["shared_pier_structural_wall_role_proven"] is False
+    assert source_piers["shared_pier_host_equivalence_proven"] is False
+    assert source_piers["opening_host_or_frame_publication_granted"] is False
+    assert source_piers["metric_or_count_publication_granted"] is False
+    for pair in source_piers["source_sharing_pairs"]:
+        assert pair["wall_host_granted"] is False if "wall_host_granted" in pair else True
+        if pair["source_closed_pier_candidate"]:
+            assert pair["isolated_original_W2_W3_W4_source_graph"] is not None
     comparison = report["original_change_receipt_parity"]
     assert comparison["signed_snapshot_rekey_approved"] is False
     assert comparison["new_benchmark_match_granted"] is False
     assert len(report["duplicate_original_physical_source_ids"]) == 0
+
+
+@pytest.mark.parametrize("spoofed_source,spoofed_composition", [
+    ({}, {}),
+    (None, None),
+    ({"snapshot_id": "forged"}, ["not a physical composition"]),
+])
+def test_shared_pier_source_reader_cannot_consume_caller_json(
+        spoofed_source, spoofed_composition):
+    with pytest.raises(TypeError, match="published source composition"):
+        original_shared_pier_candidate_w4_reproof(
+            spoofed_source, spoofed_composition
+        )
