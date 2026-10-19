@@ -538,10 +538,16 @@ class CrossViewFloorFinishResult:
         # material-mark ownership gate and the physical room/surface gate here:
         # two independently keyed floors cannot reuse one source occurrence,
         # source face, physical room, or physical floor. Never elect by order.
-        sealed = tuple(
-            record for record in self.records
-            if type(record) is CrossViewFloorFinishRecord
-        )
+        # Reconstructed/public containers are not issuer receipts. A rogue
+        # entry cannot be silently filtered, leaving a valid-looking sibling
+        # that might share the contested original physical source identity.
+        if any(type(record) is not CrossViewFloorFinishRecord
+               for record in self.records):
+            return MappingProxyType({})
+        sealed = self.records
+        if any(type(record.quantity) is not QuantityEvidence
+               for record in sealed):
+            return MappingProxyType({})
         survivors, _ = _quarantine_reused_floor_finish_occurrences(sealed)
         source_fields = (
             "canonical_floor_id",

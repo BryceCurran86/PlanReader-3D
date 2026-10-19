@@ -60,7 +60,8 @@ def build_four_project_signed_run_drift(
             sha256(second.read_bytes()).hexdigest(),
         ) != original_hashes:
             raise ValueError("signed source handoff bytes changed during suite comparison")
-        verified_comparisons += 1
+        if diff["comparison_status"] != "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE":
+            verified_comparisons += 1
         if diff["comparison_status"] == "BYTE_IDENTICAL_SIGNED_RECEIPTS":
             identical += 1
         else:
