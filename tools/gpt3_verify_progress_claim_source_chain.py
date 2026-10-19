@@ -27,6 +27,15 @@ def verify_progress_claim_source_chain(
     candidate_claim: dict, client_rates: dict | None = None,
 ) -> dict:
     """Validate source → quote → contract → variations → progress deterministically."""
+    # An old claim's self-hash cannot authenticate its independent original
+    # variation event epoch, acceptance and client progress input. Until each
+    # earlier claim is replayed from its own policy/event snapshots, this
+    # source-neutral verifier cannot certify a multi-claim history.
+    if previous_claims:
+        raise ValueError(
+            "previous claim original event-source replay required; "
+            "first-claim-only authority gate"
+        )
     if client_rates is not None:
         verify_client_quote_source_replay(
             sealed_run, customers, client_rates, quote,
