@@ -221,6 +221,17 @@ class CrossViewCeilingQuantityResult:
     def records_by_ceiling_id(
         self,
     ) -> Mapping[str, CrossViewCeilingQuantityRecord]:
+        # Public result dataclasses can be reconstructed independently of
+        # the producer. Fail closed on ANY malformed source/quantity entry,
+        # rather than crashing on an unexpected record or letting its typed
+        # sibling bypass the original identity conflict gate.
+        if any(
+            type(record) is not CrossViewCeilingQuantityRecord
+            or type(record.canonical_ceiling) is not LiveCanonicalCeilingSurfaceObject
+            or type(record.quantity) is not QuantityEvidence
+            for record in self.records
+        ):
+            return MappingProxyType({})
         counts = Counter(
             record.canonical_ceiling_id for record in self.records
             if type(record.canonical_ceiling_id) is str
