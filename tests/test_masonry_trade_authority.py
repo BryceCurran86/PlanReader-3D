@@ -125,7 +125,7 @@ class TestMasonryTradeAuthority(unittest.TestCase):
             source_page="Structural S105",
         )
         items = masonry.calculate_blockwork_items(spec)
-        self.assertEqual(len(items), 3)  # Block area m², core fill grout item, bond beam lm
+        self.assertEqual(len(items), 3)  # Block area m², core fill grout m³, bond beam lm
 
         # 1. Block area
         block_area = items[0]
@@ -135,7 +135,7 @@ class TestMasonryTradeAuthority(unittest.TestCase):
         # 2. Core fill grout item: 5.50 m³
         grout_item = items[1]
         self.assertEqual(grout_item.quantity, 5.50)
-        self.assertEqual(grout_item.unit, "item")
+        self.assertEqual(grout_item.unit, "m³")
         self.assertIn("5.50 m³", grout_item.notes)
 
         # 3. Bond beam lm
