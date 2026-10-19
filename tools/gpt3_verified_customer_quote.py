@@ -477,15 +477,39 @@ def compare_verified_quotes(before: Mapping[str, Any], after: Mapping[str, Any])
             raise ValueError("quote contents differ from its canonical fingerprint")
     if before.get("project_id") != after.get("project_id"):
         raise ValueError("quote comparison cannot combine projects")
-    older = {row["quantity_id"]: row for row in before["items"]}
-    newer = {row["quantity_id"]: row for row in after["items"]}
+    # A locally rehashed quote is not evidence of a valid signed source
+    # universe. Reject dropped/duplicate physical IDs rather than silently
+    # collapsing duplicates in a dict comprehension.
+    rows_by_epoch = []
+    for quote in (before, after):
+        items = quote.get("items")
+        if type(items) is not list or not items:
+            raise ValueError("quote comparison requires actual signed source quantities")
+        count = quote.get("signed_quantity_count")
+        if type(count) is not int or count != len(items):
+            raise ValueError("quote signed source item count is inconsistent")
+        indexed = {}
+        for row in items:
+            if type(row) is not dict:
+                raise ValueError("quote source items must be objects")
+            qid = row.get("quantity_id")
+            if type(qid) is not str or not qid or qid.strip() != qid:
+                raise ValueError("quote source ID must be canonical")
+            if qid in indexed:
+                raise ValueError("duplicate signed source quantity in quote revision")
+            indexed[qid] = row
+        rows_by_epoch.append(indexed)
+    older, newer = rows_by_epoch
     changed = []
     for qid in sorted(set(older) | set(newer)):
         old, fresh = older.get(qid), newer.get(qid)
         if old is None or fresh is None:
             change = "SIGNED_QUANTITY_ADDED_OR_REMOVED_REQUIRES_RESEAL"
-        elif (old["quantity_fingerprint"], old["physical_quantity"], old["unit"]) != (
-            fresh["quantity_fingerprint"], fresh["physical_quantity"], fresh["unit"]):
+        elif any(old.get(key) != fresh.get(key) for key in (
+            "quantity_fingerprint", "physical_quantity", "unit",
+            "family", "semantic_key", "source_sha256", "document_id",
+            "source_page", "revision_id", "object_identity_refs",
+        )):
             change = "SOURCE_QUANTITY_CHANGED_REQUIRES_RESEAL"
         elif (old["sell_amount"], old["pricing_status"]) != (
             fresh["sell_amount"], fresh["pricing_status"]):
@@ -498,6 +522,13 @@ def compare_verified_quotes(before: Mapping[str, Any], after: Mapping[str, Any])
                             "new_sell_amount": fresh.get("sell_amount") if fresh else None})
     if before.get("signed_run_fingerprint") != after.get("signed_run_fingerprint"):
         issuer_status = "DIFFERENT_SIGNED_ISSUER_REQUIRES_INDEPENDENT_AUTHORITY"
+    elif any(row["change"] in (
+        "SOURCE_QUANTITY_CHANGED_REQUIRES_RESEAL",
+        "SIGNED_QUANTITY_ADDED_OR_REMOVED_REQUIRES_RESEAL",
+    ) for row in changed):
+        # A self-consistent quote fingerprint does not authenticate the
+        # claimed V1 physical source fingerprint. Never call this same issuer.
+        issuer_status = "SOURCE_IDENTITY_CONFLICT_REQUIRES_INDEPENDENT_AUTHORITY"
     else:
         issuer_status = "SAME_SIGNED_ISSUER"
     return {
