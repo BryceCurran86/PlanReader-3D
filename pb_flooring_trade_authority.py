@@ -240,6 +240,46 @@ def calculate_carpet_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
     return items
 
 
+def calculate_vinyl_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]:
+    """Publish an explicitly provisional vinyl/resilient floor-area candidate.
+
+    This generic trade adapter has a room-size input but cannot establish
+    the exact internal wall faces, printed finish mark, coved skirting,
+    threshold or installation product; source-closed FIRM is a separate seam.
+    """
+    if (
+        spec.floor_finish not in {"vinyl", "vinyl_sheet", "vinyl_plank", "resilient"}
+        or _typed_metric(spec.area_m2, positive=True) is None
+        or type(spec.space_id) is not str or not spec.space_id.strip()
+    ):
+        return []
+    material = (
+        "sheet vinyl" if spec.floor_finish == "vinyl_sheet" else
+        "vinyl plank" if spec.floor_finish == "vinyl_plank" else
+        "vinyl / resilient finish"
+    )
+    return [FlooringTakeoffItem(
+        section=spec.section,
+        element=f"Provisional {material} floor covering",
+        location=f"{spec.room_name} · {spec.space_id}",
+        substrate="Existing room floor substrate; preparation not established",
+        finish_system="Finish, joints, coves and doorway transition awaiting original schedule",
+        quantity=round(float(spec.area_m2), 2),
+        unit="m²",
+        quantity_status="Provisional",
+        source_page=spec.source_page,
+        source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=(
+            f"Candidate floor area {spec.area_m2:.2f} m²; actual clear internal wall "
+            "faces, vinyl material, sheet direction, wastage, coves and threshold "
+            "are not source-authenticated. Never extends under partitions."
+        ),
+        row_role="floor_area",
+    )]
+
+
 def calculate_tiling_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]:
     """Calculate trade items for floor tiling, sand/cement screed, and waterproofing."""
     items: List[FlooringTakeoffItem] = []
@@ -355,6 +395,8 @@ def generate_workspace_flooring_takeoff(
             items = calculate_carpet_flooring_items(spec)
         elif spec.floor_finish in ("tiles", "tiling"):
             items = calculate_tiling_items(spec)
+        elif spec.floor_finish in ("vinyl", "vinyl_sheet", "vinyl_plank", "resilient"):
+            items = calculate_vinyl_flooring_items(spec)
 
         for item in items:
             all_rows.append(item.to_core_row(workspace_id, now_stamp))
