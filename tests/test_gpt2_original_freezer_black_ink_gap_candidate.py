@@ -117,4 +117,24 @@ def test_original_freezer_source_ring_retains_all_painted_walls_and_d17_opening(
         (1179.44,1275.92),
     )
     assert row["original_room_source_candidate_only"] is True
+    rivals=row["all_original_unclassified_black_ink_in_selected_wall_gap"]
+    assert {"d53741i0","d69326i0"} <= {
+        x["original_native_path_item_id"] for x in rivals
+    }
+    assert row["source_gap_absent_of_all_original_ink_proven"] is False
+    assert row["source_selected_wall_gap_door_semantics_authenticated"] is False
     assert row["new_firm_quantities"]==0
+
+
+def test_thin_original_black_door_graphic_across_selected_wall_gap_retained():
+    source=fitz.open(stream=_synthetic(),filetype="pdf")
+    source[0].draw_line((70,20),(90,20),color=(0,0,0),width=.48)
+    raw=source.tobytes()
+    source.close()
+    output=_run(raw)
+    assert output["status"]=="original_black_ink_room_ring_with_virtual_door_gap_candidate"
+    rivals=output["all_original_unclassified_black_ink_in_selected_wall_gap"]
+    assert any(x["original_native_path_item_id"]=="d6i0" for x in rivals)
+    assert output["source_gap_absent_of_all_original_ink_proven"] is False
+    assert output["source_doorway_is_structural_wall"] is False
+    assert output["new_firm_quantities"]==0
