@@ -17,6 +17,7 @@ from pb_source_visibility_authority import (
     RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS,
     RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND,
     SourceVisibilityProducer,
+    SourceVisibilityAuthority,
 )
 
 
@@ -119,6 +120,12 @@ def recover_original_raster_opening_parent_lines_shadow(
     if type(sha) is not str or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
         raise ValueError("original source SHA identity unavailable")
     root = (revision.document_id, revision_id, sha, snapshot_id)
+    # Only the authenticated visibility facade owns these source receipts.
+    # The producer publishes snapshots; it does not resolve raster primitives.
+    visibility = source.authority()
+    if type(visibility) is not SourceVisibilityAuthority:
+        raise TypeError("authenticated SourceVisibilityAuthority required")
+
     requested = tuple(sorted(required_parent_ids))
     sought = set(requested)
     found: dict[str, list[AuthenticatedRasterOpeningParentLine]] = {
@@ -127,12 +134,12 @@ def recover_original_raster_opening_parent_lines_shadow(
     source_inventory_conflict = False
     # Addressing only: every visible opening primitive must be resolved with
     # the EXISTING producer-owned parent/page/render/visibility receipt.
-    for visible_id in sorted(source.raster_opening_primitive_observation_ids_for_snapshot(snapshot_id)):
+    for visible_id in sorted(visibility.raster_opening_primitive_observation_ids_for_snapshot(snapshot_id)):
         selector = ObservationSelector(
             document_id=root[0], revision_id=root[1],
             source_sha256=root[2], snapshot_id=root[3], observation_id=visible_id,
         )
-        result = source.resolve_raster_opening_primitive(selector)
+        result = visibility.resolve_raster_opening_primitive(selector)
         if result.status is not EvidenceResolutionStatus.CORROBORATED:
             # A missing/invalid source primitive receipt could hide competing
             # ancestry. Do not report a complete source line inventory.
