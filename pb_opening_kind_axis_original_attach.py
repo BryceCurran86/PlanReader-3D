@@ -8,8 +8,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_axis_ownership_shadow import assess_opening_axis_ownership_shadow
 from pb_opening_filling_kind_shadow import assess_opening_filling_kind_shadow
+from pb_opening_kind_authority import resolve_opening_kind
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 
 
 def _label_fields(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -22,6 +25,43 @@ def _label_fields(row: Mapping[str, Any]) -> dict[str, Any]:
         "area_m2": evidence.get("area_m2"),
         "label_evidence_id": evidence.get("evidence_id"),
     }
+
+
+def _original_structural_kind_receipt(
+    *, physical_opening_id: str, canonical: Mapping[str, Any],
+    observed: Mapping[str, Any], canonical_receipts: frozenset[str],
+) -> str | None:
+    """Re-prove source OWNED structural kind, not a figured label or host gap.
+
+    Original G17 PhysicalOpeningAuthority must have issued an existence
+    record with the same source root, page and structural class as canonical.
+    This is review-only: neither this helper nor a label grants FIRM.
+    """
+    rec = observed.get("physical_existence_record")
+    if (not isinstance(rec, Mapping)
+            or rec.get("record_id") != physical_opening_id
+            or rec.get("proposition") != PHYSICAL_OPENING_EXISTS
+            or rec.get("status") is not EvidenceResolutionStatus.CORROBORATED
+            or canonical.get("physical_opening_id") != physical_opening_id
+            or physical_opening_id not in canonical_receipts
+            or type(rec.get("structural_pattern")) is not str
+            or not rec["structural_pattern"]
+            or rec["structural_pattern"] != canonical.get("structural_pattern")
+            or any(not canonical.get(k) or canonical.get(k) != rec.get(k)
+                   for k in ("document_id", "revision_id",
+                             "source_sha256", "snapshot_id", "page_id"))):
+        return None
+    observed_ids = rec.get("source_observation_ids")
+    if (type(observed_ids) not in (tuple, list)
+            or not observed_ids
+            or any(type(x) is not str or x not in canonical_receipts
+                   for x in observed_ids)):
+        return None
+    proof = resolve_opening_kind(structural_pattern=rec["structural_pattern"])
+    if (proof.status is not EvidenceResolutionStatus.CORROBORATED
+            or proof.opening_kind != canonical.get("opening_kind")):
+        return None
+    return physical_opening_id
 
 
 def attach_kind_and_axis_shadows(
@@ -66,13 +106,21 @@ def attach_kind_and_axis_shadows(
             and all(type(item) is str for item in original_receipts)
             else frozenset()
         )
-        kind_receipts = tuple(
+        typed_kind_receipts = tuple(
             sorted(set(eid for eid in (
                 canonical.get("opening_kind_evidence_id"),
                 canonical.get("type_mark_evidence_id"),
             ) if type(eid) is str and eid
             and eid == eid.strip() and eid in evidence_ids))
         )
+        physical_kind_receipt = _original_structural_kind_receipt(
+            physical_opening_id=oid, canonical=canonical, observed=observed,
+            canonical_receipts=evidence_ids,
+        )
+        kind_receipts = tuple(sorted(set(
+            (*typed_kind_receipts, *((physical_kind_receipt,)
+              if physical_kind_receipt else ()))
+        )))
         kind = assess_opening_filling_kind_shadow(
             physical_opening_id=oid,
             opening_kind=canonical.get("opening_kind"),
@@ -101,6 +149,7 @@ def attach_kind_and_axis_shadows(
             "handoff_first_remaining_gate": decision.get("first_remaining_gate"),
             "prior_signed_quantity_id": decision.get("prior_signed_quantity_id"),
             "kind_shadow": kind,
+            "original_structural_kind_source_reproved": bool(physical_kind_receipt),
             "axis_shadow": axis,
             "invented_second_axis": False,
             "measurement_published": False,
