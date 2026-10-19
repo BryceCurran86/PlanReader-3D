@@ -73,6 +73,10 @@ def build_original_source_sha_report(
     *, sealed_path: Path, original_paths: list[Path],
 ) -> dict:
     sources = [sealed_path, *original_paths]
+    if sealed_path.is_symlink() or not sealed_path.is_file():
+        raise ValueError("sealed V1 source must be a regular non-symlink file")
+    if any(path.is_symlink() or not path.is_file() for path in original_paths):
+        raise ValueError("original sources must be regular non-symlink files")
     originals = [_file_sha256(path) for path in sources]
     sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
     report = verify_original_source_sha_envelope(sealed, original_paths)
