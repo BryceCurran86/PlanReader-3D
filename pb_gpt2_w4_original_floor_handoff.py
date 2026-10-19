@@ -225,12 +225,37 @@ def audit_gpt2_w4_material_to_gpt1(
             or floor_page!=w4_page or finish_page==floor_page):
         return {**base,
             "first_failure":"original_finish_mark_and_W4_physical_floor_mismatch"}
-    if (not material_result.get("original_source_scope_ownership_id")
-            or not material_result.get("original_finish_viewport_id")
-            or not material_result.get("original_material_definition_id")
-            or type(material_result.get("original_mark_source_record_ids")) not in (tuple,list)
-            or len(material_result["original_mark_source_record_ids"])!=1
-            or not material_result["original_mark_source_record_ids"][0]):
+    def exact_original_ids(value, *, nonempty=True):
+        return (
+            type(value) in (tuple, list)
+            and (not nonempty or bool(value))
+            and all(type(v) is str and bool(v) and v == v.strip() for v in value)
+            and len(set(value)) == len(value)
+        )
+
+    mark_ids = material_result.get("original_mark_source_record_ids")
+    mark_text_ids = material_result.get("original_mark_text_observation_ids")
+    competing_ids = material_result.get(
+        "all_same_code_source_occurrence_record_ids"
+    )
+    # Original source occurrence IDs are NOT interchangeable with word/text
+    # observations. A candidate without its source text and all competing
+    # occurrence IDs may not be called ready for GPT1 to measure.
+    if (not all(
+                type(material_result.get(field)) is str
+                and bool(material_result[field])
+                and material_result[field] == material_result[field].strip()
+                for field in (
+                    "original_source_scope_ownership_id",
+                    "original_finish_viewport_id",
+                    "original_material_definition_id",
+                    "original_finish_code",
+                ))
+            or not exact_original_ids(mark_ids)
+            or len(mark_ids) != 1
+            or not exact_original_ids(mark_text_ids)
+            or not exact_original_ids(competing_ids)
+            or mark_ids[0] not in competing_ids):
         return {**base,
             "first_failure":"original_finish_scope_or_unique_source_mark_unproven"}
     # A caller's numerically populated room area is deliberately not
@@ -269,8 +294,11 @@ def audit_gpt2_w4_material_to_gpt1(
         "FT2_92mm_wall_widths_already_outside_clear_figures":None,
         "original_dimension_terminal_to_finished_W4_face_proven":False,
         "original_D13_threshold_finish_area_verified":False,
-        "source_finish_mark_record_ids":
-            material_result["original_mark_source_record_ids"],
+        "source_finish_mark_record_ids": tuple(mark_ids),
+        "source_finish_native_text_observation_ids": tuple(mark_text_ids),
+        "source_all_competing_same_code_occurrence_record_ids":
+            tuple(competing_ids),
+        "source_finish_selected_mark_is_unique_in_reported_universe":True,
         "source_original_floor_page":w4_result["original_floor_page"],
         "source_original_finish_page":material_result["original_finish_page"],
         "source_metric_room_area_not_minted_here":True,
