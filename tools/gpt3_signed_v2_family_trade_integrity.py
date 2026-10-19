@@ -29,6 +29,19 @@ _COMPATIBLE_TRADES = {
     "opening_count": frozenset({"doors", "windows"}),
 }
 
+# Dimensional constraints on already-sealed source units, independent of
+# benchmark expected values. Not a measurement unit conversion mechanism.
+_AREA_UNITS = frozenset({"m²", "m2", "sqm"})
+_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number", "count"})
+_SOURCE_FAMILY_UNITS = {
+    "floor_area": _AREA_UNITS,
+    "floor_finish_area": _AREA_UNITS,
+    "ceiling_area": _AREA_UNITS,
+    "ceiling_finish_area": _AREA_UNITS,
+    "opening_area": _AREA_UNITS,
+    "opening_count": _COUNT_UNITS,
+}
+
 def require_signed_v2_family_trade_integrity(
     *,
     verified_items: Iterable[Any],
@@ -93,6 +106,19 @@ def require_signed_v2_family_trade_integrity(
             if trade not in allowed:
                 raise ValueError(
                     "bound production family cannot be reclassified as benchmark trade"
+                )
+            # The higher-level V1 signed receipt verifier guarantees a unit
+            # exists. A missing unit in source-neutral helper-only test data
+            # is left to that gate; a PRESENT incompatible source-owned unit
+            # can never be silently reclassified as a benchmark area/count.
+            unit = _field(quantity, "unit")
+            if unit is not None and (
+                type(unit) is not str
+                or unit != unit.strip()
+                or unit.casefold() not in _SOURCE_FAMILY_UNITS[family]
+            ):
+                raise ValueError(
+                    "bound signed source unit disagrees with physical family dimension"
                 )
             if family in {"opening_area", "opening_count"}:
                 semantic_key = _field(quantity, "semantic_key")
