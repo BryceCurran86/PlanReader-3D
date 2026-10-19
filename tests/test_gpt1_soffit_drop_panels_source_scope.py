@@ -2,7 +2,7 @@
 from pb_formwork_trade_authority import FormworkElementSpec,calculate_soffit_formwork_items
 
 def _slab(**args):
-    fields=dict(element_type="soffit",element_id="synthetic-slab",
+    fields=dict(element_type="soffit",element_id="synthetic-slab",section="Structure",
       description="synthetic soffit",area_m2=100.0,count=4,
       length_m=2.0,width_m=2.0,depth_m=0.15)
     fields.update(args)
