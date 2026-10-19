@@ -29,6 +29,8 @@ _KNOWN_GATES = frozenset({
     "opening_filling_kind_unproven",
     "source_figured_dimension_pair_unproven",
     "width_height_axis_authority_unproven",
+    "original_host_binding_receipt_unbound",
+    "original_host_frame_receipt_unbound",
     "independent_gpt1_measurement_validation_required",
 })
 
