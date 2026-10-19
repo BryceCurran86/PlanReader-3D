@@ -263,6 +263,65 @@ def audit_gpt2_competing_source_floor_handoffs(
     }
 
 
+def _source_doorway_ring_edges_native(ring, *, translation=(0.0, 0.0)):
+    """Validate exact original cyclic ink ancestry (not just a vertex set).
+
+    This is a read-only source-geometry competitor check; the rounded
+    coordinates are original PDF points, never metric wall/finish authority.
+    """
+    if type(ring) not in (tuple, list) or not 3 <= len(ring) <= 4096:
+        return None
+    raw = []
+    try:
+        for point in ring:
+            if (type(point) not in (tuple, list) or len(point) != 2
+                    or any(type(value) not in (int, float)
+                           or not math.isfinite(value) for value in point)):
+                return None
+            raw.append((float(point[0]), float(point[1])))
+        polygon = Polygon(raw)
+        if not polygon.is_valid or polygon.is_empty or polygon.area <= 0:
+            return None
+        shifted = tuple(
+            (round(x + translation[0], 3), round(y + translation[1], 3))
+            for x, y in raw
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if len(set(shifted)) != len(shifted):
+        return None
+    edges = tuple(
+        tuple(sorted((shifted[index], shifted[(index + 1) % len(shifted)])))
+        for index in range(len(shifted))
+    )
+    if len(set(edges)) != len(edges):
+        return None
+    return frozenset(edges)
+
+
+def _original_virtual_door_gap_edge(points, *, translation=(0.0, 0.0)):
+    if type(points) not in (tuple, list) or len(points) != 2:
+        return None
+    try:
+        if any(
+            type(point) not in (tuple, list) or len(point) != 2
+            or any(type(value) not in (int, float) or not math.isfinite(value)
+                   for value in point)
+            for point in points
+        ):
+            return None
+        vertices = tuple(
+            (round(float(point[0]) + translation[0], 3),
+             round(float(point[1]) + translation[1], 3))
+            for point in points
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if vertices[0] == vertices[1]:
+        return None
+    return tuple(sorted(vertices))
+
+
 def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
     floor_door_perimeter: dict, finish_door_perimeter: dict, *,
     source_registration: dict,
@@ -320,17 +379,31 @@ def audit_gpt2_original_doorway_bound_floor_finish_correspondence(
                 row.get("finish_source",{}).get("identity") not in actual_finish):
             return {**base,"first_failure":"independently_proven_doorway_perimeter_membership_conflict"}
     fx,fy=translation_pdf_pts
-    finish_vertices={tuple(vertex) for vertex in
-                     finish["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"]}
-    translated={(round(x+fx,3),round(y+fy,3))
-                for x,y in floor["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"]}
-    if translated!=finish_vertices or len(translated)!=len(finish_vertices):
-        return {**base,"first_failure":"source_doorway_bounded_ring_geometry_conflict"}
-    f_gap=[tuple(pt) for pt in floor["source_virtual_door_connector_pdf_pts"]]
-    s_gap=[tuple(pt) for pt in finish["source_virtual_door_connector_pdf_pts"]]
-    transferred={ (round(x+fx,3),round(y+fy,3)) for x,y in f_gap}
-    if transferred!=set(s_gap):
-        return {**base,"first_failure":"source_original_doorway_registration_gap_conflict"}
+    original_floor = floor.get(
+        "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"
+    )
+    original_finish = finish.get(
+        "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"
+    )
+    translated_edges = _source_doorway_ring_edges_native(
+        original_floor, translation=(fx, fy)
+    )
+    finish_edges = _source_doorway_ring_edges_native(original_finish)
+    if not translated_edges or translated_edges != finish_edges:
+        return {**base,
+            "first_failure":"source_doorway_bounded_ring_geometry_conflict"}
+    translated_gap = _original_virtual_door_gap_edge(
+        floor.get("source_virtual_door_connector_pdf_pts"),
+        translation=(fx, fy),
+    )
+    finish_gap = _original_virtual_door_gap_edge(
+        finish.get("source_virtual_door_connector_pdf_pts"),
+    )
+    if (translated_gap is None or translated_gap != finish_gap
+            or translated_gap not in translated_edges
+            or finish_gap not in finish_edges):
+        return {**base,
+            "first_failure":"source_original_doorway_registration_gap_conflict"}
     return {
         **base,
         "status":"original_source_ink_ring_translation_candidate",
