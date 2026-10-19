@@ -12,6 +12,9 @@ import json
 from pathlib import Path
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
+from tools.diag_gptmax_original_stacker_image_frame import (
+    source_verified_stacker_image_frame,
+)
 
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -242,6 +245,13 @@ def replay_opt_in(pdf: bytes, *, expected_sha256: str = SOURCE_SHA,
         "baseline_source_snapshot_id": old_source.snapshot.snapshot_id,
         "original_change_receipt_parity": parity,
         "source_changed_policy_paired_to_fresh_original":True,
+        # First source registration stage for the real original STACKER:
+        # the two independently ink-positive flanks and G17 aperture share
+        # one PDF-native XRef frame. This is NOT W4 physical SAME, host,
+        # full-wall frame, filling semantics, count or metric quantity.
+        "stacker_2127_native_image_frame_source": (
+            source_verified_stacker_image_frame(pdf)
+        ),
         "physical_paired_source_policy_replayed_on_original":True,
         "separate_elevation_witness_page_5":elevation_witness_shadow,
         "old_source_snapshot_may_differ": True,
