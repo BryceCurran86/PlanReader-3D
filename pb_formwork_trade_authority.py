@@ -358,7 +358,7 @@ def calculate_column_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
     count = spec.count
     height = spec.height_m
     w = spec.width_m
-    d = spec.depth_m if spec.depth_m > 0.0 else spec.length_m
+    d = spec.depth_m if _positive_original_metres(spec.depth_m) else spec.length_m
     if (
         not _typed_original_count(count)
         or not _positive_original_metres(height, w, d)
