@@ -192,3 +192,30 @@ def test_genuine_pdf_scaled_room_with_trusted_scale_remains_firm():
     measured = _scaled_qty()
     assert measured.abstained is False
     assert measured.value == 25.0
+
+
+@pytest.mark.parametrize("source_page", [0, "", "0", None, -1, "01", "  ", "1.0"])
+def test_falsy_or_noncanonical_room_source_page_cannot_publish_firm_printed_area(source_page):
+    room = copy(_room())
+    object.__setattr__(room, "source_page", source_page)
+    quantity = build_room_area_quantity(
+        room=room, context=_context(), document=_document(),
+        viewport=_viewport(), entity=_entity(), page_no=1,
+        explicit_area_evidence=_explicit_area(25.0),
+    )
+    assert quantity.abstained
+    assert quantity.value is None
+    assert "room_source_page_mismatch" in quantity.blocking_reasons
+
+
+@pytest.mark.parametrize("source_page", [1, "1"])
+def test_exact_original_room_source_page_preserves_documented_area(source_page):
+    room = copy(_room())
+    object.__setattr__(room, "source_page", source_page)
+    quantity = build_room_area_quantity(
+        room=room, context=_context(), document=_document(),
+        viewport=_viewport(), entity=_entity(), page_no=1,
+        explicit_area_evidence=_explicit_area(25.0),
+    )
+    assert not quantity.abstained
+    assert quantity.value == 25.0
