@@ -62,7 +62,7 @@ def test_compact_2127_original_source_is_abstained_not_an_extra_opening():
     lambda r:replace(r,quantity_evidence=replace(
         r.quantity_evidence,status="firm")),
     lambda r:replace(r,quantity_evidence=replace(
-        r.quantity_evidence,value=5.67)),
+        r.quantity_evidence,abstained=False,status="firm",value=5.67)),
     lambda r:replace(r,quantity_evidence=replace(
         r.quantity_evidence,unit="each")),
 ])
