@@ -434,11 +434,21 @@ def _coverage_complete(
         except (TypeError, ValueError):
             reasons.append(SOURCE_DECODE_INCOMPLETE)
             return False, _ordered_unique(reasons)
+        state = getattr(coverage, "state", None)
         if (
-            not requested_pages
+            type(state) is not str
+            or state not in {"complete", "partial"}
+            or not requested_pages
             or any(page <= 0 or page > total_pages for page in requested_pages)
             or not requested_pages <= decoded_set
             or bool(requested_pages & failed_set)
+            # "complete" is a claim about the WHOLE original document,
+            # not just the requested page. An incomplete inventory may
+            # authenticate a subset only under an explicit partial state.
+            or (state == "complete" and (
+                decoded_set != set(range(1, total_pages + 1))
+                or bool(failed_set)
+            ))
         ):
             reasons.append(SOURCE_DECODE_INCOMPLETE)
     else:
