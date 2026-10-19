@@ -94,7 +94,7 @@ class TestStructuralSteelTradeAuthority(unittest.TestCase):
         self.assertEqual(lm_item.quantity, 30.0)
 
         # 2. Tonnage: 30m * 40.4 kg/m = 1212.0 kg = 1.212 tonnes
-        ton_item = next(i for i in items if i.unit == "item")
+        ton_item = next(i for i in items if i.unit == "t")
         self.assertEqual(ton_item.quantity, 1.212)
         self.assertIn("1212.0 kg", ton_item.notes)
 
@@ -122,7 +122,7 @@ class TestStructuralSteelTradeAuthority(unittest.TestCase):
         self.assertEqual(len(col_items), 3)
         col_lm = next(i for i in col_items if i.unit == "lm")
         self.assertEqual(col_lm.quantity, 21.0)
-        col_ton = next(i for i in col_items if i.unit == "item")
+        col_ton = next(i for i in col_items if i.unit == "t")
         # 21m * 46.2 kg/m = 970.2 kg = 0.970 tonnes
         self.assertEqual(col_ton.quantity, 0.970)
 
@@ -191,8 +191,8 @@ class TestStructuralSteelTradeAuthority(unittest.TestCase):
             primary_specs, self.ws_id, self.now, allowance_pct=10.0
         )
         self.assertIsNotNone(conn_row)
-        self.assertEqual(conn_row["quantity"], 0.25)
-        self.assertEqual(conn_row["unit"], "item")
+        self.assertEqual(conn_row["quantity"], 0.254)
+        self.assertEqual(conn_row["unit"], "t")
         self.assertIn("10.0% connection allowance", conn_row["notes"])
 
     def test_sqlite_publication_and_contract_compliance(self) -> None:
