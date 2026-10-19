@@ -6,6 +6,7 @@ identity are caller hypotheses, not physical wall registration authority.
 from __future__ import annotations
 
 import math
+import fitz
 from tools.gpt2_native_material_mark_census import census_native_plan_material_words
 
 
@@ -34,6 +35,9 @@ def audit_original_crosssheet_candidate_floor_finish_words(
             or any(type(v) not in (float,int) or not math.isfinite(v)
                    for v in unproven_original_source_translation_pdf_pts)):
         raise ValueError("source_registration_hypothesis_finite_required")
+    with fitz.open(stream=original_pdf_bytes,filetype="pdf") as original:
+        if max(original_floor_page_1_based, original_finish_page_1_based) > len(original):
+            raise ValueError("original_floor_or_finish_source_page_missing")
     x0,y0,x1,y1=map(float,candidate_original_floor_bbox_pdf_pts)
     dx,dy=map(float,unproven_original_source_translation_pdf_pts)
     bbox=(x0+dx,y0+dy,x1+dx,y1+dy)
