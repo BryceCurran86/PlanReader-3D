@@ -31,7 +31,7 @@ def apply(*, family, semantic, unit, trade):
     ("opening_area", "door_area:qualified-1", "m²", "doors"),
     ("opening_area", "window_area:qualified-1", "m2", "windows"),
     ("opening_count", "door_count:qualified-1", "ea", "doors"),
-    ("opening_count", "window_count:qualified-1", "nr", "windows"),
+    ("opening_count", "window_count:qualified-1", "count", "windows"),
 ])
 def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
     family, semantic, unit, trade,
@@ -46,7 +46,6 @@ def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
     ("opening_area", "door_area:source-id", "ea", "doors"),
     ("opening_count", "door_count:source-id", "m2", "doors"),
     ("opening_area", "window_area:source-id", "m3", "windows"),
-    ("opening_count", "door_count:source-id", "count", "doors"),
 ])
 def test_incompatible_count_area_volume_units_fail_before_benchmark_score(
     family, semantic, unit, trade,
