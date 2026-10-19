@@ -251,270 +251,272 @@ class SameViewRoomAreaProducer:
         )
         records: list[SameViewRoomAreaRecord] = []
 
+        # Default iterates exactly the same unique-label candidates as before.
+        # Repeated text is opt-in: never disambiguate by nearest geometry.
+        area_rows: list[tuple[str, str, LiveCanonicalRoomObject, object | None]] = []
         for (page_id, label), grouped_rooms in sorted(labels.items()):
-            if len(grouped_rooms) != 1 and not repeated_label_source_ownership_shadow:
+            if len(grouped_rooms) == 1:
+                area_rows.append((page_id, label, grouped_rooms[0], None))
                 continue
-            repeated_owned_lines: dict[str, object] = {}
-            if len(grouped_rooms) > 1:
-                source_lines = tuple(
+            if not repeated_label_source_ownership_shadow:
+                continue
+            source_lines = tuple(
+                line for line in _trusted_lines_for_page(
+                    self._source, revision_id=revision_id, page_id=page_id,
+                    candidate_labels=(grouped_rooms[0].room_label,),
+                ) if _norm_label(line.text) == label
+            )
+            owned = uniquely_owned_repeated_label_lines(
+                {
+                    str(room.physical_room_id): tuple(room.room_label_evidence_ids)
+                    for room in grouped_rooms
+                }, source_lines,
+            )
+            if len(owned) != len(grouped_rooms):
+                for room in grouped_rooms:
+                    room_id = str(room.physical_room_id)
+                    unresolved.add(room_id)
+                    first_failures[room_id] = (
+                        "same_view_repeated_label_source_observation_ambiguous"
+                    )
+                conflict_seen = True
+                continue
+            for room in sorted(grouped_rooms, key=lambda r: str(r.physical_room_id)):
+                area_rows.append((
+                    page_id, label, room, owned[str(room.physical_room_id)],
+                ))
+
+        for page_id, label, room, owned_line in area_rows:
+            if (
+                str(room.physical_room_id) in duplicate_physical_ids
+                or str(room.physical_room_id) in duplicate_face_room_ids
+            ):
+                continue
+            lines = (
+                (owned_line,) if owned_line is not None
+                else tuple(
                     line for line in _trusted_lines_for_page(
                         self._source,
                         revision_id=revision_id,
                         page_id=page_id,
-                        candidate_labels=(grouped_rooms[0].room_label,),
+                        candidate_labels=(room.room_label,),
                     ) if _norm_label(line.text) == label
                 )
-                repeated_owned_lines = uniquely_owned_repeated_label_lines(
-                    {
-                        str(room.physical_room_id): tuple(room.room_label_evidence_ids)
-                        for room in grouped_rooms
-                    },
-                    source_lines,
+            )
+            if len(lines) != 1:
+                unresolved.add(str(room.physical_room_id))
+                first_failures[str(room.physical_room_id)] = (
+                    "same_view_trusted_label_ambiguous"
+                    if len(lines) > 1 else "same_view_trusted_label_unavailable"
                 )
-                if len(repeated_owned_lines) != len(grouped_rooms):
-                    for room in grouped_rooms:
-                        room_id = str(room.physical_room_id)
-                        unresolved.add(room_id)
-                        first_failures[room_id] = (
-                            "same_view_repeated_label_source_observation_ambiguous"
-                        )
+                if len(lines) > 1:
                     conflict_seen = True
-                    continue
+                continue
 
-            for room in grouped_rooms:
-                if (
-                    str(room.physical_room_id) in duplicate_physical_ids
-                    or str(room.physical_room_id) in duplicate_face_room_ids
-                ):
-                    continue
+            dimensions = _trusted_native_dimensions_for_page(
+                self._source,
+                revision_id=revision_id,
+                page_id=page_id,
+                candidate_lines=lines,
+                view_type=DrawingViewType.FLOOR_PLAN.value,
+            )
+            horizontals = tuple(
+                item
+                for item in dimensions
+                if item.orientation == DimensionOrientation.HORIZONTAL.value
+            )
+            verticals = tuple(
+                item
+                for item in dimensions
+                if item.orientation == DimensionOrientation.VERTICAL.value
+            )
 
-                if len(grouped_rooms) > 1:
-                    lines = (repeated_owned_lines[str(room.physical_room_id)],)
-                else:
-                    lines = tuple(
-                        line
-                        for line in _trusted_lines_for_page(
-                            self._source,
-                            revision_id=revision_id,
-                            page_id=page_id,
-                            candidate_labels=(room.room_label,),
-                        )
-                        if _norm_label(line.text) == label
-                    )
-                if len(lines) != 1:
-                    unresolved.add(str(room.physical_room_id))
-                    first_failures[str(room.physical_room_id)] = (
-                        "same_view_trusted_label_ambiguous"
-                        if len(lines) > 1 else "same_view_trusted_label_unavailable"
-                    )
-                    if len(lines) > 1:
-                        conflict_seen = True
-                    continue
+            matches = []
+            line = lines[0]
+            inside_pairs = 0
+            scale_consistent_pairs = 0
+            witness_pairs = 0
+            for horizontal in horizontals:
+                for vertical in verticals:
+                    if not _line_inside_dimension_pair(line, horizontal, vertical):
+                        continue
+                    inside_pairs += 1
+                    if not _figured_pair_scale_consistent(
+                        page_id=page_id,
+                        horizontal=horizontal,
+                        vertical=vertical,
+                    ):
+                        continue
+                    scale_consistent_pairs += 1
+                    if not _witness_systems_intersect(horizontal, vertical):
+                        continue
+                    witness_pairs += 1
+                    matches.append((line, horizontal, vertical))
 
-                dimensions = _trusted_native_dimensions_for_page(
-                    self._source,
-                    revision_id=revision_id,
-                    page_id=page_id,
-                    candidate_lines=lines,
-                    view_type=DrawingViewType.FLOOR_PLAN.value,
+            if not matches:
+                owned_horizontals = tuple(
+                    dimension
+                    for dimension in horizontals
+                    if _dimension_is_immediate_label_annotation(line, dimension)
                 )
-                horizontals = tuple(
-                    item
-                    for item in dimensions
-                    if item.orientation == DimensionOrientation.HORIZONTAL.value
+                owned_verticals = tuple(
+                    dimension
+                    for dimension in verticals
+                    if _dimension_is_immediate_label_annotation(line, dimension)
                 )
-                verticals = tuple(
-                    item
-                    for item in dimensions
-                    if item.orientation == DimensionOrientation.VERTICAL.value
-                )
-
-                matches = []
-                line = lines[0]
-                inside_pairs = 0
-                scale_consistent_pairs = 0
-                witness_pairs = 0
-                for horizontal in horizontals:
-                    for vertical in verticals:
-                        if not _line_inside_dimension_pair(line, horizontal, vertical):
-                            continue
-                        inside_pairs += 1
-                        if not _figured_pair_scale_consistent(
+                for horizontal in owned_horizontals:
+                    for vertical in owned_verticals:
+                        if _figured_pair_scale_consistent(
                             page_id=page_id,
                             horizontal=horizontal,
                             vertical=vertical,
                         ):
-                            continue
-                        scale_consistent_pairs += 1
-                        if not _witness_systems_intersect(horizontal, vertical):
-                            continue
-                        witness_pairs += 1
-                        matches.append((line, horizontal, vertical))
+                            matches.append((line, horizontal, vertical))
 
-                if not matches:
-                    owned_horizontals = tuple(
-                        dimension
-                        for dimension in horizontals
-                        if _dimension_is_immediate_label_annotation(line, dimension)
-                    )
-                    owned_verticals = tuple(
-                        dimension
-                        for dimension in verticals
-                        if _dimension_is_immediate_label_annotation(line, dimension)
-                    )
-                    for horizontal in owned_horizontals:
-                        for vertical in owned_verticals:
-                            if _figured_pair_scale_consistent(
-                                page_id=page_id,
-                                horizontal=horizontal,
-                                vertical=vertical,
-                            ):
-                                matches.append((line, horizontal, vertical))
+            deduped = {
+                (
+                    horizontal.dimension_id,
+                    vertical.dimension_id,
+                ): (owned_line, horizontal, vertical)
+                for owned_line, horizontal, vertical in matches
+            }
+            if len(deduped) != 1:
+                room_id = str(room.physical_room_id)
+                unresolved.add(room_id)
+                if len(deduped) > 1:
+                    conflict_seen = True
+                    first_failures[room_id] = "same_view_multiple_authenticated_dimension_pairs"
+                elif not horizontals or not verticals:
+                    first_failures[room_id] = "same_view_dimension_orientation_pair_unavailable"
+                elif not inside_pairs:
+                    first_failures[room_id] = "same_view_label_outside_dimension_box"
+                elif not scale_consistent_pairs:
+                    first_failures[room_id] = "same_view_figured_pair_scale_inconsistent"
+                elif not witness_pairs:
+                    first_failures[room_id] = "same_view_dimension_witness_intersection_unavailable"
+                else:
+                    first_failures[room_id] = "same_view_dimension_pair_unavailable"
+                continue
 
-                deduped = {
-                    (
+            owned_line, horizontal, vertical = next(iter(deduped.values()))
+            area_m2 = round(
+                float(horizontal.value_mm)
+                * float(vertical.value_mm)
+                / 1_000_000.0,
+                6,
+            )
+            if not math.isfinite(area_m2) or area_m2 <= 0.0:
+                unresolved.add(str(room.physical_room_id))
+                first_failures[str(room.physical_room_id)] = "same_view_metric_area_invalid"
+                continue
+
+            horizontal_x = sorted(
+                (
+                    float(horizontal.endpoints_pt[0][0]),
+                    float(horizontal.endpoints_pt[1][0]),
+                )
+            )
+            vertical_y = sorted(
+                (
+                    float(vertical.endpoints_pt[0][1]),
+                    float(vertical.endpoints_pt[1][1]),
+                )
+            )
+            source_dimension_box = (
+                horizontal_x[0],
+                vertical_y[0],
+                horizontal_x[1],
+                vertical_y[1],
+            )
+            evidence_id = stable_contract_id(
+                "same_view_room_area",
+                {
+                    "document_id": room.document_id,
+                    "physical_room_id": room.physical_room_id,
+                    "source_room_face_record_id": room.source_room_face_record_id,
+                    "dimension_page_id": page_id,
+                    "label_receipt_ids": owned_line.receipt_ids,
+                    "horizontal_dimension_id": horizontal.dimension_id,
+                    "vertical_dimension_id": vertical.dimension_id,
+                    "area_m2": area_m2,
+                },
+                digest_chars=32,
+            )
+            area_evidence = EvidenceAtom(
+                evidence_id=evidence_id,
+                document_id=str(room.document_id),
+                page_id=str(room.page_id),
+                viewport_id=room.viewport_id,
+                kind="explicit_room_area",
+                method="authenticated_same_view_figured_dimensions",
+                normalized_value=area_m2,
+                unit="m2",
+                confidence=1.0,
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED,),
+                metadata={
+                    "physical_room_id": str(room.physical_room_id),
+                    "source_room_face_record_id": str(
+                        room.source_room_face_record_id
+                    ),
+                    "room_label_binding_record_id": str(
+                        room.room_label_binding_record_id
+                    ),
+                    "room_label_evidence_ids": list(room.room_label_evidence_ids),
+                    "source_dimension_page_id": str(page_id),
+                    "source_dimension_snapshot_id": str(
+                        published.snapshot.snapshot_id
+                    ),
+                    "source_label_text": owned_line.text,
+                    "source_label_observation_ids": list(
+                        owned_line.observation_ids
+                    ),
+                    "source_label_receipt_ids": list(owned_line.receipt_ids),
+                    "source_label_bbox_pdf_pts": list(owned_line.bbox),
+                    "source_dimension_box_pdf_pts": list(source_dimension_box),
+                    "figured_dimension_ids": [
                         horizontal.dimension_id,
                         vertical.dimension_id,
-                    ): (owned_line, horizontal, vertical)
-                    for owned_line, horizontal, vertical in matches
-                }
-                if len(deduped) != 1:
-                    room_id = str(room.physical_room_id)
-                    unresolved.add(room_id)
-                    if len(deduped) > 1:
-                        conflict_seen = True
-                        first_failures[room_id] = "same_view_multiple_authenticated_dimension_pairs"
-                    elif not horizontals or not verticals:
-                        first_failures[room_id] = "same_view_dimension_orientation_pair_unavailable"
-                    elif not inside_pairs:
-                        first_failures[room_id] = "same_view_label_outside_dimension_box"
-                    elif not scale_consistent_pairs:
-                        first_failures[room_id] = "same_view_figured_pair_scale_inconsistent"
-                    elif not witness_pairs:
-                        first_failures[room_id] = "same_view_dimension_witness_intersection_unavailable"
-                    else:
-                        first_failures[room_id] = "same_view_dimension_pair_unavailable"
-                    continue
-
-                owned_line, horizontal, vertical = next(iter(deduped.values()))
-                area_m2 = round(
-                    float(horizontal.value_mm)
-                    * float(vertical.value_mm)
-                    / 1_000_000.0,
-                    6,
+                    ],
+                    "horizontal_dimension_id": horizontal.dimension_id,
+                    "horizontal_value_mm": int(horizontal.value_mm),
+                    "horizontal_dimension_line_observation_ids": list(
+                        horizontal.dimension_line_observation_ids
+                    ),
+                    "horizontal_witness_observation_ids": list(
+                        horizontal.witness_observation_ids
+                    ),
+                    "vertical_dimension_id": vertical.dimension_id,
+                    "vertical_value_mm": int(vertical.value_mm),
+                    "vertical_dimension_line_observation_ids": list(
+                        vertical.dimension_line_observation_ids
+                    ),
+                    "vertical_witness_observation_ids": list(
+                        vertical.witness_observation_ids
+                    ),
+                    "room_revision_id": str(room.revision_id),
+                    "room_snapshot_id": str(room.snapshot_id),
+                    "source_sha256": str(room.source_sha256),
+                },
+            )
+            records.append(
+                SameViewRoomAreaRecord(
+                    physical_room_id=str(room.physical_room_id),
+                    source_room_face_record_id=str(
+                        room.source_room_face_record_id
+                    ),
+                    room_label=str(room.room_label),
+                    source_dimension_page_id=str(page_id),
+                    source_label_observation_ids=tuple(
+                        owned_line.observation_ids
+                    ),
+                    source_label_receipt_ids=tuple(owned_line.receipt_ids),
+                    horizontal_dimension_id=horizontal.dimension_id,
+                    vertical_dimension_id=vertical.dimension_id,
+                    area_evidence=area_evidence,
+                    _seal=_RECORD_SEAL,
                 )
-                if not math.isfinite(area_m2) or area_m2 <= 0.0:
-                    unresolved.add(str(room.physical_room_id))
-                    first_failures[str(room.physical_room_id)] = "same_view_metric_area_invalid"
-                    continue
-
-                horizontal_x = sorted(
-                    (
-                        float(horizontal.endpoints_pt[0][0]),
-                        float(horizontal.endpoints_pt[1][0]),
-                    )
-                )
-                vertical_y = sorted(
-                    (
-                        float(vertical.endpoints_pt[0][1]),
-                        float(vertical.endpoints_pt[1][1]),
-                    )
-                )
-                source_dimension_box = (
-                    horizontal_x[0],
-                    vertical_y[0],
-                    horizontal_x[1],
-                    vertical_y[1],
-                )
-                evidence_id = stable_contract_id(
-                    "same_view_room_area",
-                    {
-                        "document_id": room.document_id,
-                        "physical_room_id": room.physical_room_id,
-                        "source_room_face_record_id": room.source_room_face_record_id,
-                        "dimension_page_id": page_id,
-                        "label_receipt_ids": owned_line.receipt_ids,
-                        "horizontal_dimension_id": horizontal.dimension_id,
-                        "vertical_dimension_id": vertical.dimension_id,
-                        "area_m2": area_m2,
-                    },
-                    digest_chars=32,
-                )
-                area_evidence = EvidenceAtom(
-                    evidence_id=evidence_id,
-                    document_id=str(room.document_id),
-                    page_id=str(room.page_id),
-                    viewport_id=room.viewport_id,
-                    kind="explicit_room_area",
-                    method="authenticated_same_view_figured_dimensions",
-                    normalized_value=area_m2,
-                    unit="m2",
-                    confidence=1.0,
-                    status=EvidenceResolutionStatus.CORROBORATED,
-                    reason_codes=(SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED,),
-                    metadata={
-                        "physical_room_id": str(room.physical_room_id),
-                        "source_room_face_record_id": str(
-                            room.source_room_face_record_id
-                        ),
-                        "room_label_binding_record_id": str(
-                            room.room_label_binding_record_id
-                        ),
-                        "room_label_evidence_ids": list(room.room_label_evidence_ids),
-                        "source_dimension_page_id": str(page_id),
-                        "source_dimension_snapshot_id": str(
-                            published.snapshot.snapshot_id
-                        ),
-                        "source_label_text": owned_line.text,
-                        "source_label_observation_ids": list(
-                            owned_line.observation_ids
-                        ),
-                        "source_label_receipt_ids": list(owned_line.receipt_ids),
-                        "source_label_bbox_pdf_pts": list(owned_line.bbox),
-                        "source_dimension_box_pdf_pts": list(source_dimension_box),
-                        "figured_dimension_ids": [
-                            horizontal.dimension_id,
-                            vertical.dimension_id,
-                        ],
-                        "horizontal_dimension_id": horizontal.dimension_id,
-                        "horizontal_value_mm": int(horizontal.value_mm),
-                        "horizontal_dimension_line_observation_ids": list(
-                            horizontal.dimension_line_observation_ids
-                        ),
-                        "horizontal_witness_observation_ids": list(
-                            horizontal.witness_observation_ids
-                        ),
-                        "vertical_dimension_id": vertical.dimension_id,
-                        "vertical_value_mm": int(vertical.value_mm),
-                        "vertical_dimension_line_observation_ids": list(
-                            vertical.dimension_line_observation_ids
-                        ),
-                        "vertical_witness_observation_ids": list(
-                            vertical.witness_observation_ids
-                        ),
-                        "room_revision_id": str(room.revision_id),
-                        "room_snapshot_id": str(room.snapshot_id),
-                        "source_sha256": str(room.source_sha256),
-                    },
-                )
-                records.append(
-                    SameViewRoomAreaRecord(
-                        physical_room_id=str(room.physical_room_id),
-                        source_room_face_record_id=str(
-                            room.source_room_face_record_id
-                        ),
-                        room_label=str(room.room_label),
-                        source_dimension_page_id=str(page_id),
-                        source_label_observation_ids=tuple(
-                            owned_line.observation_ids
-                        ),
-                        source_label_receipt_ids=tuple(owned_line.receipt_ids),
-                        horizontal_dimension_id=horizontal.dimension_id,
-                        vertical_dimension_id=vertical.dimension_id,
-                        area_evidence=area_evidence,
-                        _seal=_RECORD_SEAL,
-                    )
-                )
+            )
 
         # Figured-dimension witness IDs are source-owned measurements, not
         # reusable inferred sizes. Two independent physical rooms claiming the
