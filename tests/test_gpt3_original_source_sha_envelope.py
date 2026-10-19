@@ -100,3 +100,34 @@ def test_audit_rejects_symlink_before_hashing_original(tmp_path):
         build_original_source_sha_report(
             sealed_path=seal_file, original_paths=[alias],
         )
+
+def test_multi_document_signed_sha_envelope_requires_exact_complete_set(tmp_path):
+    pdf_a = tmp_path / "architectural-original-synthetic.pdf"
+    pdf_b = tmp_path / "structural-original-synthetic.pdf"
+    pdf_a.write_bytes(b"%PDF-1.7\\nsynthetic architectural bytes\\n")
+    pdf_b.write_bytes(b"%PDF-1.7\\nsynthetic structural bytes\\n")
+    sha_a = sha256(pdf_a.read_bytes()).hexdigest()
+    sha_b = sha256(pdf_b.read_bytes()).hexdigest()
+    records = []
+    traces = {}
+    for index, digest in ((1, sha_a), (2, sha_b)):
+        q = quantity(f"multi-{index}", f"floor-{index}")
+        q = replace(q, metadata={
+            **q.metadata, "source_sha256": digest,
+            "document_id": f"doc-{index}",
+        })
+        t = replace(
+            trace(q), document_id=f"doc-{index}", source_sha256=digest,
+        )
+        records.append(q)
+        traces[q.quantity_id] = t
+    sealed = seal_source_closed_run(
+        records, project_id="project-7", traces_by_quantity_id=traces,
+    )
+    result = verify_original_source_sha_envelope(sealed, [pdf_b, pdf_a])
+    assert result["original_source_sha256s"] == sorted([sha_a, sha_b])
+    assert result["sealed_quantity_count"] == 2
+    with pytest.raises(ValueError, match="one original source file"):
+        verify_original_source_sha_envelope(sealed, [pdf_a])
+    with pytest.raises(ValueError, match="do not match|duplicate"):
+        verify_original_source_sha_envelope(sealed, [pdf_a, pdf_a])
