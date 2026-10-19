@@ -662,7 +662,8 @@ class CrossViewFloorFinishResult:
                 "support_snapshot_id": record.support_snapshot_id,
             }
             if (
-                any(metadata.get(key) != expected
+                metadata.get("inclusion_status") != "INCLUSION"
+                or any(metadata.get(key) != expected
                     for key, expected in owner_fields.items())
                 or record.occurrence_evidence_id not in record.quantity.evidence_ids
             ):
