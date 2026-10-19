@@ -258,6 +258,69 @@ def audit_gpt2_w4_material_to_gpt1(
             or mark_ids[0] not in competing_ids):
         return {**base,
             "first_failure":"original_finish_scope_or_unique_source_mark_unproven"}
+    # An independently source-owned open doorway is represented as an ink
+    # gap, not as a structural wall or a measured finish threshold.
+    def native_gap(value):
+        if type(value) not in (tuple, list) or len(value) != 2:
+            return None
+        coords = []
+        for point in value:
+            if (type(point) not in (tuple, list) or len(point) != 2
+                    or any(type(v) not in (int, float) or not math.isfinite(v)
+                           for v in point)):
+                return None
+            coords.append((round(float(point[0]), 3),
+                           round(float(point[1]), 3)))
+        if coords[0] == coords[1]:
+            return None
+        return tuple(coords)
+
+    def boundary_edges(polygon):
+        raw = tuple(polygon.exterior.coords)[:-1]
+        vertices = tuple(
+            (round(float(x), 3), round(float(y), 3)) for x, y in raw
+        )
+        return {
+            frozenset((vertices[i], vertices[(i + 1) % len(vertices)]))
+            for i in range(len(vertices))
+        }
+
+    has_door_gap = material_result.get(
+        "source_original_doorway_ink_gap_candidate_only") is True
+    floor_gap = finish_gap = None
+    if (not has_door_gap and any(
+            material_result.get(field) is not None
+            for field in (
+                "source_original_floor_door_ink_gap_pdf_pts",
+                "source_original_finish_door_ink_gap_pdf_pts",
+            ))):
+        return {**base,"first_failure":"source_original_door_gap_receipt_invalid"}
+    if has_door_gap:
+        floor_gap = native_gap(
+            material_result.get("source_original_floor_door_ink_gap_pdf_pts")
+        )
+        finish_gap = native_gap(
+            material_result.get("source_original_finish_door_ink_gap_pdf_pts")
+        )
+        shift = material_result.get(
+            "source_original_cross_sheet_translation_pdf_pts"
+        )
+        if (floor_gap is None or finish_gap is None
+                or type(shift) not in (tuple, list) or len(shift) != 2
+                or any(type(v) not in (int, float) or not math.isfinite(v)
+                       for v in shift)):
+            return {**base,
+                "first_failure":"source_original_door_gap_receipt_invalid"}
+        shifted = frozenset(
+            (round(x + shift[0], 3), round(y + shift[1], 3))
+            for x, y in floor_gap
+        )
+        if (frozenset(floor_gap) not in boundary_edges(w4_floor)
+                or frozenset(finish_gap) not in boundary_edges(marked_finish)
+                or shifted != frozenset(finish_gap)):
+            return {**base,
+                "first_failure":"source_original_door_gap_vs_W4_floor_conflict"}
+    # Source gap remains a CANDIDATE for GPT1 independent threshold/wall work.
     # A caller's numerically populated room area is deliberately not
     # converted to finish m2. The existing GPT1/GPT3 verifier controls that.
     return {
@@ -294,6 +357,11 @@ def audit_gpt2_w4_material_to_gpt1(
         "FT2_92mm_wall_widths_already_outside_clear_figures":None,
         "original_dimension_terminal_to_finished_W4_face_proven":False,
         "original_D13_threshold_finish_area_verified":False,
+        "source_original_doorway_ink_gap_w4_candidate_only":has_door_gap,
+        "source_original_floor_door_ink_gap_pdf_pts":floor_gap,
+        "source_original_finish_door_ink_gap_pdf_pts":finish_gap,
+        "source_original_doorway_gap_is_structural_wall":False,
+        "source_original_doorway_gap_is_finished_threshold":False,
         "source_finish_mark_record_ids": tuple(mark_ids),
         "source_finish_native_text_observation_ids": tuple(mark_text_ids),
         "source_all_competing_same_code_occurrence_record_ids":

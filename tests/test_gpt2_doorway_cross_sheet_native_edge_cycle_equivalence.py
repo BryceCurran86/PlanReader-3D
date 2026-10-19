@@ -66,6 +66,13 @@ def test_original_closed_ink_edge_cycle_matches_without_metric_authority():
     assert row["geometric_ink_correspondence_only"] is True
     assert row["source_virtual_door_closure_is_physical_wall"] is False
     assert row["source_finished_face_verified"] is False
+    assert row["source_original_floor_door_ink_gap_pdf_pts"] == (
+        FLOOR[-1], FLOOR[0]
+    )
+    assert row["source_original_finish_door_ink_gap_pdf_pts"] == (
+        FINISH[-1], FINISH[0]
+    )
+    assert row["source_original_doorway_gap_is_finish_threshold_proof"] is False
     assert row["new_firm_quantities"] == 0
 
 
