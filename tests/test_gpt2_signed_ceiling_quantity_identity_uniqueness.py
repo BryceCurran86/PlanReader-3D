@@ -9,7 +9,7 @@ import pytest
 from tests.test_gpt2_malformed_ceiling_quantity_result_quarantine import _issued
 
 
-def _second(issued, *, quantity_id=None):
+def _second(issued, *, quantity_id=None, independent_physical_owner=False):
     first = issued.records[0]
     second_ceiling_id = "another-physical-ceiling"
     second_quantity_id = (
@@ -23,9 +23,32 @@ def _second(issued, *, quantity_id=None):
         first.canonical_ceiling, canonical_ceiling_id=second_ceiling_id,
         ceiling_quantity_id=second_quantity_id,
     )
+    if independent_physical_owner:
+        canonical = replace(
+            canonical,
+            room_entity_id="independent-source-room-2",
+            room_area_quantity_id="independent-room-area-2",
+            source_room_index_id="independent-room-index-2",
+        )
     return replace(
         first, canonical_ceiling_id=second_ceiling_id,
         physical_ceiling_surface_id=second_ceiling_id,
+        physical_room_id=(
+            "independent-physical-room-2"
+            if independent_physical_owner else first.physical_room_id
+        ),
+        canonical_room_id=(
+            "independent-canonical-room-2"
+            if independent_physical_owner else first.canonical_room_id
+        ),
+        source_room_face_record_id=(
+            "independent-source-room-face-2"
+            if independent_physical_owner else first.source_room_face_record_id
+        ),
+        upstream_room_area_quantity_id=(
+            "independent-room-area-2"
+            if independent_physical_owner else first.upstream_room_area_quantity_id
+        ),
         canonical_ceiling=canonical, quantity=quantity,
     )
 
@@ -59,7 +82,10 @@ def test_invalid_signed_quantity_id_fails_closed_even_when_other_record_valid(
 
 def test_independently_source_identified_ceiling_quantities_remain_visible():
     issued = _issued()
-    second = _second(issued, quantity_id="independent-original-quantity-id")
+    second = _second(
+        issued, quantity_id="independent-original-quantity-id",
+        independent_physical_owner=True,
+    )
     result = replace(issued, records=(second, issued.records[0]))
     assert set(result.records_by_ceiling_id) == {
         issued.records[0].canonical_ceiling_id, "another-physical-ceiling"
