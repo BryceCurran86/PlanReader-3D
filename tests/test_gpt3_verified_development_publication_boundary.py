@@ -87,7 +87,13 @@ def _four_source_verified_projects(tmp_path: Path, monkeypatch):
         lambda value: SimpleNamespace(
             project_id=value["project_id"],
             source_sha256s=value["source_sha256s"],
-            quantities=(),
+            # Synthetic original-source attempt with an explicit ABSTAIN;
+            # unlike a completely empty V1 producer this is an execution.
+            quantities=(SimpleNamespace(
+                quantity_id=f"attempt-{value['project_id']}",
+                abstained=True,
+                object_identity_refs=(),
+            ),),
             to_dict=lambda: value,
         ),
     )
@@ -103,9 +109,9 @@ def _four_source_verified_projects(tmp_path: Path, monkeypatch):
         report, "verify_sealed_customer_output",
         lambda sealed, _: SimpleNamespace(
             project_id=sealed.project_id,
-            sealed_quantity_count=0,
+            sealed_quantity_count=1,
             valid_quantity_count=0,
-            abstained_quantity_count=0,
+            abstained_quantity_count=1,
             customer_row_count=0,
             verified_quantity_ids=(),
         ),
@@ -232,3 +238,52 @@ def test_bad_signed_receipt_does_not_gain_complete_development_score(
     assert ledger["independently_verified_execution_count"] == 3
     assert ledger["development_suite_result"] is None
     assert ledger["official_suite_result"] is None
+
+
+def test_four_original_pdfs_with_one_empty_v1_handoff_never_score_missing_production(
+    tmp_path, monkeypatch,
+):
+    roots, manifests = _four_source_verified_projects(tmp_path, monkeypatch)
+    invalid_project = manifests[2].project_id
+    real_source_decoder = report.sealed_source_closed_run_from_dict
+
+    def with_empty_source(value):
+        if value["project_id"] == invalid_project:
+            return SimpleNamespace(
+                project_id=invalid_project,
+                source_sha256s=value["source_sha256s"],
+                quantities=(),
+                to_dict=lambda: value,
+            )
+        return real_source_decoder(value)
+
+    monkeypatch.setattr(
+        report, "sealed_source_closed_run_from_dict", with_empty_source,
+    )
+    monkeypatch.setattr(
+        report, "evaluate_development_suite_v2",
+        lambda *_: pytest.fail("an empty signed V1 handoff is not a genuine source execution"),
+    )
+    monkeypatch.setattr(
+        report, "evaluate_suite_v2",
+        lambda *_a, **_k: pytest.fail("incomplete source may not publish official V2"),
+    )
+
+    result = report.build_four_project_evidence_ledger(**roots)
+    entry = next(x for x in result["projects"] if x["project_id"] == invalid_project)
+    assert entry["publication_status"] == "CONFLICT"
+    assert entry["first_failing_authority_stage"] == "signed_source_quantity_universe_empty"
+    assert result["independently_verified_execution_count"] == 3
+    assert result["development_suite_result"] is None
+    assert result["official_suite_result"] is None
+    assert result["coverage_accuracy"] is None
+    assert f"{invalid_project}:signed_source_quantity_universe_empty" in result["reason_codes"]
+
+
+def test_duplicate_frozen_project_ids_cannot_reuse_one_signed_source_across_slots(
+    tmp_path, monkeypatch,
+):
+    roots, manifests = _four_source_verified_projects(tmp_path, monkeypatch)
+    manifests[-1].project_id = manifests[0].project_id
+    with pytest.raises(ValueError, match="four distinct projects"):
+        report.build_four_project_evidence_ledger(**roots)

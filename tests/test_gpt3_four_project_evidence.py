@@ -406,7 +406,13 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
         lambda data: SimpleNamespace(
             project_id=data["project_id"],
             source_sha256s=data["source_sha256s"],
-            quantities=(),
+            # Synthetic original-source attempt with an explicit ABSTAIN;
+            # unlike a completely empty V1 producer this is an execution.
+            quantities=(SimpleNamespace(
+                quantity_id=f"attempt-{data['project_id']}",
+                abstained=True,
+                object_identity_refs=(),
+            ),),
             to_dict=lambda: data,
         ),
     )
@@ -420,8 +426,8 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
     monkeypatch.setattr(
         module, "verify_sealed_customer_output",
         lambda sealed, rows: SimpleNamespace(
-            project_id=sealed.project_id, sealed_quantity_count=0,
-            valid_quantity_count=0, abstained_quantity_count=0,
+            project_id=sealed.project_id, sealed_quantity_count=1,
+            valid_quantity_count=0, abstained_quantity_count=1,
             customer_row_count=0, verified_quantity_ids=(),
         ),
     )
