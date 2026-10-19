@@ -449,6 +449,16 @@ def _definition_is_ceiling_finish(
         {"signage", "wall", "facade", "fascia", "soffit", "eaves", "canopy"}
     ):
         return False
+    # A steel roofing/wall cladding specification appearing in an RCP
+    # material legend is NOT itself proof of an internal suspended ceiling.
+    # An explicit native ceiling role is required to avoid mistaking a
+    # Colorbond sheet-cladding note for a GRID plaster-tile finish.
+    if (
+        "cladding" in role_tokens
+        and "colorbond" in role_tokens
+        and not role_tokens.intersection({"ceiling", "suspended", "grid"})
+    ):
+        return False
     # The semantic family must still come from a non-empty authenticated
     # schedule meaning. The occurrence's authenticated RCP viewport supplies
     # the ceiling role; a bare raw code can never reach this function.
