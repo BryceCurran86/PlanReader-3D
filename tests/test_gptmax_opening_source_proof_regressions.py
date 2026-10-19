@@ -146,3 +146,37 @@ def test_negative_policy_rejects_non_boolean_before_source_construction(flag):
     with pytest.raises(ValueError):
         SourceVisibilityProducer(producer_method="negative", producer_version="1",
             raster_double_face_negative_shadow=flag)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_tiled_gap_same_ratio_but_different_absolute_pixel_scale_abstains(reverse):
+    # Both images have square pixels and ratio=1, but the right image's
+    # native pixels are twice as large. Joining their raster evidence would
+    # change metric arc geometry at the seam, even with full page coverage.
+    left = Obj(bbox_pt=(0., 0., 50., 100.), pixel_width=50, pixel_height=100)
+    right = Obj(bbox_pt=(50., 0., 100., 100.), pixel_width=25, pixel_height=50)
+    placements = (right, left) if reverse else (left, right)
+    assert _raster_swing_perpendicular_scale_ratio(
+        (40., 40., 60., 60.), "horizontal", placements,
+        tiled_gap_shadow=True) is None
+
+
+@pytest.mark.parametrize("dx,dy", [(0., 0.), (73., -42.)])
+def test_tiled_gap_with_half_pixel_origin_phase_abstains(dx, dy):
+    # Absolute X/Y scales agree but the overlapping right tile begins on
+    # the left tile's half-pixel phase. Coverage alone is not registration.
+    left = Obj(bbox_pt=(0.+dx, 0.+dy, 50.+dx, 100.+dy),
+               pixel_width=50, pixel_height=100)
+    right = Obj(bbox_pt=(49.5+dx, 0.+dy, 99.5+dx, 100.+dy),
+                pixel_width=50, pixel_height=100)
+    for order in ((left, right), (right, left)):
+        assert _raster_swing_perpendicular_scale_ratio(
+            (40.+dx, 40.+dy, 60.+dx, 60.+dy), "horizontal", order,
+            tiled_gap_shadow=True) is None
+
+
+def test_opt_in_tiled_registration_does_not_alter_original_default_capture():
+    left = Obj(bbox_pt=(0., 0., 50., 100.), pixel_width=50, pixel_height=100)
+    right = Obj(bbox_pt=(50., 0., 100., 100.), pixel_width=25, pixel_height=50)
+    assert _raster_swing_perpendicular_scale_ratio(
+        (40., 40., 60., 60.), "horizontal", (left, right)) is None
