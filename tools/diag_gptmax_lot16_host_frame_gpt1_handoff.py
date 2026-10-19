@@ -277,11 +277,64 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
     }
 
 
-def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
+def verify_archived_signed_predecessors(
+    archived_signed_run: dict, archived_customer_rows: list,
+    current_receipts: dict,
+) -> None:
+    """Fail closed on ANY predecessor body change, not merely a retained ID.
+
+    The archive is checked only after live source/geometry/quantity issuance.
+    It never participates in object detection, gate decisions or publishing.
+    Additional newly signed rows may exist; every historical row stays exact.
+    """
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+    for run in (archived_signed_run, current_receipts.get("sealed_run")):
+        sealed_source_closed_run_from_dict(run)
+
+    def index(rows, *, name):
+        if type(rows) is not list:
+            raise ValueError(f"{name} must be a list")
+        result = {}
+        for row in rows:
+            if type(row) is not dict:
+                raise ValueError(f"{name} contains a malformed row")
+            key = row.get("quantity_id")
+            if type(key) is not str or not key or key in result:
+                raise ValueError(f"{name} has missing or duplicate quantity identity")
+            result[key] = row
+        return result
+
+    archived_quantities = index(archived_signed_run["quantities"], name="archived signed")
+    current_quantities = index(current_receipts["sealed_run"]["quantities"], name="current signed")
+    archived_customers = index(archived_customer_rows, name="archived customer")
+    current_customers = index(current_receipts["customer_rows"], name="current customer")
+    if not archived_quantities or set(archived_customers) != set(archived_quantities):
+        raise ValueError("archived signed/customer predecessor universe inconsistent")
+    for quantity_id, original in archived_quantities.items():
+        if current_quantities.get(quantity_id) != original:
+            raise RuntimeError(f"historical signed quantity body changed: {quantity_id}")
+        if current_customers.get(quantity_id) != archived_customers[quantity_id]:
+            raise RuntimeError(f"historical verified customer body changed: {quantity_id}")
+
+
+def original_host_frame_dimension_report(
+    pdf: bytes, *, page_id: str,
+    archived_signed_run: dict | None = None,
+    archived_customer_rows: list | None = None,
+) -> dict:
     if type(pdf) is not bytes or not pdf:
         raise TypeError("original source PDF bytes required")
     if type(page_id) is not str or not page_id.isdecimal() or int(page_id) < 1 or str(int(page_id)) != page_id:
         raise ValueError("canonical page required")
+    if (archived_signed_run is None) != (archived_customer_rows is None):
+        raise ValueError("archived signed run and customer rows must be supplied together")
+    if archived_signed_run is not None and (
+        type(archived_signed_run) is not dict
+        or type(archived_signed_run.get("project_id")) is not str
+        or not archived_signed_run["project_id"]
+    ):
+        raise ValueError("an archived signed project scope is required")
     digest = sha256(pdf).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -298,7 +351,12 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
     voids = compose_live_physical_opening_voids(
         source_visibility_producer=source, wall_opening_composition=comp)
     published = source.published_snapshot_for_revision(pub.revision.revision_id)
-    before = _retention(comp, voids, verify_customer_rows=True)
+    before = _retention(
+        comp, voids, verify_customer_rows=True,
+        audit_project_id=(archived_signed_run["project_id"]
+                          if archived_signed_run is not None
+                          else "original-source-retention"),
+    )
     existing = _observe(source, published, comp, voids)
     views = segment_source_page_viewports(
         source, revision_id=pub.revision.revision_id, page_id=page_id,
@@ -308,6 +366,9 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
             or sha256(source._producer._store.source_bytes_by_revision[pub.revision.revision_id]).hexdigest() != digest
             or _retention(comp, voids, verify_customer_rows=True) != before):
         raise RuntimeError("source snapshot or original sealed customer receipt mutated")
+    if archived_signed_run is not None:
+        verify_archived_signed_predecessors(
+            archived_signed_run, archived_customer_rows, before)
     root = {key: getattr(pub.revision, key) for key in
             ("document_id", "revision_id", "source_sha256")}
     root["snapshot_id"] = published.snapshot.snapshot_id
@@ -320,6 +381,8 @@ def original_host_frame_dimension_report(pdf: bytes, *, page_id: str) -> dict:
         "revision_id": root["revision_id"],
         "page_id": page_id,
         "source_snapshot_and_original_sealed_receipts_unchanged": True,
+        "historical_signed_quantity_bodies_exact": archived_signed_run is not None,
+        "historical_verified_customer_bodies_exact": archived_signed_run is not None,
         "same_root_f07": view,
         "signed_source_lineage_handoff_granted": False,
     }
@@ -330,12 +393,20 @@ def main() -> None:
     p.add_argument("--pdf", type=Path, required=True)
     p.add_argument("--page-id", required=True)
     p.add_argument("--sha256", required=True)
+    p.add_argument("--archived-signed-run", type=Path)
+    p.add_argument("--archived-customer-rows", type=Path)
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
     raw = args.pdf.read_bytes()
     if sha256(raw).hexdigest() != args.sha256:
         raise ValueError("immutable original PDF SHA mismatch")
-    result = original_host_frame_dimension_report(raw, page_id=args.page_id)
+    result = original_host_frame_dimension_report(
+        raw, page_id=args.page_id,
+        archived_signed_run=(json.loads(args.archived_signed_run.read_text())
+                             if args.archived_signed_run else None),
+        archived_customer_rows=(json.loads(args.archived_customer_rows.read_text())
+                                if args.archived_customer_rows else None),
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print({"hosted": result["original_authenticated_hosts"],
