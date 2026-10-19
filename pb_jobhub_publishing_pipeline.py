@@ -77,12 +77,34 @@ def build_publishing_package_from_workspace(
     )
 
     # 2. Fetch Document & Revision Metadata
+    cur.execute("PRAGMA table_info(documents)")
+    document_columns = {row[1] for row in cur.fetchall()}
+    has_original_sha = "sha256" in document_columns
     cur.execute(
-        "SELECT file_name FROM documents WHERE workspace_id=? ORDER BY id ASC",
+        (
+            "SELECT file_name, sha256 FROM documents WHERE workspace_id=? ORDER BY id ASC"
+            if has_original_sha else
+            "SELECT file_name FROM documents WHERE workspace_id=? ORDER BY id ASC"
+        ),
         (workspace_id,),
     )
     doc_rows = cur.fetchall()
-    file_names = [str(r["file_name"]) for r in doc_rows if r["file_name"]]
+    file_names = [str(row["file_name"]) for row in doc_rows if row["file_name"]]
+    # The publisher must never substitute filename equality for PDF byte
+    # identity. SHA values originate from source ingestion; separate original
+    # byte replay is still required for full benchmark/issuer certification.
+    revision_documents = []
+    if has_original_sha:
+        for doc in doc_rows:
+            name = str(doc["file_name"] or "").strip()
+            digest = str(doc["sha256"] or "").strip()
+            if (
+                not name or len(digest) != 64
+                or any(ch not in "0123456789abcdef" for ch in digest)
+            ):
+                revision_documents = []
+                break
+            revision_documents.append((name, digest))
 
     cur.execute(
         "SELECT COUNT(*) FROM pages WHERE workspace_id=?",
@@ -91,7 +113,14 @@ def build_publishing_package_from_workspace(
     sheet_count = cur.fetchone()[0] or 0
 
     drawing_issue = str(ws_row["drawing_issue"] or "BA")
-    rev_hash = hashlib.sha256(",".join(file_names).encode("utf-8")).hexdigest()
+    rev_hash = (
+        hashlib.sha256(json.dumps(
+            sorted(revision_documents),
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        if revision_documents and len(revision_documents) == len(doc_rows)
+        else ""  # source SHA missing or invalid: not commercial-publishable
+    )
 
     drawing_revision = DrawingRevisionPayload(
         drawing_issue=drawing_issue,
