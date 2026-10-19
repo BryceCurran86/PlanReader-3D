@@ -221,7 +221,13 @@ def _reconstructed_ceiling_source_row_is_firm(
     ):
         return False
     meta = quantity.metadata
+    # The Boolean grant must be an actual producer-issued True, not integer
+    # 1 or a truthy string from a reconstructed customer result.
+    if meta.get("commercial_projection_allowed") is not True:
+        return False
     expected = {
+        "inclusion_status": "INCLUSION",
+        "commercial_projection_allowed": True,
         "canonical_ceiling_id": record.canonical_ceiling_id,
         "physical_ceiling_surface_id": record.physical_ceiling_surface_id,
         "physical_room_id": record.physical_room_id,
