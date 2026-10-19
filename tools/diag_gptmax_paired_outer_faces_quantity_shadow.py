@@ -184,6 +184,11 @@ def paired_outer_faces_quantity_shadow_report(
                     raw_candidate_id=gap_id,
                     source_observation_ids=sorted(support),
                     aperture_bbox_pt=aperture,
+                    # Review-only first source-stage alternatives. These are
+                    # not independent opening instances or count authority.
+                    first_source_gate_alternatives=list(dict(
+                        authority._raster_gap_first_gate_shadow_cache.get(key, ())
+                    ).get(gap_id, ())),
                 )
                 for key, rows in sorted(
                     authority._raster_gap_candidate_audit_cache.items()
