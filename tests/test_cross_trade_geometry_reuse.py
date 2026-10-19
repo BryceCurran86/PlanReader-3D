@@ -511,12 +511,16 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
         concrete = quantities[0]
 
         self.assertEqual(concrete.unit, "m³")
-        with self.assertRaises(takeoff_contract.TakeoffRowContractError):
-            to_takeoff_rows(
-                workspace_id=77,
-                quantities=[concrete],
-                source_page="p1",
-            )
+        # m³ was added to the live commercial rate-unit contract. Keep
+        # true cubic metre quantities rather than raising the retired
+        # unsupported-unit guard or coercing volume into an item count.
+        self.assertIn("m³", takeoff_contract.TAKEOFF_UNITS)
+        concrete_rows = to_takeoff_rows(
+            workspace_id=77, quantities=[concrete], source_page="p1",
+        )
+        self.assertEqual(len(concrete_rows), 1)
+        unit_index = takeoff_contract.CORE_FIELDS.index("unit")
+        self.assertEqual(concrete_rows[0][unit_index], "m³")
 
 
 if __name__ == "__main__":
