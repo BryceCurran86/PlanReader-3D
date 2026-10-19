@@ -1,6 +1,7 @@
 """End-reach original attach refuses host grant and wires census attach."""
 from __future__ import annotations
 
+from pb_unhosted_end_reach_original import attach_end_reach_to_unhosted_openings
 from tools.diag_gptmax_raster_unhosted_flank_source import (
     attach_end_reach_shadow_to_unhosted_rows,
 )

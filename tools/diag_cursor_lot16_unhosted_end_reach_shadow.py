@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -70,11 +71,17 @@ def lot16_unhosted_end_reach_shadow_report(
             "status": attach["status"],
             "opening_count": attach["opening_count"],
             "flank_disposition_counts": attach["flank_disposition_counts"],
+            "source_line_gate_counts": dict(sorted(Counter(
+                (row.get("source_line_census") or {}).get(
+                    "source_line_first_gate") or "unavailable"
+                for row in attach["openings"]
+            ).items())),
             "openings": [
                 {
                     "physical_opening_id": row["physical_opening_id"],
                     "first_remaining_gate": row["first_remaining_gate"],
                     "flank_dispositions": row.get("flank_dispositions") or [],
+                    "source_line_census": row.get("source_line_census"),
                     "host_granted": False,
                 }
                 for row in attach["openings"]
@@ -107,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": report["status"],
         "unhosted_opening_count": report["unhosted_opening_count"],
         "flank_disposition_counts": report["end_reach_attach"]["flank_disposition_counts"],
+        "source_line_gate_counts": report["end_reach_attach"]["source_line_gate_counts"],
         "ancestry_rows_with_end_reach": report["ancestry_rows_with_end_reach"],
         "signed_eight_retained": report["signed_eight_retained"],
         "host_granted": False,

@@ -106,9 +106,29 @@ def build_unhosted_end_reach_ledger_for_opening(
             "shadow_only": True,
         }
 
+    unique_parents = tuple(sorted(set(parent_ids)))
     lines = _authenticated_raster_source_lines(
-        opening_authority, opening_record, tuple(sorted(set(parent_ids))),
+        opening_authority, opening_record, unique_parents,
     )
+    w4_primitive_ids: set[str] = set()
+    for record in wall_scope.records:
+        identity = record.physical_identity
+        if not identity.usable:
+            continue
+        for pid in identity.source_primitive_ids:
+            text = str(pid).strip()
+            if text:
+                w4_primitive_ids.add(text)
+    line_keys = set(lines.keys())
+    intersection = sorted(line_keys & w4_primitive_ids)
+    if not unique_parents:
+        line_gate = "g17_derivation_parent_ids_absent"
+    elif not line_keys:
+        line_gate = "authenticated_raster_parent_lines_empty"
+    elif not intersection:
+        line_gate = "parent_lines_disjoint_from_w4_source_primitives"
+    else:
+        line_gate = "parent_lines_intersect_w4_source_primitives"
     ledger = build_g17_flank_w4_end_reach_ledger(
         support, wall_scope.records, geometry, lines,
     )
@@ -117,6 +137,14 @@ def build_unhosted_end_reach_ledger_for_opening(
     return {
         "physical_opening_id": physical_opening_id,
         "first_remaining_gate": "g17_flank_w4_end_reach_shadow_attached",
+        "source_line_census": {
+            "g17_support_observation_count": len(support),
+            "derivation_parent_id_count": len(unique_parents),
+            "authenticated_raster_line_count": len(line_keys),
+            "usable_w4_source_primitive_count": len(w4_primitive_ids),
+            "parent_line_w4_intersection_count": len(intersection),
+            "source_line_first_gate": line_gate,
+        },
         "end_reach_ledger": ledger,
         "flank_dispositions": [
             row["disposition"] for row in ledger.get("flanks") or ()
