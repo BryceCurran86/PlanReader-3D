@@ -30,6 +30,18 @@ def attach_kind_and_axis_shadows(
     canonical_by_id: Mapping[str, Mapping[str, Any]],
     observe_rows_by_id: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
+    # Exactly one source-owned decision per physical opening, across all
+    # three producer snapshots. Missing/extra/rekeyed members cannot be
+    # concealed by the pretty-printed shadow ledger.
+    ids = [str(d.get("physical_opening_id") or "").strip()
+           for d in opening_decisions]
+    if (
+        len(set(ids)) != len(ids)
+        or any(not identity for identity in ids)
+        or set(ids) != set(canonical_by_id)
+        or set(ids) != set(observe_rows_by_id)
+    ):
+        raise ValueError("source-owned kind/axis physical opening inventory mismatch")
     attached: list[dict[str, Any]] = []
     kind_gates: dict[str, int] = {}
     axis_gates: dict[str, int] = {}
@@ -40,17 +52,28 @@ def attach_kind_and_axis_shadows(
         canonical = canonical_by_id[oid]
         observed = observe_rows_by_id[oid]
         label = _label_fields(observed)
+        # A figured AREA-label receipt is a measurement source, not proof
+        # that an object is a door rather than a window. Pass only separate,
+        # producer-issued semantic-kind or opening-mark receipt IDs that are
+        # still owned by the exact canonical opening evidence set.
+        original_receipts = canonical.get("evidence_ids")
+        evidence_ids = (
+            frozenset(original_receipts)
+            if type(original_receipts) in (tuple, list)
+            and all(type(item) is str for item in original_receipts)
+            else frozenset()
+        )
+        kind_receipts = tuple(
+            sorted(set(eid for eid in (
+                canonical.get("opening_kind_evidence_id"),
+                canonical.get("type_mark_evidence_id"),
+            ) if type(eid) is str and eid
+            and eid == eid.strip() and eid in evidence_ids))
+        )
         kind = assess_opening_filling_kind_shadow(
             physical_opening_id=oid,
             opening_kind=canonical.get("opening_kind"),
-            source_kind_evidence_ids=tuple(
-                eid for eid in (
-                    canonical.get("opening_kind_evidence_id"),
-                    canonical.get("type_mark_evidence_id"),
-                    label["label_evidence_id"],
-                )
-                if eid
-            ),
+            source_kind_evidence_ids=kind_receipts,
         )
         axis = assess_opening_axis_ownership_shadow(
             physical_opening_id=oid,
