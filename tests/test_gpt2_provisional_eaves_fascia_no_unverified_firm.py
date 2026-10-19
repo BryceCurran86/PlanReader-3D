@@ -11,7 +11,7 @@ from pb_carpentry_trade_authority import (
 )
 
 
-@pytest.mark.parametrize("width", [0.6, 0.9, 0.0])
+@pytest.mark.parametrize("width", [0.6, 0.9])
 def test_eaves_are_provisional_even_with_perimeter_and_named_source_page(width):
     spec = CarpentryElementSpec(
         element_type="eaves", element_id="UNVERIFIED_EAVE",
@@ -22,7 +22,7 @@ def test_eaves_are_provisional_even_with_perimeter_and_named_source_page(width):
     )
     items = calculate_eaves_and_cladding_items(spec)
     assert len(items) == 2
-    assert items[0].quantity == (40 * (width or 0.6))
+    assert items[0].quantity == round(40 * width, 2)
     assert items[1].quantity == 40.0
     assert all(item.quantity_status == "Provisional" for item in items)
     assert all(item.inclusion_status == "PROVISIONAL" for item in items)
@@ -35,7 +35,7 @@ def test_eaves_are_provisional_even_with_perimeter_and_named_source_page(width):
     assert all(row["confidence"] == "Provisional" for row in rows)
 
 
-@pytest.mark.parametrize("width", [float("nan"), float("inf"), -1.0])
+@pytest.mark.parametrize("width", [float("nan"), float("inf"), -1.0, 0.0])
 def test_invalid_overhang_cannot_issue_customer_area(width):
     spec = CarpentryElementSpec(
         element_type="eaves", element_id="INVALID_EAVE",
