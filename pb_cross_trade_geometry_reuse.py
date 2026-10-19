@@ -106,7 +106,20 @@ def _spec_evidence(spec: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _face_ids(spec: Mapping[str, Any]) -> tuple[str, ...]:
-    return _evidence_ids(spec.get("physical_face_ids"))
+    """One physical wall has no more than two independently owned faces.
+
+    Never reduce repeated physical faces to a credible smaller set, repair
+    malformed receipts by trimming, or turn "face ids" into guessed sides.
+    """
+    raw = spec.get("physical_face_ids")
+    if not isinstance(raw, (tuple, list)) or not 1 <= len(raw) <= 2:
+        return ()
+    if any(type(face) is not str or not face or face != face.strip()
+           for face in raw):
+        return ()
+    if len(set(raw)) != len(raw):
+        return ()
+    return tuple(raw)
 
 
 def _spec_section(spec: Mapping[str, Any]) -> Optional[str]:
