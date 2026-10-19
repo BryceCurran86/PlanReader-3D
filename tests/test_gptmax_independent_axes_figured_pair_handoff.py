@@ -27,8 +27,8 @@ def _independent_source_axes():
         width_m=1.2,
         height_m=1.8,
         geometry_complete=True,
-        evidence_ids=["figured", "original-width:physical-3",
-                      "original-height:physical-3"],
+        evidence_ids=["figured", "binding-3", "frame-3",
+                      "original-width:physical-3", "original-height:physical-3"],
     )
     # Original two-number label is corroborated only as an unordered pair.
     assert rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"] is False
