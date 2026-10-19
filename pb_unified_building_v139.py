@@ -34,10 +34,20 @@ def _opening_rects(openings:Iterable[Dict[str,Any]],wall_ref:str,width:float,hei
     rects=[]
     for o in openings or []:
         if str(o.get("resolved_wall_ref") or o.get("wall_ref") or "")!=wall_ref: continue
+        # Legacy centre placements are only a review hint, NOT wall-cut evidence.
+        if "visual centre placement" in str(o.get("geometry_status") or "").lower(): continue
         ow=max(0.0,_num(o.get("width_m"))); oh=max(0.0,_num(o.get("height_m")))
-        x0=max(0.0,min(width,_num(o.get("offset_m"),(width-ow)/2.0))); z0=max(0.0,_num(o.get("sill_m"),0.0))
-        x1=min(width,x0+ow); z1=min(height,z0+oh)
-        if x1>x0 and z1>z0: rects.append((x0,x1,z0,z1))
+        raw_offset=o.get("offset_m"); raw_sill=o.get("sill_m")
+        if raw_offset in (None, "") or raw_sill in (None, ""): continue
+        if isinstance(raw_offset,bool) or isinstance(raw_sill,bool): continue
+        try:
+            x0=float(raw_offset); z0=float(raw_sill)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(x0) or not math.isfinite(z0): continue
+        # Do not clamp an out-of-wall claim into an apparently valid opening.
+        if ow<=0 or oh<=0 or x0<0 or z0<0 or x0+ow>width+1e-9 or z0+oh>height+1e-9: continue
+        rects.append((x0,x0+ow,z0,z0+oh))
     return rects
 
 
@@ -108,9 +118,10 @@ def build_figure(walls:Sequence[Dict[str,Any]],xray:bool=False)->go.Figure:
                    f"Deductions: {_num(wall.get('opening_deduction_m2')):.2f} m²<br>Net: {_num(wall.get('net_m2')):.2f} m²<extra></extra>")
             fig.add_trace(go.Mesh3d(x=xs,y=ys,z=zs,i=[0,0],j=[1,2],k=[2,3],opacity=.35 if xray else .88,flatshading=True,name=str(wall.get("wall_ref")),hovertemplate=hover,showscale=False))
         # Opening outlines make the holes selectable/visible even when not deducted.
-        for o,(x0,x1,z0,z1) in zip(wall.get("openings") or [],rects):
-            outline=[(x0,z0),(x1,z0),(x1,z1),(x0,z1),(x0,z0)]
-            fig.add_trace(go.Scatter3d(x=[origin[0]+u[0]*x for x,z in outline],y=[origin[1]+u[1]*x for x,z in outline],z=[z for x,z in outline],mode="lines",line=dict(width=5),name=str(o.get("label") or o.get("kind") or "Opening"),hovertemplate=f"<b>{o.get('label') or o.get('kind')}</b><br>{'Deducted' if o.get('deduct',True) else 'Not deducted'}<extra></extra>"))
+        for o in wall.get("openings") or []:
+            for x0,x1,z0,z1 in _opening_rects([o],str(wall.get("wall_ref")),width,height):
+                outline=[(x0,z0),(x1,z0),(x1,z1),(x0,z1),(x0,z0)]
+                fig.add_trace(go.Scatter3d(x=[origin[0]+u[0]*x for x,z in outline],y=[origin[1]+u[1]*x for x,z in outline],z=[z for x,z in outline],mode="lines",line=dict(width=5),name=str(o.get("label") or o.get("kind") or "Opening"),hovertemplate=f"<b>{o.get('label') or o.get('kind')}</b><br>{'Deducted' if o.get('deduct',True) else 'Not deducted'}<extra></extra>"))
     fig.update_layout(height=760,margin=dict(l=0,r=0,t=10,b=0),showlegend=False,scene=dict(aspectmode="data",xaxis_title="X (m)",yaxis_title="Y (m)",zaxis_title="Height (m)",camera=dict(eye=dict(x=1.5,y=-1.5,z=1.0))))
     return fig
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 import json, math
 from typing import Any, Dict, List
 
+from pb_opening_deductions_v134 import _stated_positive_count
+
 VERSION="1.3.7"
 SETTING_KEY="opening_geometry_v137"
 
@@ -36,14 +38,25 @@ def attach_openings(app:Any,workspace_id:int,walls:List[Dict[str,Any]])->List[Di
                 wall=side_walls[0]
         length=_num(wall.get("length_m")) if wall else 0.0
         width=_num(item.get("width_m")); height=_num(item.get("height_m"))
-        # Without explicit positional evidence, centre placement is visual-only.
+        # Without explicit positional evidence, centre placement is VISUAL-ONLY.
+        # The unified wall mesh must never treat this as measured cut-out geometry.
         x0=max(0.0,(length-width)/2.0) if length else 0.0
+        kind=str(item.get("kind") or "").lower()
+        raw_sill=item.get("sill_m")
+        if "sill_m" not in item:
+            sill=0.0 if kind.startswith(("door", "garage door", "roller door")) else None
+        elif raw_sill in (None, "") or isinstance(raw_sill,bool):
+            sill=None
+        else:
+            candidate_sill=_num(raw_sill,-1.0)
+            sill=candidate_sill if candidate_sill>=0.0 else None
+        count=_stated_positive_count(item.get("quantity"))
         attached.append({**item,
             "resolved_wall_ref":str(wall.get("wall_ref")) if wall else "",
-            "offset_m":round(x0,3),"sill_m":0.0 if str(item.get("kind")).lower().startswith("door") else 0.9,
+            "offset_m":round(x0,3),"sill_m":sill,
             "geometry_status":"Visual centre placement; position needs elevation evidence" if wall else "Unassigned opening",
             "geometry_confidence":"Review",
-            "area_m2":round(width*height*max(1,int(_num(item.get("quantity"),1))),4)})
+            "area_m2":round(width*height*count,4)})
     app.set_workspace_setting(int(workspace_id),SETTING_KEY,json.dumps(attached,separators=(",",":")))
     return attached
 
