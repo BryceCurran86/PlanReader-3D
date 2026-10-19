@@ -42,7 +42,9 @@ def select_unpublished_stacker_2127_callout(
             or len(source_plan_bbox_pdf_pt) != 4
             or any(type(value) not in (int, float) or not math.isfinite(value)
                    for value in source_plan_bbox_pdf_pt)
-            or tuple(record.bbox) != tuple(source_plan_bbox_pdf_pt)):
+            or tuple(record.bbox) != tuple(
+                round(float(v), 6) for v in source_plan_bbox_pdf_pt
+            )):
         raise ValueError("original compact callout/native text binding conflict")
     evidence = record.quantity_evidence
     if (evidence.status != "abstained"
