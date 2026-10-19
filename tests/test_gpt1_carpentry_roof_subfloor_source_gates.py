@@ -90,3 +90,20 @@ def test_matching_subfloor_metric_area_and_native_dimensions_remain_estimate():
     rows = calculate_subfloor_framing_items(spec)
     assert [x.quantity for x in rows] == [80.0,192.0]
     assert all(x.quantity_status == "Provisional" for x in rows)
+
+
+def test_contradictory_roof_footprint_and_native_axes_do_not_mint_trusses_or_battens():
+    spec = CarpentryElementSpec(
+        element_type="roof_frame",element_id="synthetic-roof",
+        description="roof",length_m=15.0,width_m=8.0,area_m2=180.0,
+    )
+    assert calculate_roof_framing_items(spec) == []
+
+
+@pytest.mark.parametrize("bad_area", [-1.0, True, "120", float("nan"), float("inf"), 10**400])
+def test_broken_original_roof_area_does_not_fall_back_to_plausible_axes(bad_area):
+    spec = CarpentryElementSpec(
+        element_type="roof_frame",element_id="synthetic-roof",
+        description="roof",length_m=15.0,width_m=8.0,area_m2=bad_area,
+    )
+    assert calculate_roof_framing_items(spec) == []
