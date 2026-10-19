@@ -537,9 +537,14 @@ def _generate_project_handoff_locked(
     # plastering, painting, cladding or two-face trade-material quantity.
     wall_surface_quantities: tuple[QuantityEvidence, ...] = ()
     if clean_family_group == "surfaces":
-        wall_surface_quantities = _non_abstained(
-            publish_live_per_wall_surface_area_quantities(claim.publication)
-        )
+        # A source claim with no published external wall universe cannot
+        # supply per-wall quantities. Do not dereference a missing issuer
+        # or suppress independently valid floor/ceiling surface families.
+        wall_publication = getattr(claim, "publication", None)
+        if wall_publication is not None:
+            wall_surface_quantities = _non_abstained(
+                publish_live_per_wall_surface_area_quantities(wall_publication)
+            )
         summary["family_counts"]["wall_net_area"] = len(wall_surface_quantities)
         if wall_surface_quantities:
             family_runs.append(
