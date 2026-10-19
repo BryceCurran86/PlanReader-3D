@@ -26,9 +26,21 @@ def _second(issued, *, quantity_id=None, independent_physical_owner=False):
     if independent_physical_owner:
         canonical = replace(
             canonical,
-            room_entity_id="independent-source-room-2",
+            room_entity_id="independent-canonical-room-2",
             room_area_quantity_id="independent-room-area-2",
             source_room_index_id="independent-room-index-2",
+        )
+        quantity = replace(
+            quantity, metadata={
+                **quantity.metadata,
+                "canonical_ceiling_id": second_ceiling_id,
+                "physical_ceiling_surface_id": second_ceiling_id,
+                "physical_room_id": "independent-physical-room-2",
+                "canonical_room_id": "independent-canonical-room-2",
+                "source_room_face_record_id": "independent-source-room-face-2",
+                "upstream_room_area_quantity_id": "independent-room-area-2",
+                "room_area_quantity_id": "independent-room-area-2",
+            },
         )
     return replace(
         first, canonical_ceiling_id=second_ceiling_id,
