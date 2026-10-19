@@ -476,6 +476,80 @@ def build_four_project_evidence_ledger(
     return result
 
 
+def _snapshot_four_project_publication_inputs(
+    *, source_dir: Path, sealed_dir: Path,
+    identity_map_dir: Path, customer_dir: Path,
+) -> tuple[tuple[Path, str | None], ...]:
+    """Content-address every source the official suite publication depends on.
+
+    None is an explicit missing-file receipt: an original PDF or signed
+    output appearing halfway through scoring cannot silently turn an
+    incomplete previous evaluation into a current published report.
+    """
+    required: list[Path] = [FROZEN_ROOT / "manifest.json"]
+    manifests = load_suite_manifests(FROZEN_ROOT)
+    for manifest in manifests:
+        project_id = manifest.project_id
+        project = FROZEN_ROOT / "projects" / project_id
+        required.extend((
+            project / "source_manifest.json",
+            project / "reference_takeoff.json",
+            project / "object_universe.json",
+            project / "verification_report.json",
+        ))
+        original_files, conflicts = _resolve_original_paths(
+            source_dir, project_id, manifest.source_documents,
+        )
+        if conflicts:
+            raise ValueError("unsafe original source path in publication preflight")
+        required.extend(original_files)
+        # The source resolver permits both project-scoped and flat originals.
+        # Even an absent *alternative* path is material source evidence:
+        # a conflicting scoped/flat PDF arriving after reconciliation must
+        # invalidate publication rather than evade the selected-path digest.
+        for document in manifest.source_documents:
+            required.extend((
+                source_dir / project_id / document.name,
+                source_dir / document.name,
+            ))
+        required.extend((
+            sealed_dir / f"{project_id}.json",
+            identity_map_dir / f"{project_id}.identity_map.json",
+            customer_dir / f"{project_id}.customer_rows.json",
+        ))
+    seen: set[Path] = set()
+    receipts: list[tuple[Path, str | None]] = []
+    for source in required:
+        if source in seen:
+            continue
+        seen.add(source)
+        if source.is_symlink():
+            raise ValueError("original or signed publication source is a symlink")
+        if source.is_file():
+            receipts.append((source, _sha256(source)))
+        elif not source.exists():
+            receipts.append((source, None))
+        else:
+            raise ValueError("publication input path is not a regular file")
+    return tuple(receipts)
+
+
+def _assert_four_project_publication_inputs_stable(
+    expected: tuple[tuple[Path, str | None], ...],
+) -> None:
+    for path, expected_hash in expected:
+        if path.is_symlink():
+            raise ValueError("four-project input changed during report publication")
+        try:
+            actual = _sha256(path) if path.is_file() else None
+        except OSError as exc:
+            raise ValueError(
+                "four-project input changed during report publication"
+            ) from exc
+        if actual != expected_hash:
+            raise ValueError("four-project input changed during report publication")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path, required=True)
@@ -492,14 +566,22 @@ def main(argv: list[str] | None = None) -> int:
     # and all four projects' sealed/customer data. No two jobs can race to
     # replace an earlier signed-release decision.
     preflight_new_diagnostic(args.output, protected_roots=protected)
+    snapshot = _snapshot_four_project_publication_inputs(
+        source_dir=args.source_dir, sealed_dir=args.sealed_dir,
+        identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
+    )
     report = build_four_project_evidence_ledger(
         source_dir=args.source_dir, sealed_dir=args.sealed_dir,
         identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
     )
+    _assert_four_project_publication_inputs_stable(snapshot)
     write_new_diagnostic(
         args.output,
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
         protected_roots=protected,
+        verify_inputs=lambda: _assert_four_project_publication_inputs_stable(
+            snapshot
+        ),
     )
     print(json.dumps({
         "publication_status": report["publication_status"],
