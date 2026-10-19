@@ -194,16 +194,19 @@ def build_publishing_package_from_workspace(
         source_page = str(r["source_page"] or "")
         notes = str(r["notes"] or "")
 
-        # Check for excluded items
-        sec_lower = section.lower()
-        sub_lower = sub.lower()
-        tag_lower = tag.lower()
-        if any(k in sec_lower or k in sub_lower or k in tag_lower for k in ["exclude", "screed", "mastic", "sealant", "powdercoat"]):
+        # Do not guess exclusion by section/finish/material words. Screed,
+        # sealants, powder-coated products and mastic can be genuine separately
+        # measured construction trade scope. Only the issuer's EXPLICIT
+        # excluded authority can remove a row from a customer takeoff.
+        if auth_status == AuthorityStatus.EXCLUDED.value or (
+            auth_src == MeasurementAuthorityType.EXCLUDED.value
+        ):
             excluded_items.append(
                 ExcludedScopePayload(
                     item_code=tag or f"EXCL_{row_id}",
                     description=f"{elem} ({sub})",
-                    reason="Factory finish / other trade exclusion",
+                    reason=notes or "Explicitly excluded by source measurement authority",
+                    trade=section,
                 )
             )
             continue
