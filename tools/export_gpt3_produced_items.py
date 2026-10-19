@@ -221,7 +221,23 @@ def export_verified_produced_items(
     return sorted(items, key=lambda item: item["quantity_id"])
 
 
-def _atomic_write(path: Path, items: list[dict[str, Any]]) -> None:
+def _assert_inputs_unchanged(
+    expected_input_hashes: tuple[tuple[Path, str], ...],
+) -> None:
+    """Ensure signed, original-PDF and customer bytes still match first read."""
+    for source, digest in expected_input_hashes:
+        if _sha256(source) != digest:
+            raise SourceClosedRunConflictError(
+                "signed source or customer input changed during produced-items publication"
+            )
+
+
+def _atomic_write(
+    path: Path,
+    items: list[dict[str, Any]],
+    *,
+    expected_input_hashes: tuple[tuple[Path, str], ...] = (),
+) -> None:
     """Create one immutable produced-items receipt; never replace earlier output.
 
     Same-directory temporary file plus an atomic hard link ensures an existing
@@ -233,6 +249,7 @@ def _atomic_write(path: Path, items: list[dict[str, Any]]) -> None:
         raise FileExistsError(f"existing produced-items receipt: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
+    linked_by_this_writer = False
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=path.parent,
@@ -242,9 +259,27 @@ def _atomic_write(path: Path, items: list[dict[str, Any]]) -> None:
             stream.write(json.dumps(items, sort_keys=True, indent=2, allow_nan=False) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
+        # Staging takes time: the original source/signed/customer bytes may
+        # have changed since the last normal verification in main().
+        _assert_inputs_unchanged(expected_input_hashes)
         # Same-FS link is atomically create-only: an existing target (including
         # a dangling symlink) fails EEXIST, rather than replacing signed proof.
         os.link(temporary, path)
+        linked_by_this_writer = True
+        # Never leave an apparently current produced-item receipt referring
+        # to source/customer bytes changed during the link/publication window.
+        _assert_inputs_unchanged(expected_input_hashes)
+    except BaseException:
+        if linked_by_this_writer and temporary is not None:
+            # Do not delete another writer's output if a malicious or racing
+            # external process replaced our hard link before rollback.
+            try:
+                still_ours = path.samefile(temporary)
+            except OSError:
+                still_ours = False
+            if still_ours:
+                path.unlink()
+        raise
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -273,6 +308,12 @@ def main(argv: list[str] | None = None) -> int:
     ).resolve()
     if destination == frozen_benchmark_root or destination.is_relative_to(frozen_benchmark_root):
         raise ValueError("produced-items output must not overwrite frozen V2 benchmark inputs")
+    # Capture immutable input BYTES before even parsing one source/customer
+    # record. The final create-only writer checks them again before/after
+    # its publication link, not just before its temporary-file staging.
+    first_input_hashes = tuple(
+        (Path(path), _sha256(Path(path))) for path in input_paths
+    )
     # A concurrent source producer can rotate PDFs or the sealed run after
     # the initial verification. Recheck both immediately before publication.
     customer_rows = None
@@ -302,7 +343,9 @@ def main(argv: list[str] | None = None) -> int:
         _sha256(args.customer_rows) != original_customer_sha
     ):
         raise SourceClosedRunConflictError("customer rows changed during produced-items export")
-    _atomic_write(args.output, produced)
+    _atomic_write(
+        args.output, produced, expected_input_hashes=first_input_hashes,
+    )
     return 0
 
 
