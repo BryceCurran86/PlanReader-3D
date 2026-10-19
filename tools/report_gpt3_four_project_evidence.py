@@ -503,6 +503,15 @@ def _snapshot_four_project_publication_inputs(
         if conflicts:
             raise ValueError("unsafe original source path in publication preflight")
         required.extend(original_files)
+        # The source resolver permits both project-scoped and flat originals.
+        # Even an absent *alternative* path is material source evidence:
+        # a conflicting scoped/flat PDF arriving after reconciliation must
+        # invalidate publication rather than evade the selected-path digest.
+        for document in manifest.source_documents:
+            required.extend((
+                source_dir / project_id / document.name,
+                source_dir / document.name,
+            ))
         required.extend((
             sealed_dir / f"{project_id}.json",
             identity_map_dir / f"{project_id}.identity_map.json",
