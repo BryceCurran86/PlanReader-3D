@@ -144,6 +144,14 @@ class SemanticOpeningEnumerationRecord:
     schema_version: str = SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        # Only the source producer can certify semantic and competitor
+        # enumeration. Python truthiness must not turn "false", 1, or a
+        # reconstructed packet into an authenticated completeness claim.
+        if (
+            type(self.structural_enumeration_complete) is not bool
+            or type(self.physical_opening_universe_complete) is not bool
+        ):
+            raise TypeError("semantic opening completeness must be typed booleans")
         if not self.record_id:
             raise ValueError("record_id must be non-empty")
         if self.decision_scope_kind not in {"document", "pages"}:
