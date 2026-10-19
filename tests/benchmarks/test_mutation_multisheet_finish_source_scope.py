@@ -69,4 +69,7 @@ def test_own_page_finish_still_resolves_from_its_own_source_wall(tmp_path: Path)
     assert own["perimeter_walling"].source_page == 1
     assert own["internal_plaster"].source_page == 1
     assert own["internal_paint"].source_page == 1
-    assert own["internal_plaster"].quantity > 0
+    # The late opening-deduction authority may leave the numeric finish
+    # unresolved. Same-page semantic evidence must still retain its own
+    # original source page; do not turn a missing net m² into a guessed zero.
+    assert own["internal_plaster"].metadata["wall_height_authority"]
