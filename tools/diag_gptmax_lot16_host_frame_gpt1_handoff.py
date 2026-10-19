@@ -351,12 +351,11 @@ def original_host_frame_dimension_report(
     voids = compose_live_physical_opening_voids(
         source_visibility_producer=source, wall_opening_composition=comp)
     published = source.published_snapshot_for_revision(pub.revision.revision_id)
-    before = _retention(
-        comp, voids, verify_customer_rows=True,
-        audit_project_id=(archived_signed_run["project_id"]
-                          if archived_signed_run is not None
-                          else "original-source-retention"),
-    )
+    audit_project_id = (archived_signed_run["project_id"]
+                        if archived_signed_run is not None
+                        else "original-source-retention")
+    before = _retention(comp, voids, verify_customer_rows=True,
+                        audit_project_id=audit_project_id)
     existing = _observe(source, published, comp, voids)
     views = segment_source_page_viewports(
         source, revision_id=pub.revision.revision_id, page_id=page_id,
@@ -364,7 +363,8 @@ def original_host_frame_dimension_report(
     view = classify_live_view(views, expected_page=int(page_id))
     if (source.published_snapshot_for_revision(pub.revision.revision_id) != published
             or sha256(source._producer._store.source_bytes_by_revision[pub.revision.revision_id]).hexdigest() != digest
-            or _retention(comp, voids, verify_customer_rows=True) != before):
+            or _retention(comp, voids, verify_customer_rows=True,
+                           audit_project_id=audit_project_id) != before):
         raise RuntimeError("source snapshot or original sealed customer receipt mutated")
     if archived_signed_run is not None:
         verify_archived_signed_predecessors(
