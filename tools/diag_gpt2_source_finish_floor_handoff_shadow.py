@@ -236,6 +236,8 @@ def audit_gpt2_source_material_floor_handoff(
         "source_original_doorway_ink_gap_candidate_only":
             source_registration.get(
                 "source_real_door_ink_gap_virtual_closure_only") is True,
+        "source_original_cross_sheet_translation_pdf_pts":
+            source_registration.get("source_cross_sheet_translation_pdf_pts"),
         "source_original_doorway_gap_is_finish_threshold_proof":False,
     }
 
