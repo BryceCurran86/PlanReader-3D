@@ -174,8 +174,10 @@ def audit_source_painted_enclosure_correspondence_shadow(
                           for identity in pair)
                    for pair in original_side_pairs.values())):
         raise ValueError("four_exact_original_ink_side_pairs_required")
-    if len({identity for pair in original_side_pairs.values()
-            for identity in pair}) != 8:
+    # Native path IDs are only unique WITHIN one PDF page. Reusing d0i0 on
+    # two independently source-owned pages is legitimate, not source aliasing.
+    if (len({pair[0] for pair in original_side_pairs.values()}) != 4
+            or len({pair[1] for pair in original_side_pairs.values()}) != 4):
         raise ValueError("distinct_original_native_wall_ink_source_ids_required")
     if (type(expected_translation_pdf_pts) is not tuple
             or len(expected_translation_pdf_pts) != 2
