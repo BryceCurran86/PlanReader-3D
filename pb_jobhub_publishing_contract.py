@@ -388,6 +388,22 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
             if q.authority_status in (AuthorityStatus.PROVISIONAL.value, AuthorityStatus.REVIEW_REQUIRED.value):
                 warnings.append(f"Draft notice: Row #{q.row_id} ('{q.element}') is provisional/review ({q.notes})")
 
+    # Every source-owned publishing warning must be visible to the JobHub
+    # recipient. In commercial mode a BLOCKER/CRITICAL/REVIEW warning is not
+    # merely advisory: until it is resolved upstream, the buyer must not
+    # receive a supposedly approved construction quote.
+    for note in package.warnings:
+        severity = str(note.severity or "").strip().lower()
+        notice = (
+            f"Source warning {note.code}: {note.message}"
+        )
+        if is_commercial and severity not in {"info", "warning"}:
+            blocking_reasons.append(
+                "Unresolved commercial source issue: " + notice
+            )
+        else:
+            warnings.append(notice)
+
     # 4. Fingerprint & Payload Hash
     calculated_hash = package.compute_payload_hash()
     if package.payload_hash and package.payload_hash != calculated_hash:
