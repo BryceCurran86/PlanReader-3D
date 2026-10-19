@@ -95,6 +95,31 @@ jobs:
           current_ids={x['prior_signed_quantity_id'] for x in decisions
                        if x['prior_signed_quantity_id']}
           assert len(old_ids)==8 and old_ids.issubset(current_ids)
+          # An unchanged quantity_id can conceal a different area/evidence
+          # body. Compare full historical source-issued QuantityEvidence JSON
+          # from the original verified customer artifact with the newly
+          # replayed producer body hashes; retain all eight byte-level fields.
+          from hashlib import sha256
+          archived_customer=json.loads(Path(
+            'docs/engineering/lot16_original_signed_eight_row_20261015/'
+            'production/verified_customer_rows.json').read_text())
+          assert len(archived_customer)==8
+          historical={}
+          for row in archived_customer:
+            assert row['quantity_id'] in old_ids
+            body=row['commercial_projection_provenance']['quantity']
+            assert body['quantity_id']==row['quantity_id']
+            assert body['value']==row['ai_baseline_quantity']
+            assert body['family']=='opening_area'
+            assert row['quantity_id'] not in historical
+            encoded=json.dumps(body,sort_keys=True,ensure_ascii=False,
+                               allow_nan=False,separators=(',',':'))
+            historical[row['quantity_id']]=sha256(encoded.encode('utf-8')).hexdigest()
+          assert set(historical)==old_ids
+          current_bodies=r['original_source_issued_quantity_body_sha256']
+          assert type(current_bodies) is dict and old_ids.issubset(current_bodies)
+          assert all(current_bodies[qid]==body_hash
+                     for qid,body_hash in historical.items())
           assert not r['signed_customer_publisher_activated']
           assert not r['signed_source_lineage_handoff_granted']
           assert not r['global_opening_count_granted']
