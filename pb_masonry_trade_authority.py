@@ -90,17 +90,67 @@ class MasonryTakeoffItem:
         }
 
 
+def _source_positive_metric(value: object) -> float | None:
+    if type(value) not in (int, float):
+        return None
+    try:
+        result=float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(result) or result <= 0.0:
+        return None
+    return result
+
+
+def _original_net_masonry_face(spec: MasonryWallSpec) -> tuple[float, float, float] | None:
+    length=_source_positive_metric(spec.length_m)
+    height=_source_positive_metric(spec.height_m)
+    if length is None or height is None or not isinstance(spec.openings,(list,tuple)):
+        return None
+    gross=length*height
+    if not math.isfinite(gross):
+        return None
+    deductions=[]
+    for opening in spec.openings:
+        if not isinstance(opening,dict):
+            return None
+        raw_w,raw_h,raw_area=(opening.get("width"),opening.get("height"),opening.get("area"))
+        if (raw_w is None)!=(raw_h is None):
+            return None
+        axes_area=None
+        if raw_w is not None:
+            w,h=_source_positive_metric(raw_w),_source_positive_metric(raw_h)
+            if w is None or h is None:
+                return None
+            axes_area=w*h
+            if not math.isfinite(axes_area):
+                return None
+        explicit=_source_positive_metric(raw_area) if raw_area is not None else None
+        if raw_area is not None and explicit is None:
+            return None
+        if explicit is None and axes_area is None:
+            return None
+        if explicit is not None and axes_area is not None and not math.isclose(
+            explicit,axes_area,rel_tol=0.0,abs_tol=0.011
+        ):
+            return None
+        deductions.append(explicit if explicit is not None else axes_area)
+    deduction=math.fsum(deductions)
+    if not math.isfinite(deduction) or deduction>=gross:
+        return None
+    net=round(gross-deduction,2)
+    return (gross,deduction,net) if net>0.0 else None
+
+
 def calculate_brickwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]:
     """Calculate trade takeoff items for brickwork veneer or double brick walls."""
     items: List[MasonryTakeoffItem] = []
-    if spec.length_m <= 0.0 or spec.height_m <= 0.0:
+    if spec.wall_type not in {"brickwork_veneer","double_brick"}:
         return items
-
-    gross_m2 = spec.length_m * spec.height_m
-    opening_ded_m2 = sum(float(op.get("area") or (float(op.get("width", 0)) * float(op.get("height", 0)))) for op in spec.openings)
-    net_m2 = round(max(0.0, gross_m2 - opening_ded_m2), 2)
-    if net_m2 <= 0.0:
+    geometry=_original_net_masonry_face(spec)
+    if geometry is None:
         return items
+    gross_m2,opening_ded_m2,net_m2=geometry
 
     multiplier = 2.0 if spec.wall_type == "double_brick" else 1.0
     brick_count = int(round(net_m2 * STANDARD_BRICKS_PER_M2 * multiplier))
@@ -115,17 +165,17 @@ def calculate_brickwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
         finish_system="Laid in stretcher bond, washed down and cleaned with acid wash",
         quantity=net_m2 * multiplier,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Net area: {net_m2:.2f} m² (Gross {gross_m2:.2f} m² - Openings {opening_ded_m2:.2f} m²). Est: ~{brick_count:,} bricks & {mortar_m3:.2f} m³ mortar.",
         row_role="external_wall" if spec.section == "External" else "",
     ))
 
     # 2. Cavity Wall Ties (No.)
-    if spec.section == "External":
+    if spec.section == "External" and spec.wall_type == "brickwork_veneer":
         tie_count = int(round(net_m2 * STANDARD_TIES_PER_M2))
         items.append(MasonryTakeoffItem(
             section=spec.section,
@@ -135,12 +185,12 @@ def calculate_brickwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
             finish_system="Built into mortar joints @ 600mm H × 400mm V spacing",
             quantity=float(tie_count),
             unit="No.",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Estimated {tie_count} No. wall ties across {net_m2:.2f} m² cavity wall.",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional {tie_count} ties from area rate across {net_m2:.2f} m²; original tie layout not measured.",
             row_role="",
         ))
 
@@ -153,12 +203,12 @@ def calculate_brickwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
         finish_system="Built in at slab level with weep holes at 1200mm centres",
         quantity=round(spec.length_m, 2),
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Base flashing length: {spec.length_m:.2f} lm with mortar bed.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional base DPC/flashing {spec.length_m:.2f} lm; material, location and continuity unverified.",
         row_role="",
     ))
 
@@ -168,14 +218,14 @@ def calculate_brickwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
 def calculate_blockwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]:
     """Calculate trade takeoff items for concrete blockwork walls and core-filling."""
     items: List[MasonryTakeoffItem] = []
-    if spec.length_m <= 0.0 or spec.height_m <= 0.0:
+    if spec.wall_type not in {"blockwork_100","blockwork_150","blockwork_200"}:
         return items
-
-    gross_m2 = spec.length_m * spec.height_m
-    opening_ded_m2 = sum(float(op.get("area") or (float(op.get("width", 0)) * float(op.get("height", 0)))) for op in spec.openings)
-    net_m2 = round(max(0.0, gross_m2 - opening_ded_m2), 2)
-    if net_m2 <= 0.0:
+    if spec.core_fill not in {"none","full","half","quarter"} or type(spec.has_bond_beam) is not bool:
         return items
+    geometry=_original_net_masonry_face(spec)
+    if geometry is None:
+        return items
+    gross_m2,opening_ded_m2,net_m2=geometry
 
     series_mm = 200
     if "150" in spec.wall_type:
@@ -194,11 +244,11 @@ def calculate_blockwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
         finish_system="Laid in 1:1:6 cement mortar with flush tooled joints",
         quantity=net_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Net wall area: {net_m2:.2f} m² (~{block_count:,} blocks). Gross {gross_m2:.2f} m² less {opening_ded_m2:.2f} m² openings.",
         row_role="external_wall" if spec.section == "External" else "internal_partition",
     ))
@@ -217,13 +267,13 @@ def calculate_blockwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
             substrate="20MPa fine aggregate core-fill concrete",
             finish_system="Pumped into vertical cores and compacted by vibrator",
             quantity=grout_vol_m3,
-            unit="item",
-            quantity_status="Measured",
+            unit="m³",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Grout volume: {grout_vol_m3:.2f} m³ ({spec.core_fill} core-fill across {net_m2:.2f} m² of {series_mm}mm blockwork).",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional grout volume {grout_vol_m3:.2f} m³ from nominal core-fill factor {spec.core_fill}; actual core fill geometry unverified.",
             row_role="",
         ))
 
@@ -237,12 +287,12 @@ def calculate_blockwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
             finish_system="Grout filled with reinforcing steel",
             quantity=round(spec.length_m, 2),
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Bond beam length: {spec.length_m:.2f} lm.",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional bond beam {spec.length_m:.2f} lm; source bond-beam construction and reinforcement unconfirmed.",
             row_role="",
         ))
 
@@ -252,11 +302,22 @@ def calculate_blockwork_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]
 def calculate_lintel_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]:
     """Calculate steel/concrete lintels over wall openings."""
     items: List[MasonryTakeoffItem] = []
-    for i, op in enumerate(spec.openings):
-        w = float(op.get("width") or 0.0)
-        if w <= 0.0:
-            continue
-        # Standard bearing: 150mm each side (total length = w + 0.30m)
+    if spec.wall_type not in {
+        "brickwork_veneer","double_brick",
+        "blockwork_100","blockwork_150","blockwork_200",
+    } or not isinstance(spec.openings,(list,tuple)):
+        return items
+    # Do not quietly drop one incomplete opening from the lintel universe.
+    widths=[]
+    for op in spec.openings:
+        if not isinstance(op,dict):
+            return items
+        width=_source_positive_metric(op.get("width"))
+        if width is None:
+            return items
+        widths.append(width)
+    for i,w in enumerate(widths):
+        # 150mm end bearings on each side are only a provisional design assumption.
         lintel_length_m = round(w + 0.30, 2)
         desc = "Galvanized steel angle lintel (100x100x6)" if w <= 1.8 else "Galvanized T-bar / heavy lintel (150UB)"
 
@@ -268,12 +329,12 @@ def calculate_lintel_items(spec: MasonryWallSpec) -> List[MasonryTakeoffItem]:
             finish_system="Bedded on mortar with 150mm end bearings",
             quantity=lintel_length_m,
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{MASONRY_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Lintel over {w:.2f}m opening (Length: {lintel_length_m:.2f} lm including bearings).",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional lintel {lintel_length_m:.2f} lm over {w:.2f}m opening, assuming two 150mm end bearings; steel section and actual support unverified.",
             row_role="",
         ))
 
