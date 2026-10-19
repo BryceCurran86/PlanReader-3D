@@ -143,7 +143,8 @@ def recover_source_preserving_openings_shadow(source, *, revision_id, page_ids,
     if any(type(flag) is not bool for flag in (
             exact_nomination_shadow, source_fragment_roles_shadow, include_revision_ancestry_shadow)):
         raise ValueError("recovery policies must be explicit booleans")
-    if source._raster_paired_outer_faces_shadow or source._exact_g17_nomination_shadow:
+    if (source._raster_paired_outer_faces_shadow or source._exact_g17_nomination_shadow
+            or source._raster_double_face_negative_shadow):
         raise ValueError("original issuer must use its default source policy")
     if (not isinstance(page_ids, tuple) or len(page_ids)!=1
             or any(type(p) is not str or not p.isdigit() or str(int(p))!=p or int(p)<1 for p in page_ids)

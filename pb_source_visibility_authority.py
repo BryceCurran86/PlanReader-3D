@@ -844,7 +844,11 @@ class SourceVisibilityProducer:
     def __init__(self, *, producer_method: str, producer_version: str,
                  raster_paired_outer_faces_shadow: bool = False,
                  exact_g17_nomination_shadow: bool = False,
-                 source_native_finish_text_shadow: bool = False) -> None:
+                 source_native_finish_text_shadow: bool = False,
+                 raster_double_face_negative_shadow: bool = False) -> None:
+        if type(raster_double_face_negative_shadow) is not bool:
+            raise ValueError("double-face negative shadow requires an explicit boolean")
+        self._raster_double_face_negative_shadow = raster_double_face_negative_shadow
         if type(raster_paired_outer_faces_shadow) is not bool:
             raise ValueError("raster paired outer faces shadow must be explicit boolean")
         self._raster_paired_outer_faces_shadow = raster_paired_outer_faces_shadow
@@ -1568,6 +1572,8 @@ class SourceVisibilityProducer:
             )
         if getattr(self._physical_opening_authority_cache, "_raster_paired_outer_faces_shadow", False) != self._raster_paired_outer_faces_shadow:
             raise RuntimeError("original raster source policy changed after authority creation")
+        if self._physical_opening_authority_cache._raster_double_face_negative_shadow != self._raster_double_face_negative_shadow:
+            raise RuntimeError("original raster negative policy changed after authority creation")
         return self._physical_opening_authority_cache
 
     def physical_scale_producer(self):
@@ -2207,6 +2213,7 @@ class SourceVisibilityProducer:
         raster_paired_outer_faces_shadow: bool = False,
         exact_g17_nomination_shadow: bool = False,
         include_revision_ancestry_shadow: bool = False,
+        raster_double_face_negative_shadow: bool = False,
     ):
         """Replay an independent source policy without rewriting this issuer.
 
@@ -2218,7 +2225,7 @@ class SourceVisibilityProducer:
         """
         if any(type(flag) is not bool for flag in (
                 raster_paired_outer_faces_shadow, exact_g17_nomination_shadow,
-                include_revision_ancestry_shadow)):
+                include_revision_ancestry_shadow, raster_double_face_negative_shadow)):
             raise ValueError("source fork policies require explicit booleans")
         published = self.published_snapshot_for_revision(revision_id)
         if (published is None or self._producer.current_revision_id(
@@ -2253,6 +2260,7 @@ class SourceVisibilityProducer:
             producer_version=revision.producer_version,
             raster_paired_outer_faces_shadow=raster_paired_outer_faces_shadow,
             exact_g17_nomination_shadow=exact_g17_nomination_shadow,
+            raster_double_face_negative_shadow=raster_double_face_negative_shadow,
         )
         for ancestor, payload, decoded in reversed(lineage):
             replay = fork.ingest_native_pdf_bytes(
@@ -2775,8 +2783,7 @@ class SourceVisibilityProducer:
                 for oid in opening.source_observation_ids if oid in selectors)
             has_source_issued_area = any(
                 r.status is EvidenceResolutionStatus.CORROBORATED
-                and r.evidence is not None
-                and (r.evidence.area_m2 is not None or bool(r.evidence.dimension_values_mm))
+                and r.evidence is not None and r.evidence.area_m2 is not None
                 for r in results
             )
             if not has_source_issued_area:

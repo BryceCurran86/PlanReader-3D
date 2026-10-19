@@ -31,7 +31,8 @@ def test_independently_valid_door_still_proves_exactly_one_swing():
 
 @pytest.mark.parametrize("face_rows", [(150, 164), (151, 163), (152, 162)])
 def test_two_spanning_wall_faces_cannot_mint_a_swing_or_framed_opening(face_rows):
-    assert _records(_results(_source_sheet_with_painted_faces(face_rows))) == ()
+    assert _records(_results(_source_sheet_with_painted_faces(face_rows),
+                            raster_double_face_negative_shadow=True)) == ()
 
 
 def _pair() -> _RasterBandPair:
