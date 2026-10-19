@@ -12,10 +12,7 @@ from hashlib import sha256
 import io
 import json
 import math
-<<<<<<< HEAD
 import os
-=======
->>>>>>> 4c09f4dc (feat(gptmax): bind explicit nominal width approvals to source-owned opening reviews)
 from pathlib import Path
 import tempfile
 import zipfile
@@ -119,7 +116,7 @@ def _validate_review_report(report):
                 if metadata.get("dimension_basis") == "user_approved_single_nominal_width":
                     value = canonical.get("width_m")
                     approval = metadata.get("nominal_width_approval") or {}
-                    stated = approval.get("value_mm")
+                    stated = approval.get("value_mm") if approval.get("value_mm") is not None else approval.get("value")
                     if (type(value) not in (int, float) or type(stated) not in (int, float)
                             or not math.isfinite(value) or not math.isfinite(stated)
                             or min(value, stated) <= 0 or not math.isclose(value, stated / 1000., abs_tol=1e-12, rel_tol=1e-12)

@@ -157,6 +157,7 @@ def test_offline_package_keeps_width_evidence_without_inventing_a_rectangular_as
     report={"status":"original_issuer_preserved_additional_source_shadow",
         "original_issuer_body_unchanged_during_fork":True,
         "new_authority_promotion_granted":False,"customer_publication_granted":False,
+        "original_signed_rows_reissued":False,"official_benchmark_executed":False,
         "original_source_sha256":approval.metadata["source_sha256"],
         "original_opening_review_packets":rows,"alternate_opening_review_packets":rows,
         "original_receipt":receipt,"alternate_receipt":receipt}
