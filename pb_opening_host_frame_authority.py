@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 import pb_opening_host_binding_authority as host_geometry
@@ -39,6 +39,7 @@ from pb_physical_opening_authority import (
 from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
     PhysicalWallCandidateAuthority,
+    PhysicalWallCandidateRecord,
     PhysicalWallCandidateSelector,
     repeated_raster_drafting_motif_wall_ids,
 )
