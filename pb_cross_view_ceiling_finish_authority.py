@@ -249,6 +249,9 @@ def _quarantine_reused_ceiling_source_ownership(
     disputed: set[str] = set()
     by_physical: dict[str, int] = Counter()
     fields = (
+        # The producer's issued finish record cannot be rekeyed to a second
+        # physical room or left blank in reconstructed result records.
+        "record_id",
         "canonical_room_id",
         "source_room_face_record_id",
         "occurrence_record_id",
