@@ -337,9 +337,26 @@ def publish_live_opening_area_quantities(
     # favourable member and conceal contradictory identity lineage.
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
+    source_scope: tuple[str, str, str] | None = None
     for opening in composition.canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
+        # One published source-visibility snapshot owns this canonical
+        # composition. A foreign document/hash/snapshot cannot hide among
+        # unsupported openings while the matching member seals FIRM area.
+        # Different source PAGES within the same PDF remain independent
+        # eligible physical openings.
+        owner = (
+            opening.document_id,
+            opening.source_sha256,
+            opening.snapshot_id,
+        )
+        if source_scope is None:
+            source_scope = owner
+        elif source_scope != owner:
+            raise ValueError(
+                "canonical opening source snapshot conflicts with quantity composition"
+            )
         # A stale foreign-revision member cannot be filtered out as
         # unsupported while the favourable member becomes a commercial
         # quantity. The canonical composition is revision-scoped.
