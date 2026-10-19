@@ -180,7 +180,14 @@ def test_crosssheet_absent_or_competing_p5_label_abstains(
 
     raw = _synthetic_thirteen_page_source(
         page5_word=page5_word, double_page5=double_page5)
+    doc = fitz.open(stream=raw, filetype="pdf")
+    try:
+        (left, top, right, bottom), = paired_native_2127_tokens(doc[2])
+        c3 = ((left + right) / 2, (top + bottom) / 2)
+    finally:
+        doc.close()
     monkeypatch.setattr(audit, "LOT16_ORIGINAL_SHA", sha256(raw).hexdigest())
+    monkeypatch.setattr(audit, "_EXPECTED_CENTRES", {3: c3, 5: c3})
     # Failure happens at source-pair uniqueness, before any location-based
     # authentication or downstream physical opening/host authority.
     with pytest.raises(ValueError, match="unique native 2127 STACKER"):
