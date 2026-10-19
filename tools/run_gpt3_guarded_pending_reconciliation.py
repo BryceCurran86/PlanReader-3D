@@ -186,7 +186,10 @@ def _write_triplet(
     if expected_input_hashes is not None:
         _assert_inputs_stable(expected_input_hashes)
     staged: list[Path] = []
-    created: list[Path] = []
+    # Retain each staged inode as the ownership receipt for rollback.
+    # A competing writer can replace a visible output after our hard link;
+    # only paths still pointing at OUR inode are safe to delete.
+    created: list[tuple[Path, Path]] = []
     try:
         for path, value in zip(outputs, payloads):
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,14 +210,19 @@ def _write_triplet(
         # creates the destination since preflight. Do not replace originals.
         for path, temp in zip(outputs, staged):
             os.link(temp, path)
-            created.append(path)
+            created.append((path, temp))
         # If an input changes while the three hard links are created, roll
         # them all back. Never retain a stale activation or scored receipt.
         if expected_input_hashes is not None:
             _assert_inputs_stable(expected_input_hashes)
     except BaseException:
-        for path in reversed(created):
-            path.unlink(missing_ok=True)
+        for path, temp in reversed(created):
+            try:
+                still_ours = path.samefile(temp)
+            except OSError:
+                still_ours = False
+            if still_ours:
+                path.unlink(missing_ok=True)
         raise
     finally:
         for temp in staged:
