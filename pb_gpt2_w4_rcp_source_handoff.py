@@ -72,13 +72,23 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
                 "original_rcp_material_in_ceiling_ink_candidate"):
         return {**blocked,"first_failure":"independent_original_A120_geometry_material_issuer_missing"}
     sha=w4_room_result["original_source_sha256"]
+    # Upstream W4 stores canonical source page IDs as decimal text; the
+    # cross-sheet ink issuer stores typed one-based original page numbers.
+    # Never equate an arbitrary page string or bool with a source-owned page.
+    floor_page=independently_registered_rcp.get("original_floor_page")
+    finish_page=independently_registered_rcp.get("original_finish_page")
+    rcp_page=original_rcp_ink.get("original_rcp_page")
+    w4_page=w4_room_result.get("original_floor_page")
+    if (type(floor_page) is not int or floor_page<=0
+            or type(finish_page) is not int or finish_page<=0
+            or type(rcp_page) is not int or rcp_page<=0
+            or floor_page==finish_page
+            or type(w4_page) is not str or w4_page!=str(floor_page)):
+        return {**blocked,"first_failure":"A120_original_source_page_identity_invalid"}
     if (sha!=independently_registered_rcp.get("original_source_sha256")
             or sha!=original_rcp_ink.get("original_source_sha256")
             or sha!=original_rcp_material.get("original_source_sha256")
-            or str(independently_registered_rcp.get("original_floor_page"))!=
-               str(w4_room_result.get("original_floor_page"))
-            or independently_registered_rcp.get("original_finish_page")!=
-               original_rcp_ink.get("original_rcp_page")):
+            or finish_page!=rcp_page):
         return {**blocked,"first_failure":"A120_source_root_or_original_page_mismatch"}
     if (w4_room_result.get("original_revision_id")!=
             original_rcp_ink.get("original_revision_id")
@@ -89,10 +99,25 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
             or original_rcp_ink.get("original_snapshot_id")!=
                original_rcp_material.get("original_snapshot_id")):
         return {**blocked,"first_failure":"W4_A120_source_revision_snapshot_disagreement"}
-    if (not original_rcp_material.get("original_source_finish_record_ids")
-            or not original_rcp_material.get("original_material_definition_record_id")
-            or not original_rcp_material.get("original_rcp_scope_ownership_id")):
+    # A completed ceiling RCP source material issuer selects EXACTLY one
+    # original mark and carries an exact polygon copied from the source
+    # ceiling ink producer. Do not treat a truthy arbitrary string or stale
+    # zone receipt as an independently authenticated material occurrence.
+    mark_ids=original_rcp_material.get("original_source_finish_record_ids")
+    source_attrs=(
+        original_rcp_material.get("original_material_definition_record_id"),
+        original_rcp_material.get("original_rcp_scope_ownership_id"),
+        original_rcp_material.get("original_source_finish_code"),
+    )
+    if (type(mark_ids) is not tuple or len(mark_ids)!=1
+            or any(type(value) is not str or not value
+                   or value!=value.strip()
+                   for value in (*mark_ids,*source_attrs))):
         return {**blocked,"first_failure":"A120_original_issuers_or_mark_missing"}
+    material_polygon=_valid_polygon(
+        original_rcp_material.get("source_ceiling_ink_polygon_pdf_pts"))
+    if material_polygon is None:
+        return {**blocked,"first_failure":"A120_material_ink_polygon_missing"}
     registered_floor=_valid_polygon(
         independently_registered_rcp.get("source_floor_perimeter_polygon_pdf_pts"))
     registered_rcp=_valid_polygon(
@@ -103,7 +128,8 @@ def audit_gpt2_w4_original_rcp_ceiling_handoff(
     if not all((registered_floor,registered_rcp,w4_floor,rcp)):
         return {**blocked,"first_failure":"A120_source_perimeter_invalid"}
     if (not registered_floor.equals(w4_floor)
-            or not registered_rcp.equals(rcp)):
+            or not registered_rcp.equals(rcp)
+            or not material_polygon.equals(rcp)):
         return {**blocked,"first_failure":"A120_ceiling_area_cannot_borrow_floor_perimeter"}
     translation=independently_registered_rcp.get(
         "source_cross_sheet_translation_pdf_pts")
