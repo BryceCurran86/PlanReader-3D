@@ -269,6 +269,9 @@ class OpeningHostFrameProducer:
         host_binding_authority: OpeningHostBindingAuthority,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
         *,
+        supplemental_wall_candidate_authority: Optional[
+            PhysicalWallCandidateAuthority
+        ] = None,
         raster_split_frame_shadow: bool = False,
         _seal: object = None,
     ) -> None:
@@ -282,11 +285,17 @@ class OpeningHostFrameProducer:
             raise TypeError("host_binding_authority must be producer-owned")
         if type(physical_wall_candidate_authority) is not PhysicalWallCandidateAuthority:
             raise TypeError("physical_wall_candidate_authority must be producer-owned")
+        if (
+            supplemental_wall_candidate_authority is not None
+            and type(supplemental_wall_candidate_authority) is not PhysicalWallCandidateAuthority
+        ):
+            raise TypeError("supplemental_wall_candidate_authority must be producer-owned")
         if type(raster_split_frame_shadow) is not bool:
             raise TypeError("raster_split_frame_shadow must be a bool")
         self._opening = physical_opening_authority
         self._host = host_binding_authority
         self._walls = physical_wall_candidate_authority
+        self._supplemental_walls = supplemental_wall_candidate_authority
         # Opt-in diagnostic ONLY: never enabled in the default composition.
         self._raster_split_frame_shadow = raster_split_frame_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
@@ -298,15 +307,36 @@ class OpeningHostFrameProducer:
         physical_opening_authority: PhysicalOpeningAuthority,
         host_binding_authority: OpeningHostBindingAuthority,
         physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
+        supplemental_wall_candidate_authority: Optional[
+            PhysicalWallCandidateAuthority
+        ] = None,
         raster_split_frame_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
             host_binding_authority,
             physical_wall_candidate_authority,
+            supplemental_wall_candidate_authority=supplemental_wall_candidate_authority,
             raster_split_frame_shadow=raster_split_frame_shadow,
             _seal=_PRODUCER_SEAL,
         )
+
+    def _scope_records_by_id(self, wall_scope, selector) -> dict[str, PhysicalWallCandidateRecord]:
+        records_by_id = {str(record.wall_candidate_id): record for record in wall_scope.records}
+        if self._supplemental_walls is not None:
+            supp_selector = PhysicalWallCandidateSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+            )
+            supp_scope = self._supplemental_walls.resolve_scope(supp_selector)
+            if supp_scope.status is EvidenceResolutionStatus.CORROBORATED:
+                for r in supp_scope.records:
+                    records_by_id.setdefault(str(r.wall_candidate_id), r)
+        return records_by_id
 
     @staticmethod
     def _binding_nodes(binding, geometry, records_by_id, equivalence) -> tuple[_BandNode, _BandNode] | None:
@@ -377,9 +407,11 @@ class OpeningHostFrameProducer:
         # Re-resolve the exact original selector rather than trusting caller
         # metadata or weakening a source-band CONFLICT/ABSTAIN.
         alternate_source_proven = False
-        if (self._raster_split_frame_shadow
-                and proof.status is EvidenceResolutionStatus.CORROBORATED
-                and not proof.bands):
+        if (
+            self._raster_split_frame_shadow
+            and proof.status is EvidenceResolutionStatus.CORROBORATED
+            and not proof.bands
+        ):
             selector = OpeningHostBindingSelector(
                 document_id=binding.document_id,
                 revision_id=binding.revision_id,
@@ -390,7 +422,7 @@ class OpeningHostFrameProducer:
                 opening_identity_id=binding.opening_identity_id,
             )
             bound = self._host.resolve(selector)
-            alternate_source_proven = bool(
+            alternate_source_proven = (
                 bound.status is EvidenceResolutionStatus.CORROBORATED
                 and bound.record is not None
                 and bound.record.record_id == binding.record_id
@@ -407,18 +439,54 @@ class OpeningHostFrameProducer:
                     and len(alternative.bands) == 1):
                 proof = alternative
         if (
+            proof.status is EvidenceResolutionStatus.CORROBORATED
+            and not proof.bands
+            and self._supplemental_walls is not None
+        ):
+            selector = PhysicalWallCandidateSelector(
+                document_id=binding.document_id,
+                revision_id=binding.revision_id,
+                source_sha256=binding.source_sha256,
+                snapshot_id=binding.snapshot_id,
+                page_id=binding.page_id,
+                decision_scope_id=binding.decision_scope_id,
+            )
+            supplemental = self._supplemental_walls.resolve_scope(selector)
+            if (
+                supplemental.status is EvidenceResolutionStatus.CORROBORATED
+                and supplemental.scope_complete is False
+                and supplemental.equivalence is not None
+            ):
+                mixed = host_geometry._resolve_opening_local_mixed_scope_source_band(
+                    self._opening,
+                    opening,
+                    geometry,
+                    wall_scope.records,
+                    supplemental.records,
+                    wall_scope.source_observation_ids,
+                    supplemental.source_observation_ids,
+                )
+                if (
+                    mixed.status is EvidenceResolutionStatus.CORROBORATED
+                    and len(mixed.bands) == 1
+                ):
+                    proof = mixed
+        if (
             proof.status is not EvidenceResolutionStatus.CORROBORATED
             or len(proof.bands) != 1
             or tuple(sorted(binding.member_wall_candidate_ids)) != proof.bands[0].member_ids
         ):
             return None
-        records = {r.wall_candidate_id: r for r in wall_scope.records}
+        records = self._scope_records_by_id(wall_scope, binding)
         sides: dict[str, str] = {}
         tolerance = host_geometry.DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
         for wall_id in proof.bands[0].member_ids:
-            data = host_geometry._candidate_axis_data(records[wall_id], geometry)
+            rec = records.get(wall_id)
+            if rec is None:
+                return None
+            data = host_geometry._candidate_axis_data(rec, geometry)
             if data is None:
-                source = self._raster_source_projection(record=records[wall_id],
+                source = self._raster_source_projection(record=rec,
                     opening=opening, geometry=geometry, wall_scope=wall_scope)
                 if source is None:
                     return None
@@ -450,7 +518,7 @@ class OpeningHostFrameProducer:
         equivalence = wall_scope.equivalence
         if equivalence is None:
             return fail("opening_host_frame_equivalence_unavailable")
-        records_by_id = {record.wall_candidate_id: record for record in wall_scope.records}
+        records_by_id = self._scope_records_by_id(wall_scope, selected_binding)
         center_tol = max(0.75, float(selected_geometry.thickness) * 0.15)
         thickness_tol = max(0.75, float(selected_geometry.thickness) * 0.15)
         discovered: dict[str, object] = {}
@@ -524,7 +592,7 @@ class OpeningHostFrameProducer:
                 rel_tol=1e-6,
                 abs_tol=thickness_tol,
             ):
-                return fail("opening_host_frame_aligned_band_geometry_inconsistent")
+                continue
 
             binding_selector = OpeningHostBindingSelector(
                 document_id=selected_binding.document_id,
@@ -668,19 +736,33 @@ class OpeningHostFrameProducer:
             geometry,
             wall_scope.equivalence,
         )
-        if (
-            host_resolution.status is not EvidenceResolutionStatus.CORROBORATED
-            or len(host_resolution.bands) != 1
-        ):
-            return None
-        host_band = host_resolution.bands[0]
-        if tuple(host_band.member_ids) != tuple(binding.member_wall_candidate_ids):
+        single_member_host = (
+            host_resolution.status is EvidenceResolutionStatus.CORROBORATED
+            and len(host_resolution.bands) == 1
+            and tuple(host_resolution.bands[0].member_ids) == tuple(binding.member_wall_candidate_ids)
+        )
+        if not single_member_host:
+            selector = OpeningHostBindingSelector(
+                document_id=binding.document_id,
+                revision_id=binding.revision_id,
+                source_sha256=binding.source_sha256,
+                snapshot_id=binding.snapshot_id,
+                page_id=binding.page_id,
+                decision_scope_id=binding.decision_scope_id,
+                opening_identity_id=binding.opening_identity_id,
+            )
+            bound = self._host.resolve(selector)
+            if (
+                bound.status is EvidenceResolutionStatus.CORROBORATED
+                and bound.record is not None
+                and bound.record.record_id == binding.record_id
+                and tuple(bound.record.member_wall_candidate_ids) == tuple(binding.member_wall_candidate_ids)
+            ):
+                single_member_host = True
+        if not single_member_host:
             return None
 
-        records_by_id = {
-            str(record.wall_candidate_id): record
-            for record in wall_scope.records
-        }
+        records_by_id = self._scope_records_by_id(wall_scope, binding)
         wall_id = str(binding.member_wall_candidate_ids[0])
         record = records_by_id.get(wall_id)
         if record is None:
@@ -692,34 +774,32 @@ class OpeningHostFrameProducer:
         if projection is None:
             return None
         host_min_u, host_max_u, center_n = projection
-        host_length = host_max_u - host_min_u
+        tolerance = host_geometry.DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
+
+        op_u0 = _dot(geometry.origin, axis)
+        op_u1 = op_u0 + float(geometry.length) * _dot(geometry.axis, axis)
+        op_min = min(op_u0, op_u1)
+        op_max = max(op_u0, op_u1)
+
+        wall_min_u = min(host_min_u, op_min)
+        wall_max_u = max(host_max_u, op_max)
+        host_length = wall_max_u - wall_min_u
         if host_length <= _COORD_TOL:
             return None
 
-        origin = _point_from_basis(host_min_u, center_n, axis, normal)
-        opening_start = (float(geometry.origin[0]), float(geometry.origin[1]))
-        opening_end = (
-            opening_start[0] + axis[0] * float(geometry.length),
-            opening_start[1] + axis[1] * float(geometry.length),
-        )
-        u0 = _dot(
-            (opening_start[0] - origin[0], opening_start[1] - origin[1]),
-            axis,
-        )
-        u1 = _dot(
-            (opening_end[0] - origin[0], opening_end[1] - origin[1]),
-            axis,
-        )
+        origin = _point_from_basis(wall_min_u, center_n, axis, normal)
+        u0 = op_min - wall_min_u
+        u1 = op_max - wall_min_u
+        if abs(u0) <= tolerance:
+            u0 = 0.0
+        if abs(u1 - host_length) <= tolerance:
+            u1 = host_length
         if (
             u0 < -_COORD_TOL
             or u1 - u0 <= _COORD_TOL
             or u1 > host_length + _COORD_TOL
         ):
             return None
-        if abs(u0) <= _COORD_TOL:
-            u0 = 0.0
-        if abs(u1 - host_length) <= _COORD_TOL:
-            u1 = host_length
 
         wall_thickness = float(geometry.thickness)
         if not math.isfinite(wall_thickness) or wall_thickness <= _COORD_TOL:
@@ -786,7 +866,7 @@ class OpeningHostFrameProducer:
         ):
             return fail("opening_host_frame_complete_wall_scope_unavailable")
 
-        records_by_id = {record.wall_candidate_id: record for record in wall_scope.records}
+        records_by_id = self._scope_records_by_id(wall_scope, binding)
         contexts = self._scope_bindings(
             wall_scope=wall_scope,
             selected_binding=binding,

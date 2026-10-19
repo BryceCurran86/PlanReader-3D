@@ -1007,7 +1007,34 @@ def _raster_swing_perpendicular_scale_ratio(
         if math.isfinite(ratio) and ratio > 0.0:
             matches.append(float(ratio))
     if not matches:
-        return None
+        for placement in placements:
+            bx0, by0, bx1, by1 = placement.bbox_pt
+            if (
+                max(x0, bx0) >= min(x1, bx1) - tol
+                or max(y0, by0) >= min(y1, by1) - tol
+            ):
+                continue
+            sx = (bx1 - bx0) / float(placement.pixel_width)
+            sy = (by1 - by0) / float(placement.pixel_height)
+            if (
+                not math.isfinite(sx)
+                or not math.isfinite(sy)
+                or sx <= 0.0
+                or sy <= 0.0
+            ):
+                continue
+            ratio = sy / sx if axis == "horizontal" else sx / sy
+            if math.isfinite(ratio) and ratio > 0.0:
+                matches.append(float(ratio))
+        if not matches:
+            return None
+        first = matches[0]
+        if any(
+            not math.isclose(value, first, rel_tol=1e-3, abs_tol=1e-6)
+            for value in matches[1:]
+        ):
+            return None
+        return first
     first = matches[0]
     if any(
         not math.isclose(value, first, rel_tol=1e-6, abs_tol=1e-9)

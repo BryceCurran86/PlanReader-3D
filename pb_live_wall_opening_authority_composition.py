@@ -195,12 +195,8 @@ def compose_live_wall_opening_authority(
     if published is None:
         raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
 
-    # Materialize isolated raster-opening evidence before wall scopes. The wall
-    # producer may subsequently augment ordinary raster-visible geometry, and
-    # SourceVisibilityProducer preserves these isolated receipts across that
-    # snapshot transition. This order keeps wall/opening selectors on one final
-    # immutable producer snapshot without exposing raster opening primitives as
-    # ordinary visible observations.
+    if include_unmeasured_ink_closed_flanks_shadow:
+        source_visibility_producer._include_unmeasured_ink_closed_flanks_shadow = True
     published = source_visibility_producer.augment_with_raster_opening_primitives(
         revision_id,
         page_ids=selected_pages,
@@ -498,6 +494,7 @@ def compose_live_wall_opening_authority(
         physical_opening_authority=physical_opening_authority,
         host_binding_authority=binding_authority,
         physical_wall_candidate_authority=wall_authority,
+        supplemental_wall_candidate_authority=supplemental_wall_authority,
     )
     host_frame_traces: list[LiveOpeningHostFrameTrace] = []
     host_frame_selectors: dict[str, OpeningHostFrameSelector] = {}
