@@ -147,7 +147,17 @@ def derive_component_aware_floor_finish_area(
     opposing wall faces.  Ancillary/unspecified components and voids are left
     unresolved rather than assuming their enclosure or finish basis.
     """
-    if wall_thickness_m is None or not math.isfinite(wall_thickness_m) or wall_thickness_m <= 0.0:
+    # Do not promote a guessed/coerced wall thickness into a clear-face
+    # finish deduction. Boolean True is not 1 m; text "0.20" is not an
+    # authenticated original metric, and oversized ints must abstain rather
+    # than crash the whole quantity pipeline.
+    if type(wall_thickness_m) not in (int, float):
+        return None
+    try:
+        thickness_m = float(wall_thickness_m)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(thickness_m) or thickness_m <= 0.0:
         return None
     if footprint.status != FootprintStatus.CONFIRMED.value or footprint.missing_components:
         return None
@@ -183,8 +193,8 @@ def derive_component_aware_floor_finish_area(
     if main.length_m <= 0.0 or main.width_m <= 0.0:
         return None
 
-    clear_length_m = main.length_m - 2.0 * wall_thickness_m
-    clear_width_m = main.width_m - 2.0 * wall_thickness_m
+    clear_length_m = main.length_m - 2.0 * thickness_m
+    clear_width_m = main.width_m - 2.0 * thickness_m
     if clear_length_m <= 0.0 or clear_width_m <= 0.0:
         return None
 
@@ -208,7 +218,7 @@ def derive_component_aware_floor_finish_area(
     return ComponentFloorFinishResult(
         structural_footprint_area_m2=round(footprint.gross_floor_area_m2, 2),
         floor_finish_area_m2=round(finish_area, 2),
-        wall_thickness_m=round(wall_thickness_m, 4),
+        wall_thickness_m=round(thickness_m, 4),
         main_component_id=main.space_id,
         main_outer_length_m=round(main.length_m, 4),
         main_outer_width_m=round(main.width_m, 4),
