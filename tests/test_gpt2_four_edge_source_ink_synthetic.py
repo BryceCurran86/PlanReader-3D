@@ -6,9 +6,9 @@ from tools.diag_original_room_four_edge_source_ink_shadow import (
     audit_source_enclosure_correspondence as audit,
 )
 
-# Original source contract requires eight DISTINCT path/item owners across
-# both sheets. The second page carries four unrelated source paths before
-# its real wall edges, matching the owner's independent PDF path ancestry.
+# Source path/item identities are LOCAL to each original page. These older
+# fixture pages happen to use eight distinct path names because p2 contains
+# four unrelated native strokes. That is not a requirement for source proof.
 SIDE={role:(f"d{i}i0",f"d{i+4}i0") for i,role in enumerate(
     ("left","right","bottom","top_partial"))}
 
@@ -130,3 +130,63 @@ def test_left_anchored_original_top_partial_has_gap_on_right_not_false_wall():
     assert r["original_top_gap_pdf_pts"]==[[65.,30.],[130.,30.]]
     assert not r["canonical_cross_sheet_physical_room_equality_granted"]
     assert r["new_firm_quantities"]==0
+
+
+def test_source_native_path_names_may_repeat_on_independent_original_pages():
+    # A real CAD export can start at d0i0 on BOTH original pages. Only a
+    # (SHA,page,path,item) tuple, never the bare path string, identifies ink.
+    doc=fitz.open()
+    for offset in (0,78):
+        page=doc.new_page(width=320,height=220)
+        for start,end in (
+            ((20,30),(20,150)),
+            ((130,30),(130,150)),
+            ((20,150),(130,150)),
+            ((65,30),(130,30)),
+        ):
+            page.draw_line((start[0]+offset,start[1]),
+                           (end[0]+offset,end[1]),
+                           color=(0,0,0),width=.48)
+    raw=doc.tobytes()
+    doc.close()
+    side_names={role:(f"d{i}i0",f"d{i}i0")
+                for i,role in enumerate(
+                    ("left","right","bottom","top_partial"))}
+    result=audit(
+        raw,expected_sha256=hashlib.sha256(raw).hexdigest(),
+        floor_page_1_based=1,finish_page_1_based=2,
+        original_side_pairs=side_names,
+        expected_translation_pdf_pts=(78.,0.))
+    assert result["status"]=="original_four_edge_ink_correspondence_with_unclosed_doorway"
+    assert result["original_top_gap_pdf_pts"]==[[20.,30.],[65.,30.]]
+    assert all(value["physical_wall_role_proven"] is False
+               for value in result["original_witnesses"].values())
+    assert result["new_firm_quantities"]==0
+
+
+def test_same_native_line_cannot_own_two_different_sides_on_either_page():
+    doc=fitz.open()
+    for offset in (0,78):
+        page=doc.new_page(width=320,height=220)
+        for start,end in (
+            ((20,30),(20,150)),
+            ((130,30),(130,150)),
+            ((20,150),(130,150)),
+            ((65,30),(130,30)),
+        ):
+            page.draw_line((start[0]+offset,start[1]),
+                           (end[0]+offset,end[1]),
+                           color=(0,0,0),width=.48)
+    raw=doc.tobytes()
+    doc.close()
+    sides={role:(f"d{i}i0",f"d{i}i0") for i,role in enumerate(
+        ("left","right","bottom","top_partial"))}
+    for repeat_side in ("floor","finish"):
+        forged={key:list(value) for key,value in sides.items()}
+        index=0 if repeat_side=="floor" else 1
+        forged["right"][index]=forged["left"][index]
+        with pytest.raises(ValueError,match="distinct_source_path_item_owners_required"):
+            audit(raw,expected_sha256=hashlib.sha256(raw).hexdigest(),
+                  floor_page_1_based=1,finish_page_1_based=2,
+                  original_side_pairs={key:tuple(v) for key,v in forged.items()},
+                  expected_translation_pdf_pts=(78.,0.))
