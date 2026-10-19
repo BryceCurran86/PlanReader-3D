@@ -193,6 +193,26 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             and type(c.get("evidence_ids")) in (tuple, list)
             and c["figured_area_record_id"] in c["evidence_ids"]
         )
+        # The existing signed source-area publisher requires the original
+        # canonical evidence set to contain EACH claimed structural receipt.
+        # A host-looking string cannot make an unsigned opening AREA-ready.
+        canonical_receipts = c.get("evidence_ids")
+        receipts = (
+            frozenset(canonical_receipts)
+            if type(canonical_receipts) in (tuple, list)
+            and all(type(item) is str for item in canonical_receipts)
+            else frozenset()
+        )
+        host_receipt_bound = bool(
+            host is not None
+            and type(c.get("host_binding_record_id")) is str
+            and c["host_binding_record_id"] in receipts
+        )
+        frame_receipt_bound = bool(
+            frame_ok
+            and type(c.get("host_frame_record_id")) is str
+            and c["host_frame_record_id"] in receipts
+        )
         if not supported:
             area_gate = "source_owned_floor_plan_unavailable"
         elif host is None:
@@ -203,6 +223,10 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             area_gate = "source_figured_dimension_pair_unproven"
         elif not figured_receipt_bound:
             area_gate = "original_figured_area_receipt_unbound"
+        elif not host_receipt_bound:
+            area_gate = "original_host_binding_receipt_unbound"
+        elif frame_ok and not frame_receipt_bound:
+            area_gate = "original_host_frame_receipt_unbound"
         elif row.get("quantity_id"):
             area_gate = "original_signed_area_already_retained"
         else:
@@ -222,6 +246,10 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "source_figured_dimension_pair_unproven"
         elif not axis_ok:
             gate = "width_height_axis_authority_unproven"
+        elif not host_receipt_bound:
+            gate = "original_host_binding_receipt_unbound"
+        elif not frame_receipt_bound:
+            gate = "original_host_frame_receipt_unbound"
         else:
             gate = "independent_gpt1_measurement_validation_required"
         assessed.append({
@@ -237,6 +265,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
             "figured_area_receipt_bound": figured_receipt_bound,
+            "original_host_binding_receipt_bound": host_receipt_bound,
+            "original_host_frame_receipt_bound": frame_receipt_bound,
             "opening_area_first_remaining_gate": area_gate,
             "new_gpt1_area_candidate_handoff": area_review_ready,
             "figured_area_only_frame_unavailable": bool(
