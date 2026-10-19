@@ -224,11 +224,17 @@ class DerivedTradeQuantity:
     status: str = "Measured"
 
     def __post_init__(self) -> None:
-        if not math.isfinite(float(self.quantity)) or float(self.quantity) < 0.0:
+        if type(self.quantity) not in (int, float):
+            raise ValueError("Derived trade quantity must be native numeric, never bool/text")
+        try:
+            numeric = float(self.quantity)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Derived trade quantity cannot overflow") from exc
+        if not math.isfinite(numeric) or numeric < 0.0:
             raise ValueError(
                 "Derived trade quantity must be a non-negative finite number"
             )
-        self.quantity = round(float(self.quantity), 6)
+        self.quantity = round(numeric, 6)
         if not _clean(self.host_object_id):
             raise ValueError("host_object_id must be a canonical object id")
         if self.host_object_type not in _ALLOWED_HOST_TYPES:
@@ -238,8 +244,9 @@ class DerivedTradeQuantity:
         if not _clean(self.derivation_formula):
             raise ValueError("derivation_formula must be explicit")
         self.unit = normalise_trade_unit(self.unit)
-        self.host_evidence_ids = tuple(dict.fromkeys(self.host_evidence_ids))
-        self.spec_evidence_ids = tuple(dict.fromkeys(self.spec_evidence_ids))
+        # Keep raw original receipt sequences intact. A duplicate, padded or
+        # foreign owner is NOT cured by deduplication before final source-closed
+        # takeoff issuance; canonical pricing identity has separate normalization.
         self.rate_key = _clean(self.rate_key) or None
         self.rate_binding_evidence_ids = require_evidence_ids(
             self.rate_binding_evidence_ids, "rate_binding_evidence_ids"
@@ -1031,10 +1038,36 @@ def to_takeoff_rows(
     function raises instead of corrupting the unit.
     """
 
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise takeoff_contract.TakeoffRowContractError(
+            "source takeoff workspace requires exact positive integer"
+        )
+    if (
+        type(source_page) is not str or not source_page or
+        source_page != source_page.strip() or
+        type(source_prefix) is not str or not source_prefix or
+        source_prefix != source_prefix.strip()
+    ):
+        raise takeoff_contract.TakeoffRowContractError(
+            "source page and producer identity require exact original strings"
+        )
+
     rows: List[Tuple[Any, ...]] = []
     stamp = ""
 
     for q in quantities:
+        if type(q) is not DerivedTradeQuantity:
+            raise takeoff_contract.TakeoffRowContractError(
+                "cross trade row requires typed DerivedTradeQuantity"
+            )
+        if q.quantity <= 0.0:
+            raise takeoff_contract.TakeoffRowContractError(
+                "zero-area or zero-count construction cannot be charged as a row"
+            )
+        if not _evidence_ids(q.host_evidence_ids) or not _evidence_ids(q.spec_evidence_ids):
+            raise takeoff_contract.TakeoffRowContractError(
+                "cross trade row missing exact original host or trade source receipts"
+            )
         if q.unit not in takeoff_contract.TAKEOFF_UNITS:
             raise takeoff_contract.TakeoffRowContractError(
                 f"canonical cross-trade quantity unit {q.unit!r} is not "
