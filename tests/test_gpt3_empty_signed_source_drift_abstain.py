@@ -35,6 +35,8 @@ def test_eight_to_zero_signed_regression_does_not_fabricate_rekeyed_identity():
     assert report["comparison_status"] == "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE"
     assert report["baseline_quantity_count"] == 1
     assert report["candidate_quantity_count"] == 0
+    assert report["removed_quantity_ids"] == [q.quantity_id]
+    assert report["added_quantity_ids"] == []
     assert report["quantity_ids_alias_inferred"] is False
     assert not report["unchanged_quantity_ids"]
 
@@ -58,4 +60,23 @@ def test_four_project_suite_cannot_publish_completeness_for_empty_sealed_sources
         row["comparison_status"] == "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE"
         for row in report["projects"]
     )
+    assert report["official_v2_accuracy"] is None
+
+def test_eight_signed_quantities_lost_to_empty_run_keep_exact_missing_ids():
+    pairs = [_pair(qid=f"signed-{i}", eid=f"physical-{i}") for i in range(8)]
+    report = compare_signed_v1_physical_runs(_run(*pairs), _empty())
+    assert report["comparison_status"] == "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE"
+    assert report["removed_quantity_ids"] == [f"signed-{i}" for i in range(8)]
+    assert report["added_quantity_ids"] == []
+    assert report["source_authenticated"] is False
+    assert report["official_v2_accuracy"] is None
+
+
+def test_empty_baseline_to_eight_does_not_claim_authenticated_additions():
+    pairs = [_pair(qid=f"signed-{i}", eid=f"physical-{i}") for i in range(8)]
+    report = compare_signed_v1_physical_runs(_empty(), _run(*pairs))
+    assert report["comparison_status"] == "NO_SIGNED_SOURCE_QUANTITY_UNIVERSE"
+    assert report["added_quantity_ids"] == [f"signed-{i}" for i in range(8)]
+    assert report["removed_quantity_ids"] == []
+    assert report["source_authenticated"] is False
     assert report["official_v2_accuracy"] is None
