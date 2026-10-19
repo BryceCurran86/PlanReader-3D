@@ -76,7 +76,19 @@ def reuse_authenticated_room_area_for_finish_shadow(
         or original_firm_area.unit not in ("m2","m²")
         or original_firm_area.blocking_reasons
         or original_firm_area.quantity_id != floor.metric_area_quantity_id
+        # The signed room-area fact owns one ORIGINAL room. A copied
+        # quantity ID with an altered semantic owner must not become a
+        # candidate for FT2/FT3 through numeric equality.
+        or type(original_firm_area.semantic_key) is not str
+        or type(original_firm_area.input_entity_ids) not in (tuple,list)
+        or tuple(original_firm_area.input_entity_ids) != (floor.room_entity_id,)
+        or original_firm_area.semantic_key != f"room_area:{floor.room_entity_id}"
+        or original_firm_area.authority != floor.metric_area_authority
+        or type(original_firm_area.evidence_ids) not in (tuple,list)
         or not original_firm_area.evidence_ids
+        or any(type(receipt) is not str or not receipt or receipt != receipt.strip()
+               for receipt in original_firm_area.evidence_ids)
+        or len(set(original_firm_area.evidence_ids)) != len(original_firm_area.evidence_ids)
         or (type(original_firm_area.value) not in (int,float))
         or (type(floor.metric_area_m2) not in (int,float))
     ):
