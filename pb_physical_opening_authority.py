@@ -1016,6 +1016,7 @@ def _raster_swing_perpendicular_scale_ratio(
         # An overlapping image cannot witness pixels outside its placement.
         # Prove the entire aperture is covered by compatible source tiles.
         clipped = []
+        tile_transforms = []
         for placement in placements:
             bx0, by0, bx1, by1 = placement.bbox_pt
             if (
@@ -1036,8 +1037,23 @@ def _raster_swing_perpendicular_scale_ratio(
             if math.isfinite(ratio) and ratio > 0.0:
                 matches.append(float(ratio))
                 clipped.append((max(x0, bx0), max(y0, by0), min(x1, bx1), min(y1, by1)))
+                tile_transforms.append((sx, sy, bx0, by0))
         if not matches:
             return None
+        # Equal anisotropy ratios do not prove one coherent source-pixel
+        # registration: an image with 2 pt/pixel and one with 1 pt/pixel
+        # can both have a ratio of 1. A joined raster must agree in BOTH
+        # absolute pixel scales and be on the same integer pixel grid.
+        # This extra gate applies only to explicit tiled-gap shadow capture.
+        ref_sx, ref_sy, ref_x, ref_y = tile_transforms[0]
+        for sx, sy, bx0, by0 in tile_transforms[1:]:
+            if not (math.isclose(sx, ref_sx, rel_tol=1e-6, abs_tol=1e-9)
+                    and math.isclose(sy, ref_sy, rel_tol=1e-6, abs_tol=1e-9)):
+                return None
+            for delta in ((bx0 - ref_x) / ref_sx, (by0 - ref_y) / ref_sy):
+                if not math.isfinite(delta) or not math.isclose(
+                        delta, round(delta), rel_tol=0.0, abs_tol=1e-6):
+                    return None
         cuts = sorted({x0, x1, *(v for box in clipped for v in (box[0], box[2]))})
         for left, right in zip(cuts, cuts[1:]):
             if right - left <= tol:
