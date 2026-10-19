@@ -40,6 +40,8 @@ def test_fully_owned_axes_still_require_gpt1_validation_and_do_not_publish():
         width_m=1.2,
         height_m=1.8,
         area_m2=2.16,
+        canonical_evidence_ids=("w", "h"),
+        geometry_complete=True,
     )
     assert report["first_remaining_gate"] == "independent_gpt1_measurement_validation_required"
     assert report["axis_order_authenticated"] is True
@@ -57,5 +59,7 @@ def test_product_mismatch_fails_closed():
         width_m=1.2,
         height_m=1.8,
         area_m2=9.99,
+        canonical_evidence_ids=("w", "h"),
+        geometry_complete=True,
     )
     assert report["first_remaining_gate"] == "figured_area_product_disagrees_with_pair"
