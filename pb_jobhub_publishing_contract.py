@@ -305,8 +305,10 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                     Decimal(str(q.quantity)) * rate
                 ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                 consistent = (
-                    rate == rate.quantize(Decimal("0.01"))
-                    and actual == actual.quantize(Decimal("0.01"))
+                    # Per-unit labour/material prices may legitimately be
+                    # more precise than a cent (e.g. per m² / kg rates).
+                    # Only the final payable line total must be cent-exact.
+                    actual == actual.quantize(Decimal("0.01"))
                     and actual == expected
                 )
             except (InvalidOperation, OverflowError):
