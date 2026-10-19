@@ -109,6 +109,18 @@ def audit_exterior_overhead_source_census_shadow(
                 "native_description_literals_untrusted": tuple(strings),
                 "material_definition_issued": False,
             })
+    # A source word used by a material-definition candidate is not also
+    # evidence for a physical installed-finish occurrence. Retain EVERY
+    # remaining printed occurrence without pretending it is in the plan:
+    # other legends, schedules and drawing annotations can share the code.
+    definition_addresses = tuple(sorted({
+        tuple(row["material_code_word_address"]) for row in definitions
+    }))
+    definition_address_set = set(definition_addresses)
+    nondefinition_codes = tuple(
+        row for row in codes
+        if tuple(row["source_word_address"]) not in definition_address_set
+    )
     # Enumerate all source-number groups and ALL arithmetic competitors.
     # An equality does not bind any printed figure to physical endpoints.
     number_rows = [
@@ -258,6 +270,9 @@ def audit_exterior_overhead_source_census_shadow(
         "original_page_number": page_number,
         "original_source_sha256": expected_sha256,
         "all_original_code_word_candidates": tuple(codes),
+        "original_material_definition_code_addresses": definition_addresses,
+        "unclassified_nondefinition_source_code_word_candidates": nondefinition_codes,
+        "nondefinition_code_physical_finish_owner_proven": False,
         "original_soffit_material_description_candidates": tuple(definitions),
         "original_figured_number_candidates": numbers,
         "original_individual_figured_stroke_candidates": tuple(
