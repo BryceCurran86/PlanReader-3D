@@ -251,6 +251,18 @@ class LiveExternalPhysicalNetWallPublication:
     opening_universe_record_ids: tuple[str, ...]
     schema_version: str = LIVE_EXTERNAL_PHYSICAL_NET_WALL_SCHEMA_VERSION
 
+    @property
+    def physical_wall_net_area_quantities(self) -> tuple[QuantityEvidence, ...]:
+        """Individual source-owned exterior wall net m², not a finish takeoff.
+
+        Revalidate the aggregate and all canonical source rooms at the read
+        boundary rather than caching a separately replayable partial result.
+        """
+        from pb_live_external_wall_surface_area_quantity_publication import (
+            publish_live_external_wall_net_area_quantities,
+        )
+        return publish_live_external_wall_net_area_quantities(self)
+
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
