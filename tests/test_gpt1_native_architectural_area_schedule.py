@@ -3,7 +3,7 @@ from hashlib import sha256
 
 import fitz
 
-from pb_gpt1_native_architectural_area_schedule import issue_native_scheduled_areas
+from pb_gpt1_native_architectural_area_schedule import (\n    issue_native_scheduled_areas, _native_word_has_painted_glyphs,\n)
 
 
 def _original_like_source(*, changes=None, pages=2):
@@ -99,3 +99,51 @@ def test_source_document_not_promoted_for_empty_project_or_invalid_scope():
     )
     assert report.status == "ABSTAIN"
     assert report.quantities == ()
+
+def _word_and_trace(*, word="AREA", shift=0, opacity=1.0, mode=0):
+    native = (10.0, 20.0, 30.0, 30.0, word, 0, 0, 0)
+    chars = tuple(
+        (ord(letter), index, (10.0 + index * 5 + shift, 30.0),
+         (10.0 + index * 5 + shift, 20.0,
+          15.0 + index * 5 + shift, 30.0))
+        for index, letter in enumerate(word)
+    )
+    return native, {"type": mode, "opacity": opacity, "chars": chars}
+
+
+def test_native_word_each_glyph_exactly_overlaps_original_pdf_word():
+    word, trace = _word_and_trace()
+    assert _native_word_has_painted_glyphs(word, (trace,))
+
+
+def test_lookalike_word_drawn_elsewhere_is_not_source_ownership():
+    word, displaced = _word_and_trace(shift=300)
+    assert not _native_word_has_painted_glyphs(word, (displaced,))
+
+
+def test_invisible_paint_or_stroked_text_cannot_authenticate_area():
+    for parameters in ({"opacity": 0.0}, {"opacity": 0.5}, {"mode": 3}):
+        word, trace = _word_and_trace(**parameters)
+        assert not _native_word_has_painted_glyphs(word, (trace,))
+
+
+def test_same_source_word_painted_twice_abstains_as_ambiguous():
+    word, trace = _word_and_trace()
+    assert not _native_word_has_painted_glyphs(word, (trace, trace))
+
+
+def test_native_glyph_identity_not_merely_equal_area_or_text_length():
+    word, trace = _word_and_trace()
+    invalid = dict(trace)
+    invalid["chars"] = tuple(
+        (ord("X"), *glyph[1:]) if idx == 2 else glyph
+        for idx, glyph in enumerate(trace["chars"])
+    )
+    assert not _native_word_has_painted_glyphs(word, (invalid,))
+
+
+def test_malformed_native_paint_never_raises_or_grants_proof():
+    word, trace = _word_and_trace()
+    for forged in ({"type": 0, "opacity": 1.0, "chars": ((65,),)},
+                   {"type": 0, "opacity": 1.0, "chars": "AREA"}, {}):
+        assert not _native_word_has_painted_glyphs(word, (forged,))
