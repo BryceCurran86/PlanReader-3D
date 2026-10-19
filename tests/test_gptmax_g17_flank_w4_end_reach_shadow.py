@@ -151,3 +151,80 @@ def test_furniture_lookalike_outside_band_does_not_become_a_member():
         for row in left["local_end_reach_candidates"] + left["remote_ancestry_only_candidates"]
     )
     assert report["host_granted"] is False
+
+
+def test_all_owned_parent_sources_survive_without_first_source_selection():
+    records, lines = _fixture()
+    # One physical W4 candidate retains two authentic matching source lines.
+    # The previous implementation silently reported only whichever came first.
+    records[0].physical_identity.source_primitive_ids = (
+        "raw:left", "raw:left_other"
+    )
+    lines["raw:left_other"] = (20.0, 54.0, 100.0, 54.0)
+    first = _ledger(records, lines)
+    left = next(row for row in first["flanks"] if row["role"] == "left")
+    assert left["disposition"].endswith("unique_local_w4_end_reach_observed")
+    observed = left["local_end_reach_candidates"][0]
+    assert observed["matched_source_primitive_id"] is None
+    assert observed["matched_source_primitive_ids"] == [
+        "raw:left", "raw:left_other"
+    ]
+    assert [x["local_chain_reaches_flank_end"]
+            for x in observed["source_parent_end_reach"]] == [True, True]
+    assert not first["host_granted"]
+
+    records[0].physical_identity.source_primitive_ids = (
+        "raw:left_other", "raw:left"
+    )
+    second = _ledger(tuple(reversed(records)), dict(reversed(tuple(lines.items()))))
+    assert first == second
+
+
+def test_conflicting_local_parent_span_end_reach_abstains_not_first_or_nearest():
+    records, lines = _fixture()
+    records[0].physical_identity.source_primitive_ids = (
+        "raw:leftshort", "raw:left"
+    )
+    # The W4 chain approaches the sealed end to within original snap allowance
+    # but source parent 99..100 has NO overlap with actual W4 chain ending 98.
+    # The longer 20..100 primitive DOES overlap and is a positive candidate.
+    # Both parents terminate at the source's original flank end.
+    records[0].wall_candidate.centerline_pts = (
+        (20.0, 53.0), (98.0, 53.0)
+    )
+    lines["raw:leftshort"] = (99.0, 53.0, 100.0, 53.0)
+    first = _ledger(records, lines)
+    left = next(row for row in first["flanks"] if row["role"] == "left")
+    assert left["disposition"] == (
+        "raster_source_band_left_source_parent_end_reach_conflict_abstained"
+    )
+    assert left["local_end_reach_candidates"] == []
+    assert left["remote_ancestry_only_candidates"] == []
+    assert left["source_member_count"] == 1
+    assert len(left["conflicting_source_parent_candidates"]) == 1
+    conflicted = left["conflicting_source_parent_candidates"][0]
+    assert conflicted["wall_candidate_id"] == "left"
+    assert conflicted["local_chain_reaches_flank_end"] is None
+    assert [(x["source_primitive_id"], x["local_chain_reaches_flank_end"])
+            for x in conflicted["source_parent_end_reach"]] == [
+                ("raw:left", True),
+                ("raw:leftshort", False),
+            ]
+    assert not first["host_granted"]
+    assert not first["metric_quantity_granted"]
+    assert not first["customer_publication_granted"]
+
+    # Source parent and wall candidate permutation cannot elect the first one.
+    records[0].physical_identity.source_primitive_ids = (
+        "raw:left", "raw:leftshort"
+    )
+    assert _ledger(tuple(reversed(records)), dict(reversed(tuple(lines.items()))) == first
+
+
+def test_duplicate_source_parent_id_rejected_not_normalized_to_one_w4_owner():
+    records, lines = _fixture()
+    records[0].physical_identity.source_primitive_ids = (
+        "raw:left", "raw:left"
+    )
+    with pytest.raises(ValueError, match="duplicate W4 source primitive"):
+        _ledger(records, lines)
