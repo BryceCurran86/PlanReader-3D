@@ -2314,8 +2314,18 @@ class GenericPlanReaderExtractor:
                             dimensions=[width_m, round(gable_h, 2)],
                         )
 
-            # Finishes: strictly gated on drawing annotation presence
-            if "floor_screed" in pred_dict:
+            # Finishes require the physical floor and the wall they cover to
+            # belong to THIS source page. pred_dict is document-scoped; on
+            # another elevation, RCP or smaller floor plan it may still hold
+            # the previously selected largest envelope. A keyword on that
+            # other sheet is not a source-owned room-to-finish correspondence.
+            # Preserve the original plan-page finish logic unchanged.
+            if (
+                "floor_screed" in pred_dict
+                and "perimeter_walling" in pred_dict
+                and pred_dict["floor_screed"].source_page == page_num
+                and pred_dict["perimeter_walling"].source_page == page_num
+            ):
                 cur_wall = pred_dict["perimeter_walling"].quantity
                 cur_perim = pred_dict["perimeter_walling"].dimensions[0] if pred_dict["perimeter_walling"].dimensions else 0.0
                 cur_wall_dims = pred_dict["perimeter_walling"].dimensions
