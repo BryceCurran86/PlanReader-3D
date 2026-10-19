@@ -331,6 +331,15 @@ def build_four_project_evidence_ledger(
             }
             first_failure_stage = "sealed_source_run_parse_or_signature"
             sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
+            # The V1 container can be well-formed even when there is no
+            # physical quantity or explicit source-owned ABSTAIN receipt.
+            # Never turn "producer did not execute" into a four-project
+            # development score of zero, regardless of original PDF presence.
+            first_failure_stage = "signed_source_quantity_universe_empty"
+            if not sealed.quantities:
+                raise ValueError(
+                    "signed production contains no physical quantity or abstention receipts"
+                )
             first_failure_stage = "independent_identity_map_parse"
             mapping = identity_map_from_dict(_json_object(identity_path))
             first_failure_stage = "signed_source_document_envelope"
