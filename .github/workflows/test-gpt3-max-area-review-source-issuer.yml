@@ -6,6 +6,8 @@ on:
     paths:
       - tools/diag_gpt3_max_area_review_source_issuer_bijection.py
       - tests/test_gpt3_max_area_review_source_issuer_bijection.py
+      - tools/diag_gpt3_lot16_max_area_owner_original_replay.py
+      - tests/test_gpt3_lot16_max_area_owner_original_replay.py
       - pb_live_opening_area_quantity_publication.py
       - tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py
       - .github/workflows/test-gpt3-max-area-review-source-issuer.yml
@@ -31,10 +33,41 @@ jobs:
         run: |
           PYTHONPATH=. python -m pytest -q \
             tests/test_gpt3_max_area_review_source_issuer_bijection.py \
+            tests/test_gpt3_lot16_max_area_owner_original_replay.py \
             tests/test_live_opening_area_quantity_publication.py \
             tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
           ruff check --select F821,F823 \
             tools/diag_gpt3_max_area_review_source_issuer_bijection.py \
+            tools/diag_gpt3_lot16_max_area_owner_original_replay.py \
             tests/test_gpt3_max_area_review_source_issuer_bijection.py
       # Exact client-original PDF is not checked into this public repository.
       # A missing-original test is SKIPPED, never source-positive verified.
+
+  owner-original-lot16-source-replay:
+    # Public pull-request runners do not contain private client-owned PDFs.
+    # A skipped job is NOT positive original-source verification.
+    if: ${{ vars.PLANREADER_OWNER_ORIGINAL_SOURCE_READY == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Reproduce actual Lot16 original opening source, MAX and GPT3 seals
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum -c
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_max_area_owner_original_replay.py \
+            --pdf "$PDF" --output artifacts/gpt3-lot16-max-original-area-source-replay.json
+      - name: Preserve audit report only, not source PDF or customer records
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-lot16-max-original-area-convergence-only
+          path: artifacts/gpt3-lot16-max-original-area-source-replay.json
+          retention-days: 14
