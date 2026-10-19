@@ -18,7 +18,7 @@ from typing import Any, Iterable
 def _field(record: Any, name: str) -> Any:
     if isinstance(record, Mapping):
         return record.get(name)
-    return getattr(record, name)
+    return getattr(record, name, None)
 
 
 _COMPATIBLE_TRADES = {
@@ -89,9 +89,16 @@ def require_signed_v2_family_trade_integrity(
         declared_family = _field(binding, "production_family")
         if candidates and (
             type(declared_family) is not str
-            or not declared_family
             or declared_family != declared_family.strip()
         ):
+            raise ValueError(
+                "mapped quantity identity requires its explicit original production family"
+            )
+        typed_candidates = [
+            quantity for quantity in candidates
+            if _field(quantity, "family") == declared_family
+        ]
+        if candidates and not typed_candidates:
             raise ValueError(
                 "mapped quantity identity requires its explicit original production family"
             )
