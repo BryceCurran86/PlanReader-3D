@@ -233,17 +233,38 @@ def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[Carpent
 def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTakeoffItem]:
     """Calculate trade items for prefabricated timber roof trusses and battens."""
     items: List[CarpentryTakeoffItem] = []
-    length = spec.length_m
-    span = spec.width_m if spec.width_m > 0.0 else 8.0
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (length * span)
-    if area <= 0.0:
+    # A previous 8.0 m fallback labelled roof trusses as Measured even
+    # when the source supplied no physical span. Keep numeric candidates
+    # only for real dimensions. Standard 900 mm centres are still a design
+    # assumption, not a counted original truss layout.
+    def _positive_metric(value: object) -> float | None:
+        if type(value) not in (int, float):
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return numeric if math.isfinite(numeric) and numeric > 0.0 else None
+
+    length = _positive_metric(spec.length_m)
+    span = _positive_metric(spec.width_m)
+    explicit_area = _positive_metric(spec.area_m2)
+    area = explicit_area if explicit_area is not None else (
+        length * span if length is not None and span is not None else None
+    )
+    if area is None:
         return items
 
-    # Trusses spaced at 900mm centres
-    truss_count = int(math.ceil(length / 0.900)) + 1
+    if length is None or span is None:
+        # Without both dimensions the count of complete trusses is not
+        # measured, and the roof area alone must not mint a nominal span.
+        truss_count = None
+    else:
+        truss_count = int(math.ceil(length / 0.900)) + 1
 
     # 1. Prefabricated Trusses (No.)
-    items.append(CarpentryTakeoffItem(
+    if truss_count is not None:
+        items.append(CarpentryTakeoffItem(
         section="Roof",
         element=f"Prefabricated timber roof trusses ({span:.1f}m span)",
         location=f"Roof trusses · {spec.element_id}",
@@ -251,16 +272,17 @@ def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system="Erected, braced with speed-bracing and tied down with triple-grips",
         quantity=float(truss_count),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{truss_count} No. trusses spaced @ 900mm crs over {length:.2f}m run.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {truss_count} No. trusses estimated @ 900mm crs over {length:.2f}m source run; original truss setting-out and material unverified.",
         row_role="",
     ))
 
-    # 2. Roof Battens: approx 1.2 lm per m² of roof area (@ 900mm crs)
+    # 2. Roof Battens: approx 1.25 lm per m², not actual measured
+    # original batten lengths. Preserve it as a provisional design estimate.
     battens_lm = round(area * 1.25, 2)
     items.append(CarpentryTakeoffItem(
         section="Roof",
@@ -270,12 +292,12 @@ def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system="Fixed across truss top chords to receive roof sheeting",
         quantity=battens_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Roof battens run: {battens_lm:.2f} lm over {area:.2f} m² roof plane.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional batten rate-based estimate: {battens_lm:.2f} lm over {area:.2f} m²; actual battens/spacing/material not source-confirmed.",
         row_role="",
     ))
 
