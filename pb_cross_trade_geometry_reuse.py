@@ -22,6 +22,7 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from pb_auto_geometry_v1219 import SOURCE_PREFIX
 import pb_takeoff_row_contract as takeoff_contract
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 
 
 _ALLOWED_HOST_TYPES = {"WALL", "SLAB", "ROOF", "SPACE", "FLOOR", "CEILING"}
@@ -756,18 +757,31 @@ def _derive_area_surface_trade_quantities(
     authority_field: str,
     trade_definitions: Sequence[tuple[str, str, str]],
 ) -> List[DerivedTradeQuantity]:
-    host_id = _clean(surface.get(host_id_field))
+    host_id = surface.get(host_id_field)
     area_m2 = _positive(surface.get(area_field))
-    quantity_id = _clean(surface.get(quantity_id_field))
-    authority = _clean(surface.get(authority_field))
+    quantity_id = surface.get(quantity_id_field)
+    authority = surface.get(authority_field)
     host_evidence = _evidence_ids(surface.get("evidence_ids"))
     if (
-        not host_id
+        type(host_id) is not str or not host_id or host_id!=host_id.strip()
         or area_m2 is None
-        or not quantity_id
-        or not authority
+        or type(quantity_id) is not str or not quantity_id
+        or quantity_id != quantity_id.strip()
+        or type(authority) is not str or not authority
+        or authority != authority.strip()
         or not host_evidence
     ):
+        return []
+    if (
+        host_type=="FLOOR"
+        and authority not in {
+            MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            MeasurementAuthorityType.PDF_SCALED.value,
+            MeasurementAuthorityType.USER_APPROVED.value,
+        }
+    ):
+        # A provisional, AI, label-only or arbitrary authority string cannot
+        # be promoted by copying an already-known area into trade coverage.
         return []
 
     host_evidence = tuple(
