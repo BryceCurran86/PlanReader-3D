@@ -200,3 +200,37 @@ def test_missing_original_mark_source_scope_or_multiple_marks_never_publish():
             _w4_source_positive_candidate(),rival)
         assert result["first_failure"]=="original_finish_scope_or_unique_source_mark_unproven"
         assert result["source_finish_area_quantity_issued"] is False
+
+
+def test_all_laid_floor_finishes_stop_at_internal_faces_and_door_thresholds():
+    original=_material_source_positive_candidate()
+    for code in ("FT2", "FT3", "VINYL", "FT5"):
+        candidate={**original,"original_finish_code":code}
+        result=audit_gpt2_w4_material_to_gpt1(
+            _w4_source_positive_candidate(),candidate)
+        assert result["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+        assert result["floor_finish_measurement_boundary_basis"]==(
+            "inside_finished_wall_faces")
+        assert result["all_floor_finishes_exclude_wall_footprint"] is True
+        assert result["FT2_exclude_wall_footprint"] is (code == "FT2")
+        assert result["FT3_exclude_wall_footprint"] is (code == "FT3")
+        assert result["floor_finish_doorway_transition_boundary_required"] is True
+        assert result["original_finished_wall_face_boundary_authenticated"] is False
+        assert result["original_doorway_finish_transition_boundary_authenticated"] is False
+        assert result["original_dimension_terminal_to_finished_W4_face_proven"] is False
+        assert result["original_D13_threshold_finish_area_verified"] is False
+        assert result["source_quantity_sealing_authority_granted"] is False
+        assert result["new_firm_quantities"]==0
+
+
+def test_different_floor_finish_code_does_not_change_source_measured_area():
+    original=_material_source_positive_candidate()
+    owner=_w4_source_positive_candidate()
+    issued=[
+        audit_gpt2_w4_material_to_gpt1(owner,{**original,"original_finish_code":code})
+        for code in ("FT2","FT3")
+    ]
+    assert all(r["source_metric_room_area_not_minted_here"] is True for r in issued)
+    assert all(r["source_finish_area_quantity_issued"] is False for r in issued)
+    assert issued[0]["floor_finish_measurement_boundary_basis"]==(
+        issued[1]["floor_finish_measurement_boundary_basis"])

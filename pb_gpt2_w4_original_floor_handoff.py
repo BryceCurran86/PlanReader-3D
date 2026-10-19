@@ -254,11 +254,18 @@ def audit_gpt2_w4_material_to_gpt1(
         # Whether the A502 3570/2200 dimension terminals actually land
         # on these W4 finished faces is separately unproved here; do not
         # assert the 92mm strokes fall outside the validated W4 ring.
-        "floor_finish_measurement_boundary_basis":(
-            "inside_finished_wall_faces" if material_result["original_finish_code"]=="FT2"
-            else "material_specific_finished_face_authority_required"
-        ),
+        # Every laid floor covering is measured to the INSIDE FINISHED
+        # wall faces and ends at its source-owned doorway/finish threshold.
+        # This is a measurement rule, not evidence that the actual finished
+        # wall offsets or threshold positions have yet been authenticated.
+        "floor_finish_measurement_boundary_basis":
+            "inside_finished_wall_faces",
+        "all_floor_finishes_exclude_wall_footprint":True,
+        "floor_finish_doorway_transition_boundary_required":True,
+        "original_finished_wall_face_boundary_authenticated":False,
+        "original_doorway_finish_transition_boundary_authenticated":False,
         "FT2_exclude_wall_footprint":material_result["original_finish_code"]=="FT2",
+        "FT3_exclude_wall_footprint":material_result["original_finish_code"]=="FT3",
         "FT2_92mm_wall_widths_already_outside_clear_figures":None,
         "original_dimension_terminal_to_finished_W4_face_proven":False,
         "original_D13_threshold_finish_area_verified":False,
