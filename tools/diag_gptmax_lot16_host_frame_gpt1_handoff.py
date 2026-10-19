@@ -61,6 +61,52 @@ def _frame_valid(frame: dict | None, host: dict | None, identity: str) -> bool:
     return True
 
 
+def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) -> bool:
+    """Independent original axis receipts must agree with printed dimensions.
+
+    A PDF callout such as 1215 SGW gives a *pair* without proving which
+    printed number is the width. The separate live canonical producer may
+    resolve both width and height from frame/schedule/physical witnesses.
+    Do not veto those independently source-owned axes solely because the
+    callout's order is unresolved; equally, never permit a matching area
+    product with unrelated or swapped dimensions to pass this review gate.
+    This is diagnostic compatibility only, NEVER a measurement issuer.
+    """
+    width_id = canonical.get("width_record_id")
+    height_id = canonical.get("height_record_id")
+    if (type(width_id) is not str or not width_id or width_id != width_id.strip()
+            or type(height_id) is not str or not height_id
+            or height_id != height_id.strip() or width_id == height_id
+            or canonical.get("geometry_complete") is not True):
+        return False
+    width = canonical.get("width_m")
+    height = canonical.get("height_m")
+    if not _positive(width) or not _positive(height):
+        return False
+    raw_pair = evidence.get("dimension_values_mm")
+    if (type(raw_pair) not in (tuple, list) or len(raw_pair) != 2
+            or any(not _positive(v) for v in raw_pair)):
+        return False
+    dimensions = sorted(float(v) / 1000 for v in raw_pair)
+    axes = sorted((float(width), float(height)))
+    if not all(math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-9)
+               for a, b in zip(dimensions, axes)):
+        return False
+    # If the original label authority *also* claims width/height order, it
+    # must not contradict the independently issued canonical axis records.
+    figured_width, figured_height = evidence.get("width_mm"), evidence.get("height_mm")
+    if (figured_width is None) != (figured_height is None):
+        return False
+    if figured_width is not None:
+        if (not _positive(figured_width) or not _positive(figured_height)
+                or not math.isclose(float(figured_width) / 1000, width,
+                                    rel_tol=1e-8, abs_tol=1e-9)
+                or not math.isclose(float(figured_height) / 1000, height,
+                                    rel_tol=1e-8, abs_tol=1e-9)):
+            return False
+    return True
+
+
 def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                                     f07: dict, *, source_root: dict) -> dict:
     """Fail-closed review queue, not a new measurement or signed authority."""
@@ -116,14 +162,15 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             if (c.get("figured_area_record_id")
                     and e.get("evidence_id") != c["figured_area_record_id"]):
                 raise ValueError("canonical source dimension identity mismatch")
+        # The printed pair is order-invariant; the canonical producer's
+        # distinct source-owned width and height records are independently
+        # ordered. Require both actual axis values to match the printed pair,
+        # not merely their product, without using the label to invent order.
         axis_ok = (
-            pair_ok and bool(e.get("axis_order_resolved"))
-            and bool(c.get("width_record_id")) and bool(c.get("height_record_id"))
-            and c["width_record_id"] != c["height_record_id"]
-            and _positive(c.get("width_m")) and _positive(c.get("height_m"))
-            and bool(c.get("geometry_complete"))
+            pair_ok
+            and _source_owned_axes_agree_with_figured_pair(c, e)
             and math.isclose(
-                c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-6)
+                c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
         if not supported:
@@ -153,6 +200,14 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
             "axis_order_authenticated": axis_ok,
+            "original_figured_label_order_source_resolved": (
+                e.get("axis_order_resolved") is True if pair_ok else False
+            ),
+            "independent_source_axis_record_ids": (
+                [c["width_record_id"], c["height_record_id"]]
+                if axis_ok else []
+            ),
+            "independent_axes_agree_with_original_pair": axis_ok,
             "filling_kind_source_supported": typed,
             "prior_signed_quantity_id": row.get("quantity_id"),
             "first_remaining_gate": gate,
