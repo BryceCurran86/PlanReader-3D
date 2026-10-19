@@ -30,8 +30,12 @@ def test_page_aliases_and_invalid_pages_never_publish_firm_room_area(bad):
     (), ("page-2",), ("page-1", "page-1"), ("",), (" page-1",),
 ])
 def test_missing_duplicate_or_foreign_document_pages_never_seal_room_area(page_ids):
-    from dataclasses import replace
-    document = replace(_document(), page_ids=page_ids)
+    from copy import copy
+    # DocumentEvidence construction itself rejects duplicate pages. This
+    # adversarial replay bypasses the constructor to exercise the production
+    # FIRM-publication boundary against a tampered original manifest.
+    document = copy(_document())
+    object.__setattr__(document, "page_ids", page_ids)
     quantity = build_room_area_quantity(
         room=_room(), context=_context(), document=document,
         viewport=_viewport(), entity=_entity(), page_no=1,
