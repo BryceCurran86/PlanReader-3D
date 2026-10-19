@@ -236,9 +236,24 @@ def execute_jobhub_publishing(
         raise RuntimeError("Target JobHub job ID is required to publish package")
 
     # Verify target job exists in JobHub
-    job_rows = bridge.query("SELECT id, status FROM jobs WHERE id=?", (target_job_id,))
+    # A numeric database ID is not a verified cross-application project
+    # identity.  A stale/wrong JobHub target must never receive even draft
+    # source documents, especially when tenants have similar project labels.
+    job_rows = bridge.query(
+        "SELECT id, status, job_no FROM jobs WHERE id=?", (target_job_id,)
+    )
     if not job_rows:
         raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
+    original_job_no = package.project_identity.job_no
+    target_job_no = job_rows[0].get("job_no")
+    if (
+        type(target_job_no) is not str
+        or not target_job_no.strip()
+        or target_job_no.strip() != original_job_no.strip()
+    ):
+        raise RuntimeError(
+            "JobHub target job number conflicts with PlanReader project identity"
+        )
 
     # Calculate aggregates
     total_qty_m2 = 0.0
