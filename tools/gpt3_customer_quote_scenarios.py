@@ -192,7 +192,7 @@ def supplier_rfq_csv(report: Mapping[str, Any]) -> str:
             "project_id": _csv_text(report["project_id"]),
             "family": _csv_text(row["family"]),
             "unit": _csv_text(row["unit"]),
-            "source_quantity_ids": ";".join(row["unpriced_quantity_ids"]),
+            "source_quantity_ids": _csv_text(";".join(row["unpriced_quantity_ids"])),
             "requested_input": row["request"],
             "currency": report["currency"],
         })
