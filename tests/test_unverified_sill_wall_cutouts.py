@@ -48,6 +48,19 @@ def test_legacy_door_has_floor_threshold_but_not_a_proven_location():
     assert _opening_rects(attached, "N01", 6.0, 3.0) == []
 
 
+@pytest.mark.parametrize("kind", ["Door", "Garage door"])
+@pytest.mark.parametrize("unknown", [None, "", -1, True, "invalid"])
+def test_unknown_door_sill_survives_register_attachment(kind, unknown):
+    app = RegisterApp([{
+        "id": "D01", "kind": kind, "wall_ref": "N01", "sill_m": unknown,
+        "width_m": 0.9, "height_m": 2.1, "quantity": 1,
+    }])
+    attached = attach_openings(app, 1, [{"wall_ref": "N01", "length_m": 6.0}])
+    assert attached[0]["sill_m"] is None
+    assert app.saved[0]["sill_m"] is None
+    assert _opening_rects(attached, "N01", 6.0, 3.0) == []
+
+
 @pytest.mark.parametrize("extra", [
     {"offset_m": 1.0},  # unknown sill
     {"sill_m": 0.9},    # unknown wall position

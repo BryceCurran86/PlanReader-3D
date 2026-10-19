@@ -900,10 +900,11 @@ def from_v134_record(
     height = _num(record.get("height_m"))
     quantity = _stated_positive_count(record.get("quantity"))
     raw_sill = record.get("sill_m")
-    if raw_sill in (None, ""):
-        # A door threshold has a floor datum; plan-only windows do not.
+    if "sill_m" not in record:
+        # Preserve the legacy absent-key floor datum, but never replace an
+        # explicitly unknown or rejected datum during a persistence roundtrip.
         sill = 0.0 if opening_type in (OPENING_TYPE_DOOR, OPENING_TYPE_GARAGE, OPENING_TYPE_ROLLER) else None
-    elif isinstance(raw_sill, bool):
+    elif raw_sill in (None, "") or isinstance(raw_sill, bool):
         sill = None
     else:
         candidate_sill = _num(raw_sill, -1.0)

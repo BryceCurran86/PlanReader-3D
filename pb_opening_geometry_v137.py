@@ -43,9 +43,9 @@ def attach_openings(app:Any,workspace_id:int,walls:List[Dict[str,Any]])->List[Di
         x0=max(0.0,(length-width)/2.0) if length else 0.0
         kind=str(item.get("kind") or "").lower()
         raw_sill=item.get("sill_m")
-        if raw_sill in (None, ""):
+        if "sill_m" not in item:
             sill=0.0 if kind.startswith(("door", "garage door", "roller door")) else None
-        elif isinstance(raw_sill,bool):
+        elif raw_sill in (None, "") or isinstance(raw_sill,bool):
             sill=None
         else:
             candidate_sill=_num(raw_sill,-1.0)
