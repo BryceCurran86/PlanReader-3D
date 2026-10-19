@@ -123,3 +123,55 @@ def test_work_queue_retains_each_objects_first_gate_and_all_missing_evidence(rep
             assert all(r["first_remaining_gate"]==p["next_required_evidence"][0] for r in owned)
             assert [r["required_evidence_rank"] for r in owned] == [str(i+1) for i in range(len(owned))]
             assert all(r["source_sha256"] == p["selector"]["source_sha256"] for r in owned)
+
+
+@pytest.mark.parametrize("damage", (
+    "opening-record-id", "opening-page", "opening-snapshot",
+    "missing-source-observations", "duplicate-source-observation",
+    "duplicate-physical-identity", "unowned-source-ancestry",
+    "malformed-local-frame", "malformed-local-evidence",
+))
+def test_export_rejects_contradictory_physical_source_packet_before_writing(
+        report, tmp_path, damage):
+    """Source-review explanations must never re-key physical source evidence."""
+    data = deepcopy(report)
+    packets = data["original_opening_review_packets"]
+    p = next(p for p in packets if p["physical_opening"] is not None)
+    if damage == "opening-record-id":
+        p["physical_opening"]["record_id"] += "_different"
+    elif damage == "opening-page":
+        p["physical_opening"]["page_id"] = "999"
+    elif damage == "opening-snapshot":
+        p["physical_opening"]["snapshot_id"] = "unrelated_snapshot"
+    elif damage == "missing-source-observations":
+        p["physical_opening"]["source_observation_ids"] = []
+    elif damage == "duplicate-source-observation":
+        original = p["physical_opening"]["source_observation_ids"][0]
+        p["physical_opening"]["source_observation_ids"] = [original, original]
+    elif damage == "duplicate-physical-identity":
+        alternative = deepcopy(p)
+        alternative["packet_id"] = "opening_source_review_shadow_" + "f" * 32
+        assert alternative["packet_id"] != p["packet_id"]
+        packets.append(alternative)
+    elif damage == "unowned-source-ancestry":
+        p["physical_opening"] = None
+        p["opening_identity_id"] = None
+    elif damage == "malformed-local-frame":
+        p["local_aperture_frame"] = ["candidate"]
+    elif damage == "malformed-local-evidence":
+        p["local_aperture_frame"] = {"status": "candidate", "evidence": []}
+    output = tmp_path / "never-publish" / "review.zip"
+    with pytest.raises(ValueError):
+        export.build_opening_source_review_package(data, output)
+    assert not output.exists()
+    assert not output.parent.exists()
+
+
+def test_review_export_keeps_original_and_alternate_identity_spaces_separate(report, tmp_path):
+    """The same physical opening may appear once in each independent source branch."""
+    output = tmp_path / "review.zip"
+    export.build_opening_source_review_package(report, output)
+    with zipfile.ZipFile(output) as archive:
+        manifest = archive.read("manifest.json")
+        assert b'"authority_import_allowed":false' in manifest
+        assert archive.testzip() is None
