@@ -89,10 +89,31 @@ class FlooringTakeoffItem:
         }
 
 
+def _typed_metric(value: object, *, positive: bool = False) -> float | None:
+    if type(value) not in (int, float):
+        return None
+    try:
+        metric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(metric) or metric < 0.0 or (positive and metric <= 0.0):
+        return None
+    return metric
+
+
+def _original_doorway_net_perimeter(spec: FlooringSpaceSpec) -> float | None:
+    """Return the model's skirting/gripper estimate, never a FIRM line item."""
+    perimeter = _typed_metric(spec.perimeter_lm)
+    doorway = _typed_metric(spec.door_deduction_lm)
+    if perimeter is None or doorway is None or doorway > perimeter:
+        return None
+    return round(perimeter - doorway, 2)
+
+
 def calculate_timber_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]:
     """Calculate trade items for timber, engineered wood, or laminate flooring."""
     items: List[FlooringTakeoffItem] = []
-    if spec.area_m2 <= 0.0:
+    if _typed_metric(spec.area_m2, positive=True) is None:
         return items
 
     # 1. Timber Floor Covering (m²)
@@ -104,12 +125,12 @@ def calculate_timber_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
         finish_system="Laid with staggered end-joints and 10mm perimeter expansion gap",
         quantity=spec.area_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Net floor area: {spec.area_m2:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional internal floor area {spec.area_m2:.2f} m²; physical clear wall faces and timber finish must be authenticated from original drawing.",
         row_role="floor_area",
     ))
 
@@ -122,18 +143,18 @@ def calculate_timber_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
         finish_system="Loose laid with taped butt joints",
         quantity=spec.area_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Matches timber area: {spec.area_m2:.2f} m².",
         row_role="",
     ))
 
     # 3. Perimeter Quad / Beading (lm)
-    net_perimeter = max(0.0, spec.perimeter_lm - spec.door_deduction_lm)
-    if net_perimeter > 0.0:
+    net_perimeter = _original_doorway_net_perimeter(spec)
+    if net_perimeter is not None and net_perimeter > 0.0:
         items.append(FlooringTakeoffItem(
             section=spec.section,
             element="Perimeter timber quad beading",
@@ -142,12 +163,12 @@ def calculate_timber_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
             finish_system="Pinned to skirting over expansion gap",
             quantity=round(net_perimeter, 2),
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Net perimeter: {net_perimeter:.2f} lm (Perimeter {spec.perimeter_lm:.2f} lm less door opening).",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional quad {net_perimeter:.2f} lm after assumed {spec.door_deduction_lm:.2f} lm doorway deduction; original threshold width unresolved.",
             row_role="",
         ))
 
@@ -157,7 +178,7 @@ def calculate_timber_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
 def calculate_carpet_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]:
     """Calculate trade items for broadloom carpet or carpet tiles."""
     items: List[FlooringTakeoffItem] = []
-    if spec.area_m2 <= 0.0:
+    if _typed_metric(spec.area_m2, positive=True) is None:
         return items
 
     # 1. Carpet Covering (m²)
@@ -169,12 +190,12 @@ def calculate_carpet_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
         finish_system="Power stretched onto perimeter smooth edge grippers",
         quantity=spec.area_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Net room floor area: {spec.area_m2:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional internal floor area {spec.area_m2:.2f} m²; carpet finishes end at actual doorway threshold, not inferred 900mm or under walls.",
         row_role="floor_area",
     ))
 
@@ -187,18 +208,18 @@ def calculate_carpet_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
         finish_system="Taped seams, fitted within smooth-edge perimeter",
         quantity=spec.area_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
         notes=f"Matches carpet area: {spec.area_m2:.2f} m².",
         row_role="",
     ))
 
     # 3. Smooth Edge Grippers (lm)
-    net_perimeter = max(0.0, spec.perimeter_lm - spec.door_deduction_lm)
-    if net_perimeter > 0.0:
+    net_perimeter = _original_doorway_net_perimeter(spec)
+    if net_perimeter is not None and net_perimeter > 0.0:
         items.append(FlooringTakeoffItem(
             section=spec.section,
             element="Carpet smooth-edge architectural grippers",
@@ -207,12 +228,12 @@ def calculate_carpet_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
             finish_system="Fastened to concrete/timber substrate @ 6mm from skirting",
             quantity=round(net_perimeter, 2),
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Gripper run: {net_perimeter:.2f} lm.",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional gripper run {net_perimeter:.2f} lm; doorway deduction {spec.door_deduction_lm:.2f} lm is not source-authenticated.",
             row_role="",
         ))
 
@@ -222,9 +243,14 @@ def calculate_carpet_flooring_items(spec: FlooringSpaceSpec) -> List[FlooringTak
 def calculate_tiling_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]:
     """Calculate trade items for floor tiling, sand/cement screed, and waterproofing."""
     items: List[FlooringTakeoffItem] = []
-    if spec.area_m2 <= 0.0:
+    if _typed_metric(spec.area_m2, positive=True) is None:
         return items
 
+    if any(type(flag) is not bool for flag in
+           (spec.is_wet_area, spec.requires_screed, spec.requires_waterproofing)):
+        return items
+    # The material and inside-wall-face are generic modelling inputs here;
+    # a source-closed FT occurrence producer must independently certify them.
     # 1. Floor Tiling (m²)
     items.append(FlooringTakeoffItem(
         section=spec.section,
@@ -234,17 +260,20 @@ def calculate_tiling_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]
         finish_system="Laid to falls with matching epoxy/cementitious grout and perimeter silicone",
         quantity=spec.area_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Tiled floor area: {spec.area_m2:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional tiling area {spec.area_m2:.2f} m²; finish mark/material and clear internal floor boundary require source authentication.",
         row_role="floor_area",
     ))
 
     # 2. Sand & Cement Screed to Falls (m²)
-    if spec.requires_screed or spec.is_wet_area:
+    if (
+        (spec.requires_screed or spec.is_wet_area)
+        and type(spec.screed_depth_mm) is int and spec.screed_depth_mm > 0
+    ):
         items.append(FlooringTakeoffItem(
             section=spec.section,
             element=f"Sand & cement bed screed ({spec.screed_depth_mm}mm average)",
@@ -253,17 +282,20 @@ def calculate_tiling_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]
             finish_system="Trowelled and graded to floor waste (minimum 1:80 fall)",
             quantity=spec.area_m2,
             unit="m²",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Screed area: {spec.area_m2:.2f} m² ({spec.screed_depth_mm}mm nominal thickness).",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional screed area: {spec.area_m2:.2f} m² ({spec.screed_depth_mm}mm nominal thickness); original screed scope/falls/thickness unverified.",
             row_role="",
         ))
 
     # 3. Liquid Waterproofing Membrane with Perimeter Upturns (m²)
-    if spec.requires_waterproofing or spec.is_wet_area:
+    if (
+        (spec.requires_waterproofing or spec.is_wet_area)
+        and _typed_metric(spec.perimeter_lm) is not None
+    ):
         # Floor area + 150mm vertical perimeter upturn (plus bond breaker)
         upturn_m2 = round(spec.perimeter_lm * 0.150, 2)
         total_waterproofing_m2 = round(spec.area_m2 + upturn_m2, 2)
@@ -275,18 +307,18 @@ def calculate_tiling_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]
             finish_system="2 coats applied over primed substrate with 150mm vertical upturns",
             quantity=total_waterproofing_m2,
             unit="m²",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Waterproofing area: {spec.area_m2:.2f} m² floor + {upturn_m2:.2f} m² upturns = {total_waterproofing_m2:.2f} m² total.",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional waterproofing {spec.area_m2:.2f} m² plus assumed 150mm upturn {upturn_m2:.2f} m² = {total_waterproofing_m2:.2f} m²; membrane, actual wet scope and upturn not authenticated.",
             row_role="",
         ))
 
     # 4. Tile Skirtings (lm)
-    net_perimeter = max(0.0, spec.perimeter_lm - spec.door_deduction_lm)
-    if net_perimeter > 0.0:
+    net_perimeter = _original_doorway_net_perimeter(spec)
+    if net_perimeter is not None and net_perimeter > 0.0:
         items.append(FlooringTakeoffItem(
             section=spec.section,
             element="Tile skirtings (100mm high)",
@@ -295,12 +327,12 @@ def calculate_tiling_items(spec: FlooringSpaceSpec) -> List[FlooringTakeoffItem]
             finish_system="Adhesive fixed with silicone joint at floor junction",
             quantity=round(net_perimeter, 2),
             unit="lm",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FLOORING_SOURCE_PREFIX} · {spec.space_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Tile skirting run: {net_perimeter:.2f} lm.",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional tile skirting {net_perimeter:.2f} lm; doorway deduction {spec.door_deduction_lm:.2f} lm is a model assumption unless independently verified.",
             row_role="",
         ))
 
