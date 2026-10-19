@@ -11,13 +11,14 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import (
     SealedSourceClosedRun, sealed_source_closed_run_from_dict,
 )
 from tools.gpt3_safe_original_report_output import (
     preflight_new_diagnostic, write_new_diagnostic,
 )
-from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object
+from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object, _json_customer_rows
 
 
 _IDENTITY_FIELDS = (
@@ -126,18 +127,41 @@ def _digest(path: Path) -> str:
 
 def build_signed_v1_physical_drift_report(
     *, baseline_path: Path, candidate_path: Path,
+    baseline_customer_path: Path | None = None,
+    candidate_customer_path: Path | None = None,
 ) -> dict:
-    hashes_before = (_digest(baseline_path), _digest(candidate_path))
+    if (baseline_customer_path is None) != (candidate_customer_path is None):
+        raise ValueError("both source-closed customer snapshots must be provided together")
+    paths = (baseline_path, candidate_path)
+    if baseline_customer_path is not None and candidate_customer_path is not None:
+        paths += (baseline_customer_path, candidate_customer_path)
+    hashes_before = tuple(_digest(path) for path in paths)
     baseline = sealed_source_closed_run_from_dict(_json_object(baseline_path))
     candidate = sealed_source_closed_run_from_dict(_json_object(candidate_path))
+    if baseline_customer_path is not None and candidate_customer_path is not None:
+        baseline_rows = _json_customer_rows(baseline_customer_path, allow_manual=True)
+        candidate_rows = _json_customer_rows(candidate_customer_path, allow_manual=True)
+        baseline_verified = verify_sealed_customer_output(baseline, baseline_rows)
+        candidate_verified = verify_sealed_customer_output(candidate, candidate_rows)
     result = compare_signed_v1_physical_runs(baseline, candidate)
-    hashes_after = (_digest(baseline_path), _digest(candidate_path))
+    if baseline_customer_path is not None and candidate_customer_path is not None:
+        result["customer_epoch_bijection"] = "BOTH_INDEPENDENTLY_VERIFIED"
+        result["baseline_verified_customer_count"] = baseline_verified.customer_row_count
+        result["candidate_verified_customer_count"] = candidate_verified.customer_row_count
+    else:
+        result["customer_epoch_bijection"] = "NOT_PROVIDED_NOT_VERIFIED"
+    hashes_after = tuple(_digest(path) for path in paths)
     if hashes_before != hashes_after:
-        raise ValueError("signed source artifact changed during drift comparison")
+        raise ValueError("signed source/customer artifact changed during drift comparison")
     result["source_receipt_file_sha256s"] = {
         "baseline": hashes_before[0],
         "candidate": hashes_before[1],
     }
+    if len(hashes_before) == 4:
+        result["customer_receipt_file_sha256s"] = {
+            "baseline": hashes_before[2],
+            "candidate": hashes_before[3],
+        }
     return result
 
 
@@ -145,12 +169,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-sealed", type=Path, required=True)
     parser.add_argument("--candidate-sealed", type=Path, required=True)
+    parser.add_argument("--baseline-customer", type=Path)
+    parser.add_argument("--candidate-customer", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    protected = (FROZEN_ROOT, args.baseline_sealed, args.candidate_sealed)
+    if (args.baseline_customer is None) != (args.candidate_customer is None):
+        parser.error("both customer epochs must be provided together")
+    protected = (
+        FROZEN_ROOT, args.baseline_sealed, args.candidate_sealed,
+        args.baseline_customer, args.candidate_customer,
+    )
     preflight_new_diagnostic(args.output, protected_roots=protected)
     report = build_signed_v1_physical_drift_report(
         baseline_path=args.baseline_sealed, candidate_path=args.candidate_sealed,
+        baseline_customer_path=args.baseline_customer,
+        candidate_customer_path=args.candidate_customer,
     )
     write_new_diagnostic(
         args.output,
