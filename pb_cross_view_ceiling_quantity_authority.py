@@ -254,6 +254,14 @@ class CrossViewCeilingQuantityResult:
             "source_room_face_record_id",
             "upstream_room_area_quantity_id",
         )
+        if any(
+            type(getattr(record, field)) is not str
+            or not getattr(record, field)
+            or getattr(record, field) != getattr(record, field).strip()
+            for record in self.records
+            for field in physical_ownership_fields
+        ):
+            return MappingProxyType({})
         physical_ownership_counts = {
             field: Counter(getattr(record, field) for record in self.records)
             for field in physical_ownership_fields
