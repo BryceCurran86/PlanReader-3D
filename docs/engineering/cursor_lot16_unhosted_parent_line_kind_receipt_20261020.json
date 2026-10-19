@@ -1,0 +1,73 @@
+{
+  "benchmark_score_granted": false,
+  "host_granted": false,
+  "line_auth_outcome_counts": {
+    "parent_kind_not_raster_pdf_visible_segment": 48
+  },
+  "measurement_published": false,
+  "openings": [
+    {
+      "derivation_parent_count": 8,
+      "g17_support_observation_count": 8,
+      "host_granted": false,
+      "outcome_counts": {
+        "parent_kind_not_raster_pdf_visible_segment": 8
+      },
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+    },
+    {
+      "derivation_parent_count": 8,
+      "g17_support_observation_count": 8,
+      "host_granted": false,
+      "outcome_counts": {
+        "parent_kind_not_raster_pdf_visible_segment": 8
+      },
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d"
+    },
+    {
+      "derivation_parent_count": 8,
+      "g17_support_observation_count": 8,
+      "host_granted": false,
+      "outcome_counts": {
+        "parent_kind_not_raster_pdf_visible_segment": 8
+      },
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f"
+    },
+    {
+      "derivation_parent_count": 8,
+      "g17_support_observation_count": 8,
+      "host_granted": false,
+      "outcome_counts": {
+        "parent_kind_not_raster_pdf_visible_segment": 8
+      },
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd"
+    },
+    {
+      "derivation_parent_count": 8,
+      "g17_support_observation_count": 8,
+      "host_granted": false,
+      "outcome_counts": {
+        "parent_kind_not_raster_pdf_visible_segment": 8
+      },
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b"
+    },
+    {
+      "derivation_parent_count": 8,
+      "g17_support_observation_count": 8,
+      "host_granted": false,
+      "outcome_counts": {
+        "parent_kind_not_raster_pdf_visible_segment": 8
+      },
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787"
+    }
+  ],
+  "page_id": "3",
+  "parent_observation_kind_counts": {
+    "raster_opening_primitive_segment": 48
+  },
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_UNHOSTED_PARENT_LINE_KIND_CENSUS",
+  "unhosted_opening_count": 6
+}
