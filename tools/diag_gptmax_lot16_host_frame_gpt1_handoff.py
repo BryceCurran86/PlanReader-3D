@@ -179,9 +179,13 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
-        # A source-issued area from an unordered two-number label does NOT
-        # imply width/height order. Review opening AREA independently from
-        # 3D axis geometry; neither review flag signs a quantity.
+        # A source-issued FIGURED area from an unordered two-number label is
+        # independent of a COMPLETE whole-wall frame. The existing signed
+        # opening-area publisher accepts a source-authenticated host binding
+        # with no host frame; older signed source-proven opening areas exercise
+        # exactly that path. Keep this an AREA-ONLY GPT1 review, not a 3D void,
+        # width/height-order, net-wall deduction or signing authority.
+        # Neither review flag signs a quantity.
         figured_receipt_bound = bool(
             pair_ok and type(c.get("figured_area_record_id")) is str
             and c["figured_area_record_id"]
@@ -193,8 +197,6 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             area_gate = "source_owned_floor_plan_unavailable"
         elif host is None:
             area_gate = "structural_host_unavailable"
-        elif not frame_ok:
-            area_gate = "whole_wall_frame_unavailable"
         elif not typed:
             area_gate = "opening_filling_kind_unproven"
         elif not pair_ok:
@@ -237,6 +239,9 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "figured_area_receipt_bound": figured_receipt_bound,
             "opening_area_first_remaining_gate": area_gate,
             "new_gpt1_area_candidate_handoff": area_review_ready,
+            "figured_area_only_frame_unavailable": bool(
+                area_review_ready and not frame_ok
+            ),
             "axis_order_authenticated": axis_ok,
             "original_figured_label_order_source_resolved": (
                 e.get("axis_order_resolved") is True if pair_ok else False
