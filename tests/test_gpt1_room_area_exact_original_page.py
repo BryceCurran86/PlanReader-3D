@@ -72,26 +72,6 @@ def test_missing_duplicate_or_foreign_document_pages_never_seal_room_area(page_i
 
 
 
-@pytest.mark.parametrize("page_ids", [
-    ("page-2",), ("page-1", "page-1"), ("",), (" page-1",),
-])
-def test_missing_duplicate_or_foreign_document_pages_never_seal_room_area(page_ids):
-    from copy import copy
-    # DocumentEvidence construction itself rejects duplicate pages. This
-    # adversarial replay bypasses the constructor to exercise the production
-    # FIRM-publication boundary against a tampered original manifest.
-    document = copy(_document())
-    object.__setattr__(document, "page_ids", page_ids)
-    quantity = build_room_area_quantity(
-        room=_room(), context=_context(), document=document,
-        viewport=_viewport(), entity=_entity(), page_no=1,
-        explicit_area_evidence=_explicit_area(25.0),
-    )
-    assert quantity.abstained
-    assert "viewport_page_not_owned_by_document" in quantity.blocking_reasons
-
-
-
 def test_optional_original_document_page_manifest_keeps_existing_issued_room_area():
     from dataclasses import replace
     # This is how the live SHA-owned producer actually constructs the
