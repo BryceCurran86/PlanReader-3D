@@ -1975,9 +1975,18 @@ class GenericPlanReaderExtractor:
                 # floor correspondence, independent metric proof and material.
                 from pb_multi_space_footprint_geometry import FootprintStatus
 
+                # A figured secondary depth is not an authenticated
+                # FULL-LENGTH frontage. The legacy builder synthesizes the
+                # entire 'front' strip from the main rectangle. Its quantity
+                # remains diagnostic; no source-complete floor can be sealed
+                # until the secondary span, edge and polygon are corroborated.
+                secondary_span_source_owned = (
+                    page_num not in verandah_mention_pages
+                )
                 compound_area_complete = (
                     footprint_res.status == FootprintStatus.CONFIRMED.value
                     and not footprint_res.missing_components
+                    and secondary_span_source_owned
                     and math.isfinite(structural_bed_area_m2)
                     and structural_bed_area_m2 > 0.0
                 )
@@ -2049,6 +2058,7 @@ class GenericPlanReaderExtractor:
                         dimensions=[length_m, width_m],
                         metadata={
                             "commercial_area_authorized": compound_area_complete,
+                            "secondary_span_source_owned": secondary_span_source_owned,
                             "original_source_compound_complete": compound_area_complete,
                             "component_areas": footprint_res.component_areas,
                             "gross_floor_area_m2": footprint_res.gross_floor_area_m2,
