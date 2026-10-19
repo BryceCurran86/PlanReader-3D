@@ -781,6 +781,18 @@ class OpeningHostFrameProducer:
         ):
             return None
 
+        # A complete W4 wall scope cannot grant an opening frame from an
+        # input-order-selected duplicate candidate. The shared multi-wall
+        # path already checks this invariant; raster single-member hosts must
+        # use the same source-owned identity discipline before projection.
+        records_by_id = {}
+        for candidate in wall_scope.records:
+            wall_key = str(candidate.wall_candidate_id)
+            previous = records_by_id.get(wall_key)
+            if previous is not None and previous != candidate:
+                return None
+            records_by_id[wall_key] = candidate
+
         host_resolution = host_geometry._resolve_raster_whole_wall_host(
             wall_scope.records,
             geometry,
@@ -794,7 +806,6 @@ class OpeningHostFrameProducer:
         if not single_member_host:
             return None
 
-        records_by_id = {str(record.wall_candidate_id): record for record in wall_scope.records}
         wall_id = str(binding.member_wall_candidate_ids[0])
         record = records_by_id.get(wall_id)
         if record is None:
