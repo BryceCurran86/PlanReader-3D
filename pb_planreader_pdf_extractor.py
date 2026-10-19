@@ -1405,8 +1405,11 @@ class GenericPlanReaderExtractor:
         # ------------------------------------------------------------------
         _addr_kws = ("P.O. BOX", "P.O BOX", "PO BOX", "P O BOX", "TEL:", "FAX:", "EMAIL:", "BOX 100727", "BOX 9656")
         detected_span: Optional[float] = None
-        global_verandah_width: Optional[float] = None  # None unless explicitly parsed
-        global_has_verandah_mention = False
+        # Keep secondary source components in their own original-page scope.
+        # A label/width found on another sheet is not proof that it belongs to
+        # this physical plan; cross-page reuse needs a separate correspondence.
+        verandah_mention_pages: set[int] = set()
+        verandah_width_by_page: Dict[int, float] = {}
         global_roof_pitch_deg: Optional[float] = None
         global_has_dpc = False
         global_has_dpm = False
@@ -1459,9 +1462,13 @@ class GenericPlanReaderExtractor:
                     "evidence_present_reconciliation_only"
                 )
 
-            # Track verandah mention across drawings
-            if any(k in norm_pg for k in ("verandah", "veranda")):
-                global_has_verandah_mention = True
+            # An unfigured secondary space on this *same* page must remain
+            # an explicit partial component rather than a borrowed width.
+            page_has_verandah_mention = any(
+                k in norm_pg for k in ("verandah", "veranda")
+            )
+            if page_has_verandah_mention:
+                verandah_mention_pages.add(p_idx + 1)
 
             # Only record verandah width if an explicit dimension is figured in text.
             # F.23: prefer same-viewport, adjacency-validated spatial evidence
@@ -1470,7 +1477,7 @@ class GenericPlanReaderExtractor:
             # sentence regex below -- the regex is purely additive as a
             # fallback for wording this stricter resolver does not (yet)
             # anchor to a viewport, never a replacement for it.
-            if global_verandah_width is None:
+            if page_has_verandah_mention:
                 from pb_secondary_footprint_evidence import (
                     resolve_secondary_footprint_width_m,
                 )
@@ -1478,16 +1485,20 @@ class GenericPlanReaderExtractor:
                 spatial_evidence = resolve_secondary_footprint_width_m(
                     doc[p_idx], page_num=p_idx + 1
                 )
-                if spatial_evidence is not None:
-                    global_verandah_width = spatial_evidence.width_m
+                from pb_gpt1_page_secondary_width_authority import (
+                    bind_page_secondary_width,
+                )
 
-            if global_verandah_width is None:
-                vm = re.search(r"(\d+(?:[,.]\d+)?)\s*(?:m|mm)?\s*wide\s*veranda", norm_pg)
-                if not vm:
-                    vm = re.search(r"veranda[h]?\s*[:\-\(]?\s*(\d+(?:[,.]\d+)?)\s*(?:m|mm)", norm_pg)
-                if vm:
-                    raw_v = float(vm.group(1).replace(",", "."))
-                    global_verandah_width = raw_v / 1000.0 if raw_v > 10 else raw_v
+                # Exact original-page witnesses must agree: do not borrow a
+                # dimension from another drawing or select the first of two
+                # contradicting printed widths. A conflicting annotation
+                # leaves this component partial and blocks total-area issue.
+                _page_width = bind_page_secondary_width(
+                    pg_txt,
+                    spatial_evidence.width_m if spatial_evidence is not None else None,
+                )
+                if _page_width.width_m is not None:
+                    verandah_width_by_page[p_idx + 1] = _page_width.width_m
 
             # Roof pitch angle: only if explicitly specified
             if global_roof_pitch_deg is None:
@@ -1822,7 +1833,7 @@ class GenericPlanReaderExtractor:
                 and page_num in global_resolved_explicit_floor_area.source_pages
                 else None
             )
-            resolved_verandah_width_for_page = global_verandah_width
+            resolved_verandah_width_for_page = verandah_width_by_page.get(page_num)
             floor_plan_dims_m: Optional[List[float]] = None
             if not is_elevation_page:
                 try:
@@ -1868,7 +1879,7 @@ class GenericPlanReaderExtractor:
                     source_page=page_num,
                 )
 
-                if global_has_verandah_mention:
+                if page_num in verandah_mention_pages:
                     builder.add_verandah(
                         length_m=length_m,
                         width_m=resolved_verandah_width_for_page,
@@ -1957,6 +1968,19 @@ class GenericPlanReaderExtractor:
                 existing_area = pred_dict.get("floor_screed")
                 current_best_area = existing_area.quantity if existing_area else 0.0
                 page_has_plan_footprint_authority = self._has_plan_footprint_context(page_text)
+                # Preserve the legacy source-neutral diagnostic estimates for
+                # incomplete plans (including independently evidenced DPC);
+                # never mislabel a partial footprint as commercially closed.
+                # A real FIRM issuer still needs complete source/physical
+                # floor correspondence, independent metric proof and material.
+                from pb_multi_space_footprint_geometry import FootprintStatus
+
+                compound_area_complete = (
+                    footprint_res.status == FootprintStatus.CONFIRMED.value
+                    and not footprint_res.missing_components
+                    and math.isfinite(structural_bed_area_m2)
+                    and structural_bed_area_m2 > 0.0
+                )
                 should_replace_area = page_has_plan_footprint_authority and (
                     total_floor_screed > current_best_area or current_best_area == 0
                 )
@@ -2000,11 +2024,13 @@ class GenericPlanReaderExtractor:
                         description=desc_flr,
                         quantity=total_floor_screed,
                         unit="SM",
-                        confidence=0.92,
+                        confidence=0.92 if compound_area_complete else 0.45,
                         source_page=page_num,
                         sheet_number=sheet_no,
                         dimensions=[length_m, width_m],
                         metadata={
+                            "commercial_area_authorized": compound_area_complete,
+                            "original_source_compound_complete": compound_area_complete,
                             "component_areas": footprint_res.component_areas,
                             "gross_floor_area_m2": footprint_res.gross_floor_area_m2,
                             "dpm_area_m2": footprint_res.dpm_area_m2,

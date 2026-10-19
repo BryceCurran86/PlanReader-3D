@@ -491,11 +491,15 @@ def test_no_label_returns_none():
     assert _resolve(_build_plan_with_orthogonal_depth(edge="bottom", label_text="STORE")) is None
 
 
-def test_legacy_inline_verandah_width_path_still_wired_in_extractor():
-    """Extractor still has the page-wide regex fallback; F.23 is additive."""
+def test_inline_verandah_width_path_remains_page_scoped_and_wired():
+    """The old page-wide first-regex path is replaced, not silently removed."""
     import inspect
     import pb_planreader_pdf_extractor as mod
+    from pb_gpt1_page_secondary_width_authority import bind_page_secondary_width
 
+    assert bind_page_secondary_width("2m wide verandah", None).width_m == pytest.approx(2.0)
+    assert bind_page_secondary_width("2m wide verandah and 3m wide verandah", None).width_m is None
     src = inspect.getsource(mod.GenericPlanReaderExtractor.extract_from_pdf)
-    assert "wide\\s*veranda" in src or "wide\\s*veranda" in src.replace("\\\\", "\\")
     assert "resolve_secondary_footprint_width_m" in src
+    assert "bind_page_secondary_width" in src
+    assert "verandah_width_by_page" in src
