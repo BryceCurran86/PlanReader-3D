@@ -13,6 +13,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pb_migration_contracts import QuantityEvidence
+from pb_customer_output_verification import (
+    _customer_quantity_id, _projection_provenance, verify_sealed_customer_output,
+)
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
     SealedSourceClosedRun, SourceClosedRunConflictError,
@@ -193,9 +196,77 @@ def verify_v2_preview_scope_sidecar(
     return True
 
 
+def verify_v2_preview_scope_customer_receipts(
+    payload: Mapping[str, Any],
+    sealed: SealedSourceClosedRun,
+    customer_rows: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Verify read-only customer metadata parity with a V1-bound preview sidecar.
+
+    This requires both the established signed V1/customer bijection and the
+    optional V2-preview source-scope receipts. It does NOT authenticate the
+    original producer claims in customer metadata or scope sidecar, and it
+    never changes an old signed V1 fingerprint or authorizes publication.
+    Legacy V1-only customer runs remain valid through their existing verifier.
+    """
+    verify_v2_preview_scope_sidecar(payload, sealed)
+    verified = verify_sealed_customer_output(sealed, customer_rows)
+    expected_ids = set(verified.verified_quantity_ids)
+    records = {
+        record["quantity_id"]: record for record in payload["scope_records"]
+    }
+    if not expected_ids.issubset(records):
+        raise SourceClosedRunConflictError(
+            "customer scope sidecar is missing sealed commercial quantity IDs"
+        )
+    seen: set[str] = set()
+    for row in customer_rows:
+        quantity_id = _customer_quantity_id(row)
+        if not quantity_id:
+            # The original verifier already rejected a manual row attempting
+            # to impersonate source-authenticated commercial output.
+            continue
+        if quantity_id not in expected_ids or quantity_id in seen:
+            raise SourceClosedRunConflictError(
+                "customer scope row is not a unique sealed commercial quantity"
+            )
+        seen.add(quantity_id)
+        record = records[quantity_id]
+        provenance = _projection_provenance(row)
+        quantity = provenance.get("quantity")
+        trace = provenance.get("source_trace")
+        if not isinstance(quantity, Mapping) or not isinstance(trace, Mapping):
+            raise SourceClosedRunConflictError(
+                "customer scope provenance requires quantity and source trace"
+            )
+        qmeta = quantity.get("metadata")
+        tmeta = trace.get("metadata")
+        if not isinstance(qmeta, Mapping) or not isinstance(tmeta, Mapping):
+            raise SourceClosedRunConflictError(
+                "customer scope producer metadata missing"
+            )
+        for aliases, field, expected in (
+            (SNAPSHOT_KEYS, "snapshot_id", record["source_snapshot_id"]),
+            (SCOPE_KEYS, "decision_scope_id", record["decision_scope_id"]),
+            (RECORD_KEYS, "source_scope_record_id", record["source_scope_record_id"]),
+        ):
+            received = _producer_id(qmeta, aliases, field)
+            traced = _producer_id(tmeta, aliases, field)
+            if received != expected or traced != expected:
+                raise SourceClosedRunConflictError(
+                    f"customer {field} receipt conflicts with sealed scope sidecar"
+                )
+    if seen != expected_ids:
+        raise SourceClosedRunConflictError(
+            "customer scope preview is missing commercial quantities"
+        )
+    return True
+
+
 __all__ = [
     "SCOPE_SIDECAR_SCHEMA",
     "SCOPE_NOT_AUTHENTICATED",
     "build_v2_preview_scope_sidecar",
     "verify_v2_preview_scope_sidecar",
+    "verify_v2_preview_scope_customer_receipts",
 ]
