@@ -92,13 +92,42 @@ class CarpentryTakeoffItem:
 def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTakeoffItem]:
     """Calculate trade items for timber stud wall framing: plates, studs, noggings, and frame area."""
     items: List[CarpentryTakeoffItem] = []
+    # Architectural wall dimensions do not certify an exact count of
+    # studs, plate layers, corner members or nogging rows. Validate the
+    # complete model inputs and preserve construction estimates explicitly.
+    def positive(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return math.isfinite(numeric) and numeric > 0.0
+
     length = spec.length_m
     height = spec.height_m
-    if length <= 0.0 or height <= 0.0:
+    if (
+        not positive(length) or not positive(height)
+        or not math.isfinite(length * height)
+        or height <= 0.135
+        or type(spec.stud_spacing_mm) is not int
+        or spec.stud_spacing_mm <= 0
+        or not isinstance(spec.openings, (list, tuple))
+    ):
         return items
+    # No rough structural opening may be silently omitted from stud counts.
+    for op in spec.openings:
+        if not isinstance(op, dict):
+            return items
+        if not positive(op.get("width")) or not positive(op.get("height")):
+            return items
+        if op["height"] > height:
+            return items
 
     gross_area = round(length * height, 2)
-    spacing_m = (spec.stud_spacing_mm or 450) / 1000.0
+    spacing_m = spec.stud_spacing_mm / 1000.0
+    if not math.isfinite(length / spacing_m):
+        return items
 
     # 1. Total Wall Frame Area (m²)
     items.append(CarpentryTakeoffItem(
@@ -109,12 +138,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system=f"Prefabricated/stick-built frame with studs @ {spec.stud_spacing_mm}mm centres",
         quantity=gross_area,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Gross framing elevation: {length:.2f} lm × {height:.2f}m = {gross_area:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional gross framing elevation: {length:.2f} lm × {height:.2f}m = {gross_area:.2f} m²; framing material/type needs original structural schedule.",
         row_role="external_wall" if spec.section == "External" else "internal_partition",
     ))
 
@@ -128,12 +157,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system="Anchored to slab/joists and tied at corners",
         quantity=plates_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Plates run: 3 × {length:.2f} lm = {plates_lm:.2f} lm.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional 3-plate assumption: 3 × {length:.2f} lm = {plates_lm:.2f} lm; actual plate layers need framing schedule.",
         row_role="",
     ))
 
@@ -151,12 +180,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system=f"Spaced @ {spec.stud_spacing_mm}mm crs with double jambs at openings",
         quantity=float(total_studs),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{total_studs} No. studs ({base_studs} common + {extra_studs} jamb/corner). Total length: {studs_lm:.2f} lm.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {total_studs} studs ({base_studs} common + {extra_studs} assumed jamb/corner) based on spacing; source stud and opening framing layouts unverified.",
         row_role="",
     ))
 
@@ -171,12 +200,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system=f"Installed horizontally at mid-height between studs ({nogging_rows} row)",
         quantity=noggings_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Nogging run: {noggings_lm:.2f} lm.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional nogging {noggings_lm:.2f} lm using generic row count; actual framing/nogging schedule unverified.",
         row_role="",
     ))
 
