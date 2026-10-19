@@ -453,17 +453,11 @@ def derive_slab_trade_quantities(
     host_evidence = ()
     if isinstance(provenance, Mapping):
         host_evidence = _evidence_ids(provenance.get("evidence_ids"))
-        if not host_evidence:
-            annotation = _clean(provenance.get("annotation_raw_text"))
-            boundary_id = _clean(provenance.get("boundary_id"))
-            host_evidence = tuple(
-                value
-                for value in (
-                    f"annotation:{annotation}" if annotation else "",
-                    f"boundary:{boundary_id}" if boundary_id else "",
-                )
-                if value
-            )
+    # A copied text label and boundary ID do NOT prove the physical source
+    # receipts needed for a priced concrete slab. Never invent evidence IDs
+    # from display strings, or yield rows with no original provenance.
+    if not host_evidence:
+        return []
 
     results: List[DerivedTradeQuantity] = []
     context = _clean(

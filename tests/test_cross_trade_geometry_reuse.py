@@ -50,6 +50,7 @@ def _slab():
         "provenance": {
             "annotation_raw_text": "150mm RC slab",
             "boundary_id": "slab-boundary-1",
+            "evidence_ids": ["source-150mm-slab-geometry", "source-slab-thickness"],
         },
     }
 
