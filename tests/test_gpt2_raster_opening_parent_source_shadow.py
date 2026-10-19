@@ -3,7 +3,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_visibility_authority import SourceVisibilityProducer, SourceVisibilityAuthority
 from pb_gpt2_raster_opening_parent_source_shadow import (
     recover_original_raster_opening_parent_lines_shadow,
 )
@@ -29,6 +29,10 @@ def _visible(parent, observation, **changes):
 
 def _source(monkeypatch, records):
     src = object.__new__(SourceVisibilityProducer)
+    # Mirror the ACTUAL source architecture: producer publishes, authority
+    # facade resolves. Never monkeypatch nonexistent Producer reader methods.
+    authority = object.__new__(SourceVisibilityAuthority)
+    monkeypatch.setattr(SourceVisibilityProducer, "authority", lambda self: authority)
     published = NS(
         revision=NS(document_id="doc", revision_id="rev", source_sha256=_SHA),
         snapshot=NS(snapshot_id="snap"),
@@ -38,12 +42,12 @@ def _source(monkeypatch, records):
         lambda self, revision: published,
     )
     monkeypatch.setattr(
-        SourceVisibilityProducer,
+        SourceVisibilityAuthority,
         "raster_opening_primitive_observation_ids_for_snapshot",
         lambda self, snapshot: frozenset(records),
     )
     monkeypatch.setattr(
-        SourceVisibilityProducer, "resolve_raster_opening_primitive",
+        SourceVisibilityAuthority, "resolve_raster_opening_primitive",
         lambda self, selector: NS(
             status=EvidenceResolutionStatus.CORROBORATED,
             observation=records[selector.observation_id],
@@ -142,7 +146,7 @@ def test_conflicted_source_inventory_never_certifies_remaining_parent(monkeypatc
             return NS(status=EvidenceResolutionStatus.CONFLICT, observation=None)
         return NS(status=EvidenceResolutionStatus.CORROBORATED,
                   observation=rows[selector.observation_id])
-    monkeypatch.setattr(SourceVisibilityProducer, "resolve_raster_opening_primitive",
+    monkeypatch.setattr(SourceVisibilityAuthority, "resolve_raster_opening_primitive",
                         resolving)
     result = _run(source)
     assert result.status == "PARTIAL_ABSTAIN"
