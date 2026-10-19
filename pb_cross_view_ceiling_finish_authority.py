@@ -215,6 +215,11 @@ class CrossViewCeilingFinishResult:
     def records_by_physical_room_id(
         self,
     ) -> Mapping[str, CrossViewCeilingFinishRecord]:
+        if self.status not in (
+            EvidenceResolutionStatus.CORROBORATED,
+            EvidenceResolutionStatus.CANDIDATE,
+        ):
+            return MappingProxyType({})
         # Never expose source receipt aliases or a last-wins room dictionary,
         # including when a public result dataclass is reconstructed.
         # A reconstructed public result is not an issuer receipt. A rogue

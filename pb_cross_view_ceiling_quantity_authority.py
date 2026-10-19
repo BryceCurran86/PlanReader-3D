@@ -275,6 +275,12 @@ class CrossViewCeilingQuantityResult:
     def records_by_ceiling_id(
         self,
     ) -> Mapping[str, CrossViewCeilingQuantityRecord]:
+        # A conflicted upstream source result is not a FIRM customer issue.
+        if self.status not in (
+            EvidenceResolutionStatus.CORROBORATED,
+            EvidenceResolutionStatus.CANDIDATE,
+        ):
+            return MappingProxyType({})
         # Public result dataclasses can be reconstructed independently of
         # the producer. Fail closed on ANY malformed source/quantity entry,
         # rather than crashing on an unexpected record or letting its typed
