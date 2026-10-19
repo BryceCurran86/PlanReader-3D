@@ -154,6 +154,9 @@ def _material_source_positive_candidate():
         "original_finish_code":"FT2",
         "original_material_definition_id":"source-a140-ft2",
         "original_mark_source_record_ids":("actual-mark-1",),
+        "original_mark_text_observation_ids":("original-text-obs-1",),
+        "all_same_code_source_occurrence_record_ids":
+            ("actual-mark-1", "other-original-mark-2"),
     }
 
 
@@ -234,3 +237,60 @@ def test_different_floor_finish_code_does_not_change_source_measured_area():
     assert all(r["source_finish_area_quantity_issued"] is False for r in issued)
     assert issued[0]["floor_finish_measurement_boundary_basis"]==(
         issued[1]["floor_finish_measurement_boundary_basis"])
+
+def test_original_mark_text_and_all_competing_occurrences_remain_in_gpt1_handoff():
+    owner=_w4_source_positive_candidate()
+    material=_material_source_positive_candidate()
+    result=audit_gpt2_w4_material_to_gpt1(owner,material)
+    assert result["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+    assert result["source_finish_mark_record_ids"]==("actual-mark-1",)
+    assert result["source_finish_native_text_observation_ids"]==("original-text-obs-1",)
+    assert result["source_all_competing_same_code_occurrence_record_ids"]==(
+        "actual-mark-1","other-original-mark-2")
+    assert result["source_finish_selected_mark_is_unique_in_reported_universe"] is True
+    assert result["source_quantity_sealing_authority_granted"] is False
+    assert result["new_firm_quantities"]==0
+
+
+def test_original_mark_text_and_competing_source_universe_must_not_be_invented():
+    material=_material_source_positive_candidate()
+    mutations=(
+        {"original_mark_text_observation_ids":()},
+        {"original_mark_text_observation_ids":("native-obs","native-obs")},
+        {"original_mark_text_observation_ids":("native-obs", None)},
+        {"original_mark_text_observation_ids":(" native-obs ",)},
+        {"original_mark_text_observation_ids":("native-obs",[])},
+        {"all_same_code_source_occurrence_record_ids":()},
+        {"all_same_code_source_occurrence_record_ids":
+            ("other-original-mark-2",)},
+        {"all_same_code_source_occurrence_record_ids":
+            ("actual-mark-1","actual-mark-1")},
+        {"all_same_code_source_occurrence_record_ids":
+            ("actual-mark-1", None)},
+        {"all_same_code_source_occurrence_record_ids":
+            ("actual-mark-1", [])},
+        {"original_mark_source_record_ids":(" actual-mark-1 ",)},
+        {"original_mark_source_record_ids":(["actual-mark-1"],)},
+        {"original_source_scope_ownership_id":" "},
+        {"original_finish_viewport_id":" original-view "},
+        {"original_material_definition_id":None},
+        {"original_finish_code":"FT2 "},
+    )
+    for changes in mutations:
+        result=audit_gpt2_w4_material_to_gpt1(
+            _w4_source_positive_candidate(),{**material,**changes})
+        assert result["first_failure"]=="original_finish_scope_or_unique_source_mark_unproven"
+        assert result["new_firm_quantities"]==0
+        assert result["source_finish_area_quantity_issued"] is False
+
+
+def test_competing_source_mark_input_order_cannot_select_a_different_owner():
+    material=_material_source_positive_candidate()
+    reordered={**material,"all_same_code_source_occurrence_record_ids":
+        ("other-original-mark-2","actual-mark-1")}
+    result=audit_gpt2_w4_material_to_gpt1(
+        _w4_source_positive_candidate(),reordered)
+    assert result["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+    assert set(result["source_all_competing_same_code_occurrence_record_ids"])=={
+        "actual-mark-1","other-original-mark-2"}
+    assert result["new_firm_quantities"]==0
