@@ -164,8 +164,8 @@ def _definition_is_floor_finish(
     # floor covering merely because its original description says "floor".
     import re
     if re.search(
-        r"\\b(?:under[\\s-]*floor|sub[\\s-]*floor|"
-        r"floor[\\s-]*(?:drain|insulation)|wall[\\s-]*til(?:e|es|ing))\\b",
+        r"\b(?:under[\s-]*floor|sub[\s-]*floor|"
+        r"floor[\s-]*(?:drain|insulation)|wall[\s-]*til(?:e|es|ing))\b",
         text,
     ):
         return False
