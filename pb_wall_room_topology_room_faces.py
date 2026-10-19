@@ -197,6 +197,7 @@ def reconstruct_room_candidates(
     source_page: int = 0,
     min_area_pt2: float = ABSOLUTE_DEGENERATE_AREA_PT2,
     tiny_relative_threshold: float = DEFAULT_TINY_RELATIVE_THRESHOLD,
+    source_boundary_owner_conflicts_shadow: bool = False,
 ) -> List[RoomCandidate]:
     """Reconstruct room-face candidates for one viewport.
 
@@ -206,21 +207,39 @@ def reconstruct_room_candidates(
     viewport; ``edge_id_to_wall_candidate_id`` is that function's own second
     return value.
     """
+    if type(source_boundary_owner_conflicts_shadow) is not bool:
+        raise ValueError("source boundary owner conflict shadow requires literal boolean")
     graph, _ = deduplicate_coincident_edges(graph)
     live_edges = [e for e in graph["edges"] if not e.get("_removed")]
 
     edge_lookup: Dict[FrozenSet[Tuple[float, float]], str] = {}
+    # Review-only W2/W4 source collision gate. Rounded coordinates can alias
+    # distinct source members. No first/last owner can be physical authority.
+    competing_boundary_keys: set[FrozenSet[Tuple[float, float]]] = set()
     for edge in live_edges:
         wall_id = edge_id_to_wall_candidate_id.get(str(edge.get("id")))
         if wall_id is None:
             continue
         key = frozenset({_round_pt((edge["x1"], edge["y1"])), _round_pt((edge["x2"], edge["y2"]))})
+        if (source_boundary_owner_conflicts_shadow and key in edge_lookup
+                and edge_lookup[key] != wall_id):
+            competing_boundary_keys.add(key)
         edge_lookup[key] = wall_id
 
     components = _connected_components(graph)
     node_component_by_position: Dict[Tuple[float, float], int] = {
         _round_pt((n["x"], n["y"])): components[n["id"]] for n in graph["nodes"]
     }
+    competing_component_positions: set[Tuple[float, float]] = set()
+    if source_boundary_owner_conflicts_shadow:
+        source_components: Dict[Tuple[float, float], set[int]] = {}
+        for node in graph["nodes"]:
+            location = _round_pt((node["x"], node["y"]))
+            source_components.setdefault(location, set()).add(components[node["id"]])
+        competing_component_positions = {
+            location for location, source_ids in source_components.items()
+            if len(source_ids) > 1
+        }
 
     segments = [((e["x1"], e["y1"]), (e["x2"], e["y2"])) for e in live_edges]
     raw_faces = extract_planar_faces(segments, min_area=_MIN_AREA_PASSED_TO_LIBRARY)
@@ -245,22 +264,40 @@ def reconstruct_room_candidates(
         n = len(face)
         bounding_wall_ids: List[str] = []
         unresolved = False
+        competing_boundary_owner = False
         for i in range(n):
             p1, p2 = _round_pt(face[i]), _round_pt(face[(i + 1) % n])
-            wall_id = edge_lookup.get(frozenset({p1, p2}))
+            edge_key = frozenset({p1, p2})
+            if source_boundary_owner_conflicts_shadow and edge_key in competing_boundary_keys:
+                # Deliberately omit BOTH conflicting owner names: the map's
+                # surviving value is merely input order, not authenticated W4.
+                competing_boundary_owner = True
+                unresolved = True
+                continue
+            wall_id = edge_lookup.get(edge_key)
             if wall_id is None:
                 unresolved = True
             else:
                 bounding_wall_ids.append(wall_id)
         ordered_unique_wall_ids = tuple(dict.fromkeys(bounding_wall_ids))
 
-        component_id = node_component_by_position.get(_round_pt(face[0]))
+        component_conflict = (
+            source_boundary_owner_conflicts_shadow
+            and any(_round_pt(point) in competing_component_positions
+                    for point in face)
+        )
+        component_id = (
+            None if component_conflict else
+            node_component_by_position.get(_round_pt(face[0]))
+        )
         prelim.append(
             {
                 "polygon": tuple(_round_pt(p) for p in face),
                 "area": area,
                 "bounding_wall_ids": ordered_unique_wall_ids,
                 "unresolved_boundary": unresolved,
+                "competing_boundary_owner": competing_boundary_owner,
+                "component_conflict": component_conflict,
                 "component_id": component_id,
                 "centroid": _polygon_centroid(face),
             }
@@ -296,7 +333,14 @@ def reconstruct_room_candidates(
 
         if room["unresolved_boundary"]:
             status = EvidenceResolutionStatus.ABSTAINED
-            reason_codes.append("boundary_segment_not_traced_to_wall_candidate")
+            if room["competing_boundary_owner"]:
+                reason_codes.append("source_boundary_competing_w4_owners")
+            else:
+                reason_codes.append("boundary_segment_not_traced_to_wall_candidate")
+            confidence = 0.0
+        if source_boundary_owner_conflicts_shadow and room["component_conflict"]:
+            status = EvidenceResolutionStatus.ABSTAINED
+            reason_codes.append("source_boundary_competing_w2_components")
             confidence = 0.0
 
         is_tiny = room["area"] < min_area_pt2 or (
