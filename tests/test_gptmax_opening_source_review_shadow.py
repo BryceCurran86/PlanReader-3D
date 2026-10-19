@@ -141,7 +141,7 @@ def test_multi_page_recovery_keeps_original_issuer_and_builds_portable_package(t
     forged["alternate_opening_review_packets"].append(
         deepcopy(forged["alternate_opening_review_packets"][0]))
     rejected=tmp_path/"duplicate-packet.zip"
-    with pytest.raises(ValueError,match="duplicate source packet address"):
+    with pytest.raises(ValueError, match=r"duplicate (?:source packet address|physical opening identity)"):
         build_opening_source_review_package(forged,rejected)
     assert not rejected.exists()
 
