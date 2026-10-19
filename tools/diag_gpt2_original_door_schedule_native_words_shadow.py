@@ -55,6 +55,22 @@ def census_original_door_schedule_native_source(
             or len(code_words)!=1 or int(row[0][6])!=0
             or int(row[0][7])!=0):
         raise ValueError("original_door_schedule_native_code_row_unproven")
+    # An unrelated drawing detail may also begin with D17. Prove the
+    # source row has the ORIGINAL schedule's separate room and leaf-kind
+    # fields, rather than electing the first occurrence of the door code.
+    by_line={}
+    for word in row:
+        by_line.setdefault(int(word[6]),[]).append(str(word[4]).strip())
+    room_tokens=tuple(by_line.get(1,()))
+    leaf_tokens=tuple(by_line.get(2,()))
+    supported_leaf_kinds={
+        ("SINGLE","SWING"),("DOUBLE","SWING"),
+        ("SLIDING","DOOR"),("AS","PER","MANUFACTURER"),
+    }
+    if (not room_tokens
+            or room_tokens in (("DETAIL",),("DETAIL","LABEL"),("LABEL",))
+            or leaf_tokens not in supported_leaf_kinds):
+        raise ValueError("original_door_schedule_native_row_semantics_unproven")
     all_schedule=tuple(receipt(w,schedule_page_1_based)
                        for w in schedule if str(w[4]).strip()==requested_door_code)
     all_plan=tuple(receipt(w,plan_page_1_based)
