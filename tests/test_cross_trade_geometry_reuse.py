@@ -520,9 +520,9 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
             source_page="p1",
         )
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][takeoff_contract.TAKEOFF_COLS.index("unit")], "m³")
+        self.assertEqual(rows[0][takeoff_contract.CORE_FIELDS.index("unit")], "m³")
         self.assertEqual(
-            rows[0][takeoff_contract.TAKEOFF_COLS.index("quantity")],
+            rows[0][takeoff_contract.CORE_FIELDS.index("quantity")],
             concrete.quantity,
         )
 
