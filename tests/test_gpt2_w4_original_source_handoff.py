@@ -294,3 +294,76 @@ def test_competing_source_mark_input_order_cannot_select_a_different_owner():
     assert set(result["source_all_competing_same_code_occurrence_record_ids"])=={
         "actual-mark-1","other-original-mark-2"}
     assert result["new_firm_quantities"]==0
+
+
+def test_original_doorway_ink_gap_is_preserved_for_gpt1_without_threshold_proof():
+    original=_material_source_positive_candidate()
+    source={
+        **original,
+        "source_original_doorway_ink_gap_candidate_only":True,
+        "source_original_floor_door_ink_gap_pdf_pts":(
+            (20.,20.),(120.,20.)),
+        "source_original_finish_door_ink_gap_pdf_pts":(
+            (30.,20.),(130.,20.)),
+        "source_original_cross_sheet_translation_pdf_pts":(10.,0.),
+    }
+    result=audit_gpt2_w4_material_to_gpt1(
+        _w4_source_positive_candidate(),source)
+    assert result["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+    assert result["source_original_doorway_ink_gap_w4_candidate_only"] is True
+    assert result["source_original_floor_door_ink_gap_pdf_pts"]==(
+        (20.,20.),(120.,20.))
+    assert result["source_original_finish_door_ink_gap_pdf_pts"]==(
+        (30.,20.),(130.,20.))
+    assert result["source_original_doorway_gap_is_structural_wall"] is False
+    assert result["source_original_doorway_gap_is_finished_threshold"] is False
+    assert result["original_doorway_finish_transition_boundary_authenticated"] is False
+    assert result["new_firm_quantities"]==0
+
+
+def test_original_doorway_ink_gap_requires_exact_both_floor_source_edges():
+    original=_material_source_positive_candidate()
+    source={
+        **original,
+        "source_original_doorway_ink_gap_candidate_only":True,
+        "source_original_floor_door_ink_gap_pdf_pts":(
+            (20.,20.),(120.,20.)),
+        "source_original_finish_door_ink_gap_pdf_pts":(
+            (30.,20.),(130.,20.)),
+        "source_original_cross_sheet_translation_pdf_pts":(10.,0.),
+    }
+    cases=(
+        ({"source_original_floor_door_ink_gap_pdf_pts":
+            ((20.,20.),(120.,30.))},
+         "source_original_door_gap_vs_W4_floor_conflict"),
+        ({"source_original_finish_door_ink_gap_pdf_pts":
+            ((30.,20.),(130.,30.))},
+         "source_original_door_gap_vs_W4_floor_conflict"),
+        ({"source_original_cross_sheet_translation_pdf_pts":(11.,0.)},
+         "source_original_door_gap_vs_W4_floor_conflict"),
+        ({"source_original_floor_door_ink_gap_pdf_pts":
+            ((20.,20.),(20.,20.))},
+         "source_original_door_gap_receipt_invalid"),
+        ({"source_original_floor_door_ink_gap_pdf_pts":None},
+         "source_original_door_gap_receipt_invalid"),
+        ({"source_original_cross_sheet_translation_pdf_pts":(float("nan"),0.)},
+         "source_original_door_gap_receipt_invalid"),
+        ({"source_original_floor_door_ink_gap_pdf_pts":
+            ((20.,20.),("foreign",20.))},
+         "source_original_door_gap_receipt_invalid"),
+    )
+    for mutation, reason in cases:
+        result=audit_gpt2_w4_material_to_gpt1(
+            _w4_source_positive_candidate(),{**source,**mutation})
+        assert result["first_failure"]==reason
+        assert result["source_finish_area_quantity_issued"] is False
+        assert result["new_firm_quantities"]==0
+
+
+def test_closed_room_floor_finish_does_not_invent_doorway_source_gap():
+    result=audit_gpt2_w4_material_to_gpt1(
+        _w4_source_positive_candidate(),_material_source_positive_candidate())
+    assert result["status"]=="gpt2_W4_source_finished_floor_ready_for_GPT1_measurement"
+    assert result["source_original_doorway_ink_gap_w4_candidate_only"] is False
+    assert result["source_original_floor_door_ink_gap_pdf_pts"] is None
+    assert result["source_original_doorway_gap_is_finished_threshold"] is False
