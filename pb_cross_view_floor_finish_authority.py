@@ -159,6 +159,16 @@ def _definition_is_floor_finish(
     )
     if not text:
         return False
+    # A stale generic "tile" finish semantic does not turn a physical wall
+    # tile, floor drain or underfloor/subfloor specification into finished
+    # floor covering merely because its original description says "floor".
+    import re
+    if re.search(
+        r"\\b(?:under[\\s-]*floor|sub[\\s-]*floor|"
+        r"floor[\\s-]*(?:drain|insulation)|wall[\\s-]*til(?:e|es|ing))\\b",
+        text,
+    ):
+        return False
     # The semantic family is already authenticated upstream. This role gate
     # simply prevents a confirmed wall-tile definition from being applied to a
     # floor because both normalize to the generic semantic "tile".
