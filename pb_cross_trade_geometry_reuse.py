@@ -1076,9 +1076,9 @@ def to_takeoff_rows(
 ) -> List[Tuple[Any, ...]]:
     """Convert supported quantities into the legacy 21-field row.
 
-    This adapter is intentionally fail-closed. If a correct canonical quantity
-    uses a unit the current takeoff schema cannot represent, especially m³, the
-    function raises instead of corrupting the unit.
+    This adapter is intentionally fail-closed. Supported canonical units,
+    including original m³ concrete volumes, pass through unchanged; unknown
+    or incompatible units raise rather than being relabelled as an item.
     """
 
     if type(workspace_id) is not int or workspace_id <= 0:
