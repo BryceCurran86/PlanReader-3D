@@ -12,6 +12,8 @@ from test_gpt3_verified_customer_quote import fixture
 @pytest.mark.parametrize(("raw", "canonical"), [
     ("m²", "m2"), ("sqm", "m2"), ("m2", "m2"),
     ("m³", "m3"), ("m3", "m3"),
+    ("t", "t"), ("tonne", "t"), ("tonnes", "t"),
+    ("metric tonne", "t"), ("metric tonnes", "t"),
     ("lm", "m"), ("m", "m"),
     ("ea", "ea"), ("each", "ea"), ("nr", "ea"),
     ("no", "ea"), ("no.", "ea"), ("number", "ea"),
@@ -50,3 +52,17 @@ def test_wrong_dimensional_rate_cannot_price_original_signed_m2_as_linear_m():
     assert report["unpriced_quantity_count"] == 8
     assert report["publication_status"] == "INCOMPLETE_UNPRICED_QUANTITIES"
     assert report["summary"]["grand_total"] is None
+
+
+@pytest.mark.parametrize("wrong_dimension", [
+    "short ton", "long ton", "lb", "kg", "m²", "m³", "item",
+])
+def test_imperial_and_different_dimensions_never_become_metric_steel_tonnes(wrong_dimension):
+    assert _equivalent_pricing_unit(wrong_dimension) != "t"
+
+
+def test_canonical_cross_trade_steel_tonnes_notated_without_rate_conversion():
+    from pb_cross_trade_geometry_reuse import normalise_trade_unit
+    assert [normalise_trade_unit(unit) for unit in
+        ("t", "tonne", "tonnes", "metric tonne", "metric tonnes")] == ["t"] * 5
+    assert normalise_trade_unit("short ton") != "t"

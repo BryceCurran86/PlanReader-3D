@@ -80,6 +80,8 @@ def _equivalent_pricing_unit(unit: str) -> str:
     aliases = {
         "m²": "m2", "sqm": "m2", "m2": "m2",
         "m³": "m3", "m3": "m3",
+        "t": "t", "tonne": "t", "tonnes": "t",
+        "metric tonne": "t", "metric tonnes": "t",
         "lm": "m", "m": "m",
         "ea": "ea", "each": "ea", "nr": "ea",
         "no": "ea", "no.": "ea", "number": "ea",
