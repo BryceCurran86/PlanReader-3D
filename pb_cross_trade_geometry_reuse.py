@@ -472,6 +472,12 @@ def derive_slab_trade_quantities(
     # from display strings, or yield rows with no original provenance.
     if not host_evidence:
         return []
+    # Two separately finite metric source values can overflow once
+    # multiplied. Never let an impossible slab volume crash all trade
+    # issuers or mint an infinite construction amount.
+    structural_volume_m3 = area_m2 * thickness_m
+    if not math.isfinite(structural_volume_m3) or structural_volume_m3 <= 0.0:
+        return []
 
     results: List[DerivedTradeQuantity] = []
     context = _clean(
@@ -500,7 +506,7 @@ def derive_slab_trade_quantities(
                     element="Slab concrete",
                     location=slab_id,
                     material=material,
-                    quantity=area_m2 * thickness_m,
+                    quantity=structural_volume_m3,
                     unit="m³",
                     host_id=slab_id,
                     host_type="SLAB",
@@ -516,7 +522,12 @@ def derive_slab_trade_quantities(
 
     perimeter_m = _polygon_perimeter_m(slab.get("polygon_m"))
     edge_formwork = _trade_spec(specs, "edge_formwork")
-    if edge_formwork is not None and perimeter_m is not None:
+    if (
+        edge_formwork is not None
+        and perimeter_m is not None
+        and math.isfinite(perimeter_m * thickness_m)
+        and perimeter_m * thickness_m > 0.0
+    ):
         material = _material(edge_formwork)
         spec_evidence = _spec_evidence(edge_formwork)
         if material and spec_evidence:
