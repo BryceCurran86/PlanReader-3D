@@ -46,7 +46,10 @@ _RESOLVED = frozenset({
 def _finite_positive(value: Any) -> bool:
     if type(value) not in (int, float) or isinstance(value, bool):
         return False
-    number = float(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
     return math.isfinite(number) and number > 0.0
 
 
@@ -57,7 +60,10 @@ def _dimension_values_mm(values: Sequence[Any] | None) -> tuple[float, ...]:
     for value in values:
         if type(value) not in (int, float) or isinstance(value, bool):
             continue
-        number = float(value)
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
         if math.isfinite(number) and number > 0.0:
             owned.append(number)
     return tuple(owned)
@@ -165,10 +171,14 @@ def classify_opening_quantity_first_fail(
             "invented_second_axis_mm": None,
             "diagnostic_only": True,
         }
+    # A figured label with an area is only a candidate. It is not the
+    # canonical opening's signed area_m2 unless the original producer owns
+    # and publishes that value. In particular STACKER/other unapproved source
+    # candidates cannot be called "already published" from label text alone.
     return {
-        "first_failing_authority": "none_area_already_published",
+        "first_failing_authority": "canonical_opening_area_not_published",
         "unique_host_identity_present": True,
-        "would_publish_live_opening_area": True,
+        "would_publish_live_opening_area": False,
         "invented_second_axis_mm": None,
         "diagnostic_only": True,
     }
