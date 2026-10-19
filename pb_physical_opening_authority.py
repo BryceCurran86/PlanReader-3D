@@ -1806,9 +1806,12 @@ class PhysicalOpeningAuthority:
             and record.page_id == seed.page_id
             and record.viewport_id is None
         )
+        # Identical pixels do not prove two source observations are the same
+        # physical primitive. Keep all owned candidates, never overwrite one
+        # observation with the last row visited in a source snapshot.
         by_kind_geometry: dict[
             tuple[str, tuple[float, float, float, float]],
-            SourceObservationRecord,
+            list[SourceObservationRecord],
         ] = {}
         line_runs: list[SourceObservationRecord] = []
         thin_runs: list[SourceObservationRecord] = []
@@ -1816,7 +1819,7 @@ class PhysicalOpeningAuthority:
             geometry = tuple(round(float(value), 6) for value in record.geometry)
             if len(geometry) != 4:
                 continue
-            by_kind_geometry[(record.observation_kind, geometry)] = record
+            by_kind_geometry.setdefault((record.observation_kind, geometry), []).append(record)
             if record.observation_kind == RASTER_LINE_RUN:
                 line_runs.append(record)
             if record.observation_kind == RASTER_THIN_INK_RUN:
@@ -1830,7 +1833,14 @@ class PhysicalOpeningAuthority:
                 round(value, 6)
                 for value in _raster_geometry_pt(geometry_px, dpi)
             )
-            return by_kind_geometry.get((kind, geometry_pt))
+            owners = by_kind_geometry.get((kind, geometry_pt), ())
+            if len(owners) != 1:
+                if owners:
+                    # Source row ancestry is ambiguous, not a valid opening
+                    # whose primitive identity can be selected by input order.
+                    self._raster_gap_audit_incomplete.add(cache_key)
+                return None
+            return owners[0]
 
         def band_support(
             page_box: tuple[int, int, int, int],
