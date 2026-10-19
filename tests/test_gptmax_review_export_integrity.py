@@ -7,6 +7,7 @@ import zipfile
 
 import pytest
 
+from tests.symlink_test_support import symlink_or_skip
 import tools.build_opening_source_review_package as export
 from pb_opening_source_review_shadow import nominal_opening_obj_shadow
 
@@ -60,7 +61,7 @@ def test_existing_evidence_is_never_overwritten(report, tmp_path):
 def test_output_symlink_cannot_alias_another_evidence_file(report, tmp_path, target_exists):
     target, output = tmp_path/"target.zip", tmp_path/"review.zip"
     if target_exists: target.write_bytes(b"target evidence")
-    output.symlink_to(target)
+    symlink_or_skip(output, target)
     with pytest.raises(FileExistsError):
         export.build_opening_source_review_package(report, output)
     assert output.is_symlink()

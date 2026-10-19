@@ -193,7 +193,7 @@ def build_opening_source_review_package(report,output):
                 info.compress_type=zipfile.ZIP_DEFLATED
                 info.external_attr=0o600<<16
                 archive.writestr(info,payload)
-        with temporary.open("rb") as stream:
+        with temporary.open("r+b") as stream:
             os.fsync(stream.fileno())
         os.link(temporary, output)
     finally:
