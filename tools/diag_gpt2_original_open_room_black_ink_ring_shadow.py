@@ -121,6 +121,43 @@ def audit_original_room_wall_ink_with_single_door_gap(
             "first_unclosed_gate":"original_top_door_ink_gap_not_unique",
             "source_side_evidence":sides}
     gap=((top[0][1],round(y0,3)),(top[1][0],round(y0,3)))
+    # The selected *wall candidate* strokes do not cover this interval.
+    # Independently inspect every other original native black stroke here:
+    # door-leaf, threshold, and drafting strokes may still cross the gap.
+    # None is silently assumed structural or discarded as irrelevant.
+    chosen={source_id for ids in original_side_source_path_ids.values()
+            for source_id in ids}
+    ink_rivals=[]
+    for native_path_id, path in enumerate(drawings):
+        if path.get("color") != (0.,0.,0.):
+            continue
+        width=path.get("width")
+        if type(width) not in (float,int) or not math.isfinite(width) or width<=0:
+            continue
+        for native_item_id, original_item in enumerate(path.get("items",())):
+            native_id=f"d{native_path_id}i{native_item_id}"
+            if native_id in chosen or len(original_item)<3 or original_item[0]!="l":
+                continue
+            a,b=original_item[1:3]
+            if (not all(math.isfinite(float(v)) for v in (a.x,a.y,b.x,b.y))
+                    or abs(float(a.y)-float(b.y))>0.001
+                    or abs(float(a.y)-y0)>0.001):
+                continue
+            left,right=sorted((float(a.x),float(b.x)))
+            lo,hi=max(left,gap[0][0]),min(right,gap[1][0])
+            if hi<=lo:
+                continue
+            ink_rivals.append({
+                "original_native_path_item_id":native_id,
+                "original_ink_intersection_in_selected_gap_pdf_pts":(
+                    round(lo,3),round(hi,3)
+                ),
+                "original_black_stroke_width_pdf_pts":float(width),
+                "physical_wall_role_authenticated":False,
+                "source_door_graphic_role_authenticated":False,
+            })
+            if len(ink_rivals)>4096:
+                raise ValueError("original_unclassified_door_gap_ink_safety_cap")
     return {
         **base,
         "status":"original_black_ink_room_ring_with_virtual_door_gap_candidate",
@@ -132,6 +169,10 @@ def audit_original_room_wall_ink_with_single_door_gap(
         ),
         "source_side_evidence":sides,
         "original_source_top_ink_door_gap_pdf_pts":gap,
+        "source_selected_wall_candidates_gap_pdf_pts":gap,
+        "all_original_unclassified_black_ink_in_selected_wall_gap":tuple(ink_rivals),
+        "source_gap_absent_of_all_original_ink_proven":not bool(ink_rivals),
+        "source_selected_wall_gap_door_semantics_authenticated":False,
         "original_source_candidate_area_pdf_pts2":(x1-x0)*(y1-y0),
         "original_room_source_candidate_only":True,
         "source_doorway_is_structural_wall":False,
