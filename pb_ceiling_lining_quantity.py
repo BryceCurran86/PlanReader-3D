@@ -182,9 +182,18 @@ def _base_context_blockers(
         blockers.append("viewport_unresolved")
     if _original_page_no_or_none(page_no) is None or page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
-    mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and (
-        type(mapped_page) is not int or mapped_page != page_no
+    # page_for_viewport() converts numeric aliases with int() and returns
+    # None for absent ownership. Neither a missing page edge nor true/1.0
+    # proves the ORIGINAL physical drawing for a ceiling finish occurrence.
+    owned_edges = tuple(
+        edge for edge in context.viewport_page_ownership
+        if isinstance(edge,(tuple,list)) and len(edge)==2
+        and type(edge[0]) is str and edge[0]==viewport.viewport_id
+    )
+    if (
+        len(owned_edges)!=1
+        or type(owned_edges[0][1]) is not int
+        or owned_edges[0][1]!=page_no
     ):
         blockers.append("viewport_page_mismatch")
     return tuple(dict.fromkeys(blockers))
