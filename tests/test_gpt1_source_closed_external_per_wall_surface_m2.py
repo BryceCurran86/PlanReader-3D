@@ -7,6 +7,7 @@ from pb_live_external_physical_net_wall_publication import (
 )
 from pb_live_external_wall_surface_area_quantity_publication import (
     publish_live_per_wall_surface_area_quantities,
+    seal_live_per_wall_surface_area_run,
 )
 from tests.test_live_external_physical_net_wall_publication import _chain
 
@@ -85,3 +86,19 @@ def test_missing_original_completeness_receipt_never_mints_per_wall_surface():
     assert publish_live_per_wall_surface_area_quantities(
         replace(original,quantity_evidence=changed)
     )==()
+
+
+def test_original_one_wall_source_quantity_seals_full_physical_m2_lineage():
+    original=_produced()
+    sealed=seal_live_per_wall_surface_area_run(
+        original,workspace_id=7,project_id="synthetic-source-wall-project"
+    )
+    assert len(sealed.quantities)==1
+    row=sealed.quantities[0]
+    assert row.family=="wall_net_area"
+    assert row.lineage_ok
+    assert not row.abstained
+    assert row.value==original.canonical_walls[0].net_area_m2
+    assert row.object_identity_refs==(original.canonical_walls[0].canonical_wall_id,)
+    assert row.source_page==original.canonical_walls[0].page_id
+    assert row.source_sha256==original.canonical_walls[0].source_sha256
