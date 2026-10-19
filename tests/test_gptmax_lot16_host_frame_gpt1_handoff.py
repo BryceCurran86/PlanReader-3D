@@ -28,7 +28,8 @@ def fixture():
             "host_wall_id": "wall-grp" if host else None,
             "host_frame_record_id": frame,
             "figured_area_record_id": "figured",
-            "evidence_ids": ["figured"],
+            "evidence_ids": (["figured"] + ([host] if host else [])
+                             + ([frame] if frame else [])),
             "width_record_id": None, "height_record_id": None,
             "width_m": None, "height_m": None,
             "geometry_complete": False,
@@ -129,7 +130,7 @@ def test_valid_source_axes_only_emits_unpublished_gpt1_review_candidate():
     index=2
     c[index].update(width_record_id="width-3",height_record_id="height-3",
                     width_m=1.2,height_m=1.8,geometry_complete=True,
-                    evidence_ids=["figured","width-3","height-3"])
+                    evidence_ids=["figured","binding-3","frame-3","width-3","height-3"])
     rows[index]["original_label_dimension_result"]["evidence"]["axis_order_resolved"]=True
     r=run(rows,c)
     assert len(r["gpt1_new_handoff_candidates"])==1
@@ -142,7 +143,7 @@ def test_existing_signed_area_is_not_republished_as_new_candidate():
     rows,c=fixture()
     c[2].update(width_record_id="width",height_record_id="height",
                 width_m=1.2,height_m=1.8,geometry_complete=True,
-                evidence_ids=["figured","width","height"])
+                evidence_ids=["figured","binding-3","frame-3","width","height"])
     rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"]=True
     rows[2]["quantity_id"]="previously-signed-quantity"
     assert not run(rows,c)["gpt1_new_handoff_candidates"]

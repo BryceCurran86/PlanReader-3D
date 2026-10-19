@@ -193,6 +193,27 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
+        # The actual source-closed opening-area publisher requires every
+        # existing canonical host AND frame receipt to be present in its own
+        # producer evidence roster. A host ID copied onto the canonical row
+        # is not source provenance; a frame that exists but is not in the
+        # evidence roster cannot be used for either AREA or 3D review.
+        issuer_ids = c.get("evidence_ids")
+        receipt_roster_ok = (
+            type(issuer_ids) in (tuple, list)
+            and all(type(v) is str and v and v == v.strip() for v in issuer_ids)
+            and len(set(issuer_ids)) == len(issuer_ids)
+        )
+        host_receipt_bound = bool(
+            host is not None and receipt_roster_ok
+            and type(host.get("record_id")) is str
+            and host["record_id"] in issuer_ids
+        )
+        frame_receipt_bound = bool(
+            frame_ok and receipt_roster_ok
+            and type(frame.get("record_id")) is str
+            and frame["record_id"] in issuer_ids
+        )
         # A source-issued FIGURED area from an unordered two-number label is
         # independent of a COMPLETE whole-wall frame. The existing signed
         # opening-area publisher accepts a source-authenticated host binding
@@ -211,6 +232,10 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             area_gate = "source_owned_floor_plan_unavailable"
         elif host is None:
             area_gate = "structural_host_unavailable"
+        elif not host_receipt_bound:
+            area_gate = "original_structural_host_receipt_unbound"
+        elif frame_ok and not frame_receipt_bound:
+            area_gate = "original_host_frame_receipt_unbound"
         elif not typed:
             area_gate = "opening_filling_kind_unproven"
         elif not pair_ok:
@@ -228,8 +253,12 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "source_owned_floor_plan_unavailable"
         elif host is None:
             gate = "structural_host_unavailable"
+        elif not host_receipt_bound:
+            gate = "original_structural_host_receipt_unbound"
         elif not frame_ok:
             gate = "whole_wall_frame_unavailable"
+        elif not frame_receipt_bound:
+            gate = "original_host_frame_receipt_unbound"
         elif not typed:
             gate = "opening_filling_kind_unproven"
         elif not pair_ok:
@@ -250,6 +279,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "frame_reason_codes": list(row["frame_reason_codes"]),
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
+            "original_host_binding_receipt_bound": host_receipt_bound,
+            "original_host_frame_receipt_bound": frame_receipt_bound,
             "figured_area_receipt_bound": figured_receipt_bound,
             "opening_area_first_remaining_gate": area_gate,
             "new_gpt1_area_candidate_handoff": area_review_ready,
@@ -270,6 +301,7 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "first_remaining_gate": gate,
             "new_gpt1_candidate_handoff": bool(
                 supported and host is not None and frame_ok and typed
+                and host_receipt_bound and frame_receipt_bound
                 and axis_ok and not row.get("quantity_id")),
             # No output JSON is a signed quantity or a trust-grant token.
             "measurement_published": False,
