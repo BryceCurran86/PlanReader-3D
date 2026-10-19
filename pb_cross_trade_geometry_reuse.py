@@ -244,8 +244,9 @@ class DerivedTradeQuantity:
         if not _clean(self.derivation_formula):
             raise ValueError("derivation_formula must be explicit")
         self.unit = normalise_trade_unit(self.unit)
-        self.host_evidence_ids = tuple(dict.fromkeys(self.host_evidence_ids))
-        self.spec_evidence_ids = tuple(dict.fromkeys(self.spec_evidence_ids))
+        # Keep raw original receipt sequences intact. A duplicate, padded or
+        # foreign owner is NOT cured by deduplication before final source-closed
+        # takeoff issuance; canonical pricing identity has separate normalization.
         self.rate_key = _clean(self.rate_key) or None
         self.rate_binding_evidence_ids = require_evidence_ids(
             self.rate_binding_evidence_ids, "rate_binding_evidence_ids"
