@@ -289,6 +289,8 @@ def test_project_handoff_combines_only_available_source_closed_families(
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 1,
+        "opening_width": 0,
+        "opening_height": 0,
     }
     assert summary["combined_quantity_count"] == 5
     assert (output / f"{project_id}.json").is_file()
