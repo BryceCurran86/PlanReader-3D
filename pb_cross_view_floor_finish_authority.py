@@ -548,6 +548,28 @@ class CrossViewFloorFinishResult:
         if any(type(record.quantity) is not QuantityEvidence
                for record in sealed):
             return MappingProxyType({})
+        # A typed dataclass can be reconstructed with unhashable/malformed
+        # source owner fields. Validate before Counter or set construction:
+        # bad source observations must abstain, not crash customer projection.
+        source_owner_fields = (
+            "canonical_floor_id", "physical_floor_surface_id",
+            "physical_room_id", "source_room_face_record_id",
+            "occurrence_record_id", "occurrence_evidence_id",
+        )
+        if any(
+            type(getattr(record, field)) is not str
+            or not getattr(record, field)
+            or getattr(record, field) != getattr(record, field).strip()
+            for record in sealed for field in source_owner_fields
+        ):
+            return MappingProxyType({})
+        if any(
+            not isinstance(record.quantity.evidence_ids, (tuple, list))
+            or any(type(eid) is not str or not eid or eid != eid.strip()
+                   for eid in record.quantity.evidence_ids)
+            for record in sealed
+        ):
+            return MappingProxyType({})
         survivors, _ = _quarantine_reused_floor_finish_occurrences(sealed)
         source_fields = (
             "canonical_floor_id",
