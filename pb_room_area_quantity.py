@@ -205,7 +205,17 @@ def _validate_common(
         blockers.append("source_sha256_mismatch")
     if viewport.document_id != context.document_id:
         blockers.append("viewport_document_mismatch")
-    if document.page_ids and viewport.page_id not in document.page_ids:
+    page_inventory = document.page_ids
+    if (
+        not isinstance(page_inventory, (tuple, list))
+        or not page_inventory
+        or any(
+            type(page) is not str or not page or page != page.strip()
+            for page in page_inventory
+        )
+        or len(set(page_inventory)) != len(page_inventory)
+        or viewport.page_id not in page_inventory
+    ):
         blockers.append("viewport_page_not_owned_by_document")
     if room.viewport_id != viewport.viewport_id:
         blockers.append("room_viewport_mismatch")
