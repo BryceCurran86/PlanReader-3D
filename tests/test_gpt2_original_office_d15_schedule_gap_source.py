@@ -45,7 +45,7 @@ def _synthetic(*,two_inside=False,only_elsewhere=False):
                 page.insert_text((21,32),"D15",fontsize=10)
             page.insert_text((230,80),"D15",fontsize=10)
     page=doc.new_page(width=340,height=220)
-    page.insert_text((20,40),"D15 OFFICE SINGLE SWING 920 2040 40")
+    page.insert_text((20,40),"D15\nOFFICE\nSINGLE SWING\n920\n2040\n40")
     raw=doc.tobytes()
     doc.close()
     return raw
