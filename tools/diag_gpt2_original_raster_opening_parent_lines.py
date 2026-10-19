@@ -64,15 +64,18 @@ def original_raster_parent_source_report(
     if pub is None or pub.revision.source_sha256 != digest:
         raise ValueError("source snapshot mismatch")
     snapshot_id = pub.snapshot.snapshot_id
+    # The published producer is not a raster observation resolver.
+    # Reuse its typed authenticated visibility facade for all source reads.
+    visibility = source.authority()
     parents = tuple(requested_parents)
     if not parents:
         # A list of source-native parent IDs is only an address universe. The
         # typed source authority below must reauthenticate EVERY item.
         collected = set()
         for visible_id in sorted(
-            source.raster_opening_primitive_observation_ids_for_snapshot(snapshot_id)
+            visibility.raster_opening_primitive_observation_ids_for_snapshot(snapshot_id)
         ):
-            result = source.resolve_raster_opening_primitive(ObservationSelector(
+            result = visibility.resolve_raster_opening_primitive(ObservationSelector(
                 document_id=pub.revision.document_id,
                 revision_id=pub.revision.revision_id,
                 source_sha256=pub.revision.source_sha256,
