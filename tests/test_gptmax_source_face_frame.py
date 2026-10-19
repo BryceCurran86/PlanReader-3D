@@ -3,6 +3,7 @@ from dataclasses import asdict, replace
 from types import SimpleNamespace as Obj
 
 import pytest
+import fitz
 
 import pb_opening_host_binding_authority as host
 from pb_migration_contracts import EvidenceResolutionStatus as Status
@@ -13,12 +14,18 @@ from pb_live_wall_opening_authority_composition import compose_live_wall_opening
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _fixture(**kwargs):
+def _fixture(*, expand=False, **kwargs):
     source=SourceVisibilityProducer(producer_method='source-face-frame-test',
         producer_version='1',raster_paired_outer_faces_shadow=True,
         exact_g17_nomination_shadow=True)
+    payload=_pdf(**kwargs)
+    if expand:
+        doc=fitz.open(stream=payload,filetype='pdf')
+        box=doc[0].mediabox
+        doc[0].set_mediabox(fitz.Rect(0,0,box.width+70,box.height+90))
+        payload=doc.tobytes();doc.close()
     pub=source.ingest_native_pdf_bytes(document_id='source-face-frame-test',
-        source_bytes=_pdf(**kwargs),source_locator='memory://source-face-frame.pdf',
+        source_bytes=payload,source_locator='memory://source-face-frame.pdf',
         page_ids=(1,))
     composition=compose_live_wall_opening_authority(source_visibility_producer=source,
         revision_id=pub.revision.revision_id,page_ids=('1',),
@@ -55,7 +62,7 @@ def contexts(producer, bound):
 
 
 @pytest.mark.parametrize('kwargs', ({},dict(dx=35,dy=20),dict(rotation=1),
-    dict(rotation=2),dict(scale=2),dict(unrelated=True)))
+    dict(rotation=2),dict(scale=2),dict(unrelated=True),dict(expand=True)))
 def test_exact_source_faces_survive_bbox_padding_order_and_transform(kwargs):
     _,_,producer,bound = _fixture(**kwargs)
     ctx = contexts(producer,bound)
