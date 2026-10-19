@@ -1317,7 +1317,9 @@ def test_two_observations_proving_exact_same_physical_record_count_once(reverse)
     result = producer.publish(selector)
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.record is not None
-    assert result.record.quantity.value == 1.0
+    assert result.record.count == 1
+    assert result.record.quantity_evidence is not None
+    assert result.record.quantity_evidence.value == 1.0
 
 
 def test_cross_page_physical_opening_cannot_enter_complete_plan_universe():
