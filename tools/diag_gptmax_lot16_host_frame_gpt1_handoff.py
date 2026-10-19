@@ -79,6 +79,12 @@ def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) 
             or height_id != height_id.strip() or width_id == height_id
             or canonical.get("geometry_complete") is not True):
         return False
+    # Canonical record IDs are claims until present in the original producer's
+    # own evidence collection. Match the downstream _measurement_axes gate.
+    receipts = canonical.get("evidence_ids")
+    if (type(receipts) not in (tuple, list)
+            or width_id not in receipts or height_id not in receipts):
+        return False
     width = canonical.get("width_m")
     height = canonical.get("height_m")
     if not _positive(width) or not _positive(height):
@@ -180,6 +186,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             pair_ok and type(c.get("figured_area_record_id")) is str
             and c["figured_area_record_id"]
             and c["figured_area_record_id"] == e.get("evidence_id")
+            and type(c.get("evidence_ids")) in (tuple, list)
+            and c["figured_area_record_id"] in c["evidence_ids"]
         )
         if not supported:
             area_gate = "source_owned_floor_plan_unavailable"
