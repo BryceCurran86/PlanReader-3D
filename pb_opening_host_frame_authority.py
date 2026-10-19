@@ -129,7 +129,14 @@ def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]
             classification = PhysicalEquivalenceClass(raw)
         except ValueError:
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
-        if key in result and result[key] is not classification:
+        # Conflicting original SAME/DISTINCT/AMBIGUOUS pair receipts must
+        # be monotonic: a later repeated record can never erase a conflict
+        # already observed for the same physical wall pair. No source-order
+        # tie-breaking is a legitimate whole-wall frame authority.
+        prior = result.get(key)
+        if prior is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+            classification = prior
+        elif prior is not None and prior is not classification:
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         result[key] = classification
     return result
