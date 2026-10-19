@@ -127,7 +127,9 @@ def test_advisory_source_review_without_actual_issuer_is_not_quantity():
         "REVIEW_ONLY_SOURCE_ISSUER_UNAVAILABLE"
     )
     assert result["real_producer_issued_opening_area_count"] == 0
-    assert result["source_verified_new_quantity_count"] == 0
+    # Without the immutable original predecessor, zero new verified rows is
+    # not inferable, even though the advisory has no real issuer rows.
+    assert result["source_verified_new_quantity_count"] is None
 
 
 @pytest.mark.parametrize("mutate", [
