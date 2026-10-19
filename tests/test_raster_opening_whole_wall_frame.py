@@ -59,6 +59,12 @@ def _scope(records, *, complete: bool = True):
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=complete,
         proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="a" * 64,
+        snapshot_id="snap",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
         records=tuple(records),
         equivalence=_equivalence(records),
     )

@@ -778,6 +778,16 @@ class OpeningHostFrameProducer:
             or not wall_scope.scope_complete
             or wall_scope.proposition != PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
             or wall_scope.equivalence is None
+            # Query success is not a substitute for returned source identity.
+            # This single-wall raster path must enforce the same six keys as
+            # the shared connected-wall frame source reader.
+            or any(
+                getattr(wall_scope, name, None) != getattr(binding, name)
+                for name in (
+                    "document_id", "revision_id", "source_sha256",
+                    "snapshot_id", "page_id", "decision_scope_id",
+                )
+            )
         ):
             return None
 
