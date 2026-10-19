@@ -154,8 +154,17 @@ def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
     if not math.isfinite(original_area) or original_area < 0.0:
         return items
     axes = _positive_original_metres(spec.length_m, spec.width_m)
+    # A structural SOFFIT area and repeated DROP PANEL length/width are
+    # different physical scopes. In the latter case LxW is the size of one
+    # drop panel, not the global slab footprint. Validate the global area
+    # against global rectangle axes only when no separate drop-panel
+    # dimensions were supplied.
+    drop_panel_scope = (
+        _positive_original_metres(spec.depth_m, spec.length_m, spec.width_m)
+        and _typed_original_count(spec.count)
+    )
     if (
-        original_area > 0.0 and axes
+        original_area > 0.0 and axes and not drop_panel_scope
         and not math.isclose(original_area, float(spec.length_m * spec.width_m),
                              rel_tol=0.0, abs_tol=0.011)
     ):
