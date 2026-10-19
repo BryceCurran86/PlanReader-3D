@@ -11,6 +11,7 @@ signature-verified JSON used by the original-byte project-only scorer.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any, Iterable
 
 
@@ -32,7 +33,7 @@ _COMPATIBLE_TRADES = {
 # Dimensional constraints on already-sealed source units, independent of
 # benchmark expected values. Not a measurement unit conversion mechanism.
 _AREA_UNITS = frozenset({"m²", "m2", "sqm"})
-_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number", "count"})
+_COUNT_UNITS = frozenset({"ea", "each", "nr", "no", "no.", "number"})
 _SOURCE_FAMILY_UNITS = {
     "floor_area": _AREA_UNITS,
     "floor_finish_area": _AREA_UNITS,
@@ -120,6 +121,22 @@ def require_signed_v2_family_trade_integrity(
                 raise ValueError(
                     "bound signed source unit disagrees with physical family dimension"
                 )
+            if family == "opening_count":
+                # A source-authenticated count has an integer cardinality.
+                # Do not accept a fractional, negative, boolean or nonfinite
+                # signed count as an exact independently mapped door/window
+                # item. Abstentions remain unscored by the unchanged evaluator.
+                value = _field(quantity, "value")
+                if value is not None and not _field(quantity, "abstained"):
+                    if (
+                        type(value) not in (int, float)
+                        or not math.isfinite(value)
+                        or value < 1
+                        or value != int(value)
+                    ):
+                        raise ValueError(
+                            "mapped opening count must be a positive whole number"
+                        )
             if family in {"opening_area", "opening_count"}:
                 semantic_key = _field(quantity, "semantic_key")
                 if type(semantic_key) is not str:
