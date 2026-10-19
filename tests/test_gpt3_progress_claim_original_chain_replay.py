@@ -122,3 +122,9 @@ def test_readonly_progress_cli_avoids_overwrite_and_records_exact_evidence_hashe
     }
     with pytest.raises(FileExistsError):
         main(argv)
+
+def test_prior_self_hashed_claim_without_original_event_epochs_cannot_be_authenticated():
+    payload = _inputs()
+    payload["previous_claims"] = [deepcopy(payload["candidate_claim"])]
+    with pytest.raises(ValueError, match="first-claim-only authority gate"):
+        verify_progress_claim_source_chain(**payload)
