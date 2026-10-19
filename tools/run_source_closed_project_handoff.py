@@ -53,6 +53,9 @@ from pb_live_external_wall_surface_area_quantity_publication import (
     seal_live_per_wall_surface_area_run,
 )
 from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
+from pb_live_floor_finish_customer_projection import (
+    project_live_floor_finish_customer_rows,
+)
 from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
@@ -417,6 +420,12 @@ def _generate_project_handoff_locked(
         "verified_customer_row_count": 0,
         "customer_rows_verified": False,
         "customer_rows_file": None,
+        # A verified FINISH-ONLY customer projection never certifies the
+        # complete mixed-family customer universe or frozen V2 score.
+        "floor_finish_customer_rows_verified": False,
+        "floor_finish_customer_row_count": 0,
+        "floor_finish_customer_rows_file": None,
+        "floor_finish_customer_first_gate": "NO_SEALED_FLOOR_FINISH",
         "canonical_counts": {},
         # Source-owned canonical-wall authority is distinct from overall
         # publication status. A local canonical-ID conflict must be visible
@@ -897,6 +906,47 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise
 
+    # An independently sealed source-positive floor finish can now carry
+    # a separately verified customer receipt. Do not label the entire
+    # floor/ceiling/wall/opening project customer-verified from one family.
+    # A failure to project a finish must never silently become an approved
+    # customer row or block unrelated, already source-sealed families.
+    verified_floor_finish_customer_rows = None
+    if floor_finish_quantities:
+        finish_runs = tuple(
+            run for family, run in family_runs if family == "floor_finish_area"
+        )
+        if len(finish_runs) != 1:
+            raise RuntimeError("source floor finish family seal is ambiguous")
+        try:
+            finish_rows = tuple(project_live_floor_finish_customer_rows(
+                claim, workspace_id=workspace_id, project_id=project_id,
+            ))
+            finish_verified = verify_sealed_customer_output(
+                finish_runs[0], finish_rows,
+            )
+            sealed_ids = tuple(q.quantity_id for q in finish_runs[0].quantities)
+            if (
+                len(sealed_ids) != len(set(sealed_ids))
+                or len(finish_rows) != len(sealed_ids)
+                or set(finish_verified.verified_quantity_ids) != set(sealed_ids)
+                or finish_verified.customer_row_count != len(sealed_ids)
+            ):
+                raise RuntimeError(
+                    "sealed floor-finish customer quantity bijection unavailable"
+                )
+            verified_floor_finish_customer_rows = finish_rows
+            summary["floor_finish_customer_first_gate"] = "FAMILY_VERIFIED"
+        except Exception as exc:
+            # Preserve the signed producer evidence for independent review,
+            # but NEVER report any verified customer floor-finish output.
+            summary["floor_finish_customer_first_gate"] = (
+                f"FLOOR_FINISH_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
+            )
+            summary["claim_reason_codes"].append(
+                "floor_finish_customer_projection_unverified"
+            )
+
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
         summary["family_run_ids"][family] = run.run_id
@@ -924,6 +974,19 @@ def _generate_project_handoff_locked(
             if _source_complexity_blocked(summary["claim_reason_codes"])
             else "no_sealable_quantities"
         )
+
+    if verified_floor_finish_customer_rows is not None:
+        finish_customer_path = (
+            output_dir / "verified_floor_finish_customer_rows.json"
+        )
+        _write_json(
+            finish_customer_path, list(verified_floor_finish_customer_rows),
+        )
+        summary["floor_finish_customer_rows_verified"] = True
+        summary["floor_finish_customer_row_count"] = len(
+            verified_floor_finish_customer_rows
+        )
+        summary["floor_finish_customer_rows_file"] = str(finish_customer_path)
 
     if verified_partial_customer_rows is not None:
         customer_path = output_dir / "verified_customer_rows.json"
