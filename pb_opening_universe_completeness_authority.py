@@ -399,12 +399,21 @@ def _coverage_complete(
     failed_set = set(failed_pages)
     if scope.decision_scope_kind == "document":
         expected_pages = set(range(1, total_pages + 1))
+        # A complete drawing source covers actual page identities, not just
+        # an equal-size list of arbitrary claimed pages. Do not apply this
+        # document-wide rule to legacy "page_scope" producer contracts.
+        try:
+            claimed_pages = {int(page_id) for page_id in scope.page_ids
+                             if page_id.isdecimal() and str(int(page_id)) == page_id}
+        except (TypeError, ValueError, OverflowError):
+            claimed_pages = set()
         if (
             _clean(getattr(coverage, "state", "")) != "complete"
             or total_pages <= 0
             or failed_pages
             or decoded_set != expected_pages
             or len(scope.page_ids) != total_pages
+            or claimed_pages != expected_pages
         ):
             reasons.append(SOURCE_DECODE_INCOMPLETE)
     elif scope.decision_scope_kind == "pages":
