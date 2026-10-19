@@ -218,6 +218,14 @@ class LivePhysicalOpeningVoidComposition:
     canonical_openings: tuple[LiveCanonicalOpeningObject, ...] = ()
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
+    @property
+    def physical_opening_dimension_quantities(self):
+        """Source-owned measured widths and heights, never inferred from area."""
+        from pb_live_opening_metric_dimensions_quantity_publication import (
+            publish_live_opening_dimension_quantities,
+        )
+        return publish_live_opening_dimension_quantities(self)
+
 
 def _reason_tuple(values) -> tuple[str, ...]:
     # Set-like inputs (e.g. PhysicalOpeningVoidResult.reason_codes is a frozenset)
