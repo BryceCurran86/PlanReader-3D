@@ -64,3 +64,20 @@ def test_two_valid_but_empty_source_seals_do_not_make_complete_zero_cost_scenari
     )
     with pytest.raises(ValueError, match="empty signed source universe"):
         build_scenario_comparison(empty.to_dict(), [], bundle(rates))
+
+def test_supplier_csv_escapes_untrusted_source_quantity_formula_prefix():
+    import csv
+    import io
+    from tools.gpt3_customer_quote_scenarios import supplier_rfq_csv
+    report = {
+        "project_id": "test-project", "currency": "AUD",
+        "supplier_rate_requests": [{
+            "family": "opening_area", "unit": "m2",
+            "unpriced_quantity_ids": ['=HYPERLINK("https://example.invalid")'],
+            "request": "CLIENT_SUPPLIER_RATE_REQUIRED_NOT_ZERO",
+        }],
+    }
+    rows = list(csv.DictReader(io.StringIO(supplier_rfq_csv(report))))
+    assert len(rows) == 1
+    assert rows[0]["source_quantity_ids"].startswith("'=HYPERLINK")
+    assert rows[0]["source_quantity_ids"] != '=HYPERLINK("https://example.invalid")'
