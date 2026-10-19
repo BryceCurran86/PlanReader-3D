@@ -56,11 +56,19 @@ def normalise_trade_unit(unit: object) -> str:
 
 
 def require_evidence_ids(value: object, name: str) -> tuple[str, ...]:
-    """Clean an evidence-id sequence; a bare string is a caller bug, not a list."""
+    """Preserve exact original company-rate source receipt identities.
 
-    if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
-        raise TypeError(f"{name} must be a sequence of evidence ids, not a bare string")
-    return tuple(dict.fromkeys(_clean(item) for item in value if _clean(item)))
+    An empty tuple is legal for unbound geometry. Rate binding itself
+    requires at least one nonempty original receipt. Never cast, trim or
+    silently collapse duplicate source evidence.
+    """
+    if type(value) not in (list, tuple):
+        raise TypeError(f"{name} must be a list/tuple of original evidence ids")
+    if any(type(e) is not str or not e or e != e.strip() for e in value):
+        raise ValueError(f"{name} has missing, untyped or padded evidence ids")
+    if len(set(value)) != len(value):
+        raise ValueError(f"{name} has duplicate original evidence ids")
+    return tuple(value)
 
 
 def _positive(value: object) -> Optional[float]:
