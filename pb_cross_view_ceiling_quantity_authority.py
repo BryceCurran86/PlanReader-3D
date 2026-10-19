@@ -232,6 +232,18 @@ class CrossViewCeilingQuantityResult:
             for record in self.records
         ):
             return MappingProxyType({})
+        if any(
+            type(record.quantity.quantity_id) is not str
+            or not record.quantity.quantity_id
+            or record.quantity.quantity_id != record.quantity.quantity_id.strip()
+            for record in self.records
+        ):
+            return MappingProxyType({})
+        # Distinct physical ceilings cannot share one sealed source quantity
+        # merely by changing the canonical ceiling ID around that quantity.
+        signed_quantity_counts = Counter(
+            record.quantity.quantity_id for record in self.records
+        )
         counts = Counter(
             record.canonical_ceiling_id for record in self.records
             if type(record.canonical_ceiling_id) is str
@@ -247,6 +259,7 @@ class CrossViewCeilingQuantityResult:
             if (
                 type(record.canonical_ceiling_id) is str
                 and counts.get(record.canonical_ceiling_id, 0) == 1
+                and signed_quantity_counts.get(record.quantity.quantity_id, 0) == 1
                 and record.physical_ceiling_surface_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.canonical_ceiling_id == record.canonical_ceiling_id
                 and record.canonical_ceiling.ceiling_quantity_id == record.quantity.quantity_id
