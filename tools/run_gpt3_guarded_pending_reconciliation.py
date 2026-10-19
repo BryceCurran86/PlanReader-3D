@@ -8,6 +8,7 @@ pre-certified the physical->frozen identity.
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import importlib.util
 import json
 import os
@@ -20,6 +21,26 @@ from tools.prepare_gpt3_pending_identity_activation import build_activation
 from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _read_json_without_duplicate_keys,
 )
+
+
+def _input_sha256(path: Path) -> str:
+    """Digest the exact input bytes, not metadata or claimed source authority."""
+    digest = sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _snapshot_inputs(inputs: tuple[Path, ...]) -> tuple[tuple[Path, str], ...]:
+    """Pin each original input before parsing any potentially mutable file."""
+    return tuple((path, _input_sha256(path)) for path in inputs)
+
+
+def _assert_inputs_stable(snapshot: tuple[tuple[Path, str], ...]) -> None:
+    """Abort if any original signed/source/customer/scope byte changed."""
+    if any(_input_sha256(path) != digest for path, digest in snapshot):
+        raise ValueError("guarded reconciliation source or signed input changed during scoring")
 
 
 def _object(path: Path) -> dict[str, Any]:
@@ -158,9 +179,12 @@ def _preflight_outputs(
 def _write_triplet(
     outputs: tuple[Path, Path, Path], payloads: tuple[object, object, object],
     *, inputs: tuple[Path, ...],
+    expected_input_hashes: tuple[tuple[Path, str], ...] | None = None,
 ) -> None:
     """Stage all three files then publish exclusively, with rollback on failure."""
     _preflight_outputs(outputs, inputs)
+    if expected_input_hashes is not None:
+        _assert_inputs_stable(expected_input_hashes)
     staged: list[Path] = []
     created: list[Path] = []
     try:
@@ -175,11 +199,19 @@ def _write_triplet(
                 out.write(json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n")
                 out.flush()
                 os.fsync(out.fileno())
+        # Reading and scoring happen before staging. Recheck all original
+        # inputs immediately before the first visible output is created.
+        if expected_input_hashes is not None:
+            _assert_inputs_stable(expected_input_hashes)
         # An atomic create-only hard link will fail if any external writer
         # creates the destination since preflight. Do not replace originals.
         for path, temp in zip(outputs, staged):
             os.link(temp, path)
             created.append(path)
+        # If an input changes while the three hard links are created, roll
+        # them all back. Never retain a stale activation or scored receipt.
+        if expected_input_hashes is not None:
+            _assert_inputs_stable(expected_input_hashes)
     except BaseException:
         for path in reversed(created):
             path.unlink(missing_ok=True)
@@ -213,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     outputs = (args.output_map, args.output_activation_receipt, args.output_report)
     _preflight_outputs(outputs, inputs)
+    input_hashes = _snapshot_inputs(inputs)
     manifest = _object(args.manifest)
     candidate_map, activation, report = build_guarded_exact_report(
         pending_ledger=_object(args.pending_ledger),
@@ -224,7 +257,11 @@ def main(argv: list[str] | None = None) -> int:
         object_universe=_object(args.object_universe),
         manifest_path=args.manifest,
     )
-    _write_triplet(outputs, (candidate_map, activation, report), inputs=inputs)
+    _assert_inputs_stable(input_hashes)
+    _write_triplet(
+        outputs, (candidate_map, activation, report),
+        inputs=inputs, expected_input_hashes=input_hashes,
+    )
     print(json.dumps(report, sort_keys=True))
     return 0
 
