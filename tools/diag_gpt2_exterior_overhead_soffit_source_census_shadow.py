@@ -134,16 +134,21 @@ def audit_exterior_overhead_source_census_shadow(
         "original_bbox_pdf_pts": tuple(float(v) for v in w[:4]),
     } for value, w in number_rows)
     by_numeric_block = defaultdict(list)
+    # Preserve the complete original text order within each printed number
+    # while replacing a repeated full-page scan with an exact-value index.
+    # A matching arithmetic total is only an untrusted source candidate.
+    by_number_value = defaultdict(list)
     for value, w in number_rows:
         by_numeric_block[int(w[5])].append((value, w))
+        by_number_value[value].append(w)
     chains = []
     for block, members in by_numeric_block.items():
         if not 2 <= len(members) <= 12:
             continue
         total = sum(value for value, _ in members)
         rivals = [
-            w for value, w in number_rows
-            if value == total and int(w[5]) != block
+            w for w in by_number_value.get(total, ())
+            if int(w[5]) != block
         ]
         if not rivals:
             continue
