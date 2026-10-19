@@ -17,7 +17,7 @@ def _source():
     pdf=fitz.open()
     p=pdf.new_page()
     p.insert_text((10,20),"D17 DETAIL LABEL")
-    p.insert_text((10,60),"D17 FREEZER SLIDING DOOR 800 2000 75")
+    p.insert_text((10,60),"D17\nFREEZER\nSLIDING DOOR\n800\n2000\n75")
     p2=pdf.new_page()
     p2.insert_text((10,30),"D17 FREEZER")
     data=pdf.tobytes()
