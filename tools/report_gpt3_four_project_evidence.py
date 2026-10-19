@@ -226,8 +226,8 @@ def build_four_project_evidence_ledger(
 ) -> dict[str, Any]:
     """Inventory all frozen projects, verify supplied original bytes and score safely."""
     manifests = load_suite_manifests(FROZEN_ROOT)
-    if len(manifests) != 4:
-        raise ValueError("frozen V2 suite must contain exactly four projects")
+    if len(manifests) != 4 or len({m.project_id for m in manifests}) != 4:
+        raise ValueError("frozen V2 suite must contain four distinct projects")
     eligible = sum(
         1 for manifest in manifests for item in manifest.verified_items
         if item.denominator_eligible
