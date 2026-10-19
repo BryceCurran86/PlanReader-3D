@@ -30,7 +30,19 @@ def _fixtures(tmp_path, monkeypatch, *, status="INCOMPLETE"):
     }
     manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
     sealed = tmp_path / "sealed.json"
-    sealed.write_text(json.dumps({"source_sha256s": [receipt]}), encoding="utf-8")
+    # An explicit signed ABSTAIN attempt is a source execution. A completely
+    # empty run is not, and must not become an asserted zero benchmark score.
+    sealed.write_text(json.dumps({
+        "source_sha256s": [receipt],
+        "quantities": [{
+            "quantity_id": "synthetic-abstention",
+            "family": "floor_area",
+            "semantic_key": "floor.area",
+            "abstained": True,
+            "value": None,
+            "object_identity_refs": ["attempted-physical-floor"],
+        }],
+    }), encoding="utf-8")
     identity = tmp_path / "identity_map.json"
     identity.write_text(json.dumps({"source_sha256s": [receipt]}), encoding="utf-8")
     monkeypatch.setattr(module, "FROZEN_ROOT", frozen)
@@ -411,3 +423,41 @@ def test_project_only_strict_json_accepts_normal_nested_original_source_receipt(
     assert module._strict_original_json_object(sealed)["source_sha256s"] == [sha]
     assert module._strict_original_json_object(identity)["source_sha256s"] == [sha]
     assert not module._strict_original_json_object(sealed).get("quantities")
+
+
+def test_original_sha_verified_but_empty_sealed_project_does_not_mint_zero_score(
+    tmp_path, monkeypatch,
+):
+    manifest, original, sealed, mapping, original_sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    sealed.write_text(json.dumps({
+        "source_sha256s": [original_sha],
+        "quantities": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        module, "_unchanged_frozen_exact_report",
+        lambda *_: pytest.fail("missing production cannot run unchanged V2 scorer"),
+    )
+    report = _report(manifest, original, sealed, mapping)
+    assert report["original_source_sha_verified"] is True
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["reconciliation_complete"] is False
+    assert report["project_evaluation"] is None
+    assert report["reason_codes"] == ["signed_source_quantity_universe_empty"]
+
+
+def test_missing_sealed_quantities_field_is_not_an_executed_original_project(
+    tmp_path, monkeypatch,
+):
+    manifest, original, sealed, mapping, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    sealed.write_text(json.dumps({"source_sha256s": [sha]}), encoding="utf-8")
+    monkeypatch.setattr(
+        module, "_unchanged_frozen_exact_report",
+        lambda *_: pytest.fail("no production quantities, no frozen evaluation"),
+    )
+    result = _report(manifest, original, sealed, mapping)
+    assert result["reason_codes"] == ["signed_source_quantity_universe_empty"]
+    assert result["score_claim"] is False
