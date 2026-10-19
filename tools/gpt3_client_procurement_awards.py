@@ -17,6 +17,7 @@ from typing import Any, Mapping
 
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from pb_customer_output_verification import _customer_quantity_id, verify_sealed_customer_output
+from tools.gpt3_verified_contract_delivery import verified_quote
 from tools.gpt3_verified_customer_quote import (
     _currency, _csv_text, _decimal, _money, _number, _write_new,
     build_verified_customer_quote,
@@ -72,6 +73,9 @@ def _quote_source_lines(sealed_run: dict, customers: list[dict], quote: dict) ->
     if (type(quote) is not dict or quote.get("schema_version") != "gpt3-client-verified-quote-v1"
         or quote.get("quote_fingerprint") != _hash(quote, "quote_fingerprint")):
         raise ValueError("procurement quote was modified or is not canonical")
+    # Check the COMPLETE priced source/cost summary, not just the self-hashed
+    # quote header and each source quantity's physical fingerprint.
+    verified_quote(quote, sealed_run, customers)
     sealed = sealed_source_closed_run_from_dict(sealed_run)
     verified = verify_sealed_customer_output(sealed, customers)
     if (
@@ -110,9 +114,24 @@ def _quote_source_lines(sealed_run: dict, customers: list[dict], quote: dict) ->
             raise ValueError("procurement source row differs from original signed source")
         if row.get("pricing_status") != "PRICED_FROM_CLIENT_RATE":
             raise ValueError("procurement requires explicit client quote pricing")
-        if type(row.get("cost_components")) is not dict:
-            raise ValueError("procurement requires priced original cost components")
-        _amount(row["cost_components"].get("material"), "client material budget")
+        components = row.get("cost_components")
+        if type(components) is not dict or set(components) != {
+            "material", "labour", "plant", "subcontract",
+        }:
+            raise ValueError("procurement requires four exact client cost components")
+        cost = sum(
+            (_amount(components[key], f"client {key} budget")
+             for key in ("material", "labour", "plant", "subcontract")),
+            Decimal("0"),
+        )
+        if cost != _amount(row.get("cost_amount"), "source client cost total"):
+            raise ValueError("procurement component costs do not equal client line cost")
+        markup_pct = _decimal(row.get("markup_pct"), "client markup percent", cap=HUNDRED)
+        expected_sell = (cost * (
+            Decimal("1") + markup_pct / HUNDRED
+        )).quantize(CENT, rounding=ROUND_HALF_UP)
+        if expected_sell != _amount(row.get("sell_amount"), "client sell amount"):
+            raise ValueError("procurement line cost/markup disagree with client price")
         by_quote[qid] = row
     if set(by_quote) != set(by_signed):
         raise ValueError("procurement missing signed source-linked quote item")
