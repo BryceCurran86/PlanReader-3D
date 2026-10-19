@@ -651,3 +651,39 @@ def test_opening_area_requires_exact_native_measurement_receipt_not_trimmed_copy
         figured_area_record_id=" figured-1 ",
         evidence_ids=(*opening.evidence_ids, " figured-1 "),
     )) is None
+
+
+@pytest.mark.parametrize("axes", [
+    {"width_m": 1.2, "height_m": 1.5, "area_m2": 1.8},
+    {"width_m": 1.25, "height_m": 1.45, "area_m2": 1.81},
+])
+def test_figured_source_opening_accepts_available_matching_metric_axes(axes):
+    candidate = replace(_opening(area_m2=axes["area_m2"]), **{
+        "width_m": axes["width_m"],
+        "height_m": axes["height_m"],
+    })
+    quantity = _opening_quantity(candidate)
+    assert quantity is not None
+    assert quantity.value == pytest.approx(axes["area_m2"])
+
+
+@pytest.mark.parametrize("mismatch", [
+    {"width_m": 1.2, "height_m": 1.5, "area_m2": 1.95},
+    {"width_m": 1.25, "height_m": 1.45, "area_m2": 1.82},
+    {"width_m": True, "height_m": 1.5, "area_m2": 1.8},
+    {"width_m": "1.2", "height_m": 1.5, "area_m2": 1.8},
+    {"width_m": float("nan"), "height_m": 1.5, "area_m2": 1.8},
+    {"width_m": 1.2, "height_m": float("inf"), "area_m2": 1.8},
+    {"width_m": 0.0, "height_m": 1.5, "area_m2": 1.8},
+])
+def test_figured_source_opening_blocks_conflicting_or_invalid_available_axes(mismatch):
+    assert _opening_quantity(replace(_opening(), **mismatch)) is None
+
+
+def test_figured_source_opening_does_not_fabricate_missing_axis_from_area():
+    valid = _opening()
+    assert valid.width_m is None and valid.height_m is None
+    assert _opening_quantity(valid) is not None
+    # A single genuine corroborated metric axis does not by itself prove a
+    # second axis. Existing figured-label receipt authority remains separate.
+    assert _opening_quantity(replace(valid, width_m=1.2)) is not None
