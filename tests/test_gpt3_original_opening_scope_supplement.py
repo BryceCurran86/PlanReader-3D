@@ -108,6 +108,9 @@ def test_single_original_source_scope_sidecar_signs_without_v1_mutation():
     assert original["schema_version"] == "gpt3.opening_producer_scope.v1"
     assert original["parent_v1_source_closed_fingerprint"] == original_v1["fingerprint"]
     assert original["producer_scope_entries"][0]["snapshot_id"] == "snap-1"
+    assert original["producer_scope_entries"][0][
+        "v1_customer_projection_fingerprint"
+    ] == original_customer[0]["commercial_projection_fingerprint"]
     assert original["producer_scope_entries"][0]["decision_scope_id"] == (
         "original-producer-scope:page-3"
     )
@@ -140,6 +143,8 @@ def test_two_real_source_quantities_can_share_page_scope_without_identity_alias(
     lambda x: x.update(parent_v1_source_closed_fingerprint="0" * 64),
     lambda x: x.update(customer_release_authorized=True),
     lambda x: x["producer_scope_entries"][0].update(host_binding_record_id="borrowed-host"),
+    lambda x: x["producer_scope_entries"][0].update(
+        v1_customer_projection_fingerprint="a" * 64),
     lambda x: x["producer_scope_entries"][0].update(
         v1_signed_quantity_fingerprint="f" * 64),
     lambda x: x["producer_scope_entries"].append(
@@ -233,3 +238,23 @@ def test_sidecar_syntax_cannot_escape_source_owner_through_string_json():
         verify_source_owned_opening_scope_supplement(
             json.dumps(original), **ctx,
         )
+
+
+def test_original_customer_projection_fingerprint_cannot_be_forged_or_reused():
+    ctx = _issued_original_source(two=True)
+    supplement = _issue(ctx)
+    by_id = {
+        row["quantity_id"]: row["v1_customer_projection_fingerprint"]
+        for row in supplement["producer_scope_entries"]
+    }
+    assert len(by_id) == 2
+    assert set(by_id.values()) == {
+        row["commercial_projection_fingerprint"] for row in ctx["customer_rows"]
+    }
+    # Customer mutation must fail even if another valid signed customer row
+    # exists; exact provenance is bound to its own physical quantity ID.
+    ctx["customer_rows"][0]["commercial_projection_fingerprint"] = (
+        ctx["customer_rows"][1]["commercial_projection_fingerprint"]
+    )
+    with pytest.raises((ValueError, RuntimeError)):
+        _issue(ctx)
