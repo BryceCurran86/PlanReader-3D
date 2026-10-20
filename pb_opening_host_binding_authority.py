@@ -2306,7 +2306,7 @@ def _local_boundary_clean_host_scope(
 def _source_same_group_distinct_pair_conflicts(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> frozenset[tuple[str, str]]:
-    """Explicit DISTINCT cannot override independently issued SAME membership."""
+    """Non-SAME original pair cannot override source SAME group membership."""
     groups_by_member: dict[str, set[int]] = {}
     for group_index, group in enumerate(equivalence.equivalence_groups):
         for wall_id in group:
@@ -2316,8 +2316,10 @@ def _source_same_group_distinct_pair_conflicts(
         try:
             classification = PhysicalEquivalenceClass(raw)
         except (TypeError, ValueError):
-            continue  # The pair lookup independently makes this AMBIGUOUS.
-        if classification is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
+            # Bad original class is an explicit, contradictory source
+            # receipt, never permission to trust an issued SAME group.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
             continue
         a, b = str(left), str(right)
         if groups_by_member.get(a, set()) & groups_by_member.get(b, set()):
