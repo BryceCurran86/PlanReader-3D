@@ -50,7 +50,7 @@ class FirestopDeviceSpec:
     center_point: Tuple[float, float] = (0.0, 0.0)
     nominal_pipe_dia_mm: float = 0.0
     fire_rating_hours: int = 0
-    collar_height_mm: float = 60.0
+    collar_height_mm: float = 0.0
     level_id: str = "L01"
     source_callout: str = ""
 
@@ -94,6 +94,7 @@ class SourceFirestopCollarWrapShadowAuthority:
             "orientation": PenetrationOrientation.FLOOR_PENETRATION,
             "nominal_pipe_dia_mm": 0.0,
             "fire_rating_hours": 0,
+            "collar_height_mm": 0.0,
         }
 
         # Device Type
@@ -227,7 +228,7 @@ class SourceFirestopCollarWrapShadowAuthority:
                 center_point=snapped_center,
                 nominal_pipe_dia_mm=pipe_dia,
                 fire_rating_hours=rating_hrs,
-                collar_height_mm=float(item.get("collar_height_mm", 60.0)),
+                collar_height_mm=float(item.get("collar_height_mm", parsed["collar_height_mm"])),
                 level_id=item.get("level_id", default_level),
                 source_callout=callout,
             )

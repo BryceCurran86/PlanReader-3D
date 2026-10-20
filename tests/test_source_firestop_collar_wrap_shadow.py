@@ -48,6 +48,8 @@ def test_firestop_callout_parsing():
     omitted_spec = FirestopDeviceSpec(device_id="FS-OMIT")
     assert omitted_spec.nominal_pipe_dia_mm == 0.0
     assert omitted_spec.fire_rating_hours == 0
+    assert omitted["collar_height_mm"] == 0.0
+    assert omitted_spec.collar_height_mm == 0.0
 
 
 def test_firestop_snapping():
