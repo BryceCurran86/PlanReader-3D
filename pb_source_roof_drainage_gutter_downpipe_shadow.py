@@ -74,9 +74,9 @@ class OverflowScupperSpec:
 class RainwaterHeadSpec:
     head_id: str
     location: Tuple[float, float]
-    width_mm: float = 400.0
-    depth_mm: float = 250.0
-    height_mm: float = 300.0
+    width_mm: float = 0.0
+    depth_mm: float = 0.0
+    height_mm: float = 0.0
     level_id: str = "ROOF"
 
 

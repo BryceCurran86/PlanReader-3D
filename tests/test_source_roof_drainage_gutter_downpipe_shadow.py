@@ -121,6 +121,12 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         self.assertEqual(scupper.height_mm, 0.0)
         self.assertEqual(scupper.freeboard_mm, 0.0)
 
+    def test_omitted_rainhead_size_does_not_invent_sump(self):
+        head = RainwaterHeadSpec(head_id="RH-UNKNOWN", location=(0.0, 0.0))
+        self.assertEqual(head.width_mm, 0.0)
+        self.assertEqual(head.depth_mm, 0.0)
+        self.assertEqual(head.height_mm, 0.0)
+
     def test_invariants_and_safety(self):
         res = SourceRoofDrainageGutterDownpipeShadowAuthority.evaluate_roof_drainage([], [], [], [])
         self.assertEqual(res.status, "CANDIDATE")
