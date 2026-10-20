@@ -280,6 +280,31 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 rel_tol=0.0, abs_tol=1e-6,
             )
         )
+        # Publication parity: the exact canonical representative must be
+        # an original physical observation and a member of original
+        # canonical evidence. The re-proven producer physical record must
+        # own the same full observation universe, not a replayed substitute.
+        original_observations = physical.get("source_observation_ids")
+        canonical_observations = c.get("source_observation_ids")
+        representative = c.get("representative_observation_id")
+        canonical_viewport = c.get("viewport_id")
+        source_observations_bound = bool(
+            type(canonical_viewport) is str and canonical_viewport
+            and canonical_viewport == canonical_viewport.strip()
+            and type(representative) is str and representative
+            and representative == representative.strip()
+            and type(canonical_observations) in (tuple, list)
+            and bool(canonical_observations)
+            and all(type(i) is str and i and i == i.strip()
+                    for i in canonical_observations)
+            and len(set(canonical_observations)) == len(canonical_observations)
+            and type(original_observations) in (tuple, list)
+            and set(original_observations) == set(canonical_observations)
+            and representative in original_observations
+            and receipt_roster_ok
+            and representative in issuer_ids
+            and all(i in issuer_ids for i in canonical_observations)
+        )
         if not supported:
             area_gate = "source_owned_floor_plan_unavailable"
         elif host is None:
@@ -300,6 +325,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             area_gate = "canonical_figured_area_publication_basis_unproven"
         elif not canonical_figured_value:
             area_gate = "canonical_figured_area_value_unproven"
+        elif not source_observations_bound:
+            area_gate = "original_physical_source_observation_receipts_unbound"
         elif row.get("quantity_id"):
             area_gate = "original_signed_area_already_retained"
         else:
@@ -327,6 +354,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "canonical_figured_area_publication_basis_unproven"
         elif not canonical_figured_value:
             gate = "canonical_figured_area_value_unproven"
+        elif not source_observations_bound:
+            gate = "original_physical_source_observation_receipts_unbound"
         elif not axis_ok:
             gate = "width_height_axis_authority_unproven"
         else:
@@ -346,6 +375,7 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "original_figured_label_source_scope_bound": figured_label_scope_owned,
             "canonical_figured_area_publication_basis_bound": canonical_figured_basis,
             "canonical_figured_area_value_bound": canonical_figured_value,
+            "original_physical_source_observation_receipts_bound": source_observations_bound,
             "original_host_binding_receipt_bound": host_receipt_bound,
             "original_host_frame_receipt_bound": frame_receipt_bound,
             "figured_area_receipt_bound": figured_receipt_bound,
@@ -370,8 +400,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 supported and host is not None and frame_ok and typed
                 and host_receipt_bound and frame_receipt_bound
                 and figured_label_scope_owned
-                and canonical_figured_value and axis_ok
-                and not row.get("quantity_id")),
+                and canonical_figured_value and source_observations_bound
+                and axis_ok and not row.get("quantity_id")),
             # No output JSON is a signed quantity or a trust-grant token.
             "measurement_published": False,
             "customer_seal_granted": False,
