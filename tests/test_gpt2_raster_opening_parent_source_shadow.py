@@ -153,3 +153,28 @@ def test_conflicted_source_inventory_never_certifies_remaining_parent(monkeypatc
     assert result.lines == ()
     assert result.unresolved_parent_ids == ("parent-A",)
     assert result.reason_codes == ("original_raster_opening_source_inventory_conflict",)
+
+@pytest.mark.parametrize("damage", [
+    {"derivation_parent_ids": ()},
+    {"derivation_parent_ids": ("parent-A", "parent-B")},
+    {"derivation_parent_ids": ("",)},
+    {"origin_kind": "foreign-w4-render"},
+    {"observation_kind": "raster_pdf_visible_segment"},
+    {"source_primitive_ref": "visible:raster_segment:pretend"},
+    {"geometry": (0., 0., 0., 0.)},
+])
+def test_corrob_report_with_malformed_original_parent_abstains_everything(
+    monkeypatch, damage
+):
+    # One otherwise valid original parent cannot be certified complete when
+    # another CORROBORATED source receipt is malformed or foreign to the
+    # requested original source ancestry.
+    source = _source(monkeypatch, {
+        "v1": _visible("parent-A", "v1"),
+        "v2": _visible("parent-A", "v2", **damage),
+    })
+    report = _run(source)
+    assert report.status == "PARTIAL_ABSTAIN"
+    assert report.lines == ()
+    assert report.unresolved_parent_ids == ("parent-A",)
+    assert report.reason_codes == ("original_raster_opening_source_inventory_conflict",)
