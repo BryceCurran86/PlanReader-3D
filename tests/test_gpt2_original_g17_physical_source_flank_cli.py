@@ -246,3 +246,29 @@ def test_corrupt_support_explicitly_blocks_local_scope_completeness(monkeypatch)
     )
     assert result["hostless_g17_source_roster_complete"] is False
     assert result["unresolved"]
+
+def test_same_physical_opening_hosted_and_abstained_rosters_conflict(monkeypatch):
+    state, _ = _stub_pipeline(monkeypatch)
+    original_composer = cli.compose_live_wall_opening_authority
+    def contradictory(**kwargs):
+        result = original_composer(**kwargs)
+        row = result.opening_bindings[0]
+        hosted = NS(**{
+            **vars(row),
+            "status": EvidenceResolutionStatus.CORROBORATED,
+            "record_id": "original-hosted-wall-binding",
+            "host_wall_id": "physical-W4-wall",
+            "reason_codes": (),
+        })
+        return NS(**{
+            **vars(result), "opening_bindings": (hosted, row),
+        })
+    monkeypatch.setattr(
+        cli, "compose_live_wall_opening_authority", contradictory,
+    )
+    with pytest.raises(RuntimeError,
+                       match="repeated identity decisions"):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256=_SHA, page_id="3",
+        )
+    assert state["owned_calls"] == 0
