@@ -1,0 +1,133 @@
+"""Read-only original-PDF dimension-leader to opening-cap ink correspondence.
+
+A source-authenticated figure/leader pair is not a physical W4 doorway, a
+measurement scale, a floor threshold or a FIRM construction quantity.
+"""
+from __future__ import annotations
+from dataclasses import dataclass, asdict
+from hashlib import sha256
+from math import isfinite
+import fitz
+
+
+@dataclass(frozen=True)
+class OriginalDoorLeaderScope:
+    page_number: int
+    text_block: int
+    text_line: int
+    text_word: int
+    baseline_path: int
+    cap_paths: tuple[int,int]
+    left_tick_paths: tuple[int,int,int,int]
+    right_tick_paths: tuple[int,int,int,int]
+
+
+@dataclass(frozen=True)
+class OriginalDoorFigureSourceShadow:
+    status: str
+    source_sha256: str
+    original_page: int
+    original_word_address: tuple[int,int,int]
+    original_figured_text: str
+    drawn_leader_cap_x_pdf_pt: tuple[float,float]
+    native_dimension_line_y_pdf_pt: float
+    original_gap_span_pdf_pt: float
+    rival_same_line_word_texts: tuple[str,...]
+    source_path_ids: tuple[int,...]
+    reasons: tuple[str,...]
+    shadow_only: bool = True
+    actual_door_identity_proven: bool = False
+    original_w4_wall_issued: bool = False
+    opening_jamb_identity_granted: bool = False
+    physical_doorway_threshold_issued: bool = False
+    figure_width_mm_authorized_for_physical_opening: bool = False
+    floor_finish_area_issued: bool = False
+    customer_projection_allowed: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _native_line(page, drawings, n: int):
+    if type(n) is not int or n < 0 or n >= len(drawings):
+        raise ValueError('original drawing path not found')
+    d = drawings[n]
+    items=d.get('items',())
+    if (len(items) not in (1,2) or items[0][0] != 'l'
+            or d.get('color') is None or max(d['color']) > .04
+            or d.get('fill') is not None):
+        raise ValueError('original path not a black source line')
+    if len(items)==2 and (items[1][0]!='l' or items[1][1] != items[0][2]
+                          or items[1][2] != items[0][1]):
+        raise ValueError('original two-stroke path does not reverse same ink')
+    p,q = items[0][1:3]
+    vals = (float(p.x),float(p.y),float(q.x),float(q.y),float(d['width']))
+    if not all(isfinite(v) for v in vals) or vals[4] <= 0:
+        raise ValueError('invalid original source segment')
+    return vals
+
+
+def inspect_original_door_figure_leader_shadow(original_pdf_bytes:bytes, *,
+    source_sha256:str, scope:OriginalDoorLeaderScope,
+    expected_cap_x_pdf_pt:tuple[float,float],
+    expected_figured_word:str='1000',tolerance_pdf_pt:float=.06,
+) -> OriginalDoorFigureSourceShadow:
+    if (type(original_pdf_bytes) is not bytes or not original_pdf_bytes
+            or sha256(original_pdf_bytes).hexdigest() != source_sha256):
+        raise ValueError('source original immutable PDF SHA mismatch')
+    if (type(scope) is not OriginalDoorLeaderScope
+            or type(tolerance_pdf_pt) not in (int,float) or not isfinite(tolerance_pdf_pt)
+            or not .001 <= tolerance_pdf_pt <= .25):
+        raise ValueError('invalid original source scope or tolerance')
+    paths=(scope.baseline_path,*scope.cap_paths,*scope.left_tick_paths,*scope.right_tick_paths)
+    if len(paths)!=11 or len(set(paths))!=11:
+        raise ValueError('dimension line, two caps and eight tick/extension paths must be distinct')
+    if (type(expected_cap_x_pdf_pt) is not tuple or len(expected_cap_x_pdf_pt)!=2
+            or not all(type(v) in (float,int) and isfinite(v) for v in expected_cap_x_pdf_pt)
+            or expected_cap_x_pdf_pt[1]-expected_cap_x_pdf_pt[0]<=tolerance_pdf_pt):
+        raise ValueError('ordered source cap coordinates required')
+    with fitz.open(stream=original_pdf_bytes,filetype='pdf') as pdf:
+        if not 1<=scope.page_number<=len(pdf):
+            raise ValueError('original source page not found')
+        pg=pdf[scope.page_number-1]
+        words=[w for w in pg.get_text('words') if tuple(w[5:8]) ==
+               (scope.text_block,scope.text_line,scope.text_word)]
+        if len(words)!=1 or words[0][4] != expected_figured_word or not expected_figured_word.isdigit():
+            raise ValueError('exact figured dimension original word unavailable')
+        rivals=tuple(sorted(w[4] for w in pg.get_text('words') if
+            w[5]==scope.text_block and w[6]==scope.text_line and w[7]!=scope.text_word))
+        drawings=pg.get_drawings()
+        baseline=_native_line(pg,drawings,scope.baseline_path)
+        cap_left=_native_line(pg,drawings,scope.cap_paths[0])
+        cap_right=_native_line(pg,drawings,scope.cap_paths[1])
+        left=tuple(_native_line(pg,drawings,p) for p in scope.left_tick_paths)
+        right=tuple(_native_line(pg,drawings,p) for p in scope.right_tick_paths)
+    if abs(baseline[1]-baseline[3])>tolerance_pdf_pt:
+        raise ValueError('figured original dimension baseline is not horizontal')
+    y=baseline[1]
+    bounds=tuple(sorted((baseline[0],baseline[2])))
+    if any(x<bounds[0]-tolerance_pdf_pt or x>bounds[1]+tolerance_pdf_pt for x in expected_cap_x_pdf_pt):
+        raise ValueError('original dimension baseline does not bracket both wall caps')
+    for cap,x in zip((cap_left,cap_right),expected_cap_x_pdf_pt):
+        if abs(cap[0]-cap[2])>tolerance_pdf_pt or abs(cap[0]-x)>tolerance_pdf_pt:
+            raise ValueError('dimension leader x does not match original wall cap')
+        if not min(cap[1],cap[3])>y:
+            raise ValueError('wall cap does not lie beyond original dimension baseline')
+    for strokes,x in ((left,expected_cap_x_pdf_pt[0]),(right,expected_cap_x_pdf_pt[1])):
+        extensions=[a for a in strokes if abs(a[0]-a[2])<=tolerance_pdf_pt]
+        diagonals=[a for a in strokes if abs(a[0]-a[2])>tolerance_pdf_pt
+                   and abs(a[1]-a[3])>tolerance_pdf_pt]
+        if len(extensions)!=2 or len(diagonals)!=2:
+            raise ValueError('independent original dimension ticks/extensions incomplete')
+        if any(abs(a[0]-x)>tolerance_pdf_pt or
+               min(abs(a[1]-y),abs(a[3]-y))>tolerance_pdf_pt for a in extensions):
+            raise ValueError('original extension lines do not meet source dimension ticks')
+        if any(min(abs(a[0]-x)+abs(a[1]-y),abs(a[2]-x)+abs(a[3]-y))>tolerance_pdf_pt
+               for a in diagonals):
+            raise ValueError('original leader arrow heads not source-owned at dimension tick')
+    return OriginalDoorFigureSourceShadow(
+        'SOURCE_FIGURE_LEADER_CANDIDATE',source_sha256,scope.page_number,
+        (scope.text_block,scope.text_line,scope.text_word),expected_figured_word,
+        tuple(round(float(x),5) for x in expected_cap_x_pdf_pt),round(float(y),5),
+        round(float(expected_cap_x_pdf_pt[1]-expected_cap_x_pdf_pt[0]),5),
+        rivals,tuple(sorted(paths)),('original_door_figured_leader_source_only_no_w4_physical_owner',))
