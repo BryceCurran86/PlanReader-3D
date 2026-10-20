@@ -93,6 +93,7 @@ class TestSourceRetainingWallDrainageShadow(unittest.TestCase):
         res = SourceRetainingWallDrainageShadowAuthority.evaluate_retaining_walls([wall])
         self.assertEqual(res.quantities.total_tanking_membrane_area_m2, 0.0)
         self.assertEqual(wall.ag_pipe_diameter_mm, 0.0)
+        self.assertEqual(wall.agg_backfill_width_mm, 0.0)
         self.assertEqual(res.quantities.total_ag_pipe_length_m, 0.0)
 
     def test_invariants_and_safety(self):
