@@ -16,7 +16,7 @@ from pb_source_cross_project_drawing_type_validation_shadow import (
     PROJECT_NAME_BIAS_VETOED,
     ROLE_SEGREGATION_INVARIANT_VERIFIED,
     SNAP_TOLERANCE_INVARIANT_VERIFIED,
-    SOURCE_CROSS_PROJECT_VALIDATION_RESOLVED,
+    SOURCE_CROSS_PROJECT_VALIDATION_CANDIDATE,
     SOURCE_CROSS_PROJECT_VALIDATION_UNAVAILABLE,
     TOPOLOGICAL_CLOSURE_INVARIANT_VERIFIED,
     UNAUTHENTICATED_DRAWING_TYPE,
@@ -88,8 +88,8 @@ def test_all_four_drawing_types_pass_invariants():
     for dtype in (DRAWING_TYPE_RESIDENTIAL, DRAWING_TYPE_COMMERCIAL, DRAWING_TYPE_STANDARDS_OUTLINED, DRAWING_TYPE_INDUSTRIAL):
         sel = _make_selector(drawing_type=dtype)
         res = authority.resolve(sel)
-        assert res.status == EvidenceResolutionStatus.CORROBORATED.value
-        assert SOURCE_CROSS_PROJECT_VALIDATION_RESOLVED in res.reason_codes
+        assert res.status == EvidenceResolutionStatus.CANDIDATE.value
+        assert SOURCE_CROSS_PROJECT_VALIDATION_CANDIDATE in res.reason_codes
         assert SNAP_TOLERANCE_INVARIANT_VERIFIED in res.reason_codes
         assert PRIMITIVE_CAP_INVARIANT_VERIFIED in res.reason_codes
         assert TOPOLOGICAL_CLOSURE_INVARIANT_VERIFIED in res.reason_codes

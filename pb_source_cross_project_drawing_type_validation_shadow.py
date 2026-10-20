@@ -272,9 +272,9 @@ class SourceCrossProjectDrawingTypeValidationAuthority:
             status = EvidenceResolutionStatus.ABSTAINED.value
             mode = "abstain_project_bias_or_invariant_violation"
         else:
-            status = EvidenceResolutionStatus.CORROBORATED.value
-            mode = "corroborated_cross_project_invariant_verified"
-            all_reasons.add(SOURCE_CROSS_PROJECT_VALIDATION_RESOLVED)
+            status = EvidenceResolutionStatus.CANDIDATE.value
+            mode = "candidate_cross_project_invariant_verified"
+            all_reasons.add(SOURCE_CROSS_PROJECT_VALIDATION_CANDIDATE)
 
         return SourceCrossProjectValidationResult(
             status=status,
