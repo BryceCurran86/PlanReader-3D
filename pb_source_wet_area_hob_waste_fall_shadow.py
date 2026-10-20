@@ -211,8 +211,8 @@ class WetAreaHobWasteFallShadowAuthority:
             vertical_face_area_sqm=vertical_face_area_sqm,
             waterproofing_upturn_area_sqm=waterproofing_upturn_area_sqm,
             is_structural_wall=False,
-            status=EvidenceResolutionStatus.CORROBORATED,
-            notes="Corroborated non-structural shower hob / waterstop barrier.",
+            status=EvidenceResolutionStatus.CANDIDATE,
+            notes="Candidate non-structural shower hob / waterstop barrier; not independently re-resolved ownership.",
         )
 
     def compute_wet_area_takeoff(
@@ -244,7 +244,7 @@ class WetAreaHobWasteFallShadowAuthority:
 
         total_tiling = main_floor_area + shower_floor_area + hob_top_faces + hob_vertical_faces
 
-        status = EvidenceResolutionStatus.CORROBORATED if room_gross_floor_area_sqm > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if room_gross_floor_area_sqm > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return WetAreaTakeoffSummary(
             room_id=room_id,
