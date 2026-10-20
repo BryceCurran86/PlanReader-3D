@@ -396,3 +396,78 @@ def test_caller_plain_json_cannot_stand_in_for_the_original_source_producer():
             sealed_run=ctx["sealed_run"],
             customer_rows=ctx["customer_rows"],
         )
+
+
+
+OWNER_LOT16_SHA256 = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+OWNER_LOT16_PDF = (
+    __import__("pathlib").Path("documents/sources/")
+    / "1. Construction Plans - Lot 16 Power (REV E).pdf"
+)
+
+
+@pytest.mark.skipif(
+    not OWNER_LOT16_PDF.is_file(),
+    reason="client-owned exact original Lot16 PDF absent from public CI",
+)
+def test_owner_sha_verified_original_opening_producer_scope_and_v1_eight_customer():
+    """Only the privately provisioned actual original may close source proof."""
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_live_physical_net_wall_integration import (
+        LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+    )
+    from pb_live_wall_opening_authority_composition import (
+        compose_live_wall_opening_authority,
+    )
+    from pb_live_physical_opening_void_composition import (
+        compose_live_physical_opening_voids,
+    )
+    from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from pathlib import Path
+
+    original_bytes = OWNER_LOT16_PDF.read_bytes()
+    assert sha256(original_bytes).hexdigest() == OWNER_LOT16_SHA256
+    source = SourceVisibilityProducer(
+        producer_method="live-physical-net-wall",
+        producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+    )
+    revision = source.ingest_native_pdf_bytes(
+        document_id=f"live-source:{OWNER_LOT16_SHA256[:32]}",
+        source_bytes=original_bytes,
+        source_locator="memory://gpt3-exact-lot16-scope-v1-original.pdf",
+    ).revision.revision_id
+    wall = compose_live_wall_opening_authority(
+        source_visibility_producer=source, revision_id=revision,
+        page_ids=("3",),
+    )
+    openings = compose_live_physical_opening_voids(
+        source_visibility_producer=source, wall_opening_composition=wall,
+    )
+    retained = _retention(
+        wall, openings, verify_customer_rows=True,
+        audit_project_id="au_qld_lot16_power",
+    )
+    sealed = sealed_source_closed_run_from_dict(retained["sealed_run"])
+    historical = json.loads((
+        Path("docs/engineering/lot16_original_signed_eight_row_20261015/production")
+        / "source_sealed_run.json"
+    ).read_text())
+    assert len(sealed.quantities) >= 8
+    assert historical["fingerprint"] == (
+        "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb"
+    )
+    supplement = scope_supplement_from_live_source_producer(
+        opening_composition=openings,
+        wall_composition=wall,
+        sealed_run=sealed,
+        customer_rows=retained["customer_rows"],
+    )
+    assert len(supplement["producer_scope_entries"]) == len(sealed.quantities)
+    assert supplement["parent_v1_source_closed_fingerprint"] == sealed.fingerprint
+    assert all(
+        entry["source_sha256"] == OWNER_LOT16_SHA256
+        for entry in supplement["producer_scope_entries"]
+    )
+    assert supplement["benchmark_identity_mapping_authorized"] is False
+    assert supplement["customer_release_authorized"] is False
