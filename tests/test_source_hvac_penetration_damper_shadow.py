@@ -85,9 +85,12 @@ class TestSourceHVACPenetrationDamperShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.width_mm, 0.0)
         self.assertEqual(omitted.height_mm, 0.0)
+        self.assertEqual(omitted.element_thickness_mm, 0.0)
+        self.assertEqual(omitted.sleeve_extension_mm, 0.0)
         omitted_res = SourceHVACPenetrationDamperShadowAuthority.evaluate_dampers([omitted])
         self.assertEqual(omitted_res.quantities.total_duct_airflow_area_m2, 0.0)
         self.assertEqual(omitted_res.quantities.total_retaining_flange_length_m, 0.0)
+        self.assertEqual(omitted_res.quantities.total_firestop_mortar_volume_m3, 0.0)
 
 
 if __name__ == "__main__":
