@@ -36,7 +36,7 @@ class ParapetSegmentSpec:
     centerline_points: List[Tuple[float, float]]
     wall_thickness_mm: float = 0.0
     upstand_height_mm: float = 0.0
-    capping_material: CappingMaterial = CappingMaterial.COLORBOND_STEEL
+    capping_material: CappingMaterial = CappingMaterial.UNKNOWN
     capping_girth_mm: float = 0.0
     membrane_turnup_height_mm: float = 0.0
     has_drip_groove: bool = False
@@ -106,7 +106,7 @@ class SourceParapetCappingFlashingShadowAuthority:
         elif "STONE" in clean:
             mat = CappingMaterial.NATURAL_STONE
         else:
-            mat = CappingMaterial.COLORBOND_STEEL
+            mat = CappingMaterial.UNKNOWN
 
         # Wall thickness
         thk_match = re.search(r"(\d+)\s*(?:THK|THICK|W\b)", clean)
