@@ -240,7 +240,11 @@ class SourceRcpWordEligibilityShadowAuthority:
             and token not in support
             and not re.fullmatch(r"[0-9]+(?:[.]?[0-9]+)?(?:MM|M)?", token)
         ]
-        if clean_text.upper() not in defined or unsupported:
+        # All original sibling code tokens occupy the SAME native text
+        # block. Two different codes, or a repeated code, cannot both own
+        # one independent original ceiling-material occurrence.
+        block_codes = [token for token in block_tokens if token in defined]
+        if unsupported or block_codes != [clean_text.upper()]:
             return RcpWordEvidence(
                 word_id=word_id, text=clean_text, bbox_pdf_pts=wb,
                 block_index=block_index, line_index=line_index,
