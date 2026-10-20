@@ -26,7 +26,7 @@ def apply(*, family, semantic, unit, trade):
 
 @pytest.mark.parametrize(("family", "semantic", "unit", "trade"), [
     ("floor_area", "floor.area", "m²", "flooring"),
-    ("floor_finish_area", "tiling.floor", "sqm", "tiling"),
+    ("floor_finish_area", "floor_finish_area:source-floor-1:FT3:tile", "sqm", "tiling"),
     ("ceiling_area", "ceiling.area", "m2", "ceilings"),
     ("opening_area", "door_area:qualified-1", "m²", "doors"),
     ("opening_area", "window_area:qualified-1", "m2", "windows"),
@@ -41,7 +41,7 @@ def test_source_owned_dimensional_unit_can_map_to_compatible_trade(
 
 @pytest.mark.parametrize(("family", "semantic", "unit", "trade"), [
     ("floor_area", "floor.area", "ea", "flooring"),
-    ("floor_finish_area", "tile.area", "count", "tiling"),
+    ("floor_finish_area", "floor_finish_area:source-floor-1:FT2:tile", "count", "tiling"),
     ("ceiling_area", "ceiling.area", "m", "ceilings"),
     ("opening_area", "door_area:source-id", "ea", "doors"),
     ("opening_count", "door_count:source-id", "m2", "doors"),
