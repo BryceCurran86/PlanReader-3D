@@ -35,7 +35,7 @@ class WeatherLouverSpec:
     width_mm: float = 0.0
     height_mm: float = 0.0
     blade_pitch_mm: float = 0.0
-    free_area_ratio: float = 0.50
+    free_area_ratio: float = 0.0
     has_bird_mesh: bool = True
     frame_depth_mm: float = 100.0
     level_id: str = "ELEV"
@@ -85,16 +85,12 @@ class SourceWeatherLouverAerodynamicFreeAreaShadowAuthority:
         # Blade type
         if "STORM" in clean or "TWO STAGE" in clean or "2 STAGE" in clean:
             b_type = LouverBladeType.TWO_STAGE_STORM
-            def_ratio = 0.45
         elif "ACOUSTIC" in clean or "CHEVRON" in clean:
             b_type = LouverBladeType.ACOUSTIC_CHEVRON
-            def_ratio = 0.35
         elif "CONTINUOUS" in clean:
             b_type = LouverBladeType.CONTINUOUS_HORIZONTAL
-            def_ratio = 0.52
         else:
             b_type = LouverBladeType.SINGLE_STAGE_DRAINABLE
-            def_ratio = 0.50
 
         # Dimensions: (\d+)\s*(?:W)?\s*[xX]\s*(\d+)\s*(?:H)?
         dim_match = re.search(r"(\d+)\s*(?:W)?\s*[xX]\s*(\d+)\s*(?:H)?", clean)
@@ -109,7 +105,7 @@ class SourceWeatherLouverAerodynamicFreeAreaShadowAuthority:
         if fa_match:
             free_ratio = float(fa_match.group(1)) / 100.0
         else:
-            free_ratio = def_ratio
+            free_ratio = 0.0
 
         # Pitch: (\d+)\s*(?:PITCH|CTS|SPACING)
         pitch_match = re.search(r"(\d+)\s*(?:PITCH|CTS|SPACING)", clean)
