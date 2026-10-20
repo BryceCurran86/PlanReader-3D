@@ -26,12 +26,13 @@ def fixture():
         return {
             "physical_opening_id": identity,
             "canonical_opening_id": identity,
-            **ROOT, "page_id": "3", "opening_kind": "window",
+            **ROOT, "page_id": "3", "viewport_id":"page:3",
+            "opening_kind": "window",
             "host_binding_record_id": host,
             "host_wall_id": "wall-grp" if host else None,
             "host_frame_record_id": frame,
             "figured_area_record_id": "figured",
-            "evidence_ids": ["figured"] + ([host] if host else []) + ([frame] if frame else []),
+            "evidence_ids": ["figured", "figured-word-3"] + ([host] if host else []) + ([frame] if frame else []),
             "width_record_id": None, "height_record_id": None,
             "width_m": None, "height_m": None,
             "geometry_complete": False,
@@ -43,6 +44,10 @@ def fixture():
             "dimension_values_mm":[1200,1800],
             "axis_order_resolved":False,
             "area_m2":2.16,
+            "basis":"figured_opening_label",
+            "page_id":"3", "viewport_id":"page:3",
+            "semantic_kind":"window",
+            "source_text_observation_ids":("figured-word-3",),
         }} if area else {"status":"abstained","evidence":None}
         return {
             "physical_opening_id":identity,
