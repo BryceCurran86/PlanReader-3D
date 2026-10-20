@@ -33,7 +33,7 @@ class RetainingWallSpec:
     wall_id: str
     wall_type: RetainingWallType
     centerline_points: List[Tuple[float, float]]
-    stem_thickness_mm: float = 200.0
+    stem_thickness_mm: float = 0.0
     retained_height_mm: float = 1800.0
     footing_width_mm: float = 1200.0
     footing_depth_mm: float = 300.0
@@ -106,7 +106,7 @@ class SourceRetainingWallDrainageShadowAuthority:
 
         # Stem thickness
         stem_match = re.search(r"(\d+)\s*(?:THK|STEM)", clean)
-        stem_thk_mm = float(stem_match.group(1)) if stem_match else 200.0
+        stem_thk_mm = float(stem_match.group(1)) if stem_match else 0.0
 
         # Retained height
         h_match = re.search(r"(\d+)\s*(?:H\b|HIGH|HEIGHT)", clean)
