@@ -33,9 +33,10 @@ class TestSourceSteelBracingGussetPlateShadow(unittest.TestCase):
         self.assertEqual(mass2, 2.47)
         self.assertTrue(tb2)
 
-        _cfg3, sec3, mass3, _tb3 = SourceSteelBracingGussetPlateShadowAuthority.parse_bracing_annotation(
+        cfg3, sec3, mass3, _tb3 = SourceSteelBracingGussetPlateShadowAuthority.parse_bracing_annotation(
             "BRACING"
         )
+        self.assertEqual(cfg3, BracingConfigType.UNKNOWN)
         self.assertEqual(sec3, "")
         self.assertEqual(mass3, 0.0)
 
