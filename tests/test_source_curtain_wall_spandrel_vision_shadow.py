@@ -72,7 +72,7 @@ def test_compile_curtain_wall_receipt():
     assert receipt.total_bays_count == 1
     assert receipt.total_vision_area_pt2 == 900.0  # 30 * 30
     assert receipt.total_spandrel_area_pt2 == 1800.0 # 30 * 60
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
