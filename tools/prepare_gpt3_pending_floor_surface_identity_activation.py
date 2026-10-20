@@ -17,6 +17,9 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 
 _PACKAGE_DIR = (
     Path(__file__).resolve().parents[1]
@@ -349,6 +352,28 @@ def build_floor_surface_activation(
         unit = frozen_item.get("unit")
         if type(unit) is not str or quantity.unit != unit:
             raise ValueError("sealed floor quantity unit does not match frozen item")
+        # Exact physical floor identity is not evidence of the TRADE. The
+        # original source producer signs its canonical floor, original
+        # source finish code and proven material role into the semantic key.
+        # A VINYL/epoxy floor remains such even if the frozen target label
+        # happens to say FT2/FT3 tile; never activate false tiling credit.
+        original_finish_parts = quantity.semantic_key.split(":")
+        if (
+            len(original_finish_parts) != 4
+            or original_finish_parts[0] != "floor_finish_area"
+            or original_finish_parts[1] != canonical
+            or any(not part or part != part.strip() for part in original_finish_parts)
+        ):
+            raise ValueError(
+                "source-signed floor finish semantic identity incomplete at activation"
+            )
+        if (
+            frozen_item.get("trade_category") == "tiling"
+            and original_finish_parts[3] != "tile"
+        ):
+            raise ValueError(
+                "original source finish is not tile for frozen tiling identity"
+            )
 
         frozen_object = frozen.get(object_ref)
         if frozen_object is None:
@@ -432,6 +457,15 @@ def build_floor_surface_activation(
         ] + additions,
     }
     identity_map_from_dict(output)
+    # Fail the exact *proposed* map before activation receipt exists. This is
+    # the same negative source-signed trade/dimension role guard used by the
+    # four-project report and guarded exact project scorer; it does not mint
+    # any benchmark mapping, source finish or physical floor.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
