@@ -65,7 +65,7 @@ def test_compile_skirting_receipt():
     assert receipt.total_gross_perimeter_pt == 100.0
     assert receipt.total_doorways_deducted_pt == 20.0
     assert receipt.total_net_skirting_length_pt == 80.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
