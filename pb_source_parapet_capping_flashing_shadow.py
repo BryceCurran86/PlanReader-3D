@@ -39,7 +39,7 @@ class ParapetSegmentSpec:
     capping_material: CappingMaterial = CappingMaterial.COLORBOND_STEEL
     capping_girth_mm: float = 0.0
     membrane_turnup_height_mm: float = 0.0
-    has_drip_groove: bool = True
+    has_drip_groove: bool = False
     level_id: str = "ROOF"
     source_callout: str = ""
 
