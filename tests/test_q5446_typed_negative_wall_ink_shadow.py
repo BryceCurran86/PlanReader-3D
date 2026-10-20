@@ -183,3 +183,13 @@ def test_original_q5446_wall_scope_resolves_under_typed_negative_shadow():
     # The complexity exceeded reason code MUST NOT be present!
     assert PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED not in scope_shadow.reason_codes
     assert len(scope_shadow.filtered_native_primitive_receipts) > 10000
+
+
+def test_opening_local_supplemental_scope_result_signature_and_execution():
+    from pb_physical_wall_candidate_authority import (
+        _build_opening_local_supplemental_scope_result,
+    )
+    import inspect
+    sig = inspect.signature(_build_opening_local_supplemental_scope_result)
+    assert "filter_typed_negative_non_wall_ink_shadow" in sig.parameters
+    assert sig.parameters["filter_typed_negative_non_wall_ink_shadow"].default is False
