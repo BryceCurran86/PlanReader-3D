@@ -54,7 +54,7 @@ def test_compile_taxonomy_receipt():
     assert isinstance(receipt, PlanLegendSymbolTaxonomyReceipt)
     assert receipt.total_legend_boxes_count == 1
     assert receipt.total_registered_symbols == 2
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
