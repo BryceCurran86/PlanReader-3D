@@ -333,9 +333,9 @@ class SourceColdRoomInsulatedPanelAuthority:
             status = EvidenceResolutionStatus.ABSTAINED.value
             mode = "abstain_cold_room_panel_defect"
         else:
-            status = EvidenceResolutionStatus.CORROBORATED.value
-            mode = "corroborated_cold_room_panel_boundary"
-            all_reasons.add(SOURCE_COLD_ROOM_BOUNDARY_RESOLVED)
+            status = EvidenceResolutionStatus.CANDIDATE.value
+            mode = "candidate_cold_room_panel_boundary"
+            all_reasons.add(SOURCE_COLD_ROOM_BOUNDARY_CANDIDATE)
 
         return SourceColdRoomPanelResult(
             status=status,

@@ -12,7 +12,7 @@ from pb_source_cold_room_insulated_panel_shadow import (
     NON_COLD_ROOM_NAME_UNAUTHENTICATED,
     PANEL_MATERIAL_PIR,
     PANEL_THICKNESS_OUT_OF_BOUNDS,
-    SOURCE_COLD_ROOM_BOUNDARY_RESOLVED,
+    SOURCE_COLD_ROOM_BOUNDARY_CANDIDATE,
     SOURCE_COLD_ROOM_BOUNDARY_UNAVAILABLE,
     THERMAL_BREAK_GAP_DEFECT,
     THERMAL_PERIMETER_ENCLOSED,
@@ -96,8 +96,8 @@ def test_positive_cold_room_boundary_resolution():
     sel = _make_selector()
     res = authority.resolve(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED.value
-    assert SOURCE_COLD_ROOM_BOUNDARY_RESOLVED in res.reason_codes
+    assert res.status == EvidenceResolutionStatus.CANDIDATE.value
+    assert SOURCE_COLD_ROOM_BOUNDARY_CANDIDATE in res.reason_codes
     assert THERMAL_PERIMETER_ENCLOSED in res.reason_codes
     assert COLD_ROOM_PANEL_THICKNESS_CORROBORATED in res.reason_codes
     assert COLD_ROOM_DOOR_REBATE_VERIFIED in res.reason_codes
