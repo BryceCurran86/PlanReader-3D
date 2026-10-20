@@ -114,7 +114,7 @@ class SourceOperableSashClearanceShadowAuthority:
                 width_mm = float(dim_match.group(1))
                 height_mm = float(dim_match.group(2))
             else:
-                width_mm, height_mm = 900.0, 1200.0
+                width_mm, height_mm = 0.0, 0.0
 
         # Insect screen detection
         has_screen = ("SCREEN" in clean or "FLYSCREEN" in clean) and (op_type != SashOperationType.FIXED)
