@@ -32,12 +32,14 @@ class TestSourceWeatherLouverAerodynamicFreeAreaShadow(unittest.TestCase):
         self.assertEqual(w2, 1200.0)
         self.assertEqual(h2, 1800.0)
         self.assertEqual(fa2, 0.35)
+        self.assertEqual(pitch2, 0.0)
 
-        _b3, w3, h3, _fa3, _pitch3 = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.parse_louver_annotation(
+        _b3, w3, h3, _fa3, pitch3 = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.parse_louver_annotation(
             "LOUVER"
         )
         self.assertEqual(w3, 0.0)
         self.assertEqual(h3, 0.0)
+        self.assertEqual(pitch3, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
@@ -85,6 +87,7 @@ class TestSourceWeatherLouverAerodynamicFreeAreaShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.width_mm, 0.0)
         self.assertEqual(omitted.height_mm, 0.0)
+        self.assertEqual(omitted.blade_pitch_mm, 0.0)
         omitted_res = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.evaluate_louvers([omitted])
         self.assertEqual(omitted_res.quantities.total_gross_aperture_area_m2, 0.0)
         self.assertEqual(omitted_res.quantities.total_aerodynamic_free_area_m2, 0.0)
