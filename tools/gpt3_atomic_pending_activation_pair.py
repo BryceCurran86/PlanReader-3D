@@ -89,6 +89,17 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # A hand-crafted JSON object with duplicate keys can make two consumers
+    # disagree about the same signed/map identity despite a stable file hash.
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("activation identity receipt/map contains duplicate JSON key")
+        out[key] = value
+    return out
+
+
 def read_committed_active_identity_map(
     path: Path, *, receipt_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -107,7 +118,7 @@ def read_committed_active_identity_map(
         # The map must not be read as activated before seeing its marker.
         first_receipt = receipt_path.read_bytes()
     map_bytes = path.read_bytes()
-    raw = json.loads(map_bytes)
+    raw = json.loads(map_bytes, object_pairs_hook=_reject_duplicate_json_keys)
     if type(raw) is not dict:
         raise ValueError("active identity map must be an object")
     if first_receipt is None:
@@ -117,7 +128,7 @@ def read_committed_active_identity_map(
             )
         return raw
 
-    marker = json.loads(first_receipt)
+    marker = json.loads(first_receipt, object_pairs_hook=_reject_duplicate_json_keys)
     if type(marker) is not dict or (
         marker.get("activation_commit_marker_version")
         != ACTIVATION_COMMIT_MARKER_VERSION
