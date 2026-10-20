@@ -247,7 +247,7 @@ def test_original_hostless_roster_conflicting_duplicate_is_not_silently_deduplic
             **{**vars(result), "opening_bindings": (row, row)}
         )
     monkeypatch.setattr(cli, "compose_live_wall_opening_authority", duplicate)
-    with pytest.raises(RuntimeError, match="roster repeats a physical identity"):
+    with pytest.raises(RuntimeError, match="repeated identity decisions"):
         cli.original_physical_g17_source_flank_report(
             _SOURCE, expected_sha256=_SHA, page_id="3",
         )
