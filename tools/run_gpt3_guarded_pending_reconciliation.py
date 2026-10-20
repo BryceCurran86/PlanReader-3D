@@ -22,6 +22,11 @@ from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
 from tools.prepare_gpt3_pending_identity_activation import build_activation
+from tools.gpt3_atomic_pending_activation_pair import (
+    read_committed_active_identity_map,
+    ACTIVATION_COMMIT_MARKER_VERSION,
+    _fsync_directory,
+)
 from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _read_json_without_duplicate_keys,
 )
@@ -208,7 +213,19 @@ def _write_triplet(
     # only paths still pointing at OUR inode are safe to delete.
     created: list[tuple[Path, Path]] = []
     try:
-        for path, value in zip(outputs, payloads):
+        # Add the byte-identical map digest to the release receipt.
+        # It is the LAST published path, after map and exact report.
+        map_bytes = (
+            json.dumps(payloads[0], sort_keys=True, indent=2, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        committed_receipt = {
+            **payloads[1],
+            "activation_commit_marker_version": ACTIVATION_COMMIT_MARKER_VERSION,
+            "identity_map_sha256": sha256(map_bytes).hexdigest(),
+            "identity_map_project_id": payloads[0].get("project_id"),
+            "identity_map_source_sha256s": payloads[0].get("source_sha256s"),
+        }
+        for path, value in zip(outputs, (payloads[0], committed_receipt, payloads[2])):
             path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 "w", dir=path.parent, encoding="utf-8", newline="",
@@ -225,9 +242,15 @@ def _write_triplet(
             _assert_inputs_stable(expected_input_hashes)
         # An atomic create-only hard link will fail if any external writer
         # creates the destination since preflight. Do not replace originals.
-        for path, temp in zip(outputs, staged):
+        for index in (0, 2, 1):
+            # A receipt is the final commit marker; neither an orphan map
+            # nor an orphan report can be consumed as a released result.
+            path, temp = outputs[index], staged[index]
             os.link(temp, path)
             created.append((path, temp))
+            _fsync_directory(path.parent)
+            if index != 1 and expected_input_hashes is not None:
+                _assert_inputs_stable(expected_input_hashes)
         # If an input changes while the three hard links are created, roll
         # them all back. Never retain a stale activation or scored receipt.
         if expected_input_hashes is not None:
@@ -251,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--customer-rows", type=Path, required=True)
     parser.add_argument("--active-identity-map", type=Path, required=True)
+    parser.add_argument("--active-identity-receipt", type=Path)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--source-identity-proof", type=Path, required=True)
     parser.add_argument("--object-universe", type=Path, required=True)
@@ -268,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
         args.active_identity_map, args.manifest, args.source_identity_proof,
         args.object_universe,
     )
+    if args.active_identity_receipt is not None:
+        inputs += (args.active_identity_receipt,)
     outputs = (args.output_map, args.output_activation_receipt, args.output_report)
     _preflight_outputs(outputs, inputs)
     input_hashes = _snapshot_inputs(inputs)
@@ -276,7 +302,9 @@ def main(argv: list[str] | None = None) -> int:
         pending_ledger=_object(args.pending_ledger),
         sealed_run_payload=_object(args.sealed_run),
         customer_rows=_rows(args.customer_rows),
-        active_identity_map_payload=_object(args.active_identity_map),
+        active_identity_map_payload=read_committed_active_identity_map(
+            args.active_identity_map, receipt_path=args.active_identity_receipt,
+        ),
         source_manifest=manifest,
         source_identity_proof=_object(args.source_identity_proof),
         object_universe=_object(args.object_universe),
