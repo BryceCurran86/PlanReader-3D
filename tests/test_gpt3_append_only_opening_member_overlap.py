@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import pytest
 
+from pb_source_closed_run_export import SourceClosedRunConflictError
 from test_customer_output_verification import quantity
 from test_gpt3_source_append_only_batch_gate import (
     _sealed, _customers,
@@ -41,7 +42,15 @@ def test_partially_overlapping_legacy_source_opening_groups_cannot_enter_batch(
         input_entity_ids=("physical-B", "physical-C"), unit=unit,
         value=2.0,
     )
-    out = _audit(first, second)
+    try:
+        out = _audit(first, second)
+    except SourceClosedRunConflictError as exc:
+        # This independent batch review must remain compatible with the
+        # upstream tighter original V1 signer (#3398). If that producer
+        # already rejects overlapping source-member receipts, admission is
+        # necessarily blocked before this downstream consumer can run.
+        assert "opening" in str(exc).lower()
+        return
     assert out["admission_status"] == "BLOCKED"
     assert out["first_failing_gate"] == (
         "DUPLICATE_OPENING_AREA_PHYSICAL_IDENTITY"
@@ -68,7 +77,11 @@ def test_legacy_signed_area_and_count_cannot_disagree_about_one_physical_opening
         family="opening_count", semantic_key=f"{count_kind}_count:physical-1",
         unit="ea", value=1.0,
     )
-    out = _audit(area, count)
+    try:
+        out = _audit(area, count)
+    except SourceClosedRunConflictError as exc:
+        assert "door/window kind" in str(exc).lower()
+        return
     assert out["admission_status"] == "BLOCKED"
     assert out["first_failing_gate"] == "CONFLICTING_ORIGINAL_OPENING_DOOR_WINDOW_KIND"
 
