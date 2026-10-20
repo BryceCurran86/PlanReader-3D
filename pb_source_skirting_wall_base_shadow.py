@@ -118,7 +118,7 @@ class SourceSkirtingWallBaseShadowAuthority:
         doorway_widths_pt: Sequence[float] = (),
         joinery_lengths_pt: Sequence[float] = (),
         profile: SkirtingMaterialProfile = SkirtingMaterialProfile.TIMBER_MDF_BEVELLED,
-        internal_corners_count: int = 4,
+        internal_corners_count: int = 0,
         external_corners_count: int = 0,
     ) -> RoomSkirtingRecord:
         door_ded = sum(doorway_widths_pt)

@@ -42,6 +42,19 @@ def test_deductions_exceeding_perimeter_clamped():
     )
 
     assert rec.net_skirting_length_pt == 0.0
+    assert rec.internal_corners_count == 0
+
+
+def test_omitted_internal_corners_do_not_invent_rectangle():
+    authority = SourceSkirtingWallBaseShadowAuthority()
+
+    rec = authority.compute_room_skirting(
+        room_id="ROOM_UNKNOWN",
+        gross_perimeter_pt=80.0,
+    )
+
+    assert rec.internal_corners_count == 0
+    assert rec.external_corners_count == 0
 
 
 def test_compile_skirting_receipt():
