@@ -454,6 +454,12 @@ def test_owner_sha_verified_original_opening_producer_scope_and_v1_eight_custome
         / "source_sealed_run.json"
     ).read_text())
     assert len(sealed.quantities) >= 8
+    original_eight = {row["quantity_id"]: row for row in historical["quantities"]}
+    current_by_id = {row.quantity_id: row.to_dict() for row in sealed.quantities}
+    assert len(original_eight) == 8
+    assert set(original_eight).issubset(current_by_id)
+    assert all(current_by_id[quantity_id] == original
+               for quantity_id, original in original_eight.items())
     assert historical["fingerprint"] == (
         "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb"
     )
