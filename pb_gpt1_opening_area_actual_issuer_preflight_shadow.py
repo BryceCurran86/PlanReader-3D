@@ -94,6 +94,10 @@ def reconcile_gpt1_area_review_with_issuer(
                 or issued.metadata["area_basis"] != obj.area_basis
                 or issued.evidence_ids != tuple(sorted(obj.evidence_ids))
                 or issued.semantic_key != f"{obj.opening_kind}_area:{oid}"
+                or issued.metadata["measurement_record_id"] != row.get(
+                    "source_figured_area_record_id"
+                )
+                or issued.value != row.get("source_figured_area_m2")
             ):
                 raise RuntimeError(
                     "source-review candidate rejected by actual opening area issuer"
