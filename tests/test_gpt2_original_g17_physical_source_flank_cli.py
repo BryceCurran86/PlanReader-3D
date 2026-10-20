@@ -7,6 +7,7 @@ from pb_gpt2_g17_opening_source_band_ownership_shadow import (
     OriginalG17OpeningFlankOwnership,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import RASTER_FRAMED_WALL_BAND_INTERRUPTION
 from tools import diag_gpt2_original_g17_physical_source_flanks as cli
 
 _SOURCE = b"%PDF-synthetic-API-test"
@@ -26,7 +27,7 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
     record = NS(
         record_id=trace_identity, page_id="3", source_sha256=_SHA,
         snapshot_id="snap", source_observation_ids=tuple(support),
-        structural_pattern="raster_g17",
+        structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     )
     class Source:
         def __init__(self, *, producer_method, producer_version):
@@ -66,7 +67,12 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
             physical_opening_authority=Physical(),
             opening_bindings=(
                 NS(opening_identity_id=trace_identity,
-                   representative_observation_id="visible-1"),
+                   representative_observation_id="visible-1",
+                   status=EvidenceResolutionStatus.ABSTAINED,
+                   record_id=None, host_wall_id=None,
+                   reason_codes=(
+                       "raster_source_band_left_source_primitive_unmapped",
+                   )),
             ),
         )
     def recover(source, *, revision_id, snapshot_id, page_id,
@@ -103,7 +109,7 @@ def test_real_original_source_call_path_reproves_each_physically_owned_support(m
     assert state["parents"] == ("parent-visible-1", "parent-visible-2")
     assert state["owned_calls"] == 1
     assert result["original_source_owned_two_flank_count"] == 1
-    assert result["g17_candidate_physical_count"] == 1
+    assert result["host_abstained_g17_candidate_physical_count"] == 1
     assert result["source_owner_claims"][0]["physical_opening_id"] == "physical-original-1"
     assert result["shadow_only"] and not result["structural_host_granted"]
     assert not result["metric_quantity_granted"] and not result["benchmark_score_granted"]
@@ -153,3 +159,46 @@ def test_original_source_page_scope_must_be_exact_positive_integer(monkeypatch, 
             _SOURCE, expected_sha256=_SHA, page_id=page,
         )
     assert state["compose_calls"] == 0
+
+def test_hosted_opening_cannot_leak_into_unhosted_source_handoff(monkeypatch):
+    state, record = _stub_pipeline(monkeypatch)
+    original_composer = cli.compose_live_wall_opening_authority
+    def hosted(**kwargs):
+        result = original_composer(**kwargs)
+        row = result.opening_bindings[0]
+        row.host_wall_id = "already-signed-wall"
+        return result
+    monkeypatch.setattr(cli, "compose_live_wall_opening_authority", hosted)
+    report = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert report["host_abstained_g17_candidate_physical_count"] == 0
+    assert state["owned_calls"] == 0
+
+
+def test_unrelated_nonflank_abstention_cannot_enter_g17_source_handoff(monkeypatch):
+    state, _ = _stub_pipeline(monkeypatch)
+    original_composer = cli.compose_live_wall_opening_authority
+    def unrelated(**kwargs):
+        result = original_composer(**kwargs)
+        result.opening_bindings[0].reason_codes = ("missing_door_height",)
+        return result
+    monkeypatch.setattr(cli, "compose_live_wall_opening_authority", unrelated)
+    report = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert report["host_abstained_g17_candidate_physical_count"] == 0
+    assert state["owned_calls"] == 0
+
+
+def test_non_raster_physical_opening_cannot_be_laundered_through_flank_roster(monkeypatch):
+    state, original = _stub_pipeline(monkeypatch)
+    original.structural_pattern = "jamb_bounded_two_face_interruption"
+    report = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert report["host_abstained_g17_candidate_physical_count"] == 0
+    assert report["unresolved"][0]["reason"] == (
+        "original_g17_physical_existence_unproven"
+    )
+    assert state["owned_calls"] == 0
