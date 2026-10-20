@@ -22,6 +22,7 @@ SNAP_TOLERANCE_PT: float = 2.5
 
 
 class CeilingGridModule(str, Enum):
+    UNKNOWN = "UNKNOWN"
     GRID_1200X600 = "GRID_1200X600"
     GRID_600X600 = "GRID_600X600"
     GRID_1200X300 = "GRID_1200X300"
@@ -38,7 +39,7 @@ class SuspendedCeilingSpec:
     ceiling_id: str
     room_id: str
     boundary_polygon: List[Tuple[float, float]]
-    grid_module: CeilingGridModule = CeilingGridModule.GRID_1200X600
+    grid_module: CeilingGridModule = CeilingGridModule.UNKNOWN
     grid_type: CeilingGridType = CeilingGridType.EXPOSED_TEE
     finished_ceiling_level_mm: float = 0.0
     slab_soffit_level_mm: float = 0.0
@@ -115,8 +116,10 @@ class SourceSuspendedCeilingGridShadowAuthority:
             mod = CeilingGridModule.GRID_600X600
         elif "1200X300" in clean:
             mod = CeilingGridModule.GRID_1200X300
-        else:
+        elif "1200X600" in clean:
             mod = CeilingGridModule.GRID_1200X600
+        else:
+            mod = CeilingGridModule.UNKNOWN
 
         # Grid type
         if "CONCEALED" in clean:
@@ -162,25 +165,32 @@ class SourceSuspendedCeilingGridShadowAuthority:
             perim_m = raw_perim * drawing_scale
             total_trim_m += perim_m
 
-            # Main runners at 1.20m centers
-            main_m = area_m2 / 1.20
-            total_main_m += main_m
-
-            # Cross tees depend on grid module
             if c.grid_module == CeilingGridModule.GRID_600X600:
+                main_m = area_m2 / 1.20
                 cross_m = area_m2 / 0.60
                 tile_area = 0.60 * 0.60
             elif c.grid_module == CeilingGridModule.GRID_1200X300:
+                main_m = area_m2 / 1.20
                 cross_m = area_m2 / 0.30
                 tile_area = 1.20 * 0.30
-            else:  # GRID_1200X600
+            elif c.grid_module == CeilingGridModule.GRID_1200X600:
+                main_m = area_m2 / 1.20
                 cross_m = area_m2 / 0.60
                 tile_area = 1.20 * 0.60
+            else:
+                main_m = 0.0
+                cross_m = 0.0
+                tile_area = 0.0
+
+            total_main_m += main_m
 
             total_cross_m += cross_m
 
-            # Suspension hanger wires: 1 hanger per 1.2 x 1.2m grid (1.44 m2)
-            hangers = math.ceil(area_m2 / 1.44) if area_m2 > 0 else 0
+            hangers = (
+                math.ceil(area_m2 / 1.44)
+                if area_m2 > 0 and c.grid_module is not CeilingGridModule.UNKNOWN
+                else 0
+            )
             total_hangers += hangers
 
             # Wire length = plenum depth
@@ -188,7 +198,7 @@ class SourceSuspendedCeilingGridShadowAuthority:
             wire_len_m = hangers * plenum_m
             total_wire_len_m += wire_len_m
 
-            tiles = math.ceil(area_m2 / tile_area) if area_m2 > 0 else 0
+            tiles = math.ceil(area_m2 / tile_area) if area_m2 > 0 and tile_area > 0 else 0
             total_tiles += tiles
 
         quantities = SuspendedCeilingQuantities(

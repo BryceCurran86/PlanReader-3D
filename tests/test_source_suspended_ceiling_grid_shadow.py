@@ -33,11 +33,12 @@ class TestSourceSuspendedCeilingGridShadow(unittest.TestCase):
         self.assertEqual(clg_lvl2, 3000.0)
         self.assertEqual(soffit_lvl2, 3000.0)
 
-        _mod3, _type3, clg_lvl3, soffit_lvl3 = SourceSuspendedCeilingGridShadowAuthority.parse_ceiling_annotation(
+        mod3, _type3, clg_lvl3, soffit_lvl3 = SourceSuspendedCeilingGridShadowAuthority.parse_ceiling_annotation(
             "CEILING"
         )
         self.assertEqual(clg_lvl3, 0.0)
         self.assertEqual(soffit_lvl3, 0.0)
+        self.assertEqual(mod3, CeilingGridModule.UNKNOWN)
 
         omitted = SuspendedCeilingSpec(
             ceiling_id="CLG-UNKNOWN",
@@ -46,6 +47,12 @@ class TestSourceSuspendedCeilingGridShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.finished_ceiling_level_mm, 0.0)
         self.assertEqual(omitted.slab_soffit_level_mm, 0.0)
+        self.assertEqual(omitted.grid_module, CeilingGridModule.UNKNOWN)
+        res_omitted = SourceSuspendedCeilingGridShadowAuthority.evaluate_ceilings([omitted])
+        self.assertEqual(res_omitted.quantities.total_main_runner_length_m, 0.0)
+        self.assertEqual(res_omitted.quantities.total_cross_tee_length_m, 0.0)
+        self.assertEqual(res_omitted.quantities.total_estimated_tile_count, 0)
+        self.assertEqual(res_omitted.quantities.total_hanger_wire_points, 0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
