@@ -77,6 +77,7 @@ def require_signed_v2_family_trade_integrity(
     # proof over the *actual* signed opening rows, not a new kind inference
     # or permission to mint counts.
     opening_kind_claims: dict[str, set[str]] = {}
+    opening_family_claim_counts: dict[tuple[str, str], int] = {}
     for quantity in sealed_quantities:
         family = _field(quantity, "family")
         semantic_key = _field(quantity, "semantic_key")
@@ -91,10 +92,15 @@ def require_signed_v2_family_trade_integrity(
                 kind for prefix, kind in prefix_kind
                 if semantic_key.startswith(prefix)
             ), None)
-        if typed_kind is not None and _field(quantity, "abstained") is False:
+        if family in {"opening_area", "opening_count"} and _field(quantity, "abstained") is False:
             for physical_id in _field(quantity, "object_identity_refs") or ():
                 if type(physical_id) is str and physical_id:
-                    opening_kind_claims.setdefault(physical_id, set()).add(typed_kind)
+                    original_claim = (family, physical_id)
+                    opening_family_claim_counts[original_claim] = (
+                        opening_family_claim_counts.get(original_claim, 0) + 1
+                    )
+                    if typed_kind is not None:
+                        opening_kind_claims.setdefault(physical_id, set()).add(typed_kind)
         refs = tuple(sorted(_field(quantity, "object_identity_refs") or ()))
         by_refs.setdefault(refs, []).append(quantity)
 
@@ -122,6 +128,15 @@ def require_signed_v2_family_trade_integrity(
         ):
             raise ValueError(
                 "signed opening area/count disagree on original physical door/window kind"
+            )
+        if any(
+            opening_family_claim_counts.get((family, physical_id), 0) > 1
+            for physical_id in refs
+            for family in ("opening_area", "opening_count")
+        ):
+            raise ValueError(
+                "multiple source opening quantities claim the same physical "
+                "opening and measurement family"
             )
         candidates = by_refs.get(refs, ())
         declared_family = _field(binding, "production_family")
