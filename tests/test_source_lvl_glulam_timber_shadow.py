@@ -44,6 +44,15 @@ def test_timber_beam_callout_parsing():
     assert parsed3["depth_mm"] == 240.0
     assert parsed3["ply_width_mm"] == 45.0
 
+    omitted = SourceLVLGlulamTimberShadowAuthority.parse_callout("LVL BEAM")
+    assert omitted["ply_width_mm"] == 0.0
+    assert omitted["depth_mm"] == 0.0
+    assert omitted["stress_grade"] == ""
+    omitted_spec = TimberBeamSpec(beam_id="L-OMIT")
+    assert omitted_spec.ply_width_mm == 0.0
+    assert omitted_spec.depth_mm == 0.0
+    assert omitted_spec.stress_grade == ""
+
 
 def test_timber_beam_snapping():
     pt = (123.4, 456.7)

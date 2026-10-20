@@ -43,9 +43,9 @@ class TimberBeamSpec:
     framing_role: TimberFramingRole = TimberFramingRole.OPENING_LINTEL
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
     plies_count: int = 1
-    ply_width_mm: float = 45.0
-    depth_mm: float = 240.0
-    stress_grade: str = "e14"
+    ply_width_mm: float = 0.0
+    depth_mm: float = 0.0
+    stress_grade: str = ""
     level_id: str = "L01"
     source_callout: str = ""
 
@@ -89,9 +89,9 @@ class SourceLVLGlulamTimberShadowAuthority:
             "timber_type": EngineeredTimberType.LAMINATED_VENEER_LUMBER_LVL,
             "framing_role": TimberFramingRole.OPENING_LINTEL,
             "plies_count": 1,
-            "ply_width_mm": 45.0,
-            "depth_mm": 240.0,
-            "stress_grade": "e14",
+            "ply_width_mm": 0.0,
+            "depth_mm": 0.0,
+            "stress_grade": "",
         }
 
         # Timber type & grade
@@ -115,8 +115,6 @@ class SourceLVLGlulamTimberShadowAuthority:
             e_grade = re.search(r'\b(E\d{2}|HYSPAN|SMARTLVL)\b', clean)
             if e_grade:
                 res["stress_grade"] = e_grade.group(1)
-            else:
-                res["stress_grade"] = "e14"
 
         # Framing Role
         if "RIDGE" in clean:
