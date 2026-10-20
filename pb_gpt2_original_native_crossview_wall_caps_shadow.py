@@ -57,6 +57,14 @@ def _source_line(drawings, address: int):
     if type(address) is not int or address < 0 or address >= len(drawings):
         raise ValueError("original native drawing address missing")
     drawing = drawings[address]
+    # A black vector path is not necessarily visible construction ink.
+    # Explicit full stroke opacity and a solid native dash pattern are
+    # required before its endpoints may support even SOURCE CANDIDATE.
+    opacity = drawing.get("stroke_opacity")
+    if (type(opacity) not in (int, float) or not isfinite(opacity)
+            or opacity < 1.0 or opacity > 1.0
+            or drawing.get("dashes") != "[] 0"):
+        raise ValueError("original native source is not visible solid painted ink")
     items = drawing.get("items", ())
     if (len(items) not in (1, 2) or items[0][0] != "l"
             or drawing.get("fill") is not None
