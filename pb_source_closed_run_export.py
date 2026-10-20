@@ -532,6 +532,7 @@ def _build_sealed_run(
     # quantities. Distinct families remain legitimate: one AREA and one
     # separately source-complete COUNT may coexist for the same opening.
     opening_claims: dict[tuple[str, str], SealedSourceClosedQuantity] = {}
+    opening_kinds: dict[str, tuple[str, str]] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -631,6 +632,25 @@ def _build_sealed_run(
                         f"{row.quantity_id!r} for {physical_identity!r}"
                     )
                 opening_claims[opening_key] = row
+                typed_kind = None
+                for prefix, kind in (
+                    ("door_area:", "door"), ("window_area:", "window"),
+                    ("door_count:", "door"), ("window_count:", "window"),
+                ):
+                    if row.semantic_key.startswith(prefix):
+                        typed_kind = kind
+                        break
+                if typed_kind is not None:
+                    other_kind = opening_kinds.get(physical_identity)
+                    if other_kind is not None and other_kind[0] != typed_kind:
+                        raise SourceClosedRunConflictError(
+                            "contradictory source-owned door/window kind for "
+                            f"one physical opening {physical_identity!r}: "
+                            f"{other_kind[1]!r} vs {row.quantity_id!r}"
+                        )
+                    opening_kinds[physical_identity] = (
+                        typed_kind, row.quantity_id
+                    )
         normalized.append(row)
 
     normalized.sort(key=lambda row: row.quantity_id)
