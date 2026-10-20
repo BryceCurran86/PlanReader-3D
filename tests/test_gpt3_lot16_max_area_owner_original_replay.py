@@ -107,3 +107,74 @@ def test_exact_owner_original_page3_full_source_issuer_customer_replay():
     assert report["source_verified_new_quantity_count"] is not None
     assert not report["customer_release_authorized"]
     assert not report["benchmark_score_authorized"]
+
+
+
+def test_owner_original_source_replay_never_subsets_ingest_snapshot(monkeypatch):
+    signed, customer = _archive()
+    source_bytes = b"synthetic-owner-original-scope-negative-only"
+    monkeypatch.setattr(
+        original, "ORIGINAL_LOT16_SOURCE_SHA256",
+        sha256(source_bytes).hexdigest(),
+    )
+
+    class SourceReached(Exception):
+        pass
+
+    class OriginalSourceSpy:
+        def __init__(self, *, producer_method, producer_version):
+            assert producer_method == "live-physical-net-wall"
+            assert producer_version
+
+        def ingest_native_pdf_bytes(self, **kwargs):
+            assert kwargs["source_bytes"] is source_bytes
+            assert "page_ids" not in kwargs
+            assert kwargs["source_locator"].startswith("memory://")
+            raise SourceReached()
+
+    monkeypatch.setattr(original, "SourceVisibilityProducer", OriginalSourceSpy)
+    with pytest.raises(SourceReached):
+        original.replay_owner_original_lot16_area_convergence(
+            source_bytes,
+            archived_signed_run=signed,
+            archived_customer_rows=customer,
+        )
+
+
+def test_page_subset_changes_producer_source_snapshot_and_cannot_rekey_original_eight():
+    """A two-page synthetic PDF proves the source contract, not Lot16 content."""
+    import fitz
+    from pb_source_observation_authority import SourceObservationProducer
+
+    doc = fitz.open()
+    for index in range(2):
+        page = doc.new_page(width=300, height=300)
+        page.insert_text((20, 40), f"FULL ORIGINAL PAGE {index+1}")
+    synthetic_pdf = doc.tobytes()
+    doc.close()
+    producer_options = {
+        "producer_method": "gpt3-synthetic-source-scope-test",
+        "producer_version": "1.0.0",
+    }
+    full = SourceObservationProducer(**producer_options)
+    subset = SourceObservationProducer(**producer_options)
+    original_revision = full.ingest_native_pdf_bytes(
+        document_id="original-two-pages",
+        source_bytes=synthetic_pdf,
+        source_locator="memory://synthetic-two-pages.pdf",
+    )
+    page_only_revision = subset.ingest_native_pdf_bytes(
+        document_id="original-two-pages",
+        source_bytes=synthetic_pdf,
+        source_locator="memory://synthetic-two-pages.pdf",
+        page_ids=("1",),
+    )
+    assert original_revision.revision.source_sha256 == (
+        page_only_revision.revision.source_sha256
+    )
+    assert original_revision.revision.revision_id == (
+        page_only_revision.revision.revision_id
+    )
+    assert original_revision.snapshot.snapshot_id != (
+        page_only_revision.snapshot.snapshot_id
+    )
