@@ -108,6 +108,7 @@ class TestSourceBalustradeHandrailGuardrailShadow(unittest.TestCase):
         self.assertEqual(omitted.height_mm, 0.0)
         self.assertEqual(omitted.post_spacing_mm, 0.0)
         self.assertFalse(omitted.has_continuous_handrail)
+        self.assertEqual(omitted.handrail_extension_m, 0.0)
         omitted_res = SourceBalustradeHandrailGuardrailShadowAuthority.evaluate_balustrades([omitted])
         self.assertEqual(omitted_res.quantities.total_barrier_face_area_m2, 0.0)
         self.assertEqual(omitted_res.quantities.non_compliant_height_count, 0)
