@@ -129,7 +129,7 @@ class SourceStairFlightVoidGeometryShadowAuthority:
         *,
         flight_id: str,
         origin_pt: Tuple[float, float],
-        direction: str = "UP",
+        direction: str = "",
         riser_count: int = 0,
         riser_height_pt: float = 0.0,
         tread_going_pt: float = 0.0,
