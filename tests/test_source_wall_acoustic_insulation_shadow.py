@@ -70,7 +70,7 @@ def test_compile_insulation_receipt():
     assert receipt.total_insulated_walls_count == 1
     assert receipt.total_net_insulation_area_pt2 == 2000.0
     assert receipt.total_insulation_volume_pt3 == 4000.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
