@@ -330,6 +330,10 @@ class OpeningHostFrameProducer:
         self._raster_split_frame_shadow = raster_split_frame_shadow
         self._source_fragment_roles_shadow = source_fragment_roles_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
+        # Proven representative selectors for this exact canonical frame.
+        # Keep witnesses separate: shared-wall source_observation_ids may
+        # also include a real sibling opening and cannot authorize revocation.
+        self._accepted_opening_selectors: dict[_Key, set[ObservationSelector]] = {}
 
     @classmethod
     def from_authorities(
@@ -1260,7 +1264,14 @@ class OpeningHostFrameProducer:
         validated_opening_identity = False
 
         def fail_closed(status, *reasons):
-            if validated_opening_identity:
+            # A failed reproof of a previously accepted original observation
+            # must revoke its own cached frame, even if prove_existence now
+            # abstains before returning an opening record. A foreign sibling
+            # caller can never revoke this exact selector's former positive.
+            previously_accepted = opening_selector in self._accepted_opening_selectors.get(
+                frame_selector.key, ()
+            )
+            if validated_opening_identity or previously_accepted:
                 self._results.pop(frame_selector.key, None)
             return _blocked(status, *reasons)
 
@@ -1408,6 +1419,10 @@ class OpeningHostFrameProducer:
         if existing is not None and existing != result:
             raise RuntimeError("opening host-frame producer equivocation")
         self._results[selector.key] = result
+        # Only producer-verified successful publication can add a witness.
+        self._accepted_opening_selectors.setdefault(selector.key, set()).add(
+            opening_selector
+        )
         return result
 
     def authority(self) -> OpeningHostFrameAuthority:
