@@ -79,6 +79,8 @@ def test_omitted_leaf_thicknesses_do_not_invent_typical_walls():
     assert veneer.overall_thickness_pt == 0.0
     assert veneer.structural_core_thickness_pt == 0.0
     assert veneer.cavity_width_pt == 0.0
+    assert all(leaf.material == "" for leaf in cavity.leaves)
+    assert all(leaf.material == "" for leaf in veneer.leaves)
 
 
 def test_compile_decomposition_receipt():
