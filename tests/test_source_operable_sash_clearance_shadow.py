@@ -47,8 +47,23 @@ class TestSourceOperableSashClearanceShadow(unittest.TestCase):
             height_mm=1200.0,
         )
         self.assertFalse(sash.has_insect_screen)
+        self.assertEqual(sash.opening_angle_deg, 0.0)
         res = SourceOperableSashClearanceShadowAuthority.evaluate_sashes([sash])
         self.assertEqual(res.quantities.total_screen_count, 0)
+
+    def test_omitted_casement_angle_does_not_invent_fifteen_degrees(self):
+        sash = OperableSashSpec(
+            sash_id="S-CASE-UNKNOWN",
+            parent_window_id="W-UNKNOWN",
+            operation_type=SashOperationType.CASEMENT_RH,
+            width_mm=800.0,
+            height_mm=1500.0,
+        )
+        self.assertEqual(sash.opening_angle_deg, 0.0)
+        self.assertEqual(
+            SourceOperableSashClearanceShadowAuthority.compute_ventilation_area(sash),
+            0.0,
+        )
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
