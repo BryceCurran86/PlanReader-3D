@@ -1252,6 +1252,7 @@ def _resolve_gap_lineage_host_from_records(
         )
 
     ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
     group_lookup = _equivalence_group_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
     for raw_id in (left_raw, right_raw):
@@ -1462,6 +1463,7 @@ def _resolve_two_face_lineage_host_from_records(
         )
 
     ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
     group_lookup = _equivalence_group_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
 
@@ -2365,6 +2367,18 @@ def _inconsistent_source_group_members(
             else:
                 first_group_by_member.setdefault(member, group)
     return frozenset(unsafe_members)
+
+
+def _unsafe_original_lineage_group_members(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> frozenset[str]:
+    """Physical source W4 contradictions cannot be resolved by first owner."""
+    rejected = set(_inconsistent_source_group_members(equivalence))
+    rejected.update(
+        member for pair in _source_same_group_distinct_pair_conflicts(equivalence)
+        for member in pair
+    )
+    return frozenset(rejected)
 
 
 def _equivalence_group_lookup(

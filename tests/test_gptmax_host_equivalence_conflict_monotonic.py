@@ -247,6 +247,104 @@ def test_unrelated_wall_group_overlap_does_not_remove_independent_host():
     assert reasons == ()
 
 
+def _original_lineage_test_case(kind):
+    # Source-neutral two-collinear-gap/four-wall-face observation receipts.
+    if kind == "gap":
+        paths = [
+            ("left", (0.0, 50.0, 10.0, 50.0)),
+            ("right", (20.0, 50.0, 30.0, 50.0)),
+        ]
+        resolve = "gap"
+    else:
+        paths = [
+            ("left-top", (0.0, 50.0, 10.0, 50.0)),
+            ("right-top", (20.0, 50.0, 30.0, 50.0)),
+            ("left-bottom", (0.0, 60.0, 10.0, 60.0)),
+            ("right-bottom", (20.0, 60.0, 30.0, 60.0)),
+        ]
+        resolve = "two_face"
+    observations = tuple(
+        SimpleNamespace(
+            observation_id=f"source-obs:{name}",
+            source_primitive_ref=f"visible:segment:primitive:{name}",
+            geometry=coords,
+        )
+        for name, coords in paths
+    )
+    records = tuple(
+        _record(f"wall:{name}", start=0.0, end=30.0,
+                source_ids=(f"primitive:{name}",))
+        for name, _coords in paths
+    )
+    return observations, records, resolve
+
+
+def _original_lineage_resolve(observations, records, kind, equivalence):
+    import pb_opening_host_binding_authority as host
+    if kind == "gap":
+        return host._resolve_gap_lineage_host_from_records(
+            observations, records, equivalence,
+        )
+    return host._resolve_two_face_lineage_host_from_records(
+        observations, records, equivalence,
+    )
+
+
+@pytest.mark.parametrize("kind", ("gap", "two_face"))
+def test_actual_source_lineage_hosts_reject_group_pair_contradiction(kind):
+    observations, records, mode = _original_lineage_test_case(kind)
+    left, right = records[:2]
+    valid = _source_equivalence(())
+    first = _original_lineage_resolve(observations, records, mode, valid)
+    assert first.status is Status.CORROBORATED and len(first.bands) == 1
+    relation = (
+        (left.wall_candidate_id, right.wall_candidate_id, DISTINCT.value),
+    )
+    contradictory = _source_equivalence(
+        relation,
+        groups=((left.wall_candidate_id, right.wall_candidate_id),),
+    )
+    blocked = _original_lineage_resolve(
+        observations, records, mode, contradictory,
+    )
+    assert blocked.status is Status.CONFLICT
+    assert blocked.bands == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in blocked.reason_codes
+
+
+@pytest.mark.parametrize("kind", ("gap", "two_face"))
+def test_source_lineage_hosts_reject_overlap_group_first_wins(kind):
+    observations, records, mode = _original_lineage_test_case(kind)
+    left, right = records[:2]
+    for groups in (
+        ((left.wall_candidate_id, "other-source-wall"),
+         (left.wall_candidate_id, right.wall_candidate_id)),
+        ((left.wall_candidate_id, right.wall_candidate_id),
+         (left.wall_candidate_id, "other-source-wall")),
+    ):
+        blocked = _original_lineage_resolve(
+            observations, records, mode,
+            _source_equivalence((), groups=groups),
+        )
+        assert blocked.status is Status.CONFLICT
+        assert blocked.bands == ()
+        assert HOST_EQUIVALENCE_AMBIGUOUS in blocked.reason_codes
+
+
+@pytest.mark.parametrize("kind", ("gap", "two_face"))
+def test_unrelated_lineage_w4_group_contradiction_does_not_erase_host(kind):
+    observations, records, mode = _original_lineage_test_case(kind)
+    unrelated = _source_equivalence(
+        (("unrelated:a", "unrelated:b", DISTINCT.value),),
+        groups=(("unrelated:a", "unrelated:b"),),
+    )
+    accepted = _original_lineage_resolve(
+        observations, records, mode, unrelated,
+    )
+    assert accepted.status is Status.CORROBORATED
+    assert len(accepted.bands) == 1
+
+
 def test_malformed_single_source_relation_fails_closed_in_host_admission():
     source = _source_equivalence((("left", "right", "untrusted_value"),))
     assert _pair_lookup(source) == {("left", "right"): UNKNOWN}
