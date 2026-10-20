@@ -19,6 +19,7 @@ EXPECTED = "a" * 64
 ROOT = Path(__file__).resolve().parents[1]
 LOT16_WORKFLOW = ROOT / ".github/workflows/score-gpt3-lot16-1215-opening-local.yml"
 MARY_WORKFLOW = ROOT / ".github/workflows/test-gpt3-maryborough-original-floor-score-input.yml"
+LOT16_SEAL_WORKFLOW = ROOT / ".github/workflows/test-gpt3-lot16-original-sealed-score-input.yml"
 
 
 def test_missing_pdf_is_source_blocked_not_success(tmp_path: Path) -> None:
@@ -83,3 +84,13 @@ def test_maryborough_original_source_job_provisions_then_classifies() -> None:
         MARY_WORKFLOW,
         "Arch_Combined_Maryborough_Service_Station.pdf",
     )
+
+
+def test_lot16_sealed_original_job_provisions_then_classifies() -> None:
+    text = LOT16_SEAL_WORKFLOW.read_text(encoding="utf-8")
+    provision = text.index("uses: ./.github/actions/provision-original-sources")
+    classify = text.index("classify_original_source_preflight")
+    assert provision < classify
+    assert "1. Construction Plans - Lot 16 Power (REV E).pdf" in text
+    assert "allow-missing: true" not in text
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" in text
