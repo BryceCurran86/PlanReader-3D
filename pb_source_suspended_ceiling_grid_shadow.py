@@ -29,6 +29,7 @@ class CeilingGridModule(str, Enum):
 
 
 class CeilingGridType(str, Enum):
+    UNKNOWN = "UNKNOWN"
     EXPOSED_TEE = "EXPOSED_TEE"
     CONCEALED_TEE = "CONCEALED_TEE"
     FINELINE_SLOTTED = "FINELINE_SLOTTED"
@@ -40,7 +41,7 @@ class SuspendedCeilingSpec:
     room_id: str
     boundary_polygon: List[Tuple[float, float]]
     grid_module: CeilingGridModule = CeilingGridModule.UNKNOWN
-    grid_type: CeilingGridType = CeilingGridType.EXPOSED_TEE
+    grid_type: CeilingGridType = CeilingGridType.UNKNOWN
     finished_ceiling_level_mm: float = 0.0
     slab_soffit_level_mm: float = 0.0
     level_id: str = "L1"
@@ -126,8 +127,10 @@ class SourceSuspendedCeilingGridShadowAuthority:
             g_type = CeilingGridType.CONCEALED_TEE
         elif "FINELINE" in clean or "SLOT" in clean:
             g_type = CeilingGridType.FINELINE_SLOTTED
-        else:
+        elif "EXPOSED" in clean:
             g_type = CeilingGridType.EXPOSED_TEE
+        else:
+            g_type = CeilingGridType.UNKNOWN
 
         # Levels
         affl_match = re.search(r"(\d+)\s*(?:AFFL|CLG|CEILING)", clean)
