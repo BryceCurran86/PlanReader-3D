@@ -51,6 +51,11 @@ def test_cfs_callout_parsing():
     omitted_role = SourceCFSPurlinGirtShadowAuthority.parse_callout("CFS MEMBER")
     assert omitted_role["role"] == CFSRole.UNKNOWN
 
+    omitted_lap = SourceCFSPurlinGirtShadowAuthority.parse_callout(
+        "Z20019 ROOF PURLIN CONTINUOUS"
+    )
+    assert omitted_lap["lap_length_mm"] == 0.0
+
 
 def test_cfs_snapping():
     pt = (301.2, 598.9)
