@@ -38,6 +38,14 @@ def test_plant_screen_callout_parsing():
     assert parsed3["screen_type"] == PlantScreenType.WEATHERPROOF_PLANT_ENCLOSURE
     assert parsed3["screen_height_m"] == 2.0
     assert parsed3["integrated_doors_count"] == 2
+    assert parsed3["post_spacing_m"] == 0.0
+
+    omitted = SourcePlantScreenAcousticEnclosureShadowAuthority.parse_callout("PLANT SCREEN")
+    assert omitted["screen_height_m"] == 0.0
+    assert omitted["post_spacing_m"] == 0.0
+    omitted_spec = PlantScreenSpec(screen_id="PS-OMIT")
+    assert omitted_spec.screen_height_m == 0.0
+    assert omitted_spec.post_spacing_m == 0.0
 
 
 def test_plant_screen_snapping():

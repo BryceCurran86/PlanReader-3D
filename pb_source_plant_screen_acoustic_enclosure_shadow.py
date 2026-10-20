@@ -39,8 +39,8 @@ class PlantScreenSpec:
     screen_type: PlantScreenType = PlantScreenType.ARCHITECTURAL_SIGHT_SCREEN
     support_type: ScreenSupportType = ScreenSupportType.STRUCTURAL_STEEL_SHS
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
-    screen_height_m: float = 2.4
-    post_spacing_m: float = 2.0
+    screen_height_m: float = 0.0
+    post_spacing_m: float = 0.0
     integrated_doors_count: int = 0
     door_width_m: float = 1.0
     level_id: str = "ROOF"
@@ -86,8 +86,8 @@ class SourcePlantScreenAcousticEnclosureShadowAuthority:
         res = {
             "screen_type": PlantScreenType.ARCHITECTURAL_SIGHT_SCREEN,
             "support_type": ScreenSupportType.STRUCTURAL_STEEL_SHS,
-            "screen_height_m": 2.4,
-            "post_spacing_m": 2.0,
+            "screen_height_m": 0.0,
+            "post_spacing_m": 0.0,
             "integrated_doors_count": 0,
             "door_width_m": 1.0,
         }
@@ -243,7 +243,11 @@ class SourcePlantScreenAcousticEnclosureShadowAuthority:
 
             screen_len_m = cls.calculate_polyline_length(snapped_pts, scale_ratio)
             screen_area = screen_len_m * screen_h
-            posts_for_screen = int(math.ceil(screen_len_m / post_sp)) + 1 if screen_len_m > 0 else 0
+            posts_for_screen = (
+                int(math.ceil(screen_len_m / post_sp)) + 1
+                if screen_len_m > 0.0 and post_sp > 0.0
+                else 0
+            )
 
             tot_linear_m += screen_len_m
             tot_area_m2 += screen_area
