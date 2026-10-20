@@ -397,8 +397,8 @@ class SourceExternalSoffitAuthority:
             status = EvidenceResolutionStatus.ABSTAINED.value
             mode = "abstain_internal_ceiling_conflict"
         elif all_resolved:
-            status = EvidenceResolutionStatus.CORROBORATED.value
-            mode = "corroborated_external_overhead_cladding"
+            status = EvidenceResolutionStatus.CANDIDATE.value
+            mode = "candidate_external_overhead_cladding"
         else:
             status = EvidenceResolutionStatus.CANDIDATE.value
             mode = "candidate_external_soffit_shadow"

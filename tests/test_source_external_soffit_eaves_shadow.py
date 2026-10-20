@@ -101,7 +101,7 @@ def test_positive_soffit_eaves_resolution():
     selector = _make_selector(tag="SOFFIT-NORTH", material="STP")
     result = authority.resolve(selector)
 
-    assert result.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert result.status == EvidenceResolutionStatus.CANDIDATE.value
     assert SOURCE_EXTERNAL_SOFFIT_RESOLVED in result.reason_codes
     assert len(result.records) == 1
     rec = result.records[0]
@@ -290,11 +290,11 @@ def test_multi_soffit_run_segregation():
     authority = producer.authority()
 
     res_north = authority.resolve(_make_selector(tag="SOFFIT-NORTH", material="STP"))
-    assert res_north.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert res_north.status == EvidenceResolutionStatus.CANDIDATE.value
     assert res_north.records[0].material_code == "STP"
 
     res_south = authority.resolve(_make_selector(tag="SOFFIT-SOUTH", material="FCS1"))
-    assert res_south.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert res_south.status == EvidenceResolutionStatus.CANDIDATE.value
     assert res_south.records[0].material_code == "FCS1"
 
     all_res = authority.all_results()
