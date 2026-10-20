@@ -125,3 +125,23 @@ def test_review_only_no_extra_3d_count_or_customer_authority():
     assert pre["measurement_published"] is False
     assert pre["opening_count_granted"] is False
     assert pre["customer_seal_granted"] is False
+
+
+def test_duplicate_typed_canonical_physical_id_is_not_two_publishable_openings():
+    rows, c = _original_case()
+    queue = run(rows, c)
+    composition = _typed(c)
+    duplicates = list(composition.canonical_openings)
+    duplicates[1] = duplicates[0]
+    altered = replace(composition, canonical_openings=tuple(duplicates))
+    with pytest.raises(ValueError, match="original canonical physical identity/revision mismatch"):
+        reconcile_gpt1_area_review_with_issuer(altered, queue)
+
+
+def test_missing_source_ready_candidate_cannot_be_silently_removed_from_queue():
+    rows, c = _original_case()
+    queue = run(rows, c)
+    assert queue["gpt1_new_area_review_candidates"]
+    queue["gpt1_new_area_review_candidates"] = []
+    with pytest.raises(ValueError, match="original complete area-review/issuer universe mismatch"):
+        reconcile_gpt1_area_review_with_issuer(_typed(c), queue)
