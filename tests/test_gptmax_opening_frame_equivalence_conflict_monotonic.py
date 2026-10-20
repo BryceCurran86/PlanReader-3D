@@ -196,3 +196,59 @@ def test_issuer_class_that_raises_type_error_is_not_a_positive_relation():
         ("wall_a", "wall_b", DISTINCT.value),
     )
     assert _lookup(rows) == {("wall_a", "wall_b"): AMBIGUOUS}
+
+
+def test_failed_source_reproof_revokes_previously_positive_frame_authority(monkeypatch):
+    """A current frame authority must never return a stale cached positive."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+
+    _source, _composition, producer, bound = _fixture()
+    published = _publish(producer, bound)
+    assert all(result.status is Status.CORROBORATED for result in published)
+    selectors = tuple(result.evidence.selector for result in published)
+    assert all(producer.authority().resolve(s).status is Status.CORROBORATED
+               for s in selectors)
+
+    wall_scope = _scope(producer, bound)
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: replace(wall_scope, scope_complete=False))
+    blocked = _publish(producer, bound)
+    assert all(result.status is Status.ABSTAINED and result.evidence is None
+               for result in blocked)
+    assert all("opening_host_frame_complete_wall_scope_unavailable" in result.reason_codes
+               for result in blocked)
+
+    # Returning ABSTAIN without revoking _results is a source-laundering bug:
+    # consumers of a freshly issued frame authority would still see the old
+    # CORROBORATED proof under the SAME immutable source/decision selector.
+    latest = tuple(producer.authority().resolve(s) for s in selectors)
+    assert all(result.status is Status.ABSTAINED and result.evidence is None
+               for result in latest)
+
+    # Restored producer-owned original input yields the same physical frame
+    # record IDs/body, without inventing an additional host or metric.
+    monkeypatch.setattr(producer._walls, "resolve_scope", lambda _selector: wall_scope)
+    restored = _publish(producer, bound)
+    assert restored == published
+    assert all(producer.authority().resolve(s).status is Status.CORROBORATED
+               for s in selectors)
+
+
+def test_reproof_revocation_is_per_opening_not_global(monkeypatch):
+    """Failure of one frame selector cannot destroy an independent row."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+
+    _source, _composition, producer, bound = _fixture()
+    accepted = _publish(producer, bound)
+    selectors = tuple(result.evidence.selector for result in accepted)
+    scope = _scope(producer, bound)
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: replace(scope, scope_complete=False))
+
+    failed = _publish(producer, bound[:1])
+    assert len(failed) == 1 and failed[0].status is Status.ABSTAINED
+    refreshed = producer.authority()
+    assert refreshed.resolve(selectors[0]).status is Status.ABSTAINED
+    assert refreshed.resolve(selectors[1]) == accepted[1]
