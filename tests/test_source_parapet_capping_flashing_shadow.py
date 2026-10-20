@@ -33,6 +33,24 @@ class TestSourceParapetCappingFlashingShadow(unittest.TestCase):
         self.assertEqual(thk2, 300.0)
         self.assertEqual(h2, 900.0)
         self.assertEqual(girth2, 550.0)
+        self.assertEqual(turnup2, 0.0)
+
+        _mat3, thk3, h3, girth3, turnup3 = SourceParapetCappingFlashingShadowAuthority.parse_parapet_annotation(
+            "PARAPET"
+        )
+        self.assertEqual(thk3, 0.0)
+        self.assertEqual(h3, 0.0)
+        self.assertEqual(girth3, 0.0)
+        self.assertEqual(turnup3, 0.0)
+
+        omitted = ParapetSegmentSpec(
+            segment_id="P-UNKNOWN",
+            centerline_points=[(0.0, 0.0), (1.0, 0.0)],
+        )
+        self.assertEqual(omitted.wall_thickness_mm, 0.0)
+        self.assertEqual(omitted.upstand_height_mm, 0.0)
+        self.assertEqual(omitted.capping_girth_mm, 0.0)
+        self.assertEqual(omitted.membrane_turnup_height_mm, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 50.0)]
