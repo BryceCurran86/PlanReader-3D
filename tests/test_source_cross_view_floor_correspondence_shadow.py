@@ -1,0 +1,438 @@
+"""Synthetic tests for pb_source_cross_view_floor_correspondence_shadow.
+
+Verifies exact rigid geometric registration, dual-sheet wall-boundedness proof,
+mark containment and typed negative/ambiguity rejection. Pure synthetic geometry:
+zero PDF or benchmark gold consumed.
+"""
+from __future__ import annotations
+
+import copy
+import math
+import pytest
+
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_cross_view_floor_correspondence_shadow import (
+    SourceCrossViewFloorCorrespondenceProducer,
+    SourceCrossViewFloorCorrespondenceSelector,
+    BOX_NOT_WALL_BOUNDED,
+    COMPETING_FINISH_CODES_IN_BOX,
+    NO_FINISH_MARK_IN_BOX,
+    BOX_OWNED_BY_OTHER_FINISH_CODE,
+    MARK_TOO_CLOSE_TO_BOX_SIDE,
+    MARK_IN_UNREGISTERED_REGION,
+    OVERLAPPING_MEASURED_BOXES,
+    REGISTRATION_NOT_UNIQUE,
+    STANDING_AUTHORITY_BLOCKERS,
+    build_lines,
+    rank_registrations,
+    box_correspondence,
+    classify_floor,
+    merge_intervals,
+)
+
+
+def seg(x1: float, y1: float, x2: float, y2: float) -> dict[str, float]:
+    return {"x1": float(x1), "y1": float(y1), "x2": float(x2), "y2": float(y2)}
+
+
+def room(
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    t: float = 5.28,
+    gaps: tuple = (),
+) -> list[dict[str, float]]:
+    sides = {
+        "x0": [(x0, y0, x0, y1), (x0 - t, y0 - t, x0 - t, y1 + t)],
+        "x1": [(x1, y0, x1, y1), (x1 + t, y0 - t, x1 + t, y1 + t)],
+        "y0": [(x0, y0, x1, y0), (x0 - t, y0 - t, x1 + t, y0 - t)],
+        "y1": [(x0, y1, x1, y1), (x0 - t, y1 + t, x1 + t, y1 + t)],
+    }
+    out = []
+    for name, pairs in sides.items():
+        for a, b, c, e in pairs:
+            segs = [(a, b, c, e)]
+            for gname, lo, hi in gaps:
+                if gname != name:
+                    continue
+                nxt = []
+                for sa, sb, sc, se in segs:
+                    if sa == sc:
+                        pieces = [(sb, min(se, lo)), (max(sb, hi), se)]
+                        nxt += [(sa, p, sc, q) for p, q in pieces if q > p]
+                    else:
+                        pieces = [(sa, min(sc, lo)), (max(sa, hi), sc)]
+                        nxt += [(p, sb, q, se) for p, q in pieces if q > p]
+                segs = nxt
+            out += [seg(*s) for s in segs]
+    return out
+
+
+def moved(segs: list[dict[str, float]], dx: float, dy: float) -> list[dict[str, float]]:
+    return [
+        seg(s["x1"] + dx, s["y1"] + dy, s["x2"] + dx, s["y2"] + dy)
+        for s in segs
+    ]
+
+
+PLAN = (
+    room(173.04, 1382.72, 316.80, 1585.04, gaps=(("y0", 230.0, 280.0),))
+    + room(340.5, 1390.0, 560.2, 1600.0)
+    + room(600.0, 1100.0, 733.0, 1301.0)
+    + room(210.0, 700.0, 330.0, 951.0)
+)
+TARGET_SHEET = PLAN + [seg(60, 60, 60, 400), seg(95, 60, 95, 400)]
+TRUE_T = (-78.0, 0.0)
+
+
+def support_sheet() -> list[dict[str, float]]:
+    extras = [
+        seg(1300, 100, 1300, 900),
+        seg(1340, 100, 1340, 900),
+        seg(1300, 100, 1340, 100),
+    ]
+    return moved(PLAN, 78.0, 0.0) + extras
+
+
+def sample_selector() -> SourceCrossViewFloorCorrespondenceSelector:
+    return SourceCrossViewFloorCorrespondenceSelector(
+        document_id="doc-test-1",
+        revision_id="rev-test-1",
+        source_sha256="a" * 64,
+        snapshot_id="snap-test-1",
+        support_page_id="11",
+        target_page_id="7",
+        material_code="FT3",
+    )
+
+
+# ==============================================================================
+# Positive Tests
+# ==============================================================================
+
+def test_producer_initialization():
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+    assert prod._source is None
+
+    with pytest.raises(TypeError, match="SourceVisibilityProducer"):
+        SourceCrossViewFloorCorrespondenceProducer(object())  # type: ignore
+
+
+def test_positive_rigid_registration_and_candidate_floor():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    box_support = (251.04, 1382.72, 394.80, 1585.04)
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": box_support,
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+            "other_labelled_boxes_overlapping": 0,
+        }
+    ]
+    marks = [
+        {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True}
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=sup_segs,
+        target_segments=tgt_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert result.status == EvidenceResolutionStatus.CANDIDATE
+    assert result.winning_registration is not None
+    assert result.winning_registration["orientation"] == "identity"
+    assert result.winning_registration["scale"] == 1.0
+    assert result.winning_registration["dx"] == TRUE_T[0]
+    assert result.winning_registration["dy"] == TRUE_T[1]
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.CANDIDATE
+    assert rec.canonical_floor_id == "canonical-floor-office"
+    assert rec.physical_room_id == "physical-room-office"
+    assert rec.wall_bounded_on_both_sheets is True
+    assert rec.wall_evidence_identical_on_both_sheets is True
+    assert rec.side_kinds["y0"] == "with_openings"
+    assert rec.side_kinds["x0"] == "full"
+    assert rec.side_kinds["x1"] == "full"
+    assert rec.side_kinds["y1"] == "full"
+    assert rec.finish_codes_in_box == {"FT3": 1}
+    assert rec.commercial_projection_allowed is False
+    assert rec.takeoff_eligible is False
+    assert rec.authority_blockers == STANDING_AUTHORITY_BLOCKERS
+
+
+# ==============================================================================
+# Negative & Ambiguity Tests
+# ==============================================================================
+
+def test_negative_open_plan_box_abstains():
+    # Box without surrounding walls (grid only)
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    open_plan_segs = [
+        seg(0, 0, 400, 0),
+        seg(0, 100, 400, 100),
+        seg(0, 0, 0, 400),
+        seg(100, 0, 100, 400),
+    ]
+
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": (100.0, 100.0, 300.0, 300.0),
+            "canonical_floor_id": "canonical-floor-open",
+            "physical_room_id": "physical-room-open",
+            "source_room_face_record_id": "face-open",
+        }
+    ]
+    marks = [
+        {"x": 150.0, "y": 150.0, "code": "FT3", "registered_region": True}
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=open_plan_segs,
+        target_segments=open_plan_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.ABSTAINED
+    assert BOX_NOT_WALL_BOUNDED in rec.reason_codes
+    assert rec.wall_bounded_on_both_sheets is False
+
+
+def test_negative_competing_finish_codes_conflict():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    box_support = (251.04, 1382.72, 394.80, 1585.04)
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": box_support,
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }
+    ]
+    # Two competing finish marks inside the same box
+    marks = [
+        {"x": 300.0, "y": 1420.0, "code": "FT3", "registered_region": True},
+        {"x": 350.0, "y": 1420.0, "code": "FT2", "registered_region": True},
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=sup_segs,
+        target_segments=tgt_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.CONFLICT
+    assert COMPETING_FINISH_CODES_IN_BOX in rec.reason_codes
+    assert rec.finish_codes_in_box == {"FT3": 1, "FT2": 1}
+
+
+def test_negative_box_owned_by_other_finish_code_abstains():
+    selector = sample_selector()  # queried code is FT3
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    box_support = (251.04, 1382.72, 394.80, 1585.04)
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": box_support,
+            "canonical_floor_id": "canonical-floor-coldroom",
+            "physical_room_id": "physical-room-coldroom",
+            "source_room_face_record_id": "face-coldroom",
+        }
+    ]
+    # Mark is EPX, not FT3
+    marks = [
+        {"x": 300.0, "y": 1420.0, "code": "EPX", "registered_region": True}
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=sup_segs,
+        target_segments=tgt_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.ABSTAINED
+    assert BOX_OWNED_BY_OTHER_FINISH_CODE in rec.reason_codes
+
+
+def test_negative_no_mark_in_box_abstains():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    box_support = (251.04, 1382.72, 394.80, 1585.04)
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": box_support,
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }
+    ]
+    # No marks in box
+    marks = [
+        {"x": 100.0, "y": 100.0, "code": "FT3", "registered_region": True}
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=sup_segs,
+        target_segments=tgt_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.ABSTAINED
+    assert NO_FINISH_MARK_IN_BOX in rec.reason_codes
+
+
+def test_negative_mark_too_close_to_edge_abstains():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    box_support = (251.04, 1382.72, 394.80, 1585.04)
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": box_support,
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }
+    ]
+    # Mark at margin 1.0 pt from box side (threshold is 5.0 pt)
+    marks = [
+        {"x": 252.04, "y": 1450.0, "code": "FT3", "registered_region": True}
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=sup_segs,
+        target_segments=tgt_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.ABSTAINED
+    assert MARK_TOO_CLOSE_TO_BOX_SIDE in rec.reason_codes
+
+
+def test_negative_overlapping_measured_boxes_abstains():
+    selector = sample_selector()
+    prod = SourceCrossViewFloorCorrespondenceProducer()
+
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    box_support = (251.04, 1382.72, 394.80, 1585.04)
+    measured_boxes = [
+        {
+            "dimension_box_pdf_pts": box_support,
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+            "other_labelled_boxes_overlapping": 1,
+        }
+    ]
+    marks = [
+        {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True}
+    ]
+
+    result = prod.evaluate_synthetic(
+        selector=selector,
+        support_segments=sup_segs,
+        target_segments=tgt_segs,
+        measured_boxes=measured_boxes,
+        marks=marks,
+    )
+
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.ABSTAINED
+    assert OVERLAPPING_MEASURED_BOXES in rec.reason_codes
+
+
+# ==============================================================================
+# Metamorphic & Invariance Tests
+# ==============================================================================
+
+@pytest.mark.parametrize("shift_x, shift_y", [(0.0, 0.0), (45.0, -120.0), (-300.0, 500.0)])
+def test_translation_metamorphic_invariance(shift_x: float, shift_y: float):
+    src_segs = moved(support_sheet(), shift_x, shift_y)
+    tgt_segs = TARGET_SHEET
+
+    lines_src = build_lines(src_segs)
+    lines_tgt = build_lines(tgt_segs)
+
+    ranked = rank_registrations(lines_src, lines_tgt)
+    assert ranked
+    top = ranked[0]
+    assert top["orientation"] == "identity"
+    assert top["scale"] == 1.0
+    assert top["dx"] == pytest.approx(TRUE_T[0] - shift_x, abs=0.1)
+    assert top["dy"] == pytest.approx(TRUE_T[1] - shift_y, abs=0.1)
+
+
+def test_input_segment_order_invariance():
+    sup_segs = support_sheet()
+    tgt_segs = TARGET_SHEET
+
+    lines1 = build_lines(sup_segs)
+    shuffled = list(sup_segs)
+    shuffled.reverse()
+    lines2 = build_lines(shuffled)
+
+    assert lines1 == lines2
+
+
+def test_selector_validation():
+    with pytest.raises(ValueError, match="material_code"):
+        SourceCrossViewFloorCorrespondenceSelector(
+            document_id="doc",
+            revision_id="rev",
+            source_sha256="sha",
+            snapshot_id="snap",
+            support_page_id="11",
+            target_page_id="7",
+            material_code="",
+        )
