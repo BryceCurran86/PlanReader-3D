@@ -64,6 +64,23 @@ def test_straight_vertical_stair_flight():
     assert flight.void_polygon[2] == (75.0, 122.0)
 
 
+def test_omitted_stair_geometry_does_not_invent_typical_flight():
+    authority = SourceStairFlightVoidGeometryShadowAuthority()
+
+    flight = authority.compute_straight_flight(
+        flight_id="STAIR_UNKNOWN",
+        origin_pt=(0.0, 0.0),
+    )
+
+    assert flight.riser_count == 0
+    assert flight.tread_count == 0
+    assert flight.riser_height_pt == 0.0
+    assert flight.tread_going_pt == 0.0
+    assert flight.flight_width_pt == 0.0
+    assert flight.flight_length_pt == 0.0
+    assert flight.total_rise_pt == 0.0
+
+
 def test_compile_stair_void_receipt():
     authority = SourceStairFlightVoidGeometryShadowAuthority()
 
