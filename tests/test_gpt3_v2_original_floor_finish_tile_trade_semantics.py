@@ -57,6 +57,7 @@ def test_non_tile_source_finish_cannot_score_as_original_tiling(finish):
     "floor_finish_area:canonical-floor-1::tile",
     "floor_finish_area:canonical-floor-1:FT3: tile",
     "floor_finish_area:canonical-floor-1:FT3:tile:vinyl",
+    "floor_finish_area:canonical-floor-1:FT3:epoxy:tile",
     "floor_area:canonical-floor-1:FT3:tile",
     "floor_finish_area:canonical-floor-1:FT3:TILE",
     True, None, {}, [],
