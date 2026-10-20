@@ -89,7 +89,7 @@ def test_figure_source_scope_gate_survives_unordered_3d_handoff():
     canonical[2].update(
         width_record_id="width-3", height_record_id="height-3",
         width_m=1.2, height_m=1.8, geometry_complete=True,
-        evidence_ids=["figured", "figured-word-3", "binding-3",
+        evidence_ids=["source-own-1", "figured", "figured-word-3", "binding-3",
                       "frame-3", "width-3", "height-3"],
     )
     rows[2]["original_label_dimension_result"]["evidence"]["page_id"] = "2"
