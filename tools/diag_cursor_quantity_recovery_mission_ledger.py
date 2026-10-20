@@ -33,6 +33,33 @@ MISSION_LEDGER: dict[str, Any] = {
             ],
             "note": "batch2 + stacker/bifold/door-height fail-closed shadows + compose diag",
         },
+        {
+            "number": 3391,
+            "items": [
+                "host-lineage",
+                "segment-parent-end-reach",
+                "w4-id-disjoint",
+                "multi-gate-original",
+                "face-end-census",
+                "remaining-gates-original",
+                "maryborough-finish-pitch",
+                "batch40b-deep-census",
+                "batch40b-receipt-consistency",
+                "host-architecture-note",
+                "batch41-span-namespace",
+                "digit-tail-ambiguous-abstain",
+                "axis-pair-helper-restore",
+                "batch42-raster-segment-split",
+                "digit-tail-vs-raster_segment-not-dNi0",
+                "batch43-exact-geometry-unavailable",
+                "batch44-producer-visible-index",
+                "observation-geometry-identity-unavailable",
+            ],
+            "note": (
+                "batch40–44 host lineage; producer visible ids 4086; parent "
+                "lines still disjoint from W4 observation geometry; no FIRM/host/score"
+            ),
+        },
     ],
     "blocked_without_other_lanes_or_owner": [
         {"item": 5, "blocker": "STACKER host/frame FIRM — GPT MAX + owner PDF"},

@@ -1,0 +1,15 @@
+{
+  "benchmark_score_granted": false,
+  "blockers": [],
+  "face_end_opening_count": 6,
+  "four_project_missing": [
+    "au_qld_3laurel",
+    "au_qld_q5446"
+  ],
+  "measurement_published": false,
+  "multi_gate_opening_count": 21,
+  "remaining_universe_gate": "opening_universe_incomplete",
+  "shadow_only": true,
+  "sibling_hits": 0,
+  "status": "BATCH40B_RECEIPT_CONSISTENCY_OK"
+}

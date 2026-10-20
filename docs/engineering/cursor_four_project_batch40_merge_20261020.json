@@ -1,0 +1,51 @@
+{
+  "benchmark_score_granted": false,
+  "evaluator_invoked": false,
+  "gold_values_consumed": false,
+  "lot16_signed_eight_retained": true,
+  "lot16_source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "maryborough_finish_pitch": {
+    "finish_gate_sample": [
+      "source_room_face_unavailable"
+    ],
+    "pitched_ceiling_gate_sample": [
+      "ceiling_plan_area_authority_unproven"
+    ],
+    "plain_floor_treated_as_finish": false,
+    "scope_count": 2
+  },
+  "maryborough_source_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+  "measurement_published": false,
+  "shadow_only": true,
+  "status": "UNPUBLISHED_FOUR_PROJECT_BATCH40_MERGE",
+  "stub_report": {
+    "benchmark_score_granted": false,
+    "evaluator_invoked": false,
+    "first_gate_counts_by_project": {
+      "au_qld_3laurel": {},
+      "au_qld_lot16_power": {
+        "opening_filling_kind_unproven": 3,
+        "source_figured_dimension_pair_unproven": 1,
+        "structural_host_unavailable": 6,
+        "whole_wall_frame_unavailable": 6,
+        "width_height_axis_authority_unproven": 5
+      },
+      "au_qld_maryborough_service_station": {
+        "ceiling_plan_area_authority_unproven": 1,
+        "source_room_face_unavailable": 1
+      },
+      "au_qld_q5446": {}
+    },
+    "gold_values_consumed": false,
+    "missing_project_keys": [
+      "au_qld_3laurel",
+      "au_qld_q5446"
+    ],
+    "shadow_only": true,
+    "status": "UNPUBLISHED_THREE_LAUREL_Q5446_MISSING_STUB",
+    "stub_reason": {
+      "au_qld_3laurel": "no_cursor_owned_original_first_gate_producer",
+      "au_qld_q5446": "no_cursor_owned_original_first_gate_producer"
+    }
+  }
+}

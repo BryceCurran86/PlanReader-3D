@@ -1,0 +1,23 @@
+{
+  "benchmark_score_granted": false,
+  "finish_pitch_attach": {
+    "finish_gate_sample": [
+      "source_room_face_unavailable"
+    ],
+    "pitched_ceiling_gate_sample": [
+      "ceiling_plan_area_authority_unproven"
+    ],
+    "plain_floor_treated_as_finish": false,
+    "scope_count": 2
+  },
+  "measurement_published": false,
+  "room_gate": {
+    "authenticated_floor_plan_viewport_count": 1,
+    "room_area_quantity_publication_allowed": false,
+    "scope_count": 2
+  },
+  "shadow_only": true,
+  "source_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+  "status": "UNPUBLISHED_MARYBOROUGH_FINISH_PITCH_ORIGINAL_REPORT",
+  "topology_page_id": "7"
+}
