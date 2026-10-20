@@ -13,6 +13,9 @@ on:
       - scripts/gptmax_source_opposition_retention.py
       - tests/test_gptmax_source_opposition_retention.py
       - .github/workflows/test-gpt3-raster-source-discovery.yml
+      - tools/gpt3_original_source_preflight.py
+      - tests/test_gpt3_original_source_preflight.py
+      - scripts/copy_provisioned_originals_into_worktree.py
 permissions:
   contents: read
   actions: read
@@ -29,15 +32,42 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --expected-sha256 '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify original source
+        run: |
+          PYTHONPATH=. python -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --expected-sha256 '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
       - name: Original Lot16 source replay from exact PR base
         run: |
           git worktree add --detach /tmp/gptmax-discovery-original-base "${{ github.event.pull_request.base.sha }}"
+          PYTHONPATH=. python scripts/copy_provisioned_originals_into_worktree.py \
+            --workspace "$GITHUB_WORKSPACE" \
+            --worktree /tmp/gptmax-discovery-original-base \
+            --name '1. Construction Plans - Lot 16 Power (REV E).pdf'
           mkdir -p prerequisite-lot16
           (cd /tmp/gptmax-discovery-original-base && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
             --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
@@ -93,12 +123,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/Arch_Combined_Maryborough_Service_Station.pdf' \
+            --expected-sha256 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify original source
+        run: |
+          PYTHONPATH=. python -m tools.gpt3_original_source_preflight \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --expected-sha256 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
