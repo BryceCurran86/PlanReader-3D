@@ -32,6 +32,13 @@ class TestSourceSlabDropPanelCapitalShadow(unittest.TestCase):
         self.assertEqual(l2, 2500.0)
         self.assertEqual(thk2, 200.0)
 
+        w3, l3, thk3 = SourceSlabDropPanelCapitalShadowAuthority.parse_drop_panel_annotation(
+            "DROP PANEL"
+        )
+        self.assertEqual(w3, 0.0)
+        self.assertEqual(l3, 0.0)
+        self.assertEqual(thk3, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(50.0, 50.0), (100.0, 100.0)]
         snapped = SourceSlabDropPanelCapitalShadowAuthority.snap_point((51.0, 51.0), ref_pts)
