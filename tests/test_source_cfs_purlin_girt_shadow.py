@@ -48,6 +48,9 @@ def test_cfs_callout_parsing():
     assert omitted["section_designation"] == ""
     assert omitted["linear_mass_kg_m"] == 0.0
 
+    omitted_role = SourceCFSPurlinGirtShadowAuthority.parse_callout("CFS MEMBER")
+    assert omitted_role["role"] == CFSRole.UNKNOWN
+
 
 def test_cfs_snapping():
     pt = (301.2, 598.9)
@@ -96,6 +99,7 @@ def test_cfs_evaluation_quantities():
     omitted_spec = CFSMemberSpec(member_id="P-OMIT")
     assert omitted_spec.section_designation == ""
     assert omitted_spec.linear_mass_kg_m == 0.0
+    assert omitted_spec.role == CFSRole.UNKNOWN
     omitted_res = SourceCFSPurlinGirtShadowAuthority.evaluate_members(
         [{"member_id": "P-OMIT", "centerline_points": [(0.0, 0.0), (12000.0, 0.0)], "callout": "PURLIN"}],
         scale_ratio=0.001,
