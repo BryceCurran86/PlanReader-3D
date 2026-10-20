@@ -36,7 +36,7 @@ class OperableWallSpec:
     panel_width_mm: float = 0.0
     acoustic_rating_rw_db: int = 0
     has_retractable_seals: bool = False
-    parking_stack_track_length_m: float = 2.5
+    parking_stack_track_length_m: float = 0.0
     has_plenum_baffle: bool = True
     plenum_height_m: float = 0.9
     pass_doors_count: int = 0
@@ -86,7 +86,7 @@ class SourceOperableAcousticWallShadowAuthority:
             "panel_width_mm": 0.0,
             "acoustic_rating_rw_db": 0,
             "has_retractable_seals": False,
-            "parking_stack_track_length_m": 2.5,
+            "parking_stack_track_length_m": 0.0,
             "has_plenum_baffle": False,
             "plenum_height_m": 0.9,
             "pass_doors_count": 0,

@@ -42,11 +42,13 @@ def test_operable_wall_callout_parsing():
     assert omitted["panel_width_mm"] == 0.0
     assert omitted["acoustic_rating_rw_db"] == 0
     assert omitted["has_retractable_seals"] is False
+    assert omitted["parking_stack_track_length_m"] == 0.0
     omitted_spec = OperableWallSpec(wall_id="OW-OMIT")
     assert omitted_spec.wall_height_m == 0.0
     assert omitted_spec.panel_width_mm == 0.0
     assert omitted_spec.acoustic_rating_rw_db == 0
     assert omitted_spec.has_retractable_seals is False
+    assert omitted_spec.parking_stack_track_length_m == 0.0
     sealed = SourceOperableAcousticWallShadowAuthority.parse_callout(
         "OPERABLE WALL RETRACTABLE SEALS"
     )
