@@ -66,9 +66,9 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         self.assertEqual(unsnapped, (60.0, 60.0))
 
     def test_roof_drainage_system_takeoff(self):
-        # 15m box gutter: 350mm W x 200mm D. Girth = 0.85m -> Sheet area = 15 * 0.85 = 12.75 m2
-        # 20m eaves gutter: 150mm W x 100mm D. Girth = 0.45m -> Sheet area = 20 * 0.45 = 9.0 m2
-        # Total sheet area = 12.75 + 9.0 = 21.75 m2
+        # 15m box gutter: 350mm W x 200mm D. Girth = 0.75m -> Sheet area = 15 * 0.75 = 11.25 m2
+        # 20m eaves gutter: 150mm W x 100mm D. Girth = 0.35m -> Sheet area = 20 * 0.35 = 7.0 m2
+        # Total sheet area = 11.25 + 7.0 = 18.25 m2 (no invented 100 mm flanges)
         # 2 downpipes: 3.5m drop each -> 7.0m
         g1 = GutterSpec(
             gutter_id="BG-1",
@@ -100,7 +100,7 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         self.assertEqual(res.quantities.total_box_gutter_length_m, 15.0)
         self.assertEqual(res.quantities.total_eaves_gutter_length_m, 20.0)
         self.assertEqual(res.quantities.total_gutter_length_m, 35.0)
-        self.assertEqual(res.quantities.total_gutter_sheet_area_m2, 21.75)
+        self.assertEqual(res.quantities.total_gutter_sheet_area_m2, 18.25)
         self.assertEqual(res.quantities.total_downpipe_count, 2)
         self.assertEqual(res.quantities.total_downpipe_length_m, 7.0)
         self.assertEqual(res.quantities.total_scupper_count, 1)

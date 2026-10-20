@@ -197,8 +197,7 @@ class SourceRoofDrainageGutterDownpipeShadowAuthority:
             else:
                 total_eaves_m += len_m
 
-            # Gutter girth development: width + 2*depth + flanges (e.g. 50mm * 2)
-            girth_m = (g.width_mm + 2.0 * g.depth_mm + 100.0) / 1000.0
+            girth_m = (g.width_mm + 2.0 * g.depth_mm) / 1000.0
             total_sheet_area_m2 += len_m * girth_m
 
         total_dp_len_m = sum(dp.height_drop_m for dp in downpipes)
