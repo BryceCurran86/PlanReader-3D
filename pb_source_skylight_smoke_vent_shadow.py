@@ -44,7 +44,7 @@ class SkylightVentSpec:
     opening_width_mm: float = 0.0
     opening_length_mm: float = 0.0
     curb_height_mm: float = 0.0
-    has_safety_mesh: bool = True
+    has_safety_mesh: bool = False
     discharge_coefficient_cv: float = 0.65
     level_id: str = "ROOF"
     source_callout: str = ""
@@ -97,7 +97,6 @@ class SourceSkylightSmokeVentShadowAuthority:
         # Unit Type
         if "SMOKE" in clean or "HEAT EXHAUST" in clean or "ASHEV" in clean or "EN12101" in clean or "FIRE VENT" in clean:
             res["unit_type"] = RoofVentSkylightType.AUTOMATIC_SMOKE_HEAT_VENT
-            res["has_safety_mesh"] = True
         elif "ACCESS HATCH" in clean or "ROOF HATCH" in clean:
             res["unit_type"] = RoofVentSkylightType.ROOF_ACCESS_HATCH
         elif "OPERABLE" in clean or "MOTORIZED" in clean or "VENT SKYLIGHT" in clean:
