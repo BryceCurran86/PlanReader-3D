@@ -170,3 +170,53 @@ def test_non_axis_w4_original_fragment_is_explicitly_excluded(monkeypatch):
     ]
     assert not result["host_binding_granted"]
     assert not result["firm_area_granted"]
+
+
+def test_original_source_byte_mutation_abstains_before_w4_promotion():
+    """Even an apparently cached producer revision cannot erase a SHA error."""
+    source, scope, selectors = _fixture()
+    fake_authority = object.__new__(PhysicalWallCandidateAuthority)
+    source._producer._store.source_bytes_by_revision[scope.revision_id] = (
+        b"mutated source bytes"
+    )
+    with pytest.raises(ValueError, match="immutable original source PDF"):
+        bridge(
+            source, wall_authority=fake_authority,
+            wall_selector=scope, opening_selectors=selectors,
+        )
+
+
+def test_duplicate_opening_selectors_are_not_equated_to_complete_source_roster(monkeypatch):
+    """Openings must never be counted using caller-supplied repeated addresses."""
+    from dataclasses import replace
+    from types import SimpleNamespace as NS
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_physical_wall_candidate_authority import PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+
+    source, scope, selectors = _fixture()
+    fake_authority = object.__new__(PhysicalWallCandidateAuthority)
+    fake_scope = NS(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        equivalence=object(),
+        records=(),
+        document_id=scope.document_id,
+        revision_id=scope.revision_id,
+        source_sha256=scope.source_sha256,
+        snapshot_id=scope.snapshot_id,
+        page_id=scope.page_id,
+        decision_scope_id=scope.decision_scope_id,
+    )
+    monkeypatch.setattr(
+        PhysicalWallCandidateAuthority, "resolve_scope",
+        lambda self, selected: fake_scope,
+    )
+    result = bridge(
+        source, wall_authority=fake_authority,
+        wall_selector=scope, opening_selectors=(selectors[0], selectors[0]),
+    )
+    assert result["status"] == EvidenceResolutionStatus.ABSTAINED.value
+    assert not result["opening_roster_complete_proven"]
+    assert not result["host_binding_granted"]
+    assert not result["opening_count_granted"]
