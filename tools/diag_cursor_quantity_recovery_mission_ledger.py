@@ -43,9 +43,12 @@ MISSION_LEDGER: dict[str, Any] = {
                 "face-end-census",
                 "remaining-gates-original",
                 "maryborough-finish-pitch",
+                "batch40b-deep-census",
+                "batch40b-receipt-consistency",
+                "host-architecture-note",
             ],
             "note": (
-                "batch40 host lineage + Lot16 multi/remaining gate originals + "
+                "batch40/40b host lineage + Lot16 multi/remaining/deep census + "
                 "Maryborough finish/pitch fail-closed; no FIRM/host/score"
             ),
         },
