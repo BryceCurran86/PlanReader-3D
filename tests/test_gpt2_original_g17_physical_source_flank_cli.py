@@ -71,6 +71,7 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
             opening_bindings=(
                 NS(opening_identity_id=trace_identity,
                    representative_observation_id="visible-1",
+                   page_id="3",
                    status=EvidenceResolutionStatus.ABSTAINED,
                    record_id=None, host_wall_id=None,
                    reason_codes=(
@@ -299,6 +300,33 @@ def test_same_physical_opening_hosted_and_abstained_rosters_conflict(monkeypatch
     )
     with pytest.raises(RuntimeError,
                        match="repeated identity decisions"):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256=_SHA, page_id="3",
+        )
+    assert state["owned_calls"] == 0
+
+@pytest.mark.parametrize("wrong_address", [
+    {"opening_identity_id": None},
+    {"opening_identity_id": ""},
+    {"representative_observation_id": None},
+    {"representative_observation_id": ""},
+    {"page_id": "4"},
+    {"page_id": None},
+])
+def test_unaddressable_original_hostless_g17_does_not_shrink_completeness(
+    monkeypatch, wrong_address,
+):
+    state, _ = _stub_pipeline(monkeypatch)
+    original_composer = cli.compose_live_wall_opening_authority
+    def damaged(**kwargs):
+        result = original_composer(**kwargs)
+        row = result.opening_bindings[0]
+        for key, value in wrong_address.items():
+            setattr(row, key, value)
+        return result
+    monkeypatch.setattr(cli, "compose_live_wall_opening_authority", damaged)
+    with pytest.raises(RuntimeError,
+                       match="hostless G17 source roster has unaddressable"):
         cli.original_physical_g17_source_flank_report(
             _SOURCE, expected_sha256=_SHA, page_id="3",
         )
