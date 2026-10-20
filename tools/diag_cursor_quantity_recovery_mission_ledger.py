@@ -49,10 +49,12 @@ MISSION_LEDGER: dict[str, Any] = {
                 "batch41-span-namespace",
                 "digit-tail-ambiguous-abstain",
                 "axis-pair-helper-restore",
+                "batch42-raster-segment-split",
+                "digit-tail-vs-raster_segment-not-dNi0",
             ],
             "note": (
-                "batch40/40b/41 host lineage + FACE/END spans + ID namespace "
-                "digit-tail abstain + Maryborough finish/pitch; no FIRM/host/score"
+                "batch40–42 host lineage; digit-tail hits are almost all "
+                "raster_segment not dNi0; abstain; no FIRM/host/score"
             ),
         },
     ],

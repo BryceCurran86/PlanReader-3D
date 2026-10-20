@@ -41,6 +41,31 @@ def test_digit_tail_collision_abstains_without_host():
     assert row["digit_tail_collision_count"] == 1
     assert row["host_granted"] is False
     assert row["nearest_wins_applied"] is False
+    assert row["digit_tail_collision_pairs_sample"][0]["selected_id"] is None
+    assert row["seg_vs_d_index_digit_tail_count"] == 1
+    assert row["seg_vs_raster_segment_digit_tail_count"] == 0
+
+
+def test_raster_segment_digit_tail_also_abstains():
+    row = assess_segment_w4_namespace_bridge_variants(
+        physical_opening_id="oid",
+        segment_line_ids=[
+            "raster_opening_primitive:x:2.0.0:raster_wall_band_face:1585",
+        ],
+        w4_primitive_ids=[
+            "raster_segment:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1.0.0:1585",
+            "d0i0",
+        ],
+    )
+    assert row["first_remaining_gate"] == "digit_tail_collision_ambiguous_abstain"
+    assert row["seg_vs_raster_segment_digit_tail_count"] == 1
+    assert row["w4_raster_segment_id_count"] == 1
+    assert row["host_granted"] is False
+    pairs = row["digit_tail_collision_pairs_sample"]
+    assert pairs[0]["digit_tail"] == "1585"
+    assert pairs[0]["selected_id"] is None
+    assert len(pairs[0]["segment_ids"]) == 1
+    assert len(pairs[0]["w4_ids"]) == 1
 
 
 def test_disjoint_namespaces_remain_disjoint():

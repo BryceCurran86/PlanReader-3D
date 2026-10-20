@@ -25,6 +25,8 @@ def _prefix_bucket(raw_id: str) -> str:
         return "empty"
     if text.startswith("raster_opening_primitive:"):
         return "raster_opening_primitive"
+    if text.startswith("raster_segment:"):
+        return "raster_segment"
     if text.startswith("visible:"):
         return "visible_prefixed"
     if _D_INDEX.match(text):
@@ -36,8 +38,8 @@ def _prefix_bucket(raw_id: str) -> str:
 
 def _digit_tail(raw_id: str) -> str | None:
     text = _clean(raw_id)
-    if text.startswith("raster_opening_primitive:"):
-        # ...:raster_wall_band_face:1467 → 1467
+    if text.startswith("raster_opening_primitive:") or text.startswith("raster_segment:"):
+        # ...:raster_wall_band_face:1467 or raster_segment:sha:1.0.0:1585 → last digit token
         tail = text.rsplit(":", 1)[-1]
         return tail if tail.isdigit() else None
     m = _D_INDEX.match(text)
@@ -45,6 +47,19 @@ def _digit_tail(raw_id: str) -> str | None:
         return m.group(1)
     m2 = _DIGIT_TAIL.search(text)
     return m2.group(1) if m2 else None
+
+
+def _ids_by_digit_tail(ids: Sequence[str]) -> dict[str, list[str]]:
+    by_tail: dict[str, list[str]] = {}
+    for raw in ids:
+        text = _clean(raw)
+        tail = _digit_tail(text)
+        if not tail:
+            continue
+        by_tail.setdefault(tail, []).append(text)
+    for tail in by_tail:
+        by_tail[tail] = sorted(set(by_tail[tail]))
+    return by_tail
 
 
 def classify_id_namespace_taxonomy(
@@ -87,9 +102,26 @@ def assess_segment_w4_namespace_bridge_variants(
         x[len("visible:"):] if x.startswith("visible:") else x for x in w4
     }
     stripped = seg_strip & w4_strip
-    seg_digits = {d for d in (_digit_tail(x) for x in seg) if d}
-    w4_digits = {d for d in (_digit_tail(x) for x in w4) if d}
-    digit_hits = seg_digits & w4_digits
+    seg_by_tail = _ids_by_digit_tail(seg)
+    w4_by_tail = _ids_by_digit_tail(w4)
+    digit_hits = sorted(set(seg_by_tail) & set(w4_by_tail))
+    # Retain both ID forms for every colliding digit — never pick one side.
+    collision_pairs = []
+    for tail in digit_hits:
+        collision_pairs.append({
+            "digit_tail": tail,
+            "segment_ids": seg_by_tail[tail],
+            "w4_ids": w4_by_tail[tail],
+            "selected_id": None,
+        })
+    w4_raster_segment = [x for x in w4 if x.startswith("raster_segment:")]
+    w4_d_index = [x for x in w4 if _D_INDEX.match(x)]
+    seg_vs_raster_segment_tails = sorted(
+        set(seg_by_tail) & set(_ids_by_digit_tail(w4_raster_segment))
+    )
+    seg_vs_d_index_tails = sorted(
+        set(seg_by_tail) & set(_ids_by_digit_tail(w4_d_index))
+    )
 
     if exact:
         gate = "exact_id_intersection_review_only"
@@ -110,7 +142,14 @@ def assess_segment_w4_namespace_bridge_variants(
         "exact_intersection_count": len(exact),
         "stripped_intersection_count": len(stripped),
         "digit_tail_collision_count": len(digit_hits),
-        "digit_tail_collision_sample": sorted(digit_hits)[:12],
+        "digit_tail_collision_sample": digit_hits[:12],
+        "digit_tail_collision_pairs_sample": collision_pairs[:8],
+        "seg_vs_raster_segment_digit_tail_count": len(seg_vs_raster_segment_tails),
+        "seg_vs_d_index_digit_tail_count": len(seg_vs_d_index_tails),
+        "seg_vs_raster_segment_digit_tails_sample": seg_vs_raster_segment_tails[:12],
+        "seg_vs_d_index_digit_tails_sample": seg_vs_d_index_tails[:12],
+        "w4_raster_segment_id_count": len(w4_raster_segment),
+        "w4_d_index_id_count": len(w4_d_index),
         "taxonomy": {
             "segment_prefix_counts": taxonomy["segment_prefix_counts"],
             "w4_prefix_counts": taxonomy["w4_prefix_counts"],

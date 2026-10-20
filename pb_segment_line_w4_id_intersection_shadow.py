@@ -68,6 +68,12 @@ def assess_segment_line_w4_id_intersection_shadow(
         "namespace_bridge_gate": bridge["first_remaining_gate"],
         "digit_tail_collision_count": bridge["digit_tail_collision_count"],
         "digit_tail_collision_sample": bridge["digit_tail_collision_sample"],
+        "digit_tail_collision_pairs_sample": bridge["digit_tail_collision_pairs_sample"],
+        "seg_vs_raster_segment_digit_tail_count": bridge[
+            "seg_vs_raster_segment_digit_tail_count"],
+        "seg_vs_d_index_digit_tail_count": bridge["seg_vs_d_index_digit_tail_count"],
+        "w4_raster_segment_id_count": bridge["w4_raster_segment_id_count"],
+        "w4_d_index_id_count": bridge["w4_d_index_id_count"],
         "namespace_taxonomy": bridge["taxonomy"],
         "host_granted": False,
         "nearest_wins_applied": False,
