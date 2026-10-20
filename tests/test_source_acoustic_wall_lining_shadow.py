@@ -32,10 +32,12 @@ class TestSourceAcousticWallLiningShadow(unittest.TestCase):
         self.assertEqual(side_b2, 1)
         self.assertEqual(rw2, 50)
 
-        decoupling3, _a3, _b3, rw3 = SourceAcousticWallLiningShadowAuthority.parse_acoustic_wall_tag(
+        decoupling3, a3, b3, rw3 = SourceAcousticWallLiningShadowAuthority.parse_acoustic_wall_tag(
             "ACOUSTIC WALL"
         )
         self.assertEqual(rw3, 0)
+        self.assertEqual(a3, 0)
+        self.assertEqual(b3, 0)
 
         omitted = AcousticWallSpec(
             wall_id="AW-UNKNOWN",
@@ -45,6 +47,8 @@ class TestSourceAcousticWallLiningShadow(unittest.TestCase):
         self.assertEqual(omitted.target_rw, 0)
         self.assertEqual(omitted.wall_height_m, 0.0)
         self.assertEqual(omitted.air_gap_mm, 0.0)
+        self.assertEqual(omitted.side_a_layers, 0)
+        self.assertEqual(omitted.side_b_layers, 0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
