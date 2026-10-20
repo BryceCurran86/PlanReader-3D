@@ -183,6 +183,12 @@ def original_physical_g17_source_flank_report(
     reconciled = quarantine_overlapping_g17_physical_source_claims_shadow(
         tuple(physical)
     )
+    for source_owner in reconciled:
+        if source_owner.status is not EvidenceResolutionStatus.CORROBORATED:
+            unresolved.append({
+                "physical_opening_id": source_owner.physical_opening_id,
+                "reason": ",".join(source_owner.reason_codes),
+            })
     return {
         "source_sha256": digest,
         "revision_id": root["revision_id"],
