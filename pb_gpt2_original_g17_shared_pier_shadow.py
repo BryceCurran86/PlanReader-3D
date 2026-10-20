@@ -85,14 +85,31 @@ def audit_gpt2_original_g17_shared_piers_shadow(
         digests.add(owner.source_sha256)
         receipt_ids = [line.visible_observation_id for line in parents.lines]
         root_ids = [line.parent_observation_id for line in parents.lines]
+        band_source_obs = tuple(sorted(
+            line.visible_observation_id for line in parents.lines
+            if line.observation_kind in ("raster_wall_band_face",
+                                         "raster_wall_band_end")
+        ))
+        end_source_parents = tuple(sorted(
+            line.parent_observation_id for line in parents.lines
+            if line.observation_kind == "raster_wall_band_end"
+        ))
+        scoped_pages = {line.page_id for line in parents.lines}
         if (len(set(receipt_ids)) != len(receipt_ids)
                 or len(set(root_ids)) != len(root_ids)
                 or tuple(sorted(receipt_ids)) != owner.physical_source_observation_ids
                 or tuple(sorted(root_ids)) != owner.authenticated_source_parent_ids
+                or owner.authenticated_flank_source_visible_ids != band_source_obs
+                or owner.authenticated_flank_end_parent_ids != end_source_parents
+                or len(end_source_parents) != 2
                 or set(root_ids) != set(parents.requested_parent_ids)
+                or len(scoped_pages) != 1
+                or any(type(page) is not str or not page.isdecimal()
+                       or int(page) < 1 for page in scoped_pages)
                 or not receipt_ids):
             return OriginalG17SharedPierCandidateResult(
-                "ABSTAIN", "", (), (), ("original_g17_source_parent_ownership_conflict",),
+                "ABSTAIN", "", (), (),
+                ("original_g17_source_parent_or_cap_ownership_conflict",),
             )
         inventory = {}
         for line in parents.lines:
