@@ -191,7 +191,6 @@ class SourceCFSPurlinGirtShadowAuthority:
             except ValueError:
                 pass
         elif "LAPPED" in clean or "CONTINUOUS" in clean:
-            res["lap_length_mm"] = 900.0
             res["lap_count"] = 1
 
         lap_cnt_match = re.search(r'(\d+)\s*(?:LAPS|OVERLAPS)', clean)
