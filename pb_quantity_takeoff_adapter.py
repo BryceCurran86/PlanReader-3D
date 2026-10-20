@@ -590,6 +590,7 @@ def quantities_to_takeoff_output_rows(
     # independently sourced, ONE COUNT. Distinct semantic keys cannot
     # disguise a second area/count for the same source-owned physical object.
     opening_claims: dict[tuple[str, str], str] = {}
+    opening_kinds: dict[str, tuple[str, str]] = {}
     seen_quantity_ids: set[str] = set()
     output: list[dict[str, Any]] = []
     for quantity in quantities:
@@ -641,6 +642,25 @@ def quantities_to_takeoff_output_rows(
                         f"{quantity.quantity_id!r} for {physical_identity!r}"
                     )
                 opening_claims[physical_key] = quantity.quantity_id
+                typed_kind = None
+                for prefix, kind in (
+                    ("door_area:", "door"), ("window_area:", "window"),
+                    ("door_count:", "door"), ("window_count:", "window"),
+                ):
+                    if quantity.semantic_key.startswith(prefix):
+                        typed_kind = kind
+                        break
+                if typed_kind is not None:
+                    previous = opening_kinds.get(physical_identity)
+                    if previous is not None and previous[0] != typed_kind:
+                        raise CommercialTakeoffConflictError(
+                            "contradictory source-owned door/window kind "
+                            f"for physical opening {physical_identity!r}: "
+                            f"{previous[1]!r} vs {quantity.quantity_id!r}"
+                        )
+                    opening_kinds[physical_identity] = (
+                        typed_kind, quantity.quantity_id
+                    )
         seen.setdefault(key, []).append((identities, claim, quantity.quantity_id))
         output.append(row)
     return output
