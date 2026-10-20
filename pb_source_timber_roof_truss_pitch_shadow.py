@@ -21,6 +21,7 @@ SNAP_TOLERANCE_PT: float = 2.5
 
 
 class TrussProfileType(str, Enum):
+    UNKNOWN = "UNKNOWN"
     FINK = "FINK"
     HOWE = "HOWE"
     MONO_PITCH = "MONO_PITCH"
@@ -90,8 +91,10 @@ class SourceTimberRoofTrussPitchShadowAuthority:
             t_type = TrussProfileType.HIP_RAFTER
         elif "HOWE" in clean:
             t_type = TrussProfileType.HOWE
-        else:
+        elif "FINK" in clean:
             t_type = TrussProfileType.FINK
+        else:
+            t_type = TrussProfileType.UNKNOWN
 
         # Pitch angle: (\d+(?:\.\d+)?)\s*(?:DEG|°|PITCH)
         p_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:DEG|°|PITCH)", clean)

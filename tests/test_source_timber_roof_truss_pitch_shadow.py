@@ -32,9 +32,10 @@ class TestSourceTimberRoofTrussPitchShadow(unittest.TestCase):
         self.assertEqual(spacing2, 600.0)
         self.assertEqual(oh2, 450.0)
 
-        _t3, pitch3, sp3, oh3 = SourceTimberRoofTrussPitchShadowAuthority.parse_truss_annotation(
+        t3, pitch3, sp3, oh3 = SourceTimberRoofTrussPitchShadowAuthority.parse_truss_annotation(
             "TRUSS"
         )
+        self.assertEqual(t3, TrussProfileType.UNKNOWN)
         self.assertEqual(pitch3, 0.0)
         self.assertEqual(sp3, 0.0)
         self.assertEqual(oh3, 0.0)
