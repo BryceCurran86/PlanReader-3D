@@ -35,7 +35,7 @@ def test_positive_stairwell_void():
         scale_ratio=0.02,
     )
 
-    assert void.status == EvidenceResolutionStatus.CORROBORATED
+    assert void.status == EvidenceResolutionStatus.CANDIDATE
     assert void.void_kind == VoidKind.STAIRWELL
     assert pytest.approx(void.area_sqm, rel=1e-3) == 8.0
     assert pytest.approx(void.perimeter_m, rel=1e-3) == 12.0
@@ -55,7 +55,7 @@ def test_positive_service_riser_shaft():
         scale_ratio=0.02,
     )
 
-    assert void.status == EvidenceResolutionStatus.CORROBORATED
+    assert void.status == EvidenceResolutionStatus.CANDIDATE
     assert void.void_kind == VoidKind.SERVICE_RISER
     assert pytest.approx(void.area_sqm, rel=1e-3) == 0.36
 
@@ -146,8 +146,9 @@ def test_net_floor_area_deduction_calculation():
         voids=[v1, v2, v3],
     )
 
-    assert adj.status == EvidenceResolutionStatus.CORROBORATED
-    assert pytest.approx(adj.void_deductions_sqm, rel=1e-3) == 8.36
-    assert pytest.approx(adj.net_floor_area_sqm, rel=1e-3) == 141.64
-    assert len(adj.subtracted_void_ids) == 2
+    assert adj.status == EvidenceResolutionStatus.CANDIDATE
+    # Candidate voids are not measurement authority and must not be deducted.
+    assert pytest.approx(adj.void_deductions_sqm, rel=1e-3) == 0.0
+    assert pytest.approx(adj.net_floor_area_sqm, rel=1e-3) == 150.0
+    assert len(adj.subtracted_void_ids) == 0
     assert adj.commercial_projection_allowed is False

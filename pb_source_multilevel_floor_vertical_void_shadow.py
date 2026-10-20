@@ -281,8 +281,8 @@ class MultiLevelFloorVerticalVoidShadowAuthority:
             area_sqm=area_sqm,
             perimeter_m=perimeter_m,
             corroborating_evidence=tuple(matched_tokens),
-            status=EvidenceResolutionStatus.CORROBORATED,
-            notes="Corroborated physical vertical void penetration.",
+            status=EvidenceResolutionStatus.CANDIDATE,
+            notes="Candidate physical vertical void penetration; caller tokens are not independently re-resolved ownership.",
         )
 
     def compute_level_net_floor_area(
@@ -300,7 +300,7 @@ class MultiLevelFloorVerticalVoidShadowAuthority:
         total_deduction = sum(v.area_sqm for v in valid_voids)
         net_area = max(0.0, gross_floor_area_sqm - total_deduction)
 
-        status = EvidenceResolutionStatus.CORROBORATED if gross_floor_area_sqm > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if gross_floor_area_sqm > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return FloorLevelTakeoffAdjustment(
             level_id=level_id,
