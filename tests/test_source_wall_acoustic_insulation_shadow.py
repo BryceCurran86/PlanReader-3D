@@ -47,6 +47,23 @@ def test_opening_exceeding_wall_area_clamped():
     assert rec.insulation_volume_pt3 == 0.0
 
 
+def test_omitted_ratings_do_not_invent_typical_batts():
+    authority = SourceWallAcousticInsulationShadowAuthority()
+
+    rec = authority.compute_wall_insulation(
+        wall_id="WALL_UNKNOWN",
+        wall_type="TYPE_UNKNOWN",
+        wall_length_pt=10.0,
+        wall_height_pt=10.0,
+    )
+
+    assert rec.cavity_thickness_pt == 0.0
+    assert rec.r_value == 0.0
+    assert rec.rw_rating == 0
+    assert rec.insulation_material == ""
+    assert rec.insulation_volume_pt3 == 0.0
+
+
 def test_compile_insulation_receipt():
     authority = SourceWallAcousticInsulationShadowAuthority()
 
