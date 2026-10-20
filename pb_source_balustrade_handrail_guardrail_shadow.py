@@ -40,7 +40,7 @@ class BalustradeRunSpec:
     location_kind: BarrierLocationKind
     infill_type: BarrierInfillType
     centerline_points: List[Tuple[float, float]]
-    height_mm: float = 1100.0
+    height_mm: float = 0.0
     post_spacing_mm: float = 1000.0
     has_continuous_handrail: bool = True
     handrail_extension_m: float = 0.30
@@ -100,16 +100,12 @@ class SourceBalustradeHandrailGuardrailShadowAuthority:
         # Location kind
         if "STAIR" in clean:
             loc = BarrierLocationKind.STAIR_FLIGHT
-            def_h = 1000.0
         elif "RAMP" in clean:
             loc = BarrierLocationKind.RAMP
-            def_h = 1000.0
         elif "VOID" in clean or "ATRIUM" in clean or "MEZZANINE" in clean:
             loc = BarrierLocationKind.INTERNAL_VOID
-            def_h = 1000.0
         else:
             loc = BarrierLocationKind.BALCONY_TERRACE
-            def_h = 1100.0
 
         # Infill type
         if "GLASS" in clean:
@@ -123,7 +119,7 @@ class SourceBalustradeHandrailGuardrailShadowAuthority:
 
         # Height: (\d+)\s*(?:MM)?\s*(?:H\b|HIGH|HEIGHT)
         h_match = re.search(r"(\d+)\s*(?:MM)?\s*(?:H\b|HIGH|HEIGHT)", clean)
-        height_mm = float(h_match.group(1)) if h_match else def_h
+        height_mm = float(h_match.group(1)) if h_match else 0.0
 
         # Handrail presence
         has_hr = "HANDRAIL" in clean or "RAIL" in clean or (loc in (BarrierLocationKind.STAIR_FLIGHT, BarrierLocationKind.RAMP))
@@ -152,7 +148,7 @@ class SourceBalustradeHandrailGuardrailShadowAuthority:
 
             # Compliance check: min 1100mm on balcony/terrace, min 1000mm on stairs/ramps
             min_req_h = 1100.0 if r.location_kind == BarrierLocationKind.BALCONY_TERRACE else 1000.0
-            if r.height_mm < min_req_h:
+            if r.height_mm > 0.0 and r.height_mm < min_req_h:
                 non_compliant_count += 1
 
             if r.has_continuous_handrail:
