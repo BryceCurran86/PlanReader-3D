@@ -32,7 +32,7 @@ def test_positive_in_plan_ipf1_callout():
         title_block_bboxes=[TITLE_BLOCK],
     )
 
-    assert word.status == EvidenceResolutionStatus.CORROBORATED
+    assert word.status == EvidenceResolutionStatus.CANDIDATE
     assert word.role == RcpWordRole.IN_PLAN_CEILING_ANNOTATION
     assert word.is_eligible_for_ceiling_mark is True
     assert word.commercial_projection_allowed is False
@@ -55,7 +55,7 @@ def test_positive_in_plan_grid_callout():
         title_block_bboxes=[TITLE_BLOCK],
     )
 
-    assert word.status == EvidenceResolutionStatus.CORROBORATED
+    assert word.status == EvidenceResolutionStatus.CANDIDATE
     assert word.role == RcpWordRole.IN_PLAN_CEILING_ANNOTATION
     assert word.is_eligible_for_ceiling_mark is True
 
@@ -152,3 +152,68 @@ def test_negative_degenerate_bbox_fails_closed():
     assert word.status == EvidenceResolutionStatus.ABSTAINED
     assert word.is_eligible_for_ceiling_mark is False
     assert "Degenerate" in word.notes
+
+def test_actual_original_four_word_office_note_not_a_ceiling_mark():
+    # SHA-pinned Maryborough RCP p9 native block212:
+    # REVIEW IN OFFICE AREA (4 words). Length-only >6-word filters fail.
+    a=SourceRcpWordEligibilityShadowAuthority()
+    r=a.classify_word(
+        document_id="source:mary",page_id="9",word_text="OFFICE",
+        word_bbox=(407.0,1400.0,418.9,1450.0),
+        block_text="REVIEW IN OFFICE AREA",block_index=212,
+        line_index=0,word_index=2,
+        plan_viewport_bbox=PLAN_VIEWPORT,
+    )
+    assert r.status is EvidenceResolutionStatus.ABSTAINED
+    assert r.role is RcpWordRole.GENERAL_NOTE_PROSE
+    assert not r.is_eligible_for_ceiling_mark
+
+
+def test_original_standalone_office_is_room_word_not_ceiling_material():
+    a=SourceRcpWordEligibilityShadowAuthority()
+    r=a.classify_word(
+        document_id="source:mary",page_id="9",word_text="OFFICE",
+        word_bbox=(295.42,1465.44,311.48,1503.56),
+        block_text="OFFICE",block_index=9,line_index=0,word_index=0,
+        plan_viewport_bbox=(100.,100.,1100.,1600.),
+    )
+    assert r.status is EvidenceResolutionStatus.ABSTAINED
+    assert r.role is RcpWordRole.NON_CEILING_LABEL
+    assert not r.commercial_projection_allowed and not r.takeoff_eligible
+
+
+def test_source_less_callout_is_never_corrob_without_plan_candidate():
+    a=SourceRcpWordEligibilityShadowAuthority()
+    r=a.classify_word(
+        document_id="caller-can-invent",page_id="9",word_text="IPF1",
+        word_bbox=(350.,450.,380.,460.),block_text="IPF1",
+        plan_viewport_bbox=None,
+    )
+    assert r.status is EvidenceResolutionStatus.ABSTAINED
+    assert not r.is_eligible_for_ceiling_mark
+
+
+def test_mixed_electrical_device_text_ipf1_not_assumed_one_ceiling_mark():
+    a=SourceRcpWordEligibilityShadowAuthority()
+    r=a.classify_word(
+        document_id="source:mary",page_id="9",word_text="IPF1",
+        word_bbox=(566.,1398.,581.,1415.),
+        block_text="EX D-1 EML MS D-1 IPF1",block_index=85,line_index=5,
+        plan_viewport_bbox=(100.,100.,1100.,1700.),
+    )
+    assert r.status is EvidenceResolutionStatus.ABSTAINED
+    assert r.role is RcpWordRole.GENERAL_NOTE_PROSE
+
+
+def test_source_word_lexical_candidate_never_becomes_corrob_or_firm():
+    a=SourceRcpWordEligibilityShadowAuthority()
+    r=a.classify_word(
+        document_id="unverified-original-root",page_id="9",word_text="GRID",
+        word_bbox=(391.46,1500.42,416.54,1520.96),
+        block_text="2400 GRID",block_index=10,line_index=1,
+        plan_viewport_bbox=(100.,100.,1100.,1700.),
+    )
+    assert r.status is EvidenceResolutionStatus.CANDIDATE
+    assert r.is_eligible_for_ceiling_mark
+    assert r.role is RcpWordRole.IN_PLAN_CEILING_ANNOTATION
+    assert not r.takeoff_eligible and not r.commercial_projection_allowed
