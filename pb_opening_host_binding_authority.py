@@ -2308,9 +2308,18 @@ def _pair_lookup(
     for left, right, raw in equivalence.pair_classifications:
         key = tuple(sorted((str(left), str(right))))
         try:
-            result[key] = PhysicalEquivalenceClass(raw)
-        except ValueError:
-            continue
+            classification = PhysicalEquivalenceClass(raw)
+        except (TypeError, ValueError):
+            # A malformed issued relationship is source conflict, not
+            # permission to pretend the producer never issued the pair.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        prior = result.get(key)
+        if (prior is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+                or (prior is not None and prior is not classification)):
+            # Never re-enable SAME or DISTINCT by replaying a later
+            # positive record after an original contradictory receipt.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        result[key] = classification
     return result
 
 
