@@ -5,6 +5,10 @@ on:
     paths:
       - pb_source_visibility_authority.py
       - pb_source_door_schedule_authority.py
+      - pb_source_observation_authority.py
+      - pb_pdf_text_integrity_authority.py
+      - pb_vector_geometry_v130.py
+      - pb_native_page_frame.py
       - tests/test_gpt2_a600_native_column_header_source_roles.py
       - .github/workflows/test-gpt2-a600-original-column-header.yml
   push:
@@ -12,6 +16,10 @@ on:
     paths:
       - "pb_source_door_schedule_authority.py"
       - "pb_source_visibility_authority.py"
+      - "pb_source_observation_authority.py"
+      - "pb_pdf_text_integrity_authority.py"
+      - "pb_vector_geometry_v130.py"
+      - "pb_native_page_frame.py"
       - "tests/test_gpt2_a600_native_column_header_source_roles.py"
       - ".github/workflows/test-gpt2-a600-original-column-header.yml"
   workflow_dispatch:

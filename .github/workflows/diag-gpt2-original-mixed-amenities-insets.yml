@@ -6,6 +6,8 @@ on:
     paths:
       - "pb_page_title_authority.py"
       - "pb_viewport_segmentation.py"
+      - "pb_drawing_evidence_binding.py"
+      - "pb_native_page_frame.py"
       - "tools/diag_gpt2_original_mixed_amenities_insets.py"
       - "tests/test_gpt2_original_mixed_amenities_insets.py"
       - ".github/workflows/diag-gpt2-original-mixed-amenities-insets.yml"
@@ -13,6 +15,8 @@ on:
     paths:
       - pb_page_title_authority.py
       - pb_viewport_segmentation.py
+      - pb_drawing_evidence_binding.py
+      - pb_native_page_frame.py
       - tools/diag_gpt2_original_mixed_amenities_insets.py
       - tests/test_gpt2_original_mixed_amenities_insets.py
       - .github/workflows/diag-gpt2-original-mixed-amenities-insets.yml
