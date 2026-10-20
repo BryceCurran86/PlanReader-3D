@@ -42,8 +42,8 @@ class GutterSpec:
     gutter_id: str
     gutter_type: GutterType
     centerline_points: List[Tuple[float, float]]
-    width_mm: float = 300.0
-    depth_mm: float = 150.0
+    width_mm: float = 0.0
+    depth_mm: float = 0.0
     material: DrainageMaterial = DrainageMaterial.COLORBOND_STEEL
     fall_ratio: float = 0.01
     level_id: str = "ROOF"
@@ -171,7 +171,7 @@ class SourceRoofDrainageGutterDownpipeShadowAuthority:
                 width_mm = float(dim_match.group(1))
                 depth_mm = float(dim_match.group(2))
             else:
-                width_mm, depth_mm = 300.0, 150.0
+                width_mm, depth_mm = 0.0, 0.0
 
         return g_type, width_mm, depth_mm, mat
 
