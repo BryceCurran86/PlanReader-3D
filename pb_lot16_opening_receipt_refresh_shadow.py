@@ -31,8 +31,8 @@ _KNOWN_GATES = frozenset({
     "source_figured_dimension_pair_unproven",
     "width_height_axis_authority_unproven",
     "original_figured_label_source_scope_unverified",
-    "canonical_figured_area_publication_basis_unproven",
-    "canonical_figured_area_value_unproven",
+    "canonical_geometry_area_publication_basis_unproven",
+    "canonical_geometry_area_value_unproven",
     "original_physical_source_observation_receipts_unbound",
     "original_structural_host_receipt_unbound",
     "original_host_frame_receipt_unbound",
@@ -121,6 +121,8 @@ def refresh_opening_first_gate_receipt(
                 or row.get("original_host_binding_receipt_bound") is not True
                 or row.get("original_host_frame_receipt_bound") is not True
                 or row.get("filling_kind_source_supported") is not True
+                or row.get("canonical_3d_area_publication_basis_bound") is not True
+                or row.get("canonical_3d_area_value_bound") is not True
                 or row.get("axis_order_authenticated") is not True
             ):
                 raise RuntimeError("unproven original 3D candidate")
