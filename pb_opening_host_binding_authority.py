@@ -859,6 +859,10 @@ class OpeningHostBindingProducer:
         )
         existing = self._results.get(key)
         if existing is not None and existing != result:
+            # Reproof returned a contradictory original positive for this
+            # exact immutable source/opening selector. A newly issued
+            # authority must not retain the earlier host as CORROBORATED.
+            self._results.pop(key, None)
             raise RuntimeError("opening host-binding producer equivocation")
         self._results[key] = result
         return result
