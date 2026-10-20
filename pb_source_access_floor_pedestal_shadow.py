@@ -21,6 +21,7 @@ SNAP_TOLERANCE_PT: float = 2.5
 
 
 class AccessFloorGrade(str, Enum):
+    UNKNOWN = "UNKNOWN"
     MEDIUM_GRADE = "MEDIUM_GRADE"
     HEAVY_GRADE = "HEAVY_GRADE"
     EXTRA_HEAVY_GRADE = "EXTRA_HEAVY_GRADE"
@@ -31,9 +32,9 @@ class AccessFloorZoneSpec:
     zone_id: str
     room_id: str
     boundary_polygon: List[Tuple[float, float]]
-    grade: AccessFloorGrade = AccessFloorGrade.HEAVY_GRADE
-    ffh_mm: float = 300.0
-    panel_size_mm: float = 600.0
+    grade: AccessFloorGrade = AccessFloorGrade.UNKNOWN
+    ffh_mm: float = 0.0
+    panel_size_mm: float = 0.0
     has_underfloor_insulation: bool = False
     level_id: str = "L1"
     source_tag: str = ""
@@ -106,16 +107,18 @@ class SourceAccessFloorPedestalShadowAuthority:
             grade = AccessFloorGrade.EXTRA_HEAVY_GRADE
         elif "MEDIUM" in clean:
             grade = AccessFloorGrade.MEDIUM_GRADE
-        else:
+        elif "HEAVY" in clean:
             grade = AccessFloorGrade.HEAVY_GRADE
+        else:
+            grade = AccessFloorGrade.UNKNOWN
 
         # FFH: (\d+)\s*(?:MM)?\s*(?:FFH|HEIGHT|VOID)
         ffh_match = re.search(r"(\d+)\s*(?:MM)?\s*(?:FFH|HEIGHT|VOID)", clean)
-        ffh_mm = float(ffh_match.group(1)) if ffh_match else 300.0
+        ffh_mm = float(ffh_match.group(1)) if ffh_match else 0.0
 
         # Panel size
         p_match = re.search(r"(\d+)\s*[xX]\s*(\d+)", clean)
-        panel_size_mm = float(p_match.group(1)) if p_match else 600.0
+        panel_size_mm = float(p_match.group(1)) if p_match else 0.0
 
         return grade, ffh_mm, panel_size_mm
 
@@ -142,12 +145,14 @@ class SourceAccessFloorPedestalShadowAuthority:
 
             # Panel count
             panel_m = z.panel_size_mm / 1000.0
-            panel_area = panel_m * panel_m
-            panels = math.ceil(area_m2 / panel_area) if area_m2 > 0 else 0
+            if area_m2 > 0 and panel_m > 0:
+                panel_area = panel_m * panel_m
+                panels = math.ceil(area_m2 / panel_area)
+                pedestals = math.ceil((area_m2 / panel_area) + (perim_m / (2.0 * panel_m)) + 1.0)
+            else:
+                panels = 0
+                pedestals = 0
             total_panels += panels
-
-            # Pedestals count: Grid points + edge boundaries
-            pedestals = math.ceil((area_m2 / panel_area) + (perim_m / (2.0 * panel_m)) + 1.0) if area_m2 > 0 else 0
             total_pedestals += pedestals
 
             # Plenum volume

@@ -28,7 +28,14 @@ class TestSourceAccessFloorPedestalShadow(unittest.TestCase):
         )
         self.assertEqual(grade2, AccessFloorGrade.MEDIUM_GRADE)
         self.assertEqual(ffh2, 150.0)
-        self.assertEqual(p_size2, 600.0)
+        self.assertEqual(p_size2, 0.0)
+
+        grade3, ffh3, p_size3 = SourceAccessFloorPedestalShadowAuthority.parse_access_floor_tag(
+            "ACCESS FLOOR"
+        )
+        self.assertEqual(grade3, AccessFloorGrade.UNKNOWN)
+        self.assertEqual(ffh3, 0.0)
+        self.assertEqual(p_size3, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
@@ -63,6 +70,19 @@ class TestSourceAccessFloorPedestalShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        omitted = AccessFloorZoneSpec(
+            zone_id="AF-OMIT",
+            room_id="ROOM-OMIT",
+            boundary_polygon=[(0.0, 0.0), (6.0, 0.0), (6.0, 6.0), (0.0, 6.0)],
+        )
+        self.assertEqual(omitted.grade, AccessFloorGrade.UNKNOWN)
+        self.assertEqual(omitted.ffh_mm, 0.0)
+        self.assertEqual(omitted.panel_size_mm, 0.0)
+        omitted_res = SourceAccessFloorPedestalShadowAuthority.evaluate_access_flooring([omitted])
+        self.assertEqual(omitted_res.quantities.total_panel_count, 0)
+        self.assertEqual(omitted_res.quantities.total_pedestal_count, 0)
+        self.assertEqual(omitted_res.quantities.total_plenum_volume_m3, 0.0)
 
 
 if __name__ == "__main__":
