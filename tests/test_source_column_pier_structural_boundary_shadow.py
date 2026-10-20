@@ -68,6 +68,18 @@ def test_engaged_masonry_pier_creation():
     assert pier.volume_pt3 == 36000.0
 
 
+def test_omitted_material_does_not_invent_concrete():
+    authority = SourceColumnPierStructuralBoundaryShadowAuthority()
+
+    col = authority.create_circular_column(
+        center_pt=(0.0, 0.0),
+        diameter_pt=10.0,
+        height_pt=100.0,
+    )
+
+    assert col.material == ""
+
+
 def test_compile_column_inventory_receipt():
     authority = SourceColumnPierStructuralBoundaryShadowAuthority()
 

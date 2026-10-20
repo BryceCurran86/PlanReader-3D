@@ -156,7 +156,7 @@ class SourceColumnPierStructuralBoundaryShadowAuthority:
         diameter_pt: float,
         height_pt: float,
         placement: ColumnPlacement = ColumnPlacement.ISOLATED_IN_ROOM,
-        material: str = "CONCRETE",
+        material: str = "",
         num_circle_segments: int = 16,
     ) -> ColumnPierRecord:
         radius = diameter_pt / 2.0
@@ -195,7 +195,7 @@ class SourceColumnPierStructuralBoundaryShadowAuthority:
         boundary_polygon: Sequence[Tuple[float, float]],
         height_pt: float,
         placement: ColumnPlacement = ColumnPlacement.ISOLATED_IN_ROOM,
-        material: str = "CONCRETE",
+        material: str = "",
     ) -> ColumnPierRecord:
         poly_tuple = tuple(boundary_polygon)
         area = _polygon_area(poly_tuple)
