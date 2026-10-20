@@ -163,7 +163,7 @@ class SourceSkirtingWallBaseShadowAuthority:
             (document_id, revision_id, source_sha256, total, round(net_skirting, 2)),
         )
 
-        status = EvidenceResolutionStatus.CORROBORATED if total > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if total > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return SkirtingWallBaseReceipt(
             receipt_id=receipt_id,
