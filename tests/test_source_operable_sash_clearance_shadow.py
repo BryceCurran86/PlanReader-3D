@@ -48,6 +48,11 @@ class TestSourceOperableSashClearanceShadow(unittest.TestCase):
         )
         self.assertFalse(sash.has_insect_screen)
         self.assertEqual(sash.opening_angle_deg, 0.0)
+        self.assertEqual(sash.max_projection_mm, 0.0)
+        self.assertEqual(
+            SourceOperableSashClearanceShadowAuthority.compute_ventilation_area(sash),
+            0.0,
+        )
         res = SourceOperableSashClearanceShadowAuthority.evaluate_sashes([sash])
         self.assertEqual(res.quantities.total_screen_count, 0)
 
