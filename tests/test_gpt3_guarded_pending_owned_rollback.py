@@ -99,7 +99,50 @@ def test_positive_three_output_create_only_stays_same(tmp_path):
     assert read_committed_active_identity_map(
         outputs[0], receipt_path=outputs[1],
     ) == payload[0]
+    assert module.read_committed_guarded_exact_report(
+        outputs[0], outputs[1], outputs[2],
+    ) == payload[2]
     with pytest.raises(FileExistsError):
         module._write_triplet(
             outputs, payload, inputs=(source,), expected_input_hashes=expected,
+        )
+
+
+def test_report_without_final_receipt_is_not_committed(tmp_path):
+    source = tmp_path / "signed.json"
+    source.write_text('{"signed":true}')
+    outputs = tuple(tmp_path / name for name in (
+        "map.json", "receipt.json", "report.json",
+    ))
+    module._write_triplet(
+        outputs,
+        ({"bindings": [{"x": 1}]}, {"activated_count": 1}, {"matched": 1}),
+        inputs=(source,),
+    )
+    assert module.read_committed_guarded_exact_report(
+        outputs[0], outputs[1], outputs[2],
+    ) == {"matched": 1}
+    outputs[1].unlink()
+    with pytest.raises(FileNotFoundError):
+        module.read_committed_guarded_exact_report(
+            outputs[0], outputs[1], outputs[2],
+        )
+
+
+def test_report_tamper_after_commit_never_reaches_guarded_reader(tmp_path):
+    source = tmp_path / "signed.json"
+    source.write_text('{"signed":true}')
+    outputs = tuple(tmp_path / name for name in (
+        "map.json", "receipt.json", "report.json",
+    ))
+    module._write_triplet(
+        outputs,
+        ({"bindings": [{"x": 1}]},
+         {"activated_count": 1}, {"matched": 1}),
+        inputs=(source,),
+    )
+    outputs[2].write_text('{"matched":999}')
+    with pytest.raises(ValueError, match="report does not match activation commit digest"):
+        module.read_committed_guarded_exact_report(
+            outputs[0], outputs[1], outputs[2],
         )
