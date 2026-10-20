@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - pb_source_closed_run_export.py
+      - pb_quantity_takeoff_adapter.py
       - tests/test_gpt3_opening_cross_semantic_source_seal.py
       - .github/workflows/test-gpt3-opening-cross-semantic-seal.yml
 permissions:
@@ -25,5 +26,5 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Opening physical identity and original eight signed archive
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt3_opening_cross_semantic_source_seal.py tests/test_source_closed_run_export.py
-          ruff check --select F821,F823 pb_source_closed_run_export.py tests/test_gpt3_opening_cross_semantic_source_seal.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_opening_cross_semantic_source_seal.py tests/test_source_closed_run_export.py tests/test_quantity_takeoff_adapter.py tests/test_gpt3_family_claim_identity.py
+          ruff check --select F821,F823 pb_source_closed_run_export.py pb_quantity_takeoff_adapter.py tests/test_gpt3_opening_cross_semantic_source_seal.py
