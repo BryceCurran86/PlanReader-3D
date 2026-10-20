@@ -33,7 +33,7 @@ class AcousticWallSpec:
     wall_id: str
     decoupling_type: AcousticDecouplingType
     centerline_points: List[Tuple[float, float]]
-    wall_height_m: float = 3.0
+    wall_height_m: float = 0.0
     air_gap_mm: float = 25.0
     side_a_layers: int = 2
     side_b_layers: int = 2
