@@ -46,10 +46,13 @@ MISSION_LEDGER: dict[str, Any] = {
                 "batch40b-deep-census",
                 "batch40b-receipt-consistency",
                 "host-architecture-note",
+                "batch41-span-namespace",
+                "digit-tail-ambiguous-abstain",
+                "axis-pair-helper-restore",
             ],
             "note": (
-                "batch40/40b host lineage + Lot16 multi/remaining/deep census + "
-                "Maryborough finish/pitch fail-closed; no FIRM/host/score"
+                "batch40/40b/41 host lineage + FACE/END spans + ID namespace "
+                "digit-tail abstain + Maryborough finish/pitch; no FIRM/host/score"
             ),
         },
     ],

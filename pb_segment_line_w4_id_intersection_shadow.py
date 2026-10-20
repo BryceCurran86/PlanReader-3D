@@ -1,8 +1,29 @@
 """Compare segment-parent line keys to usable W4 source_primitive_ids (shadow)."""
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
+import re
+
+from pb_segment_w4_id_namespace_bridge_shadow import (
+    assess_segment_w4_namespace_bridge_variants,
+)
+
+
+_DIGIT_TAIL = re.compile(r"(\d+)$")
+_D_INDEX = re.compile(r"^d(\d+)i0$", re.IGNORECASE)
+
+
+def _digit_tail(raw_id: str) -> str | None:
+    text = str(raw_id or "").strip()
+    if text.startswith("raster_opening_primitive:"):
+        tail = text.rsplit(":", 1)[-1]
+        return tail if tail.isdigit() else None
+    m = _D_INDEX.match(text)
+    if m:
+        return m.group(1)
+    m2 = _DIGIT_TAIL.search(text)
+    return m2.group(1) if m2 else None
 
 
 def assess_segment_line_w4_id_intersection_shadow(
@@ -29,6 +50,11 @@ def assess_segment_line_w4_id_intersection_shadow(
         gate = "segment_line_ids_intersect_w4_primitives"
     else:
         gate = "segment_line_ids_intersect_w4_after_visible_strip_only"
+    bridge = assess_segment_w4_namespace_bridge_variants(
+        physical_opening_id=oid,
+        segment_line_ids=lines,
+        w4_primitive_ids=w4,
+    )
     return {
         "physical_opening_id": oid,
         "first_remaining_gate": gate,
@@ -39,6 +65,11 @@ def assess_segment_line_w4_id_intersection_shadow(
         "exact_intersection_ids": list(inter)[:32],
         "sample_segment_line_ids": list(lines)[:8],
         "sample_w4_primitive_ids": list(w4)[:8],
+        "namespace_bridge_gate": bridge["first_remaining_gate"],
+        "digit_tail_collision_count": bridge["digit_tail_collision_count"],
+        "digit_tail_collision_sample": bridge["digit_tail_collision_sample"],
+        "namespace_taxonomy": bridge["taxonomy"],
         "host_granted": False,
+        "nearest_wins_applied": False,
         "shadow_only": True,
     }
