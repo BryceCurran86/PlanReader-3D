@@ -31,7 +31,7 @@ class TestSourceBalustradeHandrailGuardrailShadow(unittest.TestCase):
         self.assertEqual(loc2, BarrierLocationKind.STAIR_FLIGHT)
         self.assertEqual(infill2, BarrierInfillType.VERTICAL_BALUSTERS)
         self.assertEqual(h2, 1000.0)
-        self.assertTrue(hr2)
+        self.assertFalse(hr2)
 
         loc3, _infill3, h3, _hr3 = SourceBalustradeHandrailGuardrailShadowAuthority.parse_balustrade_annotation(
             "BALUSTRADE"
@@ -107,10 +107,12 @@ class TestSourceBalustradeHandrailGuardrailShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.height_mm, 0.0)
         self.assertEqual(omitted.post_spacing_mm, 0.0)
+        self.assertFalse(omitted.has_continuous_handrail)
         omitted_res = SourceBalustradeHandrailGuardrailShadowAuthority.evaluate_balustrades([omitted])
         self.assertEqual(omitted_res.quantities.total_barrier_face_area_m2, 0.0)
         self.assertEqual(omitted_res.quantities.non_compliant_height_count, 0)
         self.assertEqual(omitted_res.quantities.total_post_count, 0)
+        self.assertEqual(omitted_res.quantities.total_handrail_length_m, 0.0)
 
 
 if __name__ == "__main__":

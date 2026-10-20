@@ -42,7 +42,7 @@ class BalustradeRunSpec:
     centerline_points: List[Tuple[float, float]]
     height_mm: float = 0.0
     post_spacing_mm: float = 0.0
-    has_continuous_handrail: bool = True
+    has_continuous_handrail: bool = False
     handrail_extension_m: float = 0.30
     level_id: str = "L1"
     source_tag: str = ""
@@ -122,7 +122,7 @@ class SourceBalustradeHandrailGuardrailShadowAuthority:
         height_mm = float(h_match.group(1)) if h_match else 0.0
 
         # Handrail presence
-        has_hr = "HANDRAIL" in clean or "RAIL" in clean or (loc in (BarrierLocationKind.STAIR_FLIGHT, BarrierLocationKind.RAMP))
+        has_hr = "HANDRAIL" in clean or re.search(r"\bRAIL\b", clean) is not None
 
         return loc, infill, height_mm, has_hr
 
