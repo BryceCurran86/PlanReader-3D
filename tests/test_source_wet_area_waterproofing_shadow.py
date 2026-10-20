@@ -53,6 +53,23 @@ def test_powder_room_no_shower():
     assert rec.total_membrane_area_pt2 == 2900.0
 
 
+def test_omitted_upstand_heights_do_not_invent_tanking():
+    authority = SourceWetAreaWaterproofingShadowAuthority()
+
+    rec = authority.compute_wet_area_waterproofing(
+        room_id="ROOM_UNKNOWN_HEIGHT",
+        kind=WetAreaKind.BATHROOM,
+        floor_area_pt2=2000.0,
+        general_perimeter_pt=180.0,
+        shower_perimeter_pt=50.0,
+    )
+
+    assert rec.general_upstand_height_pt == 0.0
+    assert rec.shower_tanking_height_pt == 0.0
+    assert rec.vertical_upstand_area_pt2 == 0.0
+    assert rec.total_membrane_area_pt2 == 2000.0
+
+
 def test_compile_waterproofing_receipt():
     authority = SourceWetAreaWaterproofingShadowAuthority()
 
