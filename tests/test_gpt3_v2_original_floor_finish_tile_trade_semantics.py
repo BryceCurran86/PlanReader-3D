@@ -96,6 +96,39 @@ def test_other_flooring_trade_may_use_source_supported_finish_types(finish):
     ) is None
 
 
+@pytest.mark.parametrize("source_finish", ["vinyl", "epoxy", "tile"])
+@pytest.mark.parametrize("claimed_refs", [
+    ["wrong-physical-floor"],
+    ["canonical-floor-1", "extra-physical-floor"],
+])
+def test_flooring_trade_also_requires_exact_single_signed_original_floor(
+    source_finish, claimed_refs,
+):
+    # The source issuer signs the SAME one-floor ownership for vinyl/epoxy
+    # as for tile. A valid material category cannot relabel floor A as B.
+    with pytest.raises(ValueError, match="flooring source physical identity"):
+        _check(
+            f"floor_finish_area:canonical-floor-1:FT1:{source_finish}",
+            trade="flooring",
+            claimed_refs=claimed_refs,
+        )
+
+
+@pytest.mark.parametrize("malformed", [
+    "floor_finish_area:canonical-floor-1:FT1",
+    "floor_finish_area:canonical-floor-1::vinyl",
+    "floor_finish_area::FT1:vinyl",
+    "floor_finish_area:canonical-floor-1:FT1:vinyl:extra",
+    "floor_finish_area:canonical-floor-1:FT1:vinyl ",
+    "floor_area:canonical-floor-1:FT1:vinyl",
+])
+def test_malformed_original_source_flooring_finish_cannot_alias_a_physical_floor(
+    malformed,
+):
+    with pytest.raises(ValueError, match="flooring source physical identity"):
+        _check(malformed, trade="flooring")
+
+
 def test_ft3_label_does_not_override_real_signed_vinyl_source_semantic():
     with pytest.raises(ValueError, match="original source-signed tile"):
         _check("floor_finish_area:canonical-floor-1:FT3:vinyl")
