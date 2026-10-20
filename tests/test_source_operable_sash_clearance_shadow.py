@@ -38,6 +38,18 @@ class TestSourceOperableSashClearanceShadow(unittest.TestCase):
         self.assertEqual(w3, 0.0)
         self.assertEqual(h3, 0.0)
 
+    def test_omitted_insect_screen_does_not_assume_flyscreen(self):
+        sash = OperableSashSpec(
+            sash_id="S-UNKNOWN",
+            parent_window_id="W-UNKNOWN",
+            operation_type=SashOperationType.AWNING,
+            width_mm=900.0,
+            height_mm=1200.0,
+        )
+        self.assertFalse(sash.has_insect_screen)
+        res = SourceOperableSashClearanceShadowAuthority.evaluate_sashes([sash])
+        self.assertEqual(res.quantities.total_screen_count, 0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourceOperableSashClearanceShadowAuthority.snap_point((1.0, 1.0), ref_pts)
