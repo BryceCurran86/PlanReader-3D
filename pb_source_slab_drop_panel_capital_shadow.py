@@ -27,6 +27,7 @@ class ShearThickeningType(str, Enum):
 
 
 class CapitalShape(str, Enum):
+    UNKNOWN = "UNKNOWN"
     PYRAMIDAL = "PYRAMIDAL"
     CONICAL = "CONICAL"
     PRISMATIC = "PRISMATIC"
@@ -39,7 +40,7 @@ class DropPanelSpec:
     boundary_polygon: List[Tuple[float, float]]
     drop_thickness_mm: float
     column_id: Optional[str] = None
-    level_id: str = "L1"
+    level_id: str = ""
     source_annotation: str = ""
 
 
@@ -51,9 +52,9 @@ class ColumnCapitalSpec:
     bottom_width_mm: float
     bottom_length_mm: float
     height_mm: float
-    shape: CapitalShape = CapitalShape.PYRAMIDAL
+    shape: CapitalShape = CapitalShape.UNKNOWN
     column_id: Optional[str] = None
-    level_id: str = "L1"
+    level_id: str = ""
 
 
 @dataclass
@@ -134,9 +135,11 @@ class SourceSlabDropPanelCapitalShadowAuthority:
         bot_w_mm: float,
         bot_l_mm: float,
         h_mm: float,
-        shape: CapitalShape = CapitalShape.PYRAMIDAL
+        shape: CapitalShape = CapitalShape.UNKNOWN
     ) -> float:
         """Calculates volume of tapered column capital in cubic meters."""
+        if shape not in (CapitalShape.CONICAL, CapitalShape.PYRAMIDAL, CapitalShape.PRISMATIC):
+            return 0.0
         h_m = h_mm / 1000.0
         if shape == CapitalShape.CONICAL:
             r1 = (top_w_mm / 2000.0)
