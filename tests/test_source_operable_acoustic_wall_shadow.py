@@ -36,6 +36,11 @@ def test_operable_wall_callout_parsing():
     )
     assert parsed3["system_type"] == OperableWallSystemType.VERTICAL_LIFT_RETRACTABLE_WALL
     assert parsed3["acoustic_rating_rw_db"] == 53
+    assert parsed3["wall_height_m"] == 0.0
+    omitted = SourceOperableAcousticWallShadowAuthority.parse_callout("OPERABLE WALL")
+    assert omitted["wall_height_m"] == 0.0
+    omitted_spec = OperableWallSpec(wall_id="OW-OMIT")
+    assert omitted_spec.wall_height_m == 0.0
 
 
 def test_operable_wall_snapping():

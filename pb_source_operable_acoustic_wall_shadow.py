@@ -32,7 +32,7 @@ class OperableWallSpec:
     wall_id: str
     system_type: OperableWallSystemType = OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
-    wall_height_m: float = 3.0
+    wall_height_m: float = 0.0
     panel_width_mm: float = 1000.0
     acoustic_rating_rw_db: int = 50
     has_retractable_seals: bool = True
@@ -82,7 +82,7 @@ class SourceOperableAcousticWallShadowAuthority:
         clean = text.upper()
         res = {
             "system_type": OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS,
-            "wall_height_m": 3.0,
+            "wall_height_m": 0.0,
             "panel_width_mm": 1000.0,
             "acoustic_rating_rw_db": 50,
             "has_retractable_seals": True,
