@@ -103,6 +103,27 @@ class SourceRcpWordEligibilityShadowAuthority:
         clean_text = word_text.strip()
         wb = (float(word_bbox[0]), float(word_bbox[1]), float(word_bbox[2]), float(word_bbox[3]))
 
+        # Never feed malformed PDF coordinates to stable_contract_id:
+        # non-finite floats cannot be normalized as source ID ingredients.
+        # An unusable geometry token gets a deterministic negative receipt
+        # with a JSON-safe empty bbox, not a CANDIDATE or an exception.
+        if not all(math.isfinite(value) for value in wb):
+            return RcpWordEvidence(
+                word_id=stable_contract_id(
+                    "RCP_WORD_INVALID_BBOX",
+                    (document_id, page_id, clean_text, block_index, line_index, word_index),
+                ),
+                text=clean_text,
+                bbox_pdf_pts=(0.0, 0.0, 0.0, 0.0),
+                block_index=block_index,
+                line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Non-finite original PDF word bounding box; no source geometry authority.",
+            )
+
         word_id = stable_contract_id(
             "RCP_WORD",
             (document_id, page_id, clean_text, wb, block_index, line_index, word_index),
