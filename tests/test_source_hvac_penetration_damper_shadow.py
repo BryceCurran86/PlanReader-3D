@@ -34,6 +34,12 @@ class TestSourceHVACPenetrationDamperShadow(unittest.TestCase):
         self.assertEqual(frl2, "-/60/60")
         self.assertFalse(mot2)
 
+        shape3, w3, h3, _frl3, _mot3 = SourceHVACPenetrationDamperShadowAuthority.parse_damper_annotation(
+            "FIRE DAMPER"
+        )
+        self.assertEqual(w3, 0.0)
+        self.assertEqual(h3, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourceHVACPenetrationDamperShadowAuthority.snap_point((1.0, 1.0), ref_pts)
@@ -70,6 +76,18 @@ class TestSourceHVACPenetrationDamperShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        omitted = FireDamperSpec(
+            damper_id="FD-OMIT",
+            penetrated_element=PenetratedElementKind.WALL_PARTITION,
+            duct_shape=DuctProfileShape.RECTANGULAR,
+            location=(5.0, 5.0),
+        )
+        self.assertEqual(omitted.width_mm, 0.0)
+        self.assertEqual(omitted.height_mm, 0.0)
+        omitted_res = SourceHVACPenetrationDamperShadowAuthority.evaluate_dampers([omitted])
+        self.assertEqual(omitted_res.quantities.total_duct_airflow_area_m2, 0.0)
+        self.assertEqual(omitted_res.quantities.total_retaining_flange_length_m, 0.0)
 
 
 if __name__ == "__main__":
