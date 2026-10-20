@@ -33,6 +33,11 @@ class TestSourceBalustradeHandrailGuardrailShadow(unittest.TestCase):
         self.assertEqual(h2, 1000.0)
         self.assertTrue(hr2)
 
+        loc3, _infill3, h3, _hr3 = SourceBalustradeHandrailGuardrailShadowAuthority.parse_balustrade_annotation(
+            "BALUSTRADE"
+        )
+        self.assertEqual(h3, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourceBalustradeHandrailGuardrailShadowAuthority.snap_point((1.0, 1.0), ref_pts)
@@ -93,6 +98,17 @@ class TestSourceBalustradeHandrailGuardrailShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        omitted = BalustradeRunSpec(
+            run_id="BAL-OMIT",
+            location_kind=BarrierLocationKind.BALCONY_TERRACE,
+            infill_type=BarrierInfillType.FRAMELESS_GLASS,
+            centerline_points=[(0.0, 0.0), (10.0, 0.0)],
+        )
+        self.assertEqual(omitted.height_mm, 0.0)
+        omitted_res = SourceBalustradeHandrailGuardrailShadowAuthority.evaluate_balustrades([omitted])
+        self.assertEqual(omitted_res.quantities.total_barrier_face_area_m2, 0.0)
+        self.assertEqual(omitted_res.quantities.non_compliant_height_count, 0)
 
 
 if __name__ == "__main__":
