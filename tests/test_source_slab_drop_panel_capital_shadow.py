@@ -82,6 +82,28 @@ class TestSourceSlabDropPanelCapitalShadow(unittest.TestCase):
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
 
+        omitted_dp = DropPanelSpec(
+            panel_id="DP-OMIT",
+            thickening_type=ShearThickeningType.DROP_PANEL,
+            boundary_polygon=[(0.0, 0.0), (2.4, 0.0), (2.4, 2.4), (0.0, 2.4)],
+            drop_thickness_mm=150.0,
+        )
+        omitted_cap = ColumnCapitalSpec(
+            capital_id="CAP-OMIT",
+            top_width_mm=1200.0,
+            top_length_mm=1200.0,
+            bottom_width_mm=600.0,
+            bottom_length_mm=600.0,
+            height_mm=600.0,
+        )
+        self.assertEqual(omitted_dp.level_id, "")
+        self.assertEqual(omitted_cap.level_id, "")
+        self.assertEqual(omitted_cap.shape, CapitalShape.UNKNOWN)
+        omitted = SourceSlabDropPanelCapitalShadowAuthority.evaluate_panels_and_capitals(
+            [omitted_dp], [omitted_cap]
+        )
+        self.assertEqual(omitted.quantities.total_capital_concrete_volume_m3, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
