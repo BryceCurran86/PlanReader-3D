@@ -19,8 +19,10 @@ DISTINCT = Class.DISTINCT_PHYSICAL_WALLS
 AMBIGUOUS = Class.AMBIGUOUS_PHYSICAL_EQUIVALENCE
 
 
-def _lookup(rows):
-    return _pair_lookup(SimpleNamespace(pair_classifications=rows))
+def _lookup(rows, *, groups=()):
+    return _pair_lookup(SimpleNamespace(
+        pair_classifications=rows, equivalence_groups=groups,
+    ))
 
 
 @pytest.mark.parametrize("classes", [
@@ -71,6 +73,26 @@ def test_ambiguous_relation_is_retained_not_treated_as_positive_distinct():
     ]
     assert classification is AMBIGUOUS
     assert classification is not Class.DISTINCT_PHYSICAL_WALLS
+
+
+@pytest.mark.parametrize("order", [
+    (DISTINCT.value,),
+    (DISTINCT.value, DISTINCT.value),
+    (DISTINCT.value, SAME.value, DISTINCT.value),
+])
+def test_source_same_group_and_explicit_distinct_pair_never_grant_exclusion(order):
+    rows = tuple(("wall_a", "wall_b", value) for value in order)
+    for permuted in set(permutations(rows)):
+        assert _lookup(permuted, groups=(("wall_a", "wall_b"),)) == {
+            ("wall_a", "wall_b"): AMBIGUOUS,
+        }
+
+
+def test_distinct_wall_pair_without_shared_source_group_remains_distinct():
+    rows = (("wall_a", "wall_b", DISTINCT.value),)
+    assert _lookup(rows, groups=(("wall_a", "other"), ("wall_b",))) == {
+        ("wall_a", "wall_b"): DISTINCT,
+    }
 
 
 def test_pair_lookup_never_mutates_original_issuer_rows():
@@ -179,6 +201,61 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
 
 
 @pytest.mark.parametrize("bad_source_class", (None, {}, ["not_a_source_class"], 1))
+def test_source_same_group_explicit_distinct_aligned_rival_blocks_frame(monkeypatch):
+    """Conflicting original W4 representations cannot become an issued frame."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+    from test_gptmax_raster_split_frame_shadow import _aligned_wall_piece_records
+
+    _source, _composition, producer, bound = _fixture()
+    accepted = _publish(producer, bound)
+    assert all(row.status is Status.CORROBORATED for row in accepted)
+    scope = _scope(producer, bound)
+    centerline = accepted[0].evidence.origin_pt[1]
+    rival_record = _aligned_wall_piece_records(
+        scope.records[0], centerline, count=1, pitch=80.0,
+    )[0]
+    rival_id = rival_record.wall_candidate_id
+    members = sorted({wall_id for row in bound
+                      for wall_id in row[3].member_wall_candidate_ids})
+    assert rival_id not in members
+    target = members[0]
+
+    original_groups = tuple(tuple(group) for group in scope.equivalence.equivalence_groups)
+    if any(target in group for group in original_groups):
+        changed_groups = tuple(
+            tuple(sorted({*group, rival_id})) if target in group else group
+            for group in original_groups
+        )
+    else:
+        changed_groups = (*original_groups, (target, rival_id))
+    distinct_rows = tuple((rival_id, member, DISTINCT.value) for member in members)
+    conflicting = replace(
+        scope,
+        records=(*scope.records, rival_record),
+        equivalence=replace(
+            scope.equivalence,
+            equivalence_groups=changed_groups,
+            pair_classifications=(
+                *scope.equivalence.pair_classifications, *distinct_rows
+            ),
+        ),
+    )
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: conflicting)
+    blocked = _publish(producer, bound)
+    assert all(row.status is Status.ABSTAINED and row.evidence is None
+               for row in blocked)
+    assert all(
+        "opening_host_frame_equivalence_group_pair_conflict" in row.reason_codes
+        for row in blocked
+    )
+    assert all(
+        producer.authority().resolve(prior.evidence.selector).status
+        is Status.ABSTAINED for prior in accepted
+    )
+
+
 def test_malformed_source_pair_class_cannot_restore_distinctness(bad_source_class):
     """A malformed issuer value remains ambiguous even after replay DISTINCT."""
     rows = (

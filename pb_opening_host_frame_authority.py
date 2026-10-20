@@ -121,7 +121,28 @@ def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
     return tuple(sorted({wall_id for group in node for wall_id in group}))
 
 
+def _source_equivalence_group_pair_conflicts(equivalence) -> frozenset[tuple[str, str]]:
+    """Exact W4 SAME-cluster membership cannot coexist with issued DISTINCT."""
+    groups_by_member: dict[str, set[int]] = {}
+    for index, group in enumerate(getattr(equivalence, "equivalence_groups", ())):
+        for member in group:
+            groups_by_member.setdefault(str(member), set()).add(index)
+    conflicted: set[tuple[str, str]] = set()
+    for left, right, raw in equivalence.pair_classifications:
+        try:
+            issued = PhysicalEquivalenceClass(raw)
+        except (TypeError, ValueError):
+            continue  # _pair_lookup handles malformed issuer classes.
+        if issued is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
+            continue
+        left_id, right_id = str(left), str(right)
+        if groups_by_member.get(left_id, set()) & groups_by_member.get(right_id, set()):
+            conflicted.add(tuple(sorted((left_id, right_id))))
+    return frozenset(conflicted)
+
+
 def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    group_conflicts = _source_equivalence_group_pair_conflicts(equivalence)
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for left, right, raw in equivalence.pair_classifications:
         key = tuple(sorted((str(left), str(right))))
@@ -130,6 +151,10 @@ def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]
         except (TypeError, ValueError):
             # Malformed issuer classes are contradictory source evidence, not
             # permission to ignore an observed wall-pair relationship.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if key in group_conflicts:
+            # A source-issued SAME cluster and a source-issued DISTINCT pair
+            # are contradictory W4 physical facts, not exclusion authority.
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         # Conflicting original SAME/DISTINCT/AMBIGUOUS pair receipts must
         # be monotonic: a later repeated record can never erase a conflict
@@ -1025,6 +1050,15 @@ class OpeningHostFrameProducer:
         )
         if not component_ids or any(wall_id not in records_by_id for wall_id in component_ids):
             return None
+        if any(
+            left in component_ids or right in component_ids
+            for left, right in _source_equivalence_group_pair_conflicts(
+                wall_scope.equivalence
+            )
+        ):
+            # This contradiction touches the selected physical frame itself.
+            # Do not let a grouped rival enter as SAME or be excluded as DISTINCT.
+            return fail("opening_host_frame_equivalence_group_pair_conflict")
 
         axis = (float(geometry.axis[0]), float(geometry.axis[1]))
         normal = (float(geometry.normal[0]), float(geometry.normal[1]))
