@@ -71,7 +71,36 @@ def require_signed_v2_family_trade_integrity(
             raise ValueError("duplicate eligible frozen item identity in mapped trade veto")
         items[key] = item
     by_refs: dict[tuple[str, ...], list[Any]] = {}
+    # Record SOURCE-OWNED kind, not trade identity or label similarity. One
+    # canonical physical opening cannot become a window in its gross AREA
+    # and a door in its independently issued COUNT. This is a negative
+    # proof over the *actual* signed opening rows, not a new kind inference
+    # or permission to mint counts.
+    opening_kind_claims: dict[str, set[str]] = {}
+    opening_family_claim_counts: dict[tuple[str, str], int] = {}
     for quantity in sealed_quantities:
+        family = _field(quantity, "family")
+        semantic_key = _field(quantity, "semantic_key")
+        typed_kind = None
+        if family in {"opening_area", "opening_count"} and type(semantic_key) is str:
+            prefix_kind = (
+                (("door_area:", "door"), ("window_area:", "window"))
+                if family == "opening_area"
+                else (("door_count:", "door"), ("window_count:", "window"))
+            )
+            typed_kind = next((
+                kind for prefix, kind in prefix_kind
+                if semantic_key.startswith(prefix)
+            ), None)
+        if family in {"opening_area", "opening_count"} and _field(quantity, "abstained") is False:
+            for physical_id in _field(quantity, "object_identity_refs") or ():
+                if type(physical_id) is str and physical_id:
+                    original_claim = (family, physical_id)
+                    opening_family_claim_counts[original_claim] = (
+                        opening_family_claim_counts.get(original_claim, 0) + 1
+                    )
+                    if typed_kind is not None:
+                        opening_kind_claims.setdefault(physical_id, set()).add(typed_kind)
         refs = tuple(sorted(_field(quantity, "object_identity_refs") or ()))
         by_refs.setdefault(refs, []).append(quantity)
 
@@ -90,6 +119,25 @@ def require_signed_v2_family_trade_integrity(
         ):
             raise ValueError("bound production object identity refs are not canonical")
         refs = tuple(sorted(raw_refs))
+        # An eligible mapping for this exact physical source identity must
+        # never score a contradictory source-owned door/window classification,
+        # even when AREA and COUNT are mapped to separately compatible trades.
+        if any(
+            len(opening_kind_claims.get(physical_id, ())) > 1
+            for physical_id in refs
+        ):
+            raise ValueError(
+                "signed opening area/count disagree on original physical door/window kind"
+            )
+        if any(
+            opening_family_claim_counts.get((family, physical_id), 0) > 1
+            for physical_id in refs
+            for family in ("opening_area", "opening_count")
+        ):
+            raise ValueError(
+                "multiple source opening quantities claim the same physical "
+                "opening and measurement family"
+            )
         candidates = by_refs.get(refs, ())
         declared_family = _field(binding, "production_family")
         if candidates and (
