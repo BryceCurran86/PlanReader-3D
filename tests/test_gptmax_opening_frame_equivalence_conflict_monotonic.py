@@ -252,3 +252,50 @@ def test_reproof_revocation_is_per_opening_not_global(monkeypatch):
     refreshed = producer.authority()
     assert refreshed.resolve(selectors[0]).status is Status.ABSTAINED
     assert refreshed.resolve(selectors[1]) == accepted[1]
+
+
+def test_foreign_opening_selector_must_not_revoke_valid_frame():
+    """A caller's wrong but real sibling source opening is not revocation."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    originals = _publish(producer, bound)
+    assert all(x.status is Status.CORROBORATED for x in originals)
+
+    # Wrong source OBSERVATION against another binding is not source withdrawal.
+    bad = producer.publish(
+        opening_selector=bound[1][0],
+        host_binding_selector=bound[0][2],
+    )
+    assert bad.status is Status.CONFLICT
+    assert bad.evidence is None
+    assert producer.authority().resolve(originals[0].evidence.selector) == originals[0]
+    assert producer.authority().resolve(originals[1].evidence.selector) == originals[1]
+
+
+def test_real_opening_withdrawn_host_reproof_revokes_cached_frame(monkeypatch):
+    """Original opening still exists, but verified host reader is unavailable."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    baseline = _publish(producer, bound)
+    selected = bound[0]
+    host = producer._host
+    original_resolve = host.resolve
+
+    def blocked_host(selector):
+        result = original_resolve(selector)
+        if selector.key == selected[2].key:
+            return replace(result, status=Status.ABSTAINED, record=None)
+        return result
+
+    monkeypatch.setattr(host, "resolve", blocked_host)
+    blocked = producer.publish(opening_selector=selected[0],
+                               host_binding_selector=selected[2])
+    assert blocked.status is Status.ABSTAINED and blocked.evidence is None
+    assert "opening_host_frame_host_unavailable" in blocked.reason_codes
+    latest = producer.authority()
+    assert latest.resolve(baseline[0].evidence.selector).status is Status.ABSTAINED
+    assert latest.resolve(baseline[1].evidence.selector) == baseline[1]
