@@ -36,11 +36,12 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         self.assertEqual(d2, 120.0)
         self.assertEqual(mat2, DrainageMaterial.STAINLESS_STEEL)
 
-        g_type3, w3, d3, _mat3 = SourceRoofDrainageGutterDownpipeShadowAuthority.parse_gutter_annotation(
+        g_type3, w3, d3, mat3 = SourceRoofDrainageGutterDownpipeShadowAuthority.parse_gutter_annotation(
             "GUTTER"
         )
         self.assertEqual(w3, 0.0)
         self.assertEqual(d3, 0.0)
+        self.assertEqual(mat3, DrainageMaterial.UNKNOWN)
 
         omitted = GutterSpec(
             gutter_id="G-UNKNOWN",
@@ -49,6 +50,11 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.width_mm, 0.0)
         self.assertEqual(omitted.depth_mm, 0.0)
+        self.assertEqual(omitted.material, DrainageMaterial.UNKNOWN)
+        self.assertEqual(
+            DownpipeSpec(downpipe_id="DP-UNKNOWN", location=(0.0, 0.0)).material,
+            DrainageMaterial.UNKNOWN,
+        )
 
     def test_snap_point(self):
         ref_pts = [(50.0, 50.0), (100.0, 100.0)]
