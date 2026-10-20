@@ -39,11 +39,11 @@ class HollowcorePlankSpec:
     plank_type: HollowcorePlankType = HollowcorePlankType.STANDARD_EXTRUDED_PLANK
     topping_type: StructuralToppingType = StructuralToppingType.COMPOSITE_TOPPING
     boundary_polygon: List[Tuple[float, float]] = field(default_factory=list)
-    nominal_width_mm: float = 1200.0
-    depth_mm: float = 200.0
-    length_m: float = 8.0
-    area_m2: float = 9.6
-    topping_thickness_mm: float = 65.0
+    nominal_width_mm: float = 0.0
+    depth_mm: float = 0.0
+    length_m: float = 0.0
+    area_m2: float = 0.0
+    topping_thickness_mm: float = 0.0
     level_id: str = "L02"
     source_callout: str = ""
 
@@ -85,10 +85,10 @@ class SourceHollowcoreSlabPlankShadowAuthority:
         res = {
             "plank_type": HollowcorePlankType.STANDARD_EXTRUDED_PLANK,
             "topping_type": StructuralToppingType.COMPOSITE_TOPPING,
-            "nominal_width_mm": 1200.0,
-            "depth_mm": 200.0,
-            "topping_thickness_mm": 65.0,
-            "length_m": 8.0,
+            "nominal_width_mm": 0.0,
+            "depth_mm": 0.0,
+            "topping_thickness_mm": 0.0,
+            "length_m": 0.0,
         }
 
         # Plank Typology
@@ -112,7 +112,7 @@ class SourceHollowcoreSlabPlankShadowAuthority:
                 try:
                     res["topping_thickness_mm"] = float(top_match.group(1))
                 except ValueError:
-                    res["topping_thickness_mm"] = 65.0
+                    res["topping_thickness_mm"] = 0.0
 
         # Depth: 150mm, 200mm, 250mm, 300mm, 400mm or HC200, HC250
         hc_match = re.search(r'\bHC(\d{3})\b', clean)

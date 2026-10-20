@@ -24,7 +24,20 @@ def test_hollowcore_callout_parsing():
     assert parsed1["depth_mm"] == 200.0
     assert parsed1["topping_type"] == StructuralToppingType.COMPOSITE_TOPPING
     assert parsed1["topping_thickness_mm"] == 65.0
-    assert parsed1["nominal_width_mm"] == 1200.0
+    assert parsed1["nominal_width_mm"] == 0.0
+    assert parsed1["length_m"] == 0.0
+
+    omitted = SourceHollowcoreSlabPlankShadowAuthority.parse_callout("HOLLOWCORE")
+    assert omitted["nominal_width_mm"] == 0.0
+    assert omitted["depth_mm"] == 0.0
+    assert omitted["length_m"] == 0.0
+    assert omitted["topping_thickness_mm"] == 0.0
+    omitted_spec = HollowcorePlankSpec(plank_id="HC-OMIT")
+    assert omitted_spec.nominal_width_mm == 0.0
+    assert omitted_spec.depth_mm == 0.0
+    assert omitted_spec.length_m == 0.0
+    assert omitted_spec.area_m2 == 0.0
+    assert omitted_spec.topping_thickness_mm == 0.0
 
     parsed2 = SourceHollowcoreSlabPlankShadowAuthority.parse_callout(
         "250mm PRECAST HOLLOWCORE PLANK UNTOPPED L=9.2m"
