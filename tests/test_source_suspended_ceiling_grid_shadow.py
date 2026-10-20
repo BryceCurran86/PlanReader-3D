@@ -55,6 +55,17 @@ class TestSourceSuspendedCeilingGridShadow(unittest.TestCase):
         self.assertEqual(res_omitted.quantities.total_cross_tee_length_m, 0.0)
         self.assertEqual(res_omitted.quantities.total_estimated_tile_count, 0)
         self.assertEqual(res_omitted.quantities.total_hanger_wire_points, 0)
+        self.assertEqual(res_omitted.quantities.total_hanger_wire_length_m, 0.0)
+
+        sized_no_plenum = SuspendedCeilingSpec(
+            ceiling_id="CLG-NO-PLENUM",
+            room_id="ROOM-NO-PLENUM",
+            boundary_polygon=[(0.0, 0.0), (12.0, 0.0), (12.0, 6.0), (0.0, 6.0)],
+            grid_module=CeilingGridModule.GRID_1200X600,
+        )
+        no_plenum = SourceSuspendedCeilingGridShadowAuthority.evaluate_ceilings([sized_no_plenum])
+        self.assertGreater(no_plenum.quantities.total_hanger_wire_points, 0)
+        self.assertEqual(no_plenum.quantities.total_hanger_wire_length_m, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
