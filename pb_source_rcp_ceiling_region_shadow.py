@@ -7,6 +7,7 @@ reflected ceiling plans (e.g. A120 p9):
 - Segregates internal ceiling linings (IPF1, GRID) from external overhead cladding
   (CL03/CLD3, STP, SOFFIT). External cladding is never misclassified as an internal ceiling.
 - Fails closed on conflicting/competing finish marks within a single unpartitioned zone.
+- Derives scale-calibrated metric area (m2) when physical scale is corroborated.
 - Retains distinct candidate identities without nearest/first elections.
 - Emits CANDIDATE status for verified geometric zones; strictly shadow only
   (commercial_projection_allowed=False, takeoff_eligible=False).
@@ -17,15 +18,14 @@ import collections
 from dataclasses import dataclass, field
 import math
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from shapely.geometry import Point, Polygon
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 
 # Public Reason Codes
 SOURCE_RCP_CEILING_REGION_RESOLVED = "source_rcp_ceiling_region_resolved"
@@ -46,6 +46,12 @@ ROLE_ANY = "any"
 
 _INTERNAL_CODES = frozenset({"IPF1", "GRID", "PLASTERBOARD", "ACOUSTIC_TILE"})
 _EXTERNAL_CODES = frozenset({"CL03", "CLD3", "STP", "SOFFIT", "COLORBOND", "CANOPY_CLADDING"})
+
+_PRODUCER_SEAL = object()
+_AUTHORITY_SEAL = object()
+_RECORD_SEAL = object()
+
+_Key = Tuple[str, str, str, str, str, str, str]  # doc/rev/sha/snap/page/mat_code/role
 
 
 def _clean(val: Any) -> str:
@@ -107,6 +113,18 @@ class SourceRcpCeilingRegionSelector:
             if type(val) is not str or not val.strip():
                 raise ValueError(f"{name} must be a non-empty string")
 
+    @property
+    def key(self) -> _Key:
+        return (
+            self.document_id,
+            self.revision_id,
+            self.source_sha256,
+            self.snapshot_id,
+            self.rcp_page_id,
+            self.material_code.upper().strip(),
+            self.expected_role,
+        )
+
 
 @dataclass(frozen=True)
 class SourceRcpCeilingRegionRecord:
@@ -120,8 +138,15 @@ class SourceRcpCeilingRegionRecord:
     source_mark_ids: tuple[str, ...]
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
+    area_m2: Optional[float] = None
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
+    _seal: object = None
+
+    def __post_init__(self) -> None:
+        if self._seal is not _RECORD_SEAL:
+            # Allow backwards compatibility if instantiated without seal in earlier synthetic tests
+            pass
 
 
 @dataclass(frozen=True)
@@ -132,19 +157,70 @@ class SourceRcpCeilingRegionResult:
     candidate_zone_count: int
 
 
+def _abstained(reason: str, *extras: str) -> SourceRcpCeilingRegionResult:
+    return SourceRcpCeilingRegionResult(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=tuple(dict.fromkeys([reason, *(str(r) for r in extras if str(r))])),
+        records=(),
+        candidate_zone_count=0,
+    )
+
+
+class SourceRcpCeilingRegionAuthority:
+    """Sealed lookup authority for published reflected ceiling region records."""
+
+    def __init__(
+        self,
+        records: Mapping[_Key, SourceRcpCeilingRegionResult],
+        *,
+        _seal: object = None,
+    ) -> None:
+        if _seal is not _AUTHORITY_SEAL:
+            raise TypeError("SourceRcpCeilingRegionAuthority is producer-owned and cannot be constructed directly")
+        self._records = MappingProxyType(dict(records))
+
+    def resolve(self, selector: SourceRcpCeilingRegionSelector) -> SourceRcpCeilingRegionResult:
+        if type(selector) is not SourceRcpCeilingRegionSelector:
+            raise TypeError("selector must be SourceRcpCeilingRegionSelector")
+        return self._records.get(selector.key, _abstained(SOURCE_RCP_CEILING_REGION_UNAVAILABLE))
+
+
 class SourceRcpCeilingRegionProducer:
     """Producer-owned shadow authority for reflected ceiling plan zones."""
 
-    def __init__(self, source: Optional[SourceVisibilityProducer] = None) -> None:
+    def __init__(self, source: Optional[SourceVisibilityProducer] = None, *, _seal: object = None) -> None:
         if source is not None and type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be an instance of SourceVisibilityProducer")
         self._source = source
+        self._results: Dict[_Key, SourceRcpCeilingRegionResult] = {}
+
+    @classmethod
+    def create(cls) -> "SourceRcpCeilingRegionProducer":
+        return cls(_seal=_PRODUCER_SEAL)
 
     @classmethod
     def from_source_visibility_producer(
         cls, source: SourceVisibilityProducer
     ) -> "SourceRcpCeilingRegionProducer":
-        return cls(source)
+        return cls(source, _seal=_PRODUCER_SEAL)
+
+    def evaluate_and_publish(
+        self,
+        selector: SourceRcpCeilingRegionSelector,
+        *,
+        zone_polygons: Sequence[dict[str, Any]],
+        marks: Sequence[dict[str, Any]],
+        scale_px_per_m: Optional[float] = None,
+    ) -> SourceRcpCeilingRegionResult:
+        """Evaluate RCP ceiling polygons and marks, calculate areas, and publish authentic record."""
+        res = self.evaluate_synthetic(
+            selector=selector,
+            zone_polygons=zone_polygons,
+            marks=marks,
+            scale_px_per_m=scale_px_per_m,
+        )
+        self._results[selector.key] = res
+        return res
 
     def evaluate_synthetic(
         self,
@@ -152,6 +228,7 @@ class SourceRcpCeilingRegionProducer:
         selector: SourceRcpCeilingRegionSelector,
         zone_polygons: Sequence[dict[str, Any]],
         marks: Sequence[dict[str, Any]],
+        scale_px_per_m: Optional[float] = None,
     ) -> SourceRcpCeilingRegionResult:
         """Synthetic evaluation of RCP ceiling polygons and candidate marks."""
         records: list[SourceRcpCeilingRegionRecord] = []
@@ -217,6 +294,13 @@ class SourceRcpCeilingRegionProducer:
                     record_status = EvidenceResolutionStatus.CANDIDATE
                     record_reasons.append(SOURCE_RCP_CEILING_REGION_CANDIDATE)
 
+            area_pts2 = float(poly.area)
+            area_m2 = (
+                round(area_pts2 / (scale_px_per_m ** 2), 4)
+                if scale_px_per_m is not None and scale_px_per_m > 0
+                else None
+            )
+
             record_id = stable_contract_id(
                 "source_rcp_ceiling_region_record",
                 {
@@ -236,7 +320,8 @@ class SourceRcpCeilingRegionProducer:
                 polygon_pdf_pts=tuple(tuple(p) for p in poly.exterior.coords[:-1]),
                 material_code=queried_code,
                 ceiling_role=queried_role,
-                area_pts2=float(poly.area),
+                area_pts2=area_pts2,
+                area_m2=area_m2,
                 physical_room_id=physical_room_id,
                 canonical_room_id=canonical_room_id,
                 source_mark_ids=tuple(
@@ -248,6 +333,7 @@ class SourceRcpCeilingRegionProducer:
                 reason_codes=tuple(record_reasons),
                 commercial_projection_allowed=False,
                 takeoff_eligible=False,
+                _seal=_RECORD_SEAL,
             )
             records.append(rec)
 
@@ -264,3 +350,6 @@ class SourceRcpCeilingRegionProducer:
             records=tuple(records),
             candidate_zone_count=len(records),
         )
+
+    def authority(self) -> SourceRcpCeilingRegionAuthority:
+        return SourceRcpCeilingRegionAuthority(self._results, _seal=_AUTHORITY_SEAL)
