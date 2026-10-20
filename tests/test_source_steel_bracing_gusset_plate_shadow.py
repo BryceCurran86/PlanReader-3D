@@ -83,6 +83,21 @@ class TestSourceSteelBracingGussetPlateShadow(unittest.TestCase):
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
 
+        omitted_g = GussetPlateSpec(gusset_id="G-OMIT", location=(0.0, 0.0, 0.0))
+        self.assertEqual(omitted_g.width_mm, 0.0)
+        self.assertEqual(omitted_g.height_mm, 0.0)
+        self.assertEqual(omitted_g.thickness_mm, 0.0)
+        omitted_m = BracingMemberSpec(
+            member_id="BR-OMIT",
+            config_type=BracingConfigType.X_BRACE,
+            start_point=(0.0, 0.0, 0.0),
+            end_point=(6.0, 0.0, 4.0),
+            linear_mass_kg_m=0.0,
+            start_gusset=omitted_g,
+        )
+        omitted_res = SourceSteelBracingGussetPlateShadowAuthority.evaluate_bracing_system([omitted_m])
+        self.assertEqual(omitted_res.quantities.total_gusset_plate_mass_kg, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

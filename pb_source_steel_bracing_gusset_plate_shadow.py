@@ -32,9 +32,9 @@ class BracingConfigType(str, Enum):
 class GussetPlateSpec:
     gusset_id: str
     location: Tuple[float, float, float]
-    width_mm: float = 250.0
-    height_mm: float = 250.0
-    thickness_mm: float = 12.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
+    thickness_mm: float = 0.0
 
 
 @dataclass
