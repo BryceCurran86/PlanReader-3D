@@ -21,6 +21,7 @@ SNAP_TOLERANCE_PT: float = 2.5
 
 
 class PileType(str, Enum):
+    UNKNOWN = "UNKNOWN"
     BORED_CAST_IN_PLACE = "BORED_CAST_IN_PLACE"
     CONTINUOUS_FLIGHT_AUGER = "CONTINUOUS_FLIGHT_AUGER"
     DRIVEN_PRECAST_CONCRETE = "DRIVEN_PRECAST_CONCRETE"
@@ -38,7 +39,7 @@ class GeotechnicalStratum(str, Enum):
 @dataclass
 class BoredPileSpec:
     pile_id: str
-    pile_type: PileType = PileType.BORED_CAST_IN_PLACE
+    pile_type: PileType = PileType.UNKNOWN
     center_point: Tuple[float, float] = (0.0, 0.0)
     diameter_mm: float = 0.0
     design_depth_m: float = 0.0
@@ -84,7 +85,7 @@ class SourceBoredPilePierShadowAuthority:
         """
         clean = text.upper()
         res = {
-            "pile_type": PileType.BORED_CAST_IN_PLACE,
+            "pile_type": PileType.UNKNOWN,
             "diameter_mm": 0.0,
             "design_depth_m": 0.0,
             "rock_socket_length_m": 0.0,
@@ -101,8 +102,10 @@ class SourceBoredPilePierShadowAuthority:
             res["pile_type"] = PileType.STEEL_SCREW_PILE
         elif "MICRO" in clean or "MINI-PILE" in clean:
             res["pile_type"] = PileType.MICROPILE
-        else:
+        elif "BORED" in clean or "CAST IN PLACE" in clean or "CAST-IN-PLACE" in clean:
             res["pile_type"] = PileType.BORED_CAST_IN_PLACE
+        else:
+            res["pile_type"] = PileType.UNKNOWN
 
         # Diameter detection: Ø600, 600 DIA, 600MM DIA, P600, etc.
         dia_match = re.search(r'(?:[ØP]|\bDIA\s*|\bDIAMETER\s*)?(\d{3,4})(?:\s*MM)?(?:\s*(?:DIA|DIAMETER|Ø))?', clean)
@@ -206,7 +209,7 @@ class SourceBoredPilePierShadowAuthority:
                 try:
                     p_type = PileType(pile_type_val)
                 except ValueError:
-                    p_type = PileType.BORED_CAST_IN_PLACE
+                    p_type = PileType.UNKNOWN
             else:
                 p_type = pile_type_val
 
