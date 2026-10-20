@@ -19,6 +19,14 @@ A configured companion-source token cannot help jobs that never provision. A red
 2. Replace the first SHA check with `tools.gpt3_original_source_preflight`: absent file → `SOURCE_BLOCKED` exit 2; digest mismatch → fail-closed; matching digest → `SOURCE_PRESENT`.
 3. Do not skip the job as success. Do not commit PDFs.
 
+## Remaining GPT3 original-source jobs (same defect, same PR)
+
+Observed on current `cursor/gpt3-3445-source-blocked-preflight-20261020` after the first three jobs: 11 more GPT3 workflows still named `documents/sources` without provision. Historical worktrees of older commits also cannot see the untracked provisioned PDF unless it is copied in.
+
+`test-gpt3-four-project-evidence.yml` / `fail-closed-inventory` must not be provisioned. It requires `original_source_not_supplied_in_this_execution` and `source_sha_verified is False` on the public runner. Giving it the originals would make that absence proof fail by construction.
+
+Do not mass-apply all ~193 workflows. Do not change `ci.yml` in this PR.
+
 ## Benchmark observations that must not influence implementation
 
 Lot16 8/27, Maryborough 0/24, Office/Food Prep m², and expected BOQ values are not inputs.

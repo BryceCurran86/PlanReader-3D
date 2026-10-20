@@ -13,6 +13,9 @@ on:
       - "tests/test_raster_unchanged_band_segments.py"
       - "tests/test_gpt3_additive_snapshot_host_retention.py"
       - ".github/workflows/test-gpt3-1215-opening-local-retention.yml"
+      - "tools/gpt3_original_source_preflight.py"
+      - "tests/test_gpt3_original_source_preflight.py"
+      - "scripts/copy_provisioned_originals_into_worktree.py"
   workflow_dispatch:
 
 concurrency:
@@ -71,6 +74,14 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -83,7 +94,7 @@ jobs:
           set -euo pipefail
           PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -m tools.gpt3_original_source_preflight --pdf "$PDF" --expected-sha256 "$SHA"
           ROOT=artifacts/gpt3-1215-opening-local-retention
           mkdir -p "$ROOT"
           git fetch origin main
@@ -93,6 +104,10 @@ jobs:
           BASE="e579030e37606dfdd1b0d0b302b3f29138631552"
           printf '%s\n' "$BASE" > "$ROOT/base_sha.txt"
           git worktree add --detach /tmp/gpt3-retention-main "$BASE"
+          PYTHONPATH=. python scripts/copy_provisioned_originals_into_worktree.py \
+            --workspace "$GITHUB_WORKSPACE" \
+            --worktree /tmp/gpt3-retention-main \
+            --name '1. Construction Plans - Lot 16 Power (REV E).pdf'
           (
             cd /tmp/gpt3-retention-main
             PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \

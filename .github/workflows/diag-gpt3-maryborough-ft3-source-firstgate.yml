@@ -16,6 +16,8 @@ on:
       - "tests/test_raster_text_corroboration_authority_v1.py"
       - "pb_source_visibility_authority.py"
       - "pb_viewport_segmentation.py"
+      - "tools/gpt3_original_source_preflight.py"
+      - "tests/test_gpt3_original_source_preflight.py"
   workflow_dispatch:
 
 concurrency:
@@ -44,6 +46,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -59,7 +69,7 @@ jobs:
           git rev-parse HEAD > "$OUT/producer_head_sha.txt"
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -m tools.gpt3_original_source_preflight --pdf "$PDF" --expected-sha256 "$SHA"
           /usr/bin/time -v timeout 2400s python -u -m tools.diag_gpt3_maryborough_ft3_source_firstgate \
             --pdf "$PDF" \
             --output "$OUT/report.json" 2>&1 | tee "$OUT/console.log"

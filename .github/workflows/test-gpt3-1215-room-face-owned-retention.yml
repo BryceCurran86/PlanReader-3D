@@ -9,6 +9,9 @@ on:
       - "tools/verify_gpt3_room_face_owned_retention.py"
       - "tests/test_gpt3_room_face_owned_retention.py"
       - ".github/workflows/test-gpt3-1215-room-face-owned-retention.yml"
+      - "tools/gpt3_original_source_preflight.py"
+      - "tests/test_gpt3_original_source_preflight.py"
+      - "scripts/copy_provisioned_originals_into_worktree.py"
 
 permissions:
   contents: read
@@ -55,6 +58,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -64,7 +75,9 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
-          printf '%s  %s\n' "$SOURCE_SHA" 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum --check
+          PYTHONPATH=. python -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --expected-sha256 "$SOURCE_SHA"
       - name: Produce exact room-face witness reports before and after 1215
         shell: bash
         run: |
@@ -85,7 +98,13 @@ jobs:
           for root in /tmp/gpt3-room-base /tmp/gpt3-room-candidate; do
             cp "$GITHUB_WORKSPACE/pb_source_room_face_authority.py" "$root/pb_source_room_face_authority.py"
             cp "$GITHUB_WORKSPACE/tools/diag_gptmax_source_authority_stages.py" "$root/tools/diag_gptmax_source_authority_stages.py"
-            printf '%s  %s\n' "$SOURCE_SHA" "$root/documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" | sha256sum --check
+            PYTHONPATH=. python scripts/copy_provisioned_originals_into_worktree.py \
+              --workspace "$GITHUB_WORKSPACE" \
+              --worktree "$root" \
+              --name '1. Construction Plans - Lot 16 Power (REV E).pdf'
+            PYTHONPATH=. python -m tools.gpt3_original_source_preflight \
+              --pdf "$root/documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --expected-sha256 "$SOURCE_SHA"
           done
 
           (
