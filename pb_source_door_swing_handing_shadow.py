@@ -114,9 +114,9 @@ class SourceDoorSwingHandingShadowAuthority:
         door_id: str,
         hinge_pt: Tuple[float, float],
         latch_pt: Tuple[float, float],
-        is_left_hand: bool = True,
-        swings_inward: bool = True,
-        swing_angle_deg: float = 90.0,
+        is_left_hand: bool,
+        swings_inward: bool,
+        swing_angle_deg: float = 0.0,
         is_obstructed: bool = False,
     ) -> DoorSwingRecord:
         leaf_len = _pt_dist(hinge_pt, latch_pt)

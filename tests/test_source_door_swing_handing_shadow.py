@@ -62,6 +62,21 @@ def test_resolve_sliding_door():
     assert record.swing_angle_deg == 0.0
 
 
+def test_omitted_swing_angle_does_not_invent_ninety_degrees():
+    authority = SourceDoorSwingHandingShadowAuthority()
+
+    record = authority.resolve_swing_door(
+        door_id="D_UNKNOWN_ANGLE",
+        hinge_pt=(0.0, 0.0),
+        latch_pt=(20.0, 0.0),
+        is_left_hand=True,
+        swings_inward=True,
+    )
+
+    assert record.swing_angle_deg == 0.0
+    assert record.swept_area_pt2 == 0.0
+
+
 def test_compile_swing_handing_receipt():
     authority = SourceDoorSwingHandingShadowAuthority()
 
@@ -69,6 +84,9 @@ def test_compile_swing_handing_receipt():
         door_id="D1",
         hinge_pt=(0.0, 0.0),
         latch_pt=(20.0, 0.0),
+        is_left_hand=True,
+        swings_inward=True,
+        swing_angle_deg=90.0,
     )
     d2 = authority.resolve_sliding_door(
         door_id="D2",
