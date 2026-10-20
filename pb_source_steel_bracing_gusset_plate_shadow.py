@@ -22,6 +22,7 @@ STEEL_DENSITY_KG_M3: float = 7850.0
 
 
 class BracingConfigType(str, Enum):
+    UNKNOWN = "UNKNOWN"
     X_BRACE = "X_BRACE"
     CHEVRON_V = "CHEVRON_V"
     K_BRACE = "K_BRACE"
@@ -104,8 +105,10 @@ class SourceSteelBracingGussetPlateShadowAuthority:
             cfg = BracingConfigType.CHEVRON_V
         elif "K-BRACE" in clean:
             cfg = BracingConfigType.K_BRACE
-        else:
+        elif "TIE" in clean or "DIAGONAL" in clean or "SINGLE" in clean:
             cfg = BracingConfigType.SINGLE_DIAGONAL
+        else:
+            cfg = BracingConfigType.UNKNOWN
 
         # Turnbuckle
         has_tb = "TURNBUCKLE" in clean or "CLEVIS" in clean or "TIE ROD" in clean
