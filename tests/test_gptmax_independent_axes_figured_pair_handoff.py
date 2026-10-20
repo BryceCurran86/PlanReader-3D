@@ -27,8 +27,8 @@ def _independent_source_axes():
         width_m=1.2,
         height_m=1.8,
         geometry_complete=True,
-        evidence_ids=["figured", "original-width:physical-3",
-                      "original-height:physical-3"],
+        evidence_ids=["source-own-1", "figured", "figured-word-3", "binding-3", "frame-3",
+                      "original-width:physical-3", "original-height:physical-3"],
     )
     # Original two-number label is corroborated only as an unordered pair.
     assert rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"] is False
@@ -58,27 +58,34 @@ def test_unordered_label_plus_independent_producer_axes_is_gpt1_candidate_only()
 
 
 @pytest.mark.parametrize("claimed_receipts", [
-    ["figured"],
-    ["figured", "original-width:physical-3"],
-    ["figured", "original-height:physical-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3", "original-width:physical-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3", "original-height:physical-3"],
     None,
     "figured original-width:physical-3 original-height:physical-3",
 ])
 def test_unowned_axis_ids_cannot_claim_authentication(claimed_receipts):
     rows, canonical = _independent_source_axes()
-    canonical[2]["evidence_ids"] = claimed_receipts
+    canonical[2]["evidence_ids"] = (
+        ["source-own-1", *claimed_receipts]
+        if type(claimed_receipts) is list else claimed_receipts
+    )
     result = run(rows, canonical)
     opening = result["opening_decisions"][2]
     assert opening["figured_pair_area_support"]
     assert not opening["axis_order_authenticated"]
-    assert opening["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert opening["first_remaining_gate"] == (
+        "width_height_axis_authority_unproven"
+        if type(claimed_receipts) is list
+        else "original_structural_host_receipt_unbound"
+    )
     assert not opening["new_gpt1_candidate_handoff"]
     assert not result["gpt1_new_handoff_candidates"]
 
 
 def test_area_receipt_id_must_be_in_producer_evidence_set():
     rows, canonical = fixture()
-    canonical[2]["evidence_ids"] = ["unrelated-receipt"]
+    canonical[2]["evidence_ids"] = ["binding-3", "frame-3", "unrelated-receipt"]
     result = run(rows, canonical)
     opening = result["opening_decisions"][2]
     assert opening["figured_pair_area_support"]
@@ -185,7 +192,7 @@ def test_unowned_figured_area_receipt_never_enters_area_review():
         run(rows, canonical)
 
 
-def test_area_review_still_requires_owned_kind_and_complete_host_frame():
+def test_area_review_requires_owned_kind_but_not_complete_3d_wall_frame():
     rows, canonical = fixture()
     canonical[2]["opening_kind"] = None
     result = run(rows, canonical)
@@ -197,10 +204,21 @@ def test_area_review_still_requires_owned_kind_and_complete_host_frame():
     rows[2]["frame_record"] = None
     canonical[2]["host_frame_record_id"] = None
     result = run(rows, canonical)
-    assert result["opening_decisions"][2]["opening_area_first_remaining_gate"] == (
-        "whole_wall_frame_unavailable"
+    decision = result["opening_decisions"][2]
+    assert decision["opening_area_first_remaining_gate"] == (
+        "independent_gpt1_opening_area_measurement_validation_required"
     )
-    assert not result["gpt1_new_area_review_candidates"]
+    assert decision["authenticated_host_record_id"] == "binding-3"
+    assert decision["authenticated_frame_record_id"] is None
+    assert decision["figured_area_only_frame_unavailable"] is True
+    assert decision["new_gpt1_area_candidate_handoff"] is True
+    assert len(result["gpt1_new_area_review_candidates"]) == 1
+    assert decision["first_remaining_gate"] == "whole_wall_frame_unavailable"
+    assert decision["new_gpt1_candidate_handoff"] is False
+    assert not decision["measurement_published"]
+    assert not decision["customer_seal_granted"]
+    assert not decision["opening_count_granted"]
+    assert not result["signed_customer_publisher_activated"]
 
 
 def test_prior_source_sealed_area_is_not_sent_for_ninth_area_review():
@@ -218,7 +236,7 @@ def test_area_first_gate_counts_are_complete_deterministic_inventory():
     assert result["area_first_gate_counts"] == {
         "independent_gpt1_opening_area_measurement_validation_required": 1,
         "structural_host_unavailable": 1,
-        "whole_wall_frame_unavailable": 1,
+        "source_figured_dimension_pair_unproven": 1,
     }
     assert sum(result["area_first_gate_counts"].values()) == 3
 
@@ -279,3 +297,121 @@ def test_signed_customer_archive_cannot_be_half_supplied_before_source_ingestion
             b"synthetic input, never client original", page_id="3",
             archived_signed_run=signed,
         )
+
+
+def test_hostless_original_figured_pair_still_cannot_enter_area_review():
+    rows, canonical = fixture()
+    rows[2]["host_record"] = None
+    rows[2]["frame_record"] = None
+    canonical[2]["host_binding_record_id"] = None
+    canonical[2]["host_wall_id"] = None
+    canonical[2]["host_frame_record_id"] = None
+    result = run(rows, canonical)
+    decision = result["opening_decisions"][2]
+    assert decision["opening_area_first_remaining_gate"] == "structural_host_unavailable"
+    assert not decision["figured_area_only_frame_unavailable"]
+    assert not result["gpt1_new_area_review_candidates"]
+
+
+def test_host_only_figured_area_still_fails_without_own_figured_receipt():
+    rows, canonical = fixture()
+    rows[2]["frame_record"] = None
+    canonical[2]["host_frame_record_id"] = None
+    canonical[2]["evidence_ids"] = ["binding-3", "not-the-original-figured-receipt"]
+    result = run(rows, canonical)
+    decision = result["opening_decisions"][2]
+    assert decision["opening_area_first_remaining_gate"] == "original_figured_area_receipt_unbound"
+    assert not decision["new_gpt1_area_candidate_handoff"]
+    assert not result["gpt1_new_area_review_candidates"]
+
+
+def test_host_only_figured_review_never_reissues_existing_signed_area():
+    rows, canonical = fixture()
+    rows[2]["frame_record"] = None
+    canonical[2]["host_frame_record_id"] = None
+    rows[2]["quantity_id"] = "already-original-source-sealed"
+    result = run(rows, canonical)
+    decision = result["opening_decisions"][2]
+    assert decision["opening_area_first_remaining_gate"] == (
+        "original_signed_area_already_retained"
+    )
+    assert not decision["figured_area_only_frame_unavailable"]
+    assert not result["gpt1_new_area_review_candidates"]
+
+
+def test_unowned_figured_area_cannot_be_sourced_from_a_different_physical_opening():
+    rows, canonical = fixture()
+    rows[2]["frame_record"] = None
+    canonical[2]["host_frame_record_id"] = None
+    rows[2]["original_label_dimension_result"]["evidence"]["opening_record_id"] = "physical-2"
+    decision = run(rows, canonical)["opening_decisions"][2]
+    assert decision["opening_area_first_remaining_gate"] == "source_figured_dimension_pair_unproven"
+    assert not decision["new_gpt1_area_candidate_handoff"]
+
+
+@pytest.mark.parametrize("present", [
+    ["figured", "frame-3"],
+    ["figured", "frame-3", "foreign-binding"],
+    ["figured", "binding-3 ", "frame-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3", "binding-3"],
+])
+def test_area_and_3d_review_require_exact_owned_host_binding_evidence(present):
+    rows, canonical = fixture()
+    canonical[2]["evidence_ids"] = present
+    record = run(rows, canonical)["opening_decisions"][2]
+    assert record["authenticated_host_record_id"] == "binding-3"
+    assert not record["original_host_binding_receipt_bound"]
+    assert record["opening_area_first_remaining_gate"] == (
+        "original_structural_host_receipt_unbound"
+    )
+    assert record["first_remaining_gate"] == (
+        "original_structural_host_receipt_unbound"
+    )
+    assert not record["new_gpt1_area_candidate_handoff"]
+    assert not record["new_gpt1_candidate_handoff"]
+    assert not record["customer_seal_granted"]
+
+
+@pytest.mark.parametrize("present", [
+    ["figured", "figured-word-3", "binding-3"],
+    ["figured", "binding-3", "foreign-frame"],
+])
+def test_existing_frame_without_original_evidence_cannot_validate_area_or_3d(present):
+    rows, canonical = fixture()
+    canonical[2]["evidence_ids"] = present
+    record = run(rows, canonical)["opening_decisions"][2]
+    assert record["original_host_binding_receipt_bound"]
+    assert record["authenticated_frame_record_id"] == "frame-3"
+    assert not record["original_host_frame_receipt_bound"]
+    assert record["opening_area_first_remaining_gate"] == (
+        "original_host_frame_receipt_unbound"
+    )
+    assert record["first_remaining_gate"] == "original_host_frame_receipt_unbound"
+    assert not record["new_gpt1_area_candidate_handoff"]
+    assert not record["new_gpt1_candidate_handoff"]
+
+
+def test_genuine_frame_absent_figured_area_requires_only_own_host_receipt():
+    rows, canonical = fixture()
+    rows[2]["frame_record"] = None
+    canonical[2]["host_frame_record_id"] = None
+    canonical[2]["evidence_ids"] = ["source-own-1", "figured", "figured-word-3", "binding-3"]
+    record = run(rows, canonical)["opening_decisions"][2]
+    assert record["original_host_binding_receipt_bound"]
+    assert not record["original_host_frame_receipt_bound"]
+    assert record["figured_area_only_frame_unavailable"]
+    assert record["new_gpt1_area_candidate_handoff"]
+    assert record["first_remaining_gate"] == "whole_wall_frame_unavailable"
+    assert not record["new_gpt1_candidate_handoff"]
+    assert not record["measurement_published"]
+    assert not record["opening_count_granted"]
+
+
+def test_genuine_framed_axes_require_both_host_and_frame_evidence_receipts():
+    rows, canonical = _independent_source_axes()
+    record = run(rows, canonical)["opening_decisions"][2]
+    assert record["original_host_binding_receipt_bound"]
+    assert record["original_host_frame_receipt_bound"]
+    assert record["axis_order_authenticated"]
+    assert record["new_gpt1_candidate_handoff"]
+    assert not record["measurement_published"]
