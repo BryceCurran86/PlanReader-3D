@@ -34,7 +34,7 @@ class WeatherLouverSpec:
     location: Tuple[float, float]
     width_mm: float = 0.0
     height_mm: float = 0.0
-    blade_pitch_mm: float = 75.0
+    blade_pitch_mm: float = 0.0
     free_area_ratio: float = 0.50
     has_bird_mesh: bool = True
     frame_depth_mm: float = 100.0
@@ -113,7 +113,7 @@ class SourceWeatherLouverAerodynamicFreeAreaShadowAuthority:
 
         # Pitch: (\d+)\s*(?:PITCH|CTS|SPACING)
         pitch_match = re.search(r"(\d+)\s*(?:PITCH|CTS|SPACING)", clean)
-        pitch_mm = float(pitch_match.group(1)) if pitch_match else 75.0
+        pitch_mm = float(pitch_match.group(1)) if pitch_match else 0.0
 
         return b_type, w, h, free_ratio, pitch_mm
 
