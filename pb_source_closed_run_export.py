@@ -526,6 +526,17 @@ def _build_sealed_run(
     # different exact sets. Index each identity under its family and semantic
     # key to prevent source-sealed commercial double counting.
     physical_claims: dict[tuple[str, str], dict[str, SealedSourceClosedQuantity]] = {}
+    # For an individually identified opening, changing the source semantic
+    # key ("door_area:" vs "window_area:", or two different typed row keys)
+    # cannot make the same physical opening into two separate AREA/count
+    # quantities. Distinct families remain legitimate: one AREA and one
+    # separately source-complete COUNT may coexist for the same opening.
+    opening_claims: dict[tuple[str, str], SealedSourceClosedQuantity] = {}
+    opening_kinds: dict[str, tuple[str, str]] = {}
+    # One actual source floor surface can have only one geometric floor_area
+    # measurement. Distinct floor_finish_area families/layers retain their
+    # own source ownership contract; do not collapse finish semantics here.
+    physical_floor_areas: dict[str, SealedSourceClosedQuantity] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -608,6 +619,56 @@ def _build_sealed_run(
                 )
             for identity in identities:
                 claimed_ids[identity] = row
+
+        if not row.abstained and identities and row.family in (
+            "opening_area", "opening_count",
+        ):
+            for physical_identity in identities:
+                opening_key = (row.family, physical_identity)
+                previous = opening_claims.get(opening_key)
+                if previous is not None:
+                    # A duplicate under the SAME semantic key was already
+                    # rejected above. Here it is a contradiction across
+                    # separately named rows for one physical opening.
+                    raise SourceClosedRunConflictError(
+                        "conflicting signed opening identity across semantic "
+                        f"keys: {previous.quantity_id!r} vs "
+                        f"{row.quantity_id!r} for {physical_identity!r}"
+                    )
+                opening_claims[opening_key] = row
+                typed_kind = None
+                for prefix, kind in (
+                    ("door_area:", "door"), ("window_area:", "window"),
+                    ("door_count:", "door"), ("window_count:", "window"),
+                ):
+                    if row.semantic_key.startswith(prefix):
+                        typed_kind = kind
+                        break
+                if typed_kind is not None:
+                    other_kind = opening_kinds.get(physical_identity)
+                    if other_kind is not None and other_kind[0] != typed_kind:
+                        raise SourceClosedRunConflictError(
+                            "contradictory source-owned door/window kind for "
+                            f"one physical opening {physical_identity!r}: "
+                            f"{other_kind[1]!r} vs {row.quantity_id!r}"
+                        )
+                    opening_kinds[physical_identity] = (
+                        typed_kind, row.quantity_id
+                    )
+        if not row.abstained and row.family == "floor_area":
+            if not identities:
+                raise SourceClosedRunConflictError(
+                    "source geometric floor area missing physical floor identity"
+                )
+            for identity in identities:
+                prior_floor = physical_floor_areas.get(identity)
+                if prior_floor is not None:
+                    raise SourceClosedRunConflictError(
+                        "same original physical floor area signed twice across "
+                        f"semantic keys: {prior_floor.quantity_id!r} vs "
+                        f"{row.quantity_id!r} for {identity!r}"
+                    )
+                physical_floor_areas[identity] = row
 
         normalized.append(row)
 
