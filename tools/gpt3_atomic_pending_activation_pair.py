@@ -70,6 +70,77 @@ def _assert_original_inputs_unchanged(
         )
 
 
+ACTIVATION_COMMIT_MARKER_VERSION = "gpt3_identity_activation_commit.v1"
+
+
+def _serialized(payload: dict[str, Any]) -> bytes:
+    # The committed digest covers exact on-disk bytes rather than an
+    # unverified normalized/rewritten JSON interpretation.
+    return (json.dumps(payload, sort_keys=True, indent=2, allow_nan=False)
+            + "\n").encode("utf-8")
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make a published hard link durable before the receipt marker appears."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def read_committed_active_identity_map(
+    path: Path, *, receipt_path: Path | None = None,
+) -> dict[str, Any]:
+    """Fail closed on orphaned/nonmatching committed maps.
+
+    An EMPTY baseline can bootstrap without an activation; a nonempty map
+    must have a matching receipt published last. The receipt is a commit
+    marker, not producer/source or independent benchmark authorization.
+    """
+    if type(path) is not Path:
+        raise TypeError("active identity map path must be typed")
+    if receipt_path is not None and type(receipt_path) is not Path:
+        raise TypeError("activation receipt path must be typed")
+    first_receipt: bytes | None = None
+    if receipt_path is not None:
+        # The map must not be read as activated before seeing its marker.
+        first_receipt = receipt_path.read_bytes()
+    map_bytes = path.read_bytes()
+    raw = json.loads(map_bytes)
+    if type(raw) is not dict:
+        raise ValueError("active identity map must be an object")
+    if first_receipt is None:
+        if raw.get("bindings") != []:
+            raise ValueError(
+                "nonempty active identity map requires its committed activation receipt"
+            )
+        return raw
+
+    marker = json.loads(first_receipt)
+    if type(marker) is not dict or (
+        marker.get("activation_commit_marker_version")
+        != ACTIVATION_COMMIT_MARKER_VERSION
+    ):
+        raise ValueError("active identity map has no valid activation commit marker")
+    digest = sha256(map_bytes).hexdigest()
+    if marker.get("identity_map_sha256") != digest:
+        raise ValueError("active identity map does not match committed receipt digest")
+    if (
+        marker.get("identity_map_project_id") != raw.get("project_id")
+        or marker.get("identity_map_source_sha256s")
+        != raw.get("source_sha256s")
+    ):
+        raise ValueError("active identity map source envelope differs from receipt")
+    # A concurrent replacement/mutation during a read cannot be committed.
+    if (
+        receipt_path.read_bytes() != first_receipt
+        or path.read_bytes() != map_bytes
+    ):
+        raise ValueError("active identity map or receipt changed during verification")
+    return raw
+
+
 def publish_new_activation_pair(
     outputs: tuple[Path, Path],
     payloads: tuple[dict[str, Any], dict[str, Any]],
@@ -85,7 +156,17 @@ def publish_new_activation_pair(
     staged: list[Path] = []
     published: list[tuple[Path, tuple[int, int]]] = []
     try:
-        for target, payload in zip(outputs, payloads):
+        # The map is durable first; receipt is the only committed reader
+        # marker. A crash after only the first link leaves an inert orphan.
+        map_bytes = _serialized(payloads[0])
+        committed_receipt = {
+            **payloads[1],
+            "activation_commit_marker_version": ACTIVATION_COMMIT_MARKER_VERSION,
+            "identity_map_sha256": sha256(map_bytes).hexdigest(),
+            "identity_map_project_id": payloads[0].get("project_id"),
+            "identity_map_source_sha256s": payloads[0].get("source_sha256s"),
+        }
+        for target, payload in zip(outputs, (payloads[0], committed_receipt)):
             target.parent.mkdir(parents=True, exist_ok=True)
             fd, name = tempfile.mkstemp(
                 prefix=".gpt3-identity-activation-",
@@ -108,6 +189,12 @@ def publish_new_activation_pair(
             published.append((
                 target, (original_stat.st_dev, original_stat.st_ino)
             ))
+            _fsync_directory(target.parent)
+            # At this point no reader may accept the map until the final
+            # receipt link becomes visible. Reconfirm source before commit.
+            if target == outputs[0]:
+                _assert_original_inputs_unchanged(source_snapshot)
+        _assert_original_inputs_unchanged(source_snapshot)
     except BaseException:
         # Rollback only paths still pointing to the inode we published;
         # never remove a competing writer's file if it replaced that path.
@@ -131,4 +218,6 @@ __all__ = [
     "preflight_new_activation_pair",
     "source_input_snapshot",
     "publish_new_activation_pair",
+    "read_committed_active_identity_map",
+    "ACTIVATION_COMMIT_MARKER_VERSION",
 ]
