@@ -19,3 +19,27 @@ def test_receipt_refresh_preserves_gates_and_never_publishes():
     assert report["original_physical_opening_count"] == 3
     assert "structural_host_unavailable" in report["first_gate_counts"]
     assert (rows, canonical) == before
+
+
+def test_refresh_accepts_source_proved_first_gate_for_missing_host_receipt():
+    rows, canonical = fixture()
+    canonical[2].update(
+        width_record_id="width-3", height_record_id="height-3",
+        width_m=1.2, height_m=1.8, geometry_complete=True,
+        evidence_ids=["figured", "frame-3", "width-3", "height-3"],
+    )
+    r=refresh_opening_first_gate_receipt(rows, canonical, VIEW, source_root=ROOT)
+    assert r["first_gate_counts"]["original_host_binding_receipt_unbound"] == 1
+    assert not r["measurement_published"]
+
+
+def test_refresh_accepts_source_proved_first_gate_for_missing_frame_receipt():
+    rows, canonical = fixture()
+    canonical[2].update(
+        width_record_id="width-3", height_record_id="height-3",
+        width_m=1.2, height_m=1.8, geometry_complete=True,
+        evidence_ids=["figured", "binding-3", "width-3", "height-3"],
+    )
+    r=refresh_opening_first_gate_receipt(rows, canonical, VIEW, source_root=ROOT)
+    assert r["first_gate_counts"]["original_host_frame_receipt_unbound"] == 1
+    assert not r["customer_seal_granted"]
