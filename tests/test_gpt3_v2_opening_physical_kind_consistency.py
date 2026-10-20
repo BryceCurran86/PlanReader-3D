@@ -135,3 +135,51 @@ def test_no_source_mapping_never_infers_a_frozen_object_identity():
         sealed_quantities=_quantities(),
         identity_bindings=[],
     )
+
+
+
+@pytest.mark.parametrize("family,semantic_prefix,unit", [
+    ("opening_area", "window_area", "m2"),
+    ("opening_count", "window_count", "nr"),
+])
+def test_legacy_seal_cannot_map_duplicate_same_family_physical_opening(
+    family, semantic_prefix, unit,
+):
+    items, bindings = _bindings(
+        area_kind="window", count_kind="window"
+    )
+    source = _quantities(area_kind="window", count_kind="window")
+    extra = {
+        "object_identity_refs": ["physical-opening-A"],
+        "family": family,
+        "semantic_key": f"{semantic_prefix}:second-record",
+        "unit": unit,
+        "value": 1 if family == "opening_count" else 1.8,
+        "abstained": False,
+    }
+    with pytest.raises(ValueError, match="multiple source opening quantities"):
+        veto(
+            verified_items=items,
+            sealed_quantities=[*source, extra],
+            identity_bindings=bindings,
+        )
+
+
+def test_legacy_duplicate_source_claim_for_unmapped_object_cannot_rekey_valid_openings():
+    items, bindings = _bindings(
+        same_physical=False, area_kind="window", count_kind="door"
+    )
+    source = _quantities(same_physical=False)
+    source += [
+        {"object_identity_refs": ["unmapped-opening"],
+         "family": "opening_area", "semantic_key": "door_area:unmapped-A",
+         "unit": "m2", "value": 1.8, "abstained": False},
+        {"object_identity_refs": ["unmapped-opening"],
+         "family": "opening_area", "semantic_key": "door_area:unmapped-B",
+         "unit": "m2", "value": 1.8, "abstained": False},
+    ]
+    veto(
+        verified_items=items,
+        sealed_quantities=source,
+        identity_bindings=bindings,
+    )
