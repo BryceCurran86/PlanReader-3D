@@ -56,6 +56,14 @@ def test_cfs_callout_parsing():
     )
     assert omitted_lap["lap_length_mm"] == 0.0
 
+    omitted_th = SourceCFSPurlinGirtShadowAuthority.parse_callout("TOP HAT PURLIN")
+    assert omitted_th["section_designation"] == ""
+    assert omitted_th["linear_mass_kg_m"] == 0.0
+
+    omitted_c = SourceCFSPurlinGirtShadowAuthority.parse_callout("CHANNEL PURLIN")
+    assert omitted_c["section_designation"] == ""
+    assert omitted_c["linear_mass_kg_m"] == 0.0
+
 
 def test_cfs_snapping():
     pt = (301.2, 598.9)
