@@ -353,7 +353,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "new_gpt1_candidate_handoff": bool(
                 supported and host is not None and frame_ok and typed
                 and host_receipt_bound and frame_receipt_bound
-                and axis_ok and not row.get("quantity_id")),
+                and figured_label_scope_owned and axis_ok
+                and not row.get("quantity_id")),
             # No output JSON is a signed quantity or a trust-grant token.
             "measurement_published": False,
             "customer_seal_granted": False,
