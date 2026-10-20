@@ -110,7 +110,15 @@ jobs:
             assert x['new_gpt1_area_candidate_handoff'] is True
             assert x['prior_signed_quantity_id'] is None
             assert x['authenticated_host_record_id']
-            assert x['authenticated_frame_record_id']
+            assert x['original_host_binding_receipt_bound']
+            if x['authenticated_frame_record_id']:
+              assert x['original_host_frame_receipt_bound']
+            # Historical source-sealed gross opening AREA may be host-only.
+            # No whole-wall 3D frame, wall deduction, or height is inferred.
+            if not x['authenticated_frame_record_id']:
+              assert x['figured_area_only_frame_unavailable'] is True
+              assert x['first_remaining_gate']=='whole_wall_frame_unavailable'
+              assert not x['new_gpt1_candidate_handoff']
             assert x['filling_kind_source_supported']
             assert x['figured_pair_area_support']
             assert x['figured_area_receipt_bound']
@@ -121,7 +129,9 @@ jobs:
             assert x['new_gpt1_candidate_handoff'] is True
             assert x['prior_signed_quantity_id'] is None
             assert x['authenticated_host_record_id']
+            assert x['original_host_binding_receipt_bound']
             assert x['authenticated_frame_record_id']
+            assert x['original_host_frame_receipt_bound']
             assert x['filling_kind_source_supported']
             assert x['figured_pair_area_support']
             assert x['independent_axes_agree_with_original_pair']
