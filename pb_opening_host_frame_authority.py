@@ -122,7 +122,7 @@ def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
 
 
 def _source_equivalence_group_pair_conflicts(equivalence) -> frozenset[tuple[str, str]]:
-    """Exact W4 SAME-cluster membership cannot coexist with issued DISTINCT."""
+    """Exact source SAME group cannot coexist with an issued non-SAME pair."""
     groups_by_member: dict[str, set[int]] = {}
     for index, group in enumerate(getattr(equivalence, "equivalence_groups", ())):
         for member in group:
@@ -132,8 +132,10 @@ def _source_equivalence_group_pair_conflicts(equivalence) -> frozenset[tuple[str
         try:
             issued = PhysicalEquivalenceClass(raw)
         except (TypeError, ValueError):
-            continue  # _pair_lookup handles malformed issuer classes.
-        if issued is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
+            # An explicitly malformed original issuer is an unknown source
+            # claim, never permission to trust a contrary positive SAME group.
+            issued = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if issued is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
             continue
         left_id, right_id = str(left), str(right)
         if groups_by_member.get(left_id, set()) & groups_by_member.get(right_id, set()):
