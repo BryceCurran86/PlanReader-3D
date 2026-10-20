@@ -526,6 +526,12 @@ def _build_sealed_run(
     # different exact sets. Index each identity under its family and semantic
     # key to prevent source-sealed commercial double counting.
     physical_claims: dict[tuple[str, str], dict[str, SealedSourceClosedQuantity]] = {}
+    # For an individually identified opening, changing the source semantic
+    # key ("door_area:" vs "window_area:", or two different typed row keys)
+    # cannot make the same physical opening into two separate AREA/count
+    # quantities. Distinct families remain legitimate: one AREA and one
+    # separately source-complete COUNT may coexist for the same opening.
+    opening_claims: dict[tuple[str, str], SealedSourceClosedQuantity] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -609,6 +615,22 @@ def _build_sealed_run(
             for identity in identities:
                 claimed_ids[identity] = row
 
+        if not row.abstained and identities and row.family in (
+            "opening_area", "opening_count",
+        ):
+            for physical_identity in identities:
+                opening_key = (row.family, physical_identity)
+                previous = opening_claims.get(opening_key)
+                if previous is not None:
+                    # A duplicate under the SAME semantic key was already
+                    # rejected above. Here it is a contradiction across
+                    # separately named rows for one physical opening.
+                    raise SourceClosedRunConflictError(
+                        "conflicting signed opening identity across semantic "
+                        f"keys: {previous.quantity_id!r} vs "
+                        f"{row.quantity_id!r} for {physical_identity!r}"
+                    )
+                opening_claims[opening_key] = row
         normalized.append(row)
 
     normalized.sort(key=lambda row: row.quantity_id)
