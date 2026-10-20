@@ -11,13 +11,23 @@ from tools.gpt3_signed_v2_family_trade_integrity import (
 def apply(*, family, semantic, unit, trade):
     item = {"item_id": "item-one", "denominator_eligible": True,
             "trade_category": trade}
+    # Model the real signed source input ID, rather than an unrelated
+    # fixture ref that bypasses the non-abstained physical identity guard.
+    if family == "opening_area":
+        physical_ref = semantic.split(":", 1)[-1]
+    elif family == "floor_finish_area":
+        physical_ref = semantic.split(":")[1]
+    else:
+        physical_ref = "source-physical-1"
     source = {
-        "object_identity_refs": ["source-physical-1"], "family": family,
+        "object_identity_refs": [physical_ref], "family": family,
         "semantic_key": semantic, "unit": unit,
+        "abstained": False,
+        "value": 1 if family == "opening_count" else 1.0,
     }
     mapped = {
         "benchmark_item_id": "item-one",
-        "production_object_identity_refs": ["source-physical-1"],
+        "production_object_identity_refs": [physical_ref],
         "production_family": family,
     }
     return veto(verified_items=[item], sealed_quantities=[source],
@@ -104,7 +114,7 @@ def test_one_source_owned_physical_door_can_separately_map_area_and_count():
     ]
     quantities = [
         {"object_identity_refs": original_refs, "family": "opening_area",
-         "semantic_key": "door_area:lot16-opening-101", "unit": "m2",
+         "semantic_key": "door_area:lot16:door:opening-101", "unit": "m2",
          "value": 1.8, "abstained": False},
         {"object_identity_refs": original_refs, "family": "opening_count",
          "semantic_key": "door_count:lot16-opening-101", "unit": "nr",
