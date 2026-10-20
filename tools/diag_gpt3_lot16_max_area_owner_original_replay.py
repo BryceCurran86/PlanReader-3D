@@ -80,7 +80,6 @@ def replay_owner_original_lot16_area_convergence(
         # Select p3 at COMPOSITION only, never at the original ingest gate.
     )
     revision = published_revision.revision.revision_id
-    source_snapshot = source.published_snapshot_for_revision(revision)
 
     wall_composition = compose_live_wall_opening_authority(
         source_visibility_producer=source,
@@ -91,6 +90,11 @@ def replay_owner_original_lot16_area_convergence(
         source_visibility_producer=source,
         wall_opening_composition=wall_composition,
     )
+    # Opening host/void composition can add DERIVED original observations
+    # and fork a producer snapshot. The authoritative opening IDs, canonical
+    # selectors and figured area receipts belong to that FINAL source
+    # snapshot, not the earlier native-word-only ingest snapshot.
+    source_snapshot = source.published_snapshot_for_revision(revision)
     # The actual production serializer builds the signed/customer receipts;
     # there is no independent reconstruction from a candidate's numbers.
     original_retention = _retention(
