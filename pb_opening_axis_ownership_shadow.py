@@ -43,8 +43,6 @@ def assess_opening_axis_ownership_shadow(
         a, b = float(values[0]), float(values[1])
         if not math.isclose(a * b / 1_000_000.0, float(area_m2), rel_tol=1e-9):
             gate = "figured_area_product_disagrees_with_pair"
-        elif geometry_complete is not True:
-            gate = "opening_geometry_axis_scope_unavailable"
         elif (
             type(width_record_id) is not str or not width_record_id
             or width_record_id != width_record_id.strip()
@@ -54,6 +52,8 @@ def assess_opening_axis_ownership_shadow(
             or not (_positive(width_m) and _positive(height_m))
         ):
             gate = "width_height_axis_authority_unproven"
+        elif geometry_complete is not True:
+            gate = "opening_geometry_axis_scope_unavailable"
         elif (
             type(canonical_evidence_ids) not in (tuple, list)
             or width_record_id not in canonical_evidence_ids
