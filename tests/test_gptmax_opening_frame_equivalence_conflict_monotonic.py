@@ -81,3 +81,18 @@ def test_pair_lookup_never_mutates_original_issuer_rows():
     original = list(rows)
     assert _lookup(rows) == {("left", "right"): AMBIGUOUS}
     assert rows == original
+
+
+def test_frame_cannot_recover_distinctness_after_four_source_receipts():
+    """A final apparently valid DISTINCT must not wash out earlier SAME."""
+    original = (
+        ("frame_left", "frame_right", DISTINCT.value),
+        ("frame_right", "frame_left", SAME.value),
+        ("frame_left", "frame_right", AMBIGUOUS.value),
+        ("frame_left", "frame_right", DISTINCT.value),
+    )
+    for permutation in set(permutations(original)):
+        observed = _lookup(permutation)
+        assert observed[("frame_left", "frame_right")] is AMBIGUOUS
+        assert observed[("frame_left", "frame_right")] is not DISTINCT
+    assert len(original) == 4
