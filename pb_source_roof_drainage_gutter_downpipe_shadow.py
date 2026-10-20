@@ -55,7 +55,7 @@ class DownpipeSpec:
     downpipe_id: str
     location: Tuple[float, float]
     diameter_mm: float = 100.0
-    height_drop_m: float = 3.0
+    height_drop_m: float = 0.0
     material: DrainageMaterial = DrainageMaterial.PVC
     level_id: str = "ROOF"
 
