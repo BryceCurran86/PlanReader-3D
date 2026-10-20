@@ -201,6 +201,57 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
 
 
 @pytest.mark.parametrize("bad_source_class", (None, {}, ["not_a_source_class"], 1))
+def test_single_member_shortcut_rejects_same_group_vs_distinct_pair():
+    """A contradictory W4 issuer cannot mint frame via the raster shortcut."""
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    records = (_record("wall:host"), _record("wall:rival"))
+    scope = _scope(records)
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(("wall:host", "wall:rival"),),
+        pair_classifications=(("wall:host", "wall:rival", DISTINCT.value),),
+        representative_wall_ids=("wall:host",),
+        same_wall_ids=("wall:host", "wall:rival"),
+    )
+    bound = _binding()
+    bound.member_equivalence_groups = (("wall:host", "wall:rival"),)
+    result = _producer(scope)._raster_whole_wall_frame(
+        binding=bound, opening=_opening(), geometry=GEOMETRY,
+    )
+    assert result is None
+
+
+def test_single_member_shortcut_preserves_unrelated_w4_source_conflict():
+    """A conflict on remote unrelated pairs cannot revoke a valid host."""
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    records = (
+        _record("wall:host"),
+        _record("remote:a", offset=400.0),
+        _record("remote:b", offset=500.0),
+    )
+    scope = _scope(records)
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(("remote:a", "remote:b"),),
+        pair_classifications=(("remote:a", "remote:b", DISTINCT.value),),
+        representative_wall_ids=("wall:host", "remote:a"),
+        same_wall_ids=("remote:a", "remote:b"),
+    )
+    result = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    )
+    assert result is not None
+    assert result.candidate_ids == ("wall:host",)
+
+
 def test_source_same_group_explicit_distinct_aligned_rival_blocks_frame(monkeypatch):
     """Conflicting original W4 representations cannot become an issued frame."""
     from pb_migration_contracts import EvidenceResolutionStatus as Status

@@ -892,6 +892,18 @@ class OpeningHostFrameProducer:
                 return None
             records_by_id[wall_key] = candidate
 
+        if any(
+            member_id in binding.member_wall_candidate_ids
+            for pair in _source_equivalence_group_pair_conflicts(
+                wall_scope.equivalence
+            )
+            for member_id in pair
+        ):
+            # Single-member shortcut must not bypass the physical W4
+            # SAME-group-vs-DISTINCT-pair contradiction veto enforced on the
+            # connected-frame path.
+            return None
+
         host_resolution = host_geometry._resolve_raster_whole_wall_host(
             wall_scope.records,
             geometry,
