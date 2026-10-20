@@ -33,6 +33,12 @@ class TestSourceSteelBracingGussetPlateShadow(unittest.TestCase):
         self.assertEqual(mass2, 2.47)
         self.assertTrue(tb2)
 
+        _cfg3, sec3, mass3, _tb3 = SourceSteelBracingGussetPlateShadowAuthority.parse_bracing_annotation(
+            "BRACING"
+        )
+        self.assertEqual(sec3, "")
+        self.assertEqual(mass3, 0.0)
+
     def test_snap_point_3d(self):
         ref_pts = [(0.0, 0.0, 0.0), (100.0, 100.0, 50.0)]
         snapped = SourceSteelBracingGussetPlateShadowAuthority.snap_point_3d((1.0, 1.0, 0.5), ref_pts)
@@ -92,11 +98,13 @@ class TestSourceSteelBracingGussetPlateShadow(unittest.TestCase):
             config_type=BracingConfigType.X_BRACE,
             start_point=(0.0, 0.0, 0.0),
             end_point=(6.0, 0.0, 4.0),
-            linear_mass_kg_m=0.0,
             start_gusset=omitted_g,
         )
+        self.assertEqual(omitted_m.section_name, "")
+        self.assertEqual(omitted_m.linear_mass_kg_m, 0.0)
         omitted_res = SourceSteelBracingGussetPlateShadowAuthority.evaluate_bracing_system([omitted_m])
         self.assertEqual(omitted_res.quantities.total_gusset_plate_mass_kg, 0.0)
+        self.assertEqual(omitted_res.quantities.total_member_steel_mass_kg, 0.0)
 
 
 if __name__ == "__main__":

@@ -43,8 +43,8 @@ class BracingMemberSpec:
     config_type: BracingConfigType
     start_point: Tuple[float, float, float]
     end_point: Tuple[float, float, float]
-    section_name: str = "75x75x6 EA"
-    linear_mass_kg_m: float = 6.81
+    section_name: str = ""
+    linear_mass_kg_m: float = 0.0
     start_gusset: Optional[GussetPlateSpec] = None
     end_gusset: Optional[GussetPlateSpec] = None
     has_turnbuckle: bool = False
@@ -127,8 +127,8 @@ class SourceSteelBracingGussetPlateShadowAuthority:
             sec = "20mm Round Bar"
             mass = 2.47
         else:
-            sec = "75x75x6 EA"
-            mass = 6.81
+            sec = ""
+            mass = 0.0
 
         return cfg, sec, mass, has_tb
 
