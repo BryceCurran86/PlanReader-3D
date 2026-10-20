@@ -11,22 +11,27 @@ from pb_gpt2_original_native_crossview_wall_caps_shadow import (
 )
 
 
-def _original_like_source(*, shifted_right=False, red_face=False):
+def _original_like_source(*, shifted_right=False, red_face=False,
+                          invisible_cap=False, dashed_face=False,
+                          translucent_face=False):
     pdf=fitz.open()
     for page_index,shift in enumerate((0.,78.)):
         page=pdf.new_page(width=550,height=500)
         if shifted_right and page_index==1:
             shift+=10.
-        def ink(a,b,color=(0,0,0)):
+        def ink(a,b,color=(0,0,0),stroke_opacity=1.0,dashes=None):
             p=page.new_shape()
             p.draw_line(fitz.Point(*a),fitz.Point(*b))
-            p.finish(color=color,width=0.48)
+            p.finish(color=color,width=0.48,stroke_opacity=stroke_opacity,dashes=dashes)
             p.commit()
-        ink((100+shift,100),(100+shift,110))
+        ink((100+shift,100),(100+shift,110),
+            stroke_opacity=0.0 if invisible_cap and page_index==1 else 1.0)
         ink((160+shift,110),(160+shift,100))
         ink((90+shift,100),(100+shift,100))
         ink((160+shift,100),(200+shift,100),
-            color=(1,0,0) if red_face and page_index==1 else (0,0,0))
+            color=(1,0,0) if red_face and page_index==1 else (0,0,0),
+            stroke_opacity=0.5 if translucent_face and page_index==1 else 1.0,
+            dashes="[2 2] 0" if dashed_face and page_index==1 else None)
         ink((90+shift,110),(100+shift,110))
         ink((160+shift,110),(200+shift,110))
         page.insert_text((360,180),"UNRELATED PLAN NOTE")
@@ -133,3 +138,23 @@ def test_original_maryborough_p7_p11_when_owner_pdf_provisioned():
     assert r.first.cap_x_pdf_pt == (177.12,233.76)
     assert r.second.cap_x_pdf_pt == (254.88,311.76)
     assert not r.doorway_threshold_issued and not r.firm_area_issued
+
+
+@pytest.mark.parametrize("fixture_kwargs", [
+    {"invisible_cap": True},
+    {"dashed_face": True},
+    {"translucent_face": True},
+])
+def test_native_source_path_visibility_or_draft_style_cannot_prove_wall_cap(fixture_kwargs):
+    source = _original_like_source(**fixture_kwargs)
+    with pytest.raises(ValueError, match="visible solid painted ink"):
+        _run(source)
+
+
+def test_original_solid_opaque_walls_still_remain_source_candidate_only():
+    source = _original_like_source()
+    result = _run(source)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert not result.original_w4_wall_issued
+    assert not result.doorway_threshold_issued
+    assert not result.firm_area_issued
