@@ -55,6 +55,7 @@ def test_omitted_internal_corners_do_not_invent_rectangle():
 
     assert rec.internal_corners_count == 0
     assert rec.external_corners_count == 0
+    assert rec.skirting_profile == SkirtingMaterialProfile.UNKNOWN
 
 
 def test_compile_skirting_receipt():
