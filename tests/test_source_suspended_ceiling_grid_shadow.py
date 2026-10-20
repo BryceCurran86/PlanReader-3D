@@ -31,7 +31,21 @@ class TestSourceSuspendedCeilingGridShadow(unittest.TestCase):
         self.assertEqual(mod2, CeilingGridModule.GRID_600X600)
         self.assertEqual(g_type2, CeilingGridType.CONCEALED_TEE)
         self.assertEqual(clg_lvl2, 3000.0)
-        self.assertEqual(soffit_lvl2, 3600.0)
+        self.assertEqual(soffit_lvl2, 3000.0)
+
+        _mod3, _type3, clg_lvl3, soffit_lvl3 = SourceSuspendedCeilingGridShadowAuthority.parse_ceiling_annotation(
+            "CEILING"
+        )
+        self.assertEqual(clg_lvl3, 0.0)
+        self.assertEqual(soffit_lvl3, 0.0)
+
+        omitted = SuspendedCeilingSpec(
+            ceiling_id="CLG-UNKNOWN",
+            room_id="ROOM-UNKNOWN",
+            boundary_polygon=[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        )
+        self.assertEqual(omitted.finished_ceiling_level_mm, 0.0)
+        self.assertEqual(omitted.slab_soffit_level_mm, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]

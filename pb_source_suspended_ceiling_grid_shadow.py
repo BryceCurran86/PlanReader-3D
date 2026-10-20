@@ -40,8 +40,8 @@ class SuspendedCeilingSpec:
     boundary_polygon: List[Tuple[float, float]]
     grid_module: CeilingGridModule = CeilingGridModule.GRID_1200X600
     grid_type: CeilingGridType = CeilingGridType.EXPOSED_TEE
-    finished_ceiling_level_mm: float = 2700.0
-    slab_soffit_level_mm: float = 3300.0
+    finished_ceiling_level_mm: float = 0.0
+    slab_soffit_level_mm: float = 0.0
     level_id: str = "L1"
     source_annotation: str = ""
 
@@ -128,14 +128,14 @@ class SourceSuspendedCeilingGridShadowAuthority:
 
         # Levels
         affl_match = re.search(r"(\d+)\s*(?:AFFL|CLG|CEILING)", clean)
-        clg_lvl = float(affl_match.group(1)) if affl_match else 2700.0
+        clg_lvl = float(affl_match.group(1)) if affl_match else 0.0
 
         plenum_match = re.search(r"(?:PLENUM|VOID)\s*(\d+)", clean)
         if plenum_match:
             plenum_mm = float(plenum_match.group(1))
             soffit_lvl = clg_lvl + plenum_mm
         else:
-            soffit_lvl = clg_lvl + 600.0
+            soffit_lvl = clg_lvl
 
         return mod, g_type, clg_lvl, soffit_lvl
 
