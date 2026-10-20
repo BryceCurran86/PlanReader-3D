@@ -106,12 +106,12 @@ class SourceCurtainWallSpandrelVisionShadowAuthority:
         *,
         bay_id: str,
         wall_id: str,
-        bay_width_pt: float = 42.52,  # ~1500mm at 1:100 scale: 42.52 pt
-        story_height_pt: float = 102.05, # ~3600mm story height
-        vision_sill_height_pt: float = 25.51, # ~900mm sill
-        vision_head_height_pt: float = 68.03, # ~2400mm head
-        spandrel_insulation_thickness_pt: float = 1.42, # ~50mm mineral wool
-        spandrel_finish: str = "CERAMIC_FRIT_BACKPAN_MINERAL_WOOL",
+        bay_width_pt: float = 0.0,
+        story_height_pt: float = 0.0,
+        vision_sill_height_pt: float = 0.0,
+        vision_head_height_pt: float = 0.0,
+        spandrel_insulation_thickness_pt: float = 0.0,
+        spandrel_finish: str = "",
     ) -> CurtainWallBayRecord:
         clamped_sill = max(0.0, min(vision_sill_height_pt, story_height_pt))
         clamped_head = max(clamped_sill, min(vision_head_height_pt, story_height_pt))
