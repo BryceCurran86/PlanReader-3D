@@ -113,8 +113,7 @@ class SourceExpansionControlJointShadowAuthority:
         joint_length_pt: float = 0.0,
         backing_rod_spec: str = "",
     ) -> MovementJointRecord:
-        # Standard sealant depth: half of width, minimum 6mm (0.17 pt)
-        sealant_depth = max(0.17, gap_width_pt / 2.0)
+        sealant_depth = gap_width_pt / 2.0
         sealant_vol = joint_length_pt * gap_width_pt * sealant_depth
 
         return MovementJointRecord(

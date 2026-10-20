@@ -26,8 +26,8 @@ def test_masonry_control_joint():
     assert j.is_doorway_opening is False
     assert j.gap_width_pt == 0.28
     assert j.joint_length_pt == 80.0
-    # Depth = 0.17 -> vol = 80 * 0.28 * 0.17 = 3.808
-    assert math.isclose(j.sealant_volume_pt3, 3.808, abs_tol=1e-3)
+    # Depth = half-gap only; no 6 mm minimum. vol = 80 * 0.28 * 0.14 = 3.136
+    assert math.isclose(j.sealant_volume_pt3, 3.136, abs_tol=1e-3)
 
 
 def test_structural_expansion_joint():
