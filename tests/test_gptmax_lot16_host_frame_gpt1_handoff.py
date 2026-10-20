@@ -3,6 +3,9 @@ from copy import deepcopy
 
 import pytest
 
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
+
 from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import assess_gpt1_opening_candidates
 
 ROOT = {
