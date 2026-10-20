@@ -28,6 +28,7 @@ from pb_migration_contracts import (
 
 class RcpWordRole(str, Enum):
     IN_PLAN_CEILING_ANNOTATION = "IN_PLAN_CEILING_ANNOTATION"
+    NON_CEILING_LABEL = "NON_CEILING_LABEL"
     SCHEDULE_TABLE_CELL = "SCHEDULE_TABLE_CELL"
     GENERAL_NOTE_PROSE = "GENERAL_NOTE_PROSE"
     TITLE_BLOCK_METADATA = "TITLE_BLOCK_METADATA"
@@ -153,8 +154,10 @@ class SourceRcpWordEligibilityShadowAuthority:
                     notes="Word is located inside sheet title block or revision block.",
                 )
 
-        # 3. Viewport boundary check
-        if plan_viewport_bbox is not None and not _bbox_inside(wb, plan_viewport_bbox):
+        # 3. Viewport boundary check. The bbox is only a caller-supplied
+        # candidate: even when present it cannot CORROBORATE original paint,
+        # typed plan viewport, material or physical ceiling-zone ownership.
+        if plan_viewport_bbox is None or not _bbox_inside(wb, plan_viewport_bbox):
             return RcpWordEvidence(
                 word_id=word_id,
                 text=clean_text,
@@ -168,10 +171,24 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes="Word bbox is outside designated plan drawing viewport.",
             )
 
-        # 4. Syntactic prose / general note check
-        # Notes are multi-word prose paragraphs (e.g. > 6 words or length > 35 chars)
-        block_words = block_text.strip().split()
-        if len(block_words) > 6 or len(block_text.strip()) > 35:
+        # 4. Syntactic prose / general note check. The genuine original
+        # Maryborough page-9 note 'REVIEW IN OFFICE AREA' is FOUR words,
+        # not >6, so length-only note classification is unsafe.
+        block_words = block_text.strip().upper().split()
+        ceiling_codes = frozenset(("IPF1", "GRID", "WFPB", "FPB", "IP"))
+        def _short_code_context() -> bool:
+            if clean_text.upper() not in ceiling_codes:
+                return False
+            if len(block_words) <= 2:
+                return True
+            return (
+                clean_text.upper() == "GRID"
+                and any(w.isdigit() for w in block_words)
+                and all(w in ceiling_codes or w in ("/", "CLG", "CEILING")
+                        or w.isdigit() for w in block_words)
+            )
+        if (len(block_words) > 6 or len(block_text.strip()) > 35
+                or (len(block_words) >= 3 and not _short_code_context())):
             return RcpWordEvidence(
                 word_id=word_id,
                 text=clean_text,
@@ -185,7 +202,25 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes=f"Word is part of a general note prose block ({len(block_words)} words).",
             )
 
-        # 5. Authentic in-plan ceiling callout candidate
+        # 5. Distinguish room names/notes from actual ceiling code words.
+        # Caller words/boxes alone can NEVER confer original visibility.
+        if clean_text.upper() not in ceiling_codes:
+            return RcpWordEvidence(
+                word_id=word_id,
+                text=clean_text,
+                bbox_pdf_pts=wb,
+                block_index=block_index,
+                line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.NON_CEILING_LABEL,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="No source-authenticated ceiling material code; room or other label.",
+            )
+
+        # 6. Lexically plausible ceiling callout CANDIDATE only.
+        # Complete real source PDF/snapshot/viewport/W4 zone and material
+        # definition must be proved by independent typed authorities.
         return RcpWordEvidence(
             word_id=word_id,
             text=clean_text,
@@ -195,6 +230,6 @@ class SourceRcpWordEligibilityShadowAuthority:
             word_index=word_index,
             role=RcpWordRole.IN_PLAN_CEILING_ANNOTATION,
             is_eligible_for_ceiling_mark=True,
-            status=EvidenceResolutionStatus.CORROBORATED,
-            notes="Corroborated in-plan ceiling annotation candidate.",
+            status=EvidenceResolutionStatus.CANDIDATE,
+            notes="Lexical RCP candidate only: original source, viewport and ceiling zone unproved.",
         )
