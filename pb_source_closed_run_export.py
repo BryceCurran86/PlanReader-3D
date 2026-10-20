@@ -236,6 +236,31 @@ def sealed_source_closed_run_from_dict(
     """
     if not isinstance(payload, Mapping):
         raise TypeError("sealed run payload must be a mapping")
+    # V1 seals sign a FIXED wire schema. A valid old fingerprint does not
+    # authenticate optional JSON fields such as snapshot_id, decision_scope_id,
+    # project trade, estimator approval or alleged benchmark score. Refuse
+    # those UNSIGNED extras rather than allowing another consumer to mistake
+    # their presence for producer-issued source authority. Optional future
+    # scope identifiers must be carried by a separately signed versioned
+    # supplement, never squeezed into the unchanged V1 signature.
+    run_wire_fields = frozenset({
+        "schema_version", "run_id", "project_id", "source_sha256s",
+        "revision_ids", "quantities", "fingerprint",
+    })
+    if set(payload) != run_wire_fields:
+        raise SourceClosedRunConflictError(
+            "sealed V1 run has missing or unsigned additional wire fields"
+        )
+    quantity_wire_fields = frozenset({
+        "schema_version", "project_id", "quantity_id", "family",
+        "semantic_key", "value", "unit", "status", "authority",
+        "confidence", "abstained", "document_id", "source_sha256",
+        "source_page", "viewport_id", "revision_id",
+        "object_identity_refs", "trace_canonical_entity_ids",
+        "evidence_ids", "trace_evidence_ids", "blocking_reasons",
+        "reason_codes", "lineage_ok", "lineage_reason_codes",
+        "fingerprint",
+    })
     for field in ("schema_version", "run_id", "project_id", "fingerprint"):
         original = payload.get(field)
         if type(original) is not str or not original or original != original.strip():
@@ -275,6 +300,10 @@ def sealed_source_closed_run_from_dict(
         if not isinstance(raw, Mapping):
             raise SourceClosedRunConflictError(
                 f"sealed quantity {index} must be a mapping"
+            )
+        if set(raw) != quantity_wire_fields:
+            raise SourceClosedRunConflictError(
+                f"sealed V1 quantity {index} has missing or unsigned additional wire fields"
             )
         # Original source fields are canonical strings. Coercing 123 -> "123"
         # during rehydration can preserve the same normalized fingerprint,
@@ -646,6 +675,13 @@ def seal_source_closed_run(
         raise SourceClosedRunConflictError("quantity ids must be unique")
 
     rows: list[SealedSourceClosedQuantity] = []
+    # V1 cannot persist a new snapshot field without breaking historical
+    # fingerprints. While ISSUING a NEW run, however, exact producer-owned
+    # snapshot metadata is available in memory. A document cannot silently
+    # mix two positive snapshot receipts under the same source/revision.
+    # Legacy quantities without a snapshot stay unproven; a separate
+    # producer-authenticated supplement is required to prove their scope.
+    issued_snapshots: dict[tuple[str, str, str], str] = {}
     for quantity in quantities:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("quantities must contain only QuantityEvidence records")
@@ -658,6 +694,41 @@ def seal_source_closed_run(
             raise SourceClosedRunConflictError(
                 f"quantity {quantity.quantity_id} belongs to project {trace.project_id}"
             )
+        meta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        trace_meta = trace.metadata if isinstance(trace.metadata, Mapping) else {}
+        # Matching producer/trace snapshot receipts are independently held
+        # claims of the same source visibility scope. Neither may override
+        # a contradictory value from the other and slip into an old V1 seal.
+        q_snapshot = meta.get("snapshot_id") if "snapshot_id" in meta else None
+        t_snapshot = (
+            trace_meta.get("snapshot_id")
+            if "snapshot_id" in trace_meta else None
+        )
+        if "snapshot_id" in meta and "snapshot_id" in trace_meta:
+            if q_snapshot != t_snapshot or type(q_snapshot) is not str:
+                raise SourceClosedRunConflictError(
+                    "original quantity/trace snapshot receipts conflict"
+                )
+        if "snapshot_id" in meta or "snapshot_id" in trace_meta:
+            source_snapshot = (
+                q_snapshot if "snapshot_id" in meta else t_snapshot
+            )
+            if (
+                type(source_snapshot) is not str or not source_snapshot
+                or source_snapshot != source_snapshot.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "explicit original producer snapshot_id must be a canonical string"
+                )
+            document_scope = (
+                trace.document_id, trace.revision_id, trace.source_sha256
+            )
+            previous = issued_snapshots.get(document_scope)
+            if previous is not None and previous != source_snapshot:
+                raise SourceClosedRunConflictError(
+                    "conflicting explicit source snapshot receipts in one signed run"
+                )
+            issued_snapshots[document_scope] = source_snapshot
         rows.append(seal_source_closed_quantity(quantity, trace=trace))
 
     return _build_sealed_run(rows, project_id=clean_project_id)
