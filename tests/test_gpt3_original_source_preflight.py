@@ -79,8 +79,9 @@ def test_invalid_expected_digest_is_rejected(tmp_path: Path) -> None:
 def _assert_provision_before_preflight(path: Path, pdf_name: str) -> None:
     text = path.read_text(encoding="utf-8")
     provision = text.index("uses: ./.github/actions/provision-original-sources")
-    preflight = text.index("python -m tools.gpt3_original_source_preflight")
-    assert provision < preflight
+    always = text.index("if: always()", provision)
+    preflight = text.index("python3 -m tools.gpt3_original_source_preflight", provision)
+    assert provision < always < preflight
     assert pdf_name in text
     assert "allow-missing: true" not in text
     assert "allow-missing: 'true'" not in text
@@ -102,13 +103,14 @@ def test_maryborough_original_source_job_provisions_then_classifies() -> None:
 
 
 def test_lot16_sealed_original_job_provisions_then_classifies() -> None:
+    _assert_provision_before_preflight(
+        LOT16_SEAL_WORKFLOW,
+        "1. Construction Plans - Lot 16 Power (REV E).pdf",
+    )
     text = LOT16_SEAL_WORKFLOW.read_text(encoding="utf-8")
-    provision = text.index("uses: ./.github/actions/provision-original-sources")
-    classify = text.index("classify_original_source_preflight")
-    assert provision < classify
-    assert "1. Construction Plans - Lot 16 Power (REV E).pdf" in text
-    assert "allow-missing: true" not in text
-    assert "secrets.ORIGINAL_SOURCES_TOKEN" in text
+    always = text.index("if: always()")
+    producer = text.index("tools.run_gpt3_lot16_original_sealed_score_input")
+    assert always < producer
 
 
 @pytest.mark.parametrize("path,pdf_name,copies_into_worktree", REMAINING_ORIGINAL_JOBS)
@@ -123,6 +125,17 @@ def test_remaining_gpt3_original_jobs_provision_then_classify(
         assert provision < copy_at
     else:
         assert "python scripts/copy_provisioned_originals_into_worktree.py" not in text
+
+
+def test_selected_two_originals_classify_always_runs() -> None:
+    _assert_provision_before_preflight(
+        ROOT / ".github/workflows/score-gpt3-selected-two-original-projects.yml",
+        LOT16_PDF,
+    )
+    text = (
+        ROOT / ".github/workflows/score-gpt3-selected-two-original-projects.yml"
+    ).read_text(encoding="utf-8")
+    assert MARY_PDF in text
 
 
 def test_four_project_fail_closed_inventory_is_not_provisioned() -> None:

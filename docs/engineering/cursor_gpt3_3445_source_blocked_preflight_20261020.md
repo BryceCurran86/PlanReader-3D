@@ -27,6 +27,17 @@ Observed on current `cursor/gpt3-3445-source-blocked-preflight-20261020` after t
 
 Do not mass-apply all ~193 workflows. Do not change `ci.yml` in this PR.
 
+## Provision failure vs SOURCE_BLOCKED receipt (GPT3 review of #3470)
+
+Observed: `provision-original-sources` raises `ProvisionError` and exits 1 when the token is missing, the companion file is absent, or the digest differs. That step runs first, so the job was red without emitting `tools.gpt3_original_source_preflight` JSON/exit 2.
+
+Proposed: keep provision fail-closed (`allow-missing` unset, no success-on-missing). Immediately after it, a `Classify original source` step with `if: always()` writes the preflight receipt and exits 2 on `SOURCE_BLOCKED` or 1 on digest mismatch. Producer steps have no `always()` and do not run. Two honest semantics:
+
+- (A) provisioning failed closed and the job is red
+- (B) original-source replay emitted structured SOURCE_BLOCKED and did not run the producer
+
+Do not set `continue-on-error` on provision. Do not treat missing originals as CI success.
+
 ## Benchmark observations that must not influence implementation
 
 Lot16 8/27, Maryborough 0/24, Office/Food Prep m², and expected BOQ values are not inputs.

@@ -53,6 +53,16 @@ jobs:
           ref: ${{ vars.ORIGINAL_SOURCES_REF }}
           names: |
             1. Construction Plans - Lot 16 Power (REV E).pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --expected-sha256 '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

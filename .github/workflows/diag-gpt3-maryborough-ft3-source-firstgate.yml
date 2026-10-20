@@ -54,6 +54,16 @@ jobs:
           ref: ${{ vars.ORIGINAL_SOURCES_REF }}
           names: |
             Arch_Combined_Maryborough_Service_Station.pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/Arch_Combined_Maryborough_Service_Station.pdf' \
+            --expected-sha256 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

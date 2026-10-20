@@ -31,6 +31,16 @@ jobs:
           ref: ${{ vars.ORIGINAL_SOURCES_REF }}
           names: |
             1. Construction Plans - Lot 16 Power (REV E).pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --expected-sha256 '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -51,6 +61,7 @@ jobs:
           import json
           from pathlib import Path
           from tools.gpt3_original_source_preflight import (
+              SOURCE_BLOCKED,
               SOURCE_PRESENT,
               classify_original_source_preflight,
           )
@@ -63,7 +74,8 @@ jobs:
           data=architects[0]
           pdf=Path("documents/sources") / data["name"]
           receipt=classify_original_source_preflight(pdf, data["sha256"])
-          assert receipt["status"]==SOURCE_PRESENT, receipt
+          if receipt["status"] != SOURCE_PRESENT:
+              raise SystemExit(2 if receipt["status"] == SOURCE_BLOCKED else 1)
           assert pdf.stat().st_size==data["size_bytes"]
           Path("artifacts/gpt3-lot16-original-source-score-input/source_sha256.txt").write_text(
               receipt["actual_sha256"] + "\n", encoding="utf-8",
