@@ -104,8 +104,8 @@ class SourceLevelDatumHeightExtrusionShadowAuthority:
         revision_id: str,
         source_sha256: str,
         raw_levels: Sequence[Mapping[str, Any]],
-        default_floor_finish_thickness_m: float = 0.05,
-        default_ceiling_offset_m: float = 0.60,
+        default_floor_finish_thickness_m: float = 0.0,
+        default_ceiling_offset_m: float = 0.0,
     ) -> BuildingLevelDatumReceipt:
         if not raw_levels:
             receipt_id = stable_contract_id(
@@ -149,8 +149,9 @@ class SourceLevelDatumHeightExtrusionShadowAuthority:
                 next_rl = float(sorted_raw[i + 1]["elevation_reduced_level_m"])
                 f2f = round(next_rl - rl, 4)
             else:
-                # Top roof/parapet level
-                f2f = float(item.get("floor_to_floor_height_m", 3.0))
+                # Top roof/parapet level. Missing height stays 0.0; do not invent 3.0 m.
+                raw_f2f = item.get("floor_to_floor_height_m")
+                f2f = float(raw_f2f) if raw_f2f is not None else 0.0
 
             clear_h = max(0.0, f2f - ceil_offset)
             ffl = rl
