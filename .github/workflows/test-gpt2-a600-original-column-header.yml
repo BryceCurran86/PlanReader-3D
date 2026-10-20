@@ -3,11 +3,17 @@ name: TEST GPT2 Original A600 Width Height Column Authority
 on:
   pull_request:
     paths:
+      - pb_source_visibility_authority.py
       - pb_source_door_schedule_authority.py
       - tests/test_gpt2_a600_native_column_header_source_roles.py
       - .github/workflows/test-gpt2-a600-original-column-header.yml
   push:
     branches: [main]
+    paths:
+      - "pb_source_door_schedule_authority.py"
+      - "pb_source_visibility_authority.py"
+      - "tests/test_gpt2_a600_native_column_header_source_roles.py"
+      - ".github/workflows/test-gpt2-a600-original-column-header.yml"
   workflow_dispatch:
 
 jobs:
