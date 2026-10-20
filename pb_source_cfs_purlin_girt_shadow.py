@@ -53,6 +53,7 @@ STANDARD_CFS_MASS_TABLE: Dict[str, float] = {
 
 
 class CFSRole(str, Enum):
+    UNKNOWN = "UNKNOWN"
     ROOF_PURLIN = "ROOF_PURLIN"
     WALL_GIRT = "WALL_GIRT"
     EAVES_STRUT = "EAVES_STRUT"
@@ -68,7 +69,7 @@ class CFSSectionProfile(str, Enum):
 @dataclass
 class CFSMemberSpec:
     member_id: str
-    role: CFSRole = CFSRole.ROOF_PURLIN
+    role: CFSRole = CFSRole.UNKNOWN
     section_profile: CFSSectionProfile = CFSSectionProfile.Z_SECTION
     section_designation: str = ""
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
@@ -136,7 +137,7 @@ class SourceCFSPurlinGirtShadowAuthority:
         """
         clean = text.upper()
         res = {
-            "role": CFSRole.ROOF_PURLIN,
+            "role": CFSRole.UNKNOWN,
             "section_profile": CFSSectionProfile.Z_SECTION,
             "section_designation": "",
             "lap_count": 0,
@@ -152,8 +153,10 @@ class SourceCFSPurlinGirtShadowAuthority:
             res["role"] = CFSRole.EAVES_STRUT
         elif "FACIA" in clean or "FASCIA" in clean:
             res["role"] = CFSRole.FACIA_PURLIN
-        else:
+        elif "ROOF" in clean or "PURLIN" in clean:
             res["role"] = CFSRole.ROOF_PURLIN
+        else:
+            res["role"] = CFSRole.UNKNOWN
 
         # Designation
         des_match = re.search(r'\b([CZ]\d{5}|TH\d{2,3})\b', clean)
@@ -264,7 +267,7 @@ class SourceCFSPurlinGirtShadowAuthority:
                 try:
                     role = CFSRole(role_val)
                 except ValueError:
-                    role = CFSRole.ROOF_PURLIN
+                    role = CFSRole.UNKNOWN
             else:
                 role = role_val
 
