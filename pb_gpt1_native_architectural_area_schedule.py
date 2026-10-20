@@ -70,21 +70,53 @@ def _native_receipts(page, block_no: int, lines: tuple[str, ...], page_no: int):
             "".join(expected.split()).casefold()
         ):
             return None
-    # Both text and paint must exist. Neither a copied value nor an invisible
-    # text layer is sufficient. This is SOURCE-SCHEDULE authority, not a floor.
+    # Both native text and its paint must be original-source visible.
+    # A later opaque fill can hide a perfectly extractable native m² value:
+    # get_text("words") and get_texttrace() still return that hidden row.
+    # Reuse the PDF text-integrity authority's existing exact-source paint
+    # occlusion and overlap checks, never create a second geometry threshold.
+    from pb_pdf_text_integrity_authority import (
+        _intersection_ratio, _later_paint_occlusion_reasons,
+    )
+
     rect = page.get_text("blocks")[block_no]
     bx0, by0, bx1, by1 = rect[:4]
+    try:
+        bboxlog = tuple(page.get_bboxlog())
+        traces = tuple(page.get_texttrace())
+    except Exception:
+        return None
     text_runs = []
-    for trace in page.get_texttrace():
+    owned_trace_spans = []
+    for trace in traces:
         x0, y0, x1, y1 = trace["bbox"]
         if (x0 >= bx0 - 1 and y0 >= by0 - 2
                 and x1 <= bx1 + 1 and y1 <= by1 + 2):
             if trace.get("type") != 0 or trace.get("opacity") != 1.0:
                 return None
+            seqno = trace.get("seqno")
+            if (type(seqno) is not int or seqno < 0 or seqno >= len(bboxlog)
+                    or bboxlog[seqno][0] != "fill-text"):
+                return None
+            owned_trace_spans.append(trace)
             try:
                 text_runs.append("".join(chr(glyph[0]) for glyph in trace["chars"]))
             except (ValueError, TypeError, OverflowError):
                 return None
+    # Audit EACH native word, not the whole multiline trace's bounding box:
+    # a mask over one numeric token must invalidate the entire signed table.
+    for word in words:
+        contenders = [
+            span for span in owned_trace_spans
+            if _intersection_ratio(word[:4], span["bbox"]) >= 0.5
+        ]
+        if len(contenders) != 1:
+            return None
+        span = contenders[0]
+        if _later_paint_occlusion_reasons(
+            page, word[:4], span["seqno"], bboxlog
+        ):
+            return None
     painted = "".join(text_runs).replace(" ", "").casefold()
     for label_or_value in lines:
         if "".join(label_or_value.split()).casefold() not in painted:
@@ -107,6 +139,17 @@ def _page_schedule(page, page_no: int):
     if len(headings) != 1:
         return None
     heading = headings[0][1]
+    # The actual SOURCE heading must be painted and unobscured too. Merely
+    # finding AREA CALCULATIONS in extracted Unicode is not permission to
+    # issue a FIRM source schedule from invisible/overpainted title text.
+    original_heading_lines = tuple(
+        line.strip() for line in heading[4].splitlines() if line.strip()
+    )
+    if (not original_heading_lines
+            or _native_receipts(
+                page, headings[0][0], original_heading_lines, page_no
+            ) is None):
+        return None
     tables = []
     for index, block in enumerate(blocks):
         if len(block) <= 6 or block[6] != 0 or index == headings[0][0]:
