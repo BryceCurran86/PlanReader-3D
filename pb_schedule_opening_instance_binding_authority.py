@@ -885,7 +885,7 @@ class ScheduleOpeningInstanceBindingProducer:
 
         trusted_by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
         native_words: dict[str, tuple[str, str, int, int, int]] = {}
-        native_census_authenticated = True
+        native_census_authenticated = bool(published.text_observation_ids)
         for observation_id in published.text_observation_ids:
             text_result = text_integrity.resolve_text(
                 ObservationSelector(
