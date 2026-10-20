@@ -197,7 +197,7 @@ class SourceSuspendedCeilingGridShadowAuthority:
             total_hangers += hangers
 
             # Wire length = plenum depth
-            plenum_m = max(0.1, (c.slab_soffit_level_mm - c.finished_ceiling_level_mm) / 1000.0)
+            plenum_m = max(0.0, (c.slab_soffit_level_mm - c.finished_ceiling_level_mm) / 1000.0)
             wire_len_m = hangers * plenum_m
             total_wire_len_m += wire_len_m
 
