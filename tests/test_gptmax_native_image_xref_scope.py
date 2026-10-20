@@ -99,3 +99,29 @@ def test_missing_original_image_owner_is_not_an_empty_source_proof():
         "original_g17_single_image_placement_unproven"
     )
     assert result["g17_edges"][0]["same_image_pixel_lattice_candidates"] == []
+
+
+def test_reused_same_xref_at_two_distinct_placements_is_not_shared_pixel_frame():
+    """A reused PDF XObject hash cannot alias physically distinct placements."""
+    doc = fitz.open()
+    page = doc.new_page(width=220, height=120)
+    image = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 100, 100), False)
+    image.clear_with(35)
+    xref = page.insert_image(fitz.Rect(0, 0, 100, 100), pixmap=image)
+    page.insert_image(fitz.Rect(100, 0, 200, 100), xref=xref)
+    original = doc.tobytes()
+    doc.close()
+    result = _audit(
+        original, hashlib.sha256(original).hexdigest(),
+        (60.0, 40.0, 99.8, 40.0),
+        (99.0, 40.0, 130.0, 40.0),
+    )
+    edge = result["g17_edges"][0]
+    assert edge["source_native_image_xref"] == xref
+    assert edge["same_image_pixel_lattice_candidates"] == []
+    assert edge["foreign_image_or_ambiguous_lattice_candidates"] == [{
+        "w4_edge_id": "w4",
+        "reason": "different_original_image_placement_or_pixel_grid",
+    }]
+    assert not result["physical_wall_equivalence_granted"]
+    assert not result["opening_host_granted"]
