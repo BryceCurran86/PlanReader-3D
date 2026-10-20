@@ -15,6 +15,9 @@ from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
 from pb_segment_line_w4_id_intersection_shadow import (
     assess_segment_line_w4_id_intersection_shadow,
 )
+from pb_segment_w4_exact_geometry_identity_shadow import (
+    assess_segment_w4_exact_geometry_identity_shadow,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
 
@@ -131,11 +134,45 @@ def build_unhosted_end_reach_with_segment_lines_shadow(
         segment_line_raw_ids=tuple(lines.keys()),
         usable_w4_source_primitive_ids=w4_ids,
     )
+    w4_record_maps = []
+    for record in wall_scope.records:
+        identity = record.physical_identity
+        if not identity.usable:
+            continue
+        w4_record_maps.append({
+            "wall_candidate_id": record.wall_candidate_id,
+            "centerline_pts": list(record.wall_candidate.centerline_pts or ()),
+            "source_primitive_ids": list(identity.source_primitive_ids or ()),
+        })
+    geometry_id = assess_segment_w4_exact_geometry_identity_shadow(
+        physical_opening_id=physical_opening_id,
+        segment_lines_by_id=lines,
+        w4_wall_records=w4_record_maps,
+    )
     ledger = build_g17_flank_w4_end_reach_ledger(
         support, wall_scope.records, geometry, lines,
     )
     if ledger.get("host_granted") is not False:
         raise RuntimeError("end-reach ledger attempted host grant")
+    # Detect whether GPT MAX #3412 strict fragment fields are present (not required).
+    fragment_field_present = False
+    for flank in ledger.get("flanks") or ():
+        for key in (
+            "local_end_reach_candidates",
+            "remote_ancestry_only_candidates",
+            "conflicting_source_parent_candidates",
+        ):
+            for cand in flank.get(key) or ():
+                if isinstance(cand, dict) and (
+                    "owned_w4_fragment_end_reach_status" in cand
+                    or "strict_source_fragment_end_reach_candidate" in cand
+                ):
+                    fragment_field_present = True
+                    break
+            if fragment_field_present:
+                break
+        if fragment_field_present:
+            break
     return {
         "physical_opening_id": physical_opening_id,
         "first_remaining_gate": "g17_segment_line_end_reach_shadow_attached",
@@ -143,10 +180,24 @@ def build_unhosted_end_reach_with_segment_lines_shadow(
             "authenticated_segment_line_count": line_shadow[
                 "authenticated_segment_line_count"],
             "outcome_counts": line_shadow["outcome_counts"],
+            "lines_by_raw_primitive_id": {
+                k: list(v) for k, v in sorted(lines.items())
+            },
         },
         "segment_w4_id_intersection": id_gate,
+        "segment_w4_exact_geometry_identity": {
+            "first_remaining_gate": geometry_id["first_remaining_gate"],
+            "exact_match_count": geometry_id["exact_match_count"],
+            "matched_wall_candidate_ids": geometry_id["matched_wall_candidate_ids"],
+            "segment_line_count": geometry_id["segment_line_count"],
+            "w4_centerline_edge_count": geometry_id["w4_centerline_edge_count"],
+            "matches_sample": geometry_id["matches_sample"],
+            "host_granted": False,
+            "selected_wall_candidate_id": None,
+        },
         "flank_dispositions": [row["disposition"] for row in ledger.get("flanks") or ()],
         "end_reach_ledger": ledger,
+        "gptmax_3412_fragment_field_present": fragment_field_present,
         "host_granted": False,
         "production_line_assembler_bypassed": True,
         "shadow_only": True,

@@ -51,10 +51,11 @@ MISSION_LEDGER: dict[str, Any] = {
                 "axis-pair-helper-restore",
                 "batch42-raster-segment-split",
                 "digit-tail-vs-raster_segment-not-dNi0",
+                "batch43-exact-geometry-unavailable",
             ],
             "note": (
-                "batch40–42 host lineage; digit-tail hits are almost all "
-                "raster_segment not dNi0; abstain; no FIRM/host/score"
+                "batch40–43 host lineage; digit-tail abstain; exact centerline "
+                "geometry identity unavailable x6; no FIRM/host/score"
             ),
         },
     ],
