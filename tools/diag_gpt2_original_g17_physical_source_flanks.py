@@ -20,6 +20,9 @@ from pb_gpt2_g17_opening_source_band_ownership_shadow import (
     bind_original_g17_flanks_to_physical_opening_shadow,
     quarantine_overlapping_g17_physical_source_claims_shadow,
 )
+from pb_gpt2_original_g17_shared_pier_shadow import (
+    audit_gpt2_original_g17_shared_piers_shadow,
+)
 from pb_gpt2_raster_opening_parent_source_shadow import (
     recover_original_raster_opening_parent_lines_shadow,
 )
@@ -88,6 +91,11 @@ def original_physical_g17_source_flank_report(
     observed: dict[str, str] = {}
     unresolved: list[dict] = []
     physical = []
+    # Preserve every independently re-proven source owner BEFORE exclusive
+    # whole-roster quarantine. Possible real two-ended shared piers must
+    # remain as typed source-only alternatives, never an exemption to the
+    # quarantine or a W4/metric publication grant.
+    pier_source_owners = {}
     # Keep original source band geometry for the actual physically-owned
     # source members; rival or failed opening claims are removed below.
     authenticated_band_receipts: dict[str, tuple[dict, ...]] = {}
@@ -218,6 +226,7 @@ def original_physical_g17_source_flank_report(
         )
         physical.append(owned)
         if owned.status is EvidenceResolutionStatus.CORROBORATED:
+            pier_source_owners[physical_id] = (owned, source)
             if (len(bands.candidates) != 2
                     or owned.physical_opening_id != physical_id):
                 raise RuntimeError("G17 source-owned source band output identity mismatch")
@@ -227,6 +236,14 @@ def original_physical_g17_source_flank_report(
 
     reconciled = quarantine_overlapping_g17_physical_source_claims_shadow(
         tuple(physical)
+    )
+    # Reuse the original reviewed GPT MAX dual-end audit; this addressed
+    # hostless subset cannot exclude a third opening outside its roster.
+    # Peer-pier evidence is diagnostic even when exclusive physical-ink
+    # ownership remains ABSTAIN/CONFLICT.
+    shared_pier = (
+        audit_gpt2_original_g17_shared_piers_shadow(pier_source_owners)
+        if pier_source_owners else None
     )
 
     # The original source may be changed in a producer cache independently
@@ -277,6 +294,9 @@ def original_physical_g17_source_flank_report(
         ),
         "unresolved": unresolved,
         "source_owner_claims": [asdict(x) for x in reconciled],
+        "source_only_shared_pier_review": (
+            asdict(shared_pier) if shared_pier is not None else None
+        ),
         # Source-only PDF-point face/end bands. Failed/repeated physical
         # owners cannot leak a geometry receipt to downstream MAX review.
         "source_owned_flank_bands_by_physical_opening": {
