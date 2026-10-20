@@ -42,7 +42,7 @@ class FireDamperSpec:
     element_thickness_mm: float = 0.0
     sleeve_extension_mm: float = 0.0
     annular_gap_mm: float = 0.0
-    frl_rating: str = "-/120/120"
+    frl_rating: str = ""
     is_motorized: bool = False
     level_id: str = "L1"
     source_tag: str = ""
@@ -96,7 +96,7 @@ class SourceHVACPenetrationDamperShadowAuthority:
 
         # FRL
         frl_match = re.search(r"FRL\s*([-\d/]+)", clean)
-        frl = frl_match.group(1) if frl_match else "-/120/120"
+        frl = frl_match.group(1) if frl_match else ""
 
         # Dimensions: (\d+)\s*[xX]\s*(\d+) or (\d+)\s*W\s*[xX]\s*(\d+)\s*H or (\d+)\s*DIA
         if is_circ:
