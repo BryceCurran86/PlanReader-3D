@@ -97,3 +97,26 @@ def test_subpixel_change_cannot_borrow_rounded_pdf_geometry():
     assert tuple(round(v * 72 / receipt.dpi, 6) for v in pixels) == receipt.geometry
     source._raster_opening_primitive_receipts[key] = replace(receipt, pixel_geometry=pixels)
     assert source.authority().resolve_raster_opening_primitive(selector).status is EvidenceResolutionStatus.CONFLICT
+
+
+@pytest.mark.parametrize("field,value", (
+    ("source_partition_id", "foreign-original-source-partition"),
+    ("document_id", "foreign-source-document"),
+    ("revision_id", "foreign-original-revision"),
+    ("page_id", "different-original-page"),
+    ("pixel_geometry", [1.0, 2.0, 3.0, 4.0]),
+))
+def test_original_source_root_and_pixel_container_are_independent_receipt_gates(field, value):
+    """Replacing root identity must not borrow same-geometry raster source ink."""
+    source, published = _prepare(frame_lines=2)
+    selector = _selector(published, published.raster_opening_primitive_observation_ids[0])
+    original = source.authority().resolve_raster_opening_primitive(selector)
+    assert original.status is EvidenceResolutionStatus.CORROBORATED
+    key = (selector.snapshot_id, selector.observation_id)
+    receipt = source._raster_opening_primitive_receipts[key]
+    source._raster_opening_primitive_receipts[key] = replace(receipt, **{field: value})
+    damaged = source.authority().resolve_raster_opening_primitive(selector)
+    assert damaged.status is EvidenceResolutionStatus.CONFLICT
+    assert damaged.observation is None
+    source._raster_opening_primitive_receipts[key] = receipt
+    assert source.authority().resolve_raster_opening_primitive(selector) == original
