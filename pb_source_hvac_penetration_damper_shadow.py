@@ -39,8 +39,8 @@ class FireDamperSpec:
     location: Tuple[float, float]
     width_mm: float = 0.0
     height_mm: float = 0.0
-    element_thickness_mm: float = 150.0
-    sleeve_extension_mm: float = 150.0
+    element_thickness_mm: float = 0.0
+    sleeve_extension_mm: float = 0.0
     annular_gap_mm: float = 25.0
     frl_rating: str = "-/120/120"
     is_motorized: bool = False
