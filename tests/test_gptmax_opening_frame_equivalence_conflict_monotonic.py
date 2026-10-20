@@ -165,6 +165,13 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
             "opening_host_frame_aligned_fragment_distinctness_unproven"
             in row.reason_codes for row in withheld
         )
+        # A newly obtained selector-only authority cannot return the prior
+        # positive from cache after a same-source W4 contradiction.
+        assert all(
+            producer.authority().resolve(prior.evidence.selector).status
+            is Status.ABSTAINED
+            for prior in baseline
+        )
         # Conflict cannot amend source-bounded commercial opening areas.
         assert _publish(producer, tuple(reversed(bound))) == tuple(reversed(withheld))
 
