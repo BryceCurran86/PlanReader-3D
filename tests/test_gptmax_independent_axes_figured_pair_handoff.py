@@ -27,7 +27,7 @@ def _independent_source_axes():
         width_m=1.2,
         height_m=1.8,
         geometry_complete=True,
-        evidence_ids=["figured", "binding-3", "frame-3",
+        evidence_ids=["figured", "figured-word-3", "binding-3", "frame-3",
                       "original-width:physical-3", "original-height:physical-3"],
     )
     # Original two-number label is corroborated only as an unordered pair.
@@ -58,9 +58,9 @@ def test_unordered_label_plus_independent_producer_axes_is_gpt1_candidate_only()
 
 
 @pytest.mark.parametrize("claimed_receipts", [
-    ["figured", "binding-3", "frame-3"],
-    ["figured", "binding-3", "frame-3", "original-width:physical-3"],
-    ["figured", "binding-3", "frame-3", "original-height:physical-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3", "original-width:physical-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3", "original-height:physical-3"],
     None,
     "figured original-width:physical-3 original-height:physical-3",
 ])
@@ -350,7 +350,7 @@ def test_unowned_figured_area_cannot_be_sourced_from_a_different_physical_openin
     ["figured", "frame-3"],
     ["figured", "frame-3", "foreign-binding"],
     ["figured", "binding-3 ", "frame-3"],
-    ["figured", "binding-3", "frame-3", "binding-3"],
+    ["figured", "figured-word-3", "binding-3", "frame-3", "binding-3"],
 ])
 def test_area_and_3d_review_require_exact_owned_host_binding_evidence(present):
     rows, canonical = fixture()
@@ -370,7 +370,7 @@ def test_area_and_3d_review_require_exact_owned_host_binding_evidence(present):
 
 
 @pytest.mark.parametrize("present", [
-    ["figured", "binding-3"],
+    ["figured", "figured-word-3", "binding-3"],
     ["figured", "binding-3", "foreign-frame"],
 ])
 def test_existing_frame_without_original_evidence_cannot_validate_area_or_3d(present):
@@ -392,7 +392,7 @@ def test_genuine_frame_absent_figured_area_requires_only_own_host_receipt():
     rows, canonical = fixture()
     rows[2]["frame_record"] = None
     canonical[2]["host_frame_record_id"] = None
-    canonical[2]["evidence_ids"] = ["figured", "binding-3"]
+    canonical[2]["evidence_ids"] = ["figured", "figured-word-3", "binding-3"]
     record = run(rows, canonical)["opening_decisions"][2]
     assert record["original_host_binding_receipt_bound"]
     assert not record["original_host_frame_receipt_bound"]
