@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from pb_opening_host_frame_authority import _pair_lookup
+from pb_opening_host_frame_authority import (
+    _pair_lookup, _source_equivalence_group_overlap_members,
+)
 from pb_physical_wall_identity import PhysicalEquivalenceClass as Class
 
 
@@ -208,6 +210,66 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
         assert _publish(producer, tuple(reversed(bound))) == tuple(reversed(withheld))
 
     assert tuple(scope.equivalence.pair_classifications) == original_pairs
+
+
+def test_overlapping_original_w4_groups_unsafe_regardless_of_order():
+    groups = (("host", "first"), ("host", "second"))
+    for order in (groups, tuple(reversed(groups))):
+        source = SimpleNamespace(equivalence_groups=order)
+        assert _source_equivalence_group_overlap_members(source) == frozenset(
+            {"host", "first", "second"}
+        )
+
+
+def test_duplicate_w4_group_member_not_two_independent_witnesses():
+    source = SimpleNamespace(equivalence_groups=(("host", "host"),))
+    assert _source_equivalence_group_overlap_members(source) == frozenset(
+        {"host"}
+    )
+    positive = SimpleNamespace(
+        equivalence_groups=(("host", "first"), ("host", "first")),
+    )
+    assert not _source_equivalence_group_overlap_members(positive)
+
+
+def test_single_member_raster_frame_vetoes_source_group_overlap():
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(
+            ("wall:host", "other-source:a"),
+            ("wall:host", "other-source:b"),
+        ),
+    )
+    assert _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    ) is None
+
+
+def test_unrelated_source_group_overlap_does_not_veto_real_raster_frame():
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(
+            ("unrelated:a", "unrelated:b"),
+            ("unrelated:a", "unrelated:c"),
+        ),
+    )
+    accepted = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    )
+    assert accepted is not None
+    assert accepted.candidate_ids == ("wall:host",)
 
 
 @pytest.mark.parametrize("unproved_class", (
