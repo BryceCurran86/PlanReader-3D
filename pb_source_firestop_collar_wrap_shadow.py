@@ -48,7 +48,7 @@ class FirestopDeviceSpec:
     pipe_material: PipeMaterialType = PipeMaterialType.PVC_DWV
     orientation: PenetrationOrientation = PenetrationOrientation.FLOOR_PENETRATION
     center_point: Tuple[float, float] = (0.0, 0.0)
-    nominal_pipe_dia_mm: float = 100.0
+    nominal_pipe_dia_mm: float = 0.0
     fire_rating_hours: int = 2
     collar_height_mm: float = 60.0
     level_id: str = "L01"
@@ -92,7 +92,7 @@ class SourceFirestopCollarWrapShadowAuthority:
             "device_type": FirestopDeviceType.CAST_IN_COLLAR,
             "pipe_material": PipeMaterialType.PVC_DWV,
             "orientation": PenetrationOrientation.FLOOR_PENETRATION,
-            "nominal_pipe_dia_mm": 100.0,
+            "nominal_pipe_dia_mm": 0.0,
             "fire_rating_hours": 2,
         }
 

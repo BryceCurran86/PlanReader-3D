@@ -42,6 +42,11 @@ def test_firestop_callout_parsing():
     assert parsed3["nominal_pipe_dia_mm"] == 50.0
     assert parsed3["fire_rating_hours"] == 2
 
+    omitted = SourceFirestopCollarWrapShadowAuthority.parse_callout("FIRE COLLAR")
+    assert omitted["nominal_pipe_dia_mm"] == 0.0
+    omitted_spec = FirestopDeviceSpec(device_id="FS-OMIT")
+    assert omitted_spec.nominal_pipe_dia_mm == 0.0
+
 
 def test_firestop_snapping():
     pt = (301.2, 598.9)
