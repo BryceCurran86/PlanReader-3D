@@ -115,6 +115,12 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         )
         self.assertEqual(res.quantities.total_downpipe_length_m, 0.0)
 
+    def test_omitted_scupper_size_does_not_invent_overflow_opening(self):
+        scupper = OverflowScupperSpec(scupper_id="SC-UNKNOWN", location=(0.0, 0.0))
+        self.assertEqual(scupper.width_mm, 0.0)
+        self.assertEqual(scupper.height_mm, 0.0)
+        self.assertEqual(scupper.freeboard_mm, 0.0)
+
     def test_invariants_and_safety(self):
         res = SourceRoofDrainageGutterDownpipeShadowAuthority.evaluate_roof_drainage([], [], [], [])
         self.assertEqual(res.status, "CANDIDATE")

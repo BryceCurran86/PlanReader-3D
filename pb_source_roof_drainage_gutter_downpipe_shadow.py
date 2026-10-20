@@ -64,9 +64,9 @@ class DownpipeSpec:
 class OverflowScupperSpec:
     scupper_id: str
     location: Tuple[float, float]
-    width_mm: float = 300.0
-    height_mm: float = 100.0
-    freeboard_mm: float = 50.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
+    freeboard_mm: float = 0.0
     level_id: str = "ROOF"
 
 
