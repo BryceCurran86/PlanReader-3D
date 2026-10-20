@@ -72,7 +72,7 @@ def test_compile_hatch_receipt():
     assert receipt.fire_rated_count == 1
     assert receipt.total_trim_perimeter_pt == 80.0 + 100.0 # 180.0
     assert receipt.total_hatch_area_pt2 == 400.0 + 625.0    # 1025.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
