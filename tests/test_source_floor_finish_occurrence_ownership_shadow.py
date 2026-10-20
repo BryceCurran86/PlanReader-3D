@@ -328,3 +328,28 @@ def test_input_no_mutation():
     assert poly == poly_copy
     assert mark == mark_copy
     assert doorway == doorway_copy
+
+
+def test_unaligned_doorway_threshold_not_authenticated():
+    """Doorway threshold distant from the room polygon boundary must not authenticate transition."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark(
+        occurrence_id="OCC_FT2_PWD",
+        page_id="page_11",
+        material_code="FT2",
+        mark_center_pt=(150.0, 200.0),
+    )
+    # Threshold 400 pt away from room polygon
+    distant_doorway = SourceDoorwayThreshold("DOOR_DISTANT", (500.0, 500.0), (550.0, 500.0))
+
+    sel = _selector("ROOM_PWD", "FT2")
+    res = evaluate_source_floor_finish_ownership_shadow(
+        sel,
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[distant_doorway],
+    )
+
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False
