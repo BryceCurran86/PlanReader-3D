@@ -226,6 +226,26 @@ def require_signed_v2_family_trade_integrity(
                         "mapped tiling requires original source-signed tile "
                         "floor finish material semantics and exact physical floor identity"
                     )
+            if family == "floor_finish_area" and trade == "flooring" and _field(quantity, "abstained") is False:
+                # The real source finish issuer signs the same SINGLE
+                # canonical physical floor for tile, vinyl and epoxy.
+                # A mapped flooring trade must not alias that signed floor
+                # to another physical floor, even with a compatible unit.
+                # This is a negative identity veto, not source material
+                # authentication or a new benchmark-identity crosswalk.
+                finish_key = _field(quantity, "semantic_key")
+                parts = finish_key.split(":") if type(finish_key) is str else ()
+                if (
+                    len(parts) != 4
+                    or parts[0] != "floor_finish_area"
+                    or any(not part or part != part.strip() for part in parts)
+                    or len(refs) != 1
+                    or parts[1] != refs[0]
+                ):
+                    raise ValueError(
+                        "mapped flooring source physical identity disagrees "
+                        "with exact one original floor finish source member"
+                    )
             # The higher-level V1 signed receipt verifier guarantees a unit
             # exists. A missing unit in source-neutral helper-only test data
             # is left to that gate; a PRESENT incompatible source-owned unit
