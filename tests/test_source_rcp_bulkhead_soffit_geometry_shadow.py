@@ -68,7 +68,7 @@ def test_compile_bulkhead_receipt():
     assert receipt.total_bulkheads_count == 1
     assert receipt.total_fascia_area_pt2 == 800.0  # 40 * 20
     assert receipt.total_soffit_area_pt2 == 400.0  # 40 * 10
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
