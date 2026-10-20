@@ -38,7 +38,7 @@ class OperableSashSpec:
     width_mm: float
     height_mm: float
     opening_angle_deg: float = 0.0
-    max_projection_mm: float = 250.0
+    max_projection_mm: float = 0.0
     has_insect_screen: bool = False
     level_id: str = "L1"
     source_annotation: str = ""
