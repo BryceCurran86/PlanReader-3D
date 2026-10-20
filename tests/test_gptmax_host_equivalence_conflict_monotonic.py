@@ -112,6 +112,27 @@ def test_explicit_distinct_against_same_group_never_recovers_a_host(issued):
         assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
 
 
+@pytest.mark.parametrize("unproved_class", (
+    UNKNOWN.value, "malformed_source_class", None, [],
+))
+def test_same_source_group_with_ambiguous_or_malformed_pair_blocks_host(
+    unproved_class,
+):
+    left = _record("wall:left", start=10.0, end=40.0)
+    right = _record("wall:right", start=10.0, end=40.0)
+    source = _source_equivalence(
+        (("wall:left", "wall:right", unproved_class),),
+        groups=(("wall:left", "wall:right"),),
+    )
+    assert _pair_lookup(source) == {("wall:left", "wall:right"): UNKNOWN}
+    status, normalized, reasons = _normalize_role_candidates(
+        ((0.0, left), (5.0, right)), source, axis_tol=0.8,
+    )
+    assert status is Status.CONFLICT
+    assert normalized == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
 def test_same_group_needs_positive_same_class_to_collapse_local_role():
     left = _record("wall_left", start=10.0, end=40.0)
     right = _record("wall_right", start=10.0, end=40.0)
@@ -292,14 +313,19 @@ def _original_lineage_resolve(observations, records, kind, equivalence):
 
 
 @pytest.mark.parametrize("kind", ("gap", "two_face"))
-def test_actual_source_lineage_hosts_reject_group_pair_contradiction(kind):
+@pytest.mark.parametrize("unproved_class", (
+    DISTINCT.value, UNKNOWN.value, "malformed_source_class",
+))
+def test_actual_source_lineage_hosts_reject_group_pair_contradiction(
+    kind, unproved_class,
+):
     observations, records, mode = _original_lineage_test_case(kind)
     left, right = records[:2]
     valid = _source_equivalence(())
     first = _original_lineage_resolve(observations, records, mode, valid)
     assert first.status is Status.CORROBORATED and len(first.bands) == 1
     relation = (
-        (left.wall_candidate_id, right.wall_candidate_id, DISTINCT.value),
+        (left.wall_candidate_id, right.wall_candidate_id, unproved_class),
     )
     contradictory = _source_equivalence(
         relation,
