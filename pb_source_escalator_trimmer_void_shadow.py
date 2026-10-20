@@ -21,6 +21,7 @@ SNAP_TOLERANCE_PT: float = 2.5
 
 
 class VerticalTransportationType(str, Enum):
+    UNKNOWN = "UNKNOWN"
     COMMERCIAL_ESCALATOR_30_DEG = "COMMERCIAL_ESCALATOR_30_DEG"
     PUBLIC_TRANSIT_ESCALATOR_35_DEG = "PUBLIC_TRANSIT_ESCALATOR_35_DEG"
     HORIZONTAL_MOVING_WALKWAY = "HORIZONTAL_MOVING_WALKWAY"
@@ -30,13 +31,13 @@ class VerticalTransportationType(str, Enum):
 @dataclass
 class EscalatorVoidSpec:
     void_id: str
-    unit_type: VerticalTransportationType = VerticalTransportationType.COMMERCIAL_ESCALATOR_30_DEG
+    unit_type: VerticalTransportationType = VerticalTransportationType.UNKNOWN
     boundary_polygon: List[Tuple[float, float]] = field(default_factory=list)
-    vertical_rise_m: float = 4.5
-    incline_angle_deg: float = 30.0
-    step_pallet_width_mm: float = 1000.0
-    has_smoke_baffle: bool = True
-    smoke_baffle_depth_mm: float = 500.0
+    vertical_rise_m: float = 0.0
+    incline_angle_deg: float = 0.0
+    step_pallet_width_mm: float = 0.0
+    has_smoke_baffle: bool = False
+    smoke_baffle_depth_mm: float = 0.0
     level_id: str = "L01"
     source_callout: str = ""
 
@@ -76,12 +77,12 @@ class SourceEscalatorTrimmerVoidShadowAuthority:
         """
         clean = text.upper()
         res = {
-            "unit_type": VerticalTransportationType.COMMERCIAL_ESCALATOR_30_DEG,
-            "vertical_rise_m": 4.5,
-            "incline_angle_deg": 30.0,
-            "step_pallet_width_mm": 1000.0,
+            "unit_type": VerticalTransportationType.UNKNOWN,
+            "vertical_rise_m": 0.0,
+            "incline_angle_deg": 0.0,
+            "step_pallet_width_mm": 0.0,
             "has_smoke_baffle": False,
-            "smoke_baffle_depth_mm": 500.0,
+            "smoke_baffle_depth_mm": 0.0,
         }
 
         # Unit Typology & Incline
@@ -95,9 +96,17 @@ class SourceEscalatorTrimmerVoidShadowAuthority:
         elif "35" in clean or "TRANSIT" in clean or "METRO" in clean:
             res["unit_type"] = VerticalTransportationType.PUBLIC_TRANSIT_ESCALATOR_35_DEG
             res["incline_angle_deg"] = 35.0
-        else:
+        elif "ESCALATOR" in clean or "COMMERCIAL" in clean:
             res["unit_type"] = VerticalTransportationType.COMMERCIAL_ESCALATOR_30_DEG
-            res["incline_angle_deg"] = 30.0
+        else:
+            res["unit_type"] = VerticalTransportationType.UNKNOWN
+
+        deg_match = re.search(r'(\d+)\s*DEG', clean)
+        if deg_match:
+            try:
+                res["incline_angle_deg"] = float(deg_match.group(1))
+            except ValueError:
+                pass
 
         # Vertical Rise: RISE=4.5m, H=6.0m, 4500mm RISE
         rise_match = re.search(r'(?:RISE\s*[=:]?\s*|H\s*[=:]?\s*)(\d+(?:\.\d+)?)\s*M\b', clean)
@@ -134,7 +143,7 @@ class SourceEscalatorTrimmerVoidShadowAuthority:
                 try:
                     res["smoke_baffle_depth_mm"] = float(baf_m.group(1))
                 except ValueError:
-                    res["smoke_baffle_depth_mm"] = 500.0
+                    res["smoke_baffle_depth_mm"] = 0.0
 
         return res
 
@@ -203,7 +212,7 @@ class SourceEscalatorTrimmerVoidShadowAuthority:
                 try:
                     utype = VerticalTransportationType(utype_val)
                 except ValueError:
-                    utype = VerticalTransportationType.COMMERCIAL_ESCALATOR_30_DEG
+                    utype = VerticalTransportationType.UNKNOWN
             else:
                 utype = utype_val
 

@@ -38,6 +38,22 @@ def test_escalator_callout_parsing():
     )
     assert parsed3["unit_type"] == VerticalTransportationType.INCLINED_MOVING_WALKWAY_12_DEG
     assert parsed3["incline_angle_deg"] == 12.0
+    assert parsed3["vertical_rise_m"] == 0.0
+    assert parsed3["step_pallet_width_mm"] == 0.0
+    assert parsed3["smoke_baffle_depth_mm"] == 0.0
+
+    omitted = SourceEscalatorTrimmerVoidShadowAuthority.parse_callout("VOID")
+    assert omitted["unit_type"] == VerticalTransportationType.UNKNOWN
+    assert omitted["vertical_rise_m"] == 0.0
+    assert omitted["incline_angle_deg"] == 0.0
+    assert omitted["step_pallet_width_mm"] == 0.0
+    assert omitted["smoke_baffle_depth_mm"] == 0.0
+    omitted_spec = EscalatorVoidSpec(void_id="ESC-OMIT")
+    assert omitted_spec.vertical_rise_m == 0.0
+    assert omitted_spec.incline_angle_deg == 0.0
+    assert omitted_spec.step_pallet_width_mm == 0.0
+    assert omitted_spec.has_smoke_baffle is False
+    assert omitted_spec.smoke_baffle_depth_mm == 0.0
 
 
 def test_escalator_snapping():
