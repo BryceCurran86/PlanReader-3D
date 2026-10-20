@@ -115,7 +115,7 @@ class SourceCeilingAccessHatchShadowAuthority:
         width_pt: float = 0.0,
         length_pt: float = 0.0,
         fire_rating: AccessHatchFireRating = AccessHatchFireRating.NON_RATED,
-        panel_type: str = "PLASTERBOARD_INFILL_FLUSH",
+        panel_type: str = "",
         min_code_dimension_pt: Optional[float] = None,
     ) -> CeilingAccessHatchRecord:
         area = width_pt * length_pt

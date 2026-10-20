@@ -55,6 +55,7 @@ def test_omitted_hatch_size_does_not_invent_typical_opening():
     assert h.length_pt == 0.0
     assert h.area_pt2 == 0.0
     assert h.is_code_compliant is False
+    assert h.panel_type == ""
 
 
 def test_compile_hatch_receipt():
