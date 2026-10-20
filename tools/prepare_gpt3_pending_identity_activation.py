@@ -19,6 +19,9 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 from tools.gpt3_atomic_pending_activation_pair import (
     preflight_new_activation_pair, source_input_snapshot,
     publish_new_activation_pair,
@@ -523,6 +526,14 @@ def build_activation(
 
     # Reparse to enforce identity-map schema and uniqueness before publish.
     identity_map_from_dict(output)
+    # An original physical WINDOW must never become a benchmark DOOR through
+    # an independently prepared source identity activation. This is checked
+    # before the CLI's atomic create-only map-and-receipt publisher runs.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
