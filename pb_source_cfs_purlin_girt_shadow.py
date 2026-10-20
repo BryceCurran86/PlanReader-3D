@@ -70,12 +70,12 @@ class CFSMemberSpec:
     member_id: str
     role: CFSRole = CFSRole.ROOF_PURLIN
     section_profile: CFSSectionProfile = CFSSectionProfile.Z_SECTION
-    section_designation: str = "Z20019"
+    section_designation: str = ""
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
     lap_count: int = 0
     lap_length_mm: float = 0.0
     bridging_rows_count: int = 0
-    linear_mass_kg_m: float = 4.54
+    linear_mass_kg_m: float = 0.0
     level_id: str = "ROOF"
     source_callout: str = ""
 
@@ -123,7 +123,7 @@ class SourceCFSPurlinGirtShadowAuthority:
             mass = girth_m * (thickness / 1000.0) * 7850.0
             return round(mass, 2)
 
-        return 4.54  # Default fallback
+        return 0.0
 
     @classmethod
     def parse_callout(cls, text: str) -> Dict[str, any]:
@@ -138,11 +138,11 @@ class SourceCFSPurlinGirtShadowAuthority:
         res = {
             "role": CFSRole.ROOF_PURLIN,
             "section_profile": CFSSectionProfile.Z_SECTION,
-            "section_designation": "Z20019",
+            "section_designation": "",
             "lap_count": 0,
             "lap_length_mm": 0.0,
             "bridging_rows_count": 0,
-            "linear_mass_kg_m": 4.54,
+            "linear_mass_kg_m": 0.0,
         }
 
         # Role
@@ -173,8 +173,7 @@ class SourceCFSPurlinGirtShadowAuthority:
             res["section_designation"] = "C20019"
             res["section_profile"] = CFSSectionProfile.C_SECTION
         else:
-            res["section_designation"] = "Z20019"
-            res["section_profile"] = CFSSectionProfile.Z_SECTION
+            res["section_designation"] = ""
 
         res["linear_mass_kg_m"] = cls.get_linear_mass(res["section_designation"])
 
