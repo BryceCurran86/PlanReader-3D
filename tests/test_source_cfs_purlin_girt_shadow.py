@@ -44,6 +44,10 @@ def test_cfs_callout_parsing():
     assert parsed3["bridging_rows_count"] == 2
     assert parsed3["linear_mass_kg_m"] == 5.70
 
+    omitted = SourceCFSPurlinGirtShadowAuthority.parse_callout("PURLIN")
+    assert omitted["section_designation"] == ""
+    assert omitted["linear_mass_kg_m"] == 0.0
+
 
 def test_cfs_snapping():
     pt = (301.2, 598.9)
@@ -88,3 +92,13 @@ def test_cfs_evaluation_quantities():
     assert res.status == "CANDIDATE"
     assert res.commercial_projection_allowed is False
     assert res.takeoff_eligible is False
+
+    omitted_spec = CFSMemberSpec(member_id="P-OMIT")
+    assert omitted_spec.section_designation == ""
+    assert omitted_spec.linear_mass_kg_m == 0.0
+    omitted_res = SourceCFSPurlinGirtShadowAuthority.evaluate_members(
+        [{"member_id": "P-OMIT", "centerline_points": [(0.0, 0.0), (12000.0, 0.0)], "callout": "PURLIN"}],
+        scale_ratio=0.001,
+    )
+    assert omitted_res.members[0].section_designation == ""
+    assert omitted_res.quantities.total_mass_kg == 0.0
