@@ -44,6 +44,7 @@ class TestSourceAcousticWallLiningShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.target_rw, 0)
         self.assertEqual(omitted.wall_height_m, 0.0)
+        self.assertEqual(omitted.air_gap_mm, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
