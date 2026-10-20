@@ -220,7 +220,7 @@ def test_original_hostless_roster_conflicting_duplicate_is_not_silently_deduplic
         cli.original_physical_g17_source_flank_report(
             _SOURCE, expected_sha256=_SHA, page_id="3",
         )
-    assert state["owned_calls"] == 1
+    assert state["owned_calls"] == 0
 
 
 def test_empty_hostless_original_page_scope_never_claims_completed_roster(monkeypatch):
