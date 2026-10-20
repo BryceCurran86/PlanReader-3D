@@ -530,6 +530,22 @@ class OpeningHostBindingProducer:
         if not _selector_matches_opening(host_universe_selector, opening):
             return _blocked_binding("opening_host_scope_mismatch")
 
+        # The identity and host selector now match the SAME original root.
+        # A later blocked W4 reproof must invalidate any prior positive on
+        # this exact physical opening; never evict a foreign-source entry.
+        key = _binding_key(
+            opening.document_id, opening.revision_id,
+            opening.source_sha256, opening.snapshot_id, opening.page_id,
+            host_universe_selector.decision_scope_id, opening.record_id,
+        )
+
+        def _blocked_original_host_reproof(
+            *reasons: str,
+            status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        ) -> OpeningHostBindingResult:
+            self._results.pop(key, None)
+            return _blocked_binding(*reasons, status=status)
+
         universe = self._universe.resolve_scope(host_universe_selector)
         host_records: tuple[PhysicalWallCandidateRecord, ...]
         host_equivalence: PhysicalWallEquivalenceResolution
@@ -553,7 +569,7 @@ class OpeningHostBindingProducer:
                     if universe.status is EvidenceResolutionStatus.CONFLICT
                     else EvidenceResolutionStatus.ABSTAINED
                 )
-                return _blocked_binding(
+                return _blocked_original_host_reproof(
                     "complete_authenticated_host_wall_universe_required",
                     *universe.reason_codes,
                     "authenticated_opening_geometry_unavailable",
@@ -603,7 +619,7 @@ class OpeningHostBindingProducer:
                     )
                     else EvidenceResolutionStatus.ABSTAINED
                 )
-                return _blocked_binding(
+                return _blocked_original_host_reproof(
                     "complete_authenticated_host_wall_universe_required",
                     *universe.reason_codes,
                     *local_reasons,
@@ -643,7 +659,7 @@ class OpeningHostBindingProducer:
             if geometry is None:
                 geometry = _opening_geometry(self._opening, opening)
             if geometry is None:
-                return _blocked_binding("authenticated_opening_geometry_unavailable")
+                return _blocked_original_host_reproof("authenticated_opening_geometry_unavailable")
             band_resolution = _resolve_host_bands(
                 host_records,
                 geometry,
@@ -778,15 +794,15 @@ class OpeningHostBindingProducer:
                                             OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
                                         )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
-            return _blocked_binding(
+            return _blocked_original_host_reproof(
                 *band_resolution.reason_codes,
                 status=band_resolution.status,
             )
         bands = band_resolution.bands
         if not bands:
-            return _blocked_binding("no_authenticated_host_wall_band", *band_resolution.reason_codes)
+            return _blocked_original_host_reproof("no_authenticated_host_wall_band", *band_resolution.reason_codes)
         if len(bands) != 1:
-            return _blocked_binding(
+            return _blocked_original_host_reproof(
                 "multiple_authenticated_host_wall_bands",
                 status=EvidenceResolutionStatus.CONFLICT,
             )
@@ -847,15 +863,6 @@ class OpeningHostBindingProducer:
                 *band_resolution.reason_codes,
             ),
             record=record,
-        )
-        key = _binding_key(
-            opening.document_id,
-            opening.revision_id,
-            opening.source_sha256,
-            opening.snapshot_id,
-            opening.page_id,
-            host_universe_selector.decision_scope_id,
-            opening.record_id,
         )
         existing = self._results.get(key)
         if existing is not None and existing != result:
