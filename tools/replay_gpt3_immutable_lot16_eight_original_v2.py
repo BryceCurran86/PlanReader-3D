@@ -8,7 +8,7 @@ the owner's private PDF or issue any new construction quantity.
 from __future__ import annotations
 
 import argparse
-from hashlib import sha256
+from hashlib import sha1, sha256
 import json
 from pathlib import Path
 import subprocess
@@ -34,6 +34,12 @@ SOURCE_SHA256 = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a6584
 ORIGINAL_EIGHT_FINGERPRINT = "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb"
 PROJECT = "au_qld_lot16_power"
 ORIGINAL_DENOMINATOR = 27
+# The immutable, independently pre-certified archive map's EXACT Git blob
+# identity, read from the original repository blob (not frozen gold/score).
+# Git hashes b"blob <byte-length>\0" plus the raw file bytes with SHA-1.
+# This guard is specifically for the archived historical diagnostic and
+# MUST NOT be reused to authorize any new production or source binding.
+ORIGINAL_MAP_GIT_BLOB_SHA1 = "e4cfa9a1270c608d0683ec2cba051b78b12dd573"
 
 
 def _load_json(path: Path):
@@ -49,6 +55,11 @@ def _load_json(path: Path):
 
 def _checksum(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
+
+
+def _git_blob_sha1(path: Path) -> str:
+    raw = path.read_bytes()
+    return sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
 
 
 def replay_archived_original_eight_v2_baseline() -> dict:
@@ -91,6 +102,11 @@ def replay_archived_original_eight_v2_baseline() -> dict:
         or len(identity_map["bindings"]) != 8
     ):
         raise ValueError("historical original independently certified V2 identity map unavailable")
+    # A map with eight entries but different source→target memberships is
+    # NOT the original independently certified identity map. The exact byte
+    # check must precede opening the unchanged frozen scorer process.
+    if _git_blob_sha1(ORIGINAL_MAP) != ORIGINAL_MAP_GIT_BLOB_SHA1:
+        raise ValueError("historical original identity map bytes differ from pinned archive")
 
     # Invoke the ACTUAL frozen evaluator and exact physical mapper by process
     # boundary. It alone owns benchmark identifiers and expected quantities.
@@ -133,6 +149,7 @@ def replay_archived_original_eight_v2_baseline() -> dict:
         "original_eight_fingerprint": ORIGINAL_EIGHT_FINGERPRINT,
         "source_customer_eight_verified": True,
         "historical_identity_binding_count": 8,
+        "historical_identity_map_git_blob_sha1": ORIGINAL_MAP_GIT_BLOB_SHA1,
         "original_input_sha256s": {
             path.relative_to(ROOT).as_posix(): digest
             for path, digest in zip(inputs, before)
