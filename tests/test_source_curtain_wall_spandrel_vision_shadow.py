@@ -49,6 +49,22 @@ def test_clamped_bounds():
     assert bay.spandrel_area_pt2 == 0.0
 
 
+def test_omitted_bay_geometry_does_not_invent_typical_heights():
+    authority = SourceCurtainWallSpandrelVisionShadowAuthority()
+
+    bay = authority.compute_curtain_wall_bay(
+        bay_id="BAY_UNKNOWN",
+        wall_id="CW_UNKNOWN",
+    )
+
+    assert bay.bay_width_pt == 0.0
+    assert bay.story_height_pt == 0.0
+    assert bay.vision_sill_height_pt == 0.0
+    assert bay.vision_head_height_pt == 0.0
+    assert bay.vision_area_pt2 == 0.0
+    assert bay.spandrel_glass_finish == ""
+
+
 def test_compile_curtain_wall_receipt():
     authority = SourceCurtainWallSpandrelVisionShadowAuthority()
 
