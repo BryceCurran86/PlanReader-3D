@@ -43,7 +43,7 @@ class SkylightVentSpec:
     center_point: Tuple[float, float] = (0.0, 0.0)
     opening_width_mm: float = 0.0
     opening_length_mm: float = 0.0
-    curb_height_mm: float = 200.0
+    curb_height_mm: float = 0.0
     has_safety_mesh: bool = True
     discharge_coefficient_cv: float = 0.65
     level_id: str = "ROOF"
@@ -89,7 +89,7 @@ class SourceSkylightSmokeVentShadowAuthority:
             "curb_type": CurbConstructionType.INSULATED_STEEL_UPSTAND,
             "opening_width_mm": 0.0,
             "opening_length_mm": 0.0,
-            "curb_height_mm": 200.0,
+            "curb_height_mm": 0.0,
             "has_safety_mesh": False,
             "discharge_coefficient_cv": DEFAULT_CV_DISCHARGE,
         }
@@ -132,6 +132,11 @@ class SourceSkylightSmokeVentShadowAuthority:
             curb_match = re.search(r'\bH\s*[=:]\s*(\d{2,3})\b', clean)
         if not curb_match:
             curb_match = re.search(r'(\d{2,3})\s*MM\s*(?:CURB|UPSTAND|KERB)', clean)
+        if not curb_match:
+            curb_match = re.search(
+                r'(\d{2,3})\s*MM(?:\s+\w+){0,4}\s*(?:CURB|UPSTAND|KERB)',
+                clean,
+            )
         if curb_match:
             try:
                 ch = float(curb_match.group(1))
