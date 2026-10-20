@@ -3,8 +3,6 @@ from copy import deepcopy
 
 import pytest
 
-from pb_migration_contracts import EvidenceResolutionStatus
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import assess_gpt1_opening_candidates
 
 ROOT = {
@@ -159,7 +157,7 @@ def test_existing_signed_area_is_not_republished_as_new_candidate():
     rows,c=fixture()
     c[2].update(width_record_id="width",height_record_id="height",
                 width_m=1.2,height_m=1.8,geometry_complete=True,
-                evidence_ids=["figured","width","height"])
+                evidence_ids=["figured","binding-3","frame-3","width","height"])
     rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"]=True
     rows[2]["quantity_id"]="previously-signed-quantity"
     assert not run(rows,c)["gpt1_new_handoff_candidates"]
