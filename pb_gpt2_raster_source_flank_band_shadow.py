@@ -170,6 +170,25 @@ def _one_end_candidates(end, faces):
     return tuple(unique[k] for k in sorted(unique))
 
 
+def reconstruct_original_raster_source_flank_bands_shadow(
+    source, *, revision_id: str, snapshot_id: str,
+    page_id: str, required_parent_ids: Sequence[str],
+) -> RasterSourceFlankBandResult:
+    """Actual trusted-source entrypoint; do not accept caller-made line records.
+
+    A real original SourceVisibilityProducer must reauthenticate every source
+    parent through its SourceVisibilityAuthority. Geometry remains shadow-only.
+    """
+    from pb_gpt2_raster_opening_parent_source_shadow import (
+        recover_original_raster_opening_parent_lines_shadow,
+    )
+    handoff = recover_original_raster_opening_parent_lines_shadow(
+        source, revision_id=revision_id, snapshot_id=snapshot_id,
+        page_id=page_id, required_parent_ids=required_parent_ids,
+    )
+    return reconstruct_raster_source_flank_bands_shadow(handoff)
+
+
 def reconstruct_raster_source_flank_bands_shadow(
     source: RasterOpeningParentSourceHandoff,
 ) -> RasterSourceFlankBandResult:
