@@ -200,7 +200,6 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
     assert tuple(scope.equivalence.pair_classifications) == original_pairs
 
 
-@pytest.mark.parametrize("bad_source_class", (None, {}, ["not_a_source_class"], 1))
 def test_single_member_shortcut_rejects_same_group_vs_distinct_pair():
     """A contradictory W4 issuer cannot mint frame via the raster shortcut."""
     from dataclasses import replace as dc_replace
@@ -310,6 +309,7 @@ def test_source_same_group_explicit_distinct_aligned_rival_blocks_frame(monkeypa
     )
 
 
+@pytest.mark.parametrize("bad_source_class", (None, {}, ["not_a_source_class"], 1))
 def test_malformed_source_pair_class_cannot_restore_distinctness(bad_source_class):
     """A malformed issuer value remains ambiguous even after replay DISTINCT."""
     rows = (
