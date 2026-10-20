@@ -35,7 +35,7 @@ class TimberRoofTrussSpec:
     layout_line: List[Tuple[float, float]]
     span_mm: float
     pitch_deg: float = 0.0
-    eaves_overhang_mm: float = 600.0
+    eaves_overhang_mm: float = 0.0
     spacing_centers_mm: float = 900.0
     count: int = 1
     level_id: str = "ROOF"
@@ -103,7 +103,7 @@ class SourceTimberRoofTrussPitchShadowAuthority:
 
         # Overhang: (\d+)\s*(?:O/HANG|OVERHANG|EAVES)",
         oh_match = re.search(r"(\d+)\s*(?:O/HANG|OVERHANG|EAVES)", clean)
-        overhang_mm = float(oh_match.group(1)) if oh_match else 600.0
+        overhang_mm = float(oh_match.group(1)) if oh_match else 0.0
 
         return t_type, pitch_deg, spacing_mm, overhang_mm
 
