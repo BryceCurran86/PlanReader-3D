@@ -244,6 +244,19 @@ def require_signed_v2_family_trade_integrity(
                     raise ValueError(
                         "source-owned opening kind disagrees with benchmark trade"
                     )
+                if family == "opening_area" and _field(quantity, "abstained") is False:
+                    # The source opening AREA producer signs ONE canonical
+                    # physical opening in BOTH its semantic suffix and input
+                    # entity IDs. A valid signature/kind alone may not be
+                    # rebound to a different physical opening or a group.
+                    # Opening COUNT has its own source-complete scope and is
+                    # intentionally not subject to this one-area identity.
+                    signed_opening_id = semantic_key.split(":", 1)[1]
+                    if len(refs) != 1 or signed_opening_id != refs[0]:
+                        raise ValueError(
+                            "mapped source-signed opening area identity disagrees "
+                            "with its exact physical opening source member"
+                        )
 
 
 __all__ = ["require_signed_v2_family_trade_integrity"]
