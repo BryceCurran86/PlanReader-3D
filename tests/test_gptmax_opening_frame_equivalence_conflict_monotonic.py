@@ -336,6 +336,40 @@ def test_issuer_class_that_raises_type_error_is_not_a_positive_relation():
     assert _lookup(rows) == {("wall_a", "wall_b"): AMBIGUOUS}
 
 
+def test_conflicting_same_selector_source_frame_revokes_cached_positive(monkeypatch):
+    """A failed equivocation must not keep the old positive selector live."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    originals = _publish(producer, bound)
+    assert all(r.status is Status.CORROBORATED for r in originals)
+    prior_authority = producer.authority()
+    target = bound[0][3].opening_identity_id
+    original_shared = producer._shared_host_frame
+
+    def contradictory_source_frame(**kwargs):
+        existing = original_shared(**kwargs)
+        if (existing is not None
+                and kwargs["binding"].opening_identity_id == target):
+            return replace(existing, frame_id="contradictory:" + existing.frame_id)
+        return existing
+
+    monkeypatch.setattr(producer, "_shared_host_frame",
+                        contradictory_source_frame)
+    with pytest.raises(RuntimeError, match="producer equivocation"):
+        producer.publish(opening_selector=bound[0][0],
+                         host_binding_selector=bound[0][2])
+
+    fresh = producer.authority()
+    assert fresh.resolve(originals[0].evidence.selector).status is Status.ABSTAINED
+    assert fresh.resolve(originals[1].evidence.selector) == originals[1]
+    assert prior_authority.resolve(originals[0].evidence.selector) == originals[0]
+
+    monkeypatch.undo()
+    assert _publish(producer, bound) == originals
+
+
 def test_failed_source_reproof_revokes_previously_positive_frame_authority(monkeypatch):
     """A current frame authority must never return a stale cached positive."""
     from pb_migration_contracts import EvidenceResolutionStatus as Status

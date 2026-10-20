@@ -1463,6 +1463,11 @@ class OpeningHostFrameProducer:
         )
         existing = self._results.get(selector.key)
         if existing is not None and existing != result:
+            # A contradictory new positive on one immutable selector makes
+            # the previously issued cached positive unsafe for any newly
+            # acquired authority. Retain the error but revoke its old proof.
+            self._results.pop(selector.key, None)
+            self._accepted_opening_selectors.pop(selector.key, None)
             raise RuntimeError("opening host-frame producer equivocation")
         self._results[selector.key] = result
         # Only producer-verified successful publication can add a witness.
