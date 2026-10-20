@@ -8,12 +8,15 @@ from tools.gpt3_signed_v2_family_trade_integrity import (
 )
 
 
-def _check(semantic_key, *, trade="tiling", abstained=False):
-    floor = "source-owned-original-floor"
+def _check(semantic_key, *, trade="tiling", abstained=False, claimed_refs=None):
+    # The actual CrossViewFloorFinishProducer signs its canonical floor ID
+    # into BOTH the material semantic key and the source object identities.
+    floor = "canonical-floor-1"
+    source_refs = [floor] if claimed_refs is None else list(claimed_refs)
     quantity = {
         "family": "floor_finish_area",
         "semantic_key": semantic_key,
-        "object_identity_refs": [floor],
+        "object_identity_refs": source_refs,
         "unit": "m2", "value": None if abstained else 9.05352,
         "abstained": abstained,
     }
@@ -25,7 +28,7 @@ def _check(semantic_key, *, trade="tiling", abstained=False):
     link = {
         "benchmark_item_id": item["item_id"],
         "production_family": "floor_finish_area",
-        "production_object_identity_refs": [floor],
+        "production_object_identity_refs": source_refs,
     }
     return require_signed_v2_family_trade_integrity(
         verified_items=[item],
@@ -42,6 +45,24 @@ def test_source_signed_tile_finish_can_be_considered_for_tiling_trade(key):
     # This is only a negative guard; independent source/physical identity
     # and frozen evaluator must separately verify the actual result.
     assert _check(key) is None
+
+
+
+@pytest.mark.parametrize("claimed_refs", [
+    ["different-physical-floor"],
+    ["canonical-floor-1", "unrelated-physical-floor"],
+])
+def test_tile_source_key_cannot_map_an_unrelated_or_grouped_physical_floor(
+    claimed_refs,
+):
+    # A source-signed material type alone does not prove the physical
+    # identity in an independently mapped frozen tiling item. A valid
+    # signature on a contradictory floor ID still must be rejected.
+    with pytest.raises(ValueError, match="floor|source.*identity"):
+        _check(
+            "floor_finish_area:canonical-floor-1:FT3:tile",
+            claimed_refs=claimed_refs,
+        )
 
 
 @pytest.mark.parametrize("finish", ["vinyl", "epoxy", "carpet", "tile ", "TILE"])
