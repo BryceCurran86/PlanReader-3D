@@ -48,6 +48,20 @@ def test_multi_storey_shower_waste_with_fire_collar():
     assert w.grate_finish == "TILE_INSERT_SQUARE"
 
 
+def test_omitted_pipe_diameter_does_not_invent_eighty_mm():
+    authority = SourceFloorWasteDrainageShadowAuthority()
+
+    w = authority.compute_floor_waste(
+        room_id="ROOM_UNKNOWN",
+        drain_kind=DrainKind.FLOOR_WASTE_GULLY,
+        location_pt=(0.0, 0.0),
+    )
+
+    assert w.pipe_diameter_pt == 0.0
+    assert w.slab_penetration_diameter_pt == 0.0
+    assert w.grate_finish == ""
+
+
 def test_compile_waste_receipt():
     authority = SourceFloorWasteDrainageShadowAuthority()
 
