@@ -586,6 +586,10 @@ def quantities_to_takeoff_output_rows(
     being erased merely because they share a semantic quantity type.
     """
     seen: dict[tuple[str, str], list[tuple[frozenset[str], tuple[float, str], str]]] = {}
+    # Each physical opening owns at most ONE commercial AREA and, if
+    # independently sourced, ONE COUNT. Distinct semantic keys cannot
+    # disguise a second area/count for the same source-owned physical object.
+    opening_claims: dict[tuple[str, str], str] = {}
     seen_quantity_ids: set[str] = set()
     output: list[dict[str, Any]] = []
     for quantity in quantities:
@@ -622,6 +626,21 @@ def quantities_to_takeoff_output_rows(
                 f"{prior_quantity_id!r} and {quantity.quantity_id!r}"
             )
 
+        if key[0] in {"opening_area", "opening_count"}:
+            if not identities:
+                raise CommercialTakeoffConflictError(
+                    "source-owned physical opening identity required for commercial area/count"
+                )
+            for physical_identity in identities:
+                physical_key = (key[0], physical_identity)
+                previous_id = opening_claims.get(physical_key)
+                if previous_id is not None:
+                    raise CommercialTakeoffConflictError(
+                        "conflicting commercial physical opening source claim "
+                        f"across semantic keys: {previous_id!r} vs "
+                        f"{quantity.quantity_id!r} for {physical_identity!r}"
+                    )
+                opening_claims[physical_key] = quantity.quantity_id
         seen.setdefault(key, []).append((identities, claim, quantity.quantity_id))
         output.append(row)
     return output
