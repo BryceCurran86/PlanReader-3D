@@ -3,6 +3,9 @@ from copy import deepcopy
 
 import pytest
 
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
+
 from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import assess_gpt1_opening_candidates
 
 ROOT = {
@@ -23,12 +26,17 @@ def fixture():
         return {
             "physical_opening_id": identity,
             "canonical_opening_id": identity,
-            **ROOT, "page_id": "3", "opening_kind": "window",
+            **ROOT, "page_id": "3", "viewport_id":"page:3",
+            "opening_kind": "window",
+            "area_basis": "figured_opening_label" if identity == "physical-3" else None,
+            "area_m2": 2.16 if identity == "physical-3" else None,
+            "representative_observation_id": "source-own-1",
+            "source_observation_ids": ("source-own-1",),
             "host_binding_record_id": host,
             "host_wall_id": "wall-grp" if host else None,
             "host_frame_record_id": frame,
             "figured_area_record_id": "figured",
-            "evidence_ids": ["figured"],
+            "evidence_ids": ["source-own-1", "figured", "figured-word-3"] + ([host] if host else []) + ([frame] if frame else []),
             "width_record_id": None, "height_record_id": None,
             "width_m": None, "height_m": None,
             "geometry_complete": False,
@@ -40,14 +48,30 @@ def fixture():
             "dimension_values_mm":[1200,1800],
             "axis_order_resolved":False,
             "area_m2":2.16,
+            "basis":"figured_opening_label",
+            "page_id":"3", "viewport_id":"page:3",
+            "semantic_kind":"window",
+            "source_text_observation_ids":("figured-word-3",),
         }} if area else {"status":"abstained","evidence":None}
         return {
             "physical_opening_id":identity,
             "canonical_opening_id":identity,
             **ROOT, "page_id":"3",
-            "attempted_host_selector":{"decision_scope_id":"wall-source:page-3"},
-            "physical_existence_record":{"record_id":identity},
+            "attempted_host_selector":{
+                **ROOT, "page_id":"3",
+                "decision_scope_id":"wall-source:page-3",
+                "opening_identity_id":identity,
+            },
+            "physical_existence_record":{
+                "record_id":identity, **ROOT, "page_id":"3",
+                "status":EvidenceResolutionStatus.CORROBORATED,
+                "proposition":PHYSICAL_OPENING_EXISTS,
+                "source_observation_ids":("source-own-1",),
+            },
             "host_record":None if not host else {
+                **ROOT, "page_id":"3",
+                "decision_scope_id":"wall-source:page-3",
+                "source_observation_ids":("source-own-1",),
                 "record_id":host,"host_wall_id":"wall-grp",
                 "opening_identity_id":identity,
                 "member_wall_candidate_ids":["wall-a"],
@@ -55,6 +79,9 @@ def fixture():
             "frame_record":None if not frame else {
                 "record_id":frame,"opening_identity_id":identity,
                 "host_binding_record_id":host,"host_wall_id":"wall-grp",
+                "selector":{**ROOT, "page_id":"3",
+                    "decision_scope_id":"wall-source:page-3",
+                    "opening_identity_id":identity},
                 "coordinate_unit":"pdf_point",
                 "whole_wall_candidate_ids":["wall-a"],
                 "source_observation_ids":["source-own-1"],
@@ -129,7 +156,7 @@ def test_valid_source_axes_only_emits_unpublished_gpt1_review_candidate():
     index=2
     c[index].update(width_record_id="width-3",height_record_id="height-3",
                     width_m=1.2,height_m=1.8,geometry_complete=True,
-                    evidence_ids=["figured","width-3","height-3"])
+                    evidence_ids=["source-own-1", "figured","figured-word-3","binding-3","frame-3","width-3","height-3"])
     rows[index]["original_label_dimension_result"]["evidence"]["axis_order_resolved"]=True
     r=run(rows,c)
     assert len(r["gpt1_new_handoff_candidates"])==1
@@ -142,7 +169,7 @@ def test_existing_signed_area_is_not_republished_as_new_candidate():
     rows,c=fixture()
     c[2].update(width_record_id="width",height_record_id="height",
                 width_m=1.2,height_m=1.8,geometry_complete=True,
-                evidence_ids=["figured","width","height"])
+                evidence_ids=["source-own-1", "figured","figured-word-3","binding-3","frame-3","width","height"])
     rows[2]["original_label_dimension_result"]["evidence"]["axis_order_resolved"]=True
     rows[2]["quantity_id"]="previously-signed-quantity"
     assert not run(rows,c)["gpt1_new_handoff_candidates"]
