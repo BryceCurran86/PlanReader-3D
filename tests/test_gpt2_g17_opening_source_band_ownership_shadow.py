@@ -17,7 +17,7 @@ from pb_gpt2_raster_opening_parent_source_shadow import (
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import (
     PhysicalOpeningAuthority, PhysicalOpeningExistenceRecord,
-    PHYSICAL_OPENING_EXISTS,
+    PHYSICAL_OPENING_EXISTS, RASTER_FRAMED_WALL_BAND_INTERRUPTION,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
@@ -45,10 +45,10 @@ def _context(monkeypatch):
         document_id="doc", revision_id="rev",
         source_sha256="e" * 64, snapshot_id="snapshot",
         page_id="3", viewport_id=None,
-        semantic_class="raster-framed-opening",
+        semantic_class="opening",
         status=EvidenceResolutionStatus.CORROBORATED,
         proposition=PHYSICAL_OPENING_EXISTS,
-        structural_pattern="raster_wall_band_interruption",
+        structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
         diagnostic_confidence=1.0, blocking_reasons=(),
         structural_reason_codes=(), producer_method="source-owned",
         producer_version="1.0.0", producer_generation=1,
@@ -125,6 +125,13 @@ def test_positive_six_real_source_strokes_are_owned_by_one_physical_opening(monk
     lambda r: replace(r, document_id="other"),
     lambda r: replace(r, page_id="4"),
     lambda r: replace(r, status=EvidenceResolutionStatus.CANDIDATE),
+    lambda r: replace(r, record_id=""),
+    lambda r: replace(r, viewport_id="foreign"),
+    lambda r: replace(r, semantic_class="non-opening"),
+    lambda r: replace(r, structural_pattern="swing_arc_without_raster"),
+    lambda r: replace(r, source_observation_ids=tuple(
+        obs for obs in r.source_observation_ids if obs != "visible-left-face-1"
+    )),
     lambda r: replace(r, proposition="invented"),
     lambda r: replace(r, source_observation_ids=()),
     lambda r: replace(r, source_lineage_root_ids=()),
