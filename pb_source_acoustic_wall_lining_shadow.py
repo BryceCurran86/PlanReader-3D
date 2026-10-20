@@ -37,7 +37,7 @@ class AcousticWallSpec:
     air_gap_mm: float = 25.0
     side_a_layers: int = 2
     side_b_layers: int = 2
-    target_rw: int = 50
+    target_rw: int = 0
     level_id: str = "L1"
     source_tag: str = ""
 
@@ -104,7 +104,7 @@ class SourceAcousticWallLiningShadowAuthority:
 
         # Target Rw
         rw_match = re.search(r"RW\s*(\d+)", clean)
-        target_rw = int(rw_match.group(1)) if rw_match else 50
+        target_rw = int(rw_match.group(1)) if rw_match else 0
 
         # Layer parsing: e.g. '2x13mm + 2x13mm' or '2x13 + 1x13'
         layer_matches = re.findall(r"(\d+)\s*[xX]\s*\d+", clean)
