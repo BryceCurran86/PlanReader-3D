@@ -14,7 +14,10 @@ from pb_live_floor_finish_area_source_closed_export import (
 from pb_live_floor_finish_customer_projection import (
     project_live_floor_finish_customer_rows,
 )
-from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from pb_source_closed_run_export import (
+    SourceClosedRunConflictError,
+    sealed_source_closed_run_from_dict,
+)
 from tests.test_gpt3_pending_floor_surface_identity_activation import (
     _inputs, _claim,
 )
@@ -108,7 +111,11 @@ def test_genuine_other_flooring_semantics_remain_independently_admissible(finish
     "floor_finish_area:other-floor:FT3:tile",
 ])
 def test_forged_noncanonical_floor_finish_cannot_activate(key):
-    with pytest.raises(ValueError):
+    # Source first: the real producer blocks these malformed keys before
+    # even creating a V1 signed record, so downstream activation is never
+    # invoked. That earlier rejection is the correct security boundary.
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="floor finish semantic identity"):
         _run(finish="tile", key=key)
 
 
