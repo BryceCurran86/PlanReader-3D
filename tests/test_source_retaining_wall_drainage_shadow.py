@@ -32,10 +32,11 @@ class TestSourceRetainingWallDrainageShadow(unittest.TestCase):
         self.assertEqual(stem_t2, 190.0)
         self.assertEqual(h2, 1200.0)
 
-        _w3, stem_t3, _h3, _fw3, _fd3 = SourceRetainingWallDrainageShadowAuthority.parse_retaining_wall_annotation(
+        _w3, stem_t3, h3, _fw3, _fd3 = SourceRetainingWallDrainageShadowAuthority.parse_retaining_wall_annotation(
             "RETAINING WALL"
         )
         self.assertEqual(stem_t3, 0.0)
+        self.assertEqual(h3, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
@@ -82,6 +83,7 @@ class TestSourceRetainingWallDrainageShadow(unittest.TestCase):
         )
         self.assertFalse(wall.has_tanking_membrane)
         self.assertEqual(wall.stem_thickness_mm, 0.0)
+        self.assertEqual(wall.retained_height_mm, 0.0)
         res = SourceRetainingWallDrainageShadowAuthority.evaluate_retaining_walls([wall])
         self.assertEqual(res.quantities.total_tanking_membrane_area_m2, 0.0)
 
