@@ -20,6 +20,7 @@ def test_bathroom_with_shower_recess():
         shower_perimeter_pt=50.0,
         general_upstand_height_pt=4.25,
         shower_tanking_height_pt=56.69,
+        membrane_spec="CLASS_III_POLYURETHANE_MEMBRANE",
     )
 
     assert rec.room_id == "ROOM_BATH_01"
@@ -68,6 +69,7 @@ def test_omitted_upstand_heights_do_not_invent_tanking():
     assert rec.shower_tanking_height_pt == 0.0
     assert rec.vertical_upstand_area_pt2 == 0.0
     assert rec.total_membrane_area_pt2 == 2000.0
+    assert rec.membrane_system_spec == ""
 
 
 def test_compile_waterproofing_receipt():
