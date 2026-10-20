@@ -146,3 +146,55 @@ def test_report_tamper_after_commit_never_reaches_guarded_reader(tmp_path):
         module.read_committed_guarded_exact_report(
             outputs[0], outputs[1], outputs[2],
         )
+
+
+def test_receipt_swap_between_map_and_report_read_is_rejected(tmp_path, monkeypatch):
+    source = tmp_path / "signed.json"
+    source.write_text('{"signed":true}')
+    outputs = tuple(tmp_path / name for name in (
+        "map.json", "receipt.json", "report.json",
+    ))
+    module._write_triplet(
+        outputs,
+        ({"bindings": [{"x": 1}]}, {"activated_count": 1}, {"matched": 1}),
+        inputs=(source,),
+    )
+    actual_reader = module.read_committed_active_identity_map
+
+    def replace_receipt_after_first_verification(*args, **kwargs):
+        result = actual_reader(*args, **kwargs)
+        marker = json.loads(outputs[1].read_text())
+        marker["activated_count"] = 42
+        outputs[1].write_text(json.dumps(marker))
+        return result
+
+    monkeypatch.setattr(
+        module, "read_committed_active_identity_map",
+        replace_receipt_after_first_verification,
+    )
+    with pytest.raises(ValueError, match="receipt changed across map verification"):
+        module.read_committed_guarded_exact_report(
+            outputs[0], outputs[1], outputs[2],
+        )
+
+
+def test_duplicate_score_report_json_key_is_not_authenticated(tmp_path):
+    source = tmp_path / "signed.json"
+    source.write_text('{"signed":true}')
+    outputs = tuple(tmp_path / name for name in (
+        "map.json", "receipt.json", "report.json",
+    ))
+    module._write_triplet(
+        outputs,
+        ({"bindings": [{"x": 1}]}, {"activated_count": 1}, {"matched": 1}),
+        inputs=(source,),
+    )
+    forged = b'{"matched":0,"matched":1}\n'
+    marker = json.loads(outputs[1].read_text())
+    marker["exact_report_sha256"] = __import__("hashlib").sha256(forged).hexdigest()
+    outputs[2].write_bytes(forged)
+    outputs[1].write_text(json.dumps(marker))
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        module.read_committed_guarded_exact_report(
+            outputs[0], outputs[1], outputs[2],
+        )
