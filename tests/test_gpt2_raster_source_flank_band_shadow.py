@@ -182,3 +182,42 @@ def test_source_owned_non_wall_primitives_remain_unassigned():
     assert len(result.candidates) == 1
     assert result.unresolved_source_parent_ids == ("other-ink",)
     assert not result.physical_wall_granted
+
+def test_trusted_source_producer_entrypoint_matches_authenticated_parent_handoff(monkeypatch):
+    from test_gpt2_raster_opening_parent_source_shadow import _source, _visible
+    from pb_gpt2_raster_source_flank_band_shadow import (
+        reconstruct_original_raster_source_flank_bands_shadow,
+    )
+    # The source must pass through its real typed producer/facade API (mock
+    # data are test-only), rather than accepting caller-shaped physical hosts.
+    src = _source(monkeypatch, {
+        "v1": _visible("left-face-1","v1",
+                       observation_kind="raster_wall_band_face",
+                       geometry=(-20.,0.,0.,0.)),
+        "v2": _visible("left-face-2","v2",
+                       observation_kind="raster_wall_band_face",
+                       geometry=(-20.,2.4,0.,2.4)),
+        "v3": _visible("left-end","v3",
+                       observation_kind="raster_wall_band_end",
+                       geometry=(0.,0.,0.,2.4)),
+    })
+    got = reconstruct_original_raster_source_flank_bands_shadow(
+        src, revision_id="rev", snapshot_id="snap", page_id="3",
+        required_parent_ids=("left-end","left-face-2","left-face-1"),
+    )
+    assert got.status == "SOURCE_BAND_GEOMETRY_CANDIDATE"
+    assert len(got.candidates) == 1
+    assert not got.opening_host_granted and not got.firm_quantity_granted
+
+
+def test_trusted_source_entrypoint_rejects_stale_snapshot(monkeypatch):
+    from test_gpt2_raster_opening_parent_source_shadow import _source
+    from pb_gpt2_raster_source_flank_band_shadow import (
+        reconstruct_original_raster_source_flank_bands_shadow,
+    )
+    src = _source(monkeypatch, {})
+    with pytest.raises(ValueError):
+        reconstruct_original_raster_source_flank_bands_shadow(
+            src, revision_id="rev", snapshot_id="stale", page_id="3",
+            required_parent_ids=("left-face-1",),
+        )
