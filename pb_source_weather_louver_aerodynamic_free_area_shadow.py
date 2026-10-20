@@ -37,7 +37,7 @@ class WeatherLouverSpec:
     blade_pitch_mm: float = 0.0
     free_area_ratio: float = 0.0
     has_bird_mesh: bool = False
-    frame_depth_mm: float = 100.0
+    frame_depth_mm: float = 0.0
     level_id: str = "ELEV"
     source_tag: str = ""
 
@@ -133,7 +133,7 @@ class SourceWeatherLouverAerodynamicFreeAreaShadowAuthority:
             frame_len = 2.0 * (w_m + h_m)
             total_frame_m += frame_len
 
-            blades = math.ceil(max(0.0, l.height_mm - 100.0) / l.blade_pitch_mm) if l.blade_pitch_mm > 0 else 0
+            blades = math.ceil(max(0.0, l.height_mm - l.frame_depth_mm) / l.blade_pitch_mm) if l.blade_pitch_mm > 0 else 0
             total_blades += blades
 
             if l.has_bird_mesh:
