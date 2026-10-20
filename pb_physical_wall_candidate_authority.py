@@ -752,6 +752,7 @@ def _filter_repeated_non_physical_drafting_primitives(
     page_width: float,
     page_height: float,
     preserved_source_primitive_ids: frozenset[str] = frozenset(),
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> tuple[dict, ...]:
     """Exclude only source-proven dense singleton drafting motifs.
 
@@ -814,8 +815,32 @@ def _filter_repeated_non_physical_drafting_primitives(
     non_orthogonal_span = page_span * _REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION
     multi_angle_span = page_span * _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION
 
+    typed_negative_ids: set[str] = set()
+    if filter_typed_negative_non_wall_ink_shadow:
+        try:
+            from pb_structural_wall_ink_shadow import (
+                classify_structural_wall_ink,
+                NOT_WALL_INK,
+            )
+            report = classify_structural_wall_ink(
+                segments, page_width=page_width, page_height=page_height
+            )
+            typed_negative_ids = {
+                d.source_primitive_id
+                for d in report.decisions
+                if d.classification == NOT_WALL_INK
+            }
+        except Exception:
+            typed_negative_ids = set()
+
     kept: list[dict] = []
     for segment in segments:
+        sid = str(segment.get("id") or "")
+        if sid in preserved_source_primitive_ids:
+            kept.append(segment)
+            continue
+        if sid in typed_negative_ids:
+            continue
         # A fill-only PDF rectangle is not automatically an annotation wipeout.
         # Filled rectangles can also be legitimate source-owned physical
         # geometry. Prune its synthetic rect_edge linework only when an
@@ -861,6 +886,7 @@ def filtered_wall_topology_source_segment_count(
     *,
     page_width: float,
     page_height: float,
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> int:
     """Return the runtime-safety census after generic drafting filtering.
 
@@ -874,6 +900,7 @@ def filtered_wall_topology_source_segment_count(
             segments,
             page_width=page_width,
             page_height=page_height,
+            filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
         )
     )
 
@@ -3135,9 +3162,12 @@ def _assemble_scope_result(
     excluded_boundary_primitives: Sequence[ExcludedBoundaryPrimitive] = (),
     authenticated_frame_edge_primitive_count: int = 0,
     opening_local_exact_source_endpoints_shadow: bool = False,
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     if type(opening_local_exact_source_endpoints_shadow) is not bool:
         raise TypeError("exact opening-local W2 policy requires an explicit boolean")
+    if type(filter_typed_negative_non_wall_ink_shadow) is not bool:
+        raise TypeError("filter_typed_negative_non_wall_ink_shadow requires an explicit boolean")
     scope_id = selector.decision_scope_id
     # Source-proven face protection is DIAGNOSTIC ONLY until the original
     # Lot16/W4 candidate, host and frame identity preservation is proved.
@@ -3148,6 +3178,7 @@ def _assemble_scope_result(
         segments,
         page_width=page_width,
         page_height=page_height,
+        filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
     )
     excluded_native_receipts = filtered_native_primitive_receipts(
         segments, topology_segments
@@ -3412,6 +3443,7 @@ def _build_scope_result(
     resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -3471,6 +3503,7 @@ def _build_scope_result(
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
+        filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
     )
 
 
@@ -3573,6 +3606,7 @@ def _build_authenticated_viewport_scope_results(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
     physical_plan_view_shadow: bool = False,
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -3804,6 +3838,7 @@ def _build_authenticated_viewport_scope_results(
                 physical_opening_authority=physical_opening_authority,
                 excluded_boundary_primitives=tuple(excluded_primitives),
                 authenticated_frame_edge_primitive_count=frame_edge_count,
+                filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
             )
         )
     return tuple(results)
@@ -3954,6 +3989,25 @@ class PhysicalWallCandidateProducer:
             selected_revision_id=revision_id)
 
     @classmethod
+    def from_source_visibility_typed_negative_wall_ink_shadow(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+        include_authenticated_viewports: bool = False,
+        include_page_scopes: bool = True,
+    ):
+        """Candidate authority with source-proven typed negative non-wall ink filtered."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=include_authenticated_viewports,
+            include_page_scopes=include_page_scopes,
+            supplemental_only=False,
+            filter_typed_negative_non_wall_ink_shadow=True,
+        )
+
+    @classmethod
     def from_source_visibility_unmeasured_g17_flanks_shadow(
         cls,
         source_visibility_producer,
@@ -3982,6 +4036,7 @@ class PhysicalWallCandidateProducer:
         physical_plan_view_shadow: bool = False,
         include_unmeasured_ink_closed_flanks_shadow: bool = False,
         opening_local_exact_source_endpoints_shadow: bool = False,
+        filter_typed_negative_non_wall_ink_shadow: bool = False,
         selected_revision_id: Optional[str] = None,
     ):
         """Build wall scopes, optionally narrowed by source page address.
@@ -4138,7 +4193,7 @@ class PhysicalWallCandidateProducer:
                         **(
                             {"opening_local_exact_source_endpoints_shadow": True}
                             if supplemental_only and opening_local_exact_source_endpoints_shadow
-                            else {}
+                            else {"filter_typed_negative_non_wall_ink_shadow": filter_typed_negative_non_wall_ink_shadow}
                         ),
                     )
                     key = _ScopeKey(
@@ -4162,6 +4217,7 @@ class PhysicalWallCandidateProducer:
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
                         physical_plan_view_shadow=physical_plan_view_shadow,
+                        filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,
