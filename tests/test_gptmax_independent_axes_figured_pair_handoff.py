@@ -27,7 +27,7 @@ def _independent_source_axes():
         width_m=1.2,
         height_m=1.8,
         geometry_complete=True,
-        evidence_ids=["figured", "figured-word-3", "binding-3", "frame-3",
+        evidence_ids=["source-own-1", "figured", "figured-word-3", "binding-3", "frame-3",
                       "original-width:physical-3", "original-height:physical-3"],
     )
     # Original two-number label is corroborated only as an unordered pair.
@@ -392,7 +392,7 @@ def test_genuine_frame_absent_figured_area_requires_only_own_host_receipt():
     rows, canonical = fixture()
     rows[2]["frame_record"] = None
     canonical[2]["host_frame_record_id"] = None
-    canonical[2]["evidence_ids"] = ["figured", "figured-word-3", "binding-3"]
+    canonical[2]["evidence_ids"] = ["source-own-1", "figured", "figured-word-3", "binding-3"]
     record = run(rows, canonical)["opening_decisions"][2]
     assert record["original_host_binding_receipt_bound"]
     assert not record["original_host_frame_receipt_bound"]
