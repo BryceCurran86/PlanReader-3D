@@ -93,6 +93,45 @@ def _check(batch):
     )
 
 
+@pytest.mark.parametrize("signed_status", ["firm", "corroborated"])
+def test_source_closed_firm_and_corroborated_area_admit_only_to_identity_review(
+    signed_status,
+):
+    # The real room and floor-finish sources issue firm; opening-area
+    # sources may issue corroborated. Neither state authenticates the
+    # producer or independently binds frozen identities in this consumer.
+    original = quantity("original", "physical-room-1")
+    independent = replace(
+        quantity("new", "physical-room-2", value=7.5),
+        status=signed_status,
+    )
+    report = _check((
+        _sealed(original),
+        _sealed(original, independent),
+        _customers(original),
+        _customers(original, independent),
+    ))
+    assert report["admission_status"] == "READY_FOR_INDEPENDENT_IDENTITY_REVIEW"
+    assert report["added_quantity_ids"] == ["new"]
+    assert report["retained_quantity_ids"] == ["original"]
+    assert report["candidate_customer_verified_count"] == 2
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["source_authenticated"] is False
+    assert report["customer_approval_granted"] is False
+    assert report["independent_benchmark_identity_verified"] is False
+    assert report["official_v2_accuracy"] is None
+
+
+@pytest.mark.parametrize("unproven_status", [
+    "candidate", "blocked", "conflict", "abstained",
+    "review_required", "unverified", "", "FIRMED",
+])
+def test_append_only_never_treats_unproven_status_as_new_firm(unproven_status):
+    # This is the same live commercial publishing status vocabulary; it
+    # is intentionally narrower than 'non-abstained' or 'not a conflict'.
+    assert gate.quantity_status_not_publishable(unproven_status)
+
+
 def test_new_genuine_signed_customer_batch_only_allows_independent_review():
     result = _check(_fixture())
     assert result["admission_status"] == "READY_FOR_INDEPENDENT_IDENTITY_REVIEW"
