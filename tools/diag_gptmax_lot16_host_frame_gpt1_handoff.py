@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_opening_kind_authority import resolve_opening_kind
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
@@ -230,6 +231,26 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
+        # Re-resolve semantic kind from an ORIGINAL corroborated physical
+        # structural pattern and/or independently authenticated original
+        # native FIGURED label semantic evidence. A copied door/window
+        # string, host geometry or figured numeric pair alone cannot grant
+        # source filling kind to a new review candidate.
+        pattern = physical.get("structural_pattern")
+        structural_owner = (
+            pattern is None
+            or (type(pattern) is str
+                and pattern == c.get("structural_pattern"))
+        )
+        kind_proof = resolve_opening_kind(
+            structural_pattern=pattern if structural_owner else None,
+            label_kind=e.get("semantic_kind") if figured_label_scope_owned else None,
+        )
+        filling_kind_source_reproved = bool(
+            typed and structural_owner
+            and kind_proof.status is EvidenceResolutionStatus.CORROBORATED
+            and kind_proof.opening_kind == c["opening_kind"]
+        )
         # The actual source-closed opening-area publisher requires every
         # existing canonical host AND frame receipt to be present in its own
         # producer evidence roster. A host ID copied onto the canonical row
@@ -327,6 +348,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             area_gate = "canonical_figured_area_value_unproven"
         elif not source_observations_bound:
             area_gate = "original_physical_source_observation_receipts_unbound"
+        elif not filling_kind_source_reproved:
+            area_gate = "original_opening_kind_source_authority_unverified"
         elif row.get("quantity_id"):
             area_gate = "original_signed_area_already_retained"
         else:
@@ -356,6 +379,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "canonical_figured_area_value_unproven"
         elif not source_observations_bound:
             gate = "original_physical_source_observation_receipts_unbound"
+        elif not filling_kind_source_reproved:
+            gate = "original_opening_kind_source_authority_unverified"
         elif not axis_ok:
             gate = "width_height_axis_authority_unproven"
         else:
@@ -376,6 +401,7 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "canonical_figured_area_publication_basis_bound": canonical_figured_basis,
             "canonical_figured_area_value_bound": canonical_figured_value,
             "original_physical_source_observation_receipts_bound": source_observations_bound,
+            "original_opening_kind_source_authority_reproved": filling_kind_source_reproved,
             "original_host_binding_receipt_bound": host_receipt_bound,
             "original_host_frame_receipt_bound": frame_receipt_bound,
             "figured_area_receipt_bound": figured_receipt_bound,
@@ -393,7 +419,7 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 if axis_ok else []
             ),
             "independent_axes_agree_with_original_pair": axis_ok,
-            "filling_kind_source_supported": typed,
+            "filling_kind_source_supported": filling_kind_source_reproved,
             "prior_signed_quantity_id": row.get("quantity_id"),
             "first_remaining_gate": gate,
             "new_gpt1_candidate_handoff": bool(
@@ -401,7 +427,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 and host_receipt_bound and frame_receipt_bound
                 and figured_label_scope_owned
                 and canonical_figured_value and source_observations_bound
-                and axis_ok and not row.get("quantity_id")),
+                and filling_kind_source_reproved and axis_ok
+                and not row.get("quantity_id")),
             # No output JSON is a signed quantity or a trust-grant token.
             "measurement_published": False,
             "customer_seal_granted": False,
