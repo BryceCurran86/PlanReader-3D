@@ -1,0 +1,19 @@
+{
+  "status": "UNPUBLISHED_LOT16_KIND_UNPROVEN_CENSUS",
+  "source": "cursor_lot16_multi_gate_original_receipt_20261020.json",
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "kind_gate_counts": {
+    "opening_filling_kind_evidence_unproven": 1,
+    "opening_filling_kind_source_supported": 14,
+    "opening_filling_kind_unproven": 6
+  },
+  "axis_gate_counts": {
+    "single_figured_dimension_second_axis_unproven": 8,
+    "source_figured_dimension_pair_unproven": 5,
+    "width_height_axis_authority_unproven": 8
+  },
+  "invented_second_axis": false,
+  "measurement_published": false,
+  "benchmark_score_granted": false,
+  "shadow_only": true
+}

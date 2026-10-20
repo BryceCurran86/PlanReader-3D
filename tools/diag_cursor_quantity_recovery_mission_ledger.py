@@ -33,6 +33,22 @@ MISSION_LEDGER: dict[str, Any] = {
             ],
             "note": "batch2 + stacker/bifold/door-height fail-closed shadows + compose diag",
         },
+        {
+            "number": 3391,
+            "items": [
+                "host-lineage",
+                "segment-parent-end-reach",
+                "w4-id-disjoint",
+                "multi-gate-original",
+                "face-end-census",
+                "remaining-gates-original",
+                "maryborough-finish-pitch",
+            ],
+            "note": (
+                "batch40 host lineage + Lot16 multi/remaining gate originals + "
+                "Maryborough finish/pitch fail-closed; no FIRM/host/score"
+            ),
+        },
     ],
     "blocked_without_other_lanes_or_owner": [
         {"item": 5, "blocker": "STACKER host/frame FIRM — GPT MAX + owner PDF"},
