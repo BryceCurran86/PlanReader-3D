@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 from hashlib import sha256
 import json
 
@@ -13,6 +14,7 @@ from pb_gpt3_original_opening_scope_supplement import (
     ProducerScopeLineageConflict,
     source_owned_opening_scope_supplement,
     verify_source_owned_opening_scope_supplement,
+    scope_supplement_from_live_source_producer,
 )
 from pb_live_opening_area_quantity_publication import (
     publish_live_opening_area_quantities,
@@ -20,9 +22,13 @@ from pb_live_opening_area_quantity_publication import (
 from pb_live_opening_source_closed_export import (
     build_live_opening_area_source_traces, seal_live_opening_area_run,
 )
-from pb_live_wall_opening_authority_composition import LiveOpeningHostTrace
+from pb_live_wall_opening_authority_composition import (
+    LiveOpeningHostTrace, LiveWallOpeningAuthorityComposition,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_opening_host_binding_authority import OpeningHostBindingSelector
+from pb_opening_host_binding_authority import (
+    OpeningHostBindingRecord, OpeningHostBindingSelector,
+)
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority, quantities_to_takeoff_output_rows,
 )
@@ -258,3 +264,135 @@ def test_original_customer_projection_fingerprint_cannot_be_forged_or_reused():
     )
     with pytest.raises((ValueError, RuntimeError)):
         _issue(ctx)
+
+
+
+def _live_producer_composition(ctx, *, wrong: str | None = None):
+    """Source-neutral typed test doubles, NOT original client PDF authority."""
+    receipts = {}
+    for physical_id, selector in ctx["producer_binding_selectors"].items():
+        member = next(
+            x for x in ctx["composition"].canonical_openings
+            if x.physical_opening_id == physical_id
+        )
+        receipts[physical_id] = OpeningHostBindingRecord(
+            record_id=member.host_binding_record_id,
+            document_id=member.document_id,
+            revision_id=member.revision_id,
+            source_sha256=member.source_sha256,
+            snapshot_id=member.snapshot_id,
+            page_id=member.page_id,
+            decision_scope_id=selector.decision_scope_id,
+            opening_identity_id=member.physical_opening_id,
+            host_wall_id=member.host_wall_id,
+            member_wall_candidate_ids=(f"candidate-{physical_id}",),
+            member_candidate_identity_ids=(f"wall-member-{physical_id}",),
+            member_equivalence_groups=((f"wall-member-{physical_id}",),),
+            source_observation_ids=member.source_observation_ids,
+        )
+    if wrong == "foreign_scope":
+        first = next(iter(receipts))
+        receipts[first] = replace(
+            receipts[first], decision_scope_id="foreign-w4-source")
+    if wrong == "foreign_host":
+        first = next(iter(receipts))
+        receipts[first] = replace(
+            receipts[first], host_wall_id="borrowed-wall")
+    if wrong == "source_snapshot":
+        first = next(iter(receipts))
+        receipts[first] = replace(
+            receipts[first], snapshot_id="old-source-snapshot")
+
+    class OriginalHostAuthority:
+        def resolve(self, selector):
+            if wrong == "host_abstain":
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED, record=None
+                )
+            if wrong == "resolver_exception":
+                raise ValueError("issuer refuses forged selector")
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                record=receipts[selector.opening_identity_id],
+            )
+
+    return LiveWallOpeningAuthorityComposition(
+        revision_id=ctx["composition"].revision_id,
+        page_ids=("3",),
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(),
+        semantic_enumeration_result=None,
+        opening_universe_result=None,
+        opening_universe_results={},
+        wall_scopes=(),
+        opening_bindings=ctx["producer_host_traces"],
+        host_frames=(),
+        physical_wall_candidate_authority=None,
+        physical_opening_authority=None,
+        semantic_opening_enumeration_authority=None,
+        opening_universe_completeness_authority=None,
+        opening_universe_completeness_authorities={},
+        opening_host_binding_authority=OriginalHostAuthority(),
+        opening_host_frame_authority=None,
+        binding_selectors=ctx["producer_binding_selectors"],
+        host_frame_selectors={},
+    )
+
+
+def test_original_host_producer_reproves_scope_before_signed_sidecar():
+    ctx = _issued_original_source(two=True)
+    wall_producer = _live_producer_composition(ctx)
+    sidecar = scope_supplement_from_live_source_producer(
+        opening_composition=ctx["composition"],
+        wall_composition=wall_producer,
+        sealed_run=ctx["sealed_run"],
+        customer_rows=ctx["customer_rows"],
+    )
+    assert sidecar == _issue(ctx)
+    assert len(sidecar["producer_scope_entries"]) == 2
+
+
+@pytest.mark.parametrize("wrong", [
+    "foreign_scope", "foreign_host", "source_snapshot",
+    "host_abstain", "resolver_exception",
+])
+def test_actual_host_binding_issuer_disagreement_never_issues_scope_sidecar(wrong):
+    ctx = _issued_original_source()
+    wall_producer = _live_producer_composition(ctx, wrong=wrong)
+    with pytest.raises((ValueError, RuntimeError)):
+        scope_supplement_from_live_source_producer(
+            opening_composition=ctx["composition"],
+            wall_composition=wall_producer,
+            sealed_run=ctx["sealed_run"],
+            customer_rows=ctx["customer_rows"],
+        )
+
+
+def test_source_producer_revision_change_cannot_rebind_signed_quantity():
+    ctx = _issued_original_source()
+    wall_producer = replace(
+        _live_producer_composition(ctx), revision_id="foreign-revision",
+    )
+    with pytest.raises(ProducerScopeLineageConflict, match="revision"):
+        scope_supplement_from_live_source_producer(
+            opening_composition=ctx["composition"],
+            wall_composition=wall_producer,
+            sealed_run=ctx["sealed_run"],
+            customer_rows=ctx["customer_rows"],
+        )
+
+
+def test_caller_plain_json_cannot_stand_in_for_the_original_source_producer():
+    ctx = _issued_original_source()
+    fake_producer = SimpleNamespace(
+        binding_selectors=ctx["producer_binding_selectors"],
+        opening_bindings=ctx["producer_host_traces"],
+        revision_id=ctx["composition"].revision_id,
+    )
+    with pytest.raises(TypeError, match="original live wall"):
+        scope_supplement_from_live_source_producer(
+            opening_composition=ctx["composition"],
+            wall_composition=fake_producer,
+            sealed_run=ctx["sealed_run"],
+            customer_rows=ctx["customer_rows"],
+        )
