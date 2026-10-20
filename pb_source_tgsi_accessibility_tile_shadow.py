@@ -50,10 +50,10 @@ class TGSIZoneSpec:
     indicator_format: TGSIFormat = TGSIFormat.INDIVIDUAL_STUDS
     location_context: TGSILocationContext = TGSILocationContext.STAIR_TOP
     boundary_polygon: List[Tuple[float, float]] = field(default_factory=list)
-    width_m: float = 1.0
-    depth_m: float = 0.6
-    area_m2: float = 0.6
-    stud_count: int = 240
+    width_m: float = 0.0
+    depth_m: float = 0.0
+    area_m2: float = 0.0
+    stud_count: int = 0
     tile_units_count: int = 0
     level_id: str = "L01"
     source_callout: str = ""
@@ -97,8 +97,8 @@ class SourceTGSIAccessibilityTileShadowAuthority:
             "indicator_type": TGSIType.HAZARD_WARNING,
             "indicator_format": TGSIFormat.INDIVIDUAL_STUDS,
             "location_context": TGSILocationContext.GENERAL_ACCESSIBILITY,
-            "width_m": 1.0,
-            "depth_m": 0.6,
+            "width_m": 0.0,
+            "depth_m": 0.0,
         }
 
         # Indicator profile type
@@ -244,10 +244,12 @@ class SourceTGSIAccessibilityTileShadowAuthority:
             # Compute stud or tile takeoff
             stud_cnt = 0
             tile_cnt = 0
+            stud_density = int(item.get("studs_per_square_meter", 0))
+            tile_mod = float(item.get("tile_module_area_m2", 0.0))
             if iformat == TGSIFormat.INDIVIDUAL_STUDS:
-                stud_cnt = int(round(area_m2 * STUDS_PER_SQUARE_METER))
+                stud_cnt = int(round(area_m2 * stud_density))
             elif iformat in (TGSIFormat.INTEGRATED_TILE, TGSIFormat.PEEL_AND_STICK_MAT):
-                tile_cnt = int(math.ceil(area_m2 / TILE_MODULE_AREA_M2))
+                tile_cnt = int(math.ceil(area_m2 / tile_mod)) if tile_mod > 0.0 else 0
 
             spec = TGSIZoneSpec(
                 zone_id=zone_id,
