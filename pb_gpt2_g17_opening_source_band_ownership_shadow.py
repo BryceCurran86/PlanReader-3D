@@ -7,7 +7,7 @@ source namespace, no geometric proximity guess, and no W4/host/FIRM grant.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from pb_gpt2_raster_opening_parent_source_shadow import (
     RasterOpeningParentSourceHandoff,
@@ -178,3 +178,51 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
                      for candidate in source_bands.candidates)),
         tuple(sorted(expected_band_obs)),
     )
+
+def quarantine_overlapping_g17_physical_source_claims_shadow(
+    records: tuple[OriginalG17OpeningFlankOwnership, ...],
+) -> tuple[OriginalG17OpeningFlankOwnership, ...]:
+    """Never silently choose among TWO real physical openings owning G17 ink.
+
+    A one-opening source proof does not certify whole-page physical-instance
+    uniqueness. Compare the complete emitted original source observation
+    ownership universe before any subsequent structural host claim.
+    """
+    if type(records) is not tuple or any(
+        type(item) is not OriginalG17OpeningFlankOwnership for item in records
+    ):
+        raise TypeError("typed source-owned G17 physical claim tuple required")
+    owners: dict[tuple[str, str], set[str]] = {}
+    physically_repeated: set[tuple[str, str]] = set()
+    seen_ids: set[tuple[str, str]] = set()
+    for item in records:
+        physical_key = (item.source_sha256, item.physical_opening_id)
+        if item.physical_opening_id and physical_key in seen_ids:
+            physically_repeated.add(physical_key)
+        seen_ids.add(physical_key)
+        if item.status is not EvidenceResolutionStatus.CORROBORATED:
+            continue
+        for original_id in (
+            *item.physical_source_observation_ids,
+            *item.authenticated_flank_end_parent_ids,
+        ):
+            key = (item.source_sha256, original_id)
+            owners.setdefault(key, set()).add(item.physical_opening_id)
+    contested: set[tuple[str, str]] = set(physically_repeated)
+    for (original_sha, _original_id), owner_ids in owners.items():
+        if len(owner_ids) > 1:
+            contested.update((original_sha, physical_id)
+                             for physical_id in owner_ids)
+    output = []
+    for item in records:
+        if (item.source_sha256, item.physical_opening_id) in contested:
+            output.append(replace(
+                item, status=EvidenceResolutionStatus.CONFLICT,
+                reason_codes=("source_g17_physical_instance_ownership_conflict",),
+            ))
+        else:
+            output.append(item)
+    return tuple(sorted(output, key=lambda item: (
+        item.source_sha256, item.physical_opening_id,
+        item.reason_codes,
+    )))
