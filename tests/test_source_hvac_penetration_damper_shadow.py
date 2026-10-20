@@ -41,6 +41,12 @@ class TestSourceHVACPenetrationDamperShadow(unittest.TestCase):
         self.assertEqual(h3, 0.0)
         self.assertEqual(frl3, "")
 
+        _shape4, w4, h4, _frl4, _mot4 = SourceHVACPenetrationDamperShadowAuthority.parse_damper_annotation(
+            "CIRCULAR FD"
+        )
+        self.assertEqual(w4, 0.0)
+        self.assertEqual(h4, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourceHVACPenetrationDamperShadowAuthority.snap_point((1.0, 1.0), ref_pts)

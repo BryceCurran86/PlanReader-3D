@@ -100,8 +100,8 @@ class SourceHVACPenetrationDamperShadowAuthority:
 
         # Dimensions: (\d+)\s*[xX]\s*(\d+) or (\d+)\s*W\s*[xX]\s*(\d+)\s*H or (\d+)\s*DIA
         if is_circ:
-            dia_match = re.search(r"(\d+)\s*(?:DIA|MM)?", clean)
-            dia = float(dia_match.group(1)) if dia_match else 300.0
+            dia_match = re.search(r"(\d+)\s*(?:DIA|MM)", clean)
+            dia = float(dia_match.group(1)) if dia_match else 0.0
             return shape, dia, dia, frl, is_mot
         else:
             dim_match = re.search(r"(\d+)\s*(?:W)?\s*[xX]\s*(\d+)\s*(?:H)?", clean)
