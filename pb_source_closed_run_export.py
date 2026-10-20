@@ -526,6 +526,10 @@ def _build_sealed_run(
     # different exact sets. Index each identity under its family and semantic
     # key to prevent source-sealed commercial double counting.
     physical_claims: dict[tuple[str, str], dict[str, SealedSourceClosedQuantity]] = {}
+    # One actual source floor surface can have only one geometric floor_area
+    # measurement. Distinct floor_finish_area families/layers retain their
+    # own source ownership contract; do not collapse finish semantics here.
+    physical_floor_areas: dict[str, SealedSourceClosedQuantity] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -608,6 +612,20 @@ def _build_sealed_run(
                 )
             for identity in identities:
                 claimed_ids[identity] = row
+        if not row.abstained and row.family == "floor_area":
+            if not identities:
+                raise SourceClosedRunConflictError(
+                    "source geometric floor area missing physical floor identity"
+                )
+            for identity in identities:
+                prior_floor = physical_floor_areas.get(identity)
+                if prior_floor is not None:
+                    raise SourceClosedRunConflictError(
+                        "same original physical floor area signed twice across "
+                        f"semantic keys: {prior_floor.quantity_id!r} vs "
+                        f"{row.quantity_id!r} for {identity!r}"
+                    )
+                physical_floor_areas[identity] = row
 
         normalized.append(row)
 
