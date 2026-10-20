@@ -35,7 +35,7 @@ class OperableWallSpec:
     wall_height_m: float = 0.0
     panel_width_mm: float = 0.0
     acoustic_rating_rw_db: int = 0
-    has_retractable_seals: bool = True
+    has_retractable_seals: bool = False
     parking_stack_track_length_m: float = 2.5
     has_plenum_baffle: bool = True
     plenum_height_m: float = 0.9
@@ -85,7 +85,7 @@ class SourceOperableAcousticWallShadowAuthority:
             "wall_height_m": 0.0,
             "panel_width_mm": 0.0,
             "acoustic_rating_rw_db": 0,
-            "has_retractable_seals": True,
+            "has_retractable_seals": False,
             "parking_stack_track_length_m": 2.5,
             "has_plenum_baffle": False,
             "plenum_height_m": 0.9,
@@ -158,6 +158,9 @@ class SourceOperableAcousticWallShadowAuthority:
         elif "PASS DOOR" in clean:
             res["pass_doors_count"] = 1
 
+        if re.search(r"RETRACTABLE\s+SEAL|\bSEALS\b", clean):
+            res["has_retractable_seals"] = True
+
         return res
 
     @staticmethod
@@ -225,6 +228,7 @@ class SourceOperableAcousticWallShadowAuthority:
             has_baffle = bool(item.get("has_plenum_baffle", parsed["has_plenum_baffle"]))
             plenum_h = float(item.get("plenum_height_m", parsed["plenum_height_m"]))
             doors_cnt = int(item.get("pass_doors_count", parsed["pass_doors_count"]))
+            has_seals = bool(item.get("has_retractable_seals", parsed["has_retractable_seals"]))
 
             spec = OperableWallSpec(
                 wall_id=wall_id,
@@ -233,7 +237,7 @@ class SourceOperableAcousticWallShadowAuthority:
                 wall_height_m=wall_h,
                 panel_width_mm=panel_w,
                 acoustic_rating_rw_db=rw_val,
-                has_retractable_seals=True,
+                has_retractable_seals=has_seals,
                 parking_stack_track_length_m=stack_len,
                 has_plenum_baffle=has_baffle,
                 plenum_height_m=plenum_h,
