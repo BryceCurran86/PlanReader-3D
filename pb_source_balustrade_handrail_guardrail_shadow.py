@@ -41,7 +41,7 @@ class BalustradeRunSpec:
     infill_type: BarrierInfillType
     centerline_points: List[Tuple[float, float]]
     height_mm: float = 0.0
-    post_spacing_mm: float = 1000.0
+    post_spacing_mm: float = 0.0
     has_continuous_handrail: bool = True
     handrail_extension_m: float = 0.30
     level_id: str = "L1"
@@ -156,9 +156,8 @@ class SourceBalustradeHandrailGuardrailShadowAuthority:
                 ext_m = (2.0 * r.handrail_extension_m) if r.location_kind in (BarrierLocationKind.STAIR_FLIGHT, BarrierLocationKind.RAMP) else 0.0
                 total_handrail_m += len_m + ext_m
 
-            # Post count: ceil(len / post_spacing) + 1
-            post_sp_m = max(0.5, r.post_spacing_mm / 1000.0)
-            posts = math.ceil(len_m / post_sp_m) + 1 if len_m > 0 else 0
+            post_sp_m = r.post_spacing_mm / 1000.0
+            posts = math.ceil(len_m / post_sp_m) + 1 if len_m > 0 and post_sp_m > 0 else 0
             total_posts += posts
 
         quantities = BalustradeQuantities(

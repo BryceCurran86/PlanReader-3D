@@ -106,9 +106,11 @@ class TestSourceBalustradeHandrailGuardrailShadow(unittest.TestCase):
             centerline_points=[(0.0, 0.0), (10.0, 0.0)],
         )
         self.assertEqual(omitted.height_mm, 0.0)
+        self.assertEqual(omitted.post_spacing_mm, 0.0)
         omitted_res = SourceBalustradeHandrailGuardrailShadowAuthority.evaluate_balustrades([omitted])
         self.assertEqual(omitted_res.quantities.total_barrier_face_area_m2, 0.0)
         self.assertEqual(omitted_res.quantities.non_compliant_height_count, 0)
+        self.assertEqual(omitted_res.quantities.total_post_count, 0)
 
 
 if __name__ == "__main__":
