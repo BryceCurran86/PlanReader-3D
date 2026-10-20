@@ -28,6 +28,7 @@ _JOINT_SEAL = object()
 
 
 class JointKind(str, Enum):
+    UNKNOWN = "UNKNOWN"
     EXPANSION_JOINT = "EXPANSION_JOINT"
     CONTROL_JOINT = "CONTROL_JOINT"
     CONSTRUCTION_JOINT = "CONSTRUCTION_JOINT"
@@ -108,7 +109,7 @@ class SourceExpansionControlJointShadowAuthority:
         *,
         joint_id: str,
         host_element_id: str,
-        joint_kind: JointKind = JointKind.CONTROL_JOINT,
+        joint_kind: JointKind = JointKind.UNKNOWN,
         gap_width_pt: float = 0.0,
         joint_length_pt: float = 0.0,
         backing_rod_spec: str = "",

@@ -58,6 +58,7 @@ def test_omitted_joint_geometry_does_not_invent_typical_gap():
     assert j.joint_length_pt == 0.0
     assert j.sealant_volume_pt3 == 0.0
     assert j.backing_rod_spec == ""
+    assert j.joint_kind == JointKind.UNKNOWN
 
 
 def test_compile_joint_receipt():
