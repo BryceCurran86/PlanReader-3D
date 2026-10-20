@@ -339,3 +339,75 @@ publish_new_activation_pair(
     with pytest.raises(FileExistsError, match="never overwrite"):
         _publish(inputs, outputs)
 
+
+
+@pytest.mark.parametrize("program", [opening, floor])
+def test_cli_rejects_orphaned_nonempty_active_map_before_publish(tmp_path, program):
+    signed, rows, pending, _, manifest, universe, proof = floor_inputs()
+    if program is opening:
+        mapping = {
+            "pending": lot16_pending(),
+            "sealed": original_lot16("source_sealed_run.json"),
+            "customers": original_lot16("verified_customer_rows.json"),
+            "active": original_lot16("identity_map.json"),
+            "manifest": lot16_manifest(),
+            "proof": json.loads(SOURCE_IDENTITY_PROOF.read_text()),
+            "universe": json.loads(OBJECT_UNIVERSE.read_text()),
+        }
+    else:
+        mapping = {
+            "pending": pending, "sealed": signed, "customers": rows,
+            "active": {"schema_version": "1.0.0", "project_id": "project-1",
+                       "source_sha256s": ["a" * 64],
+                       "bindings": [{
+                           "benchmark_item_id": "independent-floor",
+                           "production_family": "floor_area",
+                           "production_object_identity_refs": ["floor-1"],
+                       }]},
+            "manifest": manifest, "proof": proof, "universe": universe,
+        }
+    files = _write_fixture_files(tmp_path, mapping)
+    outputs = _outputs(tmp_path)
+    with pytest.raises(
+        ValueError, match="requires its committed activation receipt",
+    ):
+        program.main(_cli_args(files, outputs))
+    assert not any(p.exists() for p in outputs)
+
+
+def test_committed_prior_partial_map_is_verified_before_next_activation(tmp_path):
+    archived = original_lot16("identity_map.json")
+    prior = {
+        **archived,
+        "bindings": [
+            row for row in archived["bindings"]
+            if row["benchmark_item_id"] !=
+            "lot16-1218-sgw-01-area"
+        ],
+    }
+    files = _write_fixture_files(tmp_path, {
+        "pending": lot16_pending(),
+        "sealed": original_lot16("source_sealed_run.json"),
+        "customers": original_lot16("verified_customer_rows.json"),
+        "manifest": lot16_manifest(),
+        "proof": json.loads(SOURCE_IDENTITY_PROOF.read_text()),
+        "universe": json.loads(OBJECT_UNIVERSE.read_text()),
+    })
+    active_map = tmp_path / "previous-map.json"
+    previous_receipt = tmp_path / "previous-receipt.json"
+    publish_new_activation_pair(
+        (active_map, previous_receipt),
+        (prior, {"benchmark_score_granted": False}),
+        inputs=(files["sealed"],),
+        source_snapshot=source_input_snapshot((files["sealed"],)),
+    )
+    files["active"] = active_map
+    outputs = _outputs(tmp_path)
+    args = _cli_args(files, outputs) + [
+        "--active-identity-receipt", str(previous_receipt),
+    ]
+    assert opening.main(args) == 0
+    assert len(json.loads(outputs[0].read_text())["bindings"]) == 7
+    assert json.loads(outputs[1].read_text())["activated_count"] == 1
+
+
