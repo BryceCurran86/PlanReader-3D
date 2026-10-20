@@ -32,6 +32,36 @@ from tools.report_gpt3_four_project_evidence import (
 )
 
 
+def read_committed_guarded_exact_report(
+    map_path: Path, receipt_path: Path, report_path: Path,
+) -> dict[str, Any]:
+    """Read a three-file exact report only behind the final receipt marker.
+
+    This checks durable release consistency, not original source ownership,
+    customer publication permission or independent benchmark scoring authority.
+    """
+    # First verify the entire active-map/receipt release contract.
+    read_committed_active_identity_map(
+        map_path, receipt_path=receipt_path,
+    )
+    first_receipt = receipt_path.read_bytes()
+    marker = json.loads(first_receipt)
+    if marker.get("activation_commit_marker_version") != ACTIVATION_COMMIT_MARKER_VERSION:
+        raise ValueError("guarded exact report has no committed activation receipt")
+    report_bytes = report_path.read_bytes()
+    if marker.get("exact_report_sha256") != sha256(report_bytes).hexdigest():
+        raise ValueError("guarded exact report does not match activation commit digest")
+    report = json.loads(report_bytes)
+    if type(report) is not dict:
+        raise ValueError("guarded exact report must contain a JSON object")
+    if (
+        receipt_path.read_bytes() != first_receipt
+        or report_path.read_bytes() != report_bytes
+    ):
+        raise ValueError("guarded exact report/receipt changed during verification")
+    return report
+
+
 def _input_sha256(path: Path) -> str:
     """Digest the exact input bytes, not metadata or claimed source authority."""
     digest = sha256()
@@ -222,6 +252,10 @@ def _write_triplet(
             **payloads[1],
             "activation_commit_marker_version": ACTIVATION_COMMIT_MARKER_VERSION,
             "identity_map_sha256": sha256(map_bytes).hexdigest(),
+            "exact_report_sha256": sha256((
+                json.dumps(payloads[2], sort_keys=True, indent=2, allow_nan=False)
+                + "\n"
+            ).encode("utf-8")).hexdigest(),
             "identity_map_project_id": payloads[0].get("project_id"),
             "identity_map_source_sha256s": payloads[0].get("source_sha256s"),
         }
