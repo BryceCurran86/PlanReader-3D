@@ -109,6 +109,10 @@ def test_positive_six_real_source_strokes_are_owned_by_one_physical_opening(monk
     assert record.physical_opening_id == "physical-G17-1"
     assert len(record.authenticated_flank_end_parent_ids) == 2
     assert len(record.authenticated_flank_source_visible_ids) == 6
+    assert len(record.authenticated_source_parent_ids) == 6
+    assert record.authenticated_source_parent_ids == tuple(sorted(
+        row.parent_observation_id for row in c[2].lines
+    ))
     assert record.source_sha256 == "e" * 64
     assert record.shadow_only and not record.w4_wall_membership_granted
     assert not record.host_binding_granted and not record.firm_area_granted
@@ -190,6 +194,7 @@ def _owner_record(physical, observations, *, digest="f" * 64,
         status, ("source_owned",), physical, digest,
         tuple(observations), (f"end:{physical}",),
         tuple(observations),
+        authenticated_source_parent_ids=tuple(f"root:{v}" for v in observations),
     )
 
 
@@ -266,3 +271,20 @@ def test_spliced_support_from_another_physical_opening_rejected(monkeypatch):
     result = _run(c)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == ("source_g17_original_parent_lineage_unbound",)
+
+def test_cross_physical_collision_on_shared_FACE_parent_even_if_visible_ids_differ():
+    # Source render could expose different observation IDs for the same
+    # producer-owned parent. Both physical opening claims must remain
+    # conflicting; comparing only their two end parents would miss this.
+    first = _owner_record("physical-a", ("face-visible-a", "end-a"))
+    second = _owner_record("physical-b", ("face-visible-b", "end-b"))
+    second = replace(second, authenticated_source_parent_ids=(
+        "root:face-visible-a", "root:end-b",
+    ))
+    result = quarantine_overlapping_g17_physical_source_claims_shadow(
+        (first, second)
+    )
+    assert len(result) == 2
+    assert all(item.status is EvidenceResolutionStatus.CONFLICT for item in result)
+    assert all(not item.host_binding_granted and not item.firm_area_granted
+               for item in result)
