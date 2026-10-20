@@ -40,6 +40,16 @@ def test_tgsi_callout_parsing():
     assert parsed3["indicator_format"] == TGSIFormat.PEEL_AND_STICK_MAT
     assert parsed3["location_context"] == TGSILocationContext.STAIR_BOTTOM
     assert parsed3["depth_m"] == 0.6
+    assert parsed3["width_m"] == 0.0
+
+    omitted = SourceTGSIAccessibilityTileShadowAuthority.parse_callout("TGSI")
+    assert omitted["width_m"] == 0.0
+    assert omitted["depth_m"] == 0.0
+    omitted_spec = TGSIZoneSpec(zone_id="TGSI-OMIT")
+    assert omitted_spec.width_m == 0.0
+    assert omitted_spec.depth_m == 0.0
+    assert omitted_spec.area_m2 == 0.0
+    assert omitted_spec.stud_count == 0
 
 
 def test_tgsi_snapping():
@@ -59,6 +69,7 @@ def test_tgsi_evaluation_quantities():
                 (0.0, 600.0),
             ],
             "callout": "600x1200 HAZARD WARNING STUDS TOP OF STAIRS",
+            "studs_per_square_meter": 400,
             "level_id": "L01",
         },
         {
@@ -67,6 +78,7 @@ def test_tgsi_evaluation_quantities():
             "width_m": 2.0,
             "depth_m": 0.6,
             "callout": "DIRECTIONAL LEADING TACTILE TILES",
+            "tile_module_area_m2": 0.09,
             "level_id": "L01",
         },
     ]
