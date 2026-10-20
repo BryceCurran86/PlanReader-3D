@@ -134,3 +134,90 @@ def test_original_lot16_eight_signed_run_stays_cryptographically_identical():
     ids = [q.object_identity_refs[0] for q in sealed.quantities]
     assert len(set(ids)) == 8
     assert all(q.family == "opening_area" for q in sealed.quantities)
+
+
+
+def _commercial_openings(rows):
+    from pb_quantity_takeoff_adapter import quantities_to_takeoff_output_rows
+    from tests.test_quantity_takeoff_adapter import (
+        quantity as commercial_quantity,
+        source_trace, figured,
+    )
+    quantities = []
+    for row in rows:
+        quantities.append(commercial_quantity(
+            quantity_id=row["quantity_id"],
+            family=row["family"],
+            semantic_key=row["semantic_key"],
+            value=row["value"],
+            unit=row["unit"],
+            input_entity_ids=tuple(row["physical_ids"]),
+        ))
+    return quantities_to_takeoff_output_rows(
+        quantities,
+        traces_by_quantity_id={
+            q.quantity_id: source_trace(
+                canonical_entity_ids=q.input_entity_ids,
+            ) for q in quantities
+        },
+        authorities_by_quantity_id={
+            q.quantity_id: figured() for q in quantities
+        },
+    )
+
+
+def test_unsealed_commercial_projection_rejects_same_opening_two_area_semantics():
+    source_rows = [
+        {"quantity_id": "area-door", "family": "opening_area",
+         "semantic_key": "door_area:actual-opening",
+         "value": 1.8, "unit": "m2", "physical_ids": ["actual-opening"]},
+        {"quantity_id": "area-window", "family": "opening_area",
+         "semantic_key": "window_area:actual-opening",
+         "value": 1.8, "unit": "m2", "physical_ids": ["actual-opening"]},
+    ]
+    from pb_quantity_takeoff_adapter import CommercialTakeoffConflictError
+    with pytest.raises(CommercialTakeoffConflictError,
+                       match="conflicting commercial physical opening"):
+        _commercial_openings(source_rows)
+
+
+def test_distinct_area_and_complete_count_can_project_same_physical_opening():
+    source_rows = [
+        {"quantity_id": "door-area", "family": "opening_area",
+         "semantic_key": "door_area:actual-opening",
+         "value": 1.8, "unit": "m2", "physical_ids": ["actual-opening"]},
+        {"quantity_id": "door-count", "family": "opening_count",
+         "semantic_key": "door_count:actual-opening",
+         "value": 1, "unit": "ea", "physical_ids": ["actual-opening"]},
+    ]
+    rows = _commercial_openings(source_rows)
+    assert [r["quantity_id"] for r in rows] == ["door-area", "door-count"]
+
+
+def test_grouped_opening_count_overlap_is_not_hidden_by_new_semantic_key():
+    source_rows = [
+        {"quantity_id": "door-count-one", "family": "opening_count",
+         "semantic_key": "door_count:source-owned-universe-A",
+         "value": 2, "unit": "ea",
+         "physical_ids": ["opening-1", "opening-2"]},
+        {"quantity_id": "door-count-two", "family": "opening_count",
+         "semantic_key": "door_count:source-owned-universe-B",
+         "value": 2, "unit": "ea",
+         "physical_ids": ["opening-2", "opening-3"]},
+    ]
+    from pb_quantity_takeoff_adapter import CommercialTakeoffConflictError
+    with pytest.raises(CommercialTakeoffConflictError,
+                       match="conflicting commercial physical opening"):
+        _commercial_openings(source_rows)
+
+
+def test_commercial_distinct_physical_openings_not_filtered_by_shared_area_family():
+    source_rows = [
+        {"quantity_id": "door-one", "family": "opening_area",
+         "semantic_key": "door_area:one",
+         "value": 1.8, "unit": "m2", "physical_ids": ["one"]},
+        {"quantity_id": "door-two", "family": "opening_area",
+         "semantic_key": "door_area:two",
+         "value": 1.8, "unit": "m2", "physical_ids": ["two"]},
+    ]
+    assert len(_commercial_openings(source_rows)) == 2
