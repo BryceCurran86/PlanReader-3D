@@ -35,6 +35,11 @@ def test_spider_fitting_callout_parsing():
     )
     assert parsed3["fitting_type"] == SpiderFittingType.SINGLE_ARM
     assert parsed3["support_type"] == FinSupportType.STEEL_COLUMN
+    assert parsed3["rotule_dia_mm"] == 0.0
+    omitted_spider = SourceSpiderFittingGlassFinShadowAuthority.parse_spider_callout("SPIDER")
+    assert omitted_spider["rotule_dia_mm"] == 0.0
+    omitted_fitting = SpiderFittingSpec(fitting_id="SP-OMIT")
+    assert omitted_fitting.rotule_dia_mm == 0.0
 
 
 def test_glass_fin_callout_parsing():
@@ -53,6 +58,15 @@ def test_glass_fin_callout_parsing():
     assert parsed_fin2["depth_mm"] == 400.0
     assert parsed_fin2["height_m"] == 6.0
     assert parsed_fin2["is_laminated"] is True
+
+    omitted_fin = SourceSpiderFittingGlassFinShadowAuthority.parse_fin_callout("GLASS FIN")
+    assert omitted_fin["thickness_mm"] == 0.0
+    assert omitted_fin["depth_mm"] == 0.0
+    assert omitted_fin["height_m"] == 0.0
+    omitted_fin_spec = GlassFinSpec(fin_id="FIN-OMIT")
+    assert omitted_fin_spec.thickness_mm == 0.0
+    assert omitted_fin_spec.depth_mm == 0.0
+    assert omitted_fin_spec.height_m == 0.0
 
 
 def test_facade_snapping():
