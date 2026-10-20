@@ -219,10 +219,12 @@ def require_signed_v2_family_trade_integrity(
                         for part in parts
                     )
                     or parts[-1] != "tile"
+                    or len(refs) != 1
+                    or parts[1] != refs[0]
                 ):
                     raise ValueError(
                         "mapped tiling requires original source-signed tile "
-                        "floor finish material semantics"
+                        "floor finish material semantics and exact physical floor identity"
                     )
             # The higher-level V1 signed receipt verifier guarantees a unit
             # exists. A missing unit in source-neutral helper-only test data
