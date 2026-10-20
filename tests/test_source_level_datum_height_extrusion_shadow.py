@@ -32,7 +32,7 @@ def test_multilevel_building_stack():
     assert receipt.base_level_elevation_m == 10.0
     assert receipt.top_level_elevation_m == 21.0
     assert receipt.total_building_height_m == 11.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

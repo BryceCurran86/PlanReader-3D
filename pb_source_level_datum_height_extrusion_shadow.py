@@ -191,7 +191,7 @@ class SourceLevelDatumHeightExtrusionShadowAuthority:
             top_level_elevation_m=top_rl,
             total_building_height_m=total_height,
             levels=tuple(records),
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             schema_version=SCHEMA_VERSION,
             commercial_projection_allowed=False,
             takeoff_eligible=False,
