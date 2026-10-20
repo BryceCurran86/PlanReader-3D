@@ -98,9 +98,9 @@ def read_committed_active_identity_map(
     must have a matching receipt published last. The receipt is a commit
     marker, not producer/source or independent benchmark authorization.
     """
-    if type(path) is not Path:
+    if not isinstance(path, Path):
         raise TypeError("active identity map path must be typed")
-    if receipt_path is not None and type(receipt_path) is not Path:
+    if receipt_path is not None and not isinstance(receipt_path, Path):
         raise TypeError("activation receipt path must be typed")
     first_receipt: bytes | None = None
     if receipt_path is not None:
