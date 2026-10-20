@@ -2349,6 +2349,24 @@ def _pair_lookup(
     return result
 
 
+def _inconsistent_source_group_members(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> frozenset[str]:
+    """Original W4 groups must partition their members, not choose first."""
+    first_group_by_member: dict[str, tuple[str, ...]] = {}
+    unsafe_members: set[str] = set()
+    for raw_group in equivalence.equivalence_groups:
+        group = tuple(sorted(str(member) for member in raw_group))
+        for member in group:
+            prior = first_group_by_member.get(member)
+            if prior is not None and prior != group:
+                unsafe_members.update(prior)
+                unsafe_members.update(group)
+            else:
+                first_group_by_member.setdefault(member, group)
+    return frozenset(unsafe_members)
+
+
 def _equivalence_group_lookup(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> dict[str, tuple[str, ...]]:
@@ -2414,6 +2432,18 @@ def _normalize_role_candidates(
         if group_lookup is None
         else group_lookup
     )
+    unsafe_group_members = _inconsistent_source_group_members(equivalence)
+    if any(
+        str(record.wall_candidate_id) in unsafe_group_members
+        for _offset, record in candidates
+    ):
+        # Same wall belonging to incompatible source-issued group partitions
+        # is CONFLICT even if a caller-provided cached lookup chooses one.
+        return (
+            EvidenceResolutionStatus.CONFLICT,
+            (),
+            (HOST_EQUIVALENCE_AMBIGUOUS,),
+        )
     normalized: list[_RoleCandidate] = []
 
     for cluster in _clusters_by_offset(candidates, axis_tol):

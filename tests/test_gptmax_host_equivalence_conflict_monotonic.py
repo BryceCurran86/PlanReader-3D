@@ -158,6 +158,53 @@ def test_injected_distinct_lookup_cannot_bypass_same_source_group_veto():
     assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
 
 
+@pytest.mark.parametrize("reverse", (False, True))
+@pytest.mark.parametrize("selected", ("left", "right", "third"))
+def test_overlapping_original_same_groups_fail_closed_on_all_affected_members(
+    reverse, selected,
+):
+    groups = (("left", "right"), ("left", "third"))
+    if reverse:
+        groups = tuple(reversed(groups))
+    equivalence = _source_equivalence((), groups=groups)
+    record = _record(selected, start=10.0, end=40.0)
+    status, normalized, reasons = _normalize_role_candidates(
+        ((0.0, record),), equivalence, axis_tol=0.8,
+    )
+    assert status is Status.CONFLICT
+    assert normalized == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
+def test_repeated_identical_source_group_is_not_an_original_contradiction():
+    left = _record("left", start=10.0, end=40.0)
+    right = _record("right", start=10.0, end=40.0)
+    equiv = _source_equivalence(
+        (("left", "right", SAME.value),),
+        groups=(("left", "right"), ("left", "right")),
+    )
+    status, normalized, reasons = _normalize_role_candidates(
+        ((0.0, left), (0.0, right)), equiv, axis_tol=0.8,
+    )
+    assert status is Status.CORROBORATED
+    assert len(normalized) == 1
+    assert reasons == ()
+
+
+def test_unrelated_wall_group_overlap_does_not_remove_independent_host():
+    host = _record("host", start=10.0, end=40.0)
+    equiv = _source_equivalence(
+        (), groups=(("left", "right"), ("left", "third")),
+    )
+    status, normalized, reasons = _normalize_role_candidates(
+        ((0.0, host),), equiv, axis_tol=0.8,
+    )
+    assert status is Status.CORROBORATED
+    assert len(normalized) == 1
+    assert normalized[0].record.wall_candidate_id == "host"
+    assert reasons == ()
+
+
 def test_malformed_single_source_relation_fails_closed_in_host_admission():
     source = _source_equivalence((("left", "right", "untrusted_value"),))
     assert _pair_lookup(source) == {("left", "right"): UNKNOWN}
