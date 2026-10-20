@@ -106,9 +106,12 @@ def original_physical_g17_source_flank_report(
         representative = str(trace.representative_observation_id)
         prior = observed.get(physical_id)
         if prior is not None:
-            if prior != representative:
-                raise RuntimeError("duplicate physical G17 opening identity with competing source observations")
-            continue
+            # Even the same representative occurring twice is not two
+            # independent physical-opening proof records. Discarding the
+            # second hides an incomplete or duplicated producer universe.
+            raise RuntimeError(
+                "original G17 opening roster repeats a physical identity"
+            )
         observed[physical_id] = representative
         selector = ObservationSelector(
             **root, observation_id=representative,
@@ -198,6 +201,16 @@ def original_physical_g17_source_flank_report(
         "original_source_owned_two_flank_count": sum(
             x.status is EvidenceResolutionStatus.CORROBORATED
             for x in reconciled
+        ),
+        # Zero unresolved source claims is necessary, but not sufficient,
+        # for page-level publication. The return below never confers host
+        # or quantity authority even when this local source scope is clean.
+        "hostless_g17_source_roster_complete": (
+            bool(observed)
+            and len(reconciled) == len(observed)
+            and not unresolved
+            and all(x.status is EvidenceResolutionStatus.CORROBORATED
+                    for x in reconciled)
         ),
         "unresolved": unresolved,
         "source_owner_claims": [asdict(x) for x in reconciled],
