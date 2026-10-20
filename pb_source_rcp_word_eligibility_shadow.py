@@ -16,6 +16,7 @@ Non-negotiable invariants:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -32,6 +33,7 @@ class RcpWordRole(str, Enum):
     GENERAL_NOTE_PROSE = "GENERAL_NOTE_PROSE"
     TITLE_BLOCK_METADATA = "TITLE_BLOCK_METADATA"
     OUT_OF_VIEWPORT = "OUT_OF_VIEWPORT"
+    OTHER_PLAN_TEXT = "OTHER_PLAN_TEXT"
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,7 @@ class SourceRcpWordEligibilityShadowAuthority:
         plan_viewport_bbox: Optional[Tuple[float, float, float, float]] = None,
         schedule_table_bboxes: Sequence[Tuple[float, float, float, float]] = (),
         title_block_bboxes: Sequence[Tuple[float, float, float, float]] = (),
+        source_defined_ceiling_codes: Sequence[str] = (),
     ) -> RcpWordEvidence:
         """Classifies a single word token for ceiling mark eligibility."""
         clean_text = word_text.strip()
@@ -107,7 +110,8 @@ class SourceRcpWordEligibilityShadowAuthority:
             (document_id, page_id, clean_text, wb, block_index, line_index, word_index),
         )
 
-        if not clean_text or wb[0] >= wb[2] or wb[1] >= wb[3]:
+        if (not clean_text or any(not math.isfinite(x) for x in wb)
+                or wb[0] >= wb[2] or wb[1] >= wb[3]):
             return RcpWordEvidence(
                 word_id=word_id,
                 text=clean_text,
@@ -168,6 +172,49 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes="Word bbox is outside designated plan drawing viewport.",
             )
 
+        # A word token, bounding box, viewport and schedule are only
+        # *caller supplied* here. No SourceVisibilityProducer snapshot,
+        # source-painted glyph, revision or original material definition has
+        # been re-resolved, so none may grant CORROBORATED source authority.
+        # Missing plan/schedule scopes must not default to 'in plan'.
+        defined = {
+            str(code).strip().upper()
+            for code in source_defined_ceiling_codes
+            if isinstance(code, str) and str(code).strip()
+        }
+        if plan_viewport_bbox is None or not schedule_table_bboxes or not defined:
+            return RcpWordEvidence(
+                word_id=word_id, text=clean_text, bbox_pdf_pts=wb,
+                block_index=block_index, line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Original plan, schedule and ceiling-code scope is not issued.",
+            )
+        # A room label and a short drafting sentence are NOT ceiling
+        # callouts just because they contain <=6 words. Require the source
+        # schedule-defined code and permit only numeric/CLG support tokens
+        # in its native whole text block. This is still CANDIDATE only.
+        support = {"CLG", "/", "AFFL", "FFL", "A.F.F.L"}
+        block_tokens = [part.upper() for part in block_text.strip().split()]
+        unsupported = [
+            token for token in block_tokens
+            if token not in defined
+            and token not in support
+            and not re.fullmatch(r"[0-9]+(?:[.]?[0-9]+)?(?:MM|M)?", token)
+        ]
+        if clean_text.upper() not in defined or unsupported:
+            return RcpWordEvidence(
+                word_id=word_id, text=clean_text, bbox_pdf_pts=wb,
+                block_index=block_index, line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.OTHER_PLAN_TEXT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Not an isolated source-defined ceiling material/code callout.",
+            )
+
         # 4. Syntactic prose / general note check
         # Notes are multi-word prose paragraphs (e.g. > 6 words or length > 35 chars)
         block_words = block_text.strip().split()
@@ -195,6 +242,6 @@ class SourceRcpWordEligibilityShadowAuthority:
             word_index=word_index,
             role=RcpWordRole.IN_PLAN_CEILING_ANNOTATION,
             is_eligible_for_ceiling_mark=True,
-            status=EvidenceResolutionStatus.CORROBORATED,
-            notes="Corroborated in-plan ceiling annotation candidate.",
+            status=EvidenceResolutionStatus.CANDIDATE,
+            notes="Caller-scoped original ceiling word candidate only; source producer not re-proven.",
         )
