@@ -221,3 +221,55 @@ def test_commercial_distinct_physical_openings_not_filtered_by_shared_area_famil
          "value": 1.8, "unit": "m2", "physical_ids": ["two"]},
     ]
     assert len(_commercial_openings(source_rows)) == 2
+
+
+
+@pytest.mark.parametrize("area_kind,count_kind", [
+    ("door", "window"),
+    ("window", "door"),
+])
+def test_original_seal_rejects_opposite_kinds_across_area_and_count(
+    area_kind, count_kind,
+):
+    area = _q("physical-opening-1", kind=area_kind,
+              family="opening_area", quantity_id="source-area")
+    count = _q("physical-opening-1", kind=count_kind,
+               family="opening_count", quantity_id="source-count")
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="contradictory source-owned door/window kind"):
+        _seal([area, count])
+
+
+@pytest.mark.parametrize("area_kind,count_kind", [
+    ("door", "window"),
+    ("window", "door"),
+])
+def test_customer_projection_rejects_opposite_kinds_across_area_and_count(
+    area_kind, count_kind,
+):
+    rows = [
+        {"quantity_id": "area", "family": "opening_area",
+         "semantic_key": f"{area_kind}_area:original-open",
+         "value": 1.8, "unit": "m2",
+         "physical_ids": ["original-open"]},
+        {"quantity_id": "count", "family": "opening_count",
+         "semantic_key": f"{count_kind}_count:original-open",
+         "value": 1, "unit": "ea",
+         "physical_ids": ["original-open"]},
+    ]
+    from pb_quantity_takeoff_adapter import CommercialTakeoffConflictError
+    with pytest.raises(CommercialTakeoffConflictError,
+                       match="contradictory source-owned door/window kind"):
+        _commercial_openings(rows)
+
+
+def test_multiple_proven_same_kind_area_and_count_remain_separate_families():
+    rows = [
+        {"quantity_id": "window-area", "family": "opening_area",
+         "semantic_key": "window_area:original-open",
+         "value": 1.8, "unit": "m2", "physical_ids": ["original-open"]},
+        {"quantity_id": "window-count", "family": "opening_count",
+         "semantic_key": "window_count:original-open",
+         "value": 1, "unit": "ea", "physical_ids": ["original-open"]},
+    ]
+    assert len(_commercial_openings(rows)) == 2
