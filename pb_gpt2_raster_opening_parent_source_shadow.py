@@ -146,13 +146,26 @@ def recover_original_raster_opening_parent_lines_shadow(
             source_inventory_conflict = True
             continue
         record = result.observation
-        if record is None or len(record.derivation_parent_ids) != 1:
+        # A CORROBORATED status cannot excuse a missing, malformed or split
+        # original parent receipt: it might conceal a competing claim to one
+        # of the requested physical source lines.
+        if (record is None
+                or type(record.derivation_parent_ids) is not tuple
+                or len(record.derivation_parent_ids) != 1
+                or type(record.derivation_parent_ids[0]) is not str
+                or not record.derivation_parent_ids[0]):
+            source_inventory_conflict = True
             continue
         parent_id = record.derivation_parent_ids[0]
         if parent_id not in sought:
             continue
-        line = _source_line(record, parent_id=parent_id, visible_id=visible_id, root=root, page_id=page_id)
-        if line is not None:
+        line = _source_line(
+            record, parent_id=parent_id, visible_id=visible_id,
+            root=root, page_id=page_id,
+        )
+        if line is None:
+            source_inventory_conflict = True
+        else:
             found[parent_id].append(line)
     if source_inventory_conflict:
         return RasterOpeningParentSourceHandoff(
