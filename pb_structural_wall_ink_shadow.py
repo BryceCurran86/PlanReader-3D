@@ -935,23 +935,51 @@ def classify_structural_wall_ink(
         # a cluster that reaches the wall network anywhere is attached as a whole.
         glyph_list = sorted(m for m in deferred_glyph if m in pts)
         guf = _UnionFind(glyph_list)
+        widths = {
+            m: ((_num(segs[m].get("width")) or 0.0) if m in strokes else 0.0)
+            for m in glyph_list
+        }
+        bboxes = {
+            m: (
+                min(pts[m][0], pts[m][2]),
+                min(pts[m][1], pts[m][3]),
+                max(pts[m][0], pts[m][2]),
+                max(pts[m][1], pts[m][3]),
+            )
+            for m in glyph_list
+        }
         gcells: Dict[Tuple[int, int], List[int]] = defaultdict(list)
         for m in glyph_list:
-            x0, x1 = sorted((pts[m][0], pts[m][2]))
-            y0, y1 = sorted((pts[m][1], pts[m][3]))
+            x0, y0, x1, y1 = bboxes[m]
             for gx in range(int(x0 // _CONTACT_CELL_PT) - 1, int(x1 // _CONTACT_CELL_PT) + 2):
                 for gy in range(int(y0 // _CONTACT_CELL_PT) - 1, int(y1 // _CONTACT_CELL_PT) + 2):
                     gcells[(gx, gy)].append(m)
+        tested_pairs: set[Tuple[int, int]] = set()
         for cell in sorted(gcells):
             group = gcells[cell]
             for ia in range(len(group)):
+                a = group[ia]
+                ax0, ay0, ax1, ay1 = bboxes[a]
+                wa = widths[a]
                 for ib in range(ia + 1, len(group)):
-                    a, b = group[ia], group[ib]
+                    b = group[ib]
+                    pair = (a, b) if a < b else (b, a)
+                    if pair in tested_pairs:
+                        continue
+                    tested_pairs.add(pair)
                     if guf.find(a) == guf.find(b):
                         continue
-                    wa = (_num(segs[a].get("width")) or 0.0) if a in strokes else 0.0
-                    wb = (_num(segs[b].get("width")) or 0.0) if b in strokes else 0.0
-                    if _segment_distance(pts[a], pts[b]) <= (wa + wb) / 2 + CONTACT_SLACK_PT:
+                    wb = widths[b]
+                    max_contact = (wa + wb) / 2 + CONTACT_SLACK_PT
+                    bx0, by0, bx1, by1 = bboxes[b]
+                    if (
+                        ax0 - bx1 > max_contact
+                        or bx0 - ax1 > max_contact
+                        or ay0 - by1 > max_contact
+                        or by0 - ay1 > max_contact
+                    ):
+                        continue
+                    if _segment_distance(pts[a], pts[b]) <= max_contact:
                         guf.union(a, b)
         attached_roots = {guf.find(m) for m in glyph_list if touches_network(m)}
         for key, members in glyph_members.items():
