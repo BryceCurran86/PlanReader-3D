@@ -121,7 +121,7 @@ class SourceWetAreaWaterproofingShadowAuthority:
         shower_perimeter_pt: float = 0.0,
         general_upstand_height_pt: float = 0.0,
         shower_tanking_height_pt: float = 0.0,
-        membrane_spec: str = "CLASS_III_POLYURETHANE_MEMBRANE",
+        membrane_spec: str = "",
     ) -> WetAreaWaterproofingRecord:
         gen_upstand_area = general_perimeter_pt * general_upstand_height_pt
         shower_tanking_area = shower_perimeter_pt * shower_tanking_height_pt
