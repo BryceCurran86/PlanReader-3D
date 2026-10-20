@@ -105,6 +105,25 @@ class SourceRcpWordEligibilityShadowAuthority:
         clean_text = word_text.strip()
         wb = (float(word_bbox[0]), float(word_bbox[1]), float(word_bbox[2]), float(word_bbox[3]))
 
+        # Original PDF coordinates must be finite BEFORE they enter the
+        # canonical contract ID. An invalid source box is a negative receipt.
+        if not all(math.isfinite(v) for v in wb):
+            return RcpWordEvidence(
+                word_id=stable_contract_id(
+                    "RCP_WORD_INVALID_BBOX",
+                    (document_id, page_id, clean_text, block_index, line_index, word_index),
+                ),
+                text=clean_text,
+                bbox_pdf_pts=(0.0, 0.0, 0.0, 0.0),
+                block_index=block_index,
+                line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Non-finite original PDF bbox; no source geometry authority.",
+            )
+
         word_id = stable_contract_id(
             "RCP_WORD",
             (document_id, page_id, clean_text, wb, block_index, line_index, word_index),
