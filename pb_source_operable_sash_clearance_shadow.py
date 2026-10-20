@@ -37,7 +37,7 @@ class OperableSashSpec:
     operation_type: SashOperationType
     width_mm: float
     height_mm: float
-    opening_angle_deg: float = 45.0
+    opening_angle_deg: float = 0.0
     max_projection_mm: float = 250.0
     has_insect_screen: bool = False
     level_id: str = "L1"
@@ -135,7 +135,9 @@ class SourceOperableSashClearanceShadowAuthority:
         elif sash.operation_type == SashOperationType.SLIDING:
             return 0.5 * gross_area
         elif sash.operation_type in (SashOperationType.CASEMENT_LH, SashOperationType.CASEMENT_RH):
-            angle_rad = math.radians(min(90.0, max(15.0, sash.opening_angle_deg)))
+            if sash.opening_angle_deg <= 0.0:
+                return 0.0
+            angle_rad = math.radians(min(90.0, sash.opening_angle_deg))
             return gross_area * math.sin(angle_rad)
         elif sash.operation_type == SashOperationType.AWNING:
             proj_m = sash.max_projection_mm / 1000.0
