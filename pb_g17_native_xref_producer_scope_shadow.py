@@ -106,6 +106,7 @@ def producer_bound_g17_w4_native_xref_shadow(
 
     opening_authority = source.physical_opening_authority()
     g17 = []
+    excluded_non_axis_g17_ids = []
     physical_ids = []
     seen_selectors = set()
     seen_edge_ids = set()
@@ -164,14 +165,19 @@ def producer_bound_g17_w4_native_xref_shadow(
                             opening_ids=physical_ids,
                         )
                     seen_edge_ids.add(edge_id)
+                    if _axis_line_for_native_xref(tuple(f.geometry)) is None:
+                        excluded_non_axis_g17_ids.append(edge_id)
+                        continue
                     g17.append({"edge_id": edge_id,
                                 "geometry_pdf_pts": tuple(f.geometry)})
 
     ordinary = []
     non_axis_w4_edges = []
+    excluded_unusable_w4_ids = []
     seen_w4 = set()
     for w in scope.records:
         if not w.wall_candidate_id or not w.physical_identity.usable:
+            excluded_unusable_w4_ids.append(str(w.wall_candidate_id))
             continue
         for f in w.source_edge_fragments:
             edge_id = f"{w.wall_candidate_id}:{f.edge_id}"
@@ -217,7 +223,9 @@ def producer_bound_g17_w4_native_xref_shadow(
         "physical_opening_ids": sorted(physical_ids),
         "original_producer_scope_verified": True,
         "g17_source_edges_reissued": len(g17),
+        "g17_non_axis_source_edges_excluded": sorted(excluded_non_axis_g17_ids),
         "ordinary_w4_edges_reissued": len(ordinary),
+        "unusable_w4_candidate_ids_excluded": sorted(excluded_unusable_w4_ids),
         "ordinary_w4_non_axis_source_edges_excluded": sorted(non_axis_w4_edges),
         "opening_roster_complete_proven": False,
         "complete_structural_wall_equivalence_proven": False,
