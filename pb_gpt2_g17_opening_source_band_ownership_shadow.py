@@ -121,6 +121,20 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
     if set(source_visible_ids) != opening_observation_ids:
         return _abstain(original_selector, "source_g17_not_complete_physical_opening_support")
 
+    # The original G17 producer independently issues this exact immutable
+    # source-root set from each supporting visible observation's derivation
+    # parent. Without the comparison, a caller could splice source-owned ink
+    # from an entirely different opening under a valid physical opening ID.
+    source_roots = tuple(sorted(line.parent_observation_id for line in rows))
+    if (
+        type(record.source_lineage_root_ids) is not tuple
+        or not record.source_lineage_root_ids
+        or len(set(record.source_lineage_root_ids)) != len(record.source_lineage_root_ids)
+        or any(type(parent) is not str or not parent for parent in record.source_lineage_root_ids)
+        or tuple(sorted(record.source_lineage_root_ids)) != source_roots
+    ):
+        return _abstain(original_selector, "source_g17_original_parent_lineage_unbound")
+
     # Existing producer-owned typed reader must independently reauthenticate
     # every original source observation, not just the two end-line summaries.
     visibility = authority.source_visibility_authority()
