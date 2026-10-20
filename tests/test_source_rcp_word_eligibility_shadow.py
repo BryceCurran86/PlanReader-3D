@@ -295,3 +295,42 @@ def test_finite_original_ceiling_code_remains_noncommercial_candidate_with_stric
     assert result.is_eligible_for_ceiling_mark
     assert not result.takeoff_eligible
     assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("mixed_block", (
+    "GRID IPF1", "IPF1 GRID", "GRID GRID", "IPF1 IPF1",
+    "GRID WFPB 2400", "WFPB GRID 2400",
+))
+def test_multiple_original_ceiling_codes_in_one_native_block_abstain(mixed_block):
+    a=SourceRcpWordEligibilityShadowAuthority()
+    for token in mixed_block.split():
+        if token not in {"GRID","IPF1","WFPB"}:
+            continue
+        word=a.classify_word(
+            document_id="sha-pinned-source",page_id="9",word_text=token,
+            word_bbox=(500.,600.,530.,610.),block_text=mixed_block,
+            plan_viewport_bbox=PLAN_VIEWPORT,
+            schedule_table_bboxes=(SCHEDULE_TABLE,),
+            source_defined_ceiling_codes=("GRID","IPF1","WFPB"),
+        )
+        assert word.status is EvidenceResolutionStatus.ABSTAINED
+        assert word.role is RcpWordRole.OTHER_PLAN_TEXT
+        assert not word.is_eligible_for_ceiling_mark
+        assert not word.commercial_projection_allowed
+        assert not word.takeoff_eligible
+
+
+@pytest.mark.parametrize("word,source_block", (
+    ("GRID","GRID 2400"), ("IPF1","IPF1"),
+))
+def test_one_native_schedule_defined_ceiling_code_remains_noncommercial_only(word,source_block):
+    r=SourceRcpWordEligibilityShadowAuthority().classify_word(
+        document_id="source-p9",page_id="9",word_text=word,
+        word_bbox=(500.,600.,530.,610.),block_text=source_block,
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
+    )
+    assert r.status is EvidenceResolutionStatus.CANDIDATE
+    assert r.role is RcpWordRole.IN_PLAN_CEILING_ANNOTATION
+    assert not r.commercial_projection_allowed and not r.takeoff_eligible
