@@ -41,8 +41,8 @@ class SkylightVentSpec:
     unit_type: RoofVentSkylightType = RoofVentSkylightType.FIXED_SKYLIGHT_DOME
     curb_type: CurbConstructionType = CurbConstructionType.INSULATED_STEEL_UPSTAND
     center_point: Tuple[float, float] = (0.0, 0.0)
-    opening_width_mm: float = 1200.0
-    opening_length_mm: float = 2400.0
+    opening_width_mm: float = 0.0
+    opening_length_mm: float = 0.0
     curb_height_mm: float = 200.0
     has_safety_mesh: bool = True
     discharge_coefficient_cv: float = 0.65
@@ -87,8 +87,8 @@ class SourceSkylightSmokeVentShadowAuthority:
         res = {
             "unit_type": RoofVentSkylightType.FIXED_SKYLIGHT_DOME,
             "curb_type": CurbConstructionType.INSULATED_STEEL_UPSTAND,
-            "opening_width_mm": 1200.0,
-            "opening_length_mm": 2400.0,
+            "opening_width_mm": 0.0,
+            "opening_length_mm": 0.0,
             "curb_height_mm": 200.0,
             "has_safety_mesh": False,
             "discharge_coefficient_cv": DEFAULT_CV_DISCHARGE,
