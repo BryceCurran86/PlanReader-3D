@@ -76,7 +76,7 @@ def test_compile_alignment_receipt():
 
     assert isinstance(receipt, SheetRegistrationAlignmentReceipt)
     assert receipt.total_registered_sheets == 1
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
