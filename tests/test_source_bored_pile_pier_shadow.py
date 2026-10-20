@@ -42,6 +42,9 @@ def test_bored_pile_callout_parsing():
     assert parsed3["rock_socket_length_m"] == 2.0
     assert parsed3["stratum"] == GeotechnicalStratum.SOLID_BEDROCK
 
+    omitted = SourceBoredPilePierShadowAuthority.parse_callout("PILE")
+    assert omitted["diameter_mm"] == 0.0
+
 
 def test_bored_pile_snapping():
     pt = (123.4, 456.7)
@@ -100,3 +103,11 @@ def test_bored_pile_evaluation_quantities():
     assert res.status == "CANDIDATE"
     assert res.commercial_projection_allowed is False
     assert res.takeoff_eligible is False
+
+    omitted_spec = BoredPileSpec(pile_id="P-OMIT")
+    assert omitted_spec.diameter_mm == 0.0
+    omitted_res = SourceBoredPilePierShadowAuthority.evaluate_piles(
+        [{"pile_id": "P-OMIT", "center_point": (0.0, 0.0), "callout": "PILE"}]
+    )
+    assert omitted_res.piles[0].diameter_mm == 0.0
+    assert omitted_res.quantities.total_concrete_volume_m3 == 0.0
