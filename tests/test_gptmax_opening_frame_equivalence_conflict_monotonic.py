@@ -88,6 +88,16 @@ def test_source_same_group_and_explicit_distinct_pair_never_grant_exclusion(orde
         }
 
 
+@pytest.mark.parametrize("unproved_class", (
+    AMBIGUOUS.value, "malformed_source_class", None, [],
+))
+def test_same_original_group_with_non_same_class_stays_ambiguous(unproved_class):
+    rows = (("wall_a", "wall_b", unproved_class),)
+    assert _lookup(rows, groups=(("wall_a", "wall_b"),)) == {
+        ("wall_a", "wall_b"): AMBIGUOUS,
+    }
+
+
 def test_distinct_wall_pair_without_shared_source_group_remains_distinct():
     rows = (("wall_a", "wall_b", DISTINCT.value),)
     assert _lookup(rows, groups=(("wall_a", "other"), ("wall_b",))) == {
@@ -200,7 +210,12 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
     assert tuple(scope.equivalence.pair_classifications) == original_pairs
 
 
-def test_single_member_shortcut_rejects_same_group_vs_distinct_pair():
+@pytest.mark.parametrize("unproved_class", (
+    DISTINCT.value, AMBIGUOUS.value, "malformed_source_class", None,
+))
+def test_single_member_shortcut_rejects_same_group_vs_distinct_pair(
+    unproved_class,
+):
     """A contradictory W4 issuer cannot mint frame via the raster shortcut."""
     from dataclasses import replace as dc_replace
     from test_raster_opening_whole_wall_frame import (
@@ -212,7 +227,7 @@ def test_single_member_shortcut_rejects_same_group_vs_distinct_pair():
     scope.equivalence = dc_replace(
         scope.equivalence,
         equivalence_groups=(("wall:host", "wall:rival"),),
-        pair_classifications=(("wall:host", "wall:rival", DISTINCT.value),),
+        pair_classifications=(("wall:host", "wall:rival", unproved_class),),
         representative_wall_ids=("wall:host",),
         same_wall_ids=("wall:host", "wall:rival"),
     )
