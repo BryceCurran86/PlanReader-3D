@@ -51,6 +51,12 @@ def test_skylight_smoke_vent_callout_parsing():
     assert omitted_spec.opening_length_mm == 0.0
     assert omitted_spec.curb_height_mm == 0.0
     assert omitted["curb_height_mm"] == 0.0
+    assert omitted["has_safety_mesh"] is False
+    assert omitted_spec.has_safety_mesh is False
+    smoke_no_mesh = SourceSkylightSmokeVentShadowAuthority.parse_callout(
+        "1200x2400 AUTOMATIC SMOKE VENT 200mm CURB"
+    )
+    assert smoke_no_mesh["has_safety_mesh"] is False
 
 
 def test_skylight_smoke_vent_snapping():
