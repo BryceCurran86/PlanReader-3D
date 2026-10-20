@@ -11,6 +11,7 @@ Proves producer-owned open passage and connected space shadow authority:
 from __future__ import annotations
 
 import copy
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -286,3 +287,103 @@ def test_input_no_mutation():
     assert p_edges == orig_p
     assert c_edges == orig_c
     assert passage == orig_pass
+
+
+def test_transverse_wall_crossing_passage_obstructs():
+    """A wall that crosses the doorway interior is obstruction, not only collinear overlap."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+    crossing = SimpleNamespace(endpoints_pt=((50.0, 80.0), (150.0, 80.0)))
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        primary_finish_code="FT3",
+        connected_finish_code="FT3",
+        existing_wall_candidates=(crossing,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert OPEN_PASSAGE_OBSTRUCTED_BY_WALL in result.reason_codes
+    assert result.record is None
+
+
+def test_t_junction_wall_on_passage_interior_obstructs():
+    """A wall ending on the doorway span occupies the opening."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+    t_wall = SimpleNamespace(endpoints_pt=((150.0, 80.0), (100.0, 80.0)))
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        primary_finish_code="FT3",
+        connected_finish_code="FT3",
+        existing_wall_candidates=(t_wall,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert OPEN_PASSAGE_OBSTRUCTED_BY_WALL in result.reason_codes
+
+
+def test_jamb_endpoint_contact_is_not_obstruction():
+    """A wall that only meets a passage endpoint is a jamb, not a crossing wall."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+    jamb = SimpleNamespace(endpoints_pt=((80.0, 50.0), (100.0, 50.0)))
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        primary_finish_code="FT3",
+        connected_finish_code="FT3",
+        existing_wall_candidates=(jamb,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert SOURCE_OPEN_PASSAGE_RESOLVED in result.reason_codes
+    assert result.record is not None
+
+
+def test_transverse_obstruction_is_rotation_and_order_invariant():
+    """Rotating the doorway and swapping candidate order still abstains."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+    crossing = ((50.0, 80.0), (150.0, 80.0))
+    angle = math.radians(37.0)
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+
+    def rot(pt: tuple[float, float]) -> tuple[float, float]:
+        return (pt[0] * cos_a - pt[1] * sin_a, pt[0] * sin_a + pt[1] * cos_a)
+
+    r_p = [
+        SourcePassageWallEdge(e.wall_id, rot(e.start_pt), rot(e.end_pt))
+        for e in p_edges
+    ]
+    r_c = [
+        SourcePassageWallEdge(e.wall_id, rot(e.start_pt), rot(e.end_pt))
+        for e in c_edges
+    ]
+    r_pass = (rot(passage[0]), rot(passage[1]))
+    r_cross = SimpleNamespace(endpoints_pt=(rot(crossing[0]), rot(crossing[1])))
+    decoy = SimpleNamespace(endpoints_pt=(rot((300.0, 0.0)), rot((300.0, 10.0))))
+
+    for candidates in ((r_cross, decoy), (decoy, r_cross)):
+        result = evaluate_source_open_passage_connection_shadow(
+            selector,
+            passage_endpoints=r_pass,
+            primary_wall_edges=r_p,
+            connected_wall_edges=r_c,
+            primary_finish_code="FT3",
+            connected_finish_code="FT3",
+            existing_wall_candidates=candidates,
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert OPEN_PASSAGE_OBSTRUCTED_BY_WALL in result.reason_codes
+        assert result.record is None

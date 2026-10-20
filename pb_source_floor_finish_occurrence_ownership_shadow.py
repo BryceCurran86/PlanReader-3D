@@ -113,10 +113,16 @@ class SourceDoorwayThreshold:
     threshold_id: str
     start_pt: tuple[float, float]
     end_pt: tuple[float, float]
+    source_stroke_id: str = ""
+    page_id: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.threshold_id, str) or not self.threshold_id.strip():
             raise ValueError("threshold_id must be non-empty string")
+        if not isinstance(self.source_stroke_id, str):
+            raise ValueError("source_stroke_id must be a string")
+        if not isinstance(self.page_id, str):
+            raise ValueError("page_id must be a string")
         p1 = _point(self.start_pt)
         p2 = _point(self.end_pt)
         if p1 is None or p2 is None:
@@ -138,8 +144,8 @@ class SourceFloorFinishOwnershipRecord:
     occurrence_id: str
     finish_boundary_polygon_pdf_pts: tuple[tuple[float, float], ...]
     internal_floor_area_sq_pt: float
-    terminates_at_internal_faces: bool = True
-    under_wall_finish_excluded: bool = True
+    terminates_at_internal_faces: bool = False
+    under_wall_finish_excluded: bool = False
     doorway_transition_authenticated: bool = False
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     reason_codes: tuple[str, ...] = (SOURCE_FLOOR_FINISH_OWNERSHIP_CANDIDATE,)
@@ -221,6 +227,44 @@ def _polygon_area(poly: Sequence[tuple[float, float]]) -> float:
     return abs(area) * 0.5
 
 
+def _threshold_lies_on_polygon_boundary(
+    threshold: SourceDoorwayThreshold,
+    poly: Sequence[tuple[float, float]],
+    snap_tolerance_pt: float,
+) -> bool:
+    """True when the threshold chord lies on one polygon edge (not merely nearby)."""
+    t1 = _point(threshold.start_pt)
+    t2 = _point(threshold.end_pt)
+    if t1 is None or t2 is None:
+        return False
+    t_len = _distance(t1, t2)
+    if t_len <= 1e-6:
+        return False
+    n = len(poly)
+    for i in range(n):
+        e1 = poly[i]
+        e2 = poly[(i + 1) % n]
+        e_len = _distance(e1, e2)
+        if e_len <= 1e-6:
+            continue
+        ux = (e2[0] - e1[0]) / e_len
+        uy = (e2[1] - e1[1]) / e_len
+
+        def proj(p: tuple[float, float]) -> tuple[float, float]:
+            along = (p[0] - e1[0]) * ux + (p[1] - e1[1]) * uy
+            perp = abs((p[0] - e1[0]) * (-uy) + (p[1] - e1[1]) * ux)
+            return along, perp
+
+        a1, perp1 = proj(t1)
+        a2, perp2 = proj(t2)
+        if perp1 > snap_tolerance_pt or perp2 > snap_tolerance_pt:
+            continue
+        overlap = min(max(a1, a2), e_len) - max(min(a1, a2), 0.0)
+        if overlap > snap_tolerance_pt:
+            return True
+    return False
+
+
 def evaluate_source_floor_finish_ownership_shadow(
     selector: SourceFloorFinishOwnershipSelector,
     *,
@@ -228,6 +272,9 @@ def evaluate_source_floor_finish_ownership_shadow(
     internal_face_polygon_pdf_pts: Sequence[Any],
     other_finish_marks: Sequence[SourceFloorFinishMark] = (),
     doorway_transitions: Sequence[SourceDoorwayThreshold] = (),
+    published_room_face_record_id: str | None = None,
+    published_boundary_wall_edge_ids: Sequence[str] = (),
+    jamb_wall_ids: Sequence[str] = (),
     clearance_tolerance_pt: float = DEFAULT_CLEARANCE_TOLERANCE_PT,
     snap_tolerance_pt: float = DEFAULT_SNAP_TOLERANCE_PT,
 ) -> SourceFloorFinishOwnershipResult:
@@ -317,10 +364,46 @@ def evaluate_source_floor_finish_ownership_shadow(
                     selector=selector,
                 )
 
-    # 5. Check doorway threshold transitions
-    doorway_authenticated = False
-    if doorway_transitions:
-        doorway_authenticated = True
+    # 5. Doorway thresholds: presence is not authentication.
+    unique_jambs = tuple(
+        dict.fromkeys(str(wid).strip() for wid in jamb_wall_ids if str(wid).strip())
+    )
+    face_id = str(published_room_face_record_id or "").strip()
+    unique_edges = tuple(
+        dict.fromkeys(
+            str(eid).strip()
+            for eid in published_boundary_wall_edge_ids
+            if str(eid).strip()
+        )
+    )
+    for threshold in doorway_transitions:
+        if not isinstance(threshold, SourceDoorwayThreshold):
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
+        if threshold.page_id.strip() and threshold.page_id.strip() != selector.page_id:
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
+        if not _threshold_lies_on_polygon_boundary(
+            threshold, clean_poly, snap_tolerance_pt
+        ):
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(DOORWAY_TRANSITION_MISALIGNED,),
+                selector=selector,
+            )
+    doorway_authenticated = bool(
+        doorway_transitions
+        and face_id
+        and len(unique_jambs) == 2
+        and all(str(t.source_stroke_id).strip() for t in doorway_transitions)
+    )
+    wall_face_owned = bool(face_id and len(unique_edges) >= 3)
 
     poly_tuple = tuple(clean_poly)
     record_id = stable_contract_id(
@@ -351,8 +434,8 @@ def evaluate_source_floor_finish_ownership_shadow(
         occurrence_id=finish_mark.occurrence_id,
         finish_boundary_polygon_pdf_pts=poly_tuple,
         internal_floor_area_sq_pt=round(area, 4),
-        terminates_at_internal_faces=True,
-        under_wall_finish_excluded=True,
+        terminates_at_internal_faces=wall_face_owned,
+        under_wall_finish_excluded=wall_face_owned,
         doorway_transition_authenticated=doorway_authenticated,
         status=EvidenceResolutionStatus.CANDIDATE,
         reason_codes=(

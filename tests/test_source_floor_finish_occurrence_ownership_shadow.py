@@ -9,6 +9,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_floor_finish_occurrence_ownership_shadow import (
     COMPETING_FINISH_CODES_IN_ROOM,
     COMPETING_FINISH_MARKS_IN_ROOM,
+    DOORWAY_TRANSITION_MISALIGNED,
     FINISH_MATERIAL_CODE_MISMATCH,
     INVALID_ROOM_POLYGON,
     MARK_NOT_IN_ROOM_POLYGON,
@@ -73,9 +74,9 @@ def test_positive_ft2_floor_finish_ownership_in_pwd():
     assert isinstance(record, SourceFloorFinishOwnershipRecord)
     assert record.material_code == "FT2"
     assert record.occurrence_id == "OCC_FT2_PWD"
-    assert record.terminates_at_internal_faces is True
-    assert record.under_wall_finish_excluded is True
-    assert record.doorway_transition_authenticated is True
+    assert record.terminates_at_internal_faces is False
+    assert record.under_wall_finish_excluded is False
+    assert record.doorway_transition_authenticated is False
     assert record.commercial_projection_allowed is False
     assert record.takeoff_eligible is False
     assert record.diagnostic_only is True
@@ -328,3 +329,108 @@ def test_input_no_mutation():
     assert poly == poly_copy
     assert mark == mark_copy
     assert doorway == doorway_copy
+
+
+def test_supplied_threshold_is_not_authenticated_without_w4_and_source_stroke():
+    """A geometric SourceDoorwayThreshold is not doorway or wall-face authority."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    doorway = SourceDoorwayThreshold("D1", (100.0, 300.0), (150.0, 300.0))
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[doorway],
+    )
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False
+    assert res.record.terminates_at_internal_faces is False
+    assert res.record.under_wall_finish_excluded is False
+
+
+def test_displaced_threshold_abstains():
+    """A parallel-displaced threshold is not snapped onto the polygon edge."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    displaced = SourceDoorwayThreshold("D_OFF", (100.0, 312.0), (150.0, 312.0))
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[displaced],
+    )
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert DOORWAY_TRANSITION_MISALIGNED in res.reason_codes
+    assert res.record is None
+
+
+def test_foreign_page_threshold_abstains():
+    """A threshold copied from another page is not this room's doorway."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    foreign = SourceDoorwayThreshold(
+        "D_P9", (100.0, 300.0), (150.0, 300.0), page_id="page_09"
+    )
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[foreign],
+    )
+    assert res.status == EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_LINEAGE_MISMATCH in res.reason_codes
+    assert res.record is None
+
+
+def test_authenticated_doorway_requires_face_jambs_and_source_stroke():
+    """Only a published room-face, two jambs, and a source stroke can authenticate."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    doorway = SourceDoorwayThreshold(
+        "D1",
+        (100.0, 300.0),
+        (150.0, 300.0),
+        source_stroke_id="stroke_threshold_1",
+        page_id="page_07",
+    )
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[doorway],
+        published_room_face_record_id="face_pwd_1",
+        published_boundary_wall_edge_ids=("e0", "e1", "e2", "e3"),
+        jamb_wall_ids=("wall_jamb_a", "wall_jamb_b"),
+    )
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is True
+    assert res.record.terminates_at_internal_faces is True
+    assert res.record.under_wall_finish_excluded is True
+    assert res.record.commercial_projection_allowed is False
+    assert res.record.takeoff_eligible is False
+
+
+def test_two_jamb_ids_that_collapse_to_one_do_not_authenticate():
+    """Duplicate jamb identity is not two physical jambs."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    doorway = SourceDoorwayThreshold(
+        "D1",
+        (100.0, 300.0),
+        (150.0, 300.0),
+        source_stroke_id="stroke_threshold_1",
+    )
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector(),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[doorway],
+        published_room_face_record_id="face_pwd_1",
+        published_boundary_wall_edge_ids=("e0", "e1", "e2", "e3"),
+        jamb_wall_ids=("wall_jamb_a", "wall_jamb_a"),
+    )
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False

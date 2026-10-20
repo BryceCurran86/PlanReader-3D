@@ -151,19 +151,17 @@ def _point_matches_wall_endpoints(
     return False
 
 
-def _segment_intersects_passage(
+def _collinear_interior_overlap(
     seg_start: tuple[float, float],
     seg_end: tuple[float, float],
     p1: tuple[float, float],
     p2: tuple[float, float],
     tolerance_pt: float,
 ) -> bool:
-    """Check if a wall candidate segment obstructs or runs along the passage line."""
-    # Check if wall candidate is collinear and overlaps the passage line
+    """True when a wall lies on the passage line and overlaps its interior."""
     p_len = _distance(p1, p2)
     if p_len <= 1e-6:
         return False
-    # Unit vector of passage
     ux = (p2[0] - p1[0]) / p_len
     uy = (p2[1] - p1[1]) / p_len
 
@@ -174,11 +172,42 @@ def _segment_intersects_passage(
 
     a1, perp1 = proj(seg_start)
     a2, perp2 = proj(seg_end)
-    if perp1 <= tolerance_pt and perp2 <= tolerance_pt:
-        # Collinear: check overlap along the span
-        overlap = min(max(a1, a2), p_len) - max(min(a1, a2), 0.0)
-        if overlap > tolerance_pt:
-            return True
+    if perp1 > tolerance_pt or perp2 > tolerance_pt:
+        return False
+    overlap = min(max(a1, a2), p_len) - max(min(a1, a2), 0.0)
+    return overlap > tolerance_pt
+
+
+def _segment_intersects_passage(
+    seg_start: tuple[float, float],
+    seg_end: tuple[float, float],
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    tolerance_pt: float,
+) -> bool:
+    """True when a wall occupies the doorway interior.
+
+    Collinear overlap of the passage span is obstruction. A transverse or
+    T-junction crossing of the passage interior is obstruction. Contact only
+    at a passage endpoint (jamb) is not obstruction.
+    """
+    p_len = _distance(p1, p2)
+    if p_len <= 1e-6:
+        return False
+    if _collinear_interior_overlap(seg_start, seg_end, p1, p2, tolerance_pt):
+        return True
+    rx, ry = p2[0] - p1[0], p2[1] - p1[1]
+    sx, sy = seg_end[0] - seg_start[0], seg_end[1] - seg_start[1]
+    den = rx * sy - ry * sx
+    if abs(den) <= 1e-12:
+        return False
+    qpx = seg_start[0] - p1[0]
+    qpy = seg_start[1] - p1[1]
+    t = (qpx * sy - qpy * sx) / den
+    u = (qpx * ry - qpy * rx) / den
+    t_margin = min(0.5, tolerance_pt / p_len)
+    if t_margin < t < (1.0 - t_margin) and -1e-9 <= u <= 1.0 + 1e-9:
+        return True
     return False
 
 
