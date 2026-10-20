@@ -5,7 +5,9 @@ on:
     paths:
       - pb_source_closed_run_export.py
       - pb_quantity_takeoff_adapter.py
+      - tools/gpt3_signed_v2_family_trade_integrity.py
       - tests/test_gpt3_floor_area_physical_double_issue_veto.py
+      - tests/test_gpt3_v2_legacy_floor_area_uniqueness.py
       - .github/workflows/test-gpt3-floor-area-physical-uniqueness.yml
 permissions:
   contents: read
@@ -26,5 +28,5 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Signed original floor identity and commercial adapter negatives
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt3_floor_area_physical_double_issue_veto.py tests/test_source_closed_run_export.py tests/test_quantity_takeoff_adapter.py
-          ruff check --select F821,F823 pb_source_closed_run_export.py pb_quantity_takeoff_adapter.py tests/test_gpt3_floor_area_physical_double_issue_veto.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_floor_area_physical_double_issue_veto.py tests/test_gpt3_v2_legacy_floor_area_uniqueness.py tests/test_gpt3_signed_v2_family_unit_dimension_veto.py tests/test_source_closed_run_export.py tests/test_quantity_takeoff_adapter.py
+          ruff check --select F821,F823 pb_source_closed_run_export.py pb_quantity_takeoff_adapter.py tools/gpt3_signed_v2_family_trade_integrity.py tests/test_gpt3_floor_area_physical_double_issue_veto.py tests/test_gpt3_v2_legacy_floor_area_uniqueness.py
