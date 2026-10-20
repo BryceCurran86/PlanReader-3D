@@ -37,8 +37,8 @@ class FireDamperSpec:
     penetrated_element: PenetratedElementKind
     duct_shape: DuctProfileShape
     location: Tuple[float, float]
-    width_mm: float = 600.0
-    height_mm: float = 400.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
     element_thickness_mm: float = 150.0
     sleeve_extension_mm: float = 150.0
     annular_gap_mm: float = 25.0
@@ -109,7 +109,7 @@ class SourceHVACPenetrationDamperShadowAuthority:
                 w = float(dim_match.group(1))
                 h = float(dim_match.group(2))
             else:
-                w, h = 600.0, 400.0
+                w, h = 0.0, 0.0
             return shape, w, h, frl, is_mot
 
     @classmethod
