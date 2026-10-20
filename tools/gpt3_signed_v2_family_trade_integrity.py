@@ -144,7 +144,7 @@ def require_signed_v2_family_trade_integrity(
                     if type(finish_key) is str else ()
                 )
                 if (
-                    len(parts) < 4
+                    len(parts) != 4
                     or parts[0] != "floor_finish_area"
                     or not all(
                         type(part) is str and part and part == part.strip()
