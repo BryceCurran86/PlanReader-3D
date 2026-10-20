@@ -39,8 +39,10 @@ def test_operable_wall_callout_parsing():
     assert parsed3["wall_height_m"] == 0.0
     omitted = SourceOperableAcousticWallShadowAuthority.parse_callout("OPERABLE WALL")
     assert omitted["wall_height_m"] == 0.0
+    assert omitted["panel_width_mm"] == 0.0
     omitted_spec = OperableWallSpec(wall_id="OW-OMIT")
     assert omitted_spec.wall_height_m == 0.0
+    assert omitted_spec.panel_width_mm == 0.0
 
 
 def test_operable_wall_snapping():
@@ -85,4 +87,20 @@ def test_operable_wall_evaluation_quantities():
 
     assert res.status == "CANDIDATE"
     assert res.commercial_projection_allowed is False
+    assert res.takeoff_eligible is False
+
+
+def test_operable_wall_omitted_panel_width_does_not_invent_count():
+    res = SourceOperableAcousticWallShadowAuthority.evaluate_operable_walls(
+        [
+            {
+                "wall_id": "OW-OMIT",
+                "centerline_points": [(0.0, 0.0), (12000.0, 0.0)],
+                "callout": "OPERABLE WALL",
+            }
+        ],
+        scale_ratio=0.001,
+    )
+    assert res.walls[0].panel_width_mm == 0.0
+    assert res.quantities.total_panels_count == 0
     assert res.takeoff_eligible is False
