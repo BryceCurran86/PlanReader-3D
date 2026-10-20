@@ -13,6 +13,8 @@ import json
 import math
 from pathlib import Path
 
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
@@ -138,9 +140,29 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 or not row.get("physical_existence_record")
                 or row["physical_existence_record"].get("record_id") != identity):
             raise ValueError("original physical existence source/root mismatch")
+        # The source handoff accepts producer-shaped dictionaries only after
+        # independent original revision/snapshot/page/selector re-proof.
+        # Same-looking record IDs from another source cannot be host authority.
+        physical = row["physical_existence_record"]
+        selector = row.get("attempted_host_selector")
+        if (physical.get("status") is not EvidenceResolutionStatus.CORROBORATED
+                or physical.get("proposition") != PHYSICAL_OPENING_EXISTS
+                or any(physical.get(k) != source_root[k] for k in source_root)
+                or physical.get("page_id") != c["page_id"]
+                or not physical.get("source_observation_ids")
+                or not isinstance(selector, dict)
+                or any(selector.get(k) != source_root[k] for k in source_root)
+                or selector.get("page_id") != c["page_id"]
+                or selector.get("opening_identity_id") != identity
+                or not selector.get("decision_scope_id")):
+            raise ValueError("original physical opening or host selector source/root mismatch")
         host, frame = row["host_record"], row["frame_record"]
         if host is not None and (
-                host.get("record_id") != c.get("host_binding_record_id")
+                any(host.get(k) != source_root[k] for k in source_root)
+                or host.get("page_id") != c["page_id"]
+                or host.get("decision_scope_id") != selector["decision_scope_id"]
+                or not host.get("source_observation_ids")
+                or host.get("record_id") != c.get("host_binding_record_id")
                 or host.get("host_wall_id") != c.get("host_wall_id")
                 or host.get("opening_identity_id") != identity
                 or not host.get("member_wall_candidate_ids")):
@@ -152,6 +174,14 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             raise ValueError("canonical whole-wall frame identity changed")
         if frame_ok and frame["record_id"] != c["host_frame_record_id"]:
             raise ValueError("original frame receipt changed")
+        if frame_ok and (
+            not isinstance(frame.get("selector"), dict)
+            or any(frame["selector"].get(k) != selector.get(k)
+                   for k in ("document_id", "revision_id", "source_sha256",
+                             "snapshot_id", "page_id", "decision_scope_id",
+                             "opening_identity_id"))
+        ):
+            raise ValueError("original frame selector source/root mismatch")
         label = row.get("original_label_dimension_result") or {}
         e = label.get("evidence")
         pair_ok = bool(
