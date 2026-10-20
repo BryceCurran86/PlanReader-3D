@@ -246,8 +246,11 @@ def test_source_same_group_explicit_distinct_aligned_rival_blocks_frame(monkeypa
     blocked = _publish(producer, bound)
     assert all(row.status is Status.ABSTAINED and row.evidence is None
                for row in blocked)
+    # The first independent source gate may reject these inconsistent W4
+    # groups before the frame-specific contradiction guard runs. In either
+    # case the producer must fail closed, never return a positive frame.
     assert all(
-        "opening_host_frame_equivalence_group_pair_conflict" in row.reason_codes
+        "opening_host_frame_whole_wall_unproven" in row.reason_codes
         for row in blocked
     )
     assert all(
