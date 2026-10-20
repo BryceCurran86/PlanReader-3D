@@ -47,6 +47,93 @@ def _candidate_usable(record: PhysicalWallCandidateRecord) -> bool:
     )
 
 
+def _source_owned_w4_fragment_end_reach(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+    *,
+    source_primitive_id: str,
+    role: str,
+    edge: float,
+    cross_lo: float,
+    cross_hi: float,
+    parent_lo: float,
+    parent_hi: float,
+    parent_offset: float,
+    snap_tol: float,
+    pixel_tol: float,
+) -> tuple[str, tuple[str, ...]]:
+    """Recheck a local W2 edge against its OWN W4 primitive ancestry.
+
+    A snapped W4 centerline can contain a locally reaching segment that comes
+    from a DIFFERENT ancestor of the same candidate. This independent shadow
+    witness never upgrades the existing candidate-only end-reach classification.
+    Missing/inconsistent W2 fragment receipts cannot be treated as proof.
+    """
+    fragments = tuple(getattr(record, "source_edge_fragments", ()) or ())
+    if not fragments:
+        return ("w4_source_edge_fragment_receipts_unavailable", ())
+
+    identity_parents = tuple(str(x) for x in record.physical_identity.source_primitive_ids)
+    edge_ids = tuple(str(getattr(f, "edge_id", "")) for f in fragments)
+    fragment_parents = tuple(
+        str(parent)
+        for f in fragments
+        for parent in getattr(f, "source_primitive_ids", ())
+    )
+    if (
+        not all(edge_ids)
+        or len(set(edge_ids)) != len(edge_ids)
+        or not identity_parents
+        or len(set(identity_parents)) != len(identity_parents)
+        or any(not x for x in fragment_parents)
+        or not fragment_parents
+        or set(identity_parents) != set(fragment_parents)
+    ):
+        return ("w4_source_edge_fragment_lineage_conflict", ())
+
+    owned = tuple(
+        f for f in fragments
+        if source_primitive_id in tuple(str(v) for v in f.source_primitive_ids)
+    )
+    if not owned:
+        return ("w4_local_fragment_parent_unmapped", ())
+
+    hits = []
+    original_parent_geometry_conflict = False
+    for fragment in owned:
+        local = _source_line_axis_data(tuple(fragment.geometry), opening)
+        if local is None:
+            continue
+        lo, hi, offset = local
+        # A foreign local edge must not become ancestry merely by carrying
+        # the matching source ID and terminating at the apparent end. W2
+        # snapped edges can differ within the existing pixel/snap budget,
+        # but cannot shift across the solid wall band or extend far beyond
+        # their own independently issued original source span.
+        if (
+            abs(offset - parent_offset) > pixel_tol
+            or lo < parent_lo - snap_tol
+            or hi > parent_hi + snap_tol
+        ):
+            original_parent_geometry_conflict = True
+            continue
+        local_end = hi if role == "left" else lo
+        if (
+            abs(local_end - edge) <= snap_tol
+            and cross_lo - pixel_tol <= offset <= cross_hi + pixel_tol
+            and min(hi, parent_hi) - max(lo, parent_lo) > pixel_tol
+        ):
+            hits.append(str(fragment.edge_id))
+
+    if original_parent_geometry_conflict:
+        # A conflicted candidate must never be rescued by its OTHER original
+        # fragments. Retain each conflict rather than electing a positive.
+        return ("w4_source_edge_fragment_parent_geometry_conflict", ())
+    if hits:
+        return ("w4_source_owned_local_fragment_end_reach_observed", tuple(sorted(hits)))
+    return ("w4_source_owned_local_fragment_end_reach_missing", ())
+
+
 def _local_chain_reaches_flank_end(
     record: PhysicalWallCandidateRecord,
     opening: _OpeningGeometry,
@@ -160,9 +247,25 @@ def build_g17_flank_w4_end_reach_ledger(
                     snap_tol=snap_tol,
                     pixel_tol=pixel_tol,
                 )
+                fragment_status, fragment_edges = _source_owned_w4_fragment_end_reach(
+                    record,
+                    opening,
+                    source_primitive_id=str(primitive_id),
+                    role=role,
+                    edge=edge,
+                    cross_lo=cross_lo,
+                    cross_hi=cross_hi,
+                    parent_lo=p_lo,
+                    parent_hi=p_hi,
+                    parent_offset=offset,
+                    snap_tol=snap_tol,
+                    pixel_tol=pixel_tol,
+                )
                 matches.append({
                     "source_primitive_id": str(primitive_id),
                     "local_chain_reaches_flank_end": reaches,
+                    "owned_w4_fragment_end_reach_status": fragment_status,
+                    "owned_w4_fragment_edge_ids": list(fragment_edges),
                 })
             if not matches:
                 continue
@@ -185,6 +288,17 @@ def build_g17_flank_w4_end_reach_ledger(
                 "source_parent_end_reach": matches,
                 "local_chain_reaches_flank_end": (
                     next(iter(statuses)) if len(statuses) == 1 else None
+                ),
+                # A separate stricter read of the ACTUAL W2 source fragments,
+                # not candidate-level primitive membership alone. Never used
+                # to grant a host or change the legacy disposition.
+                "strict_source_fragment_end_reach_candidate": bool(
+                    matches and all(
+                        m["local_chain_reaches_flank_end"] is True
+                        and m["owned_w4_fragment_end_reach_status"]
+                        == "w4_source_owned_local_fragment_end_reach_observed"
+                        for m in matches
+                    )
                 ),
                 "host_publication_allowed": False,
             }
