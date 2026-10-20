@@ -586,6 +586,9 @@ def quantities_to_takeoff_output_rows(
     being erased merely because they share a semantic quantity type.
     """
     seen: dict[tuple[str, str], list[tuple[frozenset[str], tuple[float, str], str]]] = {}
+    # A floor-area semantic label is NOT a second physical source surface.
+    # Keep finish layers and non-geometric families separate.
+    physical_floor_areas: dict[str, str] = {}
     seen_quantity_ids: set[str] = set()
     output: list[dict[str, Any]] = []
     for quantity in quantities:
@@ -622,6 +625,20 @@ def quantities_to_takeoff_output_rows(
                 f"{prior_quantity_id!r} and {quantity.quantity_id!r}"
             )
 
+        if key[0] == "floor_area":
+            if not identities:
+                raise CommercialTakeoffConflictError(
+                    "commercial floor area requires source physical floor identity"
+                )
+            for physical_identity in identities:
+                prior_id = physical_floor_areas.get(physical_identity)
+                if prior_id is not None:
+                    raise CommercialTakeoffConflictError(
+                        "same original physical floor area commercially projected "
+                        f"twice across semantic keys: {prior_id!r} vs "
+                        f"{quantity.quantity_id!r} for {physical_identity!r}"
+                    )
+                physical_floor_areas[physical_identity] = quantity.quantity_id
         seen.setdefault(key, []).append((identities, claim, quantity.quantity_id))
         output.append(row)
     return output
