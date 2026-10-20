@@ -46,6 +46,7 @@ def test_bored_pile_callout_parsing():
     assert omitted["diameter_mm"] == 0.0
     assert omitted["design_depth_m"] == 0.0
     assert omitted["pile_type"] == PileType.UNKNOWN
+    assert omitted["stratum"] == GeotechnicalStratum.UNKNOWN
 
 
 def test_bored_pile_snapping():
@@ -110,6 +111,7 @@ def test_bored_pile_evaluation_quantities():
     assert omitted_spec.diameter_mm == 0.0
     assert omitted_spec.design_depth_m == 0.0
     assert omitted_spec.pile_type == PileType.UNKNOWN
+    assert omitted_spec.stratum == GeotechnicalStratum.UNKNOWN
     omitted_res = SourceBoredPilePierShadowAuthority.evaluate_piles(
         [{"pile_id": "P-OMIT", "center_point": (0.0, 0.0), "callout": "PILE"}]
     )

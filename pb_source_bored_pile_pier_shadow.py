@@ -30,6 +30,7 @@ class PileType(str, Enum):
 
 
 class GeotechnicalStratum(str, Enum):
+    UNKNOWN = "UNKNOWN"
     CLAY_SILT = "CLAY_SILT"
     SAND_GRAVEL = "SAND_GRAVEL"
     WEATHERED_ROCK = "WEATHERED_ROCK"
@@ -44,7 +45,7 @@ class BoredPileSpec:
     diameter_mm: float = 0.0
     design_depth_m: float = 0.0
     rock_socket_length_m: float = 0.0
-    stratum: GeotechnicalStratum = GeotechnicalStratum.WEATHERED_ROCK
+    stratum: GeotechnicalStratum = GeotechnicalStratum.UNKNOWN
     pile_cap_id: str = ""
     level_id: str = "FOUNDATION"
     source_callout: str = ""
@@ -89,7 +90,7 @@ class SourceBoredPilePierShadowAuthority:
             "diameter_mm": 0.0,
             "design_depth_m": 0.0,
             "rock_socket_length_m": 0.0,
-            "stratum": GeotechnicalStratum.WEATHERED_ROCK,
+            "stratum": GeotechnicalStratum.UNKNOWN,
             "pile_cap_id": "",
         }
 
@@ -218,7 +219,7 @@ class SourceBoredPilePierShadowAuthority:
                 try:
                     stratum = GeotechnicalStratum(stratum_val)
                 except ValueError:
-                    stratum = GeotechnicalStratum.WEATHERED_ROCK
+                    stratum = GeotechnicalStratum.UNKNOWN
             else:
                 stratum = stratum_val
 
