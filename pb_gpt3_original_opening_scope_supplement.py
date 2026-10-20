@@ -21,7 +21,9 @@ from pb_live_wall_opening_authority_composition import (
     LiveOpeningHostTrace, LiveWallOpeningAuthorityComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus, canonical_contract_json
-from pb_opening_host_binding_authority import OpeningHostBindingSelector
+from pb_opening_host_binding_authority import (
+    OpeningHostBindingRecord, OpeningHostBindingSelector,
+)
 from pb_source_closed_run_export import (
     SealedSourceClosedRun, sealed_source_closed_run_from_dict,
 )
@@ -308,7 +310,7 @@ def scope_supplement_from_live_source_producer(
         if host.record_id is not None:
             if (
                 result.status is not EvidenceResolutionStatus.CORROBORATED
-                or bound is None
+                or type(bound) is not OpeningHostBindingRecord
                 or bound.record_id != host.record_id
                 or bound.host_wall_id != host.host_wall_id
                 or bound.opening_identity_id != physical_id
