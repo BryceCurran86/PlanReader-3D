@@ -88,7 +88,7 @@ def test_compile_stair_void_receipt():
     assert receipt.total_risers_count == 10
     # Length = 9 * 10 = 90, width = 20 -> area = 1800
     assert receipt.total_void_area_pt2 == 1800.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

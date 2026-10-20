@@ -27,7 +27,7 @@ def test_positive_d17_opening_evaluation():
         scale_ratio=0.02,
     )
 
-    assert evidence.status == EvidenceResolutionStatus.CORROBORATED
+    assert evidence.status == EvidenceResolutionStatus.CANDIDATE
     assert pytest.approx(evidence.translation_dx_pt, rel=1e-3) == 77.76
     assert pytest.approx(evidence.clear_opening_width_pt, rel=1e-3) == 45.36
     assert pytest.approx(evidence.clear_opening_width_m, rel=1e-3) == 0.9072
@@ -81,7 +81,7 @@ def test_positive_freezer_epx_floor_takeoff():
         coving_height_m=0.100,
     )
 
-    assert takeoff.status == EvidenceResolutionStatus.CORROBORATED
+    assert takeoff.status == EvidenceResolutionStatus.CANDIDATE
     assert takeoff.material_code == "EPX"
     assert pytest.approx(takeoff.internal_floor_area_sqm, rel=1e-3) == 25.0
     assert pytest.approx(takeoff.perimeter_coving_length_m, rel=1e-3) == 20.0

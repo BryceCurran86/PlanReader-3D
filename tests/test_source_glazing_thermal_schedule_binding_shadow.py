@@ -36,7 +36,7 @@ def test_positive_glazing_thermal_binding():
         physical_height_m=1.20,
     )
 
-    assert evidence.status == EvidenceResolutionStatus.CORROBORATED
+    assert evidence.status == EvidenceResolutionStatus.CANDIDATE
     assert pytest.approx(evidence.u_value_w_m2k, rel=1e-2) == 2.80
     assert pytest.approx(evidence.shgc, rel=1e-2) == 0.45
     assert evidence.glazing_assembly == GlazingAssembly.DOUBLE_LOW_E

@@ -32,7 +32,7 @@ def test_positive_single_sliding_cavity_door():
         scale_ratio=0.02,
     )
 
-    assert evidence.status == EvidenceResolutionStatus.CORROBORATED
+    assert evidence.status == EvidenceResolutionStatus.CANDIDATE
     assert evidence.retains_wall_continuity is True
     assert pytest.approx(evidence.clear_opening_width_m, rel=1e-2) == 0.82
     assert pytest.approx(evidence.pocket_length_m, rel=1e-2) == 0.84
@@ -122,5 +122,5 @@ def test_positive_double_bi_parting_pocket():
         scale_ratio=0.02,
     )
 
-    assert evidence.status == EvidenceResolutionStatus.CORROBORATED
+    assert evidence.status == EvidenceResolutionStatus.CANDIDATE
     assert pytest.approx(evidence.clear_opening_width_m, rel=1e-2) == 1.60

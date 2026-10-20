@@ -102,7 +102,7 @@ def test_compile_repair_receipt():
     assert receipt.total_rooms_evaluated == 2
     assert receipt.repaired_rooms_count == 1
     assert receipt.clean_rooms_count == 1
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

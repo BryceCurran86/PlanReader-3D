@@ -183,6 +183,6 @@ class CavitySliderPocketJambShadowAuthority:
             total_frame_length_m=total_frame_length_m,
             wall_thickness_m=wall_thickness_m,
             retains_wall_continuity=True,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             notes="Corroborated cavity slider with structural wall continuity preserved across pocket.",
         )

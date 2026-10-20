@@ -85,7 +85,7 @@ def test_compile_subframing_receipt():
     assert isinstance(receipt, WindowSubframingReceipt)
     assert receipt.total_windows_evaluated == 1
     assert receipt.total_lites_count == 2
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

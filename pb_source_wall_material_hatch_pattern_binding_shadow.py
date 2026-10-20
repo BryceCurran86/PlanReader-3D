@@ -162,7 +162,7 @@ class SourceWallMaterialHatchPatternBindingShadowAuthority:
             (document_id, revision_id, source_sha256, total, bound_count, unhatched_count),
         )
 
-        status = EvidenceResolutionStatus.CORROBORATED if total > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if total > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return WallMaterialBindingReceipt(
             receipt_id=receipt_id,
