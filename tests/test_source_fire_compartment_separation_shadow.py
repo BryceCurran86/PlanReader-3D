@@ -39,6 +39,24 @@ def test_fire_compartment_wall_with_penetrations():
     assert len(wall.penetrations) == 2
 
 
+def test_omitted_ratings_do_not_invent_ninety_minute_frl():
+    authority = SourceFireCompartmentSeparationShadowAuthority()
+
+    p = authority.create_penetration(wall_id="FW_UNKNOWN")
+    wall = authority.create_fire_wall(
+        wall_id="FW_UNKNOWN",
+        wall_length_pt=10.0,
+        wall_height_pt=10.0,
+        penetrations=[p],
+    )
+
+    assert p.penetration_type == ""
+    assert p.service_dimension_pt == 0.0
+    assert p.damper_rating_min == 0
+    assert wall.frl_rating == ""
+    assert wall.compartment_boundary_type == ""
+
+
 def test_compile_fire_compartment_receipt():
     authority = SourceFireCompartmentSeparationShadowAuthority()
 
