@@ -27,6 +27,7 @@ class PenetratedElementKind(str, Enum):
 
 
 class DuctProfileShape(str, Enum):
+    UNKNOWN = "UNKNOWN"
     RECTANGULAR = "RECTANGULAR"
     CIRCULAR = "CIRCULAR"
 
@@ -89,7 +90,13 @@ class SourceHVACPenetrationDamperShadowAuthority:
 
         # Shape detection
         is_circ = "CIRCULAR" in clean or "DIA" in clean or "ROUND" in clean
-        shape = DuctProfileShape.CIRCULAR if is_circ else DuctProfileShape.RECTANGULAR
+        dim_match = re.search(r"(\d+)\s*(?:W)?\s*[xX]\s*(\d+)\s*(?:H)?", clean)
+        if is_circ:
+            shape = DuctProfileShape.CIRCULAR
+        elif "RECT" in clean or dim_match is not None:
+            shape = DuctProfileShape.RECTANGULAR
+        else:
+            shape = DuctProfileShape.UNKNOWN
 
         # Motorized
         is_mot = "MOTOR" in clean or "MOT" in clean or "FSD" in clean
@@ -104,7 +111,6 @@ class SourceHVACPenetrationDamperShadowAuthority:
             dia = float(dia_match.group(1)) if dia_match else 0.0
             return shape, dia, dia, frl, is_mot
         else:
-            dim_match = re.search(r"(\d+)\s*(?:W)?\s*[xX]\s*(\d+)\s*(?:H)?", clean)
             if dim_match:
                 w = float(dim_match.group(1))
                 h = float(dim_match.group(2))
@@ -138,7 +144,7 @@ class SourceHVACPenetrationDamperShadowAuthority:
 
                 firestop_vol = (opening_area - duct_area) * t_m
                 total_firestop_vol_m3 += firestop_vol
-            else:
+            elif d.duct_shape == DuctProfileShape.RECTANGULAR:
                 w_m = d.width_mm / 1000.0
                 h_m = d.height_mm / 1000.0
                 duct_area = w_m * h_m

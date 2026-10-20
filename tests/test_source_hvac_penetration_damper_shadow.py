@@ -37,6 +37,7 @@ class TestSourceHVACPenetrationDamperShadow(unittest.TestCase):
         shape3, w3, h3, frl3, _mot3 = SourceHVACPenetrationDamperShadowAuthority.parse_damper_annotation(
             "FIRE DAMPER"
         )
+        self.assertEqual(shape3, DuctProfileShape.UNKNOWN)
         self.assertEqual(w3, 0.0)
         self.assertEqual(h3, 0.0)
         self.assertEqual(frl3, "")
