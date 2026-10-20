@@ -255,3 +255,43 @@ def test_exact_original_page9_short_office_note_source_negative_when_provisioned
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.role is RcpWordRole.OTHER_PLAN_TEXT
     assert not result.is_eligible_for_ceiling_mark
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("axis", [0, 1, 2, 3])
+def test_every_nonfinite_pdf_coordinate_abstains_before_source_contract_id(bad,axis):
+    import json
+    authority=SourceRcpWordEligibilityShadowAuthority()
+    bbox=[350.0,450.0,380.0,460.0]
+    bbox[axis]=bad
+    options=dict(
+        document_id="untrusted-original-source",page_id="9",
+        word_text="GRID",word_bbox=tuple(bbox),block_text="GRID 2400",
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+        block_index=10,line_index=1,word_index=0,
+    )
+    word=authority.classify_word(**options)
+    assert word==authority.classify_word(**options)
+    assert word.status is EvidenceResolutionStatus.ABSTAINED
+    assert word.role is RcpWordRole.OUT_OF_VIEWPORT
+    assert word.bbox_pdf_pts == (0.,0.,0.,0.)
+    assert not word.is_eligible_for_ceiling_mark
+    assert not word.commercial_projection_allowed
+    assert not word.takeoff_eligible
+    json.dumps(word.to_dict(),allow_nan=False)
+
+
+def test_finite_original_ceiling_code_remains_noncommercial_candidate_with_strict_source_scopes():
+    result=SourceRcpWordEligibilityShadowAuthority().classify_word(
+        document_id="strict-source",page_id="9",word_text="GRID",
+        word_bbox=(350.,450.,380.,460.),block_text="GRID 2400",
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+    )
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.is_eligible_for_ceiling_mark
+    assert not result.takeoff_eligible
+    assert not result.commercial_projection_allowed
