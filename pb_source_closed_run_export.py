@@ -666,8 +666,24 @@ def seal_source_closed_run(
                 f"quantity {quantity.quantity_id} belongs to project {trace.project_id}"
             )
         meta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-        if "snapshot_id" in meta:
-            source_snapshot = meta["snapshot_id"]
+        trace_meta = trace.metadata if isinstance(trace.metadata, Mapping) else {}
+        # Matching producer/trace snapshot receipts are independently held
+        # claims of the same source visibility scope. Neither may override
+        # a contradictory value from the other and slip into an old V1 seal.
+        q_snapshot = meta.get("snapshot_id") if "snapshot_id" in meta else None
+        t_snapshot = (
+            trace_meta.get("snapshot_id")
+            if "snapshot_id" in trace_meta else None
+        )
+        if "snapshot_id" in meta and "snapshot_id" in trace_meta:
+            if q_snapshot != t_snapshot or type(q_snapshot) is not str:
+                raise SourceClosedRunConflictError(
+                    "original quantity/trace snapshot receipts conflict"
+                )
+        if "snapshot_id" in meta or "snapshot_id" in trace_meta:
+            source_snapshot = (
+                q_snapshot if "snapshot_id" in meta else t_snapshot
+            )
             if (
                 type(source_snapshot) is not str or not source_snapshot
                 or source_snapshot != source_snapshot.strip()
