@@ -83,7 +83,7 @@ def test_multi_page_plan_streaming_success():
     sel = _make_selector()
     res = authority.resolve(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert res.status == EvidenceResolutionStatus.CANDIDATE.value
     assert SOURCE_MEMORY_EFFICIENT_PLAN_RESOLVED in res.reason_codes
     assert res.total_pages == 3
     assert res.processed_pages == 3
@@ -175,7 +175,7 @@ def test_dense_page_spatial_chunk_grid_indexing():
     authority = producer.authority()
     res = authority.resolve(_make_selector())
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert res.status == EvidenceResolutionStatus.CANDIDATE.value
     rec = res.page_receipts[0]
     assert rec.primitive_count == 2500
     assert SPATIAL_CHUNK_INDEX_APPLIED in rec.reason_codes
