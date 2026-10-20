@@ -169,3 +169,30 @@ def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
         assert _publish(producer, tuple(reversed(bound))) == tuple(reversed(withheld))
 
     assert tuple(scope.equivalence.pair_classifications) == original_pairs
+
+
+@pytest.mark.parametrize("bad_source_class", (None, {}, ["not_a_source_class"], 1))
+def test_malformed_source_pair_class_cannot_restore_distinctness(bad_source_class):
+    """A malformed issuer value remains ambiguous even after replay DISTINCT."""
+    rows = (
+        ("wall_a", "wall_b", DISTINCT.value),
+        ("wall_b", "wall_a", bad_source_class),
+        ("wall_a", "wall_b", DISTINCT.value),
+    )
+    for order in (rows, tuple(reversed(rows))):
+        assert _lookup(order) == {("wall_a", "wall_b"): AMBIGUOUS}
+
+
+def test_issuer_class_that_raises_type_error_is_not_a_positive_relation():
+    class BadOriginalClass:
+        def __hash__(self):
+            raise TypeError("unhashable original classification")
+        def __eq__(self, other):
+            raise TypeError("malformed original classification")
+
+    rows = (
+        ("wall_a", "wall_b", DISTINCT.value),
+        ("wall_b", "wall_a", BadOriginalClass()),
+        ("wall_a", "wall_b", DISTINCT.value),
+    )
+    assert _lookup(rows) == {("wall_a", "wall_b"): AMBIGUOUS}
