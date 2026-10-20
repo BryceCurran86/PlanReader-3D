@@ -72,6 +72,24 @@ def test_clamped_vertical_bounds():
     assert w.overhead_lintel_height_pt == 0.0
 
 
+def test_omitted_sill_and_head_do_not_invent_typical_heights():
+    authority = SourceWindowSillHeadGeometryShadowAuthority()
+
+    w = authority.compute_window_vertical_partition(
+        window_id="WIN_NO_HEIGHT",
+        wall_id="WALL_01",
+        opening_length_pt=40.0,
+        wall_thickness_pt=10.0,
+        wall_height_pt=100.0,
+    )
+
+    assert w.sill_height_pt == 0.0
+    assert w.head_height_pt == 0.0
+    assert w.aperture_height_pt == 0.0
+    assert w.aperture_void_volume_pt3 == 0.0
+    assert w.retained_wall_volume_pt3 == 40.0 * 10.0 * 100.0
+
+
 def test_compile_vertical_geometry_receipt():
     authority = SourceWindowSillHeadGeometryShadowAuthority()
 

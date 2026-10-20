@@ -106,8 +106,8 @@ class SourceWindowSillHeadGeometryShadowAuthority:
         opening_length_pt: float,
         wall_thickness_pt: float,
         wall_height_pt: float,
-        sill_height_pt: float = 25.5,  # ~900mm in pt (at 1:100 scale: 25.5 pt)
-        head_height_pt: float = 59.5,  # ~2100mm in pt (at 1:100 scale: 59.5 pt)
+        sill_height_pt: float = 0.0,
+        head_height_pt: float = 0.0,
     ) -> WindowVerticalGeometryRecord:
         # Clamped vertical bounds
         clamped_sill = max(0.0, min(sill_height_pt, wall_height_pt))
