@@ -2432,6 +2432,23 @@ def _normalize_role_candidates(
         if group_lookup is None
         else group_lookup
     )
+    contradictory_pair_members = {
+        member_id
+        for pair in _source_same_group_distinct_pair_conflicts(equivalence)
+        for member_id in pair
+    }
+    if any(
+        str(record.wall_candidate_id) in contradictory_pair_members
+        for _offset, record in candidates
+    ):
+        # Physical SAME-vs-DISTINCT original-source contradiction is global
+        # to the physical wall identity: different geometric offset clusters
+        # cannot conceal it or restore host authority.
+        return (
+            EvidenceResolutionStatus.CONFLICT,
+            (),
+            (HOST_EQUIVALENCE_AMBIGUOUS,),
+        )
     unsafe_group_members = _inconsistent_source_group_members(equivalence)
     if any(
         str(record.wall_candidate_id) in unsafe_group_members

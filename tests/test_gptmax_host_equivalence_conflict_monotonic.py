@@ -142,6 +142,48 @@ def test_distinct_wall_groups_remain_two_local_host_candidates():
     assert reasons == ()
 
 
+@pytest.mark.parametrize("reverse", (False, True))
+@pytest.mark.parametrize("left_offset,right_offset", [
+    (0.0, 5.0), (5.0, 0.0), (-2.0, 2.0),
+])
+def test_same_group_distinct_pair_veto_spans_separate_role_offset_clusters(
+    reverse, left_offset, right_offset,
+):
+    left = _record("wall:left", start=10.0, end=40.0)
+    right = _record("wall:right", start=10.0, end=40.0)
+    issued = (("wall:left", "wall:right", DISTINCT.value),)
+    if reverse:
+        issued = tuple((right_id, left_id, role)
+                       for left_id, right_id, role in issued)
+    source = _source_equivalence(
+        issued, groups=(("wall:left", "wall:right"),),
+    )
+    candidates = ((left_offset, left), (right_offset, right))
+    if reverse:
+        candidates = tuple(reversed(candidates))
+    status, normalized, reasons = _normalize_role_candidates(
+        candidates, source, axis_tol=0.8,
+    )
+    assert status is Status.CONFLICT
+    assert normalized == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
+def test_source_cross_offset_conflict_not_global_to_unrelated_wall():
+    record = _record("wall:unrelated", start=10.0, end=40.0)
+    source = _source_equivalence(
+        (("wall:left", "wall:right", DISTINCT.value),),
+        groups=(("wall:left", "wall:right"),),
+    )
+    status, normalized, reasons = _normalize_role_candidates(
+        ((0.0, record),), source, axis_tol=0.8,
+    )
+    assert status is Status.CORROBORATED
+    assert len(normalized) == 1
+    assert normalized[0].record.wall_candidate_id == "wall:unrelated"
+    assert reasons == ()
+
+
 def test_injected_distinct_lookup_cannot_bypass_same_source_group_veto():
     left = _record("wall_left", start=10.0, end=40.0)
     right = _record("wall_right", start=10.0, end=40.0)
