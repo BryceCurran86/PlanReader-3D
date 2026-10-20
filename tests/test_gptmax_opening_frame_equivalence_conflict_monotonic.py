@@ -261,6 +261,67 @@ def test_reproof_revocation_is_per_opening_not_global(monkeypatch):
     assert refreshed.resolve(selectors[1]) == accepted[1]
 
 
+def test_withdrawn_original_opening_reproof_revokes_only_its_cached_frame(monkeypatch):
+    """The same previously proven observation is not a stale positive after withdrawal."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    initial = _publish(producer, bound)
+    assert all(row.status is Status.CORROBORATED for row in initial)
+    prior_snapshot = producer.authority()
+    selected = bound[0][0]
+    original_prove = type(producer._opening).prove_existence
+
+    def withdrawn_existence(authority, selector):
+        result = original_prove(authority, selector)
+        if authority is producer._opening and selector == selected:
+            return replace(result, status=Status.ABSTAINED,
+                           proposition=None, existence_record=None)
+        return result
+
+    monkeypatch.setattr(type(producer._opening), "prove_existence", withdrawn_existence)
+    result = producer.publish(opening_selector=selected,
+                              host_binding_selector=bound[0][2])
+    assert result.status is Status.ABSTAINED and result.evidence is None
+    assert "opening_host_frame_opening_unavailable" in result.reason_codes
+
+    # This is a newly constructed authority, not the historical immutable one.
+    fresh = producer.authority()
+    assert fresh.resolve(initial[0].evidence.selector).status is Status.ABSTAINED
+    assert fresh.resolve(initial[1].evidence.selector) == initial[1]
+    assert prior_snapshot.resolve(initial[0].evidence.selector) == initial[0]
+
+    # Restoration does not change the earlier provenance, ID or accepted body.
+    monkeypatch.undo()
+    assert _publish(producer, bound) == initial
+
+
+def test_unproven_foreign_sibling_reproof_does_not_revoke_first_frame(monkeypatch):
+    """A caller-selected sibling with failed source proof is not first opening."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    accepted = _publish(producer, bound)
+    foreign = bound[1][0]
+    original_prove = type(producer._opening).prove_existence
+
+    def withdrawn_sibling(authority, selector):
+        result = original_prove(authority, selector)
+        if authority is producer._opening and selector == foreign:
+            return replace(result, status=Status.CONFLICT,
+                           proposition=None, existence_record=None)
+        return result
+
+    monkeypatch.setattr(type(producer._opening), "prove_existence", withdrawn_sibling)
+    failed = producer.publish(opening_selector=foreign,
+                              host_binding_selector=bound[0][2])
+    assert failed.status is Status.CONFLICT and failed.evidence is None
+    # Exact canonical prior publication is not revoked by wrong caller identity.
+    assert producer.authority().resolve(accepted[0].evidence.selector) == accepted[0]
+
+
 def test_foreign_opening_selector_must_not_revoke_valid_frame():
     """A caller's wrong but real sibling source opening is not revocation."""
     from pb_migration_contracts import EvidenceResolutionStatus as Status
