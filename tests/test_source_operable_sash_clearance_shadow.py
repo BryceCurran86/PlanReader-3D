@@ -32,6 +32,12 @@ class TestSourceOperableSashClearanceShadow(unittest.TestCase):
         self.assertEqual(h2, 1500.0)
         self.assertFalse(screen2)
 
+        _op3, w3, h3, _screen3 = SourceOperableSashClearanceShadowAuthority.parse_sash_annotation(
+            "SASH"
+        )
+        self.assertEqual(w3, 0.0)
+        self.assertEqual(h3, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourceOperableSashClearanceShadowAuthority.snap_point((1.0, 1.0), ref_pts)
