@@ -172,6 +172,23 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes="Word bbox is outside designated plan drawing viewport.",
             )
 
+        # 4. Syntactic prose / general note check
+        # Notes are multi-word prose paragraphs (e.g. > 6 words or length > 35 chars)
+        block_words = block_text.strip().split()
+        if len(block_words) > 6 or len(block_text.strip()) > 35:
+            return RcpWordEvidence(
+                word_id=word_id,
+                text=clean_text,
+                bbox_pdf_pts=wb,
+                block_index=block_index,
+                line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.GENERAL_NOTE_PROSE,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes=f"Word is part of a general note prose block ({len(block_words)} words).",
+            )
+
         # A word token, bounding box, viewport and schedule are only
         # *caller supplied* here. No SourceVisibilityProducer snapshot,
         # source-painted glyph, revision or original material definition has
@@ -213,23 +230,6 @@ class SourceRcpWordEligibilityShadowAuthority:
                 is_eligible_for_ceiling_mark=False,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 notes="Not an isolated source-defined ceiling material/code callout.",
-            )
-
-        # 4. Syntactic prose / general note check
-        # Notes are multi-word prose paragraphs (e.g. > 6 words or length > 35 chars)
-        block_words = block_text.strip().split()
-        if len(block_words) > 6 or len(block_text.strip()) > 35:
-            return RcpWordEvidence(
-                word_id=word_id,
-                text=clean_text,
-                bbox_pdf_pts=wb,
-                block_index=block_index,
-                line_index=line_index,
-                word_index=word_index,
-                role=RcpWordRole.GENERAL_NOTE_PROSE,
-                is_eligible_for_ceiling_mark=False,
-                status=EvidenceResolutionStatus.ABSTAINED,
-                notes=f"Word is part of a general note prose block ({len(block_words)} words).",
             )
 
         # 5. Authentic in-plan ceiling callout candidate
