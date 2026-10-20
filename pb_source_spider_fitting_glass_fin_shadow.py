@@ -47,9 +47,9 @@ ROTULE_COUNT_BY_TYPE: Dict[SpiderFittingType, int] = {
 class GlassFinSpec:
     fin_id: str
     center_point: Tuple[float, float] = (0.0, 0.0)
-    height_m: float = 4.0
-    depth_mm: float = 300.0
-    thickness_mm: float = 19.0
+    height_m: float = 0.0
+    depth_mm: float = 0.0
+    thickness_mm: float = 0.0
     is_laminated: bool = False
     level_id: str = "L01"
     source_callout: str = ""
@@ -60,7 +60,7 @@ class SpiderFittingSpec:
     fitting_id: str
     fitting_type: SpiderFittingType = SpiderFittingType.FOUR_ARM
     center_point: Tuple[float, float] = (0.0, 0.0)
-    rotule_dia_mm: float = 14.0
+    rotule_dia_mm: float = 0.0
     support_type: FinSupportType = FinSupportType.GLASS_FIN
     associated_fin_id: str = ""
     level_id: str = "L01"
@@ -103,7 +103,7 @@ class SourceSpiderFittingGlassFinShadowAuthority:
         clean = text.upper()
         res = {
             "fitting_type": SpiderFittingType.FOUR_ARM,
-            "rotule_dia_mm": 14.0,
+            "rotule_dia_mm": 0.0,
             "support_type": FinSupportType.GLASS_FIN,
         }
 
@@ -151,9 +151,9 @@ class SourceSpiderFittingGlassFinShadowAuthority:
         """
         clean = text.upper()
         res = {
-            "thickness_mm": 19.0,
-            "depth_mm": 300.0,
-            "height_m": 4.0,
+            "thickness_mm": 0.0,
+            "depth_mm": 0.0,
+            "height_m": 0.0,
             "is_laminated": False,
         }
 
