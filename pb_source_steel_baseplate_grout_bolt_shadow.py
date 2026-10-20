@@ -39,7 +39,7 @@ class SteelBaseplateSpec:
     bolt_diameter_mm: float = 0.0
     bolt_embedment_depth_mm: float = 0.0
     bolt_grade: BoltGrade = BoltGrade.GRADE_8_8
-    grout_thickness_mm: float = 35.0
+    grout_thickness_mm: float = 0.0
     level_id: str = "L0"
     source_callout: str = ""
 
@@ -108,7 +108,7 @@ class SourceSteelBaseplateGroutBoltShadowAuthority:
 
         # Grout thickness: (\d+)\s*(?:GROUT|BED)
         grt_match = re.search(r"(\d+)\s*(?:GROUT|BED)", clean)
-        grout_thk = float(grt_match.group(1)) if grt_match else 35.0
+        grout_thk = float(grt_match.group(1)) if grt_match else 0.0
 
         return plate_w, plate_l, plate_thk, bolt_count, bolt_dia, bolt_embed, grout_thk
 
