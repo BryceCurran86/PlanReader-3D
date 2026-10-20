@@ -22,6 +22,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from tools.diag_gptmax_native_image_xref_scope import (
     native_g17_w4_pixel_registration_shadow,
+    _line as _axis_line_for_native_xref,
 )
 
 
@@ -76,7 +77,7 @@ def producer_bound_g17_w4_native_xref_shadow(
             if x == "snapshot_id" else getattr(published.revision, x))
             for x in root)
             or any(getattr(opening, x) != getattr(wall_selector, x)
-                   for opening in opening_selectors)):
+                   for opening in opening_selectors for x in root)):
         raise ValueError("original W4/opening/source roots differ")
     if (not wall_selector.page_id.isdecimal()
             or wall_selector.decision_scope_id !=
@@ -167,6 +168,7 @@ def producer_bound_g17_w4_native_xref_shadow(
                                 "geometry_pdf_pts": tuple(f.geometry)})
 
     ordinary = []
+    non_axis_w4_edges = []
     seen_w4 = set()
     for w in scope.records:
         if not w.wall_candidate_id or not w.physical_identity.usable:
@@ -181,6 +183,13 @@ def producer_bound_g17_w4_native_xref_shadow(
                     opening_ids=physical_ids,
                 )
             seen_w4.add(edge_id)
+            # The native-pixel lattice comparator is deliberately axis-only.
+            # An authenticated diagonal W4 fragment is not evidence against
+            # source existence, and MUST remain a typed excluded alternative,
+            # rather than silently disappearing or crashing the whole page.
+            if _axis_line_for_native_xref(tuple(f.geometry)) is None:
+                non_axis_w4_edges.append(edge_id)
+                continue
             ordinary.append({"edge_id": edge_id,
                              "geometry_pdf_pts": tuple(f.geometry)})
     if not g17 or not ordinary:
@@ -209,6 +218,7 @@ def producer_bound_g17_w4_native_xref_shadow(
         "original_producer_scope_verified": True,
         "g17_source_edges_reissued": len(g17),
         "ordinary_w4_edges_reissued": len(ordinary),
+        "ordinary_w4_non_axis_source_edges_excluded": sorted(non_axis_w4_edges),
         "opening_roster_complete_proven": False,
         "complete_structural_wall_equivalence_proven": False,
         "source_parent_equivalence_granted": False,
