@@ -228,6 +228,27 @@ def original_physical_g17_source_flank_report(
     reconciled = quarantine_overlapping_g17_physical_source_claims_shadow(
         tuple(physical)
     )
+
+    # The original source may be changed in a producer cache independently
+    # of the original immutable input bytes. Re-read the producer's own
+    # publication and original-byte owner before releasing any source-band
+    # geometry. A later replacement is not a new registered source revision.
+    stable_publication = producer.published_snapshot_for_revision(
+        initial.revision.revision_id
+    )
+    sealed_source_bytes = producer._producer._store.source_bytes_by_revision.get(
+        initial.revision.revision_id
+    )
+    if (
+        stable_publication != published
+        or type(sealed_source_bytes) is not bytes
+        or sha256(sealed_source_bytes).hexdigest() != digest
+        or sealed_source_bytes != original_pdf_bytes
+    ):
+        raise RuntimeError(
+            "original G17 producer snapshot or source bytes changed during replay"
+        )
+
     for source_owner in reconciled:
         if source_owner.status is not EvidenceResolutionStatus.CORROBORATED:
             unresolved.append({
