@@ -112,7 +112,7 @@ class SourceFloorWasteDrainageShadowAuthority:
         drain_kind: DrainKind,
         location_pt: Tuple[float, float],
         pipe_diameter_pt: float = 0.0,
-        has_puddle_flange: bool = True,
+        has_puddle_flange: bool = False,
         requires_fire_collar: bool = False,
         grate_finish: str = "",
         sleeve_oversize_pt: float = 0.0,

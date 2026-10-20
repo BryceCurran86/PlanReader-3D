@@ -60,6 +60,7 @@ def test_omitted_pipe_diameter_does_not_invent_eighty_mm():
     assert w.pipe_diameter_pt == 0.0
     assert w.slab_penetration_diameter_pt == 0.0
     assert w.grate_finish == ""
+    assert w.has_puddle_flange is False
 
 
 def test_compile_waste_receipt():
