@@ -35,6 +35,7 @@ class OriginalG17OpeningFlankOwnership:
     physical_source_observation_ids: tuple[str, ...] = ()
     authenticated_flank_end_parent_ids: tuple[str, ...] = ()
     authenticated_flank_source_visible_ids: tuple[str, ...] = ()
+    authenticated_source_parent_ids: tuple[str, ...] = ()
     shadow_only: bool = True
     w4_wall_membership_granted: bool = False
     host_binding_granted: bool = False
@@ -191,7 +192,9 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
         tuple(sorted(candidate.end_parent_id
                      for candidate in source_bands.candidates)),
         tuple(sorted(expected_band_obs)),
+        authenticated_source_parent_ids=source_roots,
     )
+
 
 def quarantine_overlapping_g17_physical_source_claims_shadow(
     records: tuple[OriginalG17OpeningFlankOwnership, ...],
@@ -218,6 +221,7 @@ def quarantine_overlapping_g17_physical_source_claims_shadow(
             continue
         for original_id in (
             *item.physical_source_observation_ids,
+            *item.authenticated_source_parent_ids,
             *item.authenticated_flank_end_parent_ids,
         ):
             key = (item.source_sha256, original_id)
