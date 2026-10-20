@@ -17,6 +17,10 @@ import sys
 import tempfile
 from typing import Any, Mapping
 
+from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 from tools.prepare_gpt3_pending_identity_activation import build_activation
 from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _read_json_without_duplicate_keys,
@@ -122,6 +126,19 @@ def build_guarded_exact_report(
         raise ValueError("activation step must not grant a benchmark score")
     if activation_receipt.get("evaluator_invoked") is not False:
         raise ValueError("activation step unexpectedly invoked evaluator")
+
+    # Every newly active map must pass exactly the SAME physical-family,
+    # source-owned door/window, dimension and material/trade veto as the
+    # four-project reporter. The frozen per-project exact evaluator by design
+    # does not perform this GPT3 commercial-semantic check. Fail BEFORE
+    # importing or invoking that evaluator, even if an independent source
+    # activation handoff erroneously proposes an incompatible trade.
+    sealed = sealed_source_closed_run_from_dict(dict(sealed_run_payload))
+    require_signed_v2_family_trade_integrity(
+        verified_items=frozen_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=candidate_map["bindings"],
+    )
 
     exact = _exact_report_module()
     with tempfile.TemporaryDirectory(

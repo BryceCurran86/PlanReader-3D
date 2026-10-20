@@ -19,6 +19,13 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
+from tools.gpt3_atomic_pending_activation_pair import (
+    preflight_new_activation_pair, source_input_snapshot,
+    publish_new_activation_pair,
+)
 # tests/benchmarks is also a top-level package named "benchmarks". Load the
 # actual frozen full_plan_v2 package under a private alias, matching the
 # repository's exact reconciliation runner, so pytest collection cannot resolve
@@ -519,6 +526,14 @@ def build_activation(
 
     # Reparse to enforce identity-map schema and uniqueness before publish.
     identity_map_from_dict(output)
+    # An original physical WINDOW must never become a benchmark DOOR through
+    # an independently prepared source identity activation. This is checked
+    # before the CLI's atomic create-only map-and-receipt publisher runs.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
@@ -584,6 +599,16 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
     )
     args = parser.parse_args(argv)
+    inputs = (
+        args.pending_ledger, args.sealed_run, args.customer_rows,
+        args.active_identity_map, args.source_manifest,
+        args.source_identity_proof, args.object_universe,
+    )
+    outputs = (args.output_map, args.output_receipt)
+    # Source and frozen collisions must be caught BEFORE reading any untrusted
+    # source/identity content, never after a signed handoff has been built.
+    preflight_new_activation_pair(outputs, inputs=inputs)
+    before = source_input_snapshot(inputs)
 
     output, receipt = build_activation(
         pending_ledger=_object(args.pending_ledger),
@@ -597,21 +622,9 @@ def main(argv: list[str] | None = None) -> int:
         object_universe=_object(args.object_universe),
     )
 
-    args.output_map.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    args.output_receipt.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-    args.output_map.write_text(
-        json.dumps(output, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    args.output_receipt.write_text(
-        json.dumps(receipt, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    publish_new_activation_pair(
+        outputs, (output, receipt),
+        inputs=inputs, source_snapshot=before,
     )
     print(json.dumps(receipt, sort_keys=True))
     return 0

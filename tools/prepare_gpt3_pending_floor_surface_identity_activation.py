@@ -17,6 +17,13 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
+from tools.gpt3_atomic_pending_activation_pair import (
+    preflight_new_activation_pair, source_input_snapshot,
+    publish_new_activation_pair,
+)
 
 _PACKAGE_DIR = (
     Path(__file__).resolve().parents[1]
@@ -349,6 +356,26 @@ def build_floor_surface_activation(
         unit = frozen_item.get("unit")
         if type(unit) is not str or quantity.unit != unit:
             raise ValueError("sealed floor quantity unit does not match frozen item")
+        # Floor identity and m2 do not authenticate its construction trade.
+        # Only the actual signed source material owner authorizes TILE for
+        # a frozen tiling target; no FT3-label or expected-area inference.
+        original_finish_parts = quantity.semantic_key.split(":")
+        if (
+            len(original_finish_parts) != 4
+            or original_finish_parts[0] != "floor_finish_area"
+            or original_finish_parts[1] != canonical
+            or any(not part or part != part.strip() for part in original_finish_parts)
+        ):
+            raise ValueError(
+                "source-signed floor finish semantic identity incomplete at activation"
+            )
+        if (
+            frozen_item.get("trade_category") == "tiling"
+            and original_finish_parts[3] != "tile"
+        ):
+            raise ValueError(
+                "original source finish is not tile for frozen tiling identity"
+            )
 
         frozen_object = frozen.get(object_ref)
         if frozen_object is None:
@@ -432,6 +459,13 @@ def build_floor_surface_activation(
         ] + additions,
     }
     identity_map_from_dict(output)
+    # Same exact signed family/trade veto as the four-project reporter and
+    # guarded V2 scorer, before any externally visible activation receipt.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
@@ -459,6 +493,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-map", type=Path, required=True)
     parser.add_argument("--output-receipt", type=Path, required=True)
     args = parser.parse_args(argv)
+    inputs = (
+        args.pending_ledger, args.sealed_run, args.customer_rows,
+        args.active_identity_map, args.source_manifest,
+        args.source_identity_proof, args.object_universe,
+    )
+    outputs = (args.output_map, args.output_receipt)
+    # Source and frozen collisions must be caught BEFORE reading any untrusted
+    # source/identity content, never after a signed handoff has been built.
+    preflight_new_activation_pair(outputs, inputs=inputs)
+    before = source_input_snapshot(inputs)
 
     output, receipt = build_floor_surface_activation(
         pending_ledger=_object(args.pending_ledger),
@@ -469,15 +513,9 @@ def main(argv: list[str] | None = None) -> int:
         source_identity_proof=_object(args.source_identity_proof),
         object_universe=_object(args.object_universe),
     )
-    args.output_map.parent.mkdir(parents=True, exist_ok=True)
-    args.output_receipt.parent.mkdir(parents=True, exist_ok=True)
-    args.output_map.write_text(
-        json.dumps(output, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    args.output_receipt.write_text(
-        json.dumps(receipt, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    publish_new_activation_pair(
+        outputs, (output, receipt),
+        inputs=inputs, source_snapshot=before,
     )
     print(json.dumps(receipt, sort_keys=True))
     return 0
