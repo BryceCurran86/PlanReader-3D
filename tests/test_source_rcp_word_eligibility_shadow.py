@@ -255,3 +255,53 @@ def test_sha_pinned_real_original_short_note_room_word_and_grid_if_provisioned()
         (RcpWordRole.IN_PLAN_CEILING_ANNOTATION,EvidenceResolutionStatus.CANDIDATE),
         (RcpWordRole.GENERAL_NOTE_PROSE,EvidenceResolutionStatus.ABSTAINED),
     ]
+
+
+def test_nonfinite_source_word_bbox_abstains_before_contract_id():
+    """Bad source coordinates must not crash identity normalization or serialize NaN."""
+    import json
+
+    authority = SourceRcpWordEligibilityShadowAuthority()
+    for invalid in (float("nan"), float("inf"), float("-inf")):
+        for axis in range(4):
+            bbox = [350.0, 450.0, 380.0, 460.0]
+            bbox[axis] = invalid
+            kwargs = dict(
+                document_id="source:untrusted-p9",
+                page_id="9",
+                word_text="GRID",
+                word_bbox=tuple(bbox),
+                block_text="GRID 2400",
+                block_index=10,
+                line_index=1,
+                word_index=0,
+                plan_viewport_bbox=(100.0, 100.0, 1100.0, 1700.0),
+            )
+            first = authority.classify_word(**kwargs)
+            replay = authority.classify_word(**kwargs)
+            assert first == replay
+            assert first.status is EvidenceResolutionStatus.ABSTAINED
+            assert first.role is RcpWordRole.OUT_OF_VIEWPORT
+            assert not first.is_eligible_for_ceiling_mark
+            assert not first.commercial_projection_allowed
+            assert not first.takeoff_eligible
+            assert first.bbox_pdf_pts == (0.0, 0.0, 0.0, 0.0)
+            json.dumps(first.to_dict(), allow_nan=False)
+
+
+def test_valid_original_bbox_still_only_receives_lexical_candidate():
+    authority = SourceRcpWordEligibilityShadowAuthority()
+    result = authority.classify_word(
+        document_id="source:untrusted-p9",
+        page_id="9",
+        word_text="GRID",
+        word_bbox=(350.0, 450.0, 380.0, 460.0),
+        block_text="GRID 2400",
+        block_index=10,
+        line_index=1,
+        word_index=0,
+        plan_viewport_bbox=(100.0, 100.0, 1100.0, 1700.0),
+    )
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert not result.takeoff_eligible
+    assert not result.commercial_projection_allowed
