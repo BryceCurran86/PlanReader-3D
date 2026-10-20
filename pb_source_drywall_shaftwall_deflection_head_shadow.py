@@ -43,7 +43,7 @@ class DrywallPartitionSpec:
     wall_height_m: float = 0.0
     stud_width_mm: float = 0.0
     deflection_allowance_mm: float = 0.0
-    fire_rating_hours: int = 2
+    fire_rating_hours: int = 0
     has_shaftliner_core: bool = False
     level_id: str = "L01"
     source_callout: str = ""
@@ -90,7 +90,7 @@ class SourceDrywallShaftwallDeflectionHeadShadowAuthority:
             "wall_height_m": 0.0,
             "stud_width_mm": 0.0,
             "deflection_allowance_mm": 0.0,
-            "fire_rating_hours": 2,
+            "fire_rating_hours": 0,
             "has_shaftliner_core": False,
         }
 

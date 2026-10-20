@@ -53,6 +53,11 @@ def test_drywall_callout_parsing():
     assert omitted_spec.wall_height_m == 0.0
     assert omitted_spec.stud_width_mm == 0.0
     assert omitted_spec.deflection_allowance_mm == 0.0
+    assert omitted_spec.fire_rating_hours == 0
+    omitted_rating = SourceDrywallShaftwallDeflectionHeadShadowAuthority.parse_callout(
+        "STEEL STUD PARTITION"
+    )
+    assert omitted_rating["fire_rating_hours"] == 0
 
 
 def test_drywall_snapping():
