@@ -68,3 +68,51 @@ def test_exact_source_with_unavailable_w4_scope_stays_abstained(monkeypatch):
     assert not result["firm_area_granted"]
     assert not result["opening_count_granted"]
     assert not result["benchmark_score_granted"]
+
+
+def test_real_synthetic_source_with_mock_w4_scope_stays_source_only(monkeypatch):
+    """Exercise the full adapter, but never present a mocked wall as authority."""
+    from types import SimpleNamespace as NS
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_opening_local_g17_wall_shadow import build_opening_local_g17_wall_shadow
+    from pb_physical_wall_candidate_authority import PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+    from tests.test_opening_local_g17_wall_shadow import address
+
+    source, published = _prepare(frame_lines=2)
+    selector = address(source, published)
+    kwargs = dict(
+        document_id=selector.document_id,
+        revision_id=selector.revision_id,
+        source_sha256=selector.source_sha256,
+        snapshot_id=selector.snapshot_id,
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+    )
+    wall_selector = PhysicalWallCandidateSelector(**kwargs)
+    local = build_opening_local_g17_wall_shadow(source, selector)
+    assert len(local.flanks) == 2
+    supplied_mock_wall = local.flanks[0].exact_coordinate_records[0]
+    mocked_scope = NS(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        records=(supplied_mock_wall,), equivalence=object(), **kwargs,
+    )
+    monkeypatch.setattr(
+        PhysicalWallCandidateAuthority, "resolve_scope",
+        lambda self, s: mocked_scope,
+    )
+    fake_wall_authority = object.__new__(PhysicalWallCandidateAuthority)
+    result = bridge(
+        source, wall_authority=fake_wall_authority,
+        wall_selector=wall_selector, opening_selectors=(selector,),
+    )
+    assert result["original_producer_scope_verified"]
+    assert result["g17_source_edges_reissued"] > 0
+    assert result["ordinary_w4_edges_reissued"] > 0
+    assert not result["opening_roster_complete_proven"]
+    assert not result["source_parent_equivalence_granted"]
+    assert not result["host_binding_granted"]
+    assert not result["firm_area_granted"]
+    assert not result["opening_count_granted"]
+    assert not result["benchmark_score_granted"]
