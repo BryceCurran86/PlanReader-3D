@@ -62,6 +62,7 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
         self.assertEqual(omitted.bolt_embedment_depth_mm, 0.0)
         self.assertEqual(omitted.grout_thickness_mm, 0.0)
         self.assertEqual(omitted.bolt_grade, BoltGrade.UNKNOWN)
+        self.assertEqual(omitted.nut_thread_extension_mm, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(50.0, 50.0), (100.0, 100.0)]
@@ -86,7 +87,8 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
             bolt_count=4,
             bolt_diameter_mm=24.0,
             bolt_embedment_depth_mm=450.0,
-            grout_thickness_mm=50.0
+            grout_thickness_mm=50.0,
+            nut_thread_extension_mm=75.0,
         )
         res = SourceSteelBaseplateGroutBoltShadowAuthority.evaluate_connections([conn])
         self.assertEqual(res.quantities.total_connection_count, 1)
@@ -101,6 +103,21 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        no_ext = SteelBaseplateSpec(
+            connection_id="BP-NO-EXT",
+            column_id="COL-1",
+            location=(10.0, 10.0),
+            plate_width_mm=400.0,
+            plate_length_mm=400.0,
+            plate_thickness_mm=25.0,
+            bolt_count=4,
+            bolt_diameter_mm=24.0,
+            bolt_embedment_depth_mm=450.0,
+            grout_thickness_mm=50.0,
+        )
+        no_ext_res = SourceSteelBaseplateGroutBoltShadowAuthority.evaluate_connections([no_ext])
+        self.assertAlmostEqual(no_ext_res.quantities.total_anchor_bolt_rod_length_m, 2.1)
 
 
 if __name__ == "__main__":
