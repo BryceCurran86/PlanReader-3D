@@ -61,23 +61,23 @@ def _frame_valid(frame: dict | None, host: dict | None, identity: str) -> bool:
     return True
 
 
-def _axis_values_match_figured_pair(width_m: object, height_m: object,
-                                    dimension_values_mm: object) -> bool:
-    """Reject equal-area but physically different axis pairs in a shadow handoff.
+def _axis_values_match_figured_pair(
+    width_m: object, height_m: object, raw_pair: object,
+) -> bool:
+    """Check the actual two figured lengths, not just their area product.
 
-    Figured pairs are treated as unordered here: their source-owned axis-order
-    receipt is checked independently. Neither an area product nor this helper
-    grants dimension authority or selects a width/height orientation.
+    This source-neutral predicate has NO issuer authority. The caller still
+    requires source-owned physical opening, two unique canonical axis records,
+    complete geometry, and both exact IDs in canonical evidence receipts.
     """
     if (not _positive(width_m) or not _positive(height_m)
-            or not isinstance(dimension_values_mm, (list, tuple))
-            or len(dimension_values_mm) != 2
-            or not all(_positive(v) for v in dimension_values_mm)):
+            or type(raw_pair) not in (tuple, list) or len(raw_pair) != 2
+            or any(not _positive(value) for value in raw_pair)):
         return False
-    measured_mm = sorted((float(width_m) * 1000.0, float(height_m) * 1000.0))
-    figured_mm = sorted(float(v) for v in dimension_values_mm)
-    return all(math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-6)
-               for a, b in zip(measured_mm, figured_mm))
+    dimensions = sorted(float(value) / 1000 for value in raw_pair)
+    axes = sorted((float(width_m), float(height_m)))
+    return all(math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-9)
+               for a, b in zip(dimensions, axes))
 
 
 def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) -> bool:
@@ -108,8 +108,9 @@ def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) 
     height = canonical.get("height_m")
     if not _positive(width) or not _positive(height):
         return False
-    raw_pair = evidence.get("dimension_values_mm")
-    if not _axis_values_match_figured_pair(width, height, raw_pair):
+    if not _axis_values_match_figured_pair(
+        width, height, evidence.get("dimension_values_mm")
+    ):
         return False
     # If the original label authority *also* claims width/height order, it
     # must not contradict the independently issued canonical axis records.

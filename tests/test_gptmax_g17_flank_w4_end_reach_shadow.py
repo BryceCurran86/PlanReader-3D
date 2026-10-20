@@ -229,3 +229,118 @@ def test_duplicate_source_parent_id_rejected_not_normalized_to_one_w4_owner():
     )
     with pytest.raises(ValueError, match="duplicate W4 source primitive"):
         _ledger(records, lines)
+
+
+def test_strict_source_fragment_owner_confirms_genuine_local_ancestry():
+    """Two independent original fragments can confirm two independent flanks."""
+    from types import SimpleNamespace
+
+    records, lines = _fixture()
+    for record in records:
+        parent = record.physical_identity.source_primitive_ids[0]
+        record.source_edge_fragments = (
+            SimpleNamespace(
+                edge_id="owned:" + record.wall_candidate_id,
+                geometry=lines[parent],
+                source_primitive_ids=(parent,),
+            ),
+        )
+    report = _ledger(records, lines)
+    by_role = {row["role"]: row for row in report["flanks"]}
+    for role in ("left", "right"):
+        row = by_role[role]["local_end_reach_candidates"][0]
+        assert row["strict_source_fragment_end_reach_candidate"] is True
+        assert row["source_parent_end_reach"][0][
+            "owned_w4_fragment_end_reach_status"
+        ] == "w4_source_owned_local_fragment_end_reach_observed"
+    assert not report["host_granted"] and not report["metric_quantity_granted"]
+
+
+def test_snapped_centerline_cannot_borrow_a_foreign_fragment_end():
+    """A local W4 centerline can reach the flank with a REMOTE owned edge."""
+    from types import SimpleNamespace
+
+    records, lines = _fixture()
+    # The W4 line reaches x=100 but the ONLY source-owned edge on that
+    # candidate terminates at x=40. Its whole ancestor reaches x=100.
+    records[0].source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="remote-left",
+            geometry=(20.0, 53.0, 40.0, 53.0),
+            source_primitive_ids=("raw:left",),
+        ),
+    )
+    report = _ledger(records, lines)
+    left = next(x for x in report["flanks"] if x["role"] == "left")
+    candidate = left["local_end_reach_candidates"][0]
+    # Legacy coordinate-only signal remains diagnostic and unchanged.
+    assert candidate["local_chain_reaches_flank_end"] is True
+    # New source-owned W2 edge gate refuses to borrow that signal.
+    assert candidate["strict_source_fragment_end_reach_candidate"] is False
+    assert candidate["source_parent_end_reach"][0][
+        "owned_w4_fragment_end_reach_status"
+    ] == "w4_source_owned_local_fragment_end_reach_missing"
+    assert report["host_granted"] is False
+
+
+def test_conflicting_w2_source_fragment_parents_remain_unproved():
+    from types import SimpleNamespace
+
+    records, lines = _fixture()
+    records[0].source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="foreign",
+            geometry=lines["raw:left"],
+            source_primitive_ids=("raw:some-other-original-parent",),
+        ),
+    )
+    report = _ledger(records, lines)
+    left = next(x for x in report["flanks"] if x["role"] == "left")
+    candidate = left["local_end_reach_candidates"][0]
+    assert candidate["strict_source_fragment_end_reach_candidate"] is False
+    assert candidate["source_parent_end_reach"][0][
+        "owned_w4_fragment_end_reach_status"
+    ] == "w4_source_edge_fragment_lineage_conflict"
+    assert not report["host_granted"]
+
+
+def test_fragment_witness_missing_is_unknown_not_positive_and_order_stable():
+    records, lines = _fixture()
+    a = _ledger(records, lines)
+    b = _ledger(tuple(reversed(records)), dict(reversed(tuple(lines.items()))))
+    assert a == b
+    for flank in a["flanks"]:
+        for row in flank["local_end_reach_candidates"]:
+            assert row["strict_source_fragment_end_reach_candidate"] is False
+            assert row["source_parent_end_reach"][0][
+                "owned_w4_fragment_end_reach_status"
+            ] == "w4_source_edge_fragment_receipts_unavailable"
+    assert not a["host_granted"]
+
+
+@pytest.mark.parametrize("foreign_fragment", (
+    (20.0, 59.0, 100.0, 59.0),   # source ID correct, wrong wall-face offset
+    (0.0, 53.0, 100.0, 53.0),    # source ID correct, extends before source start
+))
+def test_source_parent_id_cannot_cover_foreign_shifted_or_extended_w2_edge(
+    foreign_fragment,
+):
+    from types import SimpleNamespace
+
+    records, lines = _fixture()
+    records[0].source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="claiming-left",
+            geometry=foreign_fragment,
+            source_primitive_ids=("raw:left",),
+        ),
+    )
+    result = _ledger(records, lines)
+    left = next(x for x in result["flanks"] if x["role"] == "left")
+    row = left["local_end_reach_candidates"][0]
+    assert row["local_chain_reaches_flank_end"] is True
+    assert row["strict_source_fragment_end_reach_candidate"] is False
+    assert row["source_parent_end_reach"][0][
+        "owned_w4_fragment_end_reach_status"
+    ] == "w4_source_edge_fragment_parent_geometry_conflict"
+    assert not result["host_granted"]

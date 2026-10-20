@@ -709,3 +709,21 @@ def test_glyph_runs_are_invariant_to_translation_and_input_order_and_are_determi
     shuffled = list(building() + word)
     random.Random(5).shuffle(shuffled)
     assert run(shuffled).glyph_runs == base
+
+
+def test_dense_glyph_clustering_bounding_box_pruning_and_contact():
+    # Dense array of letters spaced by 8pt horizontally and separated baselines
+    word1 = list(itertools.chain.from_iterable(_letter(f"W1_{i}", 400 + 8 * i, 450) for i in range(10)))
+    word2 = list(itertools.chain.from_iterable(_letter(f"W2_{i}", 400 + 8 * i, 480) for i in range(10)))
+    report = run(building() + word1 + word2)
+    assert len(report.glyph_runs) == 2
+    for r in report.glyph_runs:
+        assert r.path_count == 10
+        assert r.segment_count == 30
+        assert r.touches_wall_network is False
+    # All letters are classified as NOT_WALL_INK with REASON_OUTLINED_GLYPH_RUN
+    got_labels = labels(report)
+    got_reasons = reasons(report)
+    for s in word1 + word2:
+        assert got_labels[s["id"]] == NOT_WALL_INK
+        assert REASON_OUTLINED_GLYPH_RUN in got_reasons[s["id"]]

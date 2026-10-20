@@ -15,6 +15,7 @@ SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 BBOX=(100.,450.,900.,1955.)
 
 
+@pytest.mark.skipif(not ORIGINAL.is_file(), reason="owner-private Maryborough PDF unavailable")
 def test_original_p7_p11_many_source_ink_witnesses_and_competing_transforms():
     raw=ORIGINAL.read_bytes()
     assert hashlib.sha256(raw).hexdigest()==SHA
