@@ -57,6 +57,8 @@ def test_skylight_smoke_vent_callout_parsing():
         "1200x2400 AUTOMATIC SMOKE VENT 200mm CURB"
     )
     assert smoke_no_mesh["has_safety_mesh"] is False
+    assert omitted["discharge_coefficient_cv"] == 0.0
+    assert omitted_spec.discharge_coefficient_cv == 0.0
 
 
 def test_skylight_smoke_vent_snapping():
@@ -71,6 +73,7 @@ def test_skylight_smoke_vent_evaluation_quantities():
             "unit_id": "SV-01",
             "center_point": (100.0, 100.0),
             "callout": "1200x2400 AUTOMATIC SMOKE VENT 200mm CURB",
+            "discharge_coefficient_cv": 0.65,
             "level_id": "ROOF",
         },
         {

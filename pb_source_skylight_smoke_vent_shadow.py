@@ -45,7 +45,7 @@ class SkylightVentSpec:
     opening_length_mm: float = 0.0
     curb_height_mm: float = 0.0
     has_safety_mesh: bool = False
-    discharge_coefficient_cv: float = 0.65
+    discharge_coefficient_cv: float = 0.0
     level_id: str = "ROOF"
     source_callout: str = ""
 
@@ -91,7 +91,7 @@ class SourceSkylightSmokeVentShadowAuthority:
             "opening_length_mm": 0.0,
             "curb_height_mm": 0.0,
             "has_safety_mesh": False,
-            "discharge_coefficient_cv": DEFAULT_CV_DISCHARGE,
+            "discharge_coefficient_cv": 0.0,
         }
 
         # Unit Type
