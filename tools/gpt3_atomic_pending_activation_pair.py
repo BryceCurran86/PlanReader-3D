@@ -26,9 +26,9 @@ def preflight_new_activation_pair(
     *,
     inputs: tuple[Path, ...],
 ) -> None:
-    if len(outputs) != 2 or any(type(p) is not Path for p in outputs):
+    if len(outputs) != 2 or any(not isinstance(p, Path) for p in outputs):
         raise TypeError("two typed output paths required")
-    if any(type(p) is not Path for p in inputs):
+    if any(not isinstance(p, Path) for p in inputs):
         raise TypeError("typed input paths required")
     targets = tuple(path.resolve() for path in outputs)
     sources = {path.resolve() for path in inputs}
