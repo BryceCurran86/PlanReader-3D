@@ -4,6 +4,9 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import os
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,8 @@ from tools.gpt3_atomic_pending_activation_pair import (
     preflight_new_activation_pair,
     source_input_snapshot,
     publish_new_activation_pair,
+    read_committed_active_identity_map,
+    ACTIVATION_COMMIT_MARKER_VERSION,
 )
 import tools.prepare_gpt3_pending_identity_activation as opening
 import tools.prepare_gpt3_pending_floor_surface_identity_activation as floor
@@ -47,7 +52,9 @@ def _publish(inputs, outputs):
     publish_new_activation_pair(
         outputs, (first, second), inputs=inputs, source_snapshot=before,
     )
-    return first, second
+    committed_receipt = json.loads(outputs[1].read_text(encoding="utf-8"))
+    assert committed_receipt["source_authority"] == second["source_authority"]
+    return first, committed_receipt
 
 
 def test_two_outputs_publish_exclusively_with_original_input_byte_preservation(tmp_path):
@@ -213,3 +220,122 @@ def test_both_activation_clis_preflight_before_consuming_any_untrusted_source(
             program.main(_cli_args(paths, outputs))
     assert forbidden.read_text() == "preserve original"
     assert not outputs[1].exists()
+
+
+def test_receipt_marker_binds_exact_map_bytes_and_source_envelope(tmp_path):
+    inputs = _inputs(tmp_path)
+    outputs = _outputs(tmp_path)
+    _publish(inputs, outputs)
+    map_bytes = outputs[0].read_bytes()
+    map_payload = read_committed_active_identity_map(
+        outputs[0], receipt_path=outputs[1],
+    )
+    assert map_payload == json.loads(map_bytes)
+    receipt = json.loads(outputs[1].read_text())
+    assert receipt["activation_commit_marker_version"] == ACTIVATION_COMMIT_MARKER_VERSION
+    assert receipt["identity_map_sha256"] == __import__("hashlib").sha256(map_bytes).hexdigest()
+    assert receipt["benchmark_score_granted"] is False
+
+
+def test_nonempty_uncommitted_map_never_enters_active_scoring(tmp_path):
+    active = tmp_path / "uncommitted-map.json"
+    active.write_text(json.dumps({
+        "schema_version": "1.0.0", "project_id": "project-1",
+        "source_sha256s": ["a" * 64],
+        "bindings": [{"benchmark_item_id": "untrusted"}],
+    }))
+    with pytest.raises(ValueError, match="requires its committed activation receipt"):
+        read_committed_active_identity_map(active)
+    empty = tmp_path / "empty-baseline.json"
+    empty.write_text(json.dumps({
+        "schema_version": "1.0.0", "project_id": "project-1",
+        "source_sha256s": ["a" * 64], "bindings": [],
+    }))
+    assert read_committed_active_identity_map(empty)["bindings"] == []
+
+
+def test_missing_or_mismatched_receipt_is_not_committed(tmp_path):
+    inputs = _inputs(tmp_path)
+    targets = _outputs(tmp_path)
+    _publish(inputs, targets)
+    original_map = targets[0].read_bytes()
+    original_receipt = targets[1].read_bytes()
+    targets[1].unlink()
+    with pytest.raises(FileNotFoundError):
+        read_committed_active_identity_map(targets[0], receipt_path=targets[1])
+    targets[1].write_bytes(original_receipt)
+    changed = json.loads(original_map)
+    changed["bindings"].append({"other": True})
+    targets[0].write_text(json.dumps(changed))
+    with pytest.raises(ValueError, match="receipt digest"):
+        read_committed_active_identity_map(targets[0], receipt_path=targets[1])
+    targets[0].write_bytes(original_map)
+    receipt = json.loads(original_receipt)
+    receipt["identity_map_project_id"] = "wrong-source-project"
+    targets[1].write_text(json.dumps(receipt))
+    with pytest.raises(ValueError, match="source envelope differs"):
+        read_committed_active_identity_map(targets[0], receipt_path=targets[1])
+
+
+def test_reader_cannot_observe_activation_mid_two_link_publish(tmp_path, monkeypatch):
+    inputs = _inputs(tmp_path)
+    outputs = _outputs(tmp_path)
+    original_link = os.link
+    seen = []
+
+    def inspect_first_link(stage, target, *args, **kwargs):
+        original_link(stage, target, *args, **kwargs)
+        if Path(target) == outputs[0]:
+            with pytest.raises(FileNotFoundError):
+                read_committed_active_identity_map(
+                    outputs[0], receipt_path=outputs[1],
+                )
+            seen.append("not committed")
+
+    monkeypatch.setattr(os, "link", inspect_first_link)
+    _publish(inputs, outputs)
+    assert seen == ["not committed"]
+    assert read_committed_active_identity_map(
+        outputs[0], receipt_path=outputs[1],
+    )["bindings"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGKILL crash replay")
+def test_sigkill_after_map_link_leaves_inert_orphan(tmp_path):
+    inputs = _inputs(tmp_path)
+    outputs = _outputs(tmp_path)
+    script = """
+import os, signal, sys
+from pathlib import Path
+from tools.gpt3_atomic_pending_activation_pair import (
+    publish_new_activation_pair, source_input_snapshot,
+)
+source, dest_map, dest_receipt = [Path(x) for x in sys.argv[1:]]
+link = os.link
+def terminate_after_first_link(staged, output, *args, **kwargs):
+    link(staged, output, *args, **kwargs)
+    os.kill(os.getpid(), signal.SIGKILL)
+os.link = terminate_after_first_link
+publish_new_activation_pair(
+    (dest_map, dest_receipt),
+    ({"schema_version": "1.0.0", "bindings": [{"test": True}]},
+     {"benchmark_score_granted": False}),
+    inputs=(source,), source_snapshot=source_input_snapshot((source,)),
+)
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", script, str(inputs[0]),
+         str(outputs[0]), str(outputs[1])],
+        cwd=Path(__file__).resolve().parents[1], check=False,
+    )
+    assert proc.returncode == -signal.SIGKILL
+    assert outputs[0].is_file() and not outputs[1].exists()
+    with pytest.raises(FileNotFoundError):
+        read_committed_active_identity_map(
+            outputs[0], receipt_path=outputs[1],
+        )
+    with pytest.raises(ValueError, match="requires its committed activation receipt"):
+        read_committed_active_identity_map(outputs[0])
+    with pytest.raises(FileExistsError, match="never overwrite"):
+        _publish(inputs, outputs)
+
