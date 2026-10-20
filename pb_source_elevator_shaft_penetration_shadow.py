@@ -30,8 +30,8 @@ class ElevatorType(str, Enum):
 @dataclass
 class ElevatorLandingDoorSpec:
     level_id: str
-    width_mm: float = 1000.0
-    height_mm: float = 2100.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
     sill_datum_m: float = 0.0
 
 
