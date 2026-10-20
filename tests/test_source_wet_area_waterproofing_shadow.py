@@ -76,7 +76,7 @@ def test_compile_waterproofing_receipt():
     assert receipt.total_floor_membrane_pt2 == 3000.0
     assert receipt.total_vertical_upstand_pt2 == 600.0
     assert receipt.total_membrane_takeoff_pt2 == 3600.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
