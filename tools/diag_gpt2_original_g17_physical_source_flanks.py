@@ -88,6 +88,9 @@ def original_physical_g17_source_flank_report(
     observed: dict[str, str] = {}
     unresolved: list[dict] = []
     physical = []
+    # Keep original source band geometry for the actual physically-owned
+    # source members; rival or failed opening claims are removed below.
+    authenticated_band_receipts: dict[str, tuple[dict, ...]] = {}
     # A contradictory hosted + unhosted decision for the SAME physical ID
     # cannot be cleaned up by first filtering out the hosted row.
     # Scope integrity must be established across the ENTIRE issued roster.
@@ -193,6 +196,13 @@ def original_physical_g17_source_flank_report(
             parent_source=source, source_bands=bands,
         )
         physical.append(owned)
+        if owned.status is EvidenceResolutionStatus.CORROBORATED:
+            if (len(bands.candidates) != 2
+                    or owned.physical_opening_id != physical_id):
+                raise RuntimeError("G17 source-owned source band output identity mismatch")
+            authenticated_band_receipts[physical_id] = tuple(
+                asdict(candidate) for candidate in bands.candidates
+            )
 
     reconciled = quarantine_overlapping_g17_physical_source_claims_shadow(
         tuple(physical)
@@ -225,6 +235,16 @@ def original_physical_g17_source_flank_report(
         ),
         "unresolved": unresolved,
         "source_owner_claims": [asdict(x) for x in reconciled],
+        # Source-only PDF-point face/end bands. Failed/repeated physical
+        # owners cannot leak a geometry receipt to downstream MAX review.
+        "source_owned_flank_bands_by_physical_opening": {
+            item.physical_opening_id: list(
+                authenticated_band_receipts[item.physical_opening_id]
+            )
+            for item in reconciled
+            if item.status is EvidenceResolutionStatus.CORROBORATED
+            and item.physical_opening_id in authenticated_band_receipts
+        },
         "shadow_only": True,
         "structural_host_granted": False,
         "whole_wall_frame_granted": False,
