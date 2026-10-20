@@ -87,6 +87,77 @@ def test_real_host_role_normalizer_abstains_on_conflicted_pair(order):
     assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
 
 
+@pytest.mark.parametrize("issued", [
+    (DISTINCT.value,),
+    (DISTINCT.value, DISTINCT.value),
+    (DISTINCT.value, SAME.value, DISTINCT.value),
+])
+def test_explicit_distinct_against_same_group_never_recovers_a_host(issued):
+    left = _record("wall_left", start=10.0, end=40.0)
+    right = _record("wall_right", start=10.0, end=40.0)
+    for order in set(permutations(issued)):
+        source = _source_equivalence(
+            tuple(("wall_left", "wall_right", cls) for cls in order),
+            groups=(("wall_left", "wall_right"),),
+        )
+        assert _pair_lookup(source) == {
+            ("wall_left", "wall_right"): UNKNOWN,
+        }
+        status, selected, reasons = _normalize_role_candidates(
+            ((0.0, left), (0.0, right)), source, axis_tol=0.8,
+        )
+        assert status is Status.CONFLICT
+        assert selected == ()
+        assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
+def test_same_group_needs_positive_same_class_to_collapse_local_role():
+    left = _record("wall_left", start=10.0, end=40.0)
+    right = _record("wall_right", start=10.0, end=40.0)
+    source = _source_equivalence(
+        (("wall_left", "wall_right", SAME.value),),
+        groups=(("wall_left", "wall_right"),),
+    )
+    status, selected, reasons = _normalize_role_candidates(
+        ((0.0, left), (0.0, right)), source, axis_tol=0.8,
+    )
+    assert status is Status.CORROBORATED
+    assert len(selected) == 1
+    assert selected[0].candidate_group == ("wall_left", "wall_right")
+    assert reasons == ()
+
+
+def test_distinct_wall_groups_remain_two_local_host_candidates():
+    left = _record("wall_left", start=10.0, end=40.0)
+    right = _record("wall_right", start=10.0, end=40.0)
+    source = _source_equivalence(
+        (("wall_left", "wall_right", DISTINCT.value),),
+        groups=(("wall_left",), ("wall_right",)),
+    )
+    status, selected, reasons = _normalize_role_candidates(
+        ((0.0, left), (0.0, right)), source, axis_tol=0.8,
+    )
+    assert status is Status.CORROBORATED
+    assert len(selected) == 2
+    assert reasons == ()
+
+
+def test_injected_distinct_lookup_cannot_bypass_same_source_group_veto():
+    left = _record("wall_left", start=10.0, end=40.0)
+    right = _record("wall_right", start=10.0, end=40.0)
+    source = _source_equivalence(
+        (("wall_left", "wall_right", DISTINCT.value),),
+        groups=(("wall_left", "wall_right"),),
+    )
+    status, selected, reasons = _normalize_role_candidates(
+        ((0.0, left), (0.0, right)), source, axis_tol=0.8,
+        pair_lookup={("wall_left", "wall_right"): DISTINCT},
+    )
+    assert status is Status.CONFLICT
+    assert selected == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
 def test_malformed_single_source_relation_fails_closed_in_host_admission():
     source = _source_equivalence((("left", "right", "untrusted_value"),))
     assert _pair_lookup(source) == {("left", "right"): UNKNOWN}

@@ -2301,9 +2301,32 @@ def _local_boundary_clean_host_scope(
     )
 
 
+def _source_same_group_distinct_pair_conflicts(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> frozenset[tuple[str, str]]:
+    """Explicit DISTINCT cannot override independently issued SAME membership."""
+    groups_by_member: dict[str, set[int]] = {}
+    for group_index, group in enumerate(equivalence.equivalence_groups):
+        for wall_id in group:
+            groups_by_member.setdefault(str(wall_id), set()).add(group_index)
+    result: set[tuple[str, str]] = set()
+    for left, right, raw in equivalence.pair_classifications:
+        try:
+            classification = PhysicalEquivalenceClass(raw)
+        except (TypeError, ValueError):
+            continue  # The pair lookup independently makes this AMBIGUOUS.
+        if classification is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
+            continue
+        a, b = str(left), str(right)
+        if groups_by_member.get(a, set()) & groups_by_member.get(b, set()):
+            result.add(tuple(sorted((a, b))))
+    return frozenset(result)
+
+
 def _pair_lookup(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    group_conflicts = _source_same_group_distinct_pair_conflicts(equivalence)
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for left, right, raw in equivalence.pair_classifications:
         key = tuple(sorted((str(left), str(right))))
@@ -2312,6 +2335,9 @@ def _pair_lookup(
         except (TypeError, ValueError):
             # A malformed issued relationship is source conflict, not
             # permission to pretend the producer never issued the pair.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if key in group_conflicts:
+            # One original issuer cannot simultaneously say SAME and DISTINCT.
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         prior = result.get(key)
         if (prior is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
@@ -2403,6 +2429,24 @@ def _normalize_role_candidates(
                             (HOST_EQUIVALENCE_UNAVAILABLE,),
                         )
                     if classification is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return (
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (HOST_EQUIVALENCE_AMBIGUOUS,),
+                        )
+                    left_group = _equivalence_group_for(
+                        equivalence, left.wall_candidate_id,
+                        group_lookup=group_lookup,
+                    )
+                    right_group = _equivalence_group_for(
+                        equivalence, right.wall_candidate_id,
+                        group_lookup=group_lookup,
+                    )
+                    if (left.wall_candidate_id != right.wall_candidate_id
+                            and left_group == right_group
+                            and classification is not PhysicalEquivalenceClass.SAME_PHYSICAL_WALL):
+                        # Even a supplied pair lookup cannot collapse an
+                        # explicitly DISTINCT same-group wall pair to one host.
                         return (
                             EvidenceResolutionStatus.CONFLICT,
                             (),
