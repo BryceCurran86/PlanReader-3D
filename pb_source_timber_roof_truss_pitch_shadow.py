@@ -34,7 +34,7 @@ class TimberRoofTrussSpec:
     truss_type: TrussProfileType
     layout_line: List[Tuple[float, float]]
     span_mm: float
-    pitch_deg: float = 22.5
+    pitch_deg: float = 0.0
     eaves_overhang_mm: float = 600.0
     spacing_centers_mm: float = 900.0
     count: int = 1
@@ -95,7 +95,7 @@ class SourceTimberRoofTrussPitchShadowAuthority:
 
         # Pitch angle: (\d+(?:\.\d+)?)\s*(?:DEG|°|PITCH)
         p_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:DEG|°|PITCH)", clean)
-        pitch_deg = float(p_match.group(1)) if p_match else 22.5
+        pitch_deg = float(p_match.group(1)) if p_match else 0.0
 
         # Spacing: (\d+)\s*(?:CTS|CENTRES|CENTERS|SPACING)
         sp_match = re.search(r"(\d+)\s*(?:CTS|CENTRES|CENTERS|SPACING)", clean)
