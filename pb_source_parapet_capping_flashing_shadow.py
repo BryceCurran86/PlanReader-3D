@@ -34,11 +34,11 @@ class CappingMaterial(str, Enum):
 class ParapetSegmentSpec:
     segment_id: str
     centerline_points: List[Tuple[float, float]]
-    wall_thickness_mm: float = 200.0
-    upstand_height_mm: float = 600.0
+    wall_thickness_mm: float = 0.0
+    upstand_height_mm: float = 0.0
     capping_material: CappingMaterial = CappingMaterial.COLORBOND_STEEL
-    capping_girth_mm: float = 450.0
-    membrane_turnup_height_mm: float = 200.0
+    capping_girth_mm: float = 0.0
+    membrane_turnup_height_mm: float = 0.0
     has_drip_groove: bool = True
     level_id: str = "ROOF"
     source_callout: str = ""
@@ -110,19 +110,19 @@ class SourceParapetCappingFlashingShadowAuthority:
 
         # Wall thickness
         thk_match = re.search(r"(\d+)\s*(?:THK|THICK|W\b)", clean)
-        thickness_mm = float(thk_match.group(1)) if thk_match else 200.0
+        thickness_mm = float(thk_match.group(1)) if thk_match else 0.0
 
         # Upstand height
         h_match = re.search(r"(\d+)\s*(?:H\b|HIGH|HEIGHT|UPSTAND)", clean)
-        upstand_height_mm = float(h_match.group(1)) if h_match else 600.0
+        upstand_height_mm = float(h_match.group(1)) if h_match else 0.0
 
         # Capping girth
         girth_match = re.search(r"(\d+)\s*(?:GIRTH|DEVELOPMENT|GRT)", clean)
-        capping_girth_mm = float(girth_match.group(1)) if girth_match else (thickness_mm + 200.0)
+        capping_girth_mm = float(girth_match.group(1)) if girth_match else 0.0
 
         # Membrane turnup
         turnup_match = re.search(r"(\d+)\s*(?:MEMBRANE|TURNUP|UPSTAND\s*MEM)", clean)
-        membrane_turnup_mm = float(turnup_match.group(1)) if turnup_match else 200.0
+        membrane_turnup_mm = float(turnup_match.group(1)) if turnup_match else 0.0
 
         return mat, thickness_mm, upstand_height_mm, capping_girth_mm, membrane_turnup_mm
 
