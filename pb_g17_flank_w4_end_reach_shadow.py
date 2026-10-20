@@ -244,7 +244,6 @@ def build_g17_flank_w4_end_reach_ledger(
                     cross_hi=cross_hi,
                     parent_lo=p_lo,
                     parent_hi=p_hi,
-                    parent_offset=offset,
                     snap_tol=snap_tol,
                     pixel_tol=pixel_tol,
                 )
@@ -258,6 +257,7 @@ def build_g17_flank_w4_end_reach_ledger(
                     cross_hi=cross_hi,
                     parent_lo=p_lo,
                     parent_hi=p_hi,
+                    parent_offset=offset,
                     snap_tol=snap_tol,
                     pixel_tol=pixel_tol,
                 )
