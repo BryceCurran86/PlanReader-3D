@@ -19,6 +19,8 @@ from pb_gpt2_raster_source_flank_band_shadow import (
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
     PhysicalOpeningExistenceRecord,
 )
@@ -95,9 +97,19 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
     root = ("document_id", "revision_id", "source_sha256", "snapshot_id")
     if (any(getattr(record, field) != getattr(original_selector, field)
             for field in root)
+            or type(record.record_id) is not str or not record.record_id
             or type(record.page_id) is not str or not record.page_id
+            or record.viewport_id is not None
+            or record.semantic_class != "opening"
+            or record.structural_pattern not in (
+                RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            )
             or type(record.source_observation_ids) is not tuple
             or not record.source_observation_ids
+            or original_selector.observation_id not in record.source_observation_ids
+            or any(type(obs) is not str or not obs
+                   for obs in record.source_observation_ids)
             or len(set(record.source_observation_ids))
             != len(record.source_observation_ids)):
         return blocked("physical_g17_source_root_conflict")
