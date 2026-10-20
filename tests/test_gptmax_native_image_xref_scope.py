@@ -119,9 +119,13 @@ def test_reused_same_xref_at_two_distinct_placements_is_not_shared_pixel_frame()
     edge = result["g17_edges"][0]
     assert edge["source_native_image_xref"] == xref
     assert edge["same_image_pixel_lattice_candidates"] == []
+    # The W4 span straddles the image seam: it cannot be owned by ONE
+    # actual source XObject, even if the PDF reuses that SAME xref on
+    # both sides. This ambiguity is more precise than a fabricated
+    # cross-image pixel mismatch and must remain a non-hosting negative.
     assert edge["foreign_image_or_ambiguous_lattice_candidates"] == [{
         "w4_edge_id": "w4",
-        "reason": "different_original_image_placement_or_pixel_grid",
+        "reason": "w4_native_image_ownership_ambiguous_or_missing",
     }]
     assert not result["physical_wall_equivalence_granted"]
     assert not result["opening_host_granted"]
