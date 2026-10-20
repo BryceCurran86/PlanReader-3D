@@ -35,8 +35,8 @@ class AcousticWallSpec:
     centerline_points: List[Tuple[float, float]]
     wall_height_m: float = 0.0
     air_gap_mm: float = 0.0
-    side_a_layers: int = 2
-    side_b_layers: int = 2
+    side_a_layers: int = 0
+    side_b_layers: int = 0
     target_rw: int = 0
     level_id: str = "L1"
     source_tag: str = ""
@@ -115,7 +115,7 @@ class SourceAcousticWallLiningShadowAuthority:
             side_a = int(layer_matches[0])
             side_b = int(layer_matches[0])
         else:
-            side_a, side_b = 2, 2
+            side_a, side_b = 0, 0
 
         return decoupling, side_a, side_b, target_rw
 
