@@ -33,7 +33,7 @@ class OperableWallSpec:
     system_type: OperableWallSystemType = OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
     wall_height_m: float = 0.0
-    panel_width_mm: float = 1000.0
+    panel_width_mm: float = 0.0
     acoustic_rating_rw_db: int = 50
     has_retractable_seals: bool = True
     parking_stack_track_length_m: float = 2.5
@@ -83,7 +83,7 @@ class SourceOperableAcousticWallShadowAuthority:
         res = {
             "system_type": OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS,
             "wall_height_m": 0.0,
-            "panel_width_mm": 1000.0,
+            "panel_width_mm": 0.0,
             "acoustic_rating_rw_db": 50,
             "has_retractable_seals": True,
             "parking_stack_track_length_m": 2.5,
@@ -246,7 +246,11 @@ class SourceOperableAcousticWallShadowAuthority:
             clear_wall_m = cls.calculate_polyline_length(snapped_pts, scale_ratio)
             wall_area = clear_wall_m * wall_h
             track_m = clear_wall_m + stack_len
-            panels_cnt = int(math.ceil(clear_wall_m / (panel_w / 1000.0))) if clear_wall_m > 0 else 0
+            panels_cnt = (
+                int(math.ceil(clear_wall_m / (panel_w / 1000.0)))
+                if clear_wall_m > 0 and panel_w > 0
+                else 0
+            )
 
             tot_wall_m += clear_wall_m
             tot_wall_area_m2 += wall_area
