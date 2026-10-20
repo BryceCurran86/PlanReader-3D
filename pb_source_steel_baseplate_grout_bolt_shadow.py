@@ -41,6 +41,7 @@ class SteelBaseplateSpec:
     bolt_embedment_depth_mm: float = 0.0
     bolt_grade: BoltGrade = BoltGrade.UNKNOWN
     grout_thickness_mm: float = 0.0
+    nut_thread_extension_mm: float = 0.0
     level_id: str = "L0"
     source_callout: str = ""
 
@@ -130,8 +131,12 @@ class SourceSteelBaseplateGroutBoltShadowAuthority:
 
             total_bolts += conn.bolt_count
 
-            # Single bolt total rod length = embedment + plate_thk + grout_thk + nut/thread extension (75mm)
-            rod_len_mm = conn.bolt_embedment_depth_mm + conn.plate_thickness_mm + conn.grout_thickness_mm + 75.0
+            rod_len_mm = (
+                conn.bolt_embedment_depth_mm
+                + conn.plate_thickness_mm
+                + conn.grout_thickness_mm
+                + conn.nut_thread_extension_mm
+            )
             rod_len_m = (rod_len_mm / 1000.0) * conn.bolt_count
             total_rod_len_m += rod_len_m
 
