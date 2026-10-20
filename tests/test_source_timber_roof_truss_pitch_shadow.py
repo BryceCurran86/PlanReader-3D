@@ -32,10 +32,11 @@ class TestSourceTimberRoofTrussPitchShadow(unittest.TestCase):
         self.assertEqual(spacing2, 600.0)
         self.assertEqual(oh2, 450.0)
 
-        _t3, pitch3, _sp3, oh3 = SourceTimberRoofTrussPitchShadowAuthority.parse_truss_annotation(
+        _t3, pitch3, sp3, oh3 = SourceTimberRoofTrussPitchShadowAuthority.parse_truss_annotation(
             "TRUSS"
         )
         self.assertEqual(pitch3, 0.0)
+        self.assertEqual(sp3, 0.0)
         self.assertEqual(oh3, 0.0)
         omitted = TimberRoofTrussSpec(
             truss_id="T-UNKNOWN",
@@ -45,6 +46,7 @@ class TestSourceTimberRoofTrussPitchShadow(unittest.TestCase):
         )
         self.assertEqual(omitted.pitch_deg, 0.0)
         self.assertEqual(omitted.eaves_overhang_mm, 0.0)
+        self.assertEqual(omitted.spacing_centers_mm, 0.0)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
