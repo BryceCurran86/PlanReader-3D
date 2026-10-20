@@ -79,6 +79,7 @@ def test_omitted_stair_geometry_does_not_invent_typical_flight():
     assert flight.flight_width_pt == 0.0
     assert flight.flight_length_pt == 0.0
     assert flight.total_rise_pt == 0.0
+    assert flight.direction == ""
 
 
 def test_compile_stair_void_receipt():
