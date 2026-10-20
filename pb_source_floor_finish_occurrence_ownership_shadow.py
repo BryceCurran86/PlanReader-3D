@@ -35,6 +35,9 @@ COMPETING_FINISH_MARKS_IN_ROOM = "competing_finish_marks_in_room"
 INVALID_ROOM_POLYGON = "invalid_room_polygon"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 DOORWAY_TRANSITION_MISALIGNED = "doorway_transition_misaligned"
+DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED = (
+    "doorway_threshold_geometry_aligned_unauthenticated"
+)
 
 DEFAULT_CLEARANCE_TOLERANCE_PT = 2.5
 DEFAULT_SNAP_TOLERANCE_PT = 2.5
@@ -138,8 +141,8 @@ class SourceFloorFinishOwnershipRecord:
     occurrence_id: str
     finish_boundary_polygon_pdf_pts: tuple[tuple[float, float], ...]
     internal_floor_area_sq_pt: float
-    terminates_at_internal_faces: bool = True
-    under_wall_finish_excluded: bool = True
+    terminates_at_internal_faces: bool = False
+    under_wall_finish_excluded: bool = False
     doorway_transition_authenticated: bool = False
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     reason_codes: tuple[str, ...] = (SOURCE_FLOOR_FINISH_OWNERSHIP_CANDIDATE,)
@@ -360,12 +363,19 @@ def evaluate_source_floor_finish_ownership_shadow(
                     selector=selector,
                 )
 
-    # 5. Check doorway threshold transitions: must align with polygon boundary
-    doorway_authenticated = False
+    # 5. Doorway chord geometry is diagnostic only. Caller-supplied threshold
+    # geometry, threshold_id strings, and this polygon are not SourceRoomFace,
+    # W4 jamb, or native-stroke ownership. Authentication stays False.
+    doorway_geometry_aligned = False
     for thresh in doorway_transitions:
         if _threshold_aligns_with_polygon_boundary(thresh, clean_poly, snap_tolerance_pt):
-            doorway_authenticated = True
+            doorway_geometry_aligned = True
             break
+    doorway_reasons: tuple[str, ...] = ()
+    if doorway_geometry_aligned:
+        doorway_reasons = (DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED,)
+    elif doorway_transitions:
+        doorway_reasons = (DOORWAY_TRANSITION_MISALIGNED,)
 
     poly_tuple = tuple(clean_poly)
     record_id = stable_contract_id(
@@ -396,13 +406,14 @@ def evaluate_source_floor_finish_ownership_shadow(
         occurrence_id=finish_mark.occurrence_id,
         finish_boundary_polygon_pdf_pts=poly_tuple,
         internal_floor_area_sq_pt=round(area, 4),
-        terminates_at_internal_faces=True,
-        under_wall_finish_excluded=True,
-        doorway_transition_authenticated=doorway_authenticated,
+        terminates_at_internal_faces=False,
+        under_wall_finish_excluded=False,
+        doorway_transition_authenticated=False,
         status=EvidenceResolutionStatus.CANDIDATE,
         reason_codes=(
             SOURCE_FLOOR_FINISH_OWNERSHIP_RESOLVED,
             SOURCE_FLOOR_FINISH_OWNERSHIP_CANDIDATE,
+            *doorway_reasons,
         ),
         schema_version=SCHEMA_VERSION,
         commercial_projection_allowed=False,
@@ -416,6 +427,7 @@ def evaluate_source_floor_finish_ownership_shadow(
         reason_codes=(
             SOURCE_FLOOR_FINISH_OWNERSHIP_RESOLVED,
             SOURCE_FLOOR_FINISH_OWNERSHIP_CANDIDATE,
+            *doorway_reasons,
         ),
         record=record,
         selector=selector,
