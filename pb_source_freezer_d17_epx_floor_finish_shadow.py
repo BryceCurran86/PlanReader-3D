@@ -209,7 +209,7 @@ class FreezerD17EpxFloorFinishShadowAuthority:
         material_code: str,
         room_polygon_pts: Sequence[Tuple[float, float]],
         scale_ratio: float,
-        coving_height_m: float = 0.100,
+        coving_height_m: float = 0.0,
     ) -> FreezerFloorTakeoffEvidence:
         """Computes FREEZER internal floor area and 100mm cove skirting takeoff."""
         norm_code = material_code.strip().upper()

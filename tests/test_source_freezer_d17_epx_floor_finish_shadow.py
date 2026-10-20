@@ -116,6 +116,20 @@ def test_negative_ft2_ft3_finish_vetoed_in_freezer():
     assert "Incompatible finish" in t2.notes
 
 
+def test_omitted_coving_height_does_not_invent_one_hundred_mm():
+    authority = FreezerD17EpxFloorFinishShadowAuthority()
+    pts = [(0.0, 0.0), (50.0, 0.0), (50.0, 50.0), (0.0, 50.0)]
+    takeoff = authority.compute_freezer_floor_takeoff(
+        room_id="ROOM_01",
+        material_code="RESIN",
+        room_polygon_pts=pts,
+        scale_ratio=0.02,
+    )
+
+    assert takeoff.status == EvidenceResolutionStatus.CANDIDATE
+    assert pytest.approx(takeoff.coving_upturn_area_sqm, rel=1e-3) == 0.0
+
+
 def test_negative_degenerate_polygon_fails_closed():
     authority = FreezerD17EpxFloorFinishShadowAuthority()
     t = authority.compute_freezer_floor_takeoff(
