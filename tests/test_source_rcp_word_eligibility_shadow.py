@@ -217,3 +217,41 @@ def test_source_word_lexical_candidate_never_becomes_corrob_or_firm():
     assert r.is_eligible_for_ceiling_mark
     assert r.role is RcpWordRole.IN_PLAN_CEILING_ANNOTATION
     assert not r.takeoff_eligible and not r.commercial_projection_allowed
+
+def test_sha_pinned_real_original_short_note_room_word_and_grid_if_provisioned():
+    # The public CI runner does not contain the private owner's architectural
+    # original. Its absence must skip SOURCE verification, never imply pass.
+    import os
+    from pathlib import Path
+    from hashlib import sha256
+    import fitz
+    location=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not location:
+        pytest.skip("owner original source unavailable on public CI runner")
+    source=Path(location).read_bytes()
+    assert sha256(source).hexdigest()==os.environ["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
+    with fitz.open(stream=source,filetype="pdf") as pdf:
+        words=pdf[8].get_text("words")
+    candidate_plan=(100.,100.,1100.,1700.)
+    original_word_scope=((9,0,0,"OFFICE"),(10,1,0,"GRID"),(212,0,2,"OFFICE"))
+    roles=[]
+    for block_id,line_id,word_id,expected in original_word_scope:
+        found=[w for w in words if (w[5],w[6],w[7])==(block_id,line_id,word_id)]
+        assert len(found)==1 and found[0][4]==expected
+        block=[w for w in words if w[5]==block_id]
+        block.sort(key=lambda w:(w[6],w[7]))
+        original_text=" ".join(str(w[4]) for w in block)
+        result=SourceRcpWordEligibilityShadowAuthority().classify_word(
+            document_id="source:mary-original",page_id="9",word_text=expected,
+            word_bbox=tuple(float(v) for v in found[0][:4]),
+            block_text=original_text,block_index=block_id,
+            line_index=line_id,word_index=word_id,
+            plan_viewport_bbox=candidate_plan,
+        )
+        roles.append((result.role,result.status))
+        assert not result.takeoff_eligible and not result.commercial_projection_allowed
+    assert roles==[
+        (RcpWordRole.NON_CEILING_LABEL,EvidenceResolutionStatus.ABSTAINED),
+        (RcpWordRole.IN_PLAN_CEILING_ANNOTATION,EvidenceResolutionStatus.CANDIDATE),
+        (RcpWordRole.GENERAL_NOTE_PROSE,EvidenceResolutionStatus.ABSTAINED),
+    ]
