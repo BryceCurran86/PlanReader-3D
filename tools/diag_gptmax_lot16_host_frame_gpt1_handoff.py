@@ -280,6 +280,25 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 rel_tol=0.0, abs_tol=1e-6,
             )
         )
+        geometry_void = c.get("opening_void_record_id")
+        canonical_geometry_basis = bool(
+            c.get("area_basis") == "resolved_opening_geometry"
+            and c.get("geometry_complete") is True
+            and type(geometry_void) is str and geometry_void
+            and geometry_void == geometry_void.strip()
+            and receipt_roster_ok and geometry_void in issuer_ids
+        )
+        canonical_3d_basis = canonical_figured_basis or canonical_geometry_basis
+        canonical_3d_value = bool(
+            canonical_figured_value
+            or (canonical_geometry_basis and axis_ok
+                and _positive(c.get("area_m2"))
+                and math.isclose(
+                    float(c["area_m2"]),
+                    float(c["width_m"]) * float(c["height_m"]),
+                    rel_tol=0.0, abs_tol=1e-6,
+                ))
+        )
         if not supported:
             area_gate = "source_owned_floor_plan_unavailable"
         elif host is None:
@@ -323,10 +342,10 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "source_figured_dimension_pair_unproven"
         elif not figured_label_scope_owned:
             gate = "original_figured_label_source_scope_unverified"
-        elif not canonical_figured_basis:
-            gate = "canonical_figured_area_publication_basis_unproven"
-        elif not canonical_figured_value:
-            gate = "canonical_figured_area_value_unproven"
+        elif not canonical_3d_basis:
+            gate = "canonical_geometry_area_publication_basis_unproven"
+        elif not canonical_3d_value:
+            gate = "canonical_geometry_area_value_unproven"
         elif not axis_ok:
             gate = "width_height_axis_authority_unproven"
         else:
@@ -346,6 +365,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "original_figured_label_source_scope_bound": figured_label_scope_owned,
             "canonical_figured_area_publication_basis_bound": canonical_figured_basis,
             "canonical_figured_area_value_bound": canonical_figured_value,
+            "canonical_3d_area_publication_basis_bound": canonical_3d_basis,
+            "canonical_3d_area_value_bound": canonical_3d_value,
             "original_host_binding_receipt_bound": host_receipt_bound,
             "original_host_frame_receipt_bound": frame_receipt_bound,
             "figured_area_receipt_bound": figured_receipt_bound,
@@ -370,7 +391,7 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 supported and host is not None and frame_ok and typed
                 and host_receipt_bound and frame_receipt_bound
                 and figured_label_scope_owned
-                and canonical_figured_value and axis_ok
+                and canonical_3d_value and axis_ok
                 and not row.get("quantity_id")),
             # No output JSON is a signed quantity or a trust-grant token.
             "measurement_published": False,
