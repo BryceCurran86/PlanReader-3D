@@ -88,6 +88,17 @@ def original_physical_g17_source_flank_report(
     observed: dict[str, str] = {}
     unresolved: list[dict] = []
     physical = []
+    # A contradictory hosted + unhosted decision for the SAME physical ID
+    # cannot be cleaned up by first filtering out the hosted row.
+    # Scope integrity must be established across the ENTIRE issued roster.
+    all_opening_ids = [
+        row.opening_identity_id for row in live.opening_bindings
+        if type(row.opening_identity_id) is str and row.opening_identity_id
+    ]
+    if len(all_opening_ids) != len(set(all_opening_ids)):
+        raise RuntimeError(
+            "original physical opening universe has repeated identity decisions"
+        )
     for trace in sorted(live.opening_bindings, key=lambda row: (
         str(row.opening_identity_id), str(row.representative_observation_id),
     )):
