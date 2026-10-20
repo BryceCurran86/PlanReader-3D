@@ -318,7 +318,7 @@ def test_project_only_accepts_source_owned_floor_finish_before_frozen_scoring(
         "source_sha256s": [sha],
         "quantities": [{
             "family": "floor_finish_area",
-            "semantic_key": "tiled_floor_surface:physical-floor",
+            "semantic_key": "floor_finish_area:physical-floor:FT3:tile",
             "object_identity_refs": ["physical-floor"],
         }],
     }), encoding="utf-8")
