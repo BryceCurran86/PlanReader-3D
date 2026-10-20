@@ -191,6 +191,27 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             and all(_positive(v) for v in e["dimension_values_mm"])
             and _positive(e.get("area_m2"))
         )
+        # A numerical pair is not sufficient to bind an original figured
+        # source label to this exact opening. The original producer supplies
+        # the native text witnesses, original page/view, basis and semantic
+        # claim; these must be in the canonical evidence set.
+        figure_words = e.get("source_text_observation_ids") if e else None
+        figured_label_scope_owned = bool(
+            pair_ok
+            and e.get("basis") == "figured_opening_label"
+            and type(e.get("page_id")) is str
+            and e["page_id"] == c["page_id"]
+            and (e.get("viewport_id") is None
+                 or e.get("viewport_id") == c.get("viewport_id"))
+            and e.get("semantic_kind") in (None, c.get("opening_kind"))
+            and type(figure_words) in (tuple, list)
+            and bool(figure_words)
+            and all(type(x) is str and x and x == x.strip()
+                    for x in figure_words)
+            and len(set(figure_words)) == len(figure_words)
+            and type(c.get("evidence_ids")) in (tuple, list)
+            and all(x in c["evidence_ids"] for x in figure_words)
+        )
         if pair_ok:
             a, b = e["dimension_values_mm"]
             if not math.isclose(a * b / 1_000_000, e["area_m2"], rel_tol=1e-9):
@@ -258,6 +279,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             area_gate = "source_figured_dimension_pair_unproven"
         elif not figured_receipt_bound:
             area_gate = "original_figured_area_receipt_unbound"
+        elif not figured_label_scope_owned:
+            area_gate = "original_figured_label_source_scope_unverified"
         elif row.get("quantity_id"):
             area_gate = "original_signed_area_already_retained"
         else:
@@ -279,6 +302,8 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "opening_filling_kind_unproven"
         elif not pair_ok:
             gate = "source_figured_dimension_pair_unproven"
+        elif not figured_label_scope_owned:
+            gate = "original_figured_label_source_scope_unverified"
         elif not axis_ok:
             gate = "width_height_axis_authority_unproven"
         else:
@@ -295,6 +320,7 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "frame_reason_codes": list(row["frame_reason_codes"]),
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
+            "original_figured_label_source_scope_bound": figured_label_scope_owned,
             "original_host_binding_receipt_bound": host_receipt_bound,
             "original_host_frame_receipt_bound": frame_receipt_bound,
             "figured_area_receipt_bound": figured_receipt_bound,
