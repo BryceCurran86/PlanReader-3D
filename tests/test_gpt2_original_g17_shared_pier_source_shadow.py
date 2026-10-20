@@ -167,3 +167,32 @@ def test_foreign_sha_or_spliced_original_parent_receipt_cannot_be_approved():
         *source.requested_parent_ids[:-1], "foreign-original-parent",
     )))
     assert audit_gpt2_original_g17_shared_piers_shadow(owned).status == "ABSTAIN"
+
+def test_spliced_original_end_parent_and_face_support_do_not_create_pier():
+    owned = _original_pair()
+    key = _IDS[1]
+    owner, source = owned[key]
+    owned[key] = (replace(
+        owner, authenticated_flank_end_parent_ids=("foreign-owned-cap",)
+    ), source)
+    assert audit_gpt2_original_g17_shared_piers_shadow(owned).status == "ABSTAIN"
+    owned = _original_pair()
+    owner, source = owned[key]
+    owned[key] = (replace(
+        owner, authenticated_flank_source_visible_ids=("foreign-source-face",)
+    ), source)
+    assert audit_gpt2_original_g17_shared_piers_shadow(owned).status == "ABSTAIN"
+
+
+def test_mixed_original_source_pages_not_silently_united_as_one_pier():
+    owned = _original_pair()
+    key = _IDS[1]
+    owner, source = owned[key]
+    changed = tuple(
+        replace(line, page_id="4") if i == 1 else line
+        for i, line in enumerate(source.lines)
+    )
+    owned[key] = (owner, replace(source, lines=changed))
+    result = audit_gpt2_original_g17_shared_piers_shadow(owned)
+    assert result.status == "ABSTAIN"
+    assert result.source_sharing_pairs == ()
