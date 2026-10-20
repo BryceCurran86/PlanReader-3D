@@ -7,6 +7,10 @@ import os
 import pytest
 
 import tools.run_gpt3_guarded_pending_reconciliation as module
+from tools.gpt3_atomic_pending_activation_pair import (
+    read_committed_active_identity_map,
+    ACTIVATION_COMMIT_MARKER_VERSION,
+)
 
 
 def test_second_link_failure_cannot_delete_external_replacement_of_first_output(
@@ -87,7 +91,14 @@ def test_positive_three_output_create_only_stays_same(tmp_path):
     module._write_triplet(
         outputs, payload, inputs=(source,), expected_input_hashes=expected,
     )
-    assert [json.loads(p.read_text(encoding="utf-8")) for p in outputs] == list(payload)
+    values = [json.loads(p.read_text(encoding="utf-8")) for p in outputs]
+    assert values[0] == payload[0]
+    assert values[2] == payload[2]
+    assert values[1]["receipt"] == payload[1]["receipt"]
+    assert values[1]["activation_commit_marker_version"] == ACTIVATION_COMMIT_MARKER_VERSION
+    assert read_committed_active_identity_map(
+        outputs[0], receipt_path=outputs[1],
+    ) == payload[0]
     with pytest.raises(FileExistsError):
         module._write_triplet(
             outputs, payload, inputs=(source,), expected_input_hashes=expected,
