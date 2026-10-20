@@ -45,7 +45,7 @@ class GutterSpec:
     width_mm: float = 0.0
     depth_mm: float = 0.0
     material: DrainageMaterial = DrainageMaterial.UNKNOWN
-    fall_ratio: float = 0.01
+    fall_ratio: float = 0.0
     level_id: str = "ROOF"
     source_annotation: str = ""
 

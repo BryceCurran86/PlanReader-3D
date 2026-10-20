@@ -51,6 +51,7 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         self.assertEqual(omitted.width_mm, 0.0)
         self.assertEqual(omitted.depth_mm, 0.0)
         self.assertEqual(omitted.material, DrainageMaterial.UNKNOWN)
+        self.assertEqual(omitted.fall_ratio, 0.0)
         self.assertEqual(
             DownpipeSpec(downpipe_id="DP-UNKNOWN", location=(0.0, 0.0)).material,
             DrainageMaterial.UNKNOWN,
