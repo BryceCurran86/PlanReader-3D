@@ -49,6 +49,8 @@ def test_skylight_smoke_vent_callout_parsing():
     omitted_spec = SkylightVentSpec(unit_id="SK-OMIT")
     assert omitted_spec.opening_width_mm == 0.0
     assert omitted_spec.opening_length_mm == 0.0
+    assert omitted_spec.curb_height_mm == 0.0
+    assert omitted["curb_height_mm"] == 0.0
 
 
 def test_skylight_smoke_vent_snapping():
