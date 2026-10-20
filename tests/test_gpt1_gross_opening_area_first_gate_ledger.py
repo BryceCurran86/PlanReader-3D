@@ -94,7 +94,7 @@ def test_false_gross_area_ready_flag_cannot_mint_measurement(monkeypatch):
         "pb_lot16_opening_receipt_refresh_shadow.assess_gpt1_opening_candidates",
         lambda *args, **kwargs: wrong,
     )
-    with pytest.raises(RuntimeError, match="unproven gross source-area"):
+    with pytest.raises(RuntimeError, match="gross area first gate/ready claim disagreement"):
         _run(rows, canonical)
 
 
@@ -118,3 +118,49 @@ def test_order_invariance_and_no_mutation_of_source_owned_opening_rows():
     assert forward==reverse
     assert (rows,canonical)==original
     assert forward["gross_opening_area_review_candidates"][0]["physical_opening_id"]=="physical-3"
+
+
+@pytest.mark.parametrize("break_queue,expected", [
+    (lambda q: q["opening_decisions"][0].update(source_sha256="f"*64),
+     "inventory/root mismatch"),
+    (lambda q: q.update(original_physical_opening_count=99),
+     "original opening census disagreement"),
+    (lambda q: q.update(original_authenticated_hosts=99),
+     "original opening census disagreement"),
+    (lambda q: q.update(original_complete_host_frames=99),
+     "original opening census disagreement"),
+    (lambda q: q.update(original_signed_area_quantities=99),
+     "original opening census disagreement"),
+    (lambda q: q.update(first_gate_counts={"fabricated":3}),
+     "3D first-gate census mismatch"),
+    (lambda q: q.update(gpt1_new_handoff_candidates=[q["opening_decisions"][0]]),
+     "3D opening candidate universe mismatch"),
+    (lambda q: q["opening_decisions"][0].update(new_gpt1_candidate_handoff=True),
+     "3D first gate/ready claim disagreement"),
+    (lambda q: q["opening_decisions"][2].update(new_gpt1_area_candidate_handoff=False),
+     "gross area first gate/ready claim disagreement"),
+    (lambda q: q["opening_decisions"][2].update(figured_area_only_frame_unavailable=True),
+     "host-only figured area marker disagrees"),
+])
+def test_consumer_rejects_forged_source_and_3d_receipt_summaries(monkeypatch, break_queue, expected):
+    rows, canonical = fixture()
+    snapshot = deepcopy(assess_gpt1_opening_candidates(rows,canonical,VIEW,source_root=ROOT))
+    break_queue(snapshot)
+    monkeypatch.setattr(
+        "pb_lot16_opening_receipt_refresh_shadow.assess_gpt1_opening_candidates",
+        lambda *args, **kwargs: snapshot,
+    )
+    with pytest.raises((ValueError, RuntimeError), match=expected):
+        _run(rows,canonical)
+
+
+def test_two_decisions_for_one_physical_opening_are_not_a_larger_inventory(monkeypatch):
+    rows, canonical = fixture()
+    snapshot = deepcopy(assess_gpt1_opening_candidates(rows,canonical,VIEW,source_root=ROOT))
+    snapshot["opening_decisions"][1]["physical_opening_id"] = snapshot["opening_decisions"][0]["physical_opening_id"]
+    monkeypatch.setattr(
+        "pb_lot16_opening_receipt_refresh_shadow.assess_gpt1_opening_candidates",
+        lambda *args, **kwargs: snapshot,
+    )
+    with pytest.raises(ValueError, match="inventory/root mismatch"):
+        _run(rows,canonical)
