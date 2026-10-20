@@ -71,9 +71,23 @@ def require_signed_v2_family_trade_integrity(
             raise ValueError("duplicate eligible frozen item identity in mapped trade veto")
         items[key] = item
     by_refs: dict[tuple[str, ...], list[Any]] = {}
+    # Legacy V1 floor receipts may predate current production uniqueness
+    # guards. Before an independently bound physical floor contributes to
+    # frozen V2, veto competing geometric floor_area receipts even when their
+    # semantic keys or GROUPS of physical members differ. A floor_finish_area
+    # material layer remains an independent, valid family.
+    physical_floor_area_claims: dict[str, int] = {}
     for quantity in sealed_quantities:
         refs = tuple(sorted(_field(quantity, "object_identity_refs") or ()))
         by_refs.setdefault(refs, []).append(quantity)
+
+        if (_field(quantity, "family") == "floor_area"
+                and _field(quantity, "abstained") is False):
+            for floor_id in refs:
+                if type(floor_id) is str and floor_id:
+                    physical_floor_area_claims[floor_id] = (
+                        physical_floor_area_claims.get(floor_id, 0) + 1
+                    )
 
     for binding in identity_bindings:
         item = items.get(_field(binding, "benchmark_item_id"))
@@ -90,6 +104,12 @@ def require_signed_v2_family_trade_integrity(
         ):
             raise ValueError("bound production object identity refs are not canonical")
         refs = tuple(sorted(raw_refs))
+        if any(physical_floor_area_claims.get(floor_id, 0) > 1
+               for floor_id in refs):
+            raise ValueError(
+                "same original physical floor has duplicate source-signed "
+                "geometric floor area claims across semantic keys"
+            )
         candidates = by_refs.get(refs, ())
         declared_family = _field(binding, "production_family")
         if candidates and (
