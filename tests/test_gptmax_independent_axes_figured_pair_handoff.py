@@ -66,7 +66,10 @@ def test_unordered_label_plus_independent_producer_axes_is_gpt1_candidate_only()
 ])
 def test_unowned_axis_ids_cannot_claim_authentication(claimed_receipts):
     rows, canonical = _independent_source_axes()
-    canonical[2]["evidence_ids"] = claimed_receipts
+    canonical[2]["evidence_ids"] = (
+        ["source-own-1", *claimed_receipts]
+        if type(claimed_receipts) is list else claimed_receipts
+    )
     result = run(rows, canonical)
     opening = result["opening_decisions"][2]
     assert opening["figured_pair_area_support"]
