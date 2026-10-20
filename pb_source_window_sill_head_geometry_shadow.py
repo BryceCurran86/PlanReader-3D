@@ -152,7 +152,7 @@ class SourceWindowSillHeadGeometryShadowAuthority:
             (document_id, revision_id, source_sha256, total, total_void, total_retained),
         )
 
-        status = EvidenceResolutionStatus.CORROBORATED if total > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if total > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return WindowVerticalGeometryReceipt(
             receipt_id=receipt_id,

@@ -102,7 +102,7 @@ def test_compile_column_inventory_receipt():
     assert receipt.isolated_columns_count == 1
     assert receipt.embedded_columns_count == 1
     assert receipt.engaged_piers_count == 1
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

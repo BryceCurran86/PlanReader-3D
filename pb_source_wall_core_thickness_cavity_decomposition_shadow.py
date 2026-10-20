@@ -262,7 +262,7 @@ class SourceWallCoreCavityDecompositionShadowAuthority:
             (document_id, revision_id, source_sha256, total, cavity_count),
         )
 
-        status = EvidenceResolutionStatus.CORROBORATED if total > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if total > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return CompositeWallDecompositionReceipt(
             receipt_id=receipt_id,

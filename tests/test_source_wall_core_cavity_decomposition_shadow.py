@@ -83,7 +83,7 @@ def test_compile_decomposition_receipt():
     assert isinstance(receipt, CompositeWallDecompositionReceipt)
     assert receipt.total_assemblies_count == 2
     assert receipt.cavity_assemblies_count == 1
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

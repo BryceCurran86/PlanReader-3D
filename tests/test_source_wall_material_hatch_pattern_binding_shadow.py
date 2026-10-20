@@ -84,7 +84,7 @@ def test_compile_hatch_binding_receipt():
     assert receipt.total_walls_evaluated == 2
     assert receipt.bound_materials_count == 1
     assert receipt.unhatched_count == 1
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

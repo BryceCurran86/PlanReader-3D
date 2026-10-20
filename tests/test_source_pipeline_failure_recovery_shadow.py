@@ -74,7 +74,7 @@ def test_compile_recovery_report_partial_success():
     assert report.healthy_subsystems_count == 2
     assert report.quarantined_subsystems_count == 1
     assert report.is_partial_recovery is True
-    assert report.status == EvidenceResolutionStatus.CORROBORATED
+    assert report.status == EvidenceResolutionStatus.CANDIDATE
     assert report.commercial_projection_allowed is False
     assert report.takeoff_eligible is False
     assert report.schema_version == SCHEMA_VERSION

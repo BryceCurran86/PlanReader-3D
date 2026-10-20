@@ -198,7 +198,7 @@ class FreezerD17EpxFloorFinishShadowAuthority:
             filling_stroke_width_pt=filling_stroke_width_pt,
             is_filling_stroke_vetoed_as_wall=is_filling_vetoed,
             translation_dx_pt=mean_dx,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             notes="Corroborated D17 opening with authenticated +77.76pt translation and door leaf veto.",
         )
 
@@ -250,6 +250,6 @@ class FreezerD17EpxFloorFinishShadowAuthority:
             internal_floor_area_sqm=area_sqm,
             perimeter_coving_length_m=perimeter_m,
             coving_upturn_area_sqm=coving_area_sqm,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             notes="Corroborated EPX resin floor finish with 100mm perimeter coving.",
         )

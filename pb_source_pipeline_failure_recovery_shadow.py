@@ -157,7 +157,7 @@ class PipelineFailureRecoveryShadowAuthority:
         quarantined = sum(1 for s in subsystems_tuple if s.status == SubsystemStatus.QUARANTINED)
 
         is_partial = quarantined > 0 and healthy > 0
-        overall_status = EvidenceResolutionStatus.CORROBORATED if healthy > 0 else EvidenceResolutionStatus.ABSTAINED
+        overall_status = EvidenceResolutionStatus.CANDIDATE if healthy > 0 else EvidenceResolutionStatus.ABSTAINED
 
         report_id = stable_contract_id(
             "PARTIAL_PLAN_RECOVERY",

@@ -95,7 +95,7 @@ def test_compile_vertical_geometry_receipt():
     assert isinstance(receipt, WindowVerticalGeometryReceipt)
     assert receipt.total_windows_count == 1
     assert receipt.total_glazing_void_volume_pt3 == 30.0 * 10.0 * 60.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

@@ -219,6 +219,6 @@ class GlazingThermalScheduleBindingShadowAuthority:
             frame_substrate=best_entry.frame_substrate,
             thermal_conductance_w_k=thermal_conductance,
             opening_area_sqm=area_sqm,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             notes="Corroborated thermal schedule binding.",
         )
