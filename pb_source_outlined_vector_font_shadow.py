@@ -386,8 +386,8 @@ class SourceOutlinedVectorFontProducer:
                 all_reasons.update(r.reason_codes)
 
             if records:
-                status = EvidenceResolutionStatus.CORROBORATED.value
-                mode = "corroborated_outlined_vector_glyphs"
+                status = EvidenceResolutionStatus.CANDIDATE.value
+                mode = "candidate_outlined_vector_glyphs"
                 all_reasons.add(SOURCE_OUTLINED_TEXT_RESOLVED)
             else:
                 status = EvidenceResolutionStatus.CANDIDATE.value
