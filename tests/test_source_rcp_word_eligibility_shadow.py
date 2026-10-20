@@ -30,9 +30,10 @@ def test_positive_in_plan_ipf1_callout():
         plan_viewport_bbox=PLAN_VIEWPORT,
         schedule_table_bboxes=[SCHEDULE_TABLE],
         title_block_bboxes=[TITLE_BLOCK],
+        source_defined_ceiling_codes=("IPF1","GRID","WFPB","FPB"),
     )
 
-    assert word.status == EvidenceResolutionStatus.CORROBORATED
+    assert word.status == EvidenceResolutionStatus.CANDIDATE
     assert word.role == RcpWordRole.IN_PLAN_CEILING_ANNOTATION
     assert word.is_eligible_for_ceiling_mark is True
     assert word.commercial_projection_allowed is False
@@ -53,9 +54,10 @@ def test_positive_in_plan_grid_callout():
         plan_viewport_bbox=PLAN_VIEWPORT,
         schedule_table_bboxes=[SCHEDULE_TABLE],
         title_block_bboxes=[TITLE_BLOCK],
+        source_defined_ceiling_codes=("IPF1","GRID","WFPB","FPB"),
     )
 
-    assert word.status == EvidenceResolutionStatus.CORROBORATED
+    assert word.status == EvidenceResolutionStatus.CANDIDATE
     assert word.role == RcpWordRole.IN_PLAN_CEILING_ANNOTATION
     assert word.is_eligible_for_ceiling_mark is True
 
@@ -152,3 +154,104 @@ def test_negative_degenerate_bbox_fails_closed():
     assert word.status == EvidenceResolutionStatus.ABSTAINED
     assert word.is_eligible_for_ceiling_mark is False
     assert "Degenerate" in word.notes
+
+def test_original_short_mechanical_note_does_not_become_office_ceiling():
+    authority = SourceRcpWordEligibilityShadowAuthority()
+    note = authority.classify_word(
+        document_id="source-doc",page_id="9",word_text="OFFICE",
+        word_bbox=(407.0,1400.,418.,1420.),
+        block_text="REVIEW IN OFFICE AREA",
+        block_index=212,plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("IPF1","GRID","FPB","WFPB"),
+    )
+    assert note.status is EvidenceResolutionStatus.ABSTAINED
+    assert note.role == RcpWordRole.OTHER_PLAN_TEXT
+    assert not note.is_eligible_for_ceiling_mark
+
+
+def test_caller_unscoped_grid_and_schedule_text_do_not_authenticate_source():
+    authority = SourceRcpWordEligibilityShadowAuthority()
+    for kwargs in [
+        dict(plan_viewport_bbox=None,schedule_table_bboxes=(SCHEDULE_TABLE,),
+             source_defined_ceiling_codes=("GRID",)),
+        dict(plan_viewport_bbox=PLAN_VIEWPORT,schedule_table_bboxes=(),
+             source_defined_ceiling_codes=("GRID",)),
+        dict(plan_viewport_bbox=PLAN_VIEWPORT,schedule_table_bboxes=(SCHEDULE_TABLE,),
+             source_defined_ceiling_codes=()),
+    ]:
+        word=authority.classify_word(
+            document_id="made-up-doc",page_id="9",word_text="GRID",
+            word_bbox=(500.,600.,530.,610.),block_text="GRID 2400",
+            **kwargs,
+        )
+        assert word.status is EvidenceResolutionStatus.ABSTAINED
+        assert word.is_eligible_for_ceiling_mark is False
+
+
+def test_foreign_or_ordinary_room_word_never_relabels_as_material_code():
+    authority=SourceRcpWordEligibilityShadowAuthority()
+    word=authority.classify_word(
+        document_id="d",page_id="9",word_text="OFFICE",
+        word_bbox=(500.,600.,530.,610.),block_text="OFFICE",
+        plan_viewport_bbox=PLAN_VIEWPORT,schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
+    )
+    assert word.role is RcpWordRole.OTHER_PLAN_TEXT
+    assert word.status is EvidenceResolutionStatus.ABSTAINED
+
+
+def test_original_valid_grid_height_callout_remains_candidate_not_firm():
+    authority=SourceRcpWordEligibilityShadowAuthority()
+    word=authority.classify_word(
+        document_id="d",page_id="9",word_text="GRID",
+        word_bbox=(500.,600.,530.,610.),block_text="GRID / 2400 CLG",
+        plan_viewport_bbox=PLAN_VIEWPORT,schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+    )
+    assert word.status is EvidenceResolutionStatus.CANDIDATE
+    assert word.is_eligible_for_ceiling_mark is True
+    assert not word.takeoff_eligible and not word.commercial_projection_allowed
+
+
+def test_nonfinite_pdf_word_box_fails_closed():
+    authority=SourceRcpWordEligibilityShadowAuthority()
+    word=authority.classify_word(
+        document_id="d",page_id="9",word_text="GRID",
+        word_bbox=(float("nan"),600.,530.,610.),block_text="GRID",
+        plan_viewport_bbox=PLAN_VIEWPORT,schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+    )
+    assert word.status is EvidenceResolutionStatus.ABSTAINED
+
+def test_exact_original_page9_short_office_note_source_negative_when_provisioned():
+    import os
+    import hashlib
+    from pathlib import Path
+    import fitz
+    import pytest
+    loc=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not loc:
+        pytest.skip("private original 31-page architectural PDF unavailable")
+    original=Path(loc).read_bytes()
+    digest=os.environ["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
+    assert hashlib.sha256(original).hexdigest()==digest
+    with fitz.open(stream=original,filetype="pdf") as document:
+        page=document[8]
+        line=next(block for block in page.get_text("blocks")
+                  if int(block[5])==212)
+        office=next(word for word in page.get_text("words")
+                    if word[4]=="OFFICE" and int(word[5])==212)
+        assert "REVIEW IN OFFICE AREA" in line[4]
+        result=SourceRcpWordEligibilityShadowAuthority().classify_word(
+            document_id="source:"+digest[:16], page_id="9",
+            word_text=office[4], word_bbox=tuple(office[:4]),
+            block_text=line[4], block_index=212,
+            line_index=int(office[6]),word_index=int(office[7]),
+            plan_viewport_bbox=(100.,100.,1200.,2000.),
+            schedule_table_bboxes=((1360.,120.,1502.,358.),),
+            source_defined_ceiling_codes=("GRID","IPF1","WFPB","FPB"),
+        )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.role is RcpWordRole.OTHER_PLAN_TEXT
+    assert not result.is_eligible_for_ceiling_mark
