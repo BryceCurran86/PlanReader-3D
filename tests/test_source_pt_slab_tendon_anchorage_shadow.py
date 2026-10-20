@@ -32,6 +32,12 @@ class TestSourcePTSlabTendonAnchorageShadow(unittest.TestCase):
         self.assertEqual(cnt2, 4)
         self.assertEqual(dia2, 15.2)
 
+        arr3, cnt3, dia3 = SourcePTSlabTendonAnchorageShadowAuthority.parse_tendon_annotation(
+            "TENDON"
+        )
+        self.assertEqual(cnt3, 0)
+        self.assertEqual(dia3, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourcePTSlabTendonAnchorageShadowAuthority.snap_point((1.0, 1.0), ref_pts)
@@ -83,6 +89,27 @@ class TestSourcePTSlabTendonAnchorageShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        omitted_pocket = AnchoragePocketSpec(
+            pocket_id="LP-OMIT",
+            anchorage_type=AnchorageType.LIVE_END_STRESSING,
+            location=(0.0, 0.0),
+        )
+        omitted = TendonRunSpec(
+            tendon_id="T-OMIT",
+            arrangement_type=TendonArrangementType.BANDED,
+            centerline_points=[(0.0, 0.0), (20.0, 0.0)],
+            anchor_start=omitted_pocket,
+        )
+        self.assertEqual(omitted.strand_count, 0)
+        self.assertEqual(omitted.strand_diameter_mm, 0.0)
+        self.assertEqual(omitted_pocket.width_mm, 0.0)
+        self.assertEqual(omitted_pocket.height_mm, 0.0)
+        self.assertEqual(omitted_pocket.depth_mm, 0.0)
+        omitted_res = SourcePTSlabTendonAnchorageShadowAuthority.evaluate_pt_system([omitted])
+        self.assertEqual(omitted_res.quantities.total_strand_length_m, 0.0)
+        self.assertEqual(omitted_res.quantities.total_prestressing_steel_mass_kg, 0.0)
+        self.assertEqual(omitted_res.quantities.total_pocket_grout_volume_m3, 0.0)
 
 
 if __name__ == "__main__":

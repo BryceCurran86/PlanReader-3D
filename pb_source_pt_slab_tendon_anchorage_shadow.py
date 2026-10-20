@@ -39,9 +39,9 @@ class AnchoragePocketSpec:
     pocket_id: str
     anchorage_type: AnchorageType
     location: Tuple[float, float]
-    width_mm: float = 150.0
-    height_mm: float = 100.0
-    depth_mm: float = 75.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
+    depth_mm: float = 0.0
 
 
 @dataclass
@@ -49,8 +49,8 @@ class TendonRunSpec:
     tendon_id: str
     arrangement_type: TendonArrangementType
     centerline_points: List[Tuple[float, float]]
-    strand_count: int = 4
-    strand_diameter_mm: float = 12.7
+    strand_count: int = 0
+    strand_diameter_mm: float = 0.0
     anchor_start: Optional[AnchoragePocketSpec] = None
     anchor_end: Optional[AnchoragePocketSpec] = None
     level_id: str = "L1"
@@ -120,8 +120,8 @@ class SourcePTSlabTendonAnchorageShadowAuthority:
             strand_dia = float(s_match.group(2))
         else:
             cnt_match = re.search(r"(\d+)\s*(?:STRAND|STR)", clean)
-            strand_cnt = int(cnt_match.group(1)) if cnt_match else 4
-            strand_dia = 12.7
+            strand_cnt = int(cnt_match.group(1)) if cnt_match else 0
+            strand_dia = 0.0
 
         return arr_type, strand_cnt, strand_dia
 
@@ -146,7 +146,12 @@ class SourcePTSlabTendonAnchorageShadowAuthority:
             strand_len_m = path_len_m * t.strand_count
             total_strand_len_m += strand_len_m
 
-            unit_mass = STRAND_15_2_KG_M if t.strand_diameter_mm > 14.0 else STRAND_12_7_KG_M
+            if t.strand_diameter_mm <= 0.0 or t.strand_count <= 0:
+                unit_mass = 0.0
+            elif t.strand_diameter_mm > 14.0:
+                unit_mass = STRAND_15_2_KG_M
+            else:
+                unit_mass = STRAND_12_7_KG_M
             total_steel_mass_kg += strand_len_m * unit_mass
 
             # Check start and end anchorages
