@@ -46,6 +46,20 @@ def test_structural_expansion_joint():
     assert j.sealant_volume_pt3 == 200.0
 
 
+def test_omitted_joint_geometry_does_not_invent_typical_gap():
+    authority = SourceExpansionControlJointShadowAuthority()
+
+    j = authority.compute_movement_joint(
+        joint_id="J_UNKNOWN",
+        host_element_id="W_UNKNOWN",
+    )
+
+    assert j.gap_width_pt == 0.0
+    assert j.joint_length_pt == 0.0
+    assert j.sealant_volume_pt3 == 0.0
+    assert j.backing_rod_spec == ""
+
+
 def test_compile_joint_receipt():
     authority = SourceExpansionControlJointShadowAuthority()
 

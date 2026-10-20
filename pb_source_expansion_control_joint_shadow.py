@@ -109,9 +109,9 @@ class SourceExpansionControlJointShadowAuthority:
         joint_id: str,
         host_element_id: str,
         joint_kind: JointKind = JointKind.CONTROL_JOINT,
-        gap_width_pt: float = 0.28,   # ~10mm at 1:100 scale: 0.28 pt
-        joint_length_pt: float = 76.5, # ~2700mm wall height
-        backing_rod_spec: str = "CLOSED_CELL_PE_BACKING_ROD_12MM",
+        gap_width_pt: float = 0.0,
+        joint_length_pt: float = 0.0,
+        backing_rod_spec: str = "",
     ) -> MovementJointRecord:
         # Standard sealant depth: half of width, minimum 6mm (0.17 pt)
         sealant_depth = max(0.17, gap_width_pt / 2.0)
