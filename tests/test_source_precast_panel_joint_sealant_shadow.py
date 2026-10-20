@@ -23,7 +23,7 @@ class TestSourcePrecastPanelJointSealantShadow(unittest.TestCase):
         )
         self.assertEqual(j_type, PrecastJointType.VERTICAL_BUTT_JOINT)
         self.assertEqual(w, 20.0)
-        self.assertEqual(d, 10.0)
+        self.assertEqual(d, 0.0)
         self.assertEqual(rod, 25.0)
         self.assertEqual(cfg, JointSealantConfig.DOUBLE_BEAD)
 
@@ -34,6 +34,14 @@ class TestSourcePrecastPanelJointSealantShadow(unittest.TestCase):
         self.assertEqual(w2, 25.0)
         self.assertEqual(d2, 12.0)
         self.assertEqual(cfg2, JointSealantConfig.SINGLE_BEAD)
+
+        _jt3, w3, d3, rod3, cfg3 = SourcePrecastPanelJointSealantShadowAuthority.parse_joint_annotation(
+            "JOINT"
+        )
+        self.assertEqual(w3, 0.0)
+        self.assertEqual(d3, 0.0)
+        self.assertEqual(rod3, 0.0)
+        self.assertEqual(cfg3, JointSealantConfig.UNKNOWN)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
@@ -83,6 +91,27 @@ class TestSourcePrecastPanelJointSealantShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        omitted_panel = PrecastPanelSpec(
+            panel_id="PANEL-OMIT",
+            boundary_polygon=[(0.0, 0.0), (3.0, 0.0), (3.0, 6.0), (0.0, 6.0)],
+        )
+        omitted_joint = PrecastJointSpec(
+            joint_id="CJ-OMIT",
+            joint_type=PrecastJointType.VERTICAL_BUTT_JOINT,
+            centerline_points=[(3.0, 0.0), (3.0, 6.0)],
+        )
+        self.assertEqual(omitted_panel.thickness_mm, 0.0)
+        self.assertEqual(omitted_joint.joint_width_mm, 0.0)
+        self.assertEqual(omitted_joint.sealant_depth_mm, 0.0)
+        self.assertEqual(omitted_joint.backing_rod_dia_mm, 0.0)
+        self.assertEqual(omitted_joint.sealant_config, JointSealantConfig.UNKNOWN)
+        omitted = SourcePrecastPanelJointSealantShadowAuthority.evaluate_precast_envelope(
+            [omitted_panel], [omitted_joint]
+        )
+        self.assertEqual(omitted.quantities.total_panel_concrete_volume_m3, 0.0)
+        self.assertEqual(omitted.quantities.total_backing_rod_length_m, 0.0)
+        self.assertEqual(omitted.quantities.total_sealant_volume_liters, 0.0)
 
 
 if __name__ == "__main__":

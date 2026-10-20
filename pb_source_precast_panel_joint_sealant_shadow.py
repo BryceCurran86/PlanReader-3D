@@ -28,6 +28,7 @@ class PrecastJointType(str, Enum):
 
 
 class JointSealantConfig(str, Enum):
+    UNKNOWN = "UNKNOWN"
     SINGLE_BEAD = "SINGLE_BEAD"
     DOUBLE_BEAD = "DOUBLE_BEAD"
     FIRE_RATED_SEAL = "FIRE_RATED_SEAL"
@@ -37,7 +38,7 @@ class JointSealantConfig(str, Enum):
 class PrecastPanelSpec:
     panel_id: str
     boundary_polygon: List[Tuple[float, float]]
-    thickness_mm: float = 175.0
+    thickness_mm: float = 0.0
     is_insulated_sandwich: bool = False
     level_id: str = "ELEV"
     source_tag: str = ""
@@ -48,10 +49,10 @@ class PrecastJointSpec:
     joint_id: str
     joint_type: PrecastJointType
     centerline_points: List[Tuple[float, float]]
-    joint_width_mm: float = 20.0
-    sealant_depth_mm: float = 10.0
-    backing_rod_dia_mm: float = 25.0
-    sealant_config: JointSealantConfig = JointSealantConfig.DOUBLE_BEAD
+    joint_width_mm: float = 0.0
+    sealant_depth_mm: float = 0.0
+    backing_rod_dia_mm: float = 0.0
+    sealant_config: JointSealantConfig = JointSealantConfig.UNKNOWN
     source_callout: str = ""
 
 
@@ -130,20 +131,24 @@ class SourcePrecastPanelJointSealantShadowAuthority:
             cfg = JointSealantConfig.FIRE_RATED_SEAL
         elif "DOUBLE" in clean:
             cfg = JointSealantConfig.DOUBLE_BEAD
-        else:
+        elif "SINGLE" in clean:
             cfg = JointSealantConfig.SINGLE_BEAD
+        else:
+            cfg = JointSealantConfig.UNKNOWN
 
         # Joint width
         w_match = re.search(r"(\d+)\s*(?:MM)?\s*(?:GAP|JOINT|WIDTH|WIDE)", clean)
-        joint_w = float(w_match.group(1)) if w_match else 20.0
+        if w_match is None:
+            w_match = re.search(r"(\d+)\s*MM", clean)
+        joint_w = float(w_match.group(1)) if w_match else 0.0
 
         # Backing rod diameter
         rod_match = re.search(r"(\d+)\s*(?:MM)?\s*(?:DIA|ROD)", clean)
-        rod_dia = float(rod_match.group(1)) if rod_match else (joint_w * 1.25)
+        rod_dia = float(rod_match.group(1)) if rod_match else 0.0
 
-        # Sealant depth (standard 2:1 width-to-depth ratio)
+        # Sealant depth
         d_match = re.search(r"(\d+)\s*(?:MM)?\s*(?:DEPTH|DEEP)", clean)
-        seal_depth = float(d_match.group(1)) if d_match else (joint_w / 2.0)
+        seal_depth = float(d_match.group(1)) if d_match else 0.0
 
         return j_type, joint_w, seal_depth, rod_dia, cfg
 
@@ -174,7 +179,12 @@ class SourcePrecastPanelJointSealantShadowAuthority:
             len_m = raw_len * drawing_scale
             total_joint_len_m += len_m
 
-            num_beads = 2 if j.sealant_config == JointSealantConfig.DOUBLE_BEAD else 1
+            if j.sealant_config == JointSealantConfig.DOUBLE_BEAD:
+                num_beads = 2
+            elif j.sealant_config == JointSealantConfig.SINGLE_BEAD:
+                num_beads = 1
+            else:
+                num_beads = 0
             total_rod_len_m += len_m * num_beads
 
             # Sealant cross section (m2) = (W_m * D_m) * num_beads
