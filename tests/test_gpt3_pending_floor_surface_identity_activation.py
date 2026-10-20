@@ -167,6 +167,9 @@ def _inputs():
         "verified_takeoff_items": [{
             "item_id": "item-1",
             "denominator_eligible": True,
+            # Original source floor finish in this fixture is authenticated
+            # TILE, not a trade-neutral generic floor or an invented label.
+            "trade_category": "tiling",
             "expected_object_refs": ["object-1"],
             "unit": "m2",
         }],
