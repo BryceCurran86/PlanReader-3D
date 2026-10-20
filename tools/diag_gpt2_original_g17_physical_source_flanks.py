@@ -33,7 +33,14 @@ from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_opening_authority import (
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+)
 from pb_source_observation_authority import ObservationSelector
+from tools.diag_gptmax_raster_unhosted_flank_source import (
+    UNMAPPED_G17_FLANK_REASONS,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -84,7 +91,16 @@ def original_physical_g17_source_flank_report(
     for trace in sorted(live.opening_bindings, key=lambda row: (
         str(row.opening_identity_id), str(row.representative_observation_id),
     )):
-        if not trace.opening_identity_id:
+        # A producer page roster is NOT the exact unhosted G17 physical
+        # opening universe. Only the existing host authority's authentic
+        # first-failing G17 flank stage may nominate this bridge.
+        if (
+            trace.status is not EvidenceResolutionStatus.ABSTAINED
+            or trace.record_id is not None
+            or trace.host_wall_id is not None
+            or not set(trace.reason_codes).intersection(UNMAPPED_G17_FLANK_REASONS)
+            or not trace.opening_identity_id
+        ):
             continue
         physical_id = str(trace.opening_identity_id)
         representative = str(trace.representative_observation_id)
@@ -105,6 +121,10 @@ def original_physical_g17_source_flank_report(
                 or original.page_id != page_id
                 or original.source_sha256 != digest
                 or original.snapshot_id != root["snapshot_id"]
+                or original.structural_pattern not in (
+                    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+                    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                )
                 or not original.source_observation_ids):
             unresolved.append({
                 "physical_opening_id": physical_id,
@@ -168,7 +188,7 @@ def original_physical_g17_source_flank_report(
         "revision_id": root["revision_id"],
         "snapshot_id": root["snapshot_id"],
         "page_id": page_id,
-        "g17_candidate_physical_count": len(reconciled),
+        "host_abstained_g17_candidate_physical_count": len(reconciled),
         "original_source_owned_two_flank_count": sum(
             x.status is EvidenceResolutionStatus.CORROBORATED
             for x in reconciled
@@ -206,7 +226,7 @@ def main() -> None:
         encoding="utf-8",
     )
     print(json.dumps({
-        "g17_source_candidate_count": report["g17_candidate_physical_count"],
+        "g17_source_candidate_count": report["host_abstained_g17_candidate_physical_count"],
         "original_two_flank_owned": report["original_source_owned_two_flank_count"],
         "no_new_host_or_quantity": True,
     }, sort_keys=True))
