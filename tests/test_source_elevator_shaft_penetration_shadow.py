@@ -79,6 +79,11 @@ class TestSourceElevatorShaftPenetrationShadow(unittest.TestCase):
         self.assertEqual(res.quantities.total_net_enclosure_wall_area_m2, 118.5)
         self.assertEqual(res.quantities.total_guide_rail_length_m, 52.0)
 
+    def test_omitted_landing_door_size_does_not_invent_typical_leaf(self):
+        door = ElevatorLandingDoorSpec(level_id="L0")
+        self.assertEqual(door.width_mm, 0.0)
+        self.assertEqual(door.height_mm, 0.0)
+
     def test_invariants_and_safety(self):
         res = SourceElevatorShaftPenetrationShadowAuthority.evaluate_shafts([])
         self.assertEqual(res.status, "CANDIDATE")
