@@ -111,11 +111,11 @@ class SourceFloorWasteDrainageShadowAuthority:
         room_id: str,
         drain_kind: DrainKind,
         location_pt: Tuple[float, float],
-        pipe_diameter_pt: float = 2.27,  # ~80mm at 1:100 scale: 2.27 pt
+        pipe_diameter_pt: float = 0.0,
         has_puddle_flange: bool = True,
         requires_fire_collar: bool = False,
-        grate_finish: str = "CHROME_ROUND_GRATE",
-        sleeve_oversize_pt: float = 0.71, # ~25mm oversize for coring/sleeve
+        grate_finish: str = "",
+        sleeve_oversize_pt: float = 0.0,
     ) -> FloorWasteRecord:
         core_dia = pipe_diameter_pt + sleeve_oversize_pt
 
