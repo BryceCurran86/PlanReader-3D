@@ -411,3 +411,50 @@ def test_committed_prior_partial_map_is_verified_before_next_activation(tmp_path
     assert json.loads(outputs[1].read_text())["activated_count"] == 1
 
 
+
+
+def test_duplicate_json_identity_keys_fail_even_with_matching_byte_digest(tmp_path):
+    inputs = _inputs(tmp_path)
+    targets = _outputs(tmp_path)
+    _publish(inputs, targets)
+    # The receipt digest can be recomputed for malicious duplicated fields;
+    # byte stability alone is not canonical identity authority.
+    original = json.loads(targets[0].read_text())
+    fields = [
+        '"schema_version":"1.0.0"',
+        '"project_id":"project-original"',
+        '"project_id":"project-forged"',
+        '"source_sha256s":[]',
+        '"bindings":' + json.dumps(original["bindings"]),
+    ]
+    forged = ("{" + ",".join(fields) + "}").encode()
+    receipt = json.loads(targets[1].read_text())
+    receipt["identity_map_sha256"] = __import__("hashlib").sha256(forged).hexdigest()
+    receipt["identity_map_project_id"] = "project-forged"
+    receipt["identity_map_source_sha256s"] = []
+    targets[0].write_bytes(forged)
+    targets[1].write_text(json.dumps(receipt))
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        read_committed_active_identity_map(
+            targets[0], receipt_path=targets[1],
+        )
+
+
+def test_duplicate_receipt_marker_field_fails_closed(tmp_path):
+    inputs = _inputs(tmp_path)
+    targets = _outputs(tmp_path)
+    _publish(inputs, targets)
+    original = json.loads(targets[1].read_text())
+    marker = original["identity_map_sha256"]
+    # Last-key-wins readers could use the valid second fingerprint while
+    # another reader uses the forged first claim.
+    original.pop("identity_map_sha256")
+    raw = json.dumps(original)[:-1] + (
+        ',"identity_map_sha256":"bad","identity_map_sha256":'
+        + json.dumps(marker) + "}"
+    )
+    targets[1].write_text(raw)
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        read_committed_active_identity_map(
+            targets[0], receipt_path=targets[1],
+        )
