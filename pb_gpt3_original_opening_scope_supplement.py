@@ -103,6 +103,31 @@ def source_owned_opening_scope_supplement(
     if sealed_run.project_id != customer_verification.project_id:
         raise ProducerScopeLineageConflict("source project/customer verification mismatch")
 
+    # Every source-owned scope supplement also binds the exact existing V1
+    # customer projection fingerprint. The customer adapter's independent
+    # verifier has already checked those original fingerprints and notes.
+    # Never derive a projection identity from a label or quantity amount.
+    customer_by_id: dict[str, Mapping[str, object]] = {}
+    for customer in customer_rows:
+        if not isinstance(customer, Mapping):
+            raise ProducerScopeLineageConflict(
+                "source customer projection must be a mapping"
+            )
+        quantity_id = customer.get("quantity_id")
+        if (
+            type(quantity_id) is not str
+            or not quantity_id or quantity_id != quantity_id.strip()
+            or quantity_id in customer_by_id
+        ):
+            raise ProducerScopeLineageConflict(
+                "missing or reused original source customer quantity ID"
+            )
+        customer_by_id[quantity_id] = customer
+    if set(customer_by_id) != set(issuer):
+        raise ProducerScopeLineageConflict(
+            "source quantity/customer projection identity mapping changed"
+        )
+
     owner_ids = set()
     entries = []
     for quantity in sorted(original_quantities, key=lambda row: row.quantity_id):
@@ -162,8 +187,20 @@ def source_owned_opening_scope_supplement(
             raise ProducerScopeLineageConflict(
                 "source issuer does not own exact snapshot/decision scope/host lineage"
             )
+        customer_fingerprint = customer_by_id[quantity.quantity_id].get(
+            "commercial_projection_fingerprint"
+        )
+        if (
+            type(customer_fingerprint) is not str
+            or len(customer_fingerprint) != 64
+            or any(ch not in "0123456789abcdef" for ch in customer_fingerprint)
+        ):
+            raise ProducerScopeLineageConflict(
+                "existing V1 customer projection fingerprint unavailable"
+            )
         entries.append({
             "quantity_id": quantity.quantity_id,
+            "v1_customer_projection_fingerprint": customer_fingerprint,
             "v1_signed_quantity_fingerprint": row.fingerprint,
             "physical_opening_id": opening_id,
             "document_id": selector.document_id,
