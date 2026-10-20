@@ -32,9 +32,9 @@ class SteelBaseplateSpec:
     connection_id: str
     column_id: str
     location: Tuple[float, float]
-    plate_width_mm: float = 350.0
-    plate_length_mm: float = 350.0
-    plate_thickness_mm: float = 25.0
+    plate_width_mm: float = 0.0
+    plate_length_mm: float = 0.0
+    plate_thickness_mm: float = 0.0
     bolt_count: int = 4
     bolt_diameter_mm: float = 24.0
     bolt_embedment_depth_mm: float = 450.0
@@ -91,7 +91,7 @@ class SourceSteelBaseplateGroutBoltShadowAuthority:
             plate_l = float(p_match.group(2))
             plate_thk = float(p_match.group(3))
         else:
-            plate_w, plate_l, plate_thk = 350.0, 350.0, 25.0
+            plate_w, plate_l, plate_thk = 0.0, 0.0, 0.0
 
         # Bolt count and diameter: (\d+)\s*[-xX]\s*M(\d+)
         b_match = re.search(r"(\d+)\s*[-xX]\s*M(\d+)", clean)
