@@ -115,8 +115,8 @@ class SourceFireCompartmentSeparationShadowAuthority:
         self,
         *,
         wall_id: str,
-        frl_rating: str = "90/90/90",
-        boundary_type: str = "INTER_TENANCY_PARTY_WALL",
+        frl_rating: str = "",
+        boundary_type: str = "",
         wall_length_pt: float,
         wall_height_pt: float,
         penetrations: Sequence[FirePenetrationRecord] = (),
@@ -137,9 +137,9 @@ class SourceFireCompartmentSeparationShadowAuthority:
         self,
         *,
         wall_id: str,
-        penetration_type: str = "FIRE_DAMPER",
-        service_dimension_pt: float = 10.0,
-        damper_rating_min: int = 90,
+        penetration_type: str = "",
+        service_dimension_pt: float = 0.0,
+        damper_rating_min: int = 0,
     ) -> FirePenetrationRecord:
         pen_id = stable_contract_id(
             "FIRE_PEN",
