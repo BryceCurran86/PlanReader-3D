@@ -40,9 +40,11 @@ def test_operable_wall_callout_parsing():
     omitted = SourceOperableAcousticWallShadowAuthority.parse_callout("OPERABLE WALL")
     assert omitted["wall_height_m"] == 0.0
     assert omitted["panel_width_mm"] == 0.0
+    assert omitted["acoustic_rating_rw_db"] == 0
     omitted_spec = OperableWallSpec(wall_id="OW-OMIT")
     assert omitted_spec.wall_height_m == 0.0
     assert omitted_spec.panel_width_mm == 0.0
+    assert omitted_spec.acoustic_rating_rw_db == 0
 
 
 def test_operable_wall_snapping():

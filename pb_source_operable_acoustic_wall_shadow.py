@@ -34,7 +34,7 @@ class OperableWallSpec:
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
     wall_height_m: float = 0.0
     panel_width_mm: float = 0.0
-    acoustic_rating_rw_db: int = 50
+    acoustic_rating_rw_db: int = 0
     has_retractable_seals: bool = True
     parking_stack_track_length_m: float = 2.5
     has_plenum_baffle: bool = True
@@ -84,7 +84,7 @@ class SourceOperableAcousticWallShadowAuthority:
             "system_type": OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS,
             "wall_height_m": 0.0,
             "panel_width_mm": 0.0,
-            "acoustic_rating_rw_db": 50,
+            "acoustic_rating_rw_db": 0,
             "has_retractable_seals": True,
             "parking_stack_track_length_m": 2.5,
             "has_plenum_baffle": False,
