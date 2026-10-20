@@ -32,8 +32,8 @@ class WeatherLouverSpec:
     louver_id: str
     blade_type: LouverBladeType
     location: Tuple[float, float]
-    width_mm: float = 1200.0
-    height_mm: float = 1500.0
+    width_mm: float = 0.0
+    height_mm: float = 0.0
     blade_pitch_mm: float = 75.0
     free_area_ratio: float = 0.50
     has_bird_mesh: bool = True
@@ -102,7 +102,7 @@ class SourceWeatherLouverAerodynamicFreeAreaShadowAuthority:
             w = float(dim_match.group(1))
             h = float(dim_match.group(2))
         else:
-            w, h = 1200.0, 1500.0
+            w, h = 0.0, 0.0
 
         # Free area percentage: (\d+(?:\.\d+)?)\s*%\s*(?:FREE|AFA)?
         fa_match = re.search(r"(\d+(?:\.\d+)?)\s*%", clean)
