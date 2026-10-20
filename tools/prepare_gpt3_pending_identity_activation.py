@@ -427,14 +427,20 @@ def build_activation(
     active_items = {
         binding.benchmark_item_id for binding in active.bindings
     }
+    # A physical opening can legitimately carry an independently sealed
+    # opening_count AND opening_area. Only area claims compete for this
+    # area's pending benchmark identity; never promote the count as an area.
     active_physical = {
         ref
         for binding in active.bindings
+        if binding.production_family == "opening_area"
         for ref in binding.production_object_identity_refs
     }
 
     sealed_by_physical = {}
     for quantity in sealed.quantities:
+        if quantity.family != "opening_area":
+            continue
         if quantity.abstained or not quantity.lineage_ok:
             continue
         refs = tuple(quantity.object_identity_refs)
@@ -443,7 +449,7 @@ def build_activation(
         physical = refs[0]
         if physical in sealed_by_physical:
             raise ValueError(
-                "multiple sealed quantities claim one physical identity"
+                "multiple sealed opening areas claim one physical identity"
             )
         sealed_by_physical[physical] = quantity
 
