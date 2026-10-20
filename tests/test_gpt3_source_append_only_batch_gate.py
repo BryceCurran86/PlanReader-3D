@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from pb_customer_output_verification import CustomerOutputVerificationError
+from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
+from pb_source_closed_run_export import SourceClosedRunExportError
 from pb_quantity_takeoff_adapter import quantities_to_takeoff_output_rows
 from pb_source_closed_run_export import (
     seal_source_closed_run, sealed_source_closed_run_from_dict,
@@ -130,6 +132,39 @@ def test_append_only_never_treats_unproven_status_as_new_firm(unproven_status):
     # This is the same live commercial publishing status vocabulary; it
     # is intentionally narrower than 'non-abstained' or 'not a conflict'.
     assert gate.quantity_status_not_publishable(unproven_status)
+
+
+
+@pytest.mark.parametrize("unproven_status", [
+    "candidate", "blocked", "conflict", "abstained",
+    "review_required", "unverified", "", "FIRMED",
+])
+def test_unpublishable_status_cannot_reach_signed_batch_review(unproven_status):
+    original = quantity("original", "physical-room-1")
+    suspect = replace(
+        quantity("new", "physical-room-2", value=7.5),
+        status=unproven_status,
+    )
+    # Both real producer paths are legitimate fail-closed stages: either
+    # the source signer/customer projector refuses the status outright,
+    # or a verified batch reaches the admission gate and must be BLOCKED.
+    try:
+        old = _sealed(original)
+        candidate = _sealed(original, suspect)
+        old_customers = _customers(original)
+        new_customers = _customers(original, suspect)
+        report = gate.assess_append_only_signed_batch(
+            old, candidate, baseline_customers=old_customers,
+            candidate_customers=new_customers,
+        )
+    except (
+        SourceClosedRunExportError, MissingCommercialAuthorityError,
+        CustomerOutputVerificationError, ValueError,
+    ):
+        return
+    assert report["admission_status"] == "BLOCKED"
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["official_v2_accuracy"] is None
 
 
 def test_new_genuine_signed_customer_batch_only_allows_independent_review():
