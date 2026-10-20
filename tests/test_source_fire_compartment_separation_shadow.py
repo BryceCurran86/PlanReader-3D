@@ -63,7 +63,7 @@ def test_compile_fire_compartment_receipt():
     assert receipt.total_fire_wall_area_pt2 == 2500.0
     assert receipt.total_fire_dampers_count == 1
     assert receipt.total_collars_count == 0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
