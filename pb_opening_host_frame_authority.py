@@ -1242,13 +1242,29 @@ class OpeningHostFrameProducer:
         if type(host_binding_selector) is not OpeningHostBindingSelector:
             raise TypeError("host_binding_selector must be OpeningHostBindingSelector")
 
+        # Selector-scoped reproof. A previously positive frame cannot remain
+        # in a newly issued authority after the original source or host fails.
+        frame_selector = OpeningHostFrameSelector(
+            document_id=host_binding_selector.document_id,
+            revision_id=host_binding_selector.revision_id,
+            source_sha256=host_binding_selector.source_sha256,
+            snapshot_id=host_binding_selector.snapshot_id,
+            page_id=host_binding_selector.page_id,
+            decision_scope_id=host_binding_selector.decision_scope_id,
+            opening_identity_id=host_binding_selector.opening_identity_id,
+        )
+
+        def fail_closed(status, *reasons):
+            self._results.pop(frame_selector.key, None)
+            return _blocked(status, *reasons)
+
         opening_result = self._opening.prove_existence(opening_selector)
         if (
             opening_result.status is not EvidenceResolutionStatus.CORROBORATED
             or opening_result.proposition != PHYSICAL_OPENING_EXISTS
             or opening_result.existence_record is None
         ):
-            return _blocked(
+            return fail_closed(
                 opening_result.status
                 if opening_result.status in {
                     EvidenceResolutionStatus.ABSTAINED,
@@ -1266,7 +1282,7 @@ class OpeningHostFrameProducer:
             or host_result.record is None
             or OPENING_HOST_BINDING_RESOLVED not in host_result.reason_codes
         ):
-            return _blocked(
+            return fail_closed(
                 host_result.status
                 if host_result.status in {
                     EvidenceResolutionStatus.ABSTAINED,
@@ -1289,19 +1305,19 @@ class OpeningHostFrameProducer:
             and binding.decision_scope_id == host_binding_selector.decision_scope_id
         )
         if not lineage_matches:
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.CONFLICT,
                 OPENING_HOST_FRAME_SCOPE_MISMATCH,
             )
 
         geometry = host_geometry._opening_geometry(self._opening, opening)
         if geometry is None:
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_GEOMETRY_UNAVAILABLE,
             )
         if not _valid_aperture_geometry(geometry):
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.CONFLICT,
                 OPENING_HOST_FRAME_GEOMETRY_INVALID,
             )
@@ -1318,22 +1334,14 @@ class OpeningHostFrameProducer:
                 failure_reasons=frame_failure_reasons,
             )
         if frame is None:
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN,
                 OPENING_HOST_FRAME_WALL_UNAVAILABLE,
                 *frame_failure_reasons,
             )
 
-        selector = OpeningHostFrameSelector(
-            document_id=binding.document_id,
-            revision_id=binding.revision_id,
-            source_sha256=binding.source_sha256,
-            snapshot_id=binding.snapshot_id,
-            page_id=binding.page_id,
-            decision_scope_id=binding.decision_scope_id,
-            opening_identity_id=binding.opening_identity_id,
-        )
+        selector = frame_selector
         payload = {
             "selector": selector.key,
             "host_binding_record_id": binding.record_id,
