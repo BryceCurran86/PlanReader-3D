@@ -129,3 +129,38 @@ def test_reused_same_xref_at_two_distinct_placements_is_not_shared_pixel_frame()
     }]
     assert not result["physical_wall_equivalence_granted"]
     assert not result["opening_host_granted"]
+
+
+def test_distinct_adjacent_xrefs_with_matching_dark_seam_pixels_never_share_native_owner():
+    """The same dashed black marks at a tile seam are not source ancestry."""
+    doc = fitz.open()
+    page = doc.new_page(width=220, height=120)
+    left = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 100, 100), False)
+    right = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 100, 100), False)
+    left.clear_with(240)
+    right.clear_with(230)
+    for row in (10, 11, 40, 41, 70, 71):
+        for pixel in (97, 98, 99):
+            left.set_pixel(pixel, row, (0, 0, 0))
+        for pixel in (0, 1, 2):
+            right.set_pixel(pixel, row, (0, 0, 0))
+        assert left.pixel(99, row) == right.pixel(0, row)
+    xref_left = page.insert_image(fitz.Rect(0, 0, 100, 100), pixmap=left)
+    xref_right = page.insert_image(fitz.Rect(100, 0, 200, 100), pixmap=right)
+    assert xref_left != xref_right
+    original = doc.tobytes()
+    doc.close()
+    result = _audit(
+        original, hashlib.sha256(original).hexdigest(),
+        (60.0, 40.0, 99.8, 40.0),
+        (100.2, 40.0, 140.0, 40.0),
+    )
+    edge = result["g17_edges"][0]
+    assert edge["source_native_image_xref"] == xref_left
+    assert edge["original_pixel_placement_unique"] is True
+    assert edge["same_image_pixel_lattice_candidates"] == []
+    assert edge["host_binding_granted"] is False
+    assert result["source_parent_equivalence_granted"] is False
+    assert result["physical_wall_equivalence_granted"] is False
+    assert result["opening_count_granted"] is False
+    assert result["firm_opening_area_granted"] is False
