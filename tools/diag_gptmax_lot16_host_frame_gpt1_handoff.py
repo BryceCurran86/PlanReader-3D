@@ -63,6 +63,25 @@ def _frame_valid(frame: dict | None, host: dict | None, identity: str) -> bool:
     return True
 
 
+def _axis_values_match_figured_pair(
+    width_m: object, height_m: object, raw_pair: object,
+) -> bool:
+    """Check the actual two figured lengths, not just their area product.
+
+    This source-neutral predicate has NO issuer authority. The caller still
+    requires source-owned physical opening, two unique canonical axis records,
+    complete geometry, and both exact IDs in canonical evidence receipts.
+    """
+    if (not _positive(width_m) or not _positive(height_m)
+            or type(raw_pair) not in (tuple, list) or len(raw_pair) != 2
+            or any(not _positive(value) for value in raw_pair)):
+        return False
+    dimensions = sorted(float(value) / 1000 for value in raw_pair)
+    axes = sorted((float(width_m), float(height_m)))
+    return all(math.isclose(a, b, rel_tol=1e-8, abs_tol=1e-9)
+               for a, b in zip(dimensions, axes))
+
+
 def _source_owned_axes_agree_with_figured_pair(canonical: dict, evidence: dict) -> bool:
     """Independent original axis receipts must agree with printed dimensions.
 
