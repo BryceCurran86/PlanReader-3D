@@ -178,3 +178,106 @@ def test_page_subset_changes_producer_source_snapshot_and_cannot_rekey_original_
     assert original_revision.snapshot.snapshot_id != (
         page_only_revision.snapshot.snapshot_id
     )
+
+
+
+def test_original_observer_uses_final_derived_snapshot_not_initial_native_words(monkeypatch):
+    """Source-neutral integration simulation; no Lot16 physical facts asserted."""
+    from types import SimpleNamespace
+
+    source_bytes = b"simulated-source-with-native-and-derived-snapshot"
+    digest = sha256(source_bytes).hexdigest()
+    monkeypatch.setattr(original, "ORIGINAL_LOT16_SOURCE_SHA256", digest)
+    signed, customer = _archive()
+    seen = []
+
+    class OriginalSource:
+        def __init__(self, **kwargs):
+            self.derived = False
+            self._producer = SimpleNamespace(
+                _store=SimpleNamespace(
+                    source_bytes_by_revision={"synthetic-revision": source_bytes}
+                )
+            )
+
+        def ingest_native_pdf_bytes(self, **kwargs):
+            seen.append(("ingest", kwargs.get("page_ids", None)))
+            return SimpleNamespace(revision=SimpleNamespace(
+                document_id="document", revision_id="synthetic-revision",
+                source_sha256=digest,
+            ))
+
+        def published_snapshot_for_revision(self, revision):
+            assert revision == "synthetic-revision"
+            seen.append(("published", self.derived))
+            return SimpleNamespace(
+                revision=SimpleNamespace(
+                    document_id="document",
+                    revision_id="synthetic-revision",
+                    source_sha256=digest,
+                ),
+                snapshot=SimpleNamespace(
+                    snapshot_id="derived-original" if self.derived
+                    else "native-ingest-only"
+                ),
+            )
+
+    def compose_wall(*, source_visibility_producer, revision_id, page_ids):
+        assert page_ids == ("3",)
+        assert revision_id == "synthetic-revision"
+        source_visibility_producer.derived = True
+        return SimpleNamespace(kind="real-original-wall-contract-stub")
+
+    def compose_void(*, source_visibility_producer, wall_opening_composition):
+        assert source_visibility_producer.derived
+        assert wall_opening_composition.kind.startswith("real-original")
+        return SimpleNamespace(kind="real-original-void-contract-stub")
+
+    def retained(*args, **kwargs):
+        return {"canonical": [], "sealed_run": {}, "customer_rows": []}
+
+    def observe(source, published, composition, voids):
+        assert source.derived
+        assert published.snapshot.snapshot_id == "derived-original"
+        seen.append(("observed", published.snapshot.snapshot_id))
+        return {"original": "producer-owned-observer-stub"}
+
+    def classified(views, *, expected_page):
+        assert expected_page == 3
+        return {"status": "synthetic-only"}
+
+    def max_review(observed, canonical, f07, *, source_root):
+        assert source_root["snapshot_id"] == "derived-original"
+        return {
+            "original_physical_opening_count": 0,
+            "original_authenticated_hosts": 0,
+            "original_complete_host_frames": 0,
+            "original_signed_area_quantities": 0,
+            "area_first_gate_counts": {},
+        }
+
+    def audited(max_result, actual_void_composition, **kwargs):
+        seen.append(("audit", max_result["original_physical_opening_count"]))
+        return {"source_verified_new_quantity_count": None,
+                "benchmark_score_authorized": False}
+
+    monkeypatch.setattr(original, "SourceVisibilityProducer", OriginalSource)
+    monkeypatch.setattr(original, "compose_live_wall_opening_authority", compose_wall)
+    monkeypatch.setattr(original, "compose_live_physical_opening_voids", compose_void)
+    monkeypatch.setattr(original, "_retention", retained)
+    monkeypatch.setattr(original, "_observe", observe)
+    monkeypatch.setattr(original, "segment_source_page_viewports",
+                        lambda *args, **kwargs: [])
+    monkeypatch.setattr(original, "classify_live_view", classified)
+    monkeypatch.setattr(original, "assess_gpt1_opening_candidates", max_review)
+    monkeypatch.setattr(original, "audit_max_area_review_against_live_issuer",
+                        audited)
+    replayed = original.replay_owner_original_lot16_area_convergence(
+        source_bytes, archived_signed_run=signed,
+        archived_customer_rows=customer,
+    )
+    assert seen[0] == ("ingest", None)
+    assert ("observed", "derived-original") in seen
+    assert replayed["original_producer_snapshot_id"] == "derived-original"
+    assert replayed["original_source_customer_retention_unchanged"]
+    assert not replayed["new_firm_or_benchmark_score_granted"]
