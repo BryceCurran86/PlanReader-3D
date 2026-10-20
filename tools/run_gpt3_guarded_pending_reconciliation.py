@@ -26,6 +26,7 @@ from tools.gpt3_atomic_pending_activation_pair import (
     read_committed_active_identity_map,
     ACTIVATION_COMMIT_MARKER_VERSION,
     _fsync_directory,
+    _reject_duplicate_json_keys,
 )
 from tools.report_gpt3_four_project_evidence import (
     FROZEN_ROOT, _read_json_without_duplicate_keys,
@@ -40,18 +41,23 @@ def read_committed_guarded_exact_report(
     This checks durable release consistency, not original source ownership,
     customer publication permission or independent benchmark scoring authority.
     """
-    # First verify the entire active-map/receipt release contract.
+    # Pin the receipt across BOTH the map and report reads. Without
+    # this pre-snapshot a writer could swap a new marker after map proof.
+    first_receipt = receipt_path.read_bytes()
     read_committed_active_identity_map(
         map_path, receipt_path=receipt_path,
     )
-    first_receipt = receipt_path.read_bytes()
-    marker = json.loads(first_receipt)
+    if receipt_path.read_bytes() != first_receipt:
+        raise ValueError("guarded exact report receipt changed across map verification")
+    marker = json.loads(
+        first_receipt, object_pairs_hook=_reject_duplicate_json_keys,
+    )
     if marker.get("activation_commit_marker_version") != ACTIVATION_COMMIT_MARKER_VERSION:
         raise ValueError("guarded exact report has no committed activation receipt")
     report_bytes = report_path.read_bytes()
     if marker.get("exact_report_sha256") != sha256(report_bytes).hexdigest():
         raise ValueError("guarded exact report does not match activation commit digest")
-    report = json.loads(report_bytes)
+    report = json.loads(report_bytes, object_pairs_hook=_reject_duplicate_json_keys)
     if type(report) is not dict:
         raise ValueError("guarded exact report must contain a JSON object")
     if (
