@@ -36,7 +36,7 @@ class WeatherLouverSpec:
     height_mm: float = 0.0
     blade_pitch_mm: float = 0.0
     free_area_ratio: float = 0.0
-    has_bird_mesh: bool = True
+    has_bird_mesh: bool = False
     frame_depth_mm: float = 100.0
     level_id: str = "ELEV"
     source_tag: str = ""

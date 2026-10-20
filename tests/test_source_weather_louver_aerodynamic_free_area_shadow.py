@@ -90,9 +90,23 @@ class TestSourceWeatherLouverAerodynamicFreeAreaShadow(unittest.TestCase):
         self.assertEqual(omitted.height_mm, 0.0)
         self.assertEqual(omitted.blade_pitch_mm, 0.0)
         self.assertEqual(omitted.free_area_ratio, 0.0)
+        self.assertFalse(omitted.has_bird_mesh)
         omitted_res = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.evaluate_louvers([omitted])
         self.assertEqual(omitted_res.quantities.total_gross_aperture_area_m2, 0.0)
         self.assertEqual(omitted_res.quantities.total_aerodynamic_free_area_m2, 0.0)
+        self.assertEqual(omitted_res.quantities.total_bird_mesh_area_m2, 0.0)
+
+        sized_no_mesh = WeatherLouverSpec(
+            louver_id="WL-NO-MESH",
+            blade_type=LouverBladeType.TWO_STAGE_STORM,
+            location=(0.0, 0.0),
+            width_mm=1500.0,
+            height_mm=2000.0,
+        )
+        self.assertFalse(sized_no_mesh.has_bird_mesh)
+        no_mesh = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.evaluate_louvers([sized_no_mesh])
+        self.assertEqual(no_mesh.quantities.total_gross_aperture_area_m2, 3.0)
+        self.assertEqual(no_mesh.quantities.total_bird_mesh_area_m2, 0.0)
 
 
 if __name__ == "__main__":
