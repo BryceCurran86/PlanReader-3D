@@ -116,3 +116,57 @@ def test_real_synthetic_source_with_mock_w4_scope_stays_source_only(monkeypatch)
     assert not result["firm_area_granted"]
     assert not result["opening_count_granted"]
     assert not result["benchmark_score_granted"]
+
+
+def test_non_axis_w4_original_fragment_is_explicitly_excluded(monkeypatch):
+    """A diagonal W4 edge cannot prevent independent axis-aligned source audit."""
+    from dataclasses import replace
+    from types import SimpleNamespace as NS
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_opening_local_g17_wall_shadow import build_opening_local_g17_wall_shadow
+    from pb_physical_wall_candidate_authority import (
+        PhysicalWallSourceEdgeFragment,
+        PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+    )
+    from tests.test_opening_local_g17_wall_shadow import address
+
+    source, published = _prepare(frame_lines=2)
+    selector = address(source, published)
+    args = dict(
+        document_id=selector.document_id, revision_id=selector.revision_id,
+        source_sha256=selector.source_sha256,
+        snapshot_id=selector.snapshot_id, page_id="1",
+        decision_scope_id="wall-source:page-1",
+    )
+    wall_selector = PhysicalWallCandidateSelector(**args)
+    native = build_opening_local_g17_wall_shadow(source, selector)
+    wall = native.flanks[0].exact_coordinate_records[0]
+    extra_edge = PhysicalWallSourceEdgeFragment(
+        edge_id="diagonal-original",
+        geometry=(0.0, 0.0, 1.0, 1.0),
+        source_primitive_ids=("foreign-diagonal",),
+    )
+    wall = replace(
+        wall, source_edge_fragments=(*wall.source_edge_fragments, extra_edge),
+    )
+    scope = NS(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        equivalence=object(), records=(wall,), **args,
+    )
+    monkeypatch.setattr(
+        PhysicalWallCandidateAuthority, "resolve_scope",
+        lambda self, selected: scope,
+    )
+    fake_authority = object.__new__(PhysicalWallCandidateAuthority)
+    result = bridge(
+        source, wall_authority=fake_authority,
+        wall_selector=wall_selector, opening_selectors=(selector,),
+    )
+    assert result["original_producer_scope_verified"]
+    assert result["ordinary_w4_non_axis_source_edges_excluded"] == [
+        f"{wall.wall_candidate_id}:diagonal-original"
+    ]
+    assert not result["host_binding_granted"]
+    assert not result["firm_area_granted"]
