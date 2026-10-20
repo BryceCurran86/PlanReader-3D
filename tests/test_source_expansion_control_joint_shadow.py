@@ -66,7 +66,7 @@ def test_compile_joint_receipt():
     assert isinstance(receipt, ExpansionControlJointReceipt)
     assert receipt.total_joints_count == 1
     assert receipt.total_joint_length_pt == 50.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
