@@ -130,7 +130,7 @@ def test_corrupted_physical_g17_source_receipts_never_skip_as_non_raster(monkeyp
     result = cli.original_physical_g17_source_flank_report(
         _SOURCE, expected_sha256=_SHA, page_id="3",
     )
-    assert result["g17_candidate_physical_count"] == 0
+    assert result["host_abstained_g17_candidate_physical_count"] == 0
     assert state["owned_calls"] == 0
     assert result["unresolved"] == [{
         "physical_opening_id": "physical-original-1",
