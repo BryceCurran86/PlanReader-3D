@@ -66,14 +66,16 @@ def test_foreign_figured_source_never_becomes_gross_area_review(change):
     assert not r["signed_customer_publisher_activated"]
 
 
-def test_original_label_without_independent_semantic_claim_keeps_real_structural_kind():
+def test_original_label_without_independent_semantic_or_structural_kind_abstains():
     rows, canonical = _figure_only_host()
     e = rows[2]["original_label_dimension_result"]["evidence"]
     e["semantic_kind"] = None
     r = run(rows, canonical)
     item = r["opening_decisions"][2]
     assert item["original_figured_label_source_scope_bound"]
-    assert item["new_gpt1_area_candidate_handoff"]
+    assert item["original_opening_kind_source_authority_reproved"] is False
+    assert item["opening_area_first_remaining_gate"] == "original_opening_kind_source_authority_unverified"
+    assert item["new_gpt1_area_candidate_handoff"] is False
     assert not item["opening_count_granted"]
 
 
