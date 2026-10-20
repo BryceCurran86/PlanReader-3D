@@ -42,6 +42,7 @@ def test_drywall_callout_parsing():
     assert parsed3["deflection_head_type"] == DeflectionHeadType.FIRE_RATED_INTUMESCENT_TRACK
     assert parsed3["fire_rating_hours"] == 2
     assert parsed3["wall_height_m"] == 0.0
+    assert parsed3["stud_width_mm"] == 0.0
 
     omitted_h = SourceDrywallShaftwallDeflectionHeadShadowAuthority.parse_callout(
         "64mm C-STUD FIRE PARTITION 1-HR DEEP LEG DEFLECTION TRACK"
@@ -49,6 +50,7 @@ def test_drywall_callout_parsing():
     assert omitted_h["wall_height_m"] == 0.0
     omitted_spec = DrywallPartitionSpec(wall_id="W-OMIT")
     assert omitted_spec.wall_height_m == 0.0
+    assert omitted_spec.stud_width_mm == 0.0
 
 
 def test_drywall_snapping():

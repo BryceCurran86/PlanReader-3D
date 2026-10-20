@@ -41,7 +41,7 @@ class DrywallPartitionSpec:
     deflection_head_type: DeflectionHeadType = DeflectionHeadType.SLOTTED_DEFLECTION_TRACK
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
     wall_height_m: float = 0.0
-    stud_width_mm: float = 92.0
+    stud_width_mm: float = 0.0
     deflection_allowance_mm: float = 25.0
     fire_rating_hours: int = 2
     has_shaftliner_core: bool = False
@@ -88,7 +88,7 @@ class SourceDrywallShaftwallDeflectionHeadShadowAuthority:
             "system_type": DrywallSystemType.STANDARD_FIRE_PARTITION,
             "deflection_head_type": DeflectionHeadType.SLOTTED_DEFLECTION_TRACK,
             "wall_height_m": 0.0,
-            "stud_width_mm": 92.0,
+            "stud_width_mm": 0.0,
             "deflection_allowance_mm": 25.0,
             "fire_rating_hours": 2,
             "has_shaftliner_core": False,
