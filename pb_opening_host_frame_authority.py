@@ -1254,8 +1254,14 @@ class OpeningHostFrameProducer:
             opening_identity_id=host_binding_selector.opening_identity_id,
         )
 
+        # An arbitrary wrong caller observation must not revoke a valid frame
+        # for a different canonical opening. Trust source-owned opening
+        # identity only after the exact selector root and record ID re-prove.
+        validated_opening_identity = False
+
         def fail_closed(status, *reasons):
-            self._results.pop(frame_selector.key, None)
+            if validated_opening_identity:
+                self._results.pop(frame_selector.key, None)
             return _blocked(status, *reasons)
 
         opening_result = self._opening.prove_existence(opening_selector)
@@ -1275,6 +1281,14 @@ class OpeningHostFrameProducer:
                 *opening_result.reason_codes,
             )
         opening = opening_result.existence_record
+        validated_opening_identity = (
+            opening.document_id == host_binding_selector.document_id
+            and opening.revision_id == host_binding_selector.revision_id
+            and opening.source_sha256 == host_binding_selector.source_sha256
+            and opening.snapshot_id == host_binding_selector.snapshot_id
+            and opening.page_id == host_binding_selector.page_id
+            and opening.record_id == host_binding_selector.opening_identity_id
+        )
 
         host_result = self._host.resolve(host_binding_selector)
         if (
