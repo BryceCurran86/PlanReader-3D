@@ -335,7 +335,7 @@ class SourceHybridMixedFormatRecoveryProducer:
                 all_reasons.update(r.reason_codes)
 
             results_map[key] = SourceHybridMixedFormatResult(
-                status=EvidenceResolutionStatus.CORROBORATED.value,
+                status=EvidenceResolutionStatus.CANDIDATE.value,
                 detected_modality=rec_dict["detected_modality"],
                 reconciled_primitives=tuple(records),
                 vector_count=rec_dict["vector_count"],
@@ -343,7 +343,7 @@ class SourceHybridMixedFormatRecoveryProducer:
                 promoted_raster_count=rec_dict["promoted_raster_count"],
                 reconciled_raster_count=rec_dict["reconciled_raster_count"],
                 reason_codes=tuple(sorted(all_reasons)),
-                resolution_mode=f"corroborated_{rec_dict['detected_modality']}_reconciliation",
+                resolution_mode=f"candidate_{rec_dict['detected_modality']}_reconciliation",
             )
 
         return SourceHybridMixedFormatRecoveryAuthority(_AUTHORITY_SEAL, results_map)
