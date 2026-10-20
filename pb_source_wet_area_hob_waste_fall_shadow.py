@@ -128,7 +128,7 @@ class WetAreaHobWasteFallShadowAuthority:
         width_m: float,
         height_m: float,
         scale_ratio: float,
-        waterproofing_upturn_h_m: float = 0.15,
+        waterproofing_upturn_h_m: float = 0.0,
     ) -> HobGeometryEvidence:
         """Evaluates a shower hob or waterstop barrier."""
         pts_tuple = tuple((float(x), float(y)) for x, y in centerline_pts)
@@ -223,7 +223,7 @@ class WetAreaHobWasteFallShadowAuthority:
         shower_enclosure_area_sqm: float,
         hobs: Sequence[HobGeometryEvidence],
         shower_wall_perimeter_m: float = 0.0,
-        waterproof_upturn_height_m: float = 0.15,
+        waterproof_upturn_height_m: float = 0.0,
     ) -> WetAreaTakeoffSummary:
         """Computes comprehensive wet area tiling and waterproofing takeoff."""
         valid_hobs = [
