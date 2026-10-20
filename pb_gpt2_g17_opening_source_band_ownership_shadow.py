@@ -46,10 +46,11 @@ class OriginalG17OpeningFlankOwnership:
 
 
 def _abstain(
-    selector: ObservationSelector, code: str,
+    selector: ObservationSelector, code: str, *,
+    physical_id: str = "",
 ) -> OriginalG17OpeningFlankOwnership:
     return OriginalG17OpeningFlankOwnership(
-        EvidenceResolutionStatus.ABSTAINED, (code,), "",
+        EvidenceResolutionStatus.ABSTAINED, (code,), physical_id,
         selector.source_sha256,
     )
 
@@ -75,11 +76,21 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
 
     original = authority.prove_existence(original_selector)
     record = original.existence_record
+
+    def blocked(reason: str) -> OriginalG17OpeningFlankOwnership:
+        # Physical source candidates must stay addressable when a later
+        # receipt fails; an empty ID collapses independent G17 abstentions.
+        physical_id = (
+            record.record_id if type(record) is PhysicalOpeningExistenceRecord
+            else ""
+        )
+        return _abstain(original_selector, reason, physical_id=physical_id)
+
     if (original.status is not EvidenceResolutionStatus.CORROBORATED
             or type(record) is not PhysicalOpeningExistenceRecord
             or record.status is not EvidenceResolutionStatus.CORROBORATED
             or record.proposition != PHYSICAL_OPENING_EXISTS):
-        return _abstain(original_selector, "physical_g17_existence_unproven")
+        return blocked("physical_g17_existence_unproven")
 
     root = ("document_id", "revision_id", "source_sha256", "snapshot_id")
     if (any(getattr(record, field) != getattr(original_selector, field)
@@ -89,7 +100,7 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
             or not record.source_observation_ids
             or len(set(record.source_observation_ids))
             != len(record.source_observation_ids)):
-        return _abstain(original_selector, "physical_g17_source_root_conflict")
+        return blocked("physical_g17_source_root_conflict")
 
     if (parent_source.source_sha256 != original_selector.source_sha256
             or source_bands.source_sha256 != original_selector.source_sha256
@@ -104,23 +115,23 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
             or source_bands.opening_count_granted
             or source_bands.firm_quantity_granted
             or len(source_bands.candidates) != 2):
-        return _abstain(original_selector, "source_g17_flank_scope_or_count_unproven")
+        return blocked("source_g17_flank_scope_or_count_unproven")
 
     # The upstream shadow is an address-only dataclass. Rebuild the same
     # geometry independently here; callers cannot swap in a forged candidate.
     if reconstruct_raster_source_flank_bands_shadow(parent_source) != source_bands:
-        return _abstain(original_selector, "source_g17_flank_geometry_mismatch")
+        return blocked("source_g17_flank_geometry_mismatch")
 
     rows = parent_source.lines
     source_visible_ids = [line.visible_observation_id for line in rows]
     if (len(source_visible_ids) != len(set(source_visible_ids))
             or len({line.parent_observation_id for line in rows}) != len(rows)
             or any(line.page_id != record.page_id for line in rows)):
-        return _abstain(original_selector, "source_g17_flank_observation_identity_conflict")
+        return blocked("source_g17_flank_observation_identity_conflict")
 
     opening_observation_ids = set(record.source_observation_ids)
     if set(source_visible_ids) != opening_observation_ids:
-        return _abstain(original_selector, "source_g17_not_complete_physical_opening_support")
+        return blocked("source_g17_not_complete_physical_opening_support")
 
     # The original G17 producer independently issues this exact immutable
     # source-root set from each supporting visible observation's derivation
@@ -134,13 +145,13 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
         or any(type(parent) is not str or not parent for parent in record.source_lineage_root_ids)
         or tuple(sorted(record.source_lineage_root_ids)) != source_roots
     ):
-        return _abstain(original_selector, "source_g17_original_parent_lineage_unbound")
+        return blocked("source_g17_original_parent_lineage_unbound")
 
     # Existing producer-owned typed reader must independently reauthenticate
     # every original source observation, not just the two end-line summaries.
     visibility = authority.source_visibility_authority()
     if type(visibility) is not SourceVisibilityAuthority:
-        return _abstain(original_selector, "source_g17_visibility_authority_unavailable")
+        return blocked("source_g17_visibility_authority_unavailable")
     for line in rows:
         resolved = visibility.resolve_raster_opening_primitive(
             ObservationSelector(
@@ -162,7 +173,7 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
                 or source.source_primitive_ref != line.original_source_primitive_ref
                 or source.derivation_parent_ids != (line.parent_observation_id,)
                 or tuple(source.geometry) != line.geometry_pdf_points):
-            return _abstain(original_selector, "source_g17_original_primitive_receipt_unbound")
+            return blocked("source_g17_original_primitive_receipt_unbound")
 
     expected_band_obs = {
         line.visible_observation_id
@@ -182,7 +193,7 @@ def bind_original_g17_flanks_to_physical_opening_shadow(
                    or candidate.structural_wall_granted
                    or candidate.whole_wall_frame_granted
                    for candidate in source_bands.candidates)):
-        return _abstain(original_selector, "source_g17_band_ownership_conflict")
+        return blocked("source_g17_band_ownership_conflict")
 
     return OriginalG17OpeningFlankOwnership(
         EvidenceResolutionStatus.CORROBORATED,
