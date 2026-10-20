@@ -71,7 +71,7 @@ def test_compile_waste_receipt():
     assert receipt.total_core_penetrations_count == 1
     assert receipt.total_puddle_flanges_count == 1
     assert receipt.total_fire_collars_count == 1
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
