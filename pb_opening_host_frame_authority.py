@@ -121,6 +121,25 @@ def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
     return tuple(sorted({wall_id for group in node for wall_id in group}))
 
 
+def _source_equivalence_group_overlap_members(equivalence) -> frozenset[str]:
+    """An original physical wall cannot occupy incompatible SAME groups."""
+    first_by_member: dict[str, tuple[str, ...]] = {}
+    unsafe: set[str] = set()
+    for raw_group in getattr(equivalence, "equivalence_groups", ()):
+        normalized = tuple(sorted(str(member) for member in raw_group))
+        if len(normalized) != len(set(normalized)):
+            # Duplicate original wall membership is not a second witness.
+            unsafe.update(normalized)
+        for member in normalized:
+            previous = first_by_member.get(member)
+            if previous is not None and previous != normalized:
+                unsafe.update(previous)
+                unsafe.update(normalized)
+            else:
+                first_by_member.setdefault(member, normalized)
+    return frozenset(unsafe)
+
+
 def _source_equivalence_group_pair_conflicts(equivalence) -> frozenset[tuple[str, str]]:
     """Exact source SAME group cannot coexist with an issued non-SAME pair."""
     groups_by_member: dict[str, set[int]] = {}
@@ -895,6 +914,15 @@ class OpeningHostFrameProducer:
             records_by_id[wall_key] = candidate
 
         if any(
+            member_id in _source_equivalence_group_overlap_members(
+                wall_scope.equivalence
+            )
+            for member_id in binding.member_wall_candidate_ids
+        ):
+            # Live W4 can disagree with an older host-binding receipt.
+            return None
+
+        if any(
             member_id in binding.member_wall_candidate_ids
             for pair in _source_equivalence_group_pair_conflicts(
                 wall_scope.equivalence
@@ -1064,6 +1092,16 @@ class OpeningHostFrameProducer:
         )
         if not component_ids or any(wall_id not in records_by_id for wall_id in component_ids):
             return None
+        if any(
+            wall_id in _source_equivalence_group_overlap_members(
+                wall_scope.equivalence
+            )
+            for wall_id in component_ids
+        ):
+            # No W4 host/frame from a non-partitioned source wall scope,
+            # including a cached host that predates this contradiction.
+            return fail("opening_host_frame_whole_wall_unproven")
+
         if any(
             left in component_ids or right in component_ids
             for left, right in _source_equivalence_group_pair_conflicts(
