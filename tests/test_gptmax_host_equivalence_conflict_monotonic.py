@@ -383,3 +383,104 @@ def test_malformed_single_source_relation_fails_closed_in_host_admission():
     assert status is Status.CONFLICT
     assert rows == ()
     assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
+def test_exact_original_host_producer_equivocation_revokes_cached_authority(
+    monkeypatch,
+):
+    """A second different positive is an error AND revokes fresh host access."""
+    import pb_opening_host_binding_authority as host
+    from pb_source_observation_authority import ObservationSelector
+
+    opening = SimpleNamespace(
+        record_id="original:opening:A", document_id="doc",
+        revision_id="rev", source_sha256="a" * 64,
+        snapshot_id="snapshot", page_id="3", structural_pattern="fixture",
+    )
+    positive = SimpleNamespace(
+        status=Status.CORROBORATED,
+        proposition=host.PHYSICAL_OPENING_EXISTS,
+        existence_record=opening,
+    )
+    same_identity = SimpleNamespace(
+        status=Status.CORROBORATED,
+        proven_same=True,
+        reason_codes=(host.PHYSICAL_OPENING_IDENTITY_RESOLVED,),
+    )
+    original = ObservationSelector(
+        document_id=opening.document_id, revision_id=opening.revision_id,
+        source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+        observation_id="source:original:opening:A",
+    )
+    universe_selector = host.OpeningHostWallUniverseSelector(
+        document_id=opening.document_id, revision_id=opening.revision_id,
+        source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+        page_id=opening.page_id, decision_scope_id="wall-source:page-3",
+    )
+    producer = object.__new__(host.OpeningHostBindingProducer)
+    producer._opening = SimpleNamespace(
+        prove_existence=lambda _selector: positive,
+        compare_identity=lambda _left, _right: same_identity,
+    )
+    producer._universe = SimpleNamespace(
+        resolve_scope=lambda _selector: SimpleNamespace(
+            status=Status.CORROBORATED, scope_complete=True,
+            equivalence=SimpleNamespace(equivalence_groups=()),
+            records=(), source_observation_ids=(),
+        ),
+    )
+    producer._results = {}
+    active = {"member": "wall:host:A"}
+
+    def issue_band(*_args, **_kwargs):
+        wall_id = active["member"]
+        return host._HostBandResolution(
+            Status.CORROBORATED,
+            (host._HostBand(
+                member_ids=(wall_id,),
+                member_candidate_identity_ids=(f"physical:{wall_id}",),
+                member_equivalence_groups=((wall_id,),),
+                center_offset=0.0,
+            ),),
+            (),
+        )
+
+    monkeypatch.setattr(host, "_opening_geometry",
+                        lambda *_args: host._OpeningGeometry(
+                            origin=(100.0, 50.0), axis=(1.0, 0.0),
+                            normal=(0.0, 1.0), length=40.0, thickness=10.0,
+                        ))
+    monkeypatch.setattr(host, "_resolve_generic_gap_lineage_host",
+                        lambda *_args: None)
+    monkeypatch.setattr(host, "_resolve_two_face_lineage_host",
+                        lambda *_args: None)
+    monkeypatch.setattr(host, "_resolve_host_bands", issue_band)
+    first = producer.publish(
+        opening_left_selector=original, opening_right_selector=original,
+        host_universe_selector=universe_selector,
+    )
+    assert first.status is Status.CORROBORATED
+    assert first.record is not None
+    selector = host.OpeningHostBindingSelector(
+        document_id=opening.document_id, revision_id=opening.revision_id,
+        source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+        page_id=opening.page_id, decision_scope_id="wall-source:page-3",
+        opening_identity_id=opening.record_id,
+    )
+    old_authority = producer.authority()
+    assert old_authority.resolve(selector) == first
+
+    active["member"] = "wall:host:B"
+    with pytest.raises(RuntimeError, match="host-binding producer equivocation"):
+        producer.publish(
+            opening_left_selector=original, opening_right_selector=original,
+            host_universe_selector=universe_selector,
+        )
+    assert producer.authority().resolve(selector).status is Status.ABSTAINED
+    assert old_authority.resolve(selector) == first
+
+    active["member"] = "wall:host:A"
+    assert producer.publish(
+        opening_left_selector=original, opening_right_selector=original,
+        host_universe_selector=universe_selector,
+    ) == first
