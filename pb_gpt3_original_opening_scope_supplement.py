@@ -17,7 +17,9 @@ from pb_live_opening_area_quantity_publication import publish_live_opening_area_
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject, LivePhysicalOpeningVoidComposition,
 )
-from pb_live_wall_opening_authority_composition import LiveOpeningHostTrace
+from pb_live_wall_opening_authority_composition import (
+    LiveOpeningHostTrace, LiveWallOpeningAuthorityComposition,
+)
 from pb_migration_contracts import EvidenceResolutionStatus, canonical_contract_json
 from pb_opening_host_binding_authority import OpeningHostBindingSelector
 from pb_source_closed_run_export import (
@@ -261,3 +263,74 @@ def verify_source_owned_opening_scope_supplement(
         raise ProducerScopeLineageConflict(
             "scope sidecar or parent receipt differs from the live source producer"
         )
+
+
+
+def scope_supplement_from_live_source_producer(
+    *,
+    opening_composition: LivePhysicalOpeningVoidComposition,
+    wall_composition: LiveWallOpeningAuthorityComposition,
+    sealed_run: SealedSourceClosedRun,
+    customer_rows: Sequence[Mapping[str, object]],
+) -> dict:
+    """Re-prove live producer host bindings before issuing the scope supplement.
+
+    The actual wall/opening composition owns the source selectors and bound
+    host authority. Caller-provided JSON scope tokens or a prebuilt sidecar
+    never enter this API; it is intentionally an in-process producer join.
+    """
+    if type(wall_composition) is not LiveWallOpeningAuthorityComposition:
+        raise TypeError("original live wall/host producer composition required")
+    if wall_composition.revision_id != opening_composition.revision_id:
+        raise ProducerScopeLineageConflict("wall/opening source producer revision mismatch")
+    selectors = wall_composition.binding_selectors
+    traces = wall_composition.opening_bindings
+    if not isinstance(selectors, Mapping):
+        raise ProducerScopeLineageConflict("producer-owned original binding selectors absent")
+    physical = _index(
+        opening_composition.canonical_openings, "physical_opening_id",
+        role="complete canonical source opening inventory",
+    )
+    hosts = _index(
+        traces, "opening_identity_id", role="complete source host trace",
+    )
+    if set(physical) != set(selectors) or set(physical) != set(hosts):
+        raise ProducerScopeLineageConflict("source producer host universe incomplete")
+    for physical_id, item in sorted(physical.items()):
+        selector = selectors[physical_id]
+        if type(selector) is not OpeningHostBindingSelector:
+            raise ProducerScopeLineageConflict("untyped original source producer selector")
+        result = wall_composition.opening_host_binding_authority.resolve(
+            selector
+        )
+        bound = result.record
+        host = hosts[physical_id]
+        if host.record_id is not None:
+            if (
+                result.status is not EvidenceResolutionStatus.CORROBORATED
+                or bound is None
+                or bound.record_id != host.record_id
+                or bound.host_wall_id != host.host_wall_id
+                or bound.opening_identity_id != physical_id
+                or bound.decision_scope_id != selector.decision_scope_id
+                or bound.snapshot_id != selector.snapshot_id
+                or bound.source_sha256 != selector.source_sha256
+                or bound.revision_id != selector.revision_id
+                or bound.page_id != selector.page_id
+                or bound.document_id != selector.document_id
+                or host.record_id != item.host_binding_record_id
+            ):
+                raise ProducerScopeLineageConflict(
+                    "actual producer binding cannot reproduce claimed opening/host receipt"
+                )
+        elif bound is not None or item.host_binding_record_id is not None:
+            raise ProducerScopeLineageConflict(
+                "unresolved producer host cannot authenticate a canonical opening"
+            )
+    return source_owned_opening_scope_supplement(
+        opening_composition,
+        producer_binding_selectors=selectors,
+        producer_host_traces=traces,
+        sealed_run=sealed_run,
+        customer_rows=customer_rows,
+    )
