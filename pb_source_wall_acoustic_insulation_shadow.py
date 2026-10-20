@@ -107,10 +107,10 @@ class SourceWallAcousticInsulationShadowAuthority:
         wall_length_pt: float,
         wall_height_pt: float,
         openings_area_pt2: float = 0.0,
-        cavity_thickness_pt: float = 2.55,  # ~90mm at 1:100 scale: 2.55 pt
-        r_value: float = 2.5,
-        rw_rating: int = 50,
-        insulation_material: str = "HIGH_DENSITY_GLASSWOOL_BATTS",
+        cavity_thickness_pt: float = 0.0,
+        r_value: float = 0.0,
+        rw_rating: int = 0,
+        insulation_material: str = "",
     ) -> WallAcousticInsulationRecord:
         gross_area = wall_length_pt * wall_height_pt
         net_area = max(0.0, gross_area - openings_area_pt2)
