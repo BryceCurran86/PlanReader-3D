@@ -119,3 +119,56 @@ def test_original_lot16_eight_v1_seal_still_valid_after_new_issue_gate():
     assert loaded.fingerprint == (
         "ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb"
     )
+
+
+
+def test_new_issuer_and_trace_source_snapshot_must_agree():
+    quantities, traces = _two_quantities(
+        first="source_snapshot_A", second="source_snapshot_A"
+    )
+    traces["room-source-1"] = trace(
+        canonical_entity_ids=("physical-room-A",),
+        metadata={"snapshot_id": "source_snapshot_FOREIGN"},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="quantity/trace snapshot receipts conflict"):
+        _seal(quantities, traces)
+
+
+def test_trace_only_original_snapshot_still_prevents_mixed_issuer_snapshots():
+    quantities, traces = _two_quantities(
+        first=None, second="source_snapshot_B"
+    )
+    traces["room-source-1"] = trace(
+        canonical_entity_ids=("physical-room-A",),
+        metadata={"snapshot_id": "source_snapshot_A"},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="conflicting explicit source snapshot"):
+        _seal(quantities, traces)
+
+
+def test_matching_quantity_and_trace_snapshot_retains_unchanged_v1_wire():
+    quantities, traces = _two_quantities(
+        first="source_snapshot_A", second="source_snapshot_A"
+    )
+    traces["room-source-1"] = trace(
+        canonical_entity_ids=("physical-room-A",),
+        metadata={"snapshot_id": "source_snapshot_A"},
+    )
+    sealed = _seal(quantities, traces)
+    assert len(sealed.quantities) == 2
+    assert "snapshot_id" not in sealed.quantities[0].to_dict()
+    assert sealed_source_closed_run_from_dict(sealed.to_dict()).fingerprint == sealed.fingerprint
+
+
+@pytest.mark.parametrize("bad",[None,True,0, " source_snapshot_A ", [], {}])
+def test_bad_trace_only_snapshot_cannot_be_implicitly_granted(bad):
+    quantities, traces = _two_quantities(first=None, second=None)
+    traces["room-source-1"] = trace(
+        canonical_entity_ids=("physical-room-A",),
+        metadata={"snapshot_id": bad},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="explicit original producer snapshot_id"):
+        _seal(quantities, traces)
