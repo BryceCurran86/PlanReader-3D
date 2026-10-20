@@ -1,0 +1,155 @@
+"""Read-only private-original G17 source CLI call-path tests, no PDF fixtures."""
+from hashlib import sha256
+from types import SimpleNamespace as NS
+import pytest
+
+from pb_gpt2_g17_opening_source_band_ownership_shadow import (
+    OriginalG17OpeningFlankOwnership,
+)
+from pb_migration_contracts import EvidenceResolutionStatus
+from tools import diag_gpt2_original_g17_physical_source_flanks as cli
+
+_SOURCE = b"%PDF-synthetic-API-test"
+_SHA = sha256(_SOURCE).hexdigest()
+
+
+def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
+                   trace_identity="physical-original-1"):
+    state = dict(revision="rev", sha=_SHA, observed=[],
+                 compose_calls=0, source_calls=0, owned_calls=0)
+    published = NS(
+        revision=NS(revision_id="rev",
+                    document_id="live-source:" + _SHA[:32],
+                    source_sha256=_SHA),
+        snapshot=NS(snapshot_id="snap"),
+    )
+    record = NS(
+        record_id=trace_identity, page_id="3", source_sha256=_SHA,
+        snapshot_id="snap", source_observation_ids=tuple(support),
+        structural_pattern="raster_g17",
+    )
+    class Source:
+        def __init__(self, *, producer_method, producer_version):
+            assert producer_method and producer_version
+        def ingest_native_pdf_bytes(self, *, document_id, source_bytes,
+                                    source_locator, page_ids):
+            assert source_bytes == _SOURCE
+            assert page_ids == (3,)
+            assert document_id == published.revision.document_id
+            return NS(revision=NS(revision_id="rev"))
+        def published_snapshot_for_revision(self, revision_id):
+            assert revision_id == "rev"
+            return published
+        def authority(self):
+            return self
+        def resolve_raster_opening_primitive(self, selector):
+            state["source_calls"] += 1
+            if selector.observation_id not in support:
+                return NS(status=EvidenceResolutionStatus.ABSTAINED,
+                          observation=None)
+            return NS(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                observation=NS(
+                    page_id="3",
+                    derivation_parent_ids=("parent-" + selector.observation_id,),
+                ),
+            )
+    class Physical:
+        def prove_existence(self, selector):
+            state["observed"].append(selector.observation_id)
+            return NS(status=EvidenceResolutionStatus.CORROBORATED,
+                      existence_record=record)
+    def compose(*, source_visibility_producer, revision_id, page_ids):
+        state["compose_calls"] += 1
+        return NS(
+            revision_id="rev", page_ids=("3",),
+            physical_opening_authority=Physical(),
+            opening_bindings=(
+                NS(opening_identity_id=trace_identity,
+                   representative_observation_id="visible-1"),
+            ),
+        )
+    def recover(source, *, revision_id, snapshot_id, page_id,
+                required_parent_ids):
+        state["parents"] = tuple(sorted(required_parent_ids))
+        return "source-parent-source-only"
+    def owner(*args, **kwargs):
+        state["owned_calls"] += 1
+        assert kwargs["parent_source"] == "source-parent-source-only"
+        return OriginalG17OpeningFlankOwnership(
+            EvidenceResolutionStatus.CORROBORATED,
+            ("source_only",), trace_identity, _SHA,
+            tuple(sorted(support)), ("parent-end-a", "parent-end-b"),
+            tuple(sorted(support)),
+        )
+    monkeypatch.setattr(cli, "SourceVisibilityProducer", Source)
+    monkeypatch.setattr(cli, "compose_live_wall_opening_authority", compose)
+    monkeypatch.setattr(cli, "recover_original_raster_opening_parent_lines_shadow", recover)
+    monkeypatch.setattr(cli, "reconstruct_raster_source_flank_bands_shadow",
+                        lambda source: "two-original-flanks")
+    monkeypatch.setattr(cli, "bind_original_g17_flanks_to_physical_opening_shadow",
+                        owner)
+    return state, record
+
+
+def test_real_original_source_call_path_reproves_each_physically_owned_support(monkeypatch):
+    state, _ = _stub_pipeline(monkeypatch)
+    result = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert state["compose_calls"] == 1
+    assert state["source_calls"] == 2
+    assert state["observed"] == ["visible-1"]
+    assert state["parents"] == ("parent-visible-1", "parent-visible-2")
+    assert state["owned_calls"] == 1
+    assert result["original_source_owned_two_flank_count"] == 1
+    assert result["g17_candidate_physical_count"] == 1
+    assert result["source_owner_claims"][0]["physical_opening_id"] == "physical-original-1"
+    assert result["shadow_only"] and not result["structural_host_granted"]
+    assert not result["metric_quantity_granted"] and not result["benchmark_score_granted"]
+
+
+def test_foreign_source_sha_rejected_before_producer_ingest(monkeypatch):
+    state, _ = _stub_pipeline(monkeypatch)
+    with pytest.raises(ValueError):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256="0" * 64, page_id="3",
+        )
+    assert state["compose_calls"] == 0
+
+
+def test_corrupted_physical_g17_source_receipts_never_skip_as_non_raster(monkeypatch):
+    state, record = _stub_pipeline(monkeypatch)
+    record.source_observation_ids = ("missing",)
+    result = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert result["g17_candidate_physical_count"] == 0
+    assert state["owned_calls"] == 0
+    assert result["unresolved"] == [{
+        "physical_opening_id": "physical-original-1",
+        "reason": "original_g17_raster_source_support_unavailable",
+    }]
+
+
+def test_incomplete_source_support_not_laundered_as_positive(monkeypatch):
+    state, record = _stub_pipeline(monkeypatch)
+    record.source_observation_ids = ("visible-1", "missing")
+    result = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert result["original_source_owned_two_flank_count"] == 0
+    assert state["owned_calls"] == 0
+    assert result["unresolved"][0]["reason"] == (
+        "original_g17_source_support_incomplete_or_ambiguous"
+    )
+
+
+@pytest.mark.parametrize("page", ["0", "03", "three", "", "4.0"])
+def test_original_source_page_scope_must_be_exact_positive_integer(monkeypatch, page):
+    state, _ = _stub_pipeline(monkeypatch)
+    with pytest.raises(ValueError):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256=_SHA, page_id=page,
+        )
+    assert state["compose_calls"] == 0
