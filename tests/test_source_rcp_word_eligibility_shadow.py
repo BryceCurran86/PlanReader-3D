@@ -223,3 +223,35 @@ def test_nonfinite_pdf_word_box_fails_closed():
         source_defined_ceiling_codes=("GRID",),
     )
     assert word.status is EvidenceResolutionStatus.ABSTAINED
+
+def test_exact_original_page9_short_office_note_source_negative_when_provisioned():
+    import os
+    import hashlib
+    from pathlib import Path
+    import fitz
+    import pytest
+    loc=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not loc:
+        pytest.skip("private original 31-page architectural PDF unavailable")
+    original=Path(loc).read_bytes()
+    digest=os.environ["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
+    assert hashlib.sha256(original).hexdigest()==digest
+    with fitz.open(stream=original,filetype="pdf") as document:
+        page=document[8]
+        line=next(block for block in page.get_text("blocks")
+                  if int(block[5])==212)
+        office=next(word for word in page.get_text("words")
+                    if word[4]=="OFFICE" and int(word[5])==212)
+        assert "REVIEW IN OFFICE AREA" in line[4]
+        result=SourceRcpWordEligibilityShadowAuthority().classify_word(
+            document_id="source:"+digest[:16], page_id="9",
+            word_text=office[4], word_bbox=tuple(office[:4]),
+            block_text=line[4], block_index=212,
+            line_index=int(office[6]),word_index=int(office[7]),
+            plan_viewport_bbox=(100.,100.,1200.,2000.),
+            schedule_table_bboxes=((1360.,120.,1502.,358.),),
+            source_defined_ceiling_codes=("GRID","IPF1","WFPB","FPB"),
+        )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.role is RcpWordRole.OTHER_PLAN_TEXT
+    assert not result.is_eligible_for_ceiling_mark
