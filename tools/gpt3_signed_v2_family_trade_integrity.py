@@ -130,6 +130,32 @@ def require_signed_v2_family_trade_integrity(
                 raise ValueError(
                     "bound production family cannot be reclassified as benchmark trade"
                 )
+            if family == "floor_finish_area" and trade == "tiling":
+                # The real cross-view floor-finish producer signs
+                # floor_finish_area:<canonical-floor>:<source-code>:<semantic>.
+                # Its authenticated material definition allows TILE, VINYL
+                # and EPOXY. A physical floor match alone cannot turn a
+                # vinyl/epoxy finish into FT2/FT3 tiling benchmark credit.
+                # Requiring source's signed terminal material role is a
+                # NEGATIVE trade veto, never an independent material issuer.
+                finish_key = _field(quantity, "semantic_key")
+                parts = (
+                    finish_key.split(":")
+                    if type(finish_key) is str else ()
+                )
+                if (
+                    len(parts) != 4
+                    or parts[0] != "floor_finish_area"
+                    or not all(
+                        type(part) is str and part and part == part.strip()
+                        for part in parts
+                    )
+                    or parts[-1] != "tile"
+                ):
+                    raise ValueError(
+                        "mapped tiling requires original source-signed tile "
+                        "floor finish material semantics"
+                    )
             # The higher-level V1 signed receipt verifier guarantees a unit
             # exists. A missing unit in source-neutral helper-only test data
             # is left to that gate; a PRESENT incompatible source-owned unit
