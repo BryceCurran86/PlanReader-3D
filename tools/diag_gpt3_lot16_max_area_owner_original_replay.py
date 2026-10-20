@@ -73,7 +73,11 @@ def replay_owner_original_lot16_area_convergence(
         document_id=f"live-source:{source_digest[:32]}",
         source_bytes=original_pdf,
         source_locator="memory://gpt3-owner-original-lot16-area-convergence.pdf",
-        page_ids=(int(ORIGINAL_PAGE_ID),),
+        # Critical physical source identity: the historical signed original
+        # eight were produced from the FULL original document snapshot.
+        # Page-subset ingest produces a different source snapshot identity,
+        # changing opening/host/quantity IDs even if its p3 ink is identical.
+        # Select p3 at COMPOSITION only, never at the original ingest gate.
     )
     revision = published_revision.revision.revision_id
     source_snapshot = source.published_snapshot_for_revision(revision)
