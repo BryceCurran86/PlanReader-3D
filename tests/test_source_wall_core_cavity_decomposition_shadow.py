@@ -67,10 +67,28 @@ def test_decompose_solid_monolithic():
     assert assy.leaves[0].is_loadbearing is True
 
 
+def test_omitted_leaf_thicknesses_do_not_invent_typical_walls():
+    authority = SourceWallCoreCavityDecompositionShadowAuthority()
+
+    cavity = authority.decompose_cavity_brick()
+    assert cavity.overall_thickness_pt == 0.0
+    assert cavity.structural_core_thickness_pt == 0.0
+    assert cavity.cavity_width_pt == 0.0
+
+    veneer = authority.decompose_brick_veneer()
+    assert veneer.overall_thickness_pt == 0.0
+    assert veneer.structural_core_thickness_pt == 0.0
+    assert veneer.cavity_width_pt == 0.0
+
+
 def test_compile_decomposition_receipt():
     authority = SourceWallCoreCavityDecompositionShadowAuthority()
 
-    a1 = authority.decompose_cavity_brick()
+    a1 = authority.decompose_cavity_brick(
+        inner_leaf_thickness_pt=110.0,
+        cavity_width_pt=50.0,
+        outer_leaf_thickness_pt=110.0,
+    )
     a2 = authority.decompose_solid_monolithic(thickness_pt=150.0)
 
     receipt = authority.compile_decomposition_receipt(
