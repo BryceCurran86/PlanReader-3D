@@ -58,6 +58,7 @@ def _source_owned_w4_fragment_end_reach(
     cross_hi: float,
     parent_lo: float,
     parent_hi: float,
+    parent_offset: float,
     snap_tol: float,
     pixel_tol: float,
 ) -> tuple[str, tuple[str, ...]]:
@@ -98,11 +99,24 @@ def _source_owned_w4_fragment_end_reach(
         return ("w4_local_fragment_parent_unmapped", ())
 
     hits = []
+    original_parent_geometry_conflict = False
     for fragment in owned:
         local = _source_line_axis_data(tuple(fragment.geometry), opening)
         if local is None:
             continue
         lo, hi, offset = local
+        # A foreign local edge must not become ancestry merely by carrying
+        # the matching source ID and terminating at the apparent end. W2
+        # snapped edges can differ within the existing pixel/snap budget,
+        # but cannot shift across the solid wall band or extend far beyond
+        # their own independently issued original source span.
+        if (
+            abs(offset - parent_offset) > pixel_tol
+            or lo < parent_lo - snap_tol
+            or hi > parent_hi + snap_tol
+        ):
+            original_parent_geometry_conflict = True
+            continue
         local_end = hi if role == "left" else lo
         if (
             abs(local_end - edge) <= snap_tol
@@ -111,6 +125,10 @@ def _source_owned_w4_fragment_end_reach(
         ):
             hits.append(str(fragment.edge_id))
 
+    if original_parent_geometry_conflict:
+        # A conflicted candidate must never be rescued by its OTHER original
+        # fragments. Retain each conflict rather than electing a positive.
+        return ("w4_source_edge_fragment_parent_geometry_conflict", ())
     if hits:
         return ("w4_source_owned_local_fragment_end_reach_observed", tuple(sorted(hits)))
     return ("w4_source_owned_local_fragment_end_reach_missing", ())
@@ -226,6 +244,7 @@ def build_g17_flank_w4_end_reach_ledger(
                     cross_hi=cross_hi,
                     parent_lo=p_lo,
                     parent_hi=p_hi,
+                    parent_offset=offset,
                     snap_tol=snap_tol,
                     pixel_tol=pixel_tol,
                 )
