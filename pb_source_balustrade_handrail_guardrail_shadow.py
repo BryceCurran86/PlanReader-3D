@@ -43,7 +43,7 @@ class BalustradeRunSpec:
     height_mm: float = 0.0
     post_spacing_mm: float = 0.0
     has_continuous_handrail: bool = False
-    handrail_extension_m: float = 0.30
+    handrail_extension_m: float = 0.0
     level_id: str = "L1"
     source_tag: str = ""
 
