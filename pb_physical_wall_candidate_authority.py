@@ -3518,6 +3518,7 @@ def _build_opening_local_supplemental_scope_result(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
     opening_local_exact_source_endpoints_shadow: bool = False,
+    filter_typed_negative_non_wall_ink_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     """Assemble only supplemental terminal-band W4 candidates.
 
@@ -3583,6 +3584,7 @@ def _build_opening_local_supplemental_scope_result(
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
         opening_local_exact_source_endpoints_shadow=opening_local_exact_source_endpoints_shadow,
+        filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
     )
     if result.status is not EvidenceResolutionStatus.CORROBORATED:
         return result
