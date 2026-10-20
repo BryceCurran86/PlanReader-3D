@@ -48,6 +48,22 @@ def test_balcony_drainage_1_in_80():
     assert rec.screed_volume_pt3 == 8000.0 * 1.0  # 8000.0
 
 
+def test_omitted_fall_ratio_does_not_invent_one_in_one_hundred():
+    authority = SourceBalconyDrainageFallShadowAuthority()
+
+    rec = authority.compute_balcony_drainage(
+        room_id="BALCONY_UNKNOWN",
+        area_pt2=10000.0,
+        fall_distance_pt=100.0,
+    )
+
+    assert rec.fall_ratio_1_in_n == 0.0
+    assert rec.vertical_fall_pt == 0.0
+    assert rec.threshold_stepdown_pt == 0.0
+    assert rec.screed_min_thickness_pt == 0.0
+    assert rec.screed_volume_pt3 == 0.0
+
+
 def test_compile_balcony_receipt():
     authority = SourceBalconyDrainageFallShadowAuthority()
 

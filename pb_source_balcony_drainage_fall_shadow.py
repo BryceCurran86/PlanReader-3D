@@ -107,13 +107,13 @@ class SourceBalconyDrainageFallShadowAuthority:
         room_id: str,
         area_pt2: float,
         fall_distance_pt: float,
-        fall_ratio_1_in_n: float = 100.0,
-        threshold_stepdown_pt: float = 1.42,  # ~50mm at 1:100 scale: 1.42 pt
-        screed_min_thickness_pt: float = 0.71, # ~25mm at 1:100 scale: 0.71 pt
+        fall_ratio_1_in_n: float = 0.0,
+        threshold_stepdown_pt: float = 0.0,
+        screed_min_thickness_pt: float = 0.0,
         strip_drain_length_pt: float = 0.0,
     ) -> BalconyDrainageRecord:
-        ratio = max(1.0, fall_ratio_1_in_n)
-        vert_fall = fall_distance_pt / ratio
+        ratio = fall_ratio_1_in_n
+        vert_fall = fall_distance_pt / ratio if ratio > 0.0 else 0.0
         screed_max = screed_min_thickness_pt + vert_fall
         screed_avg = screed_min_thickness_pt + (vert_fall / 2.0)
         screed_vol = area_pt2 * screed_avg
