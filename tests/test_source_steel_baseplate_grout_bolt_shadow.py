@@ -38,6 +38,22 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
         self.assertEqual(b_emb2, 300.0)
         self.assertEqual(grt2, 25.0)
 
+        pw3, pl3, pt3, _c, _d, _e, _g = SourceSteelBaseplateGroutBoltShadowAuthority.parse_baseplate_annotation(
+            "BASEPLATE"
+        )
+        self.assertEqual(pw3, 0.0)
+        self.assertEqual(pl3, 0.0)
+        self.assertEqual(pt3, 0.0)
+
+        omitted = SteelBaseplateSpec(
+            connection_id="BP-UNKNOWN",
+            column_id="COL-UNKNOWN",
+            location=(0.0, 0.0),
+        )
+        self.assertEqual(omitted.plate_width_mm, 0.0)
+        self.assertEqual(omitted.plate_length_mm, 0.0)
+        self.assertEqual(omitted.plate_thickness_mm, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(50.0, 50.0), (100.0, 100.0)]
         snapped = SourceSteelBaseplateGroutBoltShadowAuthority.snap_point((51.0, 50.5), ref_pts)
