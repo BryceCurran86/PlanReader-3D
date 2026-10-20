@@ -71,9 +71,52 @@ def require_signed_v2_family_trade_integrity(
             raise ValueError("duplicate eligible frozen item identity in mapped trade veto")
         items[key] = item
     by_refs: dict[tuple[str, ...], list[Any]] = {}
+    # Legacy V1 floor receipts may predate current production uniqueness
+    # guards. Before an independently bound physical floor contributes to
+    # frozen V2, veto competing geometric floor_area receipts even when their
+    # semantic keys or GROUPS of physical members differ. A floor_finish_area
+    # material layer remains an independent, valid family.
+    physical_floor_area_claims: dict[str, int] = {}
+    # Record SOURCE-OWNED kind, not trade identity or label similarity. One
+    # canonical physical opening cannot become a window in its gross AREA
+    # and a door in its independently issued COUNT. This is a negative
+    # proof over the *actual* signed opening rows, not a new kind inference
+    # or permission to mint counts.
+    opening_kind_claims: dict[str, set[str]] = {}
+    opening_family_claim_counts: dict[tuple[str, str], int] = {}
     for quantity in sealed_quantities:
+        family = _field(quantity, "family")
+        semantic_key = _field(quantity, "semantic_key")
+        typed_kind = None
+        if family in {"opening_area", "opening_count"} and type(semantic_key) is str:
+            prefix_kind = (
+                (("door_area:", "door"), ("window_area:", "window"))
+                if family == "opening_area"
+                else (("door_count:", "door"), ("window_count:", "window"))
+            )
+            typed_kind = next((
+                kind for prefix, kind in prefix_kind
+                if semantic_key.startswith(prefix)
+            ), None)
+        if family in {"opening_area", "opening_count"} and _field(quantity, "abstained") is False:
+            for physical_id in _field(quantity, "object_identity_refs") or ():
+                if type(physical_id) is str and physical_id:
+                    original_claim = (family, physical_id)
+                    opening_family_claim_counts[original_claim] = (
+                        opening_family_claim_counts.get(original_claim, 0) + 1
+                    )
+                    if typed_kind is not None:
+                        opening_kind_claims.setdefault(physical_id, set()).add(typed_kind)
         refs = tuple(sorted(_field(quantity, "object_identity_refs") or ()))
         by_refs.setdefault(refs, []).append(quantity)
+
+        if (_field(quantity, "family") == "floor_area"
+                and _field(quantity, "abstained") is False):
+            for floor_id in refs:
+                if type(floor_id) is str and floor_id:
+                    physical_floor_area_claims[floor_id] = (
+                        physical_floor_area_claims.get(floor_id, 0) + 1
+                    )
 
     for binding in identity_bindings:
         item = items.get(_field(binding, "benchmark_item_id"))
@@ -90,6 +133,31 @@ def require_signed_v2_family_trade_integrity(
         ):
             raise ValueError("bound production object identity refs are not canonical")
         refs = tuple(sorted(raw_refs))
+        if any(physical_floor_area_claims.get(floor_id, 0) > 1
+               for floor_id in refs):
+            raise ValueError(
+                "same original physical floor has duplicate source-signed "
+                "geometric floor area claims across semantic keys"
+            )
+        # An eligible mapping for this exact physical source identity must
+        # never score a contradictory source-owned door/window classification,
+        # even when AREA and COUNT are mapped to separately compatible trades.
+        if any(
+            len(opening_kind_claims.get(physical_id, ())) > 1
+            for physical_id in refs
+        ):
+            raise ValueError(
+                "signed opening area/count disagree on original physical door/window kind"
+            )
+        if any(
+            opening_family_claim_counts.get((family, physical_id), 0) > 1
+            for physical_id in refs
+            for family in ("opening_area", "opening_count")
+        ):
+            raise ValueError(
+                "multiple source opening quantities claim the same physical "
+                "opening and measurement family"
+            )
         candidates = by_refs.get(refs, ())
         declared_family = _field(binding, "production_family")
         if candidates and (
@@ -130,6 +198,32 @@ def require_signed_v2_family_trade_integrity(
                 raise ValueError(
                     "bound production family cannot be reclassified as benchmark trade"
                 )
+            if family == "floor_finish_area" and trade == "tiling":
+                # The real cross-view floor-finish producer signs
+                # floor_finish_area:<canonical-floor>:<source-code>:<semantic>.
+                # Its authenticated material definition allows TILE, VINYL
+                # and EPOXY. A physical floor match alone cannot turn a
+                # vinyl/epoxy finish into FT2/FT3 tiling benchmark credit.
+                # Requiring source's signed terminal material role is a
+                # NEGATIVE trade veto, never an independent material issuer.
+                finish_key = _field(quantity, "semantic_key")
+                parts = (
+                    finish_key.split(":")
+                    if type(finish_key) is str else ()
+                )
+                if (
+                    len(parts) != 4
+                    or parts[0] != "floor_finish_area"
+                    or not all(
+                        type(part) is str and part and part == part.strip()
+                        for part in parts
+                    )
+                    or parts[-1] != "tile"
+                ):
+                    raise ValueError(
+                        "mapped tiling requires original source-signed tile "
+                        "floor finish material semantics"
+                    )
             # The higher-level V1 signed receipt verifier guarantees a unit
             # exists. A missing unit in source-neutral helper-only test data
             # is left to that gate; a PRESENT incompatible source-owned unit
