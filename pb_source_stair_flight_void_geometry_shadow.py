@@ -130,13 +130,13 @@ class SourceStairFlightVoidGeometryShadowAuthority:
         flight_id: str,
         origin_pt: Tuple[float, float],
         direction: str = "UP",
-        riser_count: int = 16,
-        riser_height_pt: float = 4.96,  # ~175mm in pt (1:100 scale: 4.96 pt)
-        tread_going_pt: float = 7.09,   # ~250mm in pt (1:100 scale: 7.09 pt)
-        flight_width_pt: float = 28.35, # ~1000mm in pt (1:100 scale: 28.35 pt)
+        riser_count: int = 0,
+        riser_height_pt: float = 0.0,
+        tread_going_pt: float = 0.0,
+        flight_width_pt: float = 0.0,
         is_horizontal_run: bool = True,
     ) -> StairFlightRecord:
-        tread_count = max(1, riser_count - 1)
+        tread_count = max(0, riser_count - 1)
         flight_len = tread_count * tread_going_pt
         total_rise = riser_count * riser_height_pt
 
