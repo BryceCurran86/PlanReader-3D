@@ -288,3 +288,12 @@ def test_cross_physical_collision_on_shared_FACE_parent_even_if_visible_ids_diff
     assert all(item.status is EvidenceResolutionStatus.CONFLICT for item in result)
     assert all(not item.host_binding_granted and not item.firm_area_granted
                for item in result)
+
+def test_abstention_keeps_original_physical_id_for_independent_repair(monkeypatch):
+    c = _context(monkeypatch)
+    c[-1]["record"] = replace(c[4], source_sha256="0" * 64)
+    result = _run(c)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.physical_opening_id == "physical-G17-1"
+    assert result.reason_codes == ("physical_g17_source_root_conflict",)
+    assert not result.host_binding_granted and not result.firm_area_granted
