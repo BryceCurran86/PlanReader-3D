@@ -124,7 +124,7 @@ def test_two_distinct_source_physical_floors_remain_independently_measured():
     )
     assert len(_seal(quantities).quantities) == 2
     assert len(_customer(_commercial_rows(
-        ("floor-original-1",), ("floor-original-2"),
+        ("floor-original-1",), ("floor-original-2",),
     ))) == 2
 
 
