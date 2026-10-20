@@ -126,7 +126,7 @@ class SourceSlabDropPanelCapitalShadowAuthority:
             return float(dims[0]), float(dims[1]), float(dims[2])
         elif len(dims) == 2:
             return float(dims[0]), float(dims[0]), float(dims[1])
-        return 2000.0, 2000.0, 150.0
+        return 0.0, 0.0, 0.0
 
     @staticmethod
     def compute_capital_frustum_volume(
