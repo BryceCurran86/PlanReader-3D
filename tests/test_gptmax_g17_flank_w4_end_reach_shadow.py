@@ -316,3 +316,31 @@ def test_fragment_witness_missing_is_unknown_not_positive_and_order_stable():
                 "owned_w4_fragment_end_reach_status"
             ] == "w4_source_edge_fragment_receipts_unavailable"
     assert not a["host_granted"]
+
+
+@pytest.mark.parametrize("foreign_fragment", (
+    (20.0, 59.0, 100.0, 59.0),   # source ID correct, wrong wall-face offset
+    (0.0, 53.0, 100.0, 53.0),    # source ID correct, extends before source start
+))
+def test_source_parent_id_cannot_cover_foreign_shifted_or_extended_w2_edge(
+    foreign_fragment,
+):
+    from types import SimpleNamespace
+
+    records, lines = _fixture()
+    records[0].source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="claiming-left",
+            geometry=foreign_fragment,
+            source_primitive_ids=("raw:left",),
+        ),
+    )
+    result = _ledger(records, lines)
+    left = next(x for x in result["flanks"] if x["role"] == "left")
+    row = left["local_end_reach_candidates"][0]
+    assert row["local_chain_reaches_flank_end"] is True
+    assert row["strict_source_fragment_end_reach_candidate"] is False
+    assert row["source_parent_end_reach"][0][
+        "owned_w4_fragment_end_reach_status"
+    ] == "w4_source_edge_fragment_parent_geometry_conflict"
+    assert not result["host_granted"]
