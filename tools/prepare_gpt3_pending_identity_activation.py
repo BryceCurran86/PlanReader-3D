@@ -19,6 +19,9 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 # tests/benchmarks is also a top-level package named "benchmarks". Load the
 # actual frozen full_plan_v2 package under a private alias, matching the
 # repository's exact reconciliation runner, so pytest collection cannot resolve
@@ -519,6 +522,17 @@ def build_activation(
 
     # Reparse to enforce identity-map schema and uniqueness before publish.
     identity_map_from_dict(output)
+    # A source-proven physical opening is NOT a source-proven benchmark trade.
+    # A new independent mapping that reclassifies source-signed window_area
+    # as a frozen DOOR could otherwise receive an ACTIVATED receipt here.
+    # Require the exact same negative door/window, unit, family and source
+    # cardinality checks as the four-project GPT3 report before any map
+    # or activation receipt is returned. Do not invent/rekey source objects.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
