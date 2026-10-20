@@ -209,6 +209,49 @@ def _min_distance_to_boundary(
     return min_dist
 
 
+def _point_distance_to_segment(
+    pt: tuple[float, float],
+    s1: tuple[float, float],
+    s2: tuple[float, float],
+) -> float:
+    """Distance from point to line segment s1-s2."""
+    dx = s2[0] - s1[0]
+    dy = s2[1] - s1[1]
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq <= 1e-12:
+        return _distance(pt, s1)
+    t = max(0.0, min(1.0, ((pt[0] - s1[0]) * dx + (pt[1] - s1[1]) * dy) / seg_len_sq))
+    proj_x = s1[0] + t * dx
+    proj_y = s1[1] + t * dy
+    return math.hypot(pt[0] - proj_x, pt[1] - proj_y)
+
+
+def _point_distance_to_polygon_boundary(
+    pt: tuple[float, float],
+    poly: Sequence[tuple[float, float]],
+) -> float:
+    n = len(poly)
+    if n < 2:
+        return float("inf")
+    return min(
+        _point_distance_to_segment(pt, poly[i], poly[(i + 1) % n])
+        for i in range(n)
+    )
+
+
+def _threshold_aligns_with_polygon_boundary(
+    threshold: SourceDoorwayThreshold,
+    poly: Sequence[tuple[float, float]],
+    tolerance_pt: float,
+) -> bool:
+    """Check if doorway threshold endpoints lie on or near the room polygon boundary."""
+    p1 = threshold.start_pt
+    p2 = threshold.end_pt
+    d1 = _point_distance_to_polygon_boundary(p1, poly)
+    d2 = _point_distance_to_polygon_boundary(p2, poly)
+    return d1 <= tolerance_pt and d2 <= tolerance_pt
+
+
 def _polygon_area(poly: Sequence[tuple[float, float]]) -> float:
     n = len(poly)
     if n < 3:
@@ -317,10 +360,12 @@ def evaluate_source_floor_finish_ownership_shadow(
                     selector=selector,
                 )
 
-    # 5. Check doorway threshold transitions
+    # 5. Check doorway threshold transitions: must align with polygon boundary
     doorway_authenticated = False
-    if doorway_transitions:
-        doorway_authenticated = True
+    for thresh in doorway_transitions:
+        if _threshold_aligns_with_polygon_boundary(thresh, clean_poly, snap_tolerance_pt):
+            doorway_authenticated = True
+            break
 
     poly_tuple = tuple(clean_poly)
     record_id = stable_contract_id(
