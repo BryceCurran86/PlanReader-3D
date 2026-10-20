@@ -33,6 +33,12 @@ class TestSourceWeatherLouverAerodynamicFreeAreaShadow(unittest.TestCase):
         self.assertEqual(h2, 1800.0)
         self.assertEqual(fa2, 0.35)
 
+        _b3, w3, h3, _fa3, _pitch3 = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.parse_louver_annotation(
+            "LOUVER"
+        )
+        self.assertEqual(w3, 0.0)
+        self.assertEqual(h3, 0.0)
+
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 100.0)]
         snapped = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.snap_point((1.0, 1.0), ref_pts)
@@ -71,6 +77,17 @@ class TestSourceWeatherLouverAerodynamicFreeAreaShadow(unittest.TestCase):
         self.assertEqual(res.status, "CANDIDATE")
         self.assertFalse(res.commercial_projection_allowed)
         self.assertFalse(res.takeoff_eligible)
+
+        omitted = WeatherLouverSpec(
+            louver_id="WL-OMIT",
+            blade_type=LouverBladeType.TWO_STAGE_STORM,
+            location=(0.0, 0.0),
+        )
+        self.assertEqual(omitted.width_mm, 0.0)
+        self.assertEqual(omitted.height_mm, 0.0)
+        omitted_res = SourceWeatherLouverAerodynamicFreeAreaShadowAuthority.evaluate_louvers([omitted])
+        self.assertEqual(omitted_res.quantities.total_gross_aperture_area_m2, 0.0)
+        self.assertEqual(omitted_res.quantities.total_aerodynamic_free_area_m2, 0.0)
 
 
 if __name__ == "__main__":
