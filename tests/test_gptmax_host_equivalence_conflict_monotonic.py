@@ -430,9 +430,13 @@ def test_exact_original_host_producer_equivocation_revokes_cached_authority(
         ),
     )
     producer._results = {}
-    active = {"member": "wall:host:A"}
+    active = {"member": "wall:host:A", "blocked": False}
 
     def issue_band(*_args, **_kwargs):
+        if active["blocked"]:
+            return host._HostBandResolution(
+                Status.ABSTAINED, (), ("original_w4_host_no_longer_owned",),
+            )
         wall_id = active["member"]
         return host._HostBandResolution(
             Status.CORROBORATED,
@@ -469,6 +473,25 @@ def test_exact_original_host_producer_equivocation_revokes_cached_authority(
     )
     old_authority = producer.authority()
     assert old_authority.resolve(selector) == first
+
+    # Current original wall/source support can become unproved before the
+    # issuer constructs a replacement positive result. It must revoke a
+    # stale positive from NEW authorities on this exact scoped opening.
+    active["blocked"] = True
+    withheld = producer.publish(
+        opening_left_selector=original, opening_right_selector=original,
+        host_universe_selector=universe_selector,
+    )
+    assert withheld.status is Status.ABSTAINED
+    assert "original_w4_host_no_longer_owned" in withheld.reason_codes
+    assert producer.authority().resolve(selector).status is Status.ABSTAINED
+    assert old_authority.resolve(selector) == first
+
+    active["blocked"] = False
+    assert producer.publish(
+        opening_left_selector=original, opening_right_selector=original,
+        host_universe_selector=universe_selector,
+    ) == first
 
     active["member"] = "wall:host:B"
     with pytest.raises(RuntimeError, match="host-binding producer equivocation"):
