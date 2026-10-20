@@ -24,6 +24,7 @@ def _source_equivalence(rows, groups=()):
     return SimpleNamespace(
         pair_classifications=tuple(rows),
         equivalence_groups=groups,
+        ambiguous_wall_ids=(),
     )
 
 
