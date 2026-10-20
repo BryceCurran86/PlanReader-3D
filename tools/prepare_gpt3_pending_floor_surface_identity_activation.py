@@ -22,7 +22,7 @@ from tools.gpt3_signed_v2_family_trade_integrity import (
 )
 from tools.gpt3_atomic_pending_activation_pair import (
     preflight_new_activation_pair, source_input_snapshot,
-    publish_new_activation_pair,
+    publish_new_activation_pair, read_committed_active_identity_map,
 )
 
 _PACKAGE_DIR = (
@@ -491,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--customer-rows", type=Path, required=True)
     parser.add_argument("--active-identity-map", type=Path, required=True)
+    parser.add_argument("--active-identity-receipt", type=Path)
     parser.add_argument("--source-manifest", type=Path, required=True)
     parser.add_argument("--source-identity-proof", type=Path, required=True)
     parser.add_argument("--object-universe", type=Path, required=True)
@@ -502,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
         args.active_identity_map, args.source_manifest,
         args.source_identity_proof, args.object_universe,
     )
+    if args.active_identity_receipt is not None:
+        inputs += (args.active_identity_receipt,)
     outputs = (args.output_map, args.output_receipt)
     # Source and frozen collisions must be caught BEFORE reading any untrusted
     # source/identity content, never after a signed handoff has been built.
@@ -512,7 +515,9 @@ def main(argv: list[str] | None = None) -> int:
         pending_ledger=_object(args.pending_ledger),
         sealed_run_payload=_object(args.sealed_run),
         customer_rows=_rows(args.customer_rows),
-        active_identity_map_payload=_object(args.active_identity_map),
+        active_identity_map_payload=read_committed_active_identity_map(
+            args.active_identity_map, receipt_path=args.active_identity_receipt,
+        ),
         source_manifest=_object(args.source_manifest),
         source_identity_proof=_object(args.source_identity_proof),
         object_universe=_object(args.object_universe),
