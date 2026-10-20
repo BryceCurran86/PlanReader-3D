@@ -39,7 +39,7 @@ class RetainingWallSpec:
     footing_depth_mm: float = 300.0
     ag_pipe_diameter_mm: float = 100.0
     agg_backfill_width_mm: float = 300.0
-    has_tanking_membrane: bool = True
+    has_tanking_membrane: bool = False
     level_id: str = "SITE"
     source_annotation: str = ""
 

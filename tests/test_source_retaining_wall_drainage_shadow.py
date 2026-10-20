@@ -69,6 +69,16 @@ class TestSourceRetainingWallDrainageShadow(unittest.TestCase):
         self.assertEqual(res.quantities.total_tanking_membrane_area_m2, 18.0)
         self.assertEqual(res.quantities.total_ag_pipe_length_m, 10.0)
 
+    def test_omitted_tanking_does_not_assume_membrane(self):
+        wall = RetainingWallSpec(
+            wall_id="RW-UNKNOWN",
+            wall_type=RetainingWallType.RC_CANTILEVER,
+            centerline_points=[(0.0, 0.0), (10.0, 0.0)],
+        )
+        self.assertFalse(wall.has_tanking_membrane)
+        res = SourceRetainingWallDrainageShadowAuthority.evaluate_retaining_walls([wall])
+        self.assertEqual(res.quantities.total_tanking_membrane_area_m2, 0.0)
+
     def test_invariants_and_safety(self):
         res = SourceRetainingWallDrainageShadowAuthority.evaluate_retaining_walls([])
         self.assertEqual(res.status, "CANDIDATE")
