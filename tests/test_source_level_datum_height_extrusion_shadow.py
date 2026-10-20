@@ -61,6 +61,26 @@ def test_multilevel_building_stack():
     assert len(d["levels"]) == 4
 
 
+def test_top_level_missing_height_does_not_invent_three_metres():
+    authority = SourceLevelDatumHeightExtrusionShadowAuthority()
+
+    receipt = authority.compile_level_stack(
+        document_id="DOC_TOWER",
+        revision_id="REV_A",
+        source_sha256="12344321" * 8,
+        raw_levels=[
+            {"level_name": "Ground Floor", "elevation_reduced_level_m": 10.0},
+            {"level_name": "Roof", "elevation_reduced_level_m": 13.0},
+        ],
+    )
+
+    ground, roof = receipt.levels
+    assert ground.floor_to_floor_height_m == 3.0
+    assert roof.floor_to_floor_height_m == 0.0
+    assert roof.floor_to_ceiling_clear_height_m == 0.0
+    assert receipt.levels[0].structural_slab_level_m == 10.0
+
+
 def test_empty_levels_abstained():
     authority = SourceLevelDatumHeightExtrusionShadowAuthority()
 
