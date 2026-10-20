@@ -1,0 +1,39 @@
+name: GPT3 Integrated Source-Signed Activation and Atomic Release
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/gpt3_atomic_pending_activation_pair.py
+      - tools/prepare_gpt3_pending_identity_activation.py
+      - tools/prepare_gpt3_pending_floor_surface_identity_activation.py
+      - tools/run_gpt3_guarded_pending_reconciliation.py
+      - tests/test_gpt3_atomic_pending_activation_pair.py
+      - tests/test_gpt3_original_opening_activation_signed_trade.py
+      - tests/test_gpt3_floor_surface_activation_signed_material_trade.py
+      - tests/test_gpt3_guarded_activation_signed_trade_veto.py
+      - .github/workflows/test-gpt3-integrated-activation-release.yml
+permissions:
+  contents: read
+jobs:
+  integrated-producer-to-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Four independent GPT3 PR suites plus original issuer and frozen score protections
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_atomic_pending_activation_pair.py tests/test_gpt3_original_opening_activation_signed_trade.py tests/test_gpt3_floor_surface_activation_signed_material_trade.py tests/test_gpt3_guarded_activation_signed_trade_veto.py tests/test_gpt3_pending_identity_activation.py tests/test_gpt3_pending_floor_surface_identity_activation.py tests/test_gpt3_guarded_pending_reconciliation.py tests/test_gpt3_guarded_pending_owned_rollback.py tests/test_gpt3_signed_v2_family_unit_dimension_veto.py tests/test_live_floor_finish_area_source_closed_export.py
+          ruff check --select F821,F823 tools/gpt3_atomic_pending_activation_pair.py tools/prepare_gpt3_pending_identity_activation.py tools/prepare_gpt3_pending_floor_surface_identity_activation.py tools/run_gpt3_guarded_pending_reconciliation.py
+      - name: Original eight sealed/customer and genuine archived V2 score invariants
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_source_closed_run_export.py tests/test_customer_output_verification.py tests/test_gpt3_original_eight_frozen_v2_exact_baseline.py
