@@ -28,6 +28,7 @@ _SKIRTING_SEAL = object()
 
 
 class SkirtingMaterialProfile(str, Enum):
+    UNKNOWN = "UNKNOWN"
     TIMBER_MDF_BEVELLED = "TIMBER_MDF_BEVELLED"
     TIMBER_COLONIAL = "TIMBER_COLONIAL"
     VINYL_COVE_FORMED = "VINYL_COVE_FORMED"
@@ -117,7 +118,7 @@ class SourceSkirtingWallBaseShadowAuthority:
         gross_perimeter_pt: float,
         doorway_widths_pt: Sequence[float] = (),
         joinery_lengths_pt: Sequence[float] = (),
-        profile: SkirtingMaterialProfile = SkirtingMaterialProfile.TIMBER_MDF_BEVELLED,
+        profile: SkirtingMaterialProfile = SkirtingMaterialProfile.UNKNOWN,
         internal_corners_count: int = 0,
         external_corners_count: int = 0,
     ) -> RoomSkirtingRecord:
