@@ -110,6 +110,7 @@ def test_real_original_source_call_path_reproves_each_physically_owned_support(m
     assert state["owned_calls"] == 1
     assert result["original_source_owned_two_flank_count"] == 1
     assert result["host_abstained_g17_candidate_physical_count"] == 1
+    assert result["hostless_g17_source_roster_complete"] is True
     assert result["source_owner_claims"][0]["physical_opening_id"] == "physical-original-1"
     assert result["shadow_only"] and not result["structural_host_granted"]
     assert not result["metric_quantity_granted"] and not result["benchmark_score_granted"]
@@ -202,3 +203,46 @@ def test_non_raster_physical_opening_cannot_be_laundered_through_flank_roster(mo
         "original_g17_physical_existence_unproven"
     )
     assert state["owned_calls"] == 0
+
+def test_original_hostless_roster_conflicting_duplicate_is_not_silently_deduplicated(
+    monkeypatch,
+):
+    state, _ = _stub_pipeline(monkeypatch)
+    original_composer = cli.compose_live_wall_opening_authority
+    def duplicate(**kwargs):
+        result = original_composer(**kwargs)
+        row = result.opening_bindings[0]
+        return NS(
+            **{**vars(result), "opening_bindings": (row, row)}
+        )
+    monkeypatch.setattr(cli, "compose_live_wall_opening_authority", duplicate)
+    with pytest.raises(RuntimeError, match="roster repeats a physical identity"):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256=_SHA, page_id="3",
+        )
+    assert state["owned_calls"] == 1
+
+
+def test_empty_hostless_original_page_scope_never_claims_completed_roster(monkeypatch):
+    state, _ = _stub_pipeline(monkeypatch)
+    original_composer = cli.compose_live_wall_opening_authority
+    def empty(**kwargs):
+        result = original_composer(**kwargs)
+        return NS(**{**vars(result), "opening_bindings": ()})
+    monkeypatch.setattr(cli, "compose_live_wall_opening_authority", empty)
+    report = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert report["hostless_g17_source_roster_complete"] is False
+    assert report["original_source_owned_two_flank_count"] == 0
+    assert state["owned_calls"] == 0
+
+
+def test_corrupt_support_explicitly_blocks_local_scope_completeness(monkeypatch):
+    state, record = _stub_pipeline(monkeypatch)
+    record.source_observation_ids = ("visible-1", "missing")
+    result = cli.original_physical_g17_source_flank_report(
+        _SOURCE, expected_sha256=_SHA, page_id="3",
+    )
+    assert result["hostless_g17_source_roster_complete"] is False
+    assert result["unresolved"]
