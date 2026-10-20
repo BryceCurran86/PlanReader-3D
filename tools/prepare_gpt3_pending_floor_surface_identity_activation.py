@@ -305,9 +305,13 @@ def build_floor_surface_activation(
     )
 
     active_items = {binding.benchmark_item_id for binding in active.bindings}
+    # A floor can have an independently mapped floor_area and
+    # floor_finish_area. Only an existing finish mapping competes with
+    # this source-signed floor-finish activation.
     active_entities = {
         ref
         for binding in active.bindings
+        if binding.production_family == "floor_finish_area"
         for ref in binding.production_object_identity_refs
     }
     sealed_by_canonical = {}
