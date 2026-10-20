@@ -646,6 +646,13 @@ def seal_source_closed_run(
         raise SourceClosedRunConflictError("quantity ids must be unique")
 
     rows: list[SealedSourceClosedQuantity] = []
+    # V1 cannot persist a new snapshot field without breaking historical
+    # fingerprints. While ISSUING a NEW run, however, exact producer-owned
+    # snapshot metadata is available in memory. A document cannot silently
+    # mix two positive snapshot receipts under the same source/revision.
+    # Legacy quantities without a snapshot stay unproven; a separate
+    # producer-authenticated supplement is required to prove their scope.
+    issued_snapshots: dict[tuple[str, str, str], str] = {}
     for quantity in quantities:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("quantities must contain only QuantityEvidence records")
@@ -658,6 +665,25 @@ def seal_source_closed_run(
             raise SourceClosedRunConflictError(
                 f"quantity {quantity.quantity_id} belongs to project {trace.project_id}"
             )
+        meta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        if "snapshot_id" in meta:
+            source_snapshot = meta["snapshot_id"]
+            if (
+                type(source_snapshot) is not str or not source_snapshot
+                or source_snapshot != source_snapshot.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "explicit original producer snapshot_id must be a canonical string"
+                )
+            document_scope = (
+                trace.document_id, trace.revision_id, trace.source_sha256
+            )
+            previous = issued_snapshots.get(document_scope)
+            if previous is not None and previous != source_snapshot:
+                raise SourceClosedRunConflictError(
+                    "conflicting explicit source snapshot receipts in one signed run"
+                )
+            issued_snapshots[document_scope] = source_snapshot
         rows.append(seal_source_closed_quantity(quantity, trace=trace))
 
     return _build_sealed_run(rows, project_id=clean_project_id)
