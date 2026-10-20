@@ -6,6 +6,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from hashlib import sha256
 import json
+from pathlib import Path
 
 import pytest
 
@@ -401,7 +402,7 @@ def test_caller_plain_json_cannot_stand_in_for_the_original_source_producer():
 
 OWNER_LOT16_SHA256 = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
 OWNER_LOT16_PDF = (
-    __import__("pathlib").Path("documents/sources/")
+    Path("documents/sources")
     / "1. Construction Plans - Lot 16 Power (REV E).pdf"
 )
 
@@ -424,8 +425,7 @@ def test_owner_sha_verified_original_opening_producer_scope_and_v1_eight_custome
     )
     from tools.diag_gptmax_producer_owned_g17_wall_shadow import _retention
     from pb_source_closed_run_export import sealed_source_closed_run_from_dict
-    from pathlib import Path
-
+    
     original_bytes = OWNER_LOT16_PDF.read_bytes()
     assert sha256(original_bytes).hexdigest() == OWNER_LOT16_SHA256
     source = SourceVisibilityProducer(
