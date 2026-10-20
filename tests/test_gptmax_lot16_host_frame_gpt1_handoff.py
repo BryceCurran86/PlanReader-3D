@@ -28,6 +28,8 @@ def fixture():
             "canonical_opening_id": identity,
             **ROOT, "page_id": "3", "viewport_id":"page:3",
             "opening_kind": "window",
+            "area_basis": "figured_opening_label" if identity == "physical-3" else None,
+            "area_m2": 2.16 if identity == "physical-3" else None,
             "host_binding_record_id": host,
             "host_wall_id": "wall-grp" if host else None,
             "host_frame_record_id": frame,
