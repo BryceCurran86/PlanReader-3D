@@ -70,7 +70,7 @@ def test_compile_balcony_receipt():
     assert receipt.total_balconies_count == 1
     assert receipt.total_balcony_area_pt2 == 5000.0
     assert receipt.total_strip_drain_length_pt == 50.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION
