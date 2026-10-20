@@ -44,7 +44,7 @@ class GutterSpec:
     centerline_points: List[Tuple[float, float]]
     width_mm: float = 0.0
     depth_mm: float = 0.0
-    material: DrainageMaterial = DrainageMaterial.COLORBOND_STEEL
+    material: DrainageMaterial = DrainageMaterial.UNKNOWN
     fall_ratio: float = 0.01
     level_id: str = "ROOF"
     source_annotation: str = ""
@@ -56,7 +56,7 @@ class DownpipeSpec:
     location: Tuple[float, float]
     diameter_mm: float = 0.0
     height_drop_m: float = 0.0
-    material: DrainageMaterial = DrainageMaterial.PVC
+    material: DrainageMaterial = DrainageMaterial.UNKNOWN
     level_id: str = "ROOF"
 
 
@@ -156,7 +156,7 @@ class SourceRoofDrainageGutterDownpipeShadowAuthority:
         elif "CAST" in clean:
             mat = DrainageMaterial.CAST_IRON
         else:
-            mat = DrainageMaterial.COLORBOND_STEEL
+            mat = DrainageMaterial.UNKNOWN
 
         # Dimensions: (\d+)\s*W\s*[xX]\s*(\d+)\s*D or (\d+)\s*[xX]\s*(\d+)
         w_match = re.search(r"(\d+)\s*W", clean)
