@@ -39,7 +39,9 @@ def _context(monkeypatch):
     record = PhysicalOpeningExistenceRecord(
         record_id="physical-G17-1",
         source_observation_ids=observations,
-        source_lineage_root_ids=("parent-record-1",),
+        source_lineage_root_ids=tuple(sorted(
+            line.parent_observation_id for line in parents.lines
+        )),
         document_id="doc", revision_id="rev",
         source_sha256="e" * 64, snapshot_id="snapshot",
         page_id="3", viewport_id=None,
@@ -121,6 +123,12 @@ def test_positive_six_real_source_strokes_are_owned_by_one_physical_opening(monk
     lambda r: replace(r, status=EvidenceResolutionStatus.CANDIDATE),
     lambda r: replace(r, proposition="invented"),
     lambda r: replace(r, source_observation_ids=()),
+    lambda r: replace(r, source_lineage_root_ids=()),
+    lambda r: replace(r, source_lineage_root_ids=("foreign-parent",)),
+    lambda r: replace(r, source_lineage_root_ids=r.source_lineage_root_ids[:-1]),
+    lambda r: replace(r, source_lineage_root_ids=(
+        *r.source_lineage_root_ids, r.source_lineage_root_ids[0],
+    )),
     lambda r: replace(r, source_observation_ids=r.source_observation_ids[:-1]),
     lambda r: replace(r, source_observation_ids=(*r.source_observation_ids, "foreign")),
     lambda r: replace(r, source_observation_ids=(
@@ -237,3 +245,24 @@ def test_whole_opening_universe_reconciliation_is_order_invariant():
     second = quarantine_overlapping_g17_physical_source_claims_shadow((b, a))
     assert first == second
     assert before == (a, b)
+
+def test_source_lineage_root_permutation_is_canonical_and_accepted(monkeypatch):
+    c = _context(monkeypatch)
+    c[-1]["record"] = replace(
+        c[4], source_lineage_root_ids=tuple(reversed(c[4].source_lineage_root_ids)),
+    )
+    result = _run(c)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert not result.host_binding_granted and not result.firm_area_granted
+
+
+def test_spliced_support_from_another_physical_opening_rejected(monkeypatch):
+    c = _context(monkeypatch)
+    # The correct visible words alone are not evidence that the physical
+    # candidate has the same independent original derivation parents.
+    c[-1]["record"] = replace(
+        c[4], source_lineage_root_ids=("foreign-parent",),
+    )
+    result = _run(c)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == ("source_g17_original_parent_lineage_unbound",)
