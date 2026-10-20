@@ -52,10 +52,12 @@ MISSION_LEDGER: dict[str, Any] = {
                 "batch42-raster-segment-split",
                 "digit-tail-vs-raster_segment-not-dNi0",
                 "batch43-exact-geometry-unavailable",
+                "batch44-producer-visible-index",
+                "observation-geometry-identity-unavailable",
             ],
             "note": (
-                "batch40–43 host lineage; digit-tail abstain; exact centerline "
-                "geometry identity unavailable x6; no FIRM/host/score"
+                "batch40–44 host lineage; producer visible ids 4086; parent "
+                "lines still disjoint from W4 observation geometry; no FIRM/host/score"
             ),
         },
     ],
