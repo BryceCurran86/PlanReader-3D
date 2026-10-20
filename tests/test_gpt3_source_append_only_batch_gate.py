@@ -10,6 +10,7 @@ import pytest
 from pb_customer_output_verification import CustomerOutputVerificationError
 from pb_quantity_takeoff_adapter import quantities_to_takeoff_output_rows
 from pb_source_closed_run_export import (
+    SourceClosedRunConflictError,
     seal_source_closed_run, sealed_source_closed_run_from_dict,
 )
 from test_customer_output_verification import quantity, trace, authority
@@ -136,8 +137,12 @@ def test_deleted_predecessor_cannot_be_replaced_by_same_quantity_value():
 
 
 def test_same_family_claiming_same_opening_twice_cannot_append():
-    report = _check(_fixture(duplicate_area=True))
-    assert report["first_failing_gate"] == "DUPLICATE_OPENING_AREA_PHYSICAL_IDENTITY"
+    # An even earlier protection now refuses to issue a V1 signed run for
+    # competing door/window products on one original physical opening.
+    # No forged double-seal may reach the downstream append-only gate.
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="conflicting signed opening identity"):
+        _fixture(duplicate_area=True)
 
 
 def test_abstention_is_not_a_new_firm_customer_approved_quantity():
