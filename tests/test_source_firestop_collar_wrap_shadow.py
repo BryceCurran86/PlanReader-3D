@@ -44,8 +44,10 @@ def test_firestop_callout_parsing():
 
     omitted = SourceFirestopCollarWrapShadowAuthority.parse_callout("FIRE COLLAR")
     assert omitted["nominal_pipe_dia_mm"] == 0.0
+    assert omitted["fire_rating_hours"] == 0
     omitted_spec = FirestopDeviceSpec(device_id="FS-OMIT")
     assert omitted_spec.nominal_pipe_dia_mm == 0.0
+    assert omitted_spec.fire_rating_hours == 0
 
 
 def test_firestop_snapping():
