@@ -51,6 +51,7 @@ class TestSourceParapetCappingFlashingShadow(unittest.TestCase):
         self.assertEqual(omitted.upstand_height_mm, 0.0)
         self.assertEqual(omitted.capping_girth_mm, 0.0)
         self.assertEqual(omitted.membrane_turnup_height_mm, 0.0)
+        self.assertFalse(omitted.has_drip_groove)
 
     def test_snap_point(self):
         ref_pts = [(0.0, 0.0), (100.0, 50.0)]
