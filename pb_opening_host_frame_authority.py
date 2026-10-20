@@ -127,7 +127,9 @@ def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]
         key = tuple(sorted((str(left), str(right))))
         try:
             classification = PhysicalEquivalenceClass(raw)
-        except ValueError:
+        except (TypeError, ValueError):
+            # Malformed issuer classes are contradictory source evidence, not
+            # permission to ignore an observed wall-pair relationship.
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         # Conflicting original SAME/DISTINCT/AMBIGUOUS pair receipts must
         # be monotonic: a later repeated record can never erase a conflict
