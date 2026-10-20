@@ -85,6 +85,14 @@ class TestSourceRoofDrainageGutterDownpipeShadow(unittest.TestCase):
         self.assertEqual(res.quantities.total_scupper_count, 1)
         self.assertEqual(res.quantities.total_rainwater_head_count, 1)
 
+    def test_omitted_height_drop_does_not_invent_three_metre_storey(self):
+        dp = DownpipeSpec(downpipe_id="DP-UNKNOWN", location=(0.0, 0.0))
+        self.assertEqual(dp.height_drop_m, 0.0)
+        res = SourceRoofDrainageGutterDownpipeShadowAuthority.evaluate_roof_drainage(
+            [], [dp], [], []
+        )
+        self.assertEqual(res.quantities.total_downpipe_length_m, 0.0)
+
     def test_invariants_and_safety(self):
         res = SourceRoofDrainageGutterDownpipeShadowAuthority.evaluate_roof_drainage([], [], [], [])
         self.assertEqual(res.status, "CANDIDATE")
