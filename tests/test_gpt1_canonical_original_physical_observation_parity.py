@@ -87,4 +87,6 @@ def test_rejected_observation_does_not_change_canonical_source():
     assert r["opening_decisions"][2]["original_physical_source_observation_receipts_bound"] is False
     assert rows==before[0]
     assert c[0]==before[1][0]
-    assert not r["opening_count_granted"] and not r["signed_customer_publisher_activated"]
+    assert r["global_opening_count_granted"] is False
+    assert r["signed_customer_publisher_activated"] is False
+    assert all(row["opening_count_granted"] is False for row in r["opening_decisions"])
