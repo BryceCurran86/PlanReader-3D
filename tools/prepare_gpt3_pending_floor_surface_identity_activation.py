@@ -17,6 +17,9 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 from tools.gpt3_atomic_pending_activation_pair import (
     preflight_new_activation_pair, source_input_snapshot,
     publish_new_activation_pair,
@@ -353,6 +356,26 @@ def build_floor_surface_activation(
         unit = frozen_item.get("unit")
         if type(unit) is not str or quantity.unit != unit:
             raise ValueError("sealed floor quantity unit does not match frozen item")
+        # Floor identity and m2 do not authenticate its construction trade.
+        # Only the actual signed source material owner authorizes TILE for
+        # a frozen tiling target; no FT3-label or expected-area inference.
+        original_finish_parts = quantity.semantic_key.split(":")
+        if (
+            len(original_finish_parts) != 4
+            or original_finish_parts[0] != "floor_finish_area"
+            or original_finish_parts[1] != canonical
+            or any(not part or part != part.strip() for part in original_finish_parts)
+        ):
+            raise ValueError(
+                "source-signed floor finish semantic identity incomplete at activation"
+            )
+        if (
+            frozen_item.get("trade_category") == "tiling"
+            and original_finish_parts[3] != "tile"
+        ):
+            raise ValueError(
+                "original source finish is not tile for frozen tiling identity"
+            )
 
         frozen_object = frozen.get(object_ref)
         if frozen_object is None:
@@ -436,6 +459,13 @@ def build_floor_surface_activation(
         ] + additions,
     }
     identity_map_from_dict(output)
+    # Same exact signed family/trade veto as the four-project reporter and
+    # guarded V2 scorer, before any externally visible activation receipt.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
