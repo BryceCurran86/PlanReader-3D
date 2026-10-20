@@ -102,6 +102,27 @@ def original_physical_g17_source_flank_report(
         raise RuntimeError(
             "original physical opening universe has repeated identity decisions"
         )
+    # Do not mistake the surviving subset for a complete hostless G17
+    # universe when a producer has issued a matching first-failure row with
+    # an empty physical ID, representative word, or foreign source page.
+    # All such failures must poison completeness before ANY source handoff.
+    for trace in live.opening_bindings:
+        if (
+            trace.status is EvidenceResolutionStatus.ABSTAINED
+            and trace.record_id is None
+            and trace.host_wall_id is None
+            and set(trace.reason_codes).intersection(UNMAPPED_G17_FLANK_REASONS)
+        ):
+            if (
+                type(trace.opening_identity_id) is not str
+                or not trace.opening_identity_id
+                or type(trace.representative_observation_id) is not str
+                or not trace.representative_observation_id
+                or trace.page_id != page_id
+            ):
+                raise RuntimeError(
+                    "original hostless G17 source roster has unaddressable opening"
+                )
     for trace in sorted(live.opening_bindings, key=lambda row: (
         str(row.opening_identity_id), str(row.representative_observation_id),
     )):
