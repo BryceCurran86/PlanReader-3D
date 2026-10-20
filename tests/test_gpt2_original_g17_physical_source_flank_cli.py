@@ -8,6 +8,9 @@ from pb_gpt2_g17_opening_source_band_ownership_shadow import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import RASTER_FRAMED_WALL_BAND_INTERRUPTION
+from pb_gpt2_raster_source_flank_band_shadow import (
+    RasterSourceFlankBandCandidate,
+)
 from tools import diag_gpt2_original_g17_physical_source_flanks as cli
 
 _SOURCE = b"%PDF-synthetic-API-test"
@@ -91,8 +94,26 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
     monkeypatch.setattr(cli, "SourceVisibilityProducer", Source)
     monkeypatch.setattr(cli, "compose_live_wall_opening_authority", compose)
     monkeypatch.setattr(cli, "recover_original_raster_opening_parent_lines_shadow", recover)
+    source_bands = NS(candidates=(
+        RasterSourceFlankBandCandidate(
+            page_id="3",
+            face_parent_chains=(("left-face-a",), ("left-face-b",)),
+            end_parent_id="parent-end-a",
+            near_center_pdf_pt=(0., 1.2),
+            far_center_pdf_pt=(-20., 1.2),
+            original_source_visible_ids=("left-a", "left-b", "left-end"),
+        ),
+        RasterSourceFlankBandCandidate(
+            page_id="3",
+            face_parent_chains=(("right-face-a",), ("right-face-b",)),
+            end_parent_id="parent-end-b",
+            near_center_pdf_pt=(30., 1.2),
+            far_center_pdf_pt=(50., 1.2),
+            original_source_visible_ids=("right-a", "right-b", "right-end"),
+        ),
+    ))
     monkeypatch.setattr(cli, "reconstruct_raster_source_flank_bands_shadow",
-                        lambda source: "two-original-flanks")
+                        lambda source: source_bands)
     monkeypatch.setattr(cli, "bind_original_g17_flanks_to_physical_opening_shadow",
                         owner)
     return state, record
@@ -111,6 +132,15 @@ def test_real_original_source_call_path_reproves_each_physically_owned_support(m
     assert result["original_source_owned_two_flank_count"] == 1
     assert result["host_abstained_g17_candidate_physical_count"] == 1
     assert result["hostless_g17_source_roster_complete"] is True
+    original_bands = result["source_owned_flank_bands_by_physical_opening"]
+    assert tuple(sorted(original_bands)) == ("physical-original-1",)
+    assert len(original_bands["physical-original-1"]) == 2
+    assert {band["end_parent_id"] for band in original_bands["physical-original-1"]} == {
+        "parent-end-a", "parent-end-b",
+    }
+    assert all(not band["structural_wall_granted"]
+               and not band["host_binding_granted"]
+               for band in original_bands["physical-original-1"])
     assert result["source_owner_claims"][0]["physical_opening_id"] == "physical-original-1"
     assert result["shadow_only"] and not result["structural_host_granted"]
     assert not result["metric_quantity_granted"] and not result["benchmark_score_granted"]
@@ -133,6 +163,7 @@ def test_corrupted_physical_g17_source_receipts_never_skip_as_non_raster(monkeyp
     )
     assert result["host_abstained_g17_candidate_physical_count"] == 0
     assert state["owned_calls"] == 0
+    assert result["source_owned_flank_bands_by_physical_opening"] == {}
     assert result["unresolved"] == [{
         "physical_opening_id": "physical-original-1",
         "reason": "original_g17_raster_source_support_unavailable",
