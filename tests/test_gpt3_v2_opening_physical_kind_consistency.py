@@ -13,7 +13,7 @@ def _quantities(area_kind="window", count_kind="door", *,
     return [
         {"object_identity_refs": ["physical-opening-A"],
          "family": "opening_area",
-         "semantic_key": f"{area_kind}_area:producer-opening-A",
+         "semantic_key": f"{area_kind}_area:physical-opening-A",
          "unit": "m2", "value": 1.80, "abstained": False},
         {"object_identity_refs": [
             "physical-opening-A" if same_physical else "physical-opening-B"
@@ -182,4 +182,64 @@ def test_legacy_duplicate_source_claim_for_unmapped_object_cannot_rekey_valid_op
         verified_items=items,
         sealed_quantities=source,
         identity_bindings=bindings,
+    )
+
+
+@pytest.mark.parametrize("claimed_refs", [
+    ["unrelated-opening"],
+    ["physical-opening-A", "foreign-opening"],
+])
+def test_source_signed_opening_area_cannot_claim_foreign_or_grouped_physical_members(
+    claimed_refs,
+):
+    # Actual source issuer signs typed opening AREA semantic suffix equal
+    # to its one canonical opening, and input_entity_ids=(that opening,).
+    # A verified V1 signature on a contradictory source receipt must not
+    # turn a different physical opening into an eligible trade match.
+    signed = {
+        "family": "opening_area",
+        "semantic_key": "window_area:physical-opening-A",
+        "object_identity_refs": claimed_refs,
+        "unit": "m2",
+        "value": 1.80,
+        "abstained": False,
+    }
+    with pytest.raises(ValueError, match="physical|source.*identity|opening.*identity"):
+        veto(
+            verified_items=[{
+                "item_id": "synthetic-window",
+                "denominator_eligible": True,
+                "trade_category": "windows",
+            }],
+            sealed_quantities=[signed],
+            identity_bindings=[{
+                "benchmark_item_id": "synthetic-window",
+                "production_family": "opening_area",
+                "production_object_identity_refs": claimed_refs,
+            }],
+        )
+
+
+def test_authentic_single_source_opening_area_semantic_and_ref_agree():
+    # This is only an independent negative mapping guard, not a producer,
+    # source-origin receipt, original drawing measurement or scored match.
+    veto(
+        verified_items=[{
+            "item_id": "synthetic-window",
+            "denominator_eligible": True,
+            "trade_category": "windows",
+        }],
+        sealed_quantities=[{
+            "family": "opening_area",
+            "semantic_key": "window_area:physical-opening-A",
+            "object_identity_refs": ["physical-opening-A"],
+            "unit": "m2",
+            "value": 1.80,
+            "abstained": False,
+        }],
+        identity_bindings=[{
+            "benchmark_item_id": "synthetic-window",
+            "production_family": "opening_area",
+            "production_object_identity_refs": ["physical-opening-A"],
+        }],
     )
