@@ -65,6 +65,20 @@ def test_storefront_multi_lite_partition():
         assert math.isclose(lite.area_pt2, 98.0 * 99.0, abs_tol=1e-3)
 
 
+def test_omitted_profiles_do_not_invent_one_point_five_pt():
+    authority = SourceGlazingMullionTransomSubframingShadowAuthority()
+
+    assy = authority.partition_window_subframe(
+        window_id="W_UNKNOWN",
+        total_width_pt=100.0,
+        total_height_pt=100.0,
+    )
+
+    lite = assy.glass_lites[0]
+    assert lite.width_pt == 100.0
+    assert lite.height_pt == 100.0
+
+
 def test_compile_subframing_receipt():
     authority = SourceGlazingMullionTransomSubframingShadowAuthority()
 

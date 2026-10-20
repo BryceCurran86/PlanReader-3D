@@ -131,9 +131,9 @@ class SourceGlazingMullionTransomSubframingShadowAuthority:
         total_height_pt: float,
         mullion_count: int = 0,
         transom_count: int = 0,
-        frame_profile_thickness_pt: float = 1.5,
-        mullion_profile_width_pt: float = 1.5,
-        transom_profile_height_pt: float = 1.5,
+        frame_profile_thickness_pt: float = 0.0,
+        mullion_profile_width_pt: float = 0.0,
+        transom_profile_height_pt: float = 0.0,
     ) -> WindowSubframeAssemblyRecord:
         n_bays = mullion_count + 1
         n_tiers = transom_count + 1
