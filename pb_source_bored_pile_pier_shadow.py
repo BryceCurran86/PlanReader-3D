@@ -40,7 +40,7 @@ class BoredPileSpec:
     pile_id: str
     pile_type: PileType = PileType.BORED_CAST_IN_PLACE
     center_point: Tuple[float, float] = (0.0, 0.0)
-    diameter_mm: float = 600.0
+    diameter_mm: float = 0.0
     design_depth_m: float = 8.0
     rock_socket_length_m: float = 0.0
     stratum: GeotechnicalStratum = GeotechnicalStratum.WEATHERED_ROCK
@@ -85,7 +85,7 @@ class SourceBoredPilePierShadowAuthority:
         clean = text.upper()
         res = {
             "pile_type": PileType.BORED_CAST_IN_PLACE,
-            "diameter_mm": 600.0,
+            "diameter_mm": 0.0,
             "design_depth_m": 8.0,
             "rock_socket_length_m": 0.0,
             "stratum": GeotechnicalStratum.WEATHERED_ROCK,
