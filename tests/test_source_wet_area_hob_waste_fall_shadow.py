@@ -27,7 +27,7 @@ def test_positive_raised_hob_evaluation():
         scale_ratio=0.02,
     )
 
-    assert hob.status == EvidenceResolutionStatus.CORROBORATED
+    assert hob.status == EvidenceResolutionStatus.CANDIDATE
     assert hob.is_structural_wall is False
     assert pytest.approx(hob.length_m, rel=1e-3) == 1.0
     assert pytest.approx(hob.top_area_sqm, rel=1e-3) == 0.10  # 1.0 * 0.10
@@ -51,7 +51,7 @@ def test_positive_recessed_stepdown_evaluation():
         scale_ratio=0.02,
     )
 
-    assert hob.status == EvidenceResolutionStatus.CORROBORATED
+    assert hob.status == EvidenceResolutionStatus.CANDIDATE
     assert pytest.approx(hob.length_m, rel=1e-3) == 0.9
     assert pytest.approx(hob.vertical_face_area_sqm, rel=1e-3) == 0.018  # 1 * 0.9 * 0.02
 
@@ -129,13 +129,12 @@ def test_wet_area_takeoff_summary_computation():
         waterproof_upturn_height_m=0.15,
     )
 
-    assert summary.status == EvidenceResolutionStatus.CORROBORATED
+    assert summary.status == EvidenceResolutionStatus.CANDIDATE
     assert pytest.approx(summary.main_floor_area_sqm, rel=1e-3) == 4.0
     assert pytest.approx(summary.shower_floor_area_sqm, rel=1e-3) == 1.0
-    assert pytest.approx(summary.hob_vertical_faces_sqm, rel=1e-3) == 0.15
-    assert pytest.approx(summary.hob_top_faces_sqm, rel=1e-3) == 0.10
-    # Total tiling = 4.0 + 1.0 + 0.15 + 0.10 = 5.25 m²
-    assert pytest.approx(summary.total_tiling_area_sqm, rel=1e-3) == 5.25
-    # Waterproofing upturn = 2.8 * 0.15 + 0.15 = 0.42 + 0.15 = 0.57 m²
-    assert pytest.approx(summary.waterproofing_perimeter_upturn_sqm, rel=1e-3) == 0.57
+    # Candidate hobs are not measurement authority and must not enter takeoff totals.
+    assert pytest.approx(summary.hob_vertical_faces_sqm, rel=1e-3) == 0.0
+    assert pytest.approx(summary.hob_top_faces_sqm, rel=1e-3) == 0.0
+    assert pytest.approx(summary.total_tiling_area_sqm, rel=1e-3) == 5.0
+    assert pytest.approx(summary.waterproofing_perimeter_upturn_sqm, rel=1e-3) == 0.42
     assert summary.commercial_projection_allowed is False
