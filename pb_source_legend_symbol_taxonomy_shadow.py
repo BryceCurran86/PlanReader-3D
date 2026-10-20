@@ -173,7 +173,7 @@ class SourceLegendSymbolTaxonomyShadowAuthority:
             (document_id, revision_id, source_sha256, total_boxes, total_symbols),
         )
 
-        status = EvidenceResolutionStatus.CORROBORATED if total_boxes > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if total_boxes > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return PlanLegendSymbolTaxonomyReceipt(
             receipt_id=receipt_id,
