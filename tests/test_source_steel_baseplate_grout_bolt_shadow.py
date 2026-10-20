@@ -61,6 +61,7 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
         self.assertEqual(omitted.bolt_diameter_mm, 0.0)
         self.assertEqual(omitted.bolt_embedment_depth_mm, 0.0)
         self.assertEqual(omitted.grout_thickness_mm, 0.0)
+        self.assertEqual(omitted.bolt_grade, BoltGrade.UNKNOWN)
 
     def test_snap_point(self):
         ref_pts = [(50.0, 50.0), (100.0, 100.0)]

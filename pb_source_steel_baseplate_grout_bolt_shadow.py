@@ -22,6 +22,7 @@ STEEL_DENSITY_KG_M3: float = 7850.0
 
 
 class BoltGrade(str, Enum):
+    UNKNOWN = "UNKNOWN"
     GRADE_4_6 = "GRADE_4_6"
     GRADE_8_8 = "GRADE_8_8"
     GRADE_10_9 = "GRADE_10_9"
@@ -38,7 +39,7 @@ class SteelBaseplateSpec:
     bolt_count: int = 0
     bolt_diameter_mm: float = 0.0
     bolt_embedment_depth_mm: float = 0.0
-    bolt_grade: BoltGrade = BoltGrade.GRADE_8_8
+    bolt_grade: BoltGrade = BoltGrade.UNKNOWN
     grout_thickness_mm: float = 0.0
     level_id: str = "L0"
     source_callout: str = ""
