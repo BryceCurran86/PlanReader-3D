@@ -5,6 +5,8 @@ import pytest
 
 from pb_gpt2_g17_opening_source_band_ownership_shadow import (
     bind_original_g17_flanks_to_physical_opening_shadow,
+    OriginalG17OpeningFlankOwnership,
+    quarantine_overlapping_g17_physical_source_claims_shadow,
 )
 from pb_gpt2_raster_source_flank_band_shadow import (
     reconstruct_raster_source_flank_bands_shadow,
@@ -173,3 +175,65 @@ def test_invalid_untyped_source_authority_rejected(monkeypatch):
     monkeypatch.setattr(PhysicalOpeningAuthority, "source_visibility_authority",
                         lambda self: None)
     assert _run(c).status is EvidenceResolutionStatus.ABSTAINED
+
+def _owner_record(physical, observations, *, digest="f" * 64,
+                  status=EvidenceResolutionStatus.CORROBORATED):
+    return OriginalG17OpeningFlankOwnership(
+        status, ("source_owned",), physical, digest,
+        tuple(observations), (f"end:{physical}",),
+        tuple(observations),
+    )
+
+
+def test_two_disjoint_physical_g17_openings_remain_independently_authored():
+    a = _owner_record("physical-a", ("a1", "a2"))
+    b = _owner_record("physical-b", ("b1", "b2"))
+    actual = quarantine_overlapping_g17_physical_source_claims_shadow((b, a))
+    assert actual == (a, b)
+    assert all(x.status is EvidenceResolutionStatus.CORROBORATED for x in actual)
+
+
+def test_two_different_physical_g17_openings_may_not_claim_same_ink():
+    a = _owner_record("physical-a", ("same-ink", "a2"))
+    b = _owner_record("physical-b", ("same-ink", "b2"))
+    actual = quarantine_overlapping_g17_physical_source_claims_shadow((b, a))
+    assert len(actual) == 2
+    assert all(x.status is EvidenceResolutionStatus.CONFLICT for x in actual)
+    assert set(x.physical_opening_id for x in actual) == {"physical-a", "physical-b"}
+    assert not any(x.host_binding_granted or x.firm_area_granted for x in actual)
+
+
+def test_repeated_identical_physical_claim_is_still_a_conflict():
+    one = _owner_record("physical-a", ("a1", "a2"))
+    assert all(
+        x.status is EvidenceResolutionStatus.CONFLICT
+        for x in quarantine_overlapping_g17_physical_source_claims_shadow((one, one))
+    )
+
+
+def test_shared_observation_ids_from_different_original_pdfs_do_not_interfere():
+    first = _owner_record("physical-a", ("same-ink",), digest="f" * 64)
+    second = _owner_record("physical-b", ("same-ink",), digest="e" * 64)
+    result = quarantine_overlapping_g17_physical_source_claims_shadow((first, second))
+    assert all(x.status is EvidenceResolutionStatus.CORROBORATED for x in result)
+
+
+def test_one_blocked_source_claim_never_suppresses_independent_firm_source_candidate():
+    bad = _owner_record("physical-b", ("same-ink",),
+                        status=EvidenceResolutionStatus.ABSTAINED)
+    good = _owner_record("physical-a", ("same-ink",))
+    result = quarantine_overlapping_g17_physical_source_claims_shadow((bad, good))
+    assert [x.status for x in result] == [
+        EvidenceResolutionStatus.CORROBORATED,
+        EvidenceResolutionStatus.ABSTAINED,
+    ]
+
+
+def test_whole_opening_universe_reconciliation_is_order_invariant():
+    a = _owner_record("physical-a", ("same-ink",))
+    b = _owner_record("physical-b", ("same-ink",))
+    before = (a, b)
+    first = quarantine_overlapping_g17_physical_source_claims_shadow(before)
+    second = quarantine_overlapping_g17_physical_source_claims_shadow((b, a))
+    assert first == second
+    assert before == (a, b)
