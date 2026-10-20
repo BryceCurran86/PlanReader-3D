@@ -35,8 +35,8 @@ class RetainingWallSpec:
     centerline_points: List[Tuple[float, float]]
     stem_thickness_mm: float = 0.0
     retained_height_mm: float = 0.0
-    footing_width_mm: float = 1200.0
-    footing_depth_mm: float = 300.0
+    footing_width_mm: float = 0.0
+    footing_depth_mm: float = 0.0
     ag_pipe_diameter_mm: float = 100.0
     agg_backfill_width_mm: float = 300.0
     has_tanking_membrane: bool = False
@@ -114,10 +114,10 @@ class SourceRetainingWallDrainageShadowAuthority:
 
         # Footing dimensions
         fw_match = re.search(r"(\d+)\s*(?:W\b|WIDE)", clean)
-        footing_w_mm = float(fw_match.group(1)) if fw_match else 1200.0
+        footing_w_mm = float(fw_match.group(1)) if fw_match else 0.0
 
         fd_match = re.search(r"(\d+)\s*(?:D\b|DEEP|FOOTING)", clean)
-        footing_d_mm = float(fd_match.group(1)) if fd_match else 300.0
+        footing_d_mm = float(fd_match.group(1)) if fd_match else 0.0
 
         return w_type, stem_thk_mm, retained_h_mm, footing_w_mm, footing_d_mm
 
