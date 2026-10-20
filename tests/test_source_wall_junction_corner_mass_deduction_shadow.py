@@ -25,7 +25,7 @@ def test_positive_t_junction_deduction():
         wall_height_m=2.7,
     )
 
-    assert evidence.status == EvidenceResolutionStatus.CORROBORATED
+    assert evidence.status == EvidenceResolutionStatus.CANDIDATE
     assert evidence.junction_kind == JunctionKind.T_JUNCTION_ABUTMENT
     # Overlap area = 0.11 * 0.09 = 0.0099 m²
     assert pytest.approx(evidence.overlap_area_sqm, rel=1e-3) == 0.0099
@@ -51,7 +51,7 @@ def test_positive_l_junction_corner_deduction():
         wall_height_m=2.4,
     )
 
-    assert evidence.status == EvidenceResolutionStatus.CORROBORATED
+    assert evidence.status == EvidenceResolutionStatus.CANDIDATE
     assert evidence.junction_kind == JunctionKind.L_JUNCTION_CORNER
     # Overlap area = 0.09 * 0.09 = 0.0081 m²
     assert pytest.approx(evidence.overlap_area_sqm, rel=1e-3) == 0.0081

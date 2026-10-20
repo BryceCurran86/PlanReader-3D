@@ -139,7 +139,7 @@ class WallJunctionCornerMassDeductionShadowAuthority:
             obscured_face_length_m=obscured_face_length,
             obscured_finish_area_sqm=obscured_finish_area,
             wall_height_m=wall_height_m,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             notes="Corroborated T-junction: through-wall retains continuous mass; abutting overlap deducted.",
         )
 
@@ -193,6 +193,6 @@ class WallJunctionCornerMassDeductionShadowAuthority:
             obscured_face_length_m=obscured_face_length,
             obscured_finish_area_sqm=obscured_finish_area,
             wall_height_m=wall_height_m,
-            status=EvidenceResolutionStatus.CORROBORATED,
+            status=EvidenceResolutionStatus.CANDIDATE,
             notes="Corroborated L-junction corner: shared corner block deducted from secondary wall.",
         )
