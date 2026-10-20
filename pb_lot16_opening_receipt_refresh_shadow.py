@@ -31,6 +31,8 @@ _KNOWN_GATES = frozenset({
     "source_figured_dimension_pair_unproven",
     "width_height_axis_authority_unproven",
     "original_figured_label_source_scope_unverified",
+    "canonical_figured_area_publication_basis_unproven",
+    "canonical_figured_area_value_unproven",
     "original_structural_host_receipt_unbound",
     "original_host_frame_receipt_unbound",
     "independent_gpt1_measurement_validation_required",
@@ -45,6 +47,8 @@ _KNOWN_GROSS_AREA_GATES = frozenset({
     "source_figured_dimension_pair_unproven",
     "original_figured_area_receipt_unbound",
     "original_figured_label_source_scope_unverified",
+    "canonical_figured_area_publication_basis_unproven",
+    "canonical_figured_area_value_unproven",
     "original_structural_host_receipt_unbound",
     "original_host_frame_receipt_unbound",
     "original_signed_area_already_retained",
@@ -143,6 +147,8 @@ def refresh_opening_first_gate_receipt(
                 or row.get("figured_pair_area_support") is not True
                 or row.get("figured_area_receipt_bound") is not True
                 or row.get("original_figured_label_source_scope_bound") is not True
+                or row.get("canonical_figured_area_publication_basis_bound") is not True
+                or row.get("canonical_figured_area_value_bound") is not True
                 or row.get("original_host_binding_receipt_bound") is not True
                 or row.get("filling_kind_source_supported") is not True
                 or (row.get("authenticated_frame_record_id") is not None
