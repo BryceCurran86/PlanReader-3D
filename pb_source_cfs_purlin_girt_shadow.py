@@ -170,13 +170,9 @@ class SourceCFSPurlinGirtShadowAuthority:
             else:
                 res["section_profile"] = CFSSectionProfile.Z_SECTION
         elif "TOP HAT" in clean or "TOP-HAT" in clean:
-            res["section_designation"] = "TH64"
             res["section_profile"] = CFSSectionProfile.TOP_HAT
         elif "C-PURLIN" in clean or "C PURLIN" in clean or "CHANNEL" in clean:
-            res["section_designation"] = "C20019"
             res["section_profile"] = CFSSectionProfile.C_SECTION
-        else:
-            res["section_designation"] = ""
 
         res["linear_mass_kg_m"] = cls.get_linear_mass(res["section_designation"])
 
