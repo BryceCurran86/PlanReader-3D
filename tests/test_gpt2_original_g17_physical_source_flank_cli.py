@@ -20,7 +20,9 @@ _SHA = sha256(_SOURCE).hexdigest()
 def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
                    trace_identity="physical-original-1"):
     state = dict(revision="rev", sha=_SHA, observed=[],
-                 compose_calls=0, source_calls=0, owned_calls=0)
+                 compose_calls=0, source_calls=0, owned_calls=0,
+                 corrupt_source_after_reproof=False,
+                 corrupt_snapshot_after_reproof=False)
     published = NS(
         revision=NS(revision_id="rev",
                     document_id="live-source:" + _SHA[:32],
@@ -35,6 +37,9 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
     class Source:
         def __init__(self, *, producer_method, producer_version):
             assert producer_method and producer_version
+            self._producer = NS(_store=NS(source_bytes_by_revision={
+                "rev": _SOURCE,
+            }))
         def ingest_native_pdf_bytes(self, *, document_id, source_bytes,
                                     source_locator, page_ids):
             assert source_bytes == _SOURCE
@@ -43,7 +48,9 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
             return NS(revision=NS(revision_id="rev"))
         def published_snapshot_for_revision(self, revision_id):
             assert revision_id == "rev"
-            return published
+            return (NS(revision=published.revision, snapshot=NS(snapshot_id="changed"))
+                    if state["corrupt_snapshot_after_reproof"]
+                    else published)
         def authority(self):
             return self
         def resolve_raster_opening_primitive(self, selector):
@@ -65,6 +72,7 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
                       existence_record=record)
     def compose(*, source_visibility_producer, revision_id, page_ids):
         state["compose_calls"] += 1
+        state["source"] = source_visibility_producer
         return NS(
             revision_id="rev", page_ids=("3",),
             physical_opening_authority=Physical(),
@@ -86,6 +94,12 @@ def _stub_pipeline(monkeypatch, *, support=("visible-1", "visible-2"),
     def owner(*args, **kwargs):
         state["owned_calls"] += 1
         assert kwargs["parent_source"] == "source-parent-source-only"
+        if state["corrupt_source_after_reproof"]:
+            state["source"]._producer._store.source_bytes_by_revision["rev"] = b"forged-PDF"
+        if state["corrupt_snapshot_after_reproof"]:
+            # Publication changes ONLY after original producer identity
+            # validation: the final reproof must reject the stale output.
+            pass
         return OriginalG17OpeningFlankOwnership(
             EvidenceResolutionStatus.CORROBORATED,
             ("source_only",), trace_identity, _SHA,
@@ -331,3 +345,37 @@ def test_unaddressable_original_hostless_g17_does_not_shrink_completeness(
             _SOURCE, expected_sha256=_SHA, page_id="3",
         )
     assert state["owned_calls"] == 0
+
+def test_source_byte_replacement_during_original_g17_replay_cannot_emit_bands(
+    monkeypatch,
+):
+    state, _ = _stub_pipeline(monkeypatch)
+    state["corrupt_source_after_reproof"] = True
+    with pytest.raises(RuntimeError,
+                       match="snapshot or source bytes changed during replay"):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256=_SHA, page_id="3",
+        )
+    assert state["owned_calls"] == 1
+
+
+def test_source_snapshot_replacement_during_original_g17_replay_cannot_emit_bands(
+    monkeypatch,
+):
+    state, _ = _stub_pipeline(monkeypatch)
+    # A wrapped owner mutates this shared state only after physical support
+    # and both original flank bands have been issued.
+    original_owner = cli.bind_original_g17_flanks_to_physical_opening_shadow
+    def change_snapshot(*args, **kwargs):
+        owned = original_owner(*args, **kwargs)
+        state["corrupt_snapshot_after_reproof"] = True
+        return owned
+    monkeypatch.setattr(cli,
+                        "bind_original_g17_flanks_to_physical_opening_shadow",
+                        change_snapshot)
+    with pytest.raises(RuntimeError,
+                       match="snapshot or source bytes changed during replay"):
+        cli.original_physical_g17_source_flank_report(
+            _SOURCE, expected_sha256=_SHA, page_id="3",
+        )
+    assert state["owned_calls"] == 1
