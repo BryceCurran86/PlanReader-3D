@@ -41,6 +41,7 @@ class SteelBaseplateSpec:
     bolt_embedment_depth_mm: float = 0.0
     bolt_grade: BoltGrade = BoltGrade.UNKNOWN
     grout_thickness_mm: float = 0.0
+    grout_oversize_mm: float = 0.0
     nut_thread_extension_mm: float = 0.0
     level_id: str = "L0"
     source_callout: str = ""
@@ -140,9 +141,8 @@ class SourceSteelBaseplateGroutBoltShadowAuthority:
             rod_len_m = (rod_len_mm / 1000.0) * conn.bolt_count
             total_rod_len_m += rod_len_m
 
-            # Grout bed extends 50mm all around plate
-            gw_m = (conn.plate_width_mm + 100.0) / 1000.0
-            gl_m = (conn.plate_length_mm + 100.0) / 1000.0
+            gw_m = (conn.plate_width_mm + conn.grout_oversize_mm) / 1000.0
+            gl_m = (conn.plate_length_mm + conn.grout_oversize_mm) / 1000.0
             gt_m = conn.grout_thickness_mm / 1000.0
             grout_bed_area = gw_m * gl_m
             total_grout_area_m2 += grout_bed_area

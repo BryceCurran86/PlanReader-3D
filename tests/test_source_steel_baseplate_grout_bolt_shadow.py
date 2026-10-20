@@ -61,6 +61,7 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
         self.assertEqual(omitted.bolt_diameter_mm, 0.0)
         self.assertEqual(omitted.bolt_embedment_depth_mm, 0.0)
         self.assertEqual(omitted.grout_thickness_mm, 0.0)
+        self.assertEqual(omitted.grout_oversize_mm, 0.0)
         self.assertEqual(omitted.bolt_grade, BoltGrade.UNKNOWN)
         self.assertEqual(omitted.nut_thread_extension_mm, 0.0)
 
@@ -88,6 +89,7 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
             bolt_diameter_mm=24.0,
             bolt_embedment_depth_mm=450.0,
             grout_thickness_mm=50.0,
+            grout_oversize_mm=100.0,
             nut_thread_extension_mm=75.0,
         )
         res = SourceSteelBaseplateGroutBoltShadowAuthority.evaluate_connections([conn])
@@ -118,6 +120,7 @@ class TestSourceSteelBaseplateGroutBoltShadow(unittest.TestCase):
         )
         no_ext_res = SourceSteelBaseplateGroutBoltShadowAuthority.evaluate_connections([no_ext])
         self.assertAlmostEqual(no_ext_res.quantities.total_anchor_bolt_rod_length_m, 2.1)
+        self.assertAlmostEqual(no_ext_res.quantities.total_grout_footprint_area_m2, 0.16)
 
 
 if __name__ == "__main__":
