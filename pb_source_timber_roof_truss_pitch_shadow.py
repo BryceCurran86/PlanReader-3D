@@ -36,7 +36,7 @@ class TimberRoofTrussSpec:
     span_mm: float
     pitch_deg: float = 0.0
     eaves_overhang_mm: float = 0.0
-    spacing_centers_mm: float = 900.0
+    spacing_centers_mm: float = 0.0
     count: int = 1
     level_id: str = "ROOF"
     source_tag: str = ""
@@ -99,7 +99,7 @@ class SourceTimberRoofTrussPitchShadowAuthority:
 
         # Spacing: (\d+)\s*(?:CTS|CENTRES|CENTERS|SPACING)
         sp_match = re.search(r"(\d+)\s*(?:CTS|CENTRES|CENTERS|SPACING)", clean)
-        spacing_mm = float(sp_match.group(1)) if sp_match else 900.0
+        spacing_mm = float(sp_match.group(1)) if sp_match else 0.0
 
         # Overhang: (\d+)\s*(?:O/HANG|OVERHANG|EAVES)",
         oh_match = re.search(r"(\d+)\s*(?:O/HANG|OVERHANG|EAVES)", clean)
