@@ -31,6 +31,7 @@ SOURCE_OPEN_PASSAGE_UNAVAILABLE = "source_open_passage_unavailable"
 PASSAGE_ENDPOINTS_UNALIGNED_WITH_WALLS = "passage_endpoints_unaligned_with_walls"
 OPEN_PASSAGE_OBSTRUCTED_BY_WALL = "open_passage_obstructed_by_wall"
 UNPARTITIONED_FINISH_CONFLICT = "unpartitioned_finish_conflict"
+FINISH_EVIDENCE_UNAVAILABLE = "finish_evidence_unavailable"
 INVALID_PASSAGE_GEOMETRY = "invalid_passage_geometry"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 
@@ -300,13 +301,13 @@ def evaluate_source_open_passage_connection_shadow(
 
     if trans_stroke is not None:
         transition_type = TRANSITION_PHYSICAL_STROKE
-    elif (
-        norm_primary
-        and norm_conn
-        and norm_primary == norm_conn
-        or not norm_primary
-        and not norm_conn
-    ):
+    elif not norm_primary or not norm_conn:
+        return SourceOpenPassageResult(
+            EvidenceResolutionStatus.ABSTAINED,
+            (FINISH_EVIDENCE_UNAVAILABLE,),
+            selector=selector,
+        )
+    elif norm_primary == norm_conn:
         transition_type = TRANSITION_CONTIGUOUS_FLOW
     else:
         # Differing finishes without an authenticated threshold line -> conflict

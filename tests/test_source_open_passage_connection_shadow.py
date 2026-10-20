@@ -17,6 +17,7 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_open_passage_connection_shadow import (
+    FINISH_EVIDENCE_UNAVAILABLE,
     INVALID_PASSAGE_GEOMETRY,
     OPEN_PASSAGE_OBSTRUCTED_BY_WALL,
     PASSAGE_ENDPOINTS_UNALIGNED_WITH_WALLS,
@@ -152,6 +153,45 @@ def test_unpartitioned_finish_conflict():
 
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert UNPARTITIONED_FINISH_CONFLICT in result.reason_codes
+    assert result.record is None
+
+
+def test_missing_finish_codes_do_not_invent_contiguous_flow():
+    """Absence of finish evidence is not shared-finish authentication."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        transition_mark_geometry=None,
+        primary_finish_code=None,
+        connected_finish_code=None,
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert FINISH_EVIDENCE_UNAVAILABLE in result.reason_codes
+    assert result.record is None
+
+
+def test_one_sided_finish_code_does_not_invent_contiguous_flow():
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        transition_mark_geometry=None,
+        primary_finish_code="FT3",
+        connected_finish_code=None,
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert FINISH_EVIDENCE_UNAVAILABLE in result.reason_codes
     assert result.record is None
 
 
