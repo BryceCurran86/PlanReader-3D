@@ -192,8 +192,8 @@ def test_forged_source_scope_sidecar_rejected_even_with_recomputed_fingerprint(m
 ])
 def test_invalid_producer_scope_or_host_authority_fails_closed(mutate):
     ctx = _issued_original_source()
-    mutate(ctx)
     with pytest.raises((ProducerScopeLineageConflict, ValueError)):
+        mutate(ctx)
         _issue(ctx)
 
 
