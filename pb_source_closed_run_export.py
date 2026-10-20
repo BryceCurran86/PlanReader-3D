@@ -236,6 +236,31 @@ def sealed_source_closed_run_from_dict(
     """
     if not isinstance(payload, Mapping):
         raise TypeError("sealed run payload must be a mapping")
+    # V1 seals sign a FIXED wire schema. A valid old fingerprint does not
+    # authenticate optional JSON fields such as snapshot_id, decision_scope_id,
+    # project trade, estimator approval or alleged benchmark score. Refuse
+    # those UNSIGNED extras rather than allowing another consumer to mistake
+    # their presence for producer-issued source authority. Optional future
+    # scope identifiers must be carried by a separately signed versioned
+    # supplement, never squeezed into the unchanged V1 signature.
+    run_wire_fields = frozenset({
+        "schema_version", "run_id", "project_id", "source_sha256s",
+        "revision_ids", "quantities", "fingerprint",
+    })
+    if set(payload) != run_wire_fields:
+        raise SourceClosedRunConflictError(
+            "sealed V1 run has missing or unsigned additional wire fields"
+        )
+    quantity_wire_fields = frozenset({
+        "schema_version", "project_id", "quantity_id", "family",
+        "semantic_key", "value", "unit", "status", "authority",
+        "confidence", "abstained", "document_id", "source_sha256",
+        "source_page", "viewport_id", "revision_id",
+        "object_identity_refs", "trace_canonical_entity_ids",
+        "evidence_ids", "trace_evidence_ids", "blocking_reasons",
+        "reason_codes", "lineage_ok", "lineage_reason_codes",
+        "fingerprint",
+    })
     for field in ("schema_version", "run_id", "project_id", "fingerprint"):
         original = payload.get(field)
         if type(original) is not str or not original or original != original.strip():
@@ -275,6 +300,10 @@ def sealed_source_closed_run_from_dict(
         if not isinstance(raw, Mapping):
             raise SourceClosedRunConflictError(
                 f"sealed quantity {index} must be a mapping"
+            )
+        if set(raw) != quantity_wire_fields:
+            raise SourceClosedRunConflictError(
+                f"sealed V1 quantity {index} has missing or unsigned additional wire fields"
             )
         # Original source fields are canonical strings. Coercing 123 -> "123"
         # during rehydration can preserve the same normalized fingerprint,
