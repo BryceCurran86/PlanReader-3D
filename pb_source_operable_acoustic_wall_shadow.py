@@ -33,10 +33,10 @@ class OperableWallSpec:
     system_type: OperableWallSystemType = OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS
     centerline_points: List[Tuple[float, float]] = field(default_factory=list)
     wall_height_m: float = 0.0
-    panel_width_mm: float = 1000.0
-    acoustic_rating_rw_db: int = 50
-    has_retractable_seals: bool = True
-    parking_stack_track_length_m: float = 2.5
+    panel_width_mm: float = 0.0
+    acoustic_rating_rw_db: int = 0
+    has_retractable_seals: bool = False
+    parking_stack_track_length_m: float = 0.0
     has_plenum_baffle: bool = True
     plenum_height_m: float = 0.9
     pass_doors_count: int = 0
@@ -83,10 +83,10 @@ class SourceOperableAcousticWallShadowAuthority:
         res = {
             "system_type": OperableWallSystemType.INDIVIDUAL_OMNI_DIRECTIONAL_PANELS,
             "wall_height_m": 0.0,
-            "panel_width_mm": 1000.0,
-            "acoustic_rating_rw_db": 50,
-            "has_retractable_seals": True,
-            "parking_stack_track_length_m": 2.5,
+            "panel_width_mm": 0.0,
+            "acoustic_rating_rw_db": 0,
+            "has_retractable_seals": False,
+            "parking_stack_track_length_m": 0.0,
             "has_plenum_baffle": False,
             "plenum_height_m": 0.9,
             "pass_doors_count": 0,
@@ -158,6 +158,9 @@ class SourceOperableAcousticWallShadowAuthority:
         elif "PASS DOOR" in clean:
             res["pass_doors_count"] = 1
 
+        if re.search(r"RETRACTABLE\s+SEAL|\bSEALS\b", clean):
+            res["has_retractable_seals"] = True
+
         return res
 
     @staticmethod
@@ -225,6 +228,7 @@ class SourceOperableAcousticWallShadowAuthority:
             has_baffle = bool(item.get("has_plenum_baffle", parsed["has_plenum_baffle"]))
             plenum_h = float(item.get("plenum_height_m", parsed["plenum_height_m"]))
             doors_cnt = int(item.get("pass_doors_count", parsed["pass_doors_count"]))
+            has_seals = bool(item.get("has_retractable_seals", parsed["has_retractable_seals"]))
 
             spec = OperableWallSpec(
                 wall_id=wall_id,
@@ -233,7 +237,7 @@ class SourceOperableAcousticWallShadowAuthority:
                 wall_height_m=wall_h,
                 panel_width_mm=panel_w,
                 acoustic_rating_rw_db=rw_val,
-                has_retractable_seals=True,
+                has_retractable_seals=has_seals,
                 parking_stack_track_length_m=stack_len,
                 has_plenum_baffle=has_baffle,
                 plenum_height_m=plenum_h,
@@ -246,7 +250,11 @@ class SourceOperableAcousticWallShadowAuthority:
             clear_wall_m = cls.calculate_polyline_length(snapped_pts, scale_ratio)
             wall_area = clear_wall_m * wall_h
             track_m = clear_wall_m + stack_len
-            panels_cnt = int(math.ceil(clear_wall_m / (panel_w / 1000.0))) if clear_wall_m > 0 else 0
+            panels_cnt = (
+                int(math.ceil(clear_wall_m / (panel_w / 1000.0)))
+                if clear_wall_m > 0 and panel_w > 0
+                else 0
+            )
 
             tot_wall_m += clear_wall_m
             tot_wall_area_m2 += wall_area
