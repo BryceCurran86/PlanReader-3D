@@ -1,0 +1,222 @@
+{
+  "benchmark_score_granted": false,
+  "flank_disposition_counts": {
+    "raster_source_band_left_source_primitive_unmapped": 6,
+    "raster_source_band_right_source_primitive_unmapped": 6
+  },
+  "frame_reason_cooccurrence_top": {
+    "host_binding_record_unavailable|opening_host_frame_host_unavailable": 6,
+    "opening_host_frame_aligned_fragment_distinctness_unproven|opening_host_frame_wall_unavailable|opening_host_frame_whole_wall_unproven": 3,
+    "opening_host_frame_aligned_opening_binding_unavailable|opening_host_frame_wall_unavailable|opening_host_frame_whole_wall_unproven": 1,
+    "opening_host_frame_connected_edge_unproven|opening_host_frame_wall_unavailable|opening_host_frame_whole_wall_unproven": 2,
+    "opening_host_frame_resolved": 9
+  },
+  "geometric_proximity_abstain": {
+    "first_remaining_gate": "geometric_proximity_ambiguous_abstain",
+    "nearest_wins_applied": false,
+    "selected_wall_candidate_id": null
+  },
+  "host_granted": false,
+  "hosted_first_gate_counts": {
+    "opening_filling_kind_unproven": 3,
+    "source_figured_dimension_pair_unproven": 1,
+    "whole_wall_frame_unavailable": 6,
+    "width_height_axis_authority_unproven": 5
+  },
+  "kind_unproven_empty_evidence_count": 5,
+  "kind_unproven_label_only_count": 2,
+  "label_bound_opening_count": 16,
+  "label_unbound_opening_count": 5,
+  "measurement_published": false,
+  "namespace_bridge_sample": [
+    {
+      "digit_tail_collision_count": 8,
+      "first_remaining_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "taxonomy": {
+        "segment_prefix_counts": {
+          "raster_opening_primitive": 8
+        },
+        "w4_prefix_counts": {
+          "colon_namespace:raster_segment": 2035,
+          "plain_token": 34,
+          "w4_d_index": 213
+        }
+      }
+    },
+    {
+      "digit_tail_collision_count": 7,
+      "first_remaining_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "taxonomy": {
+        "segment_prefix_counts": {
+          "raster_opening_primitive": 8
+        },
+        "w4_prefix_counts": {
+          "colon_namespace:raster_segment": 2035,
+          "plain_token": 34,
+          "w4_d_index": 213
+        }
+      }
+    },
+    {
+      "digit_tail_collision_count": 8,
+      "first_remaining_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "taxonomy": {
+        "segment_prefix_counts": {
+          "raster_opening_primitive": 8
+        },
+        "w4_prefix_counts": {
+          "colon_namespace:raster_segment": 2035,
+          "plain_token": 34,
+          "w4_d_index": 213
+        }
+      }
+    },
+    {
+      "digit_tail_collision_count": 7,
+      "first_remaining_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "taxonomy": {
+        "segment_prefix_counts": {
+          "raster_opening_primitive": 8
+        },
+        "w4_prefix_counts": {
+          "colon_namespace:raster_segment": 2035,
+          "plain_token": 34,
+          "w4_d_index": 213
+        }
+      }
+    },
+    {
+      "digit_tail_collision_count": 8,
+      "first_remaining_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "taxonomy": {
+        "segment_prefix_counts": {
+          "raster_opening_primitive": 8
+        },
+        "w4_prefix_counts": {
+          "colon_namespace:raster_segment": 2035,
+          "plain_token": 34,
+          "w4_d_index": 213
+        }
+      }
+    },
+    {
+      "digit_tail_collision_count": 6,
+      "first_remaining_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "taxonomy": {
+        "segment_prefix_counts": {
+          "raster_opening_primitive": 8
+        },
+        "w4_prefix_counts": {
+          "colon_namespace:raster_segment": 2035,
+          "plain_token": 34,
+          "w4_d_index": 213
+        }
+      }
+    }
+  ],
+  "namespace_bridge_summary": {
+    "gate_counts": {
+      "digit_tail_collision_ambiguous_abstain": 6
+    },
+    "host_granted": false,
+    "opening_count": 6,
+    "shadow_only": true,
+    "status": "UNPUBLISHED_SEGMENT_W4_NAMESPACE_BRIDGE_SUMMARY"
+  },
+  "page_id": "3",
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "signed_id_sets_equal": true,
+  "signed_quantity_ids_customer": [
+    "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+    "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+    "opening_area_1a755970ebeca773650f41e73eb0f113",
+    "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+    "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+    "opening_area_0b6477e219f9117d29b2803c181af665",
+    "opening_area_6809b61112132ffd701e6eae02076876",
+    "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+  ],
+  "signed_quantity_ids_from_decisions": [
+    "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+    "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+    "opening_area_1a755970ebeca773650f41e73eb0f113",
+    "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+    "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+    "opening_area_0b6477e219f9117d29b2803c181af665",
+    "opening_area_6809b61112132ffd701e6eae02076876",
+    "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+  ],
+  "single_figured_mm_values": [
+    {
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "single_value_mm": 870.0
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096",
+      "single_value_mm": 870.0
+    }
+  ],
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "span_summary_by_kind": {
+    "raster_line_run": {
+      "count": 6,
+      "max_pdf_pts": 45.119999999999976,
+      "mean_pdf_pts": 31.159999999999986,
+      "min_pdf_pts": 23.75999999999999
+    },
+    "raster_thin_ink_run": {
+      "count": 6,
+      "max_pdf_pts": 24.960000000000036,
+      "mean_pdf_pts": 24.44000000000001,
+      "min_pdf_pts": 24.0
+    },
+    "raster_wall_band_end": {
+      "count": 12,
+      "max_pdf_pts": 3.1200000000000045,
+      "mean_pdf_pts": 2.7000000000000264,
+      "min_pdf_pts": 2.159999999999968
+    },
+    "raster_wall_band_face": {
+      "count": 24,
+      "max_pdf_pts": 91.20000000000005,
+      "mean_pdf_pts": 31.860000000000003,
+      "min_pdf_pts": 3.840000000000032
+    }
+  },
+  "status": "UNPUBLISHED_LOT16_BATCH41_HOST_NAMESPACE_CENSUS",
+  "unhosted_first_gate_counts": {
+    "structural_host_unavailable": 6
+  },
+  "visible_observation_id_count": 0
+}

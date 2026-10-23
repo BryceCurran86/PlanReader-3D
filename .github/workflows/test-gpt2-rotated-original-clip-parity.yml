@@ -9,7 +9,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "pb_*.py"
       - "tools/diag_pdf_rotated_native_clip_parity_shadow.py"
       - "tests/test_gpt2_pdf_rotated_native_clip_parity_shadow.py"
       - ".github/workflows/test-gpt2-rotated-original-clip-parity.yml"

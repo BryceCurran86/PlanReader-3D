@@ -1,0 +1,181 @@
+{
+  "benchmark_score_granted": false,
+  "host_granted": false,
+  "index_kind_counts": {
+    "native_pdf_visible_segment": 1727,
+    "parent:native_pdf_segment": 1727,
+    "parent:raster_pdf_segment": 2359,
+    "raster_pdf_visible_segment": 2359
+  },
+  "indexed_ref_count": 16344,
+  "invented_second_axis": false,
+  "kind_unproven_split": {
+    "empty_kind": [
+      "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+      "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+      "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+      "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "physical_opening_existence_b248972669988c108ebc90c6ca3908fd"
+    ],
+    "token_without_evidence": [
+      {
+        "opening_kind": "door",
+        "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787"
+      }
+    ]
+  },
+  "measurement_published": false,
+  "observation_geometry_openings": [
+    {
+      "collinear_overlap_match_count": 0,
+      "exact_match_count": 0,
+      "exact_matched_wall_candidate_ids": [],
+      "first_remaining_gate": "observation_geometry_identity_unavailable",
+      "host_granted": false,
+      "overlap_matched_wall_candidate_ids": [],
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "w4_primitives_missing_indexed_geometry": 262,
+      "w4_primitives_with_indexed_geometry": 2069
+    },
+    {
+      "collinear_overlap_match_count": 0,
+      "exact_match_count": 0,
+      "exact_matched_wall_candidate_ids": [],
+      "first_remaining_gate": "observation_geometry_identity_unavailable",
+      "host_granted": false,
+      "overlap_matched_wall_candidate_ids": [],
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "w4_primitives_missing_indexed_geometry": 262,
+      "w4_primitives_with_indexed_geometry": 2069
+    },
+    {
+      "collinear_overlap_match_count": 0,
+      "exact_match_count": 0,
+      "exact_matched_wall_candidate_ids": [],
+      "first_remaining_gate": "observation_geometry_identity_unavailable",
+      "host_granted": false,
+      "overlap_matched_wall_candidate_ids": [],
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "w4_primitives_missing_indexed_geometry": 262,
+      "w4_primitives_with_indexed_geometry": 2069
+    },
+    {
+      "collinear_overlap_match_count": 0,
+      "exact_match_count": 0,
+      "exact_matched_wall_candidate_ids": [],
+      "first_remaining_gate": "observation_geometry_identity_unavailable",
+      "host_granted": false,
+      "overlap_matched_wall_candidate_ids": [],
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "w4_primitives_missing_indexed_geometry": 262,
+      "w4_primitives_with_indexed_geometry": 2069
+    },
+    {
+      "collinear_overlap_match_count": 0,
+      "exact_match_count": 0,
+      "exact_matched_wall_candidate_ids": [],
+      "first_remaining_gate": "observation_geometry_identity_unavailable",
+      "host_granted": false,
+      "overlap_matched_wall_candidate_ids": [],
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "w4_primitives_missing_indexed_geometry": 262,
+      "w4_primitives_with_indexed_geometry": 2069
+    },
+    {
+      "collinear_overlap_match_count": 0,
+      "exact_match_count": 0,
+      "exact_matched_wall_candidate_ids": [],
+      "first_remaining_gate": "observation_geometry_identity_unavailable",
+      "host_granted": false,
+      "overlap_matched_wall_candidate_ids": [],
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "w4_primitives_missing_indexed_geometry": 262,
+      "w4_primitives_with_indexed_geometry": 2069
+    }
+  ],
+  "observation_geometry_summary": {
+    "gate_counts": {
+      "observation_geometry_identity_unavailable": 6
+    },
+    "host_granted": false,
+    "opening_count": 6,
+    "shadow_only": true,
+    "status": "UNPUBLISHED_SEGMENT_W4_OBSERVATION_GEOMETRY_SUMMARY",
+    "total_collinear_overlap_hits": 0,
+    "total_exact_hits": 0
+  },
+  "page_id": "3",
+  "producer_visible_observation_id_count": 4086,
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "single_figured_height_gap": [
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_8ecb81b6524804c80710ec323050be6b"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b"
+    },
+    {
+      "canonical_height_m": null,
+      "canonical_height_record_id": null,
+      "door_height_gate": "door_height_second_axis_unavailable",
+      "invented_second_axis_mm": null,
+      "label_width_only_mm": 870.0,
+      "physical_opening_id": "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096"
+    }
+  ],
+  "snapshot_visible_observation_id_count": 0,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_BATCH44_OBSERVATION_GEOMETRY_CENSUS"
+}

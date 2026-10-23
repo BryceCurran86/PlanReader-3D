@@ -1,0 +1,14 @@
+{
+  "benchmark_score_granted": false,
+  "host_granted": false,
+  "opening_count": 6,
+  "signed_eight_retained": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_FACE_END_ROLE_CENSUS",
+  "support_kind_counts": {
+    "raster_line_run": 6,
+    "raster_thin_ink_run": 6,
+    "raster_wall_band_end": 12,
+    "raster_wall_band_face": 24
+  }
+}

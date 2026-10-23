@@ -1,0 +1,33 @@
+{
+  "status": "UNPUBLISHED_BATCH42_COMPOSITE_PROOF",
+  "shadow_only": true,
+  "benchmark_score_granted": false,
+  "measurement_published": false,
+  "host_granted": false,
+  "ci": {
+    "test_3_13": "pass",
+    "test_3_14": "pass",
+    "original_pdf_jobs": "fail_missing_documents_sources_artifact"
+  },
+  "proofs": {
+    "digit_tail_gate": "digit_tail_collision_ambiguous_abstain_x6",
+    "digit_tail_vs_raster_segment": [8, 7, 8, 7, 8, 6],
+    "digit_tail_vs_d_index": [0, 1, 0, 0, 0, 0],
+    "parent_kind_segment": 48,
+    "segment_lines_per_unhosted": 8,
+    "usable_w4_candidates": 2094,
+    "kind_tokens": {"door": 7, "window": 7},
+    "single_figured_all_870_mm": true,
+    "signed_eight_retained": true
+  },
+  "gptmax_sync": {
+    "3412": "W2-fragment local end-reach ownership — complementary; not Cursor host",
+    "merged": false
+  },
+  "blockers_for_owner": [
+    "digit-tail vs raster_segment is ambiguous — refuse host",
+    "parents not RASTER_PDF_VISIBLE_SEGMENT",
+    "door height second axis unavailable (870 mm width-only labels)",
+    "3Laurel/Q5446 producers missing"
+  ]
+}
