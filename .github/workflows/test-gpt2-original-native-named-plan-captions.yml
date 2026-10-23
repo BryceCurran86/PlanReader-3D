@@ -9,7 +9,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "pb_*.py"
       - "pb_source_native_named_plan_caption_shadow.py"
       - "tests/test_gpt2_native_named_plan_caption_shadow.py"
       - ".github/workflows/test-gpt2-original-native-named-plan-captions.yml"
