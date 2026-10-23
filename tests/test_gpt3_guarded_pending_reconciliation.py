@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -252,7 +253,19 @@ def test_guarded_outputs_create_three_verifiable_new_files_and_reject_overwrite(
     outputs = (tmp_path / "map.json", tmp_path / "receipt.json", tmp_path / "report.json")
     payloads = ({"sealed_id": "real"}, {"activated_count": 1}, {"score": None})
     module._write_triplet(outputs, payloads, inputs=inputs)
-    assert [json.loads(p.read_text()) for p in outputs] == list(payloads)
+    stored_map, marker, stored_report = (
+        json.loads(p.read_text()) for p in outputs
+    )
+    assert stored_map == payloads[0]
+    assert stored_report == payloads[2]
+    assert marker["activated_count"] == payloads[1]["activated_count"]
+    assert marker["activation_commit_marker_version"] == (
+        module.ACTIVATION_COMMIT_MARKER_VERSION
+    )
+    assert marker["identity_map_sha256"] == sha256(outputs[0].read_bytes()).hexdigest()
+    assert marker["exact_report_sha256"] == sha256(outputs[2].read_bytes()).hexdigest()
+    assert marker["identity_map_project_id"] is None
+    assert marker["identity_map_source_sha256s"] is None
     with pytest.raises(FileExistsError, match="new"):
         module._write_triplet(outputs, payloads, inputs=inputs)
     assert inputs[0].read_text(encoding="utf-8") == "immutable-source"

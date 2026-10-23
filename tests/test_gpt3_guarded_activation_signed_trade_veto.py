@@ -6,6 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from tools.gpt3_atomic_pending_activation_pair import (
+    publish_new_activation_pair,
+    source_input_snapshot,
+)
 import tools.run_gpt3_guarded_pending_reconciliation as activation
 from tests.test_gpt3_guarded_pending_reconciliation import (
     _run,
@@ -104,10 +108,20 @@ def test_incompatible_trade_is_never_saved_as_guarded_exact_report(tmp_path, mon
     customers = _json(EVIDENCE / "verified_customer_rows.json")
     for name, payload in (
         ("pending", _pending()), ("sealed", archive),
-        ("customers", customers), ("active", active),
+        ("customers", customers),
         ("proof", source_proof), ("universe", universe),
     ):
         (tmp_path / f"{name}.json").write_text(json.dumps(payload))
+    # Release readers must only consume a nonempty activation map together
+    # with its genuine receipt-last commit marker. This CLI test must reach
+    # the later source-owned trade veto rather than bypass this earlier gate.
+    original_inputs = (tmp_path / "sealed.json",)
+    publish_new_activation_pair(
+        (tmp_path / "active.json", tmp_path / "active-receipt.json"),
+        (active, {"activated_count": 0}),
+        inputs=original_inputs,
+        source_snapshot=source_input_snapshot(original_inputs),
+    )
 
     original_activate = activation.build_activation
     def wrong_kind(**kwargs):
@@ -125,6 +139,7 @@ def test_incompatible_trade_is_never_saved_as_guarded_exact_report(tmp_path, mon
         ("--sealed-run", tmp_path / "sealed.json"),
         ("--customer-rows", tmp_path / "customers.json"),
         ("--active-identity-map", tmp_path / "active.json"),
+        ("--active-identity-receipt", tmp_path / "active-receipt.json"),
         ("--manifest", MANIFEST),
         ("--source-identity-proof", tmp_path / "proof.json"),
         ("--object-universe", tmp_path / "universe.json"),

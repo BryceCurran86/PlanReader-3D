@@ -410,9 +410,11 @@ def test_sealed_opening_identity_rejects_wrong_quantity_family(monkeypatch):
         lambda *_args, **_kwargs: verified,
     )
 
+    # A source-tampered floor_area is not eligible as opening_area at the
+    # FIRST pre-certified opening gate; do not weaken that earlier veto.
     with pytest.raises(
         ValueError,
-        match="family does not match source-proven opening family",
+        match="no pre-certified identity is newly sealed",
     ):
         _activate(sealed=payload, rows=rows)
 
