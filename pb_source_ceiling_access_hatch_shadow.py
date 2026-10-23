@@ -112,15 +112,19 @@ class SourceCeilingAccessHatchShadowAuthority:
         *,
         room_id: str,
         center_pt: Tuple[float, float],
-        width_pt: float = 17.01,   # ~600mm in pt (1:100 scale: 17.01 pt)
-        length_pt: float = 17.01,  # ~600mm in pt (1:100 scale: 17.01 pt)
+        width_pt: float = 0.0,
+        length_pt: float = 0.0,
         fire_rating: AccessHatchFireRating = AccessHatchFireRating.NON_RATED,
-        panel_type: str = "PLASTERBOARD_INFILL_FLUSH",
-        min_code_dimension_pt: float = 12.75,  # ~450mm
+        panel_type: str = "",
+        min_code_dimension_pt: Optional[float] = None,
     ) -> CeilingAccessHatchRecord:
         area = width_pt * length_pt
         perimeter = 2.0 * (width_pt + length_pt)
-        is_compliant = width_pt >= min_code_dimension_pt and length_pt >= min_code_dimension_pt
+        is_compliant = (
+            min_code_dimension_pt is not None
+            and width_pt >= min_code_dimension_pt
+            and length_pt >= min_code_dimension_pt
+        )
 
         hatch_id = stable_contract_id(
             "CEILING_HATCH",
@@ -159,7 +163,7 @@ class SourceCeilingAccessHatchShadowAuthority:
             (document_id, revision_id, source_sha256, total, fire_count),
         )
 
-        status = EvidenceResolutionStatus.CORROBORATED if total > 0 else EvidenceResolutionStatus.ABSTAINED
+        status = EvidenceResolutionStatus.CANDIDATE if total > 0 else EvidenceResolutionStatus.ABSTAINED
 
         return CeilingAccessHatchReceipt(
             receipt_id=receipt_id,

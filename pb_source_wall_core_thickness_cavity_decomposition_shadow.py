@@ -123,11 +123,11 @@ class SourceWallCoreCavityDecompositionShadowAuthority:
     def decompose_cavity_brick(
         self,
         *,
-        inner_leaf_thickness_pt: float = 110.0,
-        cavity_width_pt: float = 50.0,
-        outer_leaf_thickness_pt: float = 110.0,
-        inner_material: str = "COMMON_BRICK",
-        outer_material: str = "FACE_BRICK",
+        inner_leaf_thickness_pt: float = 0.0,
+        cavity_width_pt: float = 0.0,
+        outer_leaf_thickness_pt: float = 0.0,
+        inner_material: str = "",
+        outer_material: str = "",
         assembly_name: str = "CAVITY_BRICK_DEFAULT",
     ) -> CompositeWallAssemblyRecord:
         inner_id = stable_contract_id("LEAF_INNER", (assembly_name, inner_leaf_thickness_pt, inner_material))
@@ -145,7 +145,7 @@ class SourceWallCoreCavityDecompositionShadowAuthority:
             role=WallLeafRole.INSULATED_OR_AIR_CAVITY,
             thickness_pt=cavity_width_pt,
             is_loadbearing=False,
-            material="AIR_OR_INSULATION",
+            material="",
         )
 
         outer_id = stable_contract_id("LEAF_OUTER", (assembly_name, outer_leaf_thickness_pt, outer_material))
@@ -172,11 +172,11 @@ class SourceWallCoreCavityDecompositionShadowAuthority:
     def decompose_brick_veneer(
         self,
         *,
-        stud_core_thickness_pt: float = 90.0,
-        cavity_width_pt: float = 40.0,
-        brick_veneer_thickness_pt: float = 110.0,
-        stud_material: str = "TIMBER_OR_LIGHT_GAUGE_STEEL_STUD",
-        veneer_material: str = "FACE_BRICK",
+        stud_core_thickness_pt: float = 0.0,
+        cavity_width_pt: float = 0.0,
+        brick_veneer_thickness_pt: float = 0.0,
+        stud_material: str = "",
+        veneer_material: str = "",
         assembly_name: str = "BRICK_VENEER_DEFAULT",
     ) -> CompositeWallAssemblyRecord:
         core_id = stable_contract_id("LEAF_STUD", (assembly_name, stud_core_thickness_pt, stud_material))
@@ -194,7 +194,7 @@ class SourceWallCoreCavityDecompositionShadowAuthority:
             role=WallLeafRole.INSULATED_OR_AIR_CAVITY,
             thickness_pt=cavity_width_pt,
             is_loadbearing=False,
-            material="AIR_CAVITY_WITH_WALL_TIES",
+            material="",
         )
 
         veneer_id = stable_contract_id("LEAF_VENEER", (assembly_name, brick_veneer_thickness_pt, veneer_material))
@@ -222,7 +222,7 @@ class SourceWallCoreCavityDecompositionShadowAuthority:
         self,
         *,
         thickness_pt: float,
-        material: str = "PRECAST_CONCRETE",
+        material: str = "",
         assembly_name: str = "MONOLITHIC_DEFAULT",
     ) -> CompositeWallAssemblyRecord:
         leaf_id = stable_contract_id("LEAF_MONO", (assembly_name, thickness_pt, material))

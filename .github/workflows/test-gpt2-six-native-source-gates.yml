@@ -9,7 +9,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "pb_*.py"
       - "tools/diag_gpt2_six_source_scope_firstgates.py"
       - "tests/test_gpt2_six_original_native_source_gates.py"
       - ".github/workflows/test-gpt2-six-native-source-gates.yml"

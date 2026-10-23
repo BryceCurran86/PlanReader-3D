@@ -129,12 +129,12 @@ class SourceStairFlightVoidGeometryShadowAuthority:
         *,
         flight_id: str,
         origin_pt: Tuple[float, float],
-        direction: str = "UP",
+        direction: str = "",
         riser_count: int = 0,
         riser_height_pt: float = 0.0,
         tread_going_pt: float = 0.0,
         flight_width_pt: float = 0.0,
-        is_horizontal_run: bool = True,
+        is_horizontal_run: Optional[bool] = None,
     ) -> StairFlightRecord:
         tread_count = max(0, riser_count - 1)
         flight_len = tread_count * tread_going_pt
@@ -145,7 +145,9 @@ class SourceStairFlightVoidGeometryShadowAuthority:
         walkline_len = math.hypot(flight_len, total_rise)
 
         ox, oy = origin_pt
-        if is_horizontal_run:
+        if is_horizontal_run is None:
+            void_poly: Tuple[Tuple[float, float], ...] = ()
+        elif is_horizontal_run:
             void_poly = (
                 (round(ox, 4), round(oy, 4)),
                 (round(ox + flight_len, 4), round(oy, 4)),

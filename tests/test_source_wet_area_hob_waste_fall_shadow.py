@@ -25,6 +25,7 @@ def test_positive_raised_hob_evaluation():
         width_m=0.10,
         height_m=0.075,
         scale_ratio=0.02,
+        waterproofing_upturn_h_m=0.15,
     )
 
     assert hob.status == EvidenceResolutionStatus.CANDIDATE
@@ -138,3 +139,28 @@ def test_wet_area_takeoff_summary_computation():
     assert pytest.approx(summary.total_tiling_area_sqm, rel=1e-3) == 5.0
     assert pytest.approx(summary.waterproofing_perimeter_upturn_sqm, rel=1e-3) == 0.42
     assert summary.commercial_projection_allowed is False
+
+
+def test_omitted_upturn_height_does_not_invent_one_fifty_mm():
+    authority = WetAreaHobWasteFallShadowAuthority()
+    pts = [(0.0, 0.0), (50.0, 0.0)]
+    hob = authority.evaluate_hob(
+        room_id="BATH_01",
+        centerline_pts=pts,
+        hob_kind=HobKind.RAISED_HOB,
+        width_m=0.10,
+        height_m=0.075,
+        scale_ratio=0.02,
+    )
+
+    assert pytest.approx(hob.waterproofing_upturn_area_sqm, rel=1e-3) == 0.0
+
+    summary = authority.compute_wet_area_takeoff(
+        room_id="BATH_01",
+        floor_finish_code="CODE_UNKNOWN",
+        room_gross_floor_area_sqm=5.0,
+        shower_enclosure_area_sqm=1.0,
+        hobs=[hob],
+        shower_wall_perimeter_m=2.8,
+    )
+    assert pytest.approx(summary.waterproofing_perimeter_upturn_sqm, rel=1e-3) == 0.0

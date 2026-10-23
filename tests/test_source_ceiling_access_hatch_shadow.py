@@ -18,6 +18,7 @@ def test_standard_compliant_access_hatch():
         length_pt=20.0,
         fire_rating=AccessHatchFireRating.FIRE_RATED_60_MIN,
         panel_type="PLASTERBOARD_INFILL_FLUSH",
+        min_code_dimension_pt=12.75,
     )
 
     assert h.room_id == "ROOM_HALLWAY"
@@ -40,6 +41,21 @@ def test_undersized_non_compliant_hatch():
     )
 
     assert h.is_code_compliant is False
+
+
+def test_omitted_hatch_size_does_not_invent_typical_opening():
+    authority = SourceCeilingAccessHatchShadowAuthority()
+
+    h = authority.compute_access_hatch(
+        room_id="ROOM_UNKNOWN",
+        center_pt=(0.0, 0.0),
+    )
+
+    assert h.width_pt == 0.0
+    assert h.length_pt == 0.0
+    assert h.area_pt2 == 0.0
+    assert h.is_code_compliant is False
+    assert h.panel_type == ""
 
 
 def test_compile_hatch_receipt():
@@ -72,7 +88,7 @@ def test_compile_hatch_receipt():
     assert receipt.fire_rated_count == 1
     assert receipt.total_trim_perimeter_pt == 80.0 + 100.0 # 180.0
     assert receipt.total_hatch_area_pt2 == 400.0 + 625.0    # 1025.0
-    assert receipt.status == EvidenceResolutionStatus.CORROBORATED
+    assert receipt.status == EvidenceResolutionStatus.CANDIDATE
     assert receipt.commercial_projection_allowed is False
     assert receipt.takeoff_eligible is False
     assert receipt.schema_version == SCHEMA_VERSION

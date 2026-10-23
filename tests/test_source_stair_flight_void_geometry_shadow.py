@@ -79,6 +79,8 @@ def test_omitted_stair_geometry_does_not_invent_typical_flight():
     assert flight.flight_width_pt == 0.0
     assert flight.flight_length_pt == 0.0
     assert flight.total_rise_pt == 0.0
+    assert flight.direction == ""
+    assert flight.void_polygon == ()
 
 
 def test_compile_stair_void_receipt():
@@ -91,6 +93,7 @@ def test_compile_stair_void_receipt():
         riser_height_pt=5.0,
         tread_going_pt=10.0,
         flight_width_pt=20.0,
+        is_horizontal_run=True,
     )
 
     receipt = authority.compile_stair_void_receipt(
