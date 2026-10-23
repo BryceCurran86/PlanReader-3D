@@ -75,7 +75,10 @@ def test_same_physical_parent_can_have_distinct_geometric_and_finish_families():
         verified_items=items,
         sealed_quantities=[
             _floor(floor, key="floor_area:office"),
-            _floor(floor, key="tile:FT3", family="floor_finish_area"),
+            # The real finish issuer signs a material-specific semantic
+            # key with the identical canonical physical floor identity.
+            _floor(floor, key=f"floor_finish_area:{floor}:FT3:tile",
+                   family="floor_finish_area"),
         ],
         identity_bindings=links,
     )
