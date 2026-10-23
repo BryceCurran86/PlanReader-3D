@@ -162,6 +162,18 @@ def _source_equivalence_group_pair_conflicts(equivalence) -> frozenset[tuple[str
     return frozenset(conflicted)
 
 
+def _source_equivalence_group_unsafe_members(equivalence) -> frozenset[str]:
+    """Veto the entire original SAME identity when any pair contradicts it."""
+    unsafe = set(_source_equivalence_group_overlap_members(equivalence))
+    conflicted_pairs = _source_equivalence_group_pair_conflicts(equivalence)
+    for raw_group in getattr(equivalence, "equivalence_groups", ()):
+        group = {str(member) for member in raw_group}
+        if any(left in group and right in group
+               for left, right in conflicted_pairs):
+            unsafe.update(group)
+    return frozenset(unsafe)
+
+
 def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
     group_conflicts = _source_equivalence_group_pair_conflicts(equivalence)
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
@@ -923,11 +935,10 @@ class OpeningHostFrameProducer:
             return None
 
         if any(
-            member_id in binding.member_wall_candidate_ids
-            for pair in _source_equivalence_group_pair_conflicts(
+            member_id in _source_equivalence_group_unsafe_members(
                 wall_scope.equivalence
             )
-            for member_id in pair
+            for member_id in binding.member_wall_candidate_ids
         ):
             # Single-member shortcut must not bypass the physical W4
             # SAME-group-vs-DISTINCT-pair contradiction veto enforced on the
@@ -1103,10 +1114,10 @@ class OpeningHostFrameProducer:
             return fail("opening_host_frame_whole_wall_unproven")
 
         if any(
-            left in component_ids or right in component_ids
-            for left, right in _source_equivalence_group_pair_conflicts(
+            wall_id in _source_equivalence_group_unsafe_members(
                 wall_scope.equivalence
             )
+            for wall_id in component_ids
         ):
             # This contradiction touches the selected physical frame itself.
             # Do not let a grouped rival enter as SAME or be excluded as DISTINCT.

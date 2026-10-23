@@ -12,6 +12,7 @@ import pytest
 
 from pb_opening_host_frame_authority import (
     _pair_lookup, _source_equivalence_group_overlap_members,
+    _source_equivalence_group_unsafe_members,
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass as Class
 
@@ -299,6 +300,64 @@ def test_single_member_shortcut_rejects_same_group_vs_distinct_pair(
         binding=bound, opening=_opening(), geometry=GEOMETRY,
     )
     assert result is None
+
+
+@pytest.mark.parametrize("unproved_class", (
+    DISTINCT.value, AMBIGUOUS.value, "malformed_source_class", None,
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_three_member_source_group_revokes_cached_c_only_raster_frame(
+    unproved_class, reverse,
+):
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    group = ("wall:A", "wall:B", "wall:host")
+    pair = ("wall:A", "wall:B", unproved_class)
+    if reverse:
+        group = tuple(reversed(group))
+        pair = (pair[1], pair[0], pair[2])
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = replace(
+        scope.equivalence,
+        equivalence_groups=(group,),
+        pair_classifications=(),
+        representative_wall_ids=("wall:host",),
+        same_wall_ids=tuple(group),
+    )
+    bound = _binding()
+    bound.member_equivalence_groups = (tuple(sorted(group)),)
+    producer = _producer(scope)
+    accepted = producer._raster_whole_wall_frame(
+        binding=bound, opening=_opening(), geometry=GEOMETRY,
+    )
+    assert accepted is not None and accepted.candidate_ids == ("wall:host",)
+
+    scope.equivalence = replace(scope.equivalence, pair_classifications=(pair,))
+    assert _source_equivalence_group_unsafe_members(scope.equivalence) == frozenset(group)
+    blocked = producer._raster_whole_wall_frame(
+        binding=bound, opening=_opening(), geometry=GEOMETRY,
+    )
+    assert blocked is None
+
+
+def test_three_member_frame_conflict_preserves_unrelated_real_raster_frame():
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = replace(
+        scope.equivalence,
+        equivalence_groups=(("A", "B", "C"),),
+        pair_classifications=(("A", "B", DISTINCT.value),),
+    )
+    assert _source_equivalence_group_unsafe_members(scope.equivalence) == frozenset({"A", "B", "C"})
+    accepted = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    )
+    assert accepted is not None and accepted.candidate_ids == ("wall:host",)
 
 
 def test_single_member_shortcut_preserves_unrelated_w4_source_conflict():
@@ -597,7 +656,7 @@ def test_real_opening_withdrawn_host_reproof_revokes_cached_frame(monkeypatch):
 
     def blocked_host(selector):
         result = original_resolve(selector)
-        if selector.key == selected[2].key:
+        if selector == selected[2]:
             return replace(result, status=Status.ABSTAINED, record=None)
         return result
 
