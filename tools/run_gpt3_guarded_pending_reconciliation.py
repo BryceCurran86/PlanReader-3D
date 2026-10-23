@@ -54,6 +54,12 @@ def read_committed_guarded_exact_report(
     )
     if marker.get("activation_commit_marker_version") != ACTIVATION_COMMIT_MARKER_VERSION:
         raise ValueError("guarded exact report has no committed activation receipt")
+    # The nested map reader verified its bytes earlier, but a concurrent
+    # writer can replace the map before we finish reading the exact report.
+    # Pin the map throughout this entire three-file committed read.
+    verified_map_bytes = map_path.read_bytes()
+    if marker.get("identity_map_sha256") != sha256(verified_map_bytes).hexdigest():
+        raise ValueError("guarded exact report map changed after initial verification")
     report_bytes = report_path.read_bytes()
     if marker.get("exact_report_sha256") != sha256(report_bytes).hexdigest():
         raise ValueError("guarded exact report does not match activation commit digest")
@@ -63,8 +69,9 @@ def read_committed_guarded_exact_report(
     if (
         receipt_path.read_bytes() != first_receipt
         or report_path.read_bytes() != report_bytes
+        or map_path.read_bytes() != verified_map_bytes
     ):
-        raise ValueError("guarded exact report/receipt changed during verification")
+        raise ValueError("guarded exact report/map/receipt changed during verification")
     return report
 
 

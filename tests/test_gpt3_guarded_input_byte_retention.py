@@ -136,3 +136,51 @@ def test_cli_rejects_signed_input_change_during_evaluation(
     with pytest.raises(ValueError, match="input changed during scoring"):
         module.main(argv)
     assert all(not path.exists() for path in outputs)
+
+@pytest.mark.parametrize("race", ["after_map_reader", "after_report_read"])
+def test_guarded_reader_rechecks_map_after_full_report_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, race: str,
+):
+    """A modified map cannot remain ACTIVE after an earlier successful read."""
+    inputs = (tmp_path / "original.json",)
+    inputs[0].write_text('{"source":"immutable"}', encoding="utf-8")
+    outputs = _outputs(tmp_path)
+    module._write_triplet(
+        outputs, ({"mapping": 1}, {"activation": 1}, {"score": None}),
+        inputs=inputs,
+    )
+    original_receipt = outputs[1].read_bytes()
+    original_report = outputs[2].read_bytes()
+    mutated_map = b'{"mapping":999}\n'
+    if race == "after_map_reader":
+        actual_reader = module.read_committed_active_identity_map
+
+        def replace_after_initial_verification(*args, **kwargs):
+            verified = actual_reader(*args, **kwargs)
+            outputs[0].write_bytes(mutated_map)
+            return verified
+
+        monkeypatch.setattr(
+            module, "read_committed_active_identity_map",
+            replace_after_initial_verification,
+        )
+    else:
+        actual_read_bytes = Path.read_bytes
+        tampered = False
+
+        def replace_after_report_bytes(path):
+            nonlocal tampered
+            data = actual_read_bytes(path)
+            if path == outputs[2] and not tampered:
+                outputs[0].write_bytes(mutated_map)
+                tampered = True
+            return data
+
+        monkeypatch.setattr(Path, "read_bytes", replace_after_report_bytes)
+
+    with pytest.raises(ValueError, match="guarded exact report.*map.*changed"):
+        module.read_committed_guarded_exact_report(*outputs)
+    assert outputs[0].read_bytes() == mutated_map
+    assert outputs[1].read_bytes() == original_receipt
+    assert outputs[2].read_bytes() == original_report
+    assert inputs[0].read_text(encoding="utf-8") == '{"source":"immutable"}'
