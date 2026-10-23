@@ -30,6 +30,7 @@ def test_positive_in_plan_ipf1_callout():
         plan_viewport_bbox=PLAN_VIEWPORT,
         schedule_table_bboxes=[SCHEDULE_TABLE],
         title_block_bboxes=[TITLE_BLOCK],
+        source_defined_ceiling_codes=("IPF1","GRID","WFPB"),
     )
 
     assert word.status == EvidenceResolutionStatus.CANDIDATE
@@ -53,6 +54,7 @@ def test_positive_in_plan_grid_callout():
         plan_viewport_bbox=PLAN_VIEWPORT,
         schedule_table_bboxes=[SCHEDULE_TABLE],
         title_block_bboxes=[TITLE_BLOCK],
+        source_defined_ceiling_codes=("GRID","IPF1"),
     )
 
     assert word.status == EvidenceResolutionStatus.CANDIDATE
@@ -176,6 +178,8 @@ def test_original_standalone_office_is_room_word_not_ceiling_material():
         word_bbox=(295.42,1465.44,311.48,1503.56),
         block_text="OFFICE",block_index=9,line_index=0,word_index=0,
         plan_viewport_bbox=(100.,100.,1100.,1600.),
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
     )
     assert r.status is EvidenceResolutionStatus.ABSTAINED
     assert r.role is RcpWordRole.NON_CEILING_LABEL
@@ -212,6 +216,8 @@ def test_source_word_lexical_candidate_never_becomes_corrob_or_firm():
         word_bbox=(391.46,1500.42,416.54,1520.96),
         block_text="2400 GRID",block_index=10,line_index=1,
         plan_viewport_bbox=(100.,100.,1100.,1700.),
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
     )
     assert r.status is EvidenceResolutionStatus.CANDIDATE
     assert r.is_eligible_for_ceiling_mark
@@ -247,6 +253,8 @@ def test_sha_pinned_real_original_short_note_room_word_and_grid_if_provisioned()
             block_text=original_text,block_index=block_id,
             line_index=line_id,word_index=word_id,
             plan_viewport_bbox=candidate_plan,
+            schedule_table_bboxes=(SCHEDULE_TABLE,),
+            source_defined_ceiling_codes=("GRID","IPF1"),
         )
         roles.append((result.role,result.status))
         assert not result.takeoff_eligible and not result.commercial_projection_allowed
@@ -301,7 +309,73 @@ def test_valid_original_bbox_still_only_receives_lexical_candidate():
         line_index=1,
         word_index=0,
         plan_viewport_bbox=(100.0, 100.0, 1100.0, 1700.0),
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
     )
     assert result.status is EvidenceResolutionStatus.CANDIDATE
     assert not result.takeoff_eligible
     assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("block",(
+    "GRID OFFICE", "OFFICE GRID", "GRID GRID", "GRID IPF1",
+    "IPF1 GRID", "GRID WFPB 2400", "WFPB GRID 2400",
+))
+def test_same_native_block_foreign_room_or_competing_code_abstains(block):
+    a=SourceRcpWordEligibilityShadowAuthority()
+    for word in block.split():
+        if word not in ("GRID","IPF1","WFPB"):
+            continue
+        r=a.classify_word(
+            document_id="synthetic-source-only",page_id="9",
+            word_text=word,word_bbox=(390.,430.,415.,450.),
+            block_text=block,plan_viewport_bbox=PLAN_VIEWPORT,
+            schedule_table_bboxes=(SCHEDULE_TABLE,),
+            source_defined_ceiling_codes=("GRID","IPF1","WFPB"),
+        )
+        assert r.status is EvidenceResolutionStatus.ABSTAINED
+        assert not r.is_eligible_for_ceiling_mark
+        assert not r.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("missing",("viewport","schedule","definitions"))
+def test_unissued_original_scope_never_promotes_lexical_grid(missing):
+    kw=dict(
+        document_id="caller-not-issuer",page_id="9",
+        word_text="GRID",word_bbox=(390.,430.,415.,450.),
+        block_text="GRID 2400",
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+    )
+    kw[dict(viewport="plan_viewport_bbox",schedule="schedule_table_bboxes",
+            definitions="source_defined_ceiling_codes")[missing]]=None if missing=="viewport" else ()
+    r=SourceRcpWordEligibilityShadowAuthority().classify_word(**kw)
+    assert r.status is EvidenceResolutionStatus.ABSTAINED
+    assert not r.is_eligible_for_ceiling_mark
+
+
+def test_generic_schedule_defined_ceiling_code_has_no_project_hardcode():
+    r=SourceRcpWordEligibilityShadowAuthority().classify_word(
+        document_id="different-synthetic-project",page_id="1",
+        word_text="CL03",word_bbox=(390.,430.,415.,450.),
+        block_text="CL03 2700 CLG",plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("CL03",),
+    )
+    assert r.status is EvidenceResolutionStatus.CANDIDATE
+    assert r.is_eligible_for_ceiling_mark
+    assert not r.commercial_projection_allowed and not r.takeoff_eligible
+
+
+def test_foreign_unissued_ceiling_code_never_uses_original_lexeme_list():
+    for code in ("IPF1","GRID","WFPB","FPB","IP"):
+        r=SourceRcpWordEligibilityShadowAuthority().classify_word(
+            document_id="source-independent",page_id="1",
+            word_text=code,word_bbox=(390.,430.,415.,450.),
+            block_text=code,plan_viewport_bbox=PLAN_VIEWPORT,
+            schedule_table_bboxes=(SCHEDULE_TABLE,),
+            source_defined_ceiling_codes=(),
+        )
+        assert r.status is EvidenceResolutionStatus.ABSTAINED
+        assert not r.is_eligible_for_ceiling_mark

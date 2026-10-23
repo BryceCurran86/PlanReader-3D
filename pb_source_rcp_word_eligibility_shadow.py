@@ -16,6 +16,7 @@ Non-negotiable invariants:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -29,6 +30,7 @@ from pb_migration_contracts import (
 class RcpWordRole(str, Enum):
     IN_PLAN_CEILING_ANNOTATION = "IN_PLAN_CEILING_ANNOTATION"
     NON_CEILING_LABEL = "NON_CEILING_LABEL"
+    OTHER_PLAN_TEXT = "OTHER_PLAN_TEXT"
     SCHEDULE_TABLE_CELL = "SCHEDULE_TABLE_CELL"
     GENERAL_NOTE_PROSE = "GENERAL_NOTE_PROSE"
     TITLE_BLOCK_METADATA = "TITLE_BLOCK_METADATA"
@@ -98,6 +100,7 @@ class SourceRcpWordEligibilityShadowAuthority:
         plan_viewport_bbox: Optional[Tuple[float, float, float, float]] = None,
         schedule_table_bboxes: Sequence[Tuple[float, float, float, float]] = (),
         title_block_bboxes: Sequence[Tuple[float, float, float, float]] = (),
+        source_defined_ceiling_codes: Sequence[str] = (),
     ) -> RcpWordEvidence:
         """Classifies a single word token for ceiling mark eligibility."""
         clean_text = word_text.strip()
@@ -192,51 +195,69 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes="Word bbox is outside designated plan drawing viewport.",
             )
 
-        # 4. Syntactic prose / general note check. The genuine original
-        # Maryborough page-9 note 'REVIEW IN OFFICE AREA' is FOUR words,
-        # not >6, so length-only note classification is unsafe.
-        block_words = block_text.strip().upper().split()
-        ceiling_codes = frozenset(("IPF1", "GRID", "WFPB", "FPB", "IP"))
-        def _short_code_context() -> bool:
-            if clean_text.upper() not in ceiling_codes:
-                return False
-            if len(block_words) <= 2:
-                return True
-            return (
-                clean_text.upper() == "GRID"
-                and any(w.isdigit() for w in block_words)
-                and all(w in ceiling_codes or w in ("/", "CLG", "CEILING")
-                        or w.isdigit() for w in block_words)
-            )
-        if (len(block_words) > 6 or len(block_text.strip()) > 35
-                or (len(block_words) >= 3 and not _short_code_context())):
+        # 4. A source-visible word is not a ceiling code merely because its
+        # spelling looks familiar. Require a caller-provided original schedule
+        # code universe, and keep the whole native source block's rivals.
+        # These caller scopes are only candidates, never source-producer trust.
+        defined=frozenset(
+            code.strip().upper() for code in source_defined_ceiling_codes
+            if type(code) is str and code.strip()
+        )
+        tokens=tuple(part.upper() for part in block_text.strip().split())
+        upper=clean_text.upper()
+        # Multiword original coordination notes (including the four-word
+        # OFFICE warning) are not material even when their PDF text is legible.
+        if (len(tokens)>6 or len(block_text.strip())>35
+                or (len(tokens)>=3 and upper not in defined)):
             return RcpWordEvidence(
-                word_id=word_id,
-                text=clean_text,
-                bbox_pdf_pts=wb,
-                block_index=block_index,
-                line_index=line_index,
-                word_index=word_index,
-                role=RcpWordRole.GENERAL_NOTE_PROSE,
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=RcpWordRole.GENERAL_NOTE_PROSE,
                 is_eligible_for_ceiling_mark=False,
                 status=EvidenceResolutionStatus.ABSTAINED,
-                notes=f"Word is part of a general note prose block ({len(block_words)} words).",
+                notes=f"Word is part of a general note prose block ({len(tokens)} words).",
             )
-
-        # 5. Distinguish room names/notes from actual ceiling code words.
-        # Caller words/boxes alone can NEVER confer original visibility.
-        if clean_text.upper() not in ceiling_codes:
+        if upper not in defined and defined:
             return RcpWordEvidence(
-                word_id=word_id,
-                text=clean_text,
-                bbox_pdf_pts=wb,
-                block_index=block_index,
-                line_index=line_index,
-                word_index=word_index,
-                role=RcpWordRole.NON_CEILING_LABEL,
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=RcpWordRole.NON_CEILING_LABEL,
                 is_eligible_for_ceiling_mark=False,
                 status=EvidenceResolutionStatus.ABSTAINED,
-                notes="No source-authenticated ceiling material code; room or other label.",
+                notes="Word is not an original schedule-defined ceiling material code.",
+            )
+        if not schedule_table_bboxes or not defined:
+            return RcpWordEvidence(
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Complete original schedule/ceiling code scope is not issued.",
+            )
+        # Native sibling text must corroborate ONE code, not allow a same
+        # block to mint two material occurrences, borrow a room label or use
+        # a note/device word as a ceiling role. Pure height/CLG support only.
+        in_block_codes=tuple(token for token in tokens if token in defined)
+        support=frozenset(("CLG","/","AFFL","FFL","A.F.F.L","CEILING"))
+        unsupported=tuple(
+            token for token in tokens
+            if token not in defined and token not in support
+            and not re.fullmatch(r"[0-9]+(?:[.]?[0-9]+)?(?:MM|M)?",token)
+        )
+        if in_block_codes != (upper,) or unsupported:
+            role=(
+                RcpWordRole.GENERAL_NOTE_PROSE
+                if unsupported and len(tokens)>=3
+                else RcpWordRole.OTHER_PLAN_TEXT
+            )
+            return RcpWordEvidence(
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=role,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Competing code or unsupported sibling original source text.",
             )
 
         # 6. Lexically plausible ceiling callout CANDIDATE only.
