@@ -110,6 +110,8 @@ def test_missing_source_parent_propagates_abstention_to_integrated_flanks_and_pi
 def test_synthetic_flanks_must_not_bypass_real_physical_opening_authority():
     parents=_source()
     bands=reconstruct_raster_source_flank_bands_shadow(parents)
+    forged=replace(parents,structural_host_granted=True)
+    assert reconstruct_raster_source_flank_bands_shadow(forged).status=="ABSTAIN"
     with pytest.raises(TypeError,match="PhysicalOpeningAuthority required"):
         bind_original_g17_flanks_to_physical_opening_shadow(
             object(),original_selector=object(),
