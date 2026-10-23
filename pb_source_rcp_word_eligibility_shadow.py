@@ -104,13 +104,23 @@ class SourceRcpWordEligibilityShadowAuthority:
     ) -> RcpWordEvidence:
         """Classifies a single word token for ceiling mark eligibility."""
         clean_text = word_text.strip()
-        wb = (float(word_bbox[0]), float(word_bbox[1]), float(word_bbox[2]), float(word_bbox[3]))
+        # A caller-supplied bbox is NOT a trusted PDF geometry witness.
+        # Refuse booleans, strings, oversized integers, incomplete boxes and
+        # non-finite coordinates before constructing ANY contract ID.
+        valid_bbox = type(word_bbox) in (tuple, list) and len(word_bbox) == 4
+        if valid_bbox:
+            try:
+                valid_bbox = all(
+                    type(v) in (int, float) and math.isfinite(float(v))
+                    for v in word_bbox
+                )
+            except (OverflowError, TypeError, ValueError):
+                valid_bbox = False
 
         # Never feed malformed PDF coordinates to stable_contract_id:
-        # non-finite floats cannot be normalized as source ID ingredients.
-        # An unusable geometry token gets a deterministic negative receipt
-        # with a JSON-safe empty bbox, not a CANDIDATE or an exception.
-        if not all(math.isfinite(value) for value in wb):
+        # an unusable geometry token gets a deterministic JSON-safe receipt
+        # with zero geometry, never CANDIDATE or publishing authority.
+        if not valid_bbox:
             return RcpWordEvidence(
                 word_id=stable_contract_id(
                     "RCP_WORD_INVALID_BBOX",
@@ -127,6 +137,7 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes="Non-finite original PDF word bounding box; no source geometry authority.",
             )
 
+        wb = tuple(float(v) for v in word_bbox)
         word_id = stable_contract_id(
             "RCP_WORD",
             (document_id, page_id, clean_text, wb, block_index, line_index, word_index),

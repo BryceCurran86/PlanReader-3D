@@ -379,3 +379,48 @@ def test_foreign_unissued_ceiling_code_never_uses_original_lexeme_list():
         )
         assert r.status is EvidenceResolutionStatus.ABSTAINED
         assert not r.is_eligible_for_ceiling_mark
+
+
+@pytest.mark.parametrize("bad_bbox",[
+    (True,450.0,380.0,460.0),
+    (350.0,False,380.0,460.0),
+    ("350",450.0,380.0,460.0),
+    (350.0,450.0,380.0),
+    (350.0,450.0,380.0,460.0,1.0),
+    (350.0,450.0,None,460.0),
+    None,
+    350.0,
+    (10**1000,450.0,380.0,460.0),
+])
+def test_malformed_caller_source_bbox_is_safe_deterministic_abstention(bad_bbox):
+    import json
+    a=SourceRcpWordEligibilityShadowAuthority()
+    options=dict(
+        document_id="untrusted-native-glyph",page_id="9",
+        word_text="GRID",word_bbox=bad_bbox,block_text="GRID 2400",
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+        block_index=10,line_index=1,word_index=0,
+    )
+    x=a.classify_word(**options)
+    y=a.classify_word(**options)
+    assert x==y
+    assert x.status is EvidenceResolutionStatus.ABSTAINED
+    assert x.role is RcpWordRole.OUT_OF_VIEWPORT
+    assert x.bbox_pdf_pts==(0.0,0.0,0.0,0.0)
+    assert not x.is_eligible_for_ceiling_mark
+    assert not x.takeoff_eligible and not x.commercial_projection_allowed
+    json.dumps(x.to_dict(),allow_nan=False)
+
+
+def test_exact_native_numeric_bbox_still_only_candidate_with_schedule_scope():
+    r=SourceRcpWordEligibilityShadowAuthority().classify_word(
+        document_id="synthetic-original",page_id="9",
+        word_text="GRID",word_bbox=(350,450,380,460),
+        block_text="GRID 2400",plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        source_defined_ceiling_codes=("GRID",),
+    )
+    assert r.status is EvidenceResolutionStatus.CANDIDATE
+    assert not r.takeoff_eligible and not r.commercial_projection_allowed
