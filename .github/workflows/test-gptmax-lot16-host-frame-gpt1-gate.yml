@@ -10,6 +10,8 @@ on:
       - tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py
       - tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
       - tests/test_gptmax_independent_axes_figured_pair_handoff.py
+      - pb_gpt1_opening_area_actual_issuer_preflight_shadow.py
+      - tests/test_gpt1_opening_area_actual_issuer_preflight_shadow.py
       - docs/engineering/gptmax_lot16_host_frame_dimensions_20261015.md
       - .github/workflows/test-gptmax-lot16-host-frame-gpt1-gate.yml
 permissions:
@@ -32,8 +34,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - run: |
-          PYTHONPATH=. python -m pytest -q             tests/test_gptmax_lot16_host_frame_gpt1_handoff.py             tests/test_gptmax_independent_axes_figured_pair_handoff.py
-          ruff check --select F821,F823             tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py             tests/test_gptmax_lot16_host_frame_gpt1_handoff.py             tests/test_gptmax_independent_axes_figured_pair_handoff.py
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_gptmax_lot16_host_frame_gpt1_handoff.py \
+            tests/test_gptmax_independent_axes_figured_pair_handoff.py \
+            tests/test_gpt1_opening_area_actual_issuer_preflight_shadow.py
+          ruff check --select F821,F823 \
+            tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py \
+            pb_gpt1_opening_area_actual_issuer_preflight_shadow.py \
+            tests/test_gpt1_opening_area_actual_issuer_preflight_shadow.py \
+            tests/test_gptmax_lot16_host_frame_gpt1_handoff.py \
+            tests/test_gptmax_independent_axes_figured_pair_handoff.py
 
   immutable-original-production-replay:
     # Public CI has no client-owned original PDFs. Skipped means NOT VERIFIED,
