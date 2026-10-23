@@ -125,3 +125,51 @@ def test_review_only_no_extra_3d_count_or_customer_authority():
     assert pre["measurement_published"] is False
     assert pre["opening_count_granted"] is False
     assert pre["customer_seal_granted"] is False
+
+
+@pytest.mark.parametrize("field", [
+    "original_opening_kind_source_authority_reproved",
+    "filling_kind_source_supported",
+    "figured_area_receipt_bound",
+    "original_figured_label_source_scope_bound",
+    "original_host_binding_receipt_bound",
+    "original_physical_source_observation_receipts_bound",
+])
+def test_positive_publisher_cannot_override_failed_original_source_gate(field):
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    ready = source["gpt1_new_area_review_candidates"]
+    assert len(ready) == 1
+    assert ready[0]["new_gpt1_area_candidate_handoff"] is True
+    ready[0][field] = False
+    # _opening_quantity would still accept this typed object, but the
+    # source-reviewed handoff must fail-closed on its missing independent gate.
+    with pytest.raises(ValueError, match="source review claim lacks"):
+        reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("opening_kind", "door"),
+    ("page_id", "foreign-page"),
+    ("viewport_id", "foreign-viewport"),
+])
+def test_publisher_object_cannot_replay_original_semantic_or_view_owner(field, value):
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    real = _typed(canonical)
+    changed = list(real.canonical_openings)
+    changed[2] = replace(changed[2], **{field: value})
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(real, canonical_openings=tuple(changed)), source,
+        )
+
+
+def test_rekeyed_original_kind_claim_cannot_pass_source_to_issuer_parity():
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    source["gpt1_new_area_review_candidates"][0][
+        "original_canonical_opening_kind"
+    ] = "door"
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)

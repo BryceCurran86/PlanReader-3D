@@ -72,6 +72,9 @@ def reconcile_gpt1_area_review_with_issuer(
             root != original_root
             or row.get("source_sha256") != obj.source_sha256
             or row.get("snapshot_id") != obj.snapshot_id
+            or row.get("original_canonical_opening_kind") != obj.opening_kind
+            or row.get("original_canonical_page_id") != obj.page_id
+            or row.get("original_canonical_viewport_id") != obj.viewport_id
             or row.get("measurement_published") is not False
             or row.get("customer_seal_granted") is not False
             or row.get("opening_count_granted") is not False
@@ -83,6 +86,23 @@ def reconcile_gpt1_area_review_with_issuer(
         original_signed = bool(row.get("prior_signed_quantity_id"))
         issued = _opening_quantity(obj)
         if review_ready:
+            # A numeric area accepted by the real publisher does not prove
+            # original physical door/window semantics, structural host, or
+            # figured-label ownership.  Require the separately established
+            # source gate results before reporting an issuer-ready candidate.
+            required_source_gates = (
+                "figured_pair_area_support",
+                "figured_area_receipt_bound",
+                "original_figured_label_source_scope_bound",
+                "original_host_binding_receipt_bound",
+                "original_physical_source_observation_receipts_bound",
+                "original_opening_kind_source_authority_reproved",
+                "filling_kind_source_supported",
+                "canonical_figured_area_publication_basis_bound",
+                "canonical_figured_area_value_bound",
+            )
+            if any(row.get(gate) is not True for gate in required_source_gates):
+                raise ValueError("source review claim lacks independently re-proved opening area authority")
             if original_signed or row.get("opening_area_first_remaining_gate") != (
                 "independent_gpt1_opening_area_measurement_validation_required"
             ):

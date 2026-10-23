@@ -424,6 +424,12 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "independent_gpt1_measurement_validation_required"
         assessed.append({
             "physical_opening_id": identity,
+            # Retain original canonical roles independently of later issuer
+            # objects: figured numeric evidence cannot relabel a window as a door
+            # or replay the room/page context under a foreign viewport.
+            "original_canonical_opening_kind": c.get("opening_kind"),
+            "original_canonical_page_id": c.get("page_id"),
+            "original_canonical_viewport_id": c.get("viewport_id"),
             "source_sha256": c["source_sha256"],
             "snapshot_id": c["snapshot_id"],
             "source_decision_scope_id": row["attempted_host_selector"]["decision_scope_id"],
