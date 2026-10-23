@@ -26,9 +26,28 @@ def test_unordered_pair_with_area_still_blocks_axis_authority():
         height_m=None,
         area_m2=2.16,
     )
-    assert report["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert report["first_remaining_gate"] == "opening_geometry_axis_scope_unavailable"
     assert report["axis_order_authenticated"] is False
 
+
+
+def test_complete_geometry_without_independent_axes_still_blocks_axis_authority():
+    """With source-owned geometry present, the NEXT gate is the two missing axes."""
+    report = assess_opening_axis_ownership_shadow(
+        physical_opening_id="opening-2-with-geometry",
+        dimension_values_mm=(1200.0, 1800.0),
+        axis_order_resolved=False,
+        width_record_id=None,
+        height_record_id=None,
+        width_m=None,
+        height_m=None,
+        area_m2=2.16,
+        geometry_complete=True,
+    )
+    assert report["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert report["axis_order_authenticated"] is False
+    assert report["opening_area_publication_allowed"] is False
+    assert report["customer_seal_granted"] is False
 
 def test_fully_owned_axes_still_require_gpt1_validation_and_do_not_publish():
     report = assess_opening_axis_ownership_shadow(

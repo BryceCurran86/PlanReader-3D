@@ -64,5 +64,5 @@ def test_pair_without_axis_order_stays_unproven():
     )
     row = report["openings"][0]
     assert row["kind_shadow"]["filling_kind_source_supported"] is True
-    assert row["axis_shadow"]["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert row["axis_shadow"]["first_remaining_gate"] == "opening_geometry_axis_scope_unavailable"
     assert row["prior_signed_quantity_id"] == "qty-signed"
