@@ -45,6 +45,7 @@ def test_pair_without_axis_order_stays_unproven():
         canonical_by_id={"op-2": {
             "opening_kind": "window",
             "opening_kind_evidence_id": "kind-ev",
+            "evidence_ids": ["kind-ev", "fig-1"],
             "width_record_id": None,
             "height_record_id": None,
             "width_m": None,
@@ -63,5 +64,5 @@ def test_pair_without_axis_order_stays_unproven():
     )
     row = report["openings"][0]
     assert row["kind_shadow"]["filling_kind_source_supported"] is True
-    assert row["axis_shadow"]["first_remaining_gate"] == "width_height_axis_authority_unproven"
+    assert row["axis_shadow"]["first_remaining_gate"] == "opening_geometry_axis_scope_unavailable"
     assert row["prior_signed_quantity_id"] == "qty-signed"
