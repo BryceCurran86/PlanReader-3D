@@ -424,3 +424,56 @@ def test_exact_native_numeric_bbox_still_only_candidate_with_schedule_scope():
     )
     assert r.status is EvidenceResolutionStatus.CANDIDATE
     assert not r.takeoff_eligible and not r.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("bad_scope",[
+    {"plan_viewport_bbox": (100.0,100.0,float("nan"),1500.0)},
+    {"plan_viewport_bbox": (100.0,100.0,99.0,1500.0)},
+    {"plan_viewport_bbox": (100.0,100.0,1000.0)},
+    {"plan_viewport_bbox": (True,100.0,1000.0,1500.0)},
+    {"schedule_table_bboxes": ((float("nan"),100.0,1500.0,600.0),)},
+    {"schedule_table_bboxes": ((1100.0,100.0,1000.0,600.0),)},
+    {"schedule_table_bboxes": ((1100.0,None,1500.0,600.0),)},
+    {"schedule_table_bboxes": (("1100",100.0,1500.0,600.0),)},
+    {"schedule_table_bboxes": 5},
+    {"title_block_bboxes": ((1100.0,1200.0,1500.0,float("inf")),)},
+    {"title_block_bboxes": ((1100.0,1200.0,1500.0,1100.0),)},
+    {"title_block_bboxes": ((1100.0,True,1500.0,1500.0),)},
+])
+def test_malformed_native_scope_cannot_launder_schedule_word_as_plan_candidate(
+    bad_scope,
+):
+    import json
+    kwargs=dict(
+        document_id="unowned-original-p9",page_id="9",word_text="GRID",
+        word_bbox=(390.0,430.0,415.0,450.0),
+        block_text="GRID 2400",
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        title_block_bboxes=(TITLE_BLOCK,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
+    )
+    kwargs.update(bad_scope)
+    authority=SourceRcpWordEligibilityShadowAuthority()
+    first=authority.classify_word(**kwargs)
+    again=authority.classify_word(**kwargs)
+    assert first==again
+    assert first.status is EvidenceResolutionStatus.ABSTAINED
+    assert first.role is RcpWordRole.OUT_OF_VIEWPORT
+    assert not first.is_eligible_for_ceiling_mark
+    assert not first.takeoff_eligible and not first.commercial_projection_allowed
+    assert "Malformed source-owned" in first.notes
+    json.dumps(first.to_dict(),allow_nan=False)
+
+
+def test_valid_source_scope_does_not_strengthen_lexical_ceiling_candidate():
+    result=SourceRcpWordEligibilityShadowAuthority().classify_word(
+        document_id="source-neutral",page_id="9",word_text="GRID",
+        word_bbox=(390.0,430.0,415.0,450.0),block_text="GRID / 2400 CLG",
+        plan_viewport_bbox=PLAN_VIEWPORT,
+        schedule_table_bboxes=(SCHEDULE_TABLE,),
+        title_block_bboxes=(TITLE_BLOCK,),
+        source_defined_ceiling_codes=("GRID","IPF1"),
+    )
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert not result.takeoff_eligible and not result.commercial_projection_allowed

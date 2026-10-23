@@ -83,6 +83,20 @@ def _bbox_inside(
     )
 
 
+def _source_scope_rect_valid(bbox: object) -> bool:
+    """Fail closed on any caller-supplied unowned PDF viewport/table rectangle."""
+    if type(bbox) not in (tuple, list) or len(bbox) != 4:
+        return False
+    try:
+        if not all(type(x) in (int, float) and math.isfinite(float(x))
+                   for x in bbox):
+            return False
+        left, top, right, bottom = (float(x) for x in bbox)
+        return left < right and top < bottom
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 class SourceRcpWordEligibilityShadowAuthority:
     """Evaluates text word tokens for reflected ceiling plan mark eligibility."""
 
@@ -155,6 +169,30 @@ class SourceRcpWordEligibilityShadowAuthority:
                 is_eligible_for_ceiling_mark=False,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 notes="Degenerate or empty word bounding box.",
+            )
+
+        # A NaN, inverted or otherwise malformed caller-drawn source scope
+        # must NEVER turn an original schedule/legend cell into an apparent
+        # in-plan material mark by making all overlap tests false. Source
+        # scopes here are candidates, never producer-issued original truth.
+        scope_valid = (
+            (plan_viewport_bbox is None
+             or _source_scope_rect_valid(plan_viewport_bbox))
+            and type(schedule_table_bboxes) in (tuple, list)
+            and all(_source_scope_rect_valid(rect)
+                    for rect in schedule_table_bboxes)
+            and type(title_block_bboxes) in (tuple, list)
+            and all(_source_scope_rect_valid(rect)
+                    for rect in title_block_bboxes)
+        )
+        if not scope_valid:
+            return RcpWordEvidence(
+                word_id=word_id, text=clean_text, bbox_pdf_pts=wb,
+                block_index=block_index, line_index=line_index,
+                word_index=word_index, role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Malformed source-owned viewport/schedule/title scope; no original material authority.",
             )
 
         # 1. Schedule table check (takes priority over general viewport check)
