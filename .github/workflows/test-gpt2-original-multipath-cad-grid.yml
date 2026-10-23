@@ -9,7 +9,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "pb_*.py"
       - "tools/diag_native_multipath_cad_grid_source_shadow.py"
       - "tests/test_gpt2_native_multipath_cad_grid_source_shadow.py"
       - ".github/workflows/test-gpt2-original-multipath-cad-grid.yml"
