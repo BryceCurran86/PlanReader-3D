@@ -11,6 +11,7 @@ from pb_opening_host_binding_authority import (
     HOST_EQUIVALENCE_AMBIGUOUS,
     _normalize_role_candidates,
     _pair_lookup,
+    _unsafe_original_lineage_group_members,
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass as Class
 from test_raster_opening_split_centerline_host import _record
@@ -204,6 +205,117 @@ def test_source_cross_offset_conflict_not_global_to_unrelated_wall():
     assert len(normalized) == 1
     assert normalized[0].record.wall_candidate_id == "wall:unrelated"
     assert reasons == ()
+
+
+@pytest.mark.parametrize("issued", (
+    DISTINCT.value, UNKNOWN.value, "malformed_source_class", None,
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_three_member_source_group_conflict_taints_unselected_sibling(
+    issued, reverse,
+):
+    group = ("wall:A", "wall:B", "wall:C")
+    pair = ("wall:A", "wall:B", issued)
+    if reverse:
+        group = tuple(reversed(group))
+        pair = (pair[1], pair[0], pair[2])
+    source = _source_equivalence((pair,), groups=(group,))
+    assert _unsafe_original_lineage_group_members(source) == frozenset(group)
+    assert _pair_lookup(source) == {("wall:A", "wall:B"): UNKNOWN}
+    only_c = _record("wall:C", start=10.0, end=40.0)
+    status, selected, reasons = _normalize_role_candidates(
+        ((0.0, only_c),), source, axis_tol=0.8,
+        pair_lookup={}, group_lookup={"wall:C": tuple(sorted(group))},
+    )
+    assert status is Status.CONFLICT
+    assert selected == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+
+def test_three_member_conflict_keeps_independent_group_and_valid_same():
+    source = _source_equivalence(
+        (("A", "B", DISTINCT.value), ("X", "Y", SAME.value)),
+        groups=(("A", "B", "C"), ("X", "Y")),
+    )
+    assert _unsafe_original_lineage_group_members(source) == frozenset({"A", "B", "C"})
+    for wall_id in ("X", "Y", "outside"):
+        record = _record(wall_id, start=10.0, end=40.0)
+        status, selected, reasons = _normalize_role_candidates(
+            ((0.0, record),), source, axis_tol=0.8,
+        )
+        assert status is Status.CORROBORATED
+        assert len(selected) == 1
+        assert reasons == ()
+
+
+def test_three_member_repeated_issuer_receipt_order_cannot_restore_c():
+    c = _record("C", start=10.0, end=40.0)
+    for order in set(permutations((SAME.value, DISTINCT.value, SAME.value))):
+        source = _source_equivalence(
+            tuple(("A", "B", cls) for cls in order),
+            groups=(("A", "B", "C"),),
+        )
+        status, selected, reasons = _normalize_role_candidates(
+            ((0.0, c),), source, axis_tol=0.8,
+        )
+        assert status is Status.CONFLICT
+        assert selected == ()
+        assert HOST_EQUIVALENCE_AMBIGUOUS in reasons
+
+    valid = _source_equivalence(
+        (("A", "B", SAME.value), ("B", "C", SAME.value)),
+        groups=(("A", "B", "C"),),
+    )
+    status, selected, reasons = _normalize_role_candidates(
+        ((0.0, c),), valid, axis_tol=0.8,
+    )
+    assert status is Status.CORROBORATED
+    assert len(selected) == 1
+    assert selected[0].candidate_group == ("A", "B", "C")
+    assert reasons == ()
+
+
+@pytest.mark.parametrize("mode", ("gap", "two_face"))
+@pytest.mark.parametrize("issued", (DISTINCT.value, UNKNOWN.value, "bad_class"))
+def test_three_member_contradiction_blocks_c_only_source_lineage(mode, issued):
+    observations, records, _ = _original_lineage_test_case(mode)
+    first = records[0]
+    c = _record("wall:C", start=0.0, end=30.0,
+                source_ids=first.physical_identity.source_primitive_ids)
+    records = (c, *records[1:])
+    valid = _original_lineage_resolve(
+        observations, records, mode, _source_equivalence(()),
+    )
+    assert valid.status is Status.CORROBORATED
+    source = _source_equivalence(
+        (("wall:A", "wall:B", issued),),
+        groups=(("wall:A", "wall:B", "wall:C"),),
+    )
+    blocked = _original_lineage_resolve(observations, records, mode, source)
+    assert blocked.status is Status.CONFLICT
+    assert blocked.bands == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in blocked.reason_codes
+
+
+def test_three_member_contradiction_blocks_actual_raster_host_consumer():
+    import pb_opening_host_binding_authority as host
+    from test_raster_opening_split_centerline_host import OPENING
+
+    c = _record("wall:C", start=20.0, end=220.0)
+    clean = host._resolve_raster_whole_wall_host(
+        (c,), OPENING, _source_equivalence(()),
+    )
+    assert clean.status is Status.CORROBORATED and len(clean.bands) == 1
+    blocked = host._resolve_raster_whole_wall_host(
+        (c,), OPENING,
+        _source_equivalence(
+            (("wall:A", "wall:B", DISTINCT.value),),
+            groups=(("wall:A", "wall:B", "wall:C"),),
+        ),
+    )
+    assert blocked.status is Status.CONFLICT
+    assert blocked.bands == ()
+    assert HOST_EQUIVALENCE_AMBIGUOUS in blocked.reason_codes
 
 
 def test_injected_distinct_lookup_cannot_bypass_same_source_group_veto():

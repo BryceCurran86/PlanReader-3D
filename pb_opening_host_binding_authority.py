@@ -2387,10 +2387,14 @@ def _unsafe_original_lineage_group_members(
 ) -> frozenset[str]:
     """Physical source W4 contradictions cannot be resolved by first owner."""
     rejected = set(_inconsistent_source_group_members(equivalence))
-    rejected.update(
-        member for pair in _source_same_group_distinct_pair_conflicts(equivalence)
-        for member in pair
-    )
+    conflicting_pairs = _source_same_group_distinct_pair_conflicts(equivalence)
+    for raw_group in equivalence.equivalence_groups:
+        group = {str(member) for member in raw_group}
+        if any(left in group and right in group
+               for left, right in conflicting_pairs):
+            # The SAME assertion is one whole-wall identity. Once any two
+            # members disagree, a third member cannot inherit that identity.
+            rejected.update(group)
     return frozenset(rejected)
 
 
@@ -2459,30 +2463,14 @@ def _normalize_role_candidates(
         if group_lookup is None
         else group_lookup
     )
-    contradictory_pair_members = {
-        member_id
-        for pair in _source_same_group_distinct_pair_conflicts(equivalence)
-        for member_id in pair
-    }
-    if any(
-        str(record.wall_candidate_id) in contradictory_pair_members
-        for _offset, record in candidates
-    ):
-        # Physical SAME-vs-DISTINCT original-source contradiction is global
-        # to the physical wall identity: different geometric offset clusters
-        # cannot conceal it or restore host authority.
-        return (
-            EvidenceResolutionStatus.CONFLICT,
-            (),
-            (HOST_EQUIVALENCE_AMBIGUOUS,),
-        )
-    unsafe_group_members = _inconsistent_source_group_members(equivalence)
+    unsafe_group_members = _unsafe_original_lineage_group_members(equivalence)
     if any(
         str(record.wall_candidate_id) in unsafe_group_members
         for _offset, record in candidates
     ):
-        # Same wall belonging to incompatible source-issued group partitions
-        # is CONFLICT even if a caller-provided cached lookup chooses one.
+        # Contradicted SAME groups and overlapping original partitions are
+        # unsafe in every role, even when only one sibling is locally present
+        # or a caller-provided cached lookup selects a different member.
         return (
             EvidenceResolutionStatus.CONFLICT,
             (),
