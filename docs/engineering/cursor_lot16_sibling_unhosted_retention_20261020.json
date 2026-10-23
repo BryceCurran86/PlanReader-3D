@@ -1,0 +1,34 @@
+{
+  "benchmark_score_granted": false,
+  "host_granted": false,
+  "measurement_published": false,
+  "page_id": "3",
+  "shadow_only": true,
+  "sibling_summary": {
+    "gate_counts": {
+      "visible_segment_siblings_unavailable": 6
+    },
+    "host_granted": false,
+    "opening_count": 6,
+    "shadow_only": true,
+    "status": "UNPUBLISHED_VISIBLE_SEGMENT_SIBLING_SEARCH_SUMMARY",
+    "total_sibling_hits": 0
+  },
+  "signed_eight_retained": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_SIBLING_AND_UNHOSTED_RETENTION",
+  "unhosted_vs_signed_eight": {
+    "all_opening_count": 21,
+    "benchmark_score_granted": false,
+    "boq_values_read": false,
+    "host_granted_to_unhosted": false,
+    "measurement_published": false,
+    "missing_quantity_ids": [],
+    "shadow_only": true,
+    "signed_id_retention": "SIGNED_QUANTITY_IDS_RETAINED",
+    "status": "UNPUBLISHED_UNHOSTED_VS_SIGNED_EIGHT_RETENTION",
+    "unhosted_opening_count": 6,
+    "unhosted_subset_of_all": true
+  },
+  "visible_segment_kind_token": "raster_pdf_visible_segment"
+}

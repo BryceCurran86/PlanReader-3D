@@ -1,0 +1,154 @@
+{
+  "benchmark_score_granted": false,
+  "exact_geometry_openings": [
+    {
+      "exact_match_count": 0,
+      "first_remaining_gate": "exact_geometry_identity_unavailable",
+      "gptmax_3412_fragment_field_present": false,
+      "host_granted": false,
+      "matched_wall_candidate_ids": [],
+      "matches_sample": [],
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "segment_line_count": 8,
+      "w4_centerline_edge_count": 2558
+    },
+    {
+      "exact_match_count": 0,
+      "first_remaining_gate": "exact_geometry_identity_unavailable",
+      "gptmax_3412_fragment_field_present": false,
+      "host_granted": false,
+      "matched_wall_candidate_ids": [],
+      "matches_sample": [],
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "segment_line_count": 8,
+      "w4_centerline_edge_count": 2558
+    },
+    {
+      "exact_match_count": 0,
+      "first_remaining_gate": "exact_geometry_identity_unavailable",
+      "gptmax_3412_fragment_field_present": false,
+      "host_granted": false,
+      "matched_wall_candidate_ids": [],
+      "matches_sample": [],
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "segment_line_count": 8,
+      "w4_centerline_edge_count": 2558
+    },
+    {
+      "exact_match_count": 0,
+      "first_remaining_gate": "exact_geometry_identity_unavailable",
+      "gptmax_3412_fragment_field_present": false,
+      "host_granted": false,
+      "matched_wall_candidate_ids": [],
+      "matches_sample": [],
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "segment_line_count": 8,
+      "w4_centerline_edge_count": 2558
+    },
+    {
+      "exact_match_count": 0,
+      "first_remaining_gate": "exact_geometry_identity_unavailable",
+      "gptmax_3412_fragment_field_present": false,
+      "host_granted": false,
+      "matched_wall_candidate_ids": [],
+      "matches_sample": [],
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "segment_line_count": 8,
+      "w4_centerline_edge_count": 2558
+    },
+    {
+      "exact_match_count": 0,
+      "first_remaining_gate": "exact_geometry_identity_unavailable",
+      "gptmax_3412_fragment_field_present": false,
+      "host_granted": false,
+      "matched_wall_candidate_ids": [],
+      "matches_sample": [],
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "segment_line_count": 8,
+      "w4_centerline_edge_count": 2558
+    }
+  ],
+  "exact_geometry_summary": {
+    "gate_counts": {
+      "exact_geometry_identity_unavailable": 6
+    },
+    "host_granted": false,
+    "opening_count": 6,
+    "shadow_only": true,
+    "status": "UNPUBLISHED_SEGMENT_W4_EXACT_GEOMETRY_SUMMARY",
+    "total_exact_match_hits": 0
+  },
+  "flank_disposition_counts": {
+    "raster_source_band_left_source_primitive_unmapped": 6,
+    "raster_source_band_right_source_primitive_unmapped": 6
+  },
+  "gptmax_3412_fragment_field_present_any": false,
+  "gptmax_3412_sync_note": "PR #3412 adds owned W2 fragment end-reach fields; not present on this Cursor branch until GPT MAX lands \u2014 Cursor does not cherry-pick as host authority",
+  "host_granted": false,
+  "invented_second_axis": false,
+  "kind_unproven_ledger": [
+    {
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+      "source_kind_evidence_ids": []
+    },
+    {
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+      "source_kind_evidence_ids": []
+    },
+    {
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "source_kind_evidence_ids": [
+        "opening_label_dimension_41c4b972c5f3e82895c2d6f47c5fcb2f"
+      ]
+    },
+    {
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+      "source_kind_evidence_ids": []
+    },
+    {
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "source_kind_evidence_ids": [
+        "opening_label_dimension_4fad004def6444ef88be4c15df1b46d1"
+      ]
+    },
+    {
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "source_kind_evidence_ids": []
+    },
+    {
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_evidence_unproven",
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "source_kind_evidence_ids": []
+    }
+  ],
+  "measurement_published": false,
+  "page_id": "3",
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "single_figured_870mm_count": 8,
+  "single_figured_870mm_opening_ids": [
+    "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+    "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+    "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+    "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+    "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+    "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+    "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+    "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096"
+  ],
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_BATCH43_EXACT_GEOMETRY_CENSUS"
+}

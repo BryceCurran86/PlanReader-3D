@@ -1,0 +1,26 @@
+{
+  "status": "UNPUBLISHED_BATCH44_COMPOSITE_PROOF",
+  "shadow_only": true,
+  "benchmark_score_granted": false,
+  "measurement_published": false,
+  "host_granted": false,
+  "proofs": {
+    "producer_visible_observation_id_count": 4086,
+    "snapshot_visible_observation_id_count": 0,
+    "w4_primitives_with_indexed_geometry": 2069,
+    "observation_geometry_gate": "observation_geometry_identity_unavailable_x6",
+    "exact_hits": 0,
+    "collinear_overlap_hits": 0,
+    "kind_unproven_empty": 6,
+    "kind_token_without_evidence_door": 1,
+    "single_figured_height_unavailable": 8,
+    "signed_eight_retained": true
+  },
+  "blockers_for_owner": [
+    "opening parent lines are not W4 visible/raster_segment observation geometries",
+    "digit-tail vs raster_segment remains ambiguous",
+    "parents not RASTER_PDF_VISIBLE_SEGMENT",
+    "door height: 870mm width-only, no owned height atom",
+    "kind: 6 empty + 1 door token without evidence"
+  ]
+}
