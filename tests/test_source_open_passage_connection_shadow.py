@@ -17,6 +17,7 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_open_passage_connection_shadow import (
+    FINISH_EVIDENCE_UNAVAILABLE,
     INVALID_PASSAGE_GEOMETRY,
     OPEN_PASSAGE_OBSTRUCTED_BY_WALL,
     PASSAGE_ENDPOINTS_UNALIGNED_WITH_WALLS,
@@ -155,6 +156,45 @@ def test_unpartitioned_finish_conflict():
     assert result.record is None
 
 
+def test_missing_finish_codes_do_not_invent_contiguous_flow():
+    """Absence of finish evidence is not shared-finish authentication."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        transition_mark_geometry=None,
+        primary_finish_code=None,
+        connected_finish_code=None,
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert FINISH_EVIDENCE_UNAVAILABLE in result.reason_codes
+    assert result.record is None
+
+
+def test_one_sided_finish_code_does_not_invent_contiguous_flow():
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        transition_mark_geometry=None,
+        primary_finish_code="FT3",
+        connected_finish_code=None,
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert FINISH_EVIDENCE_UNAVAILABLE in result.reason_codes
+    assert result.record is None
+
+
 def test_passage_obstructed_by_wall_candidate():
     """Passage candidate fails when an existing wall stands across the opening."""
     selector = _make_selector()
@@ -286,3 +326,47 @@ def test_input_no_mutation():
     assert p_edges == orig_p
     assert c_edges == orig_c
     assert passage == orig_pass
+
+
+def test_passage_obstructed_by_transverse_wall_candidate():
+    """Passage candidate fails when an existing wall crosses transversely through the opening."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+    # Transverse wall crossing through x=100.0, y=80.0
+    transverse_wall = SimpleNamespace(endpoints_pt=((80.0, 80.0), (120.0, 80.0)))
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        primary_finish_code="FT3",
+        connected_finish_code="FT3",
+        existing_wall_candidates=(transverse_wall,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert OPEN_PASSAGE_OBSTRUCTED_BY_WALL in result.reason_codes
+    assert result.record is None
+
+
+def test_passage_obstructed_by_intruding_wall_endpoint():
+    """Passage candidate fails when a wall segment terminates inside the opening span."""
+    selector = _make_selector()
+    p_edges, c_edges, passage = _make_adjoining_walls()
+    # Wall terminating at x=100.0, y=75.0 inside the opening
+    intruding_wall = SimpleNamespace(endpoints_pt=((80.0, 75.0), (100.0, 75.0)))
+
+    result = evaluate_source_open_passage_connection_shadow(
+        selector,
+        passage_endpoints=passage,
+        primary_wall_edges=p_edges,
+        connected_wall_edges=c_edges,
+        primary_finish_code="FT3",
+        connected_finish_code="FT3",
+        existing_wall_candidates=(intruding_wall,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert OPEN_PASSAGE_OBSTRUCTED_BY_WALL in result.reason_codes
+    assert result.record is None

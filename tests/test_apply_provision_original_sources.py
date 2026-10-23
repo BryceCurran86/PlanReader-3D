@@ -313,6 +313,7 @@ MIXED_WORKFLOW = ABSENCE_ONLY_WORKFLOW + """  reads-original:
     "[[ ! -e \"documents/sources/Plan B.pdf\" ]]",
     "! test -f documents/sources/Plan B.pdf",
     "  test  !  -f  ./documents/sources/Plan B.pdf",
+    'assert "original_source_not_supplied_in_this_execution" in project["reason_codes"]',
 ])
 def test_absence_assertions_are_detected(command):
     assert T.asserts_originals_absent("run: " + command)
@@ -372,6 +373,22 @@ def test_the_real_private_original_policy_job_is_excluded_and_never_rewritten():
     new, changed, skipped = result
     assert changed == [] and skipped == [job]
     assert new == text
+
+
+def test_the_real_four_project_fail_closed_inventory_is_excluded_and_never_rewritten():
+    name, job = "test-gpt3-four-project-evidence.yml", "fail-closed-inventory"
+    assert (name, job) in T.EXCLUDED_JOBS
+    path = ROOT / ".github" / "workflows" / name
+    text = path.read_bytes().decode("utf-8")
+    jobs = yaml.safe_load(text)["jobs"]
+    assert job in jobs
+    assert T.asserts_originals_absent(text)
+    result = T.plan_file(path, T.manifest_names(ROOT), "main")
+    assert result is not None
+    new, changed, skipped = result
+    assert changed == [] and skipped == [job]
+    assert new == text
+    assert "provision-original-sources" not in text
 
 
 def test_every_real_job_with_an_absence_assertion_is_deliberately_excluded():

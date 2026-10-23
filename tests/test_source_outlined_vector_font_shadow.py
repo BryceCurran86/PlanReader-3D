@@ -162,7 +162,7 @@ def test_authority_resolution_and_selector():
         page_id="1",
     )
     res = authority.resolve(sel)
-    assert res.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert res.status == EvidenceResolutionStatus.CANDIDATE.value
     assert SOURCE_OUTLINED_TEXT_RESOLVED in res.reason_codes
     assert res.total_segments == 12
     assert res.withheld_segment_count == 12

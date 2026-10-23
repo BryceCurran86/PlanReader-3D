@@ -363,9 +363,9 @@ class SourceStructuralWallSystemAuthority:
             status = EvidenceResolutionStatus.ABSTAINED.value
             mode = "abstain_wall_system_defect_remains"
         else:
-            status = EvidenceResolutionStatus.CORROBORATED.value
-            mode = "corroborated_structural_wall_system"
-            all_reasons.add(SOURCE_STRUCTURAL_WALL_SYSTEM_RESOLVED)
+            status = EvidenceResolutionStatus.CANDIDATE.value
+            mode = "candidate_structural_wall_system"
+            all_reasons.add(SOURCE_STRUCTURAL_WALL_SYSTEM_CANDIDATE)
 
         rec = records[0]
         return SourceStructuralWallSystemResult(

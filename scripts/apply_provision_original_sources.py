@@ -49,11 +49,12 @@ def manifest_names(root: Path) -> List[str]:
 _ABSENCE_ASSERTION = re.compile(
     r"(?:\btest\s+!\s+-[efd]\s+|\[\[?\s+!\s+-[efd]\s+|!\s+test\s+-[efd]\s+)\S*(?:documents/sources|benchmarks/sources)"
 )
+_ABSENCE_REASON_CODE = "original_source_not_supplied_in_this_execution"
 
 
 def asserts_originals_absent(job_text: str) -> bool:
     """True when the job checks that a file under the source directories does not exist."""
-    return bool(_ABSENCE_ASSERTION.search(job_text))
+    return bool(_ABSENCE_ASSERTION.search(job_text)) or _ABSENCE_REASON_CODE in job_text
 
 
 def reads_originals(job_text: str) -> bool:
@@ -70,6 +71,10 @@ EXCLUDED_JOBS = {
     ("test-gpt2-private-original-ci-policy.yml", "absent-private-source-synthetic-policy"):
         "asserts that the private original is absent from the public checkout (test ! -f documents/sources/...); "
         "provisioning it would make that assertion fail by construction",
+    ("test-gpt3-four-project-evidence.yml", "fail-closed-inventory"):
+        "proves private originals are not required on the public runner: it requires "
+        "original_source_not_supplied_in_this_execution and source_sha_verified is False; "
+        "provisioning would make that absence proof fail by construction",
 }
 # An artifact path that could sweep documents/sources into a downloadable artifact (artifacts of a public repository are
 # readable by anyone). Paths under artifacts/ or the runner temp directory are the repository convention and are fine.

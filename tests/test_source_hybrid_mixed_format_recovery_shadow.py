@@ -149,7 +149,7 @@ def test_authority_resolution_and_unregistered_selector():
     sel = _make_selector()
     res = authority.resolve(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED.value
+    assert res.status == EvidenceResolutionStatus.CANDIDATE.value
     assert SOURCE_HYBRID_RECOVERY_RESOLVED in res.reason_codes
     assert res.detected_modality == MODALITY_MIXED_HYBRID
     assert res.vector_count == 1

@@ -9,6 +9,8 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_floor_finish_occurrence_ownership_shadow import (
     COMPETING_FINISH_CODES_IN_ROOM,
     COMPETING_FINISH_MARKS_IN_ROOM,
+    DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED,
+    DOORWAY_TRANSITION_MISALIGNED,
     FINISH_MATERIAL_CODE_MISMATCH,
     INVALID_ROOM_POLYGON,
     MARK_NOT_IN_ROOM_POLYGON,
@@ -73,9 +75,10 @@ def test_positive_ft2_floor_finish_ownership_in_pwd():
     assert isinstance(record, SourceFloorFinishOwnershipRecord)
     assert record.material_code == "FT2"
     assert record.occurrence_id == "OCC_FT2_PWD"
-    assert record.terminates_at_internal_faces is True
-    assert record.under_wall_finish_excluded is True
-    assert record.doorway_transition_authenticated is True
+    assert record.terminates_at_internal_faces is False
+    assert record.under_wall_finish_excluded is False
+    assert record.doorway_transition_authenticated is False
+    assert DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED in record.reason_codes
     assert record.commercial_projection_allowed is False
     assert record.takeoff_eligible is False
     assert record.diagnostic_only is True
@@ -328,3 +331,81 @@ def test_input_no_mutation():
     assert poly == poly_copy
     assert mark == mark_copy
     assert doorway == doorway_copy
+
+
+def test_unaligned_doorway_threshold_not_authenticated():
+    """Doorway threshold distant from the room polygon boundary must not authenticate transition."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark(
+        occurrence_id="OCC_FT2_PWD",
+        page_id="page_11",
+        material_code="FT2",
+        mark_center_pt=(150.0, 200.0),
+    )
+    # Threshold 400 pt away from room polygon
+    distant_doorway = SourceDoorwayThreshold("DOOR_DISTANT", (500.0, 500.0), (550.0, 500.0))
+
+    sel = _selector("ROOM_PWD", "FT2")
+    res = evaluate_source_floor_finish_ownership_shadow(
+        sel,
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[distant_doorway],
+    )
+
+    assert res.status == EvidenceResolutionStatus.CANDIDATE
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False
+    assert res.record.terminates_at_internal_faces is False
+    assert res.record.under_wall_finish_excluded is False
+    assert DOORWAY_TRANSITION_MISALIGNED in res.record.reason_codes
+    assert DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED not in res.record.reason_codes
+
+
+def test_overhanging_threshold_is_not_geometry_aligned_or_authenticated():
+    """A chord that overhangs both ends of a finite room edge is not a doorway owner."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_FT2_PWD", "page_11", "FT2", (150.0, 200.0))
+    overhang = SourceDoorwayThreshold("DOOR_OVERHANG", (80.0, 300.0), (250.0, 300.0))
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector("ROOM_PWD", "FT2"),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[overhang],
+    )
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False
+    assert DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED not in res.record.reason_codes
+
+
+def test_short_overlap_threshold_is_not_geometry_aligned_or_authenticated():
+    """A mostly-external collinear chord with a tiny edge overlap is not a doorway owner."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_FT2_PWD", "page_11", "FT2", (150.0, 200.0))
+    short = SourceDoorwayThreshold("DOOR_SHORT", (195.0, 300.0), (260.0, 300.0))
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector("ROOM_PWD", "FT2"),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[short],
+    )
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False
+    assert DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED not in res.record.reason_codes
+
+
+def test_forged_threshold_id_cannot_authenticate_doorway_or_faces():
+    """Non-empty invented IDs are not SourceRoomFace / W4 / stroke ownership."""
+    poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
+    mark = SourceFloorFinishMark("OCC_FT2_PWD", "page_11", "FT2", (150.0, 200.0))
+    forged = SourceDoorwayThreshold("stroke_threshold_1", (100.0, 300.0), (150.0, 300.0))
+    res = evaluate_source_floor_finish_ownership_shadow(
+        _selector("ROOM_PWD", "FT2"),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        doorway_transitions=[forged],
+    )
+    assert res.record is not None
+    assert res.record.doorway_transition_authenticated is False
+    assert res.record.terminates_at_internal_faces is False
+    assert res.record.under_wall_finish_excluded is False

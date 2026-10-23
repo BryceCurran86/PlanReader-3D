@@ -315,8 +315,8 @@ class SourceMemoryEfficientPlanProcessingAuthority:
             mode = "candidate_partial_pages_quarantined"
             all_plan_reasons.add(SOURCE_MEMORY_EFFICIENT_PLAN_CANDIDATE)
         else:
-            status = EvidenceResolutionStatus.CORROBORATED.value
-            mode = "corroborated_bounded_memory_plan_streaming"
+            status = EvidenceResolutionStatus.CANDIDATE.value
+            mode = "candidate_bounded_memory_plan_streaming"
             all_plan_reasons.add(SOURCE_MEMORY_EFFICIENT_PLAN_RESOLVED)
 
         return SourceMemoryEfficientPlanResult(

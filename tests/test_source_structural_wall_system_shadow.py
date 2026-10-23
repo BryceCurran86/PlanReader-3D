@@ -9,7 +9,7 @@ from pb_source_structural_wall_system_shadow import (
     JUNCTIONS_INTEGRATED,
     OPENINGS_EMBEDDED,
     PAIRED_FACES_PROVEN,
-    SOURCE_STRUCTURAL_WALL_SYSTEM_RESOLVED,
+    SOURCE_STRUCTURAL_WALL_SYSTEM_CANDIDATE,
     SOURCE_STRUCTURAL_WALL_SYSTEM_UNAVAILABLE,
     WALL_GEOMETRY_INVALID,
     WALL_RUN_CONTINUITY_PROVEN,
@@ -119,8 +119,8 @@ def test_complete_structural_wall_system_resolution():
     sel = _make_selector()
     res = authority.resolve(sel)
 
-    assert res.status == EvidenceResolutionStatus.CORROBORATED.value
-    assert SOURCE_STRUCTURAL_WALL_SYSTEM_RESOLVED in res.reason_codes
+    assert res.status == EvidenceResolutionStatus.CANDIDATE.value
+    assert SOURCE_STRUCTURAL_WALL_SYSTEM_CANDIDATE in res.reason_codes
     assert WALL_RUN_CONTINUITY_PROVEN in res.reason_codes
     assert PAIRED_FACES_PROVEN in res.reason_codes
     assert WALL_THICKNESS_CORROBORATED in res.reason_codes

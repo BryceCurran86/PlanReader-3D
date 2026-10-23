@@ -31,6 +31,7 @@ SOURCE_OPEN_PASSAGE_UNAVAILABLE = "source_open_passage_unavailable"
 PASSAGE_ENDPOINTS_UNALIGNED_WITH_WALLS = "passage_endpoints_unaligned_with_walls"
 OPEN_PASSAGE_OBSTRUCTED_BY_WALL = "open_passage_obstructed_by_wall"
 UNPARTITIONED_FINISH_CONFLICT = "unpartitioned_finish_conflict"
+FINISH_EVIDENCE_UNAVAILABLE = "finish_evidence_unavailable"
 INVALID_PASSAGE_GEOMETRY = "invalid_passage_geometry"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 
@@ -158,8 +159,7 @@ def _segment_intersects_passage(
     p2: tuple[float, float],
     tolerance_pt: float,
 ) -> bool:
-    """Check if a wall candidate segment obstructs or runs along the passage line."""
-    # Check if wall candidate is collinear and overlaps the passage line
+    """Check if a wall candidate segment obstructs, crosses, or runs along the passage line."""
     p_len = _distance(p1, p2)
     if p_len <= 1e-6:
         return False
@@ -174,11 +174,33 @@ def _segment_intersects_passage(
 
     a1, perp1 = proj(seg_start)
     a2, perp2 = proj(seg_end)
+
+    # 1. Collinear overlap: wall runs along the passage opening
     if perp1 <= tolerance_pt and perp2 <= tolerance_pt:
-        # Collinear: check overlap along the span
         overlap = min(max(a1, a2), p_len) - max(min(a1, a2), 0.0)
         if overlap > tolerance_pt:
             return True
+        return False
+
+    # 2. Transverse intersection: wall crosses through the passage
+    def ccw(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    d1 = ccw(p1, p2, seg_start)
+    d2 = ccw(p1, p2, seg_end)
+    d3 = ccw(seg_start, seg_end, p1)
+    d4 = ccw(seg_start, seg_end, p2)
+
+    # Strict transversal crossing interior to both segments
+    if ((d1 > 1e-5 and d2 < -1e-5) or (d1 < -1e-5 and d2 > 1e-5)) and \
+       ((d3 > 1e-5 and d4 < -1e-5) or (d3 < -1e-5 and d4 > 1e-5)):
+        return True
+
+    # 3. Endpoint intrusion: wall terminates strictly inside the opening span
+    for a, perp in ((a1, perp1), (a2, perp2)):
+        if perp <= tolerance_pt and (tolerance_pt < a < (p_len - tolerance_pt)):
+            return True
+
     return False
 
 
@@ -279,13 +301,13 @@ def evaluate_source_open_passage_connection_shadow(
 
     if trans_stroke is not None:
         transition_type = TRANSITION_PHYSICAL_STROKE
-    elif (
-        norm_primary
-        and norm_conn
-        and norm_primary == norm_conn
-        or not norm_primary
-        and not norm_conn
-    ):
+    elif not norm_primary or not norm_conn:
+        return SourceOpenPassageResult(
+            EvidenceResolutionStatus.ABSTAINED,
+            (FINISH_EVIDENCE_UNAVAILABLE,),
+            selector=selector,
+        )
+    elif norm_primary == norm_conn:
         transition_type = TRANSITION_CONTIGUOUS_FLOW
     else:
         # Differing finishes without an authenticated threshold line -> conflict
