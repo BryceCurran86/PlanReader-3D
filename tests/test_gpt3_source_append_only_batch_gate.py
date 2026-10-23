@@ -8,9 +8,12 @@ from pathlib import Path
 import pytest
 
 from pb_customer_output_verification import CustomerOutputVerificationError
-from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
+from pb_quantity_takeoff_adapter import (
+    CommercialTakeoffConflictError,
+    MissingCommercialAuthorityError,
+    quantities_to_takeoff_output_rows,
+)
 from pb_source_closed_run_export import SourceClosedRunExportError
-from pb_quantity_takeoff_adapter import quantities_to_takeoff_output_rows
 from pb_source_closed_run_export import (
     seal_source_closed_run, sealed_source_closed_run_from_dict,
 )
@@ -141,6 +144,12 @@ def test_append_only_never_treats_unproven_status_as_new_firm(unproven_status):
 ])
 def test_unpublishable_status_cannot_reach_signed_batch_review(unproven_status):
     original = quantity("original", "physical-room-1")
+    # Empty status is invalid at the QuantityEvidence constructor: it
+    # must never be misrepresented as a signed commercial candidate.
+    if unproven_status == "":
+        with pytest.raises(ValueError, match="status must be a non-empty string"):
+            replace(quantity("new", "physical-room-2", value=7.5), status="")
+        return
     suspect = replace(
         quantity("new", "physical-room-2", value=7.5),
         status=unproven_status,
@@ -159,7 +168,8 @@ def test_unpublishable_status_cannot_reach_signed_batch_review(unproven_status):
         )
     except (
         SourceClosedRunExportError, MissingCommercialAuthorityError,
-        CustomerOutputVerificationError, ValueError,
+        CommercialTakeoffConflictError, CustomerOutputVerificationError,
+        ValueError,
     ):
         return
     assert report["admission_status"] == "BLOCKED"
