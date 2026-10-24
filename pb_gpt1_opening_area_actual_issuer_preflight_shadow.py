@@ -188,6 +188,14 @@ def reconcile_gpt1_area_review_with_issuer(
                 row.get("opening_area_first_remaining_gate") or ""
             )
 
+        # This is a COMPLETE original physical-opening inventory, not just
+        # the subset with a potential FIRM area. A source-abstained member
+        # must not conceal a later inserted or deleted canonical witness.
+        # Keep this after the ready-member host/frame check so its more
+        # precise first-failure diagnostic is preserved.
+        if tuple(row.get("original_canonical_evidence_ids") or ()) != tuple(sorted(obj.evidence_ids)):
+            raise ValueError("foreign source/signed review decision")
+
     if (
         seen != set(by_id)
         or source_queue.get("original_physical_opening_count") != len(by_id)

@@ -384,3 +384,31 @@ def test_forged_original_review_wall_or_witness_receipt_refused(field):
     assert _opening_quantity(_typed(canonical).canonical_openings[2]) is not None
     with pytest.raises(ValueError, match="foreign source/signed review decision"):
         reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)
+
+@pytest.mark.parametrize("operation", ["add", "remove"])
+def test_abstained_original_physical_member_must_retain_complete_evidence_roster(operation):
+    # One unsupported opening must not hide a forged or deleted witness while
+    # a *different* physically independent opening remains source review-ready.
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    assert source["gpt1_new_area_review_candidates"][0]["physical_opening_id"] == "physical-3"
+    typed = _typed(canonical)
+    abstained = typed.canonical_openings[0]
+    assert _opening_quantity(abstained) is None
+    original_receipts = abstained.evidence_ids
+    amended_receipts = (
+        original_receipts + ("foreign-abstained-witness",)
+        if operation == "add"
+        else original_receipts[:-1]
+    )
+    assert amended_receipts != original_receipts
+    amended = replace(abstained, evidence_ids=amended_receipts)
+    assert _opening_quantity(amended) is None
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(
+                typed,
+                canonical_openings=(amended, *typed.canonical_openings[1:]),
+            ),
+            source,
+        )
