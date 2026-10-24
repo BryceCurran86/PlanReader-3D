@@ -272,3 +272,39 @@ def test_source_figured_review_cannot_borrow_elevation_frame_issuer_basis():
             ),
             source,
         )
+
+@pytest.mark.parametrize("rekey_field", ["document_id", "revision_id"])
+def test_entire_canonical_document_revision_rekey_rejected(rekey_field):
+    # Re-key every canonical member together: internal composition revision
+    # and source-snapshot consistency still hold, and the REAL issuer remains
+    # technically compatible. The unmodified original source review must
+    # independently veto this foreign source envelope.
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    foreign = "foreign-original-" + rekey_field
+    tampered = tuple(
+        replace(item, **{rekey_field: foreign})
+        for item in typed.canonical_openings
+    )
+    assert _opening_quantity(tampered[2]) is not None
+    forged = replace(
+        typed,
+        canonical_openings=tampered,
+        revision_id=foreign if rekey_field == "revision_id" else typed.revision_id,
+    )
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(forged, source)
+
+
+@pytest.mark.parametrize("source_field", [
+    "original_canonical_document_id",
+    "original_canonical_revision_id",
+])
+def test_forged_review_document_revision_receipt_rejected(source_field):
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    source["gpt1_new_area_review_candidates"][0][source_field] = "foreign-source-scope"
+    assert _opening_quantity(_typed(canonical).canonical_openings[2]) is not None
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)

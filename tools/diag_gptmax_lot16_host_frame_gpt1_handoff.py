@@ -427,6 +427,11 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             # Retain original canonical roles independently of later issuer
             # objects: figured numeric evidence cannot relabel a window as a door
             # or replay the room/page context under a foreign viewport.
+            # Preserve the ORIGINAL document/revision before any later
+            # issuer rebuild can rekey the same SHA/snapshot under a foreign
+            # source envelope without changing numeric opening evidence.
+            "original_canonical_document_id": c.get("document_id"),
+            "original_canonical_revision_id": c.get("revision_id"),
             "original_canonical_opening_kind": c.get("opening_kind"),
             "original_canonical_page_id": c.get("page_id"),
             "original_canonical_viewport_id": c.get("viewport_id"),

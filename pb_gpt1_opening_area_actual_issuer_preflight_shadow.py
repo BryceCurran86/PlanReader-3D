@@ -73,6 +73,8 @@ def reconcile_gpt1_area_review_with_issuer(
             original_root = root
         if (
             root != original_root
+            or row.get("original_canonical_document_id") != obj.document_id
+            or row.get("original_canonical_revision_id") != obj.revision_id
             or row.get("source_sha256") != obj.source_sha256
             or row.get("snapshot_id") != obj.snapshot_id
             or row.get("original_canonical_opening_kind") != obj.opening_kind
