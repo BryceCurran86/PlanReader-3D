@@ -81,7 +81,22 @@ def test_real_original_page9_native_source_rivals_if_available():
         b,expected_source_sha256=hash_expected,page_number=9,
         native_word_address=addr,candidate_plan_bbox_pdf_pt=(100,100,1100,1700))
     assert orig((9,0,0)).original_source_role=='SOURCE_NON_CEILING_CODE_WORD'
-    assert orig((10,1,0)).original_source_role=='SOURCE_CEILING_CODE_WORD_CANDIDATE'
+    grid=orig((10,1,0))
+    assert grid.original_text=='GRID'
+    # PyMuPDF native block grouping differs across pinned/source builds.
+    # A GRID glyph with any unlisted sibling is a mixed source note,
+    # not an independent ceiling-code lexical candidate.
+    codes={'IPF1','GRID','WFPB','FPB','IP'}
+    allowed=codes | {'CLG','CEILING','/'}
+    siblings=tuple(t.upper() for t in grid.original_block_words)
+    isolated=(len(siblings)<=4 and
+              [t for t in siblings if t in codes]==['GRID'] and
+              all(t in allowed or t.isdigit() for t in siblings))
+    assert grid.original_source_role==(
+        'SOURCE_CEILING_CODE_WORD_CANDIDATE' if isolated
+        else 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
+    assert not grid.original_material_definition_authorized
+    assert not grid.physical_ceiling_zone_authorized
     assert orig((10,0,0)).original_source_role=='SOURCE_NUMERIC_CALLOUT_WORD'
     assert orig((212,0,2)).original_source_role=='SOURCE_GENERAL_NOTE_OR_MIXED_TEXT'
     assert orig((5,4,0)).original_source_role=='SOURCE_OUTSIDE_PROPOSED_PLAN_VIEWPORT'
