@@ -13,6 +13,7 @@ HEADS = {
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
     "cache": "d5cdf829c135389d58a668dfdd55ccbd5834e707",
+    "vertical": "f934aebc6c6241df4dee784f00a7d3606971fe70",
 }
 PATHS = {
     "host": (
@@ -35,6 +36,10 @@ PATHS = {
         "docs/engineering/gptmax_g17_cached_source_integrity_20261020.md",
         "pb_physical_opening_authority.py",
         "tests/test_raster_opening_cached_source_integrity.py",
+    ),
+    "vertical": (
+        "pb_gptmax_raster_tile_seam_shadow.py",
+        "tests/test_gptmax_raster_tile_seam_source.py",
     ),
 }
 
@@ -123,6 +128,25 @@ def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
     assert 'git checkout --detach "$approved_head"' in guard
     assert "github.event.pull_request" not in source
     assert "secrets.ORIGINAL_SOURCES_TOKEN" not in guard
+
+
+def test_vertical_original_source_target_cannot_be_satisfied_by_synthetic_passes():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    steps = _load()["jobs"]["verify"]["steps"]
+    guard = next(step["run"] for step in steps if step.get("name", "").startswith("Authenticate immutable"))
+    assert "vertical)" in guard
+    assert "approved_base=e405d5da857eadac9a842811fdcab3082df021e6" in guard
+    assert "approved_head=f934aebc6c6241df4dee784f00a7d3606971fe70" in guard
+    assert "focused_test=tests/test_gptmax_raster_tile_seam_source.py" in guard
+    assert 'echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"' in guard
+    focused = next(step for step in steps if step.get("name", "").startswith("Verify original-provisioned"))
+    assert focused["env"]["LOT16_ARCH_ORIGINAL"].endswith("1. Construction Plans - Lot 16 Power (REV E).pdf")
+    script = focused["run"]
+    assert '[[ "$GPTMAX_TARGET" == "vertical" ]]' in script
+    assert "test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots" in script
+    assert "1 passed" in script
+    assert "source ink test skipped or missing" in script
+    assert "github.event.pull_request" not in source
 
 
 def test_secret_only_in_manifest_authenticated_source_provisioner():
