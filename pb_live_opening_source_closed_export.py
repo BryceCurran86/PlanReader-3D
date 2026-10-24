@@ -16,6 +16,7 @@ from typing import Mapping, Sequence
 from pb_live_opening_area_quantity_publication import (
     _opening_quantity,
     _reject_incompatible_elevation_frame_claims,
+    _validate_canonical_opening_inventory,
     publish_live_opening_area_quantities,
 )
 from pb_live_physical_opening_void_composition import (
@@ -216,6 +217,13 @@ def build_live_opening_area_claim_source_traces(
     # A final production claim must not bypass the same whole-inventory
     # frame source-identity gate as the composition publisher. Per-quantity
     # reproof alone cannot see incompatible sibling opening type/kind claims.
+    _validate_canonical_opening_inventory(
+        claim.canonical_openings,
+        revision_id=(
+            claim.canonical_openings[0].revision_id
+            if claim.canonical_openings else None
+        ),
+    )
     _reject_incompatible_elevation_frame_claims(claim.canonical_openings)
     return _build_opening_area_source_traces(
         tuple(claim.opening_quantity_evidence),

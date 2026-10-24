@@ -867,3 +867,59 @@ def test_actual_claim_customer_seal_vetoes_unpublishable_source_frame_rival():
         seal_live_opening_area_claim_run(
             claim, workspace_id=7, project_id="source-project",
         )
+
+
+@pytest.mark.parametrize("field,foreign", [
+    ("document_id", "another-document"),
+    ("source_sha256", "f" * 64),
+    ("snapshot_id", "another-snapshot"),
+    ("revision_id", "another-revision"),
+])
+@pytest.mark.parametrize("unpublishable", [False, True])
+def test_final_claim_seal_rejects_foreign_source_even_when_unpublishable(
+    field, foreign, unpublishable,
+):
+    first = _elevation_opening("physical-w01", frame_id="frame-w01")
+    second = _elevation_opening("physical-w02", type_mark="W02", frame_id="frame-w02")
+    second = replace(second, **{field: foreign})
+    if unpublishable:
+        second = replace(second, area_m2=None)
+    claim = _opening_area_claim(first, second)
+    assert len(claim.opening_quantity_evidence) == (1 if unpublishable else 2)
+    with pytest.raises(ValueError, match="source snapshot conflicts|revision conflicts"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+@pytest.mark.parametrize("unpublishable", [False, True])
+def test_final_claim_seal_rejects_duplicate_physical_id_with_distinct_canonical(
+    unpublishable,
+):
+    first = _elevation_opening("physical-w01", frame_id="frame-w01")
+    second = replace(
+        _elevation_opening("physical-w02", type_mark="W02", frame_id="frame-w02"),
+        physical_opening_id="physical-w01",
+    )
+    if unpublishable:
+        second = replace(second, area_m2=None)
+    claim = _opening_area_claim(first, second)
+    assert len(claim.opening_quantity_evidence) == 1
+    with pytest.raises(ValueError, match="duplicate physical opening identity"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_final_claim_seal_preserves_distinct_pages_one_original_source():
+    first = _elevation_opening("physical-w01-a", frame_id="frame-w01")
+    second = replace(
+        _elevation_opening("physical-w01-b", frame_id="frame-w01"),
+        page_id="11",
+    )
+    sealed = seal_live_opening_area_claim_run(
+        _opening_area_claim(first, second),
+        workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(quantity.lineage_ok for quantity in sealed.quantities)

@@ -354,15 +354,17 @@ def _reject_incompatible_elevation_frame_claims(
         frame_claims[frame_id] = claim
 
 
-def publish_live_opening_area_quantities(
-    composition: LivePhysicalOpeningVoidComposition,
-) -> tuple[QuantityEvidence, ...]:
-    """Publish one deterministic area quantity per source-proven opening."""
-    if type(composition) is not LivePhysicalOpeningVoidComposition:
-        raise TypeError(
-            "composition must be LivePhysicalOpeningVoidComposition"
-        )
+def _validate_canonical_opening_inventory(
+    canonical_openings: Sequence[LiveCanonicalOpeningObject],
+    *,
+    revision_id: str | None,
+) -> None:
+    """Validate the complete physical/source universe before any seal.
 
+    Both composition publication and the final live claim must enforce this
+    exact producer-owned identity and source-snapshot rule, including blocked
+    members that cannot individually produce a quantity.
+    """
     # Check the *whole producer-owned canonical inventory* before narrowing
     # it to quantities. If an unsupported/ABSTAIN opening reuses the physical
     # identity of a FIRM opening, filtering first would silently publish the
@@ -370,7 +372,7 @@ def publish_live_opening_area_quantities(
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
     source_scope: tuple[str, str, str] | None = None
-    for opening in composition.canonical_openings:
+    for opening in canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
         # One published source-visibility snapshot owns this canonical
@@ -392,7 +394,7 @@ def publish_live_opening_area_quantities(
         # A stale foreign-revision member cannot be filtered out as
         # unsupported while the favourable member becomes a commercial
         # quantity. The canonical composition is revision-scoped.
-        if str(opening.revision_id or "").strip() != str(composition.revision_id or "").strip():
+        if str(opening.revision_id or "").strip() != str(revision_id or "").strip():
             raise ValueError(
                 "canonical opening revision conflicts with quantity composition"
             )
@@ -410,6 +412,20 @@ def publish_live_opening_area_quantities(
             canonical_ids.add(canonical_id)
         if physical_id:
             physical_ids.add(physical_id)
+
+
+def publish_live_opening_area_quantities(
+    composition: LivePhysicalOpeningVoidComposition,
+) -> tuple[QuantityEvidence, ...]:
+    """Publish one deterministic area quantity per source-proven opening."""
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError(
+            "composition must be LivePhysicalOpeningVoidComposition"
+        )
+
+    _validate_canonical_opening_inventory(
+        composition.canonical_openings, revision_id=composition.revision_id,
+    )
 
     _reject_incompatible_elevation_frame_claims(composition.canonical_openings)
 
