@@ -76,12 +76,14 @@ jobs:
           python scripts/check_full_plan_v2_integrity.py
 
   original-source-score:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -344,9 +346,8 @@ jobs:
           },sort_keys=True))
           PY
 
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-lot16-1215-opening-local-score
-          path: artifacts/gpt3-lot16-1215-score
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
