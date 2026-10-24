@@ -103,6 +103,37 @@ def reconcile_gpt1_area_review_with_issuer(
             )
             if any(row.get(gate) is not True for gate in required_source_gates):
                 raise ValueError("source review claim lacks independently re-proved opening area authority")
+            # The source review and the typed real publisher must own the
+            # SAME host and (when present) whole-wall frame record.  A
+            # boolean source gate alone cannot prove which producer receipt
+            # the issuer's canonical opening actually retained.  Gross
+            # figured area is legitimately frame-optional, but never allowed
+            # to borrow an unreviewed/foreign canonical frame.
+            source_host_id = row.get("authenticated_host_record_id")
+            source_frame_id = row.get("authenticated_frame_record_id")
+            if (
+                type(source_host_id) is not str
+                or not source_host_id
+                or source_host_id != source_host_id.strip()
+                or source_host_id != obj.host_binding_record_id
+                or (
+                    source_frame_id is None
+                    and obj.host_frame_record_id not in (None, "")
+                )
+                or (
+                    source_frame_id is not None
+                    and (
+                        type(source_frame_id) is not str
+                        or not source_frame_id
+                        or source_frame_id != source_frame_id.strip()
+                        or source_frame_id != obj.host_frame_record_id
+                        or row.get("original_host_frame_receipt_bound") is not True
+                    )
+                )
+            ):
+                raise ValueError(
+                    "original host/frame source receipt mismatches typed canonical issuer"
+                )
             if original_signed or row.get("opening_area_first_remaining_gate") != (
                 "independent_gpt1_opening_area_measurement_validation_required"
             ):
