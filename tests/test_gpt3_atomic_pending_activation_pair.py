@@ -1,7 +1,6 @@
 """Two original identity activation files must publish atomically, create-only."""
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
 import signal
@@ -85,7 +84,10 @@ def test_dangling_output_symlink_and_same_target_alias_are_refused(tmp_path):
     outputs = _outputs(tmp_path)
     with pytest.raises(ValueError, match="independent"):
         preflight_new_activation_pair((outputs[0], outputs[0]), inputs=inputs)
-    outputs[0].symlink_to(tmp_path / "missing-other.json")
+    try:
+        outputs[0].symlink_to(tmp_path / "missing-other.json")
+    except OSError as exc:  # Windows without the symlink privilege
+        pytest.skip(f"symlink creation is not permitted on this host: {exc}")
     with pytest.raises(FileExistsError, match="never overwrite"):
         preflight_new_activation_pair(outputs, inputs=inputs)
 

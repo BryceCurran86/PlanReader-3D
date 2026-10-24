@@ -20,6 +20,9 @@ from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
+from tools.report_gpt3_four_project_evidence import (
+    _read_json_without_duplicate_keys,
+)
 from tools.gpt3_atomic_pending_activation_pair import (
     preflight_new_activation_pair, source_input_snapshot,
     publish_new_activation_pair, read_committed_active_identity_map,
@@ -56,14 +59,16 @@ def _clean(value: object) -> str:
 
 
 def _object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    # The same strict reader as the guarded scorer: a duplicate JSON key would
+    # otherwise silently keep the last claim before any source/identity proof.
+    value = _read_json_without_duplicate_keys(path)
     if not isinstance(value, dict):
         raise TypeError(f"{path} must contain a JSON object")
     return value
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if not isinstance(value, list) or any(
         not isinstance(row, dict) for row in value
     ):

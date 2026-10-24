@@ -19,6 +19,8 @@ FROZEN_ROOT = (
     Path(__file__).resolve().parents[1]
     / "benchmarks/frozen_holdout/full_plan_v2"
 )
+# Windows cannot open a directory to fsync it; see _fsync_directory.
+_IS_WINDOWS = os.name == "nt"
 
 
 def preflight_new_activation_pair(
@@ -81,7 +83,15 @@ def _serialized(payload: dict[str, Any]) -> bytes:
 
 
 def _fsync_directory(path: Path) -> None:
-    """Make a published hard link durable before the receipt marker appears."""
+    """Make a published hard link durable before the receipt marker appears.
+
+    POSIX only: Windows cannot open a directory for fsync (``os.open`` raises
+    ``PermissionError``) and NTFS journals the link metadata itself, so there
+    the call is a no-op. Every other error still propagates, so a genuine
+    failure to make the link durable can never be mistaken for success.
+    """
+    if _IS_WINDOWS:
+        return
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(fd)
@@ -185,9 +195,11 @@ def publish_new_activation_pair(
             )
             staged_path = Path(name)
             staged.append(staged_path)
-            with os.fdopen(fd, "w", encoding="utf-8") as output:
-                json.dump(payload, output, sort_keys=True, indent=2, allow_nan=False)
-                output.write("\n")
+            # Binary, from the exact bytes the digest covers: a text-mode
+            # write translates the newline on Windows and the committed
+            # receipt digest would then never match the map the reader sees.
+            with os.fdopen(fd, "wb") as output:
+                output.write(_serialized(payload))
                 output.flush()
                 os.fsync(output.fileno())
         # A concurrent contributor must not modify the original source
