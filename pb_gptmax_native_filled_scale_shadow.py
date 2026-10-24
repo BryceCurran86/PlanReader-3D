@@ -125,6 +125,90 @@ def _word_at_boundary(
     return hits[0] if len(hits) == 1 and hits[0][0].lower() == expected.lower() else None
 
 
+def _source_clip_receipts(page: fitz.Page) -> dict[int, tuple[dict, ...]]:
+    """Retain active source clips for each native paint sequence."""
+    active: dict[int, dict] = {}
+    by_seq: dict[int, tuple[dict, ...]] = {}
+    for path in page.get_drawings(extended=True):
+        level = int(path.get("level", 0))
+        for stale in tuple(active):
+            if stale > level:
+                del active[stale]
+        if path.get("type") == "clip":
+            active[level] = path
+        elif isinstance(path.get("seqno"), int):
+            by_seq[path["seqno"]] = tuple(
+                active[key] for key in sorted(active) if key <= level
+            )
+    return by_seq
+
+
+def _source_ink_visible(
+    page: fitz.Page, path: dict, rect: _Rect,
+    bboxlog: Sequence[tuple], paths_by_seq: dict[int, dict],
+    clips_by_seq: dict[int, tuple[dict, ...]],
+) -> bool:
+    """Fail closed on hidden, later-overpainted, or clipped native fill."""
+    seq = path.get("seqno")
+    box = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1)
+    if not isinstance(seq, int) or not 0 <= seq < len(bboxlog):
+        return False
+    kind, painted = bboxlog[seq]
+    if kind != "fill-path" or max(
+        abs(a - b) for a, b in zip(fitz.Rect(painted), box)
+    ) > 1e-3:
+        return False
+
+    # Source-native clips may be legitimate rectangular page/view clips.
+    # Their actual geometry must contain the WHOLE bar, not only a bbox
+    # enclosing an irregular clipped shape.
+    for clip in clips_by_seq.get(seq, ()):
+        scissor = clip.get("scissor")
+        items = tuple(clip.get("items") or ())
+        if scissor is None or not fitz.Rect(scissor).contains(box) or len(items) != 1:
+            return False
+        if items[0][0] == "re":
+            clip_box = fitz.Rect(items[0][1])
+        elif items[0][0] == "qu":
+            clip_box = fitz.Rect(items[0][1].rect)
+        else:
+            return False
+        if max(abs(a - b) for a, b in zip(clip_box, fitz.Rect(scissor))) > 1e-3:
+            return False
+
+    # Native drawing paths remain in get_drawings() even when subsequently
+    # erased. A later overlapping fill, image, text or nonblack stroke
+    # invalidates source visibility; black hairline outlines are retained.
+    for later in range(seq + 1, len(bboxlog)):
+        later_kind, later_box = bboxlog[later]
+        if not box.intersects(fitz.Rect(later_box)):
+            continue
+        if later_kind == "stroke-path":
+            stroke = paths_by_seq.get(later)
+            if stroke is not None and tuple(stroke.get("color") or ()) == (0.0, 0.0, 0.0):
+                continue
+        return False
+
+    # The final rendered ink must also survive clipping and graphics-state
+    # operations. Nine interior samples avoid mistaking only an edge for a
+    # source-visible filled rectangle. Rendering never grants scale authority.
+    pix = page.get_pixmap(
+        matrix=fitz.Matrix(4, 4), colorspace=fitz.csRGB,
+        alpha=False, clip=box,
+    )
+    if pix.width < 3 or pix.height < 3:
+        return False
+    for fx in (0.2, 0.5, 0.8):
+        for fy in (0.2, 0.5, 0.8):
+            px = round((box.x0 + box.width * fx) * 4) - pix.x
+            py = round((box.y0 + box.height * fy) * 4) - pix.y
+            if not (0 <= px < pix.width and 0 <= py < pix.height):
+                return False
+            if max(pix.pixel(px, py)) > 50:
+                return False
+    return True
+
+
 def find_native_filled_scale_bar_shadows(
     source_bytes: bytes, *, expected_source_sha256: str, page_id: str,
 ) -> tuple[NativeFilledScaleBarShadow, ...]:
@@ -147,12 +231,14 @@ def find_native_filled_scale_bar_shadows(
         if int(page_id) > document.page_count:
             return ()
         page = document[int(page_id) - 1]
+        drawings = tuple(page.get_drawings())
         rectangles = tuple(
-            rect for i, path in enumerate(page.get_drawings())
+            rect for i, path in enumerate(drawings)
             if (rect := _rect_from_native_fill(i, path)) is not None
         )
         words = tuple(page.get_text("words"))
         by_left = sorted(rectangles, key=lambda rect: (rect.x0, rect.y0, rect.index))
+        visibility_context = None
         results: dict[tuple[int, ...], NativeFilledScaleBarShadow] = {}
         for start in by_left:
             chain = [start]
@@ -177,6 +263,20 @@ def find_native_filled_scale_bar_shadows(
                     break
                 label_witnesses.append(witness)
             if len(label_witnesses) != n + 1:
+                continue
+            if visibility_context is None:
+                visibility_context = (
+                    tuple(page.get_bboxlog()),
+                    {p["seqno"]: p for p in drawings if isinstance(p.get("seqno"), int)},
+                    _source_clip_receipts(page),
+                )
+            bboxlog, paths_by_seq, clips_by_seq = visibility_context
+            if not all(
+                _source_ink_visible(
+                    page, drawings[rect.index], rect,
+                    bboxlog, paths_by_seq, clips_by_seq,
+                ) for rect in chain
+            ):
                 continue
             ids = tuple(rect.index for rect in chain)
             span = chain[-1].x1 - chain[0].x0
