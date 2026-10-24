@@ -188,3 +188,70 @@ def test_complete_original_handoff_semantic_page_universe(monkeypatch, tmp_path,
         "room_area_support_pages": (28,),
         "surface_semantic_pages": tuple(range(29)),
     }
+
+def _two_source_issued_distinct_window_case():
+    pdf, w01, q01 = _source_issued_window_case()
+    # Two real issuer-positive physical windows, each with separately owned
+    # original plan tag, representative, structural host and type-frame ID.
+    w02 = replace(
+        w01,
+        canonical_opening_id="physical-window-2",
+        physical_opening_id="physical-window-2",
+        type_mark="W02",
+        host_wall_id="different-original-wall",
+        host_binding_record_id="different-original-binding",
+        tag_observation_id="original-plan-W02-word",
+        representative_observation_id="original-opening-observation-2",
+        source_observation_ids=("original-opening-observation-2",),
+        figured_area_record_id="source-elevation-frame-W02",
+        evidence_ids=(
+            "original-opening-observation-2",
+            "original-plan-W02-word",
+            "source-elevation-frame-W02",
+            "different-original-binding",
+        ),
+    )
+    q02 = _opening_quantity(w02)
+    assert q02 is not None
+    assert q02.semantic_key == "window_area:physical-window-2"
+    return pdf, w01, q01, w02, q02
+
+
+def test_two_distinct_original_window_marks_stay_issuer_compatible_review_only():
+    pdf, w01, q01, w02, q02 = _two_source_issued_distinct_window_case()
+    output = _run(pdf, _claim((w01, w02), (q01, q02)))
+    assert [w["type_mark"] for w in output["windows"][:2]] == ["W01", "W02"]
+    assert [w["first_missing_gate"] for w in output["windows"][:2]] == [
+        "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED",
+        "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED",
+    ]
+    assert [w["quantity_id"] for w in output["windows"][:2]] == [
+        q01.quantity_id, q02.quantity_id,
+    ]
+    assert output["customer_seal_granted"] is False
+    assert output["benchmark_score_granted"] is False
+
+
+@pytest.mark.parametrize("stolen_field,expected", [
+    ("tag_observation_id", "original_plan_tag_shared_across_physical_openings"),
+    ("representative_observation_id", "original_representative_shared_across_physical_openings"),
+    ("figured_area_record_id", "original_elevation_frame_shared_across_different_window_types"),
+])
+def test_original_cross_window_source_receipt_rivals_never_count_as_distinct(
+    stolen_field, expected,
+):
+    pdf, w01, q01, w02, _q02 = _two_source_issued_distinct_window_case()
+    stolen_id = getattr(w01, stolen_field)
+    new_evidence = tuple(dict.fromkeys((*w02.evidence_ids, stolen_id)))
+    mutation = {stolen_field: stolen_id, "evidence_ids": new_evidence}
+    if stolen_field == "representative_observation_id":
+        mutation["source_observation_ids"] = (stolen_id,)
+    forged = replace(w02, **mutation)
+    q02 = _opening_quantity(forged)
+    assert q02 is not None, "both individual issuers must be positive"
+    output = _run(pdf, _claim((w01, forged), (q01, q02)))
+    assert [w["first_missing_gate"] for w in output["windows"][:2]] == [
+        expected, expected,
+    ]
+    assert all(w["quantity_id"] is None for w in output["windows"][:2])
+    assert output["benchmark_score_granted"] is False

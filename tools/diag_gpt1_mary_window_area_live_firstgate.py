@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from collections import defaultdict
 from hashlib import sha256
 import inspect
 import json
@@ -78,6 +79,47 @@ def diagnose_actual_window_area_gates(
         raise ValueError("duplicate canonical physical opening identity")
     if len({q.quantity_id for q in quantities}) != len(quantities):
         raise ValueError("duplicate issued opening quantity identity")
+    # Verify the entire source-owned canonical inventory BEFORE selecting Wxx
+    # targets, so a foreign/unscored opening cannot hide a stolen original
+    # physical tag or representative by being filtered out of the report.
+    tags_by_source = defaultdict(set)
+    representatives_by_source = defaultdict(set)
+    frame_types_by_source = defaultdict(lambda: defaultdict(set))
+    for opening in openings:
+        if opening.tag_observation_id:
+            tags_by_source[opening.tag_observation_id].add(
+                opening.physical_opening_id
+            )
+        if opening.representative_observation_id:
+            representatives_by_source[opening.representative_observation_id].add(
+                opening.physical_opening_id
+            )
+        if (
+            opening.area_basis == "authenticated_elevation_frame"
+            and opening.figured_area_record_id
+            and opening.type_mark
+        ):
+            frame_types_by_source[opening.figured_area_record_id][
+                str(opening.type_mark).strip().upper()
+            ].add(opening.physical_opening_id)
+    reused_plan_tags = {
+        identity for owners in tags_by_source.values() if len(owners) > 1
+        for identity in owners
+    }
+    reused_representatives = {
+        identity for owners in representatives_by_source.values()
+        if len(owners) > 1 for identity in owners
+    }
+    # A source-issued TYPE frame may be reused by multiple physical instances
+    # of the SAME type. It cannot be silently shared across DISTINCT Wxx
+    # types, even if both canonical objects and quantities pass the real issuer.
+    conflicting_frame_types = {
+        identity
+        for type_owners in frame_types_by_source.values()
+        if len(type_owners) > 1
+        for members in type_owners.values()
+        for identity in members
+    }
     by_mark = {}
     for opening in openings:
         mark = str(opening.type_mark or "").strip().upper()
@@ -118,6 +160,12 @@ def diagnose_actual_window_area_gates(
             # to this physical aperture. Only the producer-owned original
             # plan tag receipt carried by the canonical issuer can do so.
             reason = "source_owned_plan_tag_receipt_unavailable"
+        elif physical_id in reused_plan_tags:
+            reason = "original_plan_tag_shared_across_physical_openings"
+        elif physical_id in reused_representatives:
+            reason = "original_representative_shared_across_physical_openings"
+        elif physical_id in conflicting_frame_types:
+            reason = "original_elevation_frame_shared_across_different_window_types"
         elif opening.opening_kind != "window":
             reason = "independent_window_kind_unavailable"
         elif not opening.host_wall_id or not (
