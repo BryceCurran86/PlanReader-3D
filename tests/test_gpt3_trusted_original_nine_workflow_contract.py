@@ -93,20 +93,20 @@ def test_main_owner_only_immutable_source_positive_workflow():
     raw = WORKFLOW.read_text(encoding="utf-8")
     assert "actions/upload-artifact" not in raw
     assert "github.event.inputs" not in raw
-    assert re.search(r"\\n\s+pull_request(?:_target)?:", raw) is None
-    assert re.search(r"\\n\s+workflow_call:", raw) is None
+    assert re.search(r"\n\s+pull_request(?:_target)?:", raw) is None
+    assert re.search(r"\n\s+workflow_call:", raw) is None
 
 
 @pytest.mark.parametrize("replacement", [
-    "on:\\n  pull_request:",
-    "on:\\n  pull_request:\\ntrue:\\n  workflow_dispatch:",
-    "on:\\n  pull_request:\\nyes:\\n  workflow_dispatch:",
-    "on:\\n  workflow_dispatch:\\non:\\n  pull_request:",
-    "true:\\n  workflow_dispatch:",
-    "on:\\n  push:",
+    "on:\n  pull_request:",
+    "on:\n  pull_request:\ntrue:\n  workflow_dispatch:",
+    "on:\n  pull_request:\nyes:\n  workflow_dispatch:",
+    "on:\n  workflow_dispatch:\non:\n  pull_request:",
+    "true:\n  workflow_dispatch:",
+    "on:\n  push:",
 ])
 def test_untrusted_or_duplicate_trigger_cannot_be_parsed_as_owner_manual(replacement):
     raw = WORKFLOW.read_text(encoding="utf-8")
-    assert raw.count("on:\\n  workflow_dispatch:") == 1
+    assert raw.count("on:\n  workflow_dispatch:") == 1
     with pytest.raises((yaml.YAMLError, AssertionError)):
-        _parse(raw.replace("on:\\n  workflow_dispatch:", replacement, 1))
+        _parse(raw.replace("on:\n  workflow_dispatch:", replacement, 1))
