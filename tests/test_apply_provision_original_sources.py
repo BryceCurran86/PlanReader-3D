@@ -66,6 +66,23 @@ jobs:
 """
 
 
+PINNED_ACTION = "0123456789abcdef0123456789abcdef01234567"
+TRUSTED_MAIN_IF = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'BryceCurran86/PlanReader-3D'"
+
+# A manual-only original replay with an exact trusted-main job guard is the
+# ONLY shape whose workflow YAML may be rewritten by --apply.
+TRUSTED_WORKFLOW = LF_WORKFLOW.replace(
+    "on:\n  pull_request:\n    paths:\n      - tools/x.py\n",
+    "on: workflow_dispatch\n",
+).replace(
+    "    runs-on: ubuntu-latest",
+    "    if: " + TRUSTED_MAIN_IF + "\n    runs-on: ubuntu-latest",
+).replace(
+    "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+    "ref: ${{ github.sha }}",
+)
+
+
 def _write(tmp_path: Path, text: str, eol: str = "\n") -> Path:
     root = tmp_path / "repo"
     (root / ".github" / "workflows").mkdir(parents=True)
@@ -155,13 +172,13 @@ def test_comments_and_other_steps_are_untouched(tmp_path):
 
 
 def test_apply_writes_files_and_dry_run_does_not(tmp_path, capsys):
-    root = _write(tmp_path, LF_WORKFLOW)
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
     workflow = root / ".github" / "workflows" / "synthetic.yml"
     original = workflow.read_bytes()
-    assert T.main(["--root", str(root)]) == 0
+    assert T.main(["--root", str(root), "--action-ref", PINNED_ACTION]) == 0
     assert workflow.read_bytes() == original
     assert "would change 1 workflow file(s), 3 job(s)" in capsys.readouterr().out
-    assert T.main(["--root", str(root), "--apply"]) == 0
+    assert T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"]) == 0
     assert workflow.read_bytes() != original
     assert "provision-original-sources" in workflow.read_text(encoding="utf-8")
 
@@ -270,12 +287,12 @@ def test_no_real_workflow_uploads_a_path_that_could_include_the_originals():
 
 
 def test_only_restricts_the_rewrite_to_matching_workflow_files(tmp_path, capsys):
-    root = _write(tmp_path, LF_WORKFLOW)
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
     other = root / ".github" / "workflows" / "other.yml"
-    other.write_bytes(LF_WORKFLOW.encode("utf-8"))
-    assert T.main(["--root", str(root), "--only", "synth*.yml", "--apply"]) == 0
+    other.write_bytes(TRUSTED_WORKFLOW.encode("utf-8"))
+    assert T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--only", "synth*.yml", "--apply"]) == 0
     assert "provision-original-sources" in (root / ".github" / "workflows" / "synthetic.yml").read_text(encoding="utf-8")
-    assert other.read_bytes() == LF_WORKFLOW.encode("utf-8")
+    assert other.read_bytes() == TRUSTED_WORKFLOW.encode("utf-8")
     assert "changed 1 workflow file(s), 3 job(s)" in capsys.readouterr().out
 
 
@@ -401,3 +418,164 @@ def test_every_real_job_with_an_absence_assertion_is_deliberately_excluded():
             if T.asserts_originals_absent(eol.join(lines[first:last])) and (path.name, job) not in T.EXCLUDED_JOBS:
                 offenders.append((path.name, job))
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Source-token security: never insert secrets into PRs, arbitrary branches,
+# untrusted manual checkouts, or mixed events. The CLI preflights ALL files.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("events", [
+    "on: [pull_request]", "on: [pull_request_target]",
+    "on: [workflow_run]", "on: [merge_group]",
+    "on: [push]", "on: [workflow_dispatch, pull_request]",
+    "on: [workflow_dispatch, push]",
+])
+def test_apply_refuses_untrusted_events_even_with_a_main_guard(tmp_path, events):
+    workflow = TRUSTED_WORKFLOW.replace("on: workflow_dispatch", events)
+    root = _write(tmp_path, workflow)
+    source = root / ".github/workflows/synthetic.yml"
+    before = source.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert source.read_bytes() == before
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" not in source.read_text()
+
+
+@pytest.mark.parametrize("broken", [
+    "if: always()", "if: github.ref == 'refs/heads/main'",
+    "if: github.event_name == 'workflow_dispatch' || true",
+    "if: " + TRUSTED_MAIN_IF + " || true",
+    "",
+])
+def test_apply_refuses_missing_or_weak_main_job_guard(tmp_path, broken):
+    root = _write(
+        tmp_path, TRUSTED_WORKFLOW.replace("if: " + TRUSTED_MAIN_IF, broken)
+    )
+    source = root / ".github/workflows/synthetic.yml"
+    before = source.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("ref", [
+    "main", "local", "feature/unreviewed", "not-a-commit-sha", "1" * 39,
+])
+def test_apply_refuses_mutable_or_unpinned_action_reference(tmp_path, ref):
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    source = root / ".github/workflows/synthetic.yml"
+    before = source.read_bytes()
+    with pytest.raises(SystemExit, match="commit SHA"):
+        T.main(["--root", str(root), "--action-ref", ref, "--apply"])
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("checkout", [
+    "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+    "ref: ${{ inputs.ref }}",
+    "ref: feature/unreviewed",
+])
+def test_apply_rejects_manual_workflow_that_checks_out_untrusted_code(tmp_path, checkout):
+    root = _write(tmp_path, TRUSTED_WORKFLOW.replace(
+        "ref: ${{ github.sha }}", checkout
+    ))
+    source = root / ".github/workflows/synthetic.yml"
+    before = source.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert source.read_bytes() == before
+
+
+def test_unsafe_candidate_blocks_entire_mixed_batch_before_any_write(tmp_path):
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    unsafe = root / ".github/workflows/unsafe.yml"
+    unsafe.write_text(LF_WORKFLOW, encoding="utf-8")
+    safe = root / ".github/workflows/synthetic.yml"
+    safe_bytes, unsafe_bytes = safe.read_bytes(), unsafe.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert safe.read_bytes() == safe_bytes
+    assert unsafe.read_bytes() == unsafe_bytes
+
+
+def test_yaml_11_on_key_and_raw_duplicate_on_declarations_fail_closed(tmp_path):
+    # PyYAML safe_load maps YAML 1.1 'on' to bool True. This valid trusted
+    # workflow remains permitted without permitting repeated 'on' last-wins.
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    path = root / ".github/workflows/synthetic.yml"
+    assert T._trusted_manual_main_job(path.read_text(), "needs-a")
+    duplicate = TRUSTED_WORKFLOW.replace(
+        "on: workflow_dispatch",
+        "on: [pull_request]\non: workflow_dispatch",
+    )
+    path.write_text(duplicate, encoding="utf-8")
+    assert not T._trusted_manual_main_job(path.read_text(), "needs-a")
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+
+
+def test_existing_artifact_and_original_absence_protection_not_weakened():
+    assert T.unsafe_artifact_paths([{
+        "uses": "actions/upload-artifact@v4", "with": {"path": "."},
+    }]) == ["."]
+    assert T.asserts_originals_absent(
+        "run: test ! -f documents/sources/Plan B.pdf"
+    )
+
+
+@pytest.mark.parametrize("bad_ref", ["false", "0", "[]", "{}", "null"])
+def test_manual_source_checkout_ref_must_be_explicitly_typed(tmp_path, bad_ref):
+    # Change ONLY the checkout ref, never the top-level YAML 'on' key.
+    # Re-serialising the workflow through PyYAML would itself turn 'on' into
+    # the bool True and make the guard fail for an unrelated reason.
+    root = _write(
+        tmp_path, TRUSTED_WORKFLOW.replace(
+            "ref: ${{ github.sha }}", "ref: " + bad_ref
+        ),
+    )
+    path = root / ".github/workflows/synthetic.yml"
+    assert not T._trusted_manual_main_job(path.read_text(), "needs-a")
+    before = path.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert path.read_bytes() == before
+
+
+def test_secondary_checkout_after_token_placement_is_refused(tmp_path):
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    path = root / ".github/workflows/synthetic.yml"
+    original = path.read_text()
+    # Separate checkout can run PR HEAD code after owner originals are present.
+    mutated = original.replace(
+        "      - uses: actions/setup-python@v5",
+        "      - uses: actions/checkout@v4\\n        with:\\n          ref: ${{ github.event.pull_request.head.sha }}\\n"
+        "      - uses: actions/setup-python@v5",
+    )
+    mutated = mutated.replace("\\n", "\n")
+    path.write_text(mutated)
+    before = path.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("command", [
+    "git checkout ${{ inputs.ref }}",
+    "git clone https://github.com/third-party/unreviewed-code",
+    "git fetch origin pull/123/head",
+    "git switch feature/unreviewed",
+])
+def test_later_shell_checkout_cannot_fetch_pr_controlled_code(tmp_path, command):
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    path = root / ".github/workflows/synthetic.yml"
+    original = path.read_text()
+    path.write_text(original.replace(
+        "      - run: ls documents/sources",
+        "      - run: " + command + "\n      - run: ls documents/sources",
+    ))
+    before = path.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert path.read_bytes() == before

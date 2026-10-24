@@ -57,23 +57,32 @@ verified, and nowhere else.
 5. **Run the smoke test**: Actions, *Provision original sources (smoke test)*, Run workflow. Green means ten files
    downloaded and verified, the checkout stayed clean, and the no-token path failed closed.
 
-## Rolling it out to the workflows
+## Applying provisioning safely (owner-trusted manual workflows only)
 
-After the smoke test is green and this change is on `main`:
+**Security change (2026-10-24): do NOT mass-inject `ORIGINAL_SOURCES_TOKEN` into public pull-request CI or arbitrary branch push jobs.** Existing automatic PR checks must remain source-neutral and report private-original replay as **NOT VERIFIED**. A same-repo PR can contain adversarial code: lack of secrets on *fork* PRs is NOT a sufficient protection.
 
-```bash
-# 1. the gates that matter most first: ci.yml and the GPT3 signed-output replays
-python scripts/apply_provision_original_sources.py --action-ref <merge-commit-sha> \
-    --only ci.yml --only 'score-gpt3-*' --only 'test-gpt3-*' --apply
-# 2. then the rest, in one or two batches
-python scripts/apply_provision_original_sources.py --action-ref <merge-commit-sha> --apply
+The installer `scripts/apply_provision_original_sources.py` remains a dry-run diagnostic by default. Its `--apply` writes **only** if every candidate workflow is triggered exclusively by `workflow_dispatch`, every target job has this exact owner/repository/main condition, the first checkout has no untrusted ref override, and `--action-ref` is a pinned 40-hex action commit:
+
+```yaml
+on: workflow_dispatch
+jobs:
+  trusted-original-replay:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'BryceCurran86/PlanReader-3D'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Provisioning is inserted after checkout by the reviewed tool, only on this trusted job.
 ```
 
-The script inserts one step after the job's first `actions/checkout`, naming exactly the manifest files the job mentions
-(jobs that run the whole `tests/` tree, and jobs that only mention the directory, get all ten). It re-parses every file and
-refuses to write if anything other than that one step would change; a second run changes nothing. Pin `--action-ref` to a
-commit SHA so the code that sees the token cannot change under you. Each edited workflow lists itself in its own
-`pull_request` paths, so each runs once on the rollout PR; do it in batches to keep the queue short.
+The installer also refuses a second checkout, malformed checkout-ref types, and obvious subsequent shell git checkout/clone/fetch or event-input-driven ref expressions. This static analysis is a defense in depth, **not proof that an arbitrary workflow is secure**; manually audit all commands/actions in the trusted workflow, and never execute downloaded PR-supplied code after original PDFs appear.\n\nA mixed event (including `pull_request`, `pull_request_target`, `push`, or `workflow_run`), an unrecognized condition or mutable action ref is rejected **before any file changes**. Dry-run output still enumerates other candidate jobs but warns they cannot be applied. Run `--apply` only after owner-created, security-reviewed trusted-main workflow and an owner-authorized original-source smoke test; this restriction deliberately means the historical mass-rollout command cannot run. Never weaken this gate to turn PR-source tests green.
+
+For eligible manual workflows only:
+
+```bash
+python scripts/apply_provision_original_sources.py --only 'trusted-original-replay.yml' --action-ref <reviewed-full-40-hex-action-commit> --apply
+```
+
+Do not expose private PDF bytes in GitHub Actions artifacts, logs or caches. Original source shape/hash verification, sealed/customer parity and the unchanged frozen scorer remain required after secure provisioning.
 
 ## Push-to-main runs before provisioning is configured
 
