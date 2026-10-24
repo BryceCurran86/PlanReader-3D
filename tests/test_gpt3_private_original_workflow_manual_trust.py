@@ -105,3 +105,20 @@ def test_duplicate_event_key_fails_closed(filename):
     assert "on:\n" in raw
     with pytest.raises(yaml.YAMLError):
         validate_source_job(raw.replace("on:\n", "on:\n  pull_request: {}\n", 1))
+
+
+def test_owner_original_provision_smoke_is_not_an_untrusted_dispatch():
+    raw = (ROOT / "provision-original-sources-smoke.yml").read_text(encoding="utf-8")
+    doc = yaml.load(raw, Loader=UniqueMappingLoader)
+    assert set(doc["on"]) == {"workflow_dispatch"}
+    job = doc["jobs"]["provision"]
+    assert job["if"] == OWNER_GUARD
+    steps = job["steps"]
+    checkout = next(x for x in steps if x.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"] == {"ref": TRUSTED_SHA, "persist-credentials": "false"}
+    provision = next(x for x in steps if "ORIGINAL_SOURCES_TOKEN" in str(x))
+    assert steps.index(checkout) < steps.index(provision)
+    assert steps[-1]["if"] == "always()"
+    assert "rm -rf documents/sources" in steps[-1]["run"]
+    assert "upload-artifact" not in str(job)
+    assert "pull_request.head.sha" not in str(job)
