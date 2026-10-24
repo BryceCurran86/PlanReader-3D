@@ -109,7 +109,7 @@ def test_native_clip_vetoes_fill_even_when_words_remain_visible():
     source_commands = doc.xref_stream(content_xref)
     # Clip only the bar drawing commands, then close the clip graphics state.
     doc.update_stream(
-        content_xref, b"q 0 0 1 1 re W n\\n" + source_commands + b"\\nQ",
+        content_xref, b"q 0 0 1 1 re W n\n" + source_commands + b"\nQ",
     )
     for i in range(6):
         label = str(i) if i < 5 else "5m"
