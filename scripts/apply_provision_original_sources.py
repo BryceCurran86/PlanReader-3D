@@ -241,16 +241,62 @@ _TRUSTED_JOB_IF = (
 _PINNED_ACTION_SHA = re.compile(r"[0-9a-fA-F]{40}")
 
 
+class _WorkflowLoader(yaml.SafeLoader):
+    """Read a workflow the way the trust check needs to reason about it.
+
+    PyYAML resolves ``on``/``yes``/``y`` (YAML 1.1) to booleans, so several
+    spellings collapse onto the single key ``True`` and silently last-key-win.
+    Only ``true``/``false`` are booleans here, and a repeated mapping key is an
+    error, so what this loader returns is what the trigger check inspects.
+    """
+
+
+_WorkflowLoader.yaml_implicit_resolvers = {
+    first: [(tag, pattern) for tag, pattern in resolvers if tag != "tag:yaml.org,2002:bool"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_WorkflowLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+
+
+def _construct_unique_mapping(loader: _WorkflowLoader, node: yaml.MappingNode, deep: bool = False):
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        try:
+            duplicate = key in seen
+            seen.add(key)
+        except TypeError:
+            duplicate = False  # unhashable keys are refused by the stock constructor
+        if duplicate:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate mapping key {key!r}", key_node.start_mark)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+
+_WorkflowLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+
+
 def _trusted_manual_main_job(raw: str, job_name: str) -> bool:
     """Only an explicit owner/manual-main job may receive an original-source token."""
     # PyYAML follows YAML 1.1 and treats an unquoted 'on' mapping key as True.
     # A second raw top-level 'on' could otherwise last-key-win past this check.
     if len(re.findall(r"(?m)^(?:on|['\"]on['\"])\s*:", raw)) != 1:
         return False
-    definition = yaml.safe_load(raw)
-    if not isinstance(definition, dict):
+    # ``true:``/``yes:`` spell the same YAML 1.1 key as ``on:``; the dedicated
+    # loader keeps them distinct and refuses duplicates, and any non-string
+    # top-level key is something GitHub does not read as an event: abstain.
+    try:
+        definition = yaml.load(raw, Loader=_WorkflowLoader)
+    except yaml.YAMLError:
         return False
-    trigger = definition.get("on", definition.get(True))
+    if not isinstance(definition, dict) or any(type(key) is not str for key in definition):
+        return False
+    trigger = definition.get("on")
     if isinstance(trigger, str):
         events = [trigger]
     elif isinstance(trigger, list):
