@@ -441,6 +441,7 @@ def test_labelled_fixture_lattice_vetoes_the_plan_frame_by_default_and_not_with_
     assert resolved[0].provenance[FLAG] == {
         "table_veto_lifted_frames": [FRAME],
         "near_nested_rival_frames": [],
+        "frame_source_ink": [{"frame": FRAME, "ink": "stroked"}],
     }
     doc.close()
 
@@ -512,6 +513,53 @@ def test_composite_overhanging_ring_and_outline_both_held_by_lattices():
     receipt = resolved[0].provenance[FLAG]
     assert sorted(receipt["table_veto_lifted_frames"]) == sorted([OUTER, BAND])
     assert receipt["near_nested_rival_frames"] == [{"frame": BAND, "contained_in": OUTER}]
+    assert receipt["frame_source_ink"] == [
+        {"frame": BAND, "ink": "stroked"}, {"frame": OUTER, "ink": "stroked"},
+    ]
+    doc.close()
+
+
+# ---------------------------------------------------------------------------
+# what the source actually paints: frames can be invisible background fills
+# ---------------------------------------------------------------------------
+
+
+def _ink(doc, box):
+    page = doc[0]
+    return v._frame_source_ink_class(page, box, _calibration(page))
+
+
+def test_frame_source_ink_classes():
+    doc, page = _new_page()
+    stroked, white, gray, both = (40.0, 30.0, 300.0, 200.0), (320.0, 30.0, 560.0, 200.0), (40.0, 230.0, 300.0, 400.0), (320.0, 230.0, 560.0, 400.0)
+    page.draw_rect(fitz.Rect(*stroked), color=(0, 0, 0), width=1.0)
+    page.draw_rect(fitz.Rect(*white), color=None, fill=(1, 1, 1))
+    page.draw_rect(fitz.Rect(*gray), color=None, fill=(0.75, 0.75, 0.75))
+    page.draw_rect(fitz.Rect(*both), color=None, fill=(1, 1, 1))  # a white background ...
+    page.draw_rect(fitz.Rect(*both), color=(0, 0, 0), width=1.0)  # ... with a real border on the same rectangle
+    page.insert_text((60.0, 450.0), "NOTES", fontsize=9.0)
+    doc = _reopen(doc)
+    assert _ink(doc, stroked) == "stroked"
+    assert _ink(doc, white) == "unstroked_opaque_white_fill"
+    assert _ink(doc, gray) == "unstroked_fill_other"
+    assert _ink(doc, both) == "stroked"  # any stroked producer of the same extent makes it drawn ink
+    assert _ink(doc, (100.0, 100.0, 200.0, 150.0)) == "unknown"  # no path reproduces this box
+    doc.close()
+
+
+def test_a_plan_frame_that_is_only_an_invisible_white_fill_is_resolved_but_labelled_as_such():
+    """Same lattice plan, but the plan extent exists only as an unstroked opaque white background rectangle."""
+    doc, page = _new_page()
+    page.draw_rect(fitz.Rect(*FRAME), color=None, fill=(1, 1, 1))
+    _lattice(page, 80.0, 60.0, 8, 6, 40.0, 20.0, 80.0, 40.0)
+    _title(page)
+    doc = _reopen(doc)
+    assert _vector_resolved(_segment(doc)) == []
+    resolved = _vector_resolved(_segment(doc, **{FLAG: True}))
+    assert len(resolved) == 1 and resolved[0].bounding_box == pytest.approx(FRAME)
+    assert resolved[0].provenance[FLAG]["frame_source_ink"] == [
+        {"frame": FRAME, "ink": "unstroked_opaque_white_fill"}
+    ]
     doc.close()
 
 

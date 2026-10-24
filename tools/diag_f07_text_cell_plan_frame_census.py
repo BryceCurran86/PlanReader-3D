@@ -64,6 +64,9 @@ def _viewport_row(page: Any, viewport: Any) -> dict[str, Any]:
             "table_veto_lifted_frames": len(receipt.get("table_veto_lifted_frames", ())),
             "near_nested_rival_frames": len(receipt.get("near_nested_rival_frames", ())),
         }
+        if box is not None:
+            inks = [e["ink"] for e in receipt.get("frame_source_ink", ()) if tuple(e["frame"]) == tuple(box)]
+            row["frame_source_ink"] = inks[0] if inks else None
     return row
 
 
@@ -157,8 +160,20 @@ def _table_frame_rows(doc: Any, index: int) -> list[dict[str, Any]]:
             "shadow_lifts_table_status": not shadow_table,
             "qualifying_families": _family_rows(frame, page, calibration, fragments),
             "largest_same_size_family": _largest_family_row(frame, page, fragments),
+            "source_ink": vs._frame_source_ink_class(page, frame, calibration),
         })
     return rows
+
+
+def _frame_ink_counts(doc: Any, index: int) -> dict[str, int]:
+    """How the source paints every vector frame F.07 can see on the page (stroked line, white mask, other fill)."""
+    page = doc.load_page(index)
+    calibration = vs.calibrate_viewport_layout(page)
+    counts: dict[str, int] = {}
+    for frame in vs.extract_vector_frames(page, calibration):
+        ink = vs._frame_source_ink_class(page, frame, calibration)
+        counts[ink] = counts.get(ink, 0) + 1
+    return counts
 
 
 def _changes(page: Any, before: Sequence[Any], after: Sequence[Any]) -> list[dict[str, Any]]:
@@ -217,6 +232,10 @@ def census_page(doc: Any, index: int, baseline: Any = None) -> dict[str, Any]:
         row["legacy_table_frames"] = _table_frame_rows(doc, index)
     except Exception as exc:  # noqa: BLE001
         row["table_frame_error"] = type(exc).__name__
+    try:
+        row["frame_source_ink_counts"] = _frame_ink_counts(doc, index)
+    except Exception as exc:  # noqa: BLE001
+        row["frame_ink_error"] = type(exc).__name__
     return row
 
 
@@ -231,6 +250,21 @@ def census_pdf(path: Path, baseline: Any = None, label: Optional[str] = None) ->
             "page_count": doc.page_count,
             "pages": pages,
         }
+
+
+def _count_by(items: Sequence[Any], key: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[key(item)] = counts.get(key(item), 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _ink_totals(pages: Sequence[Any]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for _source_id, page in pages:
+        for ink, count in page.get("frame_source_ink_counts", {}).items():
+            totals[ink] = totals.get(ink, 0) + count
+    return dict(sorted(totals.items()))
 
 
 def summarise(sources: Sequence[dict[str, Any]], with_baseline: bool) -> dict[str, Any]:
@@ -251,6 +285,9 @@ def summarise(sources: Sequence[dict[str, Any]], with_baseline: bool) -> dict[st
         "legacy_table_frames_cell_family_branch": len(cell_frames),
         "legacy_table_frames_line_grid_only": len(frames) - len(cell_frames),
         "legacy_table_frames_lifted_by_shadow": sum(1 for x in frames if x[2]["shadow_lifts_table_status"]),
+        "vector_frames_by_source_ink": _ink_totals(ok),
+        "legacy_table_frames_by_source_ink": _count_by(frames, lambda x: x[2]["source_ink"]),
+        "cell_family_frames_by_source_ink": _count_by(cell_frames, lambda x: x[2]["source_ink"]),
         "sources_with_any_cell_family_table_frame": sorted({sid for sid, _p, _f in cell_frames}),
         "changed_pages": [
             {"source_id": sid, "page": p["page"], "changes": p["shadow_changes"]}
@@ -295,6 +332,24 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"| **{summary['legacy_table_frames']}** "
         f"| **{summary['legacy_table_frames_cell_family_branch']}** "
         f"| **{summary['legacy_table_frames_lifted_by_shadow']}** |"
+    )
+    lines += [
+        "",
+        "| source | vector frames | stroked | unstroked opaque white fill | unstroked other fill | unknown |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for source in report["sources"]:
+        totals = _ink_totals([(source["source_id"], p) for p in source["pages"] if "error" not in p])
+        lines.append(
+            f"| {source['source_id']} | {sum(totals.values())} | {totals.get('stroked', 0)} "
+            f"| {totals.get('unstroked_opaque_white_fill', 0)} | {totals.get('unstroked_fill_other', 0)} "
+            f"| {totals.get('unknown', 0)} |"
+        )
+    all_totals = summary["vector_frames_by_source_ink"]
+    lines.append(
+        f"| **total** | **{sum(all_totals.values())}** | **{all_totals.get('stroked', 0)}** "
+        f"| **{all_totals.get('unstroked_opaque_white_fill', 0)}** | **{all_totals.get('unstroked_fill_other', 0)}** "
+        f"| **{all_totals.get('unknown', 0)}** |"
     )
     return "\n".join(lines) + "\n"
 

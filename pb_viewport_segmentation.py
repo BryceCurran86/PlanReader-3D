@@ -1103,6 +1103,62 @@ def _frame_source_edge_mesh(
     return _source_edge_connected_rects(universe)
 
 
+_FRAME_INK_STROKED = "stroked"
+_FRAME_INK_WHITE_FILL = "unstroked_opaque_white_fill"
+_FRAME_INK_OTHER_FILL = "unstroked_fill_other"
+_FRAME_INK_UNKNOWN = "unknown"
+
+
+def _frame_source_ink_class(
+    page: Any,
+    frame: Sequence[float],
+    calibration: ViewportLayoutCalibration,
+) -> str:
+    """How the source paints a vector frame. A receipt only, never a frame selector.
+
+    ``extract_vector_frames`` returns the extent of every rectangle PATH, drawn
+    or not. A frame whose every producing path is an unstroked opaque white
+    fill is an invisible background/mask rectangle, which is positive evidence
+    of an extent but not of a drawn frame (see
+    ``_opaque_white_unstroked_frame_mask_shadow``). Any producer that is
+    stroked makes the frame ``stroked``; ``unknown`` means no path reproduces
+    the frame (e.g. a caller-supplied box).
+    """
+    tol = max(calibration.median_word_height_pt * 0.15, 0.75)
+    eps = max(calibration.median_word_height_pt * 0.1, 0.25)
+    producers = []
+    for drawing in _page_drawings(page):
+        items = drawing.get("items", []) or []
+        boxes = []
+        closed = _closed_four_line_rect(items, tol=tol)
+        if closed is not None:
+            boxes.append(closed)
+        for item in items:
+            if not item:
+                continue
+            if item[0] == "re" and len(item) >= 2:
+                rect = item[1]
+                boxes.append(_normalized_bbox(
+                    float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)
+                ))
+            elif item[0] == "qu" and len(item) >= 2:
+                quad = _axis_aligned_quad_bbox(item[1], tol=tol)
+                if quad is not None:
+                    boxes.append(quad)
+        if any(all(abs(box[i] - float(frame[i])) <= eps for i in range(4)) for box in boxes):
+            producers.append(drawing)
+    if not producers:
+        return _FRAME_INK_UNKNOWN
+    if any(
+        "s" in str(drawing.get("type") or "") and drawing.get("color") is not None
+        for drawing in producers
+    ):
+        return _FRAME_INK_STROKED
+    if all(_opaque_white_unstroked_frame_mask_shadow(drawing) for drawing in producers):
+        return _FRAME_INK_WHITE_FILL
+    return _FRAME_INK_OTHER_FILL
+
+
 def _cells_text_bearing_fraction(
     cells: Sequence[tuple[float, float, float, float]],
     centres: Sequence[tuple[float, float]],
@@ -2262,11 +2318,19 @@ def _frame_resolved_viewports(
         if plan_frame_shadow and len(usable) > 1:
             usable, near_nested_rivals = _collapse_near_nested_band_frames(usable)
         if lifted_veto_frames or near_nested_rivals:
+            involved = sorted(set([
+                *lifted_veto_frames, *usable,
+                *(box for pair in near_nested_rivals for box in pair),
+            ]))
             shadow_receipts[index] = {
                 "table_veto_lifted_frames": list(lifted_veto_frames),
                 "near_nested_rival_frames": [
                     {"frame": dropped, "contained_in": container}
                     for dropped, container in near_nested_rivals
+                ],
+                "frame_source_ink": [
+                    {"frame": box, "ink": _frame_source_ink_class(page, box, calibration)}
+                    for box in involved
                 ],
             }
         if len(usable) > 1:

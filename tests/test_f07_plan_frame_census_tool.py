@@ -51,6 +51,8 @@ def test_census_reports_the_shadow_effect_page_and_frame_evidence(lattice_pdf: P
     assert change["after"]["status"] == "resolved"
     assert change["after"]["native_bbox"] == pytest.approx(list(FRAME))
     assert change["after"]["shadow_receipt_counts"] == {"table_veto_lifted_frames": 1, "near_nested_rival_frames": 0}
+    assert change["after"]["frame_source_ink"] == "stroked"
+    assert page["frame_source_ink_counts"] == {"stroked": 1}
     frames = page["legacy_table_frames"]
     assert len(frames) == 1 and frames[0]["legacy_table"] and frames[0]["cell_family_branch"]
     assert frames[0]["shadow_table"] is False and frames[0]["shadow_lifts_table_status"] is True
@@ -60,7 +62,11 @@ def test_census_reports_the_shadow_effect_page_and_frame_evidence(lattice_pdf: P
     largest = frames[0]["largest_same_size_family"]
     assert largest["cells"] == 48 and largest["text_bearing_fraction"] == 1.0 and largest["edge_connected_fraction"] == 0.0
 
+    assert frames[0]["source_ink"] == "stroked"
+
     summary = census.summarise([report], with_baseline=False)
+    assert summary["vector_frames_by_source_ink"] == {"stroked": 1}
+    assert summary["cell_family_frames_by_source_ink"] == {"stroked": 1}
     assert summary["pages"] == 1 and summary["pages_shadow_changes_viewports"] == 1
     assert summary["legacy_table_frames_cell_family_branch"] == 1
     assert summary["legacy_table_frames_lifted_by_shadow"] == 1
@@ -92,6 +98,7 @@ def test_main_writes_json_and_markdown_and_compares_with_a_baseline_module(latti
     assert report["constants"]["near_nested_band_containment_fraction"] == v._NEAR_NESTED_BAND_CONTAINMENT_FRACTION
     table = markdown.read_text(encoding="utf-8")
     assert table.splitlines()[0].startswith("| source |") and "**total**" in table
+    assert "| vector frames | stroked | unstroked opaque white fill |" in table
 
 
 def test_main_requires_a_pdf(tmp_path: Path):
