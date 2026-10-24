@@ -10,7 +10,11 @@ The step provisions exactly the manifest names the job mentions; a job that ment
 the whole-suite jobs, get every document.
 
 Usage:
-    python scripts/apply_provision_original_sources.py [--root .] [--action-ref main] [--only GLOB ...] [--apply]
+    python scripts/apply_provision_original_sources.py [--root .] [--action-ref SHA40] [--only GLOB ...] [--apply]
+
+``--apply`` is *only* allowed for an immutable-action-SHA-pinned, owner-manual
+workflow_dispatch job explicitly guarded to the original repository's main
+branch. Mixed PR/push events or PR-head checkout fail closed before any writes.
 """
 from __future__ import annotations
 
@@ -225,6 +229,70 @@ def _assert_only_steps_added(old: str, new: str, changed_jobs: Sequence[str]) ->
     if after != before:
         raise SystemExit("workflow changed outside the inserted steps")
 
+# The private source token must never be inserted into a workflow that could
+# check out PR-head code or execute on an untrusted branch. The trust rule is
+# intentionally narrower than GitHub's event/if expression language: an
+# unrecognised expression ABSTAINS instead of optimistically granting access.
+_TRUSTED_JOB_IF = (
+    "github.event_name == 'workflow_dispatch' && "
+    "github.ref == 'refs/heads/main' && "
+    "github.repository == 'BryceCurran86/PlanReader-3D'"
+)
+_PINNED_ACTION_SHA = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def _trusted_manual_main_job(raw: str, job_name: str) -> bool:
+    """Only an explicit owner/manual-main job may receive an original-source token."""
+    # PyYAML follows YAML 1.1 and treats an unquoted 'on' mapping key as True.
+    # A second raw top-level 'on' could otherwise last-key-win past this check.
+    if len(re.findall(r"(?m)^(?:on|['\"]on['\"])\\s*:", raw)) != 1:
+        return False
+    definition = yaml.safe_load(raw)
+    if not isinstance(definition, dict):
+        return False
+    trigger = definition.get("on", definition.get(True))
+    if isinstance(trigger, str):
+        events = [trigger]
+    elif isinstance(trigger, list):
+        events = trigger
+    elif isinstance(trigger, dict):
+        events = list(trigger)
+    else:
+        return False
+    if events != ["workflow_dispatch"]:
+        return False
+    jobs = definition.get("jobs")
+    if not isinstance(jobs, dict):
+        return False
+    job = jobs.get(job_name)
+    if not isinstance(job, dict):
+        return False
+    condition = job.get("if")
+    if not isinstance(condition, str):
+        return False
+    condition = condition.strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    if re.sub(r"\\s+", "", condition) != re.sub(r"\\s+", "", _TRUSTED_JOB_IF):
+        return False
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return False
+    checkout = next(
+        (step for step in steps
+         if isinstance(step, dict) and str(step.get("uses", "")).startswith("actions/checkout@")),
+        None,
+    )
+    if checkout is None:
+        return False
+    arguments = checkout.get("with") or {}
+    if not isinstance(arguments, dict):
+        return False
+    ref = arguments.get("ref") or ""
+    return isinstance(ref, str) and ref.strip() in (
+        "", "main", "refs/heads/main", "${{ github.sha }}",
+    )
+
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -239,8 +307,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     files = sorted((root / ".github" / "workflows").glob("*.y*ml"))
     if args.only:
         files = [f for f in files if any(fnmatch.fnmatch(f.name, pattern) for pattern in args.only)]
+    # PLAN FIRST, then validate the complete batch BEFORE any writes. A late
+    # unsafe PR workflow cannot cause earlier safe workflows to be partly changed.
     touched = jobs = 0
     skipped_all: List[str] = []
+    rejected: List[str] = []
+    planned: List[Tuple[Path, str]] = []
     for path in files:
         result = plan_file(path, names, args.action_ref)
         if result is None:
@@ -251,10 +323,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             continue
         touched += 1
         jobs += len(changed)
-        if args.apply:
-            path.write_bytes(new.encode("utf-8"))
-        else:
+        original = path.read_bytes().decode("utf-8")
+        for job in changed:
+            if not _trusted_manual_main_job(original, job):
+                rejected.append(f"{path.name}:{job}")
+        planned.append((path, new))
+        if not args.apply:
             print(f"would change {path.name}: {', '.join(changed)}")
+    if args.apply:
+        if not _PINNED_ACTION_SHA.fullmatch(args.action_ref):
+            raise SystemExit(
+                "--apply requires --action-ref pinned to a 40-character commit SHA; "
+                "branch names or local PR-head actions may see secrets"
+            )
+        if rejected:
+            raise SystemExit(
+                "refusing to inject ORIGINAL_SOURCES_TOKEN into untrusted "
+                "event/ref/checkout workflows: " + ", ".join(rejected)
+            )
+        for path, new in planned:
+            path.write_bytes(new.encode("utf-8"))
+    elif rejected:
+        print(
+            "SECURITY WARNING: dry-run only; --apply will refuse the "
+            "untrusted workflow jobs: " + ", ".join(rejected)
+        )
     verb = "changed" if args.apply else "would change"
     print(f"{verb} {touched} workflow file(s), {jobs} job(s)")
     if skipped_all:
