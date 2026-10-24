@@ -26,6 +26,11 @@ jobs:
         python-version: ["3.13", "3.14"]
     env:
       ORT_DISABLE_TELEMETRY: "1"
+      # Match required public CI: source omissions are not source verification.
+      PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+      # Indexed owner receipts reject even harmless unindexed bytecode.
+      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-pycache
+      PYTHONDONTWRITEBYTECODE: "1"
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

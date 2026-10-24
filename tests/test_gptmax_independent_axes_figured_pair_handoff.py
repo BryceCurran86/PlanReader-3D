@@ -265,7 +265,8 @@ def test_reissued_historical_sealed_and_customer_bodies_require_exact_parity():
 @pytest.mark.parametrize("change", [
     "quantity_value", "quantity_fingerprint", "quantity_lineage",
     "signed_row_missing", "customer_nested_quantity", "customer_fingerprint",
-    "customer_missing", "customer_duplicate",
+    "customer_missing", "customer_duplicate", "measurement_source",
+    "measurement_quantity_id", "measurement_area_basis", "customer_notes",
 ])
 def test_predecessor_mutations_cannot_hide_behind_unchanged_quantity_id(change):
     signed, customers = _historical_archive()
@@ -286,6 +287,12 @@ def test_predecessor_mutations_cannot_hide_behind_unchanged_quantity_id(change):
         current["customer_rows"].pop()
     elif change == "customer_duplicate":
         current["customer_rows"].append(deepcopy(current["customer_rows"][0]))
+    elif change in ("measurement_source", "measurement_quantity_id", "measurement_area_basis"):
+        key = {"measurement_source": "source", "measurement_quantity_id": "quantity_id",
+               "measurement_area_basis": "area_basis"}[change]
+        current["customer_rows"][0]["commercial_projection_provenance"]["measurement_authority"]["metadata"][key] = "foreign"
+    elif change == "customer_notes":
+        current["customer_rows"][0]["notes"] = "foreign provenance"
     with pytest.raises((RuntimeError, ValueError)):
         verify_archived_signed_predecessors(signed, customers, current)
 

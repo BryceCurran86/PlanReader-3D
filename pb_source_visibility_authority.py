@@ -809,6 +809,61 @@ def _raster_opening_visible_primitive_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+def _raster_opening_receipt_matches_parent(
+    receipt: RasterOpeningPrimitiveVisibilityReceipt,
+    parent: SourceObservationRecord,
+    observation: SourceObservationRecord,
+) -> bool:
+    """Bind original render and pixel registration to immutable opening IDs.
+
+    Opening and ordinary W4 raster primitives have distinct source namespaces.
+    Checking the page and PDF geometry alone must not let a replaced receipt
+    borrow a different render, DPI or pixel interval for the same source parent.
+    No rendering, source mutation or new geometry is performed by this reader.
+    """
+    try:
+        prefix, render_sha, version, kind, index = parent.source_primitive_ref.split(":")
+        if (prefix != "raster_opening_primitive"
+                or version != RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION
+                or kind != receipt.primitive_kind
+                or kind not in RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS
+                or render_sha != receipt.render_sha256
+                or len(render_sha) != 64
+                or any(c not in "0123456789abcdef" for c in render_sha)
+                or str(int(index)) != index or int(index) < 0
+                or type(receipt.dpi) is not int
+                or receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                or type(receipt.pixel_geometry) is not tuple
+                or len(receipt.pixel_geometry) != 4
+                or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0
+                       for v in receipt.pixel_geometry)):
+            return False
+        # Source band edges have integer pixel coordinates; thin-run centres
+        # may be half pixels. Sub-lattice perturbations cannot borrow the
+        # rounded six-decimal PDF geometry of an authentic source interval.
+        if any(not (float(v) * 2.0).is_integer() for v in receipt.pixel_geometry):
+            return False
+        registered = tuple(round(v * 72.0 / receipt.dpi, 6)
+                           for v in receipt.pixel_geometry)
+        if registered != tuple(receipt.geometry) or registered != tuple(parent.geometry):
+            return False
+        x1, y1, x2, y2 = registered
+        if not ((x1 == x2 and y1 != y2) or (y1 == y2 and x1 != x2)):
+            return False
+        primitive = RasterOpeningSourcePrimitive(kind, receipt.pixel_geometry, registered)
+        args = dict(document_id=receipt.document_id, revision_id=receipt.revision_id,
+                    page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+                    primitive=primitive)
+        return (
+            _raster_opening_primitive_observation_id(**args) == parent.observation_id
+            and _raster_opening_visible_primitive_id(
+                **args, parent_observation_id=parent.observation_id,
+            ) == observation.observation_id
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return False
+
+
 def _native_dimension_component_inputs_fingerprint(*, segments, words) -> str:
     """Exact original-source canonical SHA cache key without cloning JSON trees.
 
@@ -3254,6 +3309,7 @@ class SourceVisibilityAuthority:
             parent_result.status is not EvidenceResolutionStatus.CORROBORATED
             or parent is None
             or parent.observation_kind != RASTER_OPENING_PRIMITIVE_SEGMENT
+            or not _raster_opening_receipt_matches_parent(receipt, parent, observation)
             or parent.origin_kind != RASTER_OPENING_PRIMITIVE_ORIGIN_KIND
             or parent.derivation_parent_ids
             != (receipt.page_parent_observation_id,)
