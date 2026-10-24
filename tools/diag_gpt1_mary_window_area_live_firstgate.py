@@ -168,9 +168,19 @@ def main() -> int:
     parser.add_argument("--native-source-text", action="store_true")
     args = parser.parse_args()
     params = inspect.signature(collect_live_physical_net_wall_claim).parameters
+    # Match the actual source-handoff page universe, not a convenient
+    # hand-selected p7/p29 subset that could omit contradictory schedule or
+    # physical source evidence. Do not silently make p7 a topology authority.
+    from tools.run_source_closed_project_handoff import _source_page_scopes
+    topology_pages, support_pages, page_count = _source_page_scopes(args.pdf)
+    if PLAN_PAGE_INDEX not in topology_pages:
+        raise SystemExit(
+            "original p7 not producer-authenticated as a topology page"
+        )
     kwargs = {
-        "pages": (PLAN_PAGE_INDEX, ELEVATION_PAGE_INDEX),
-        "topology_pages": (PLAN_PAGE_INDEX,),
+        "pages": tuple(range(page_count)),
+        "topology_pages": topology_pages,
+        "room_area_support_pages": support_pages or None,
     }
     if args.native_source_text:
         if "source_native_finish_text_shadow" not in params:
