@@ -98,6 +98,14 @@ def _append_reproved_areas(baseline, openings, quantities):
     additions = tuple(q for qid, q in sorted(fresh.items()) if qid not in old)
     if not additions:
         return baseline
+    # This operation re-proves areas only. A complete count or net-wall
+    # publication also depends on the opening universe and its semantics or
+    # metric voids. Retaining those totals while enriching that universe would
+    # require their own source-authority replay; never silently stale them.
+    if baseline.opening_count_quantity_evidence or baseline.quantity_m2 is not None:
+        raise SourceClosedRunConflictError(
+            "opening recovery requires reproof of published count or net-wall scope"
+        )
     replacements = {}
     roots = {(o.document_id, o.revision_id, o.source_sha256) for o in old_objects.values()}
     if len(roots) != 1:

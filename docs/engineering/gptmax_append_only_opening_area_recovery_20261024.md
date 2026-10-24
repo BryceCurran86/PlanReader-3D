@@ -27,6 +27,11 @@ QuantityEvidence instances. Only additional eligible areas and their actual
 canonical objects are appended; source count, metric axes, rooms and walls are
 not inferred or promoted by this operation.
 
+A nonempty append is rejected if the baseline already publishes an opening
+count or net-wall total. Those publications depend on the opening universe,
+semantics or metric voids and require their own source reproof before any area
+enrichment. A replay with no additions retains the exact original claim.
+
 The existing area issuer, source trace builder, V1 sealer and customer projector
 then validate the final claim. No archive is read by production recovery. No
 scale resolver, evidence schema, canonical graph, or signer is added. Default

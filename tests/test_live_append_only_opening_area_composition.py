@@ -12,6 +12,7 @@ from pb_live_opening_source_closed_export import seal_live_opening_area_claim_ru
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 from pb_source_closed_run_export import SourceClosedRunConflictError
 from tests.test_live_opening_customer_projection import _opening_pdf
+from tests.test_live_opening_count_quantity_publication import _floor_plan_with_schedule_quantity
 
 
 @pytest.fixture(scope="module")
@@ -38,6 +39,15 @@ def original_claim(tmp_path_factory):
     full = collect_live_physical_net_wall_claim(path, pages=(0,))
     assert len(full.opening_quantity_evidence) == 2
     return path, full
+
+
+@pytest.fixture(scope="module")
+def counted_claim(tmp_path_factory):
+    path = tmp_path_factory.mktemp("append-counted-opening") / "counted.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert len(claim.opening_count_quantity_evidence) == 1
+    return claim
 
 
 def subset(full, *, include_unmeasured=False):
@@ -148,6 +158,26 @@ def test_order_of_new_source_inventory_does_not_select_a_different_addition(orig
     b = _append_reproved_areas(baseline, tuple(reversed(full.canonical_openings)),
                               tuple(reversed(full.opening_quantity_evidence)))
     assert a == b
+    assert _append_reproved_areas(baseline, baseline.canonical_openings,
+                                 baseline.opening_quantity_evidence) is baseline
+
+
+@pytest.mark.parametrize("published_scope", ("count", "net_wall"))
+def test_area_append_cannot_silently_stale_other_opening_dependent_publications(
+    original_claim, counted_claim, published_scope,
+):
+    _, full = original_claim
+    baseline = subset(full, include_unmeasured=True)
+    if published_scope == "count":
+        # A genuine count receipt from a separately authenticated producer
+        # cannot ride an area-only enrichment without its own scope reproof.
+        # In particular, a foreign count must not survive by being ignored.
+        baseline = replace(baseline, opening_count_quantity_evidence=counted_claim.opening_count_quantity_evidence)
+    else:
+        # Exercise the collector's published-total field, not a new issuer.
+        baseline = replace(baseline, opening_count_quantity_evidence=(), quantity_m2=12.0)
+    with pytest.raises(SourceClosedRunConflictError, match="reproof of published"):
+        _append_reproved_areas(baseline, full.canonical_openings, full.opening_quantity_evidence)
     assert _append_reproved_areas(baseline, baseline.canonical_openings,
                                  baseline.opening_quantity_evidence) is baseline
 
