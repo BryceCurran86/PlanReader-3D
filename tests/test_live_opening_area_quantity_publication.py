@@ -6,6 +6,8 @@ from types import MappingProxyType
 import pytest
 
 from pb_live_opening_source_closed_export import (
+    build_live_opening_area_claim_source_traces,
+    seal_live_opening_area_claim_run,
     build_live_opening_area_source_traces,
     seal_live_opening_area_run,
 )
@@ -17,6 +19,7 @@ from pb_live_opening_area_quantity_publication import (
     _opening_quantity,
     publish_live_opening_area_quantities,
 )
+from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
     LivePhysicalOpeningVoidComposition,
@@ -791,3 +794,76 @@ def test_figured_label_measurement_receipts_do_not_inherit_elevation_frame_confl
     second = _opening(canonical_id="physical-d02", kind="door")
     result = publish_live_opening_area_quantities(_composition(first, second))
     assert len(result) == 2
+
+
+def _opening_area_claim(*openings: LiveCanonicalOpeningObject) -> LivePhysicalNetWallClaim:
+    return LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=(), quantity_m2=None, source_pages=(),
+        canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_wall_reason_codes=(), canonical_wall_source_pages=(),
+        unresolved_wall_candidate_ids=(),
+        canonical_openings=tuple(openings),
+        canonical_rooms=(), canonical_floors=(),
+        canonical_floor_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_floor_reason_codes=(), canonical_floor_source_pages=(),
+        canonical_room_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_room_reason_codes=(), canonical_room_source_pages=(),
+        external_wall_ids=(), evidence_ids=(), quantity_id=None,
+        confidence=0.0, publication=None,
+        opening_quantity_evidence=tuple(
+            q for opening in openings if (q := _opening_quantity(opening)) is not None
+        ),
+    )
+
+
+def test_actual_claim_customer_seal_preserves_repeated_same_type_elevation_frame():
+    claim = _opening_area_claim(
+        _elevation_opening("source-w01-a"),
+        _elevation_opening("source-w01-b"),
+    )
+    sealed = seal_live_opening_area_claim_run(
+        claim, workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(q.lineage_ok for q in sealed.quantities)
+    assert {q.object_identity_refs[0] for q in sealed.quantities} == {
+        "source-w01-a", "source-w01-b",
+    }
+
+
+@pytest.mark.parametrize(
+    "kind,type_mark",
+    [("door", "D02"), ("window", "W02")],
+)
+def test_actual_claim_customer_seal_vetoes_foreign_elevation_frame_kind_or_type(
+    kind, type_mark,
+):
+    claim = _opening_area_claim(
+        _elevation_opening("source-w01"),
+        _elevation_opening("source-other", kind=kind, type_mark=type_mark),
+    )
+    assert len(claim.opening_quantity_evidence) == 2
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        build_live_opening_area_claim_source_traces(
+            claim, workspace_id=7, project_id="source-project",
+        )
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_actual_claim_customer_seal_vetoes_unpublishable_source_frame_rival():
+    claim = _opening_area_claim(
+        _elevation_opening("source-w01"),
+        _elevation_opening(
+            "source-d02", kind="door", type_mark="D02", area_m2=None,
+        ),
+    )
+    assert len(claim.opening_quantity_evidence) == 1
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )

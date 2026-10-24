@@ -9,6 +9,7 @@ measurement evidence backing that area is retained on the object.
 from __future__ import annotations
 
 import math
+from typing import Sequence
 
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
@@ -322,6 +323,37 @@ def _opening_quantity(
     )
 
 
+def _reject_incompatible_elevation_frame_claims(
+    canonical_openings: Sequence[LiveCanonicalOpeningObject],
+) -> None:
+    """Fail closed before either issuer or final claim/customer sealing.
+
+    Repeated physical openings may share one authenticated TYPE-level frame,
+    but a single original frame receipt cannot claim incompatible type marks
+    or door/window kinds, including through an ABSTAIN sibling.
+    """
+    frame_claims: dict[str, tuple[str, str]] = {}
+    for opening in canonical_openings:
+        if type(opening) is not LiveCanonicalOpeningObject:
+            raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
+        if opening.area_basis != "authenticated_elevation_frame":
+            continue
+        frame_id = opening.figured_area_record_id
+        if type(frame_id) is not str or not frame_id or frame_id != frame_id.strip():
+            continue
+        claim = (
+            str(opening.opening_kind or "").strip().lower(),
+            str(opening.type_mark or "").strip().upper(),
+        )
+        prior = frame_claims.get(frame_id)
+        if prior is not None and prior != claim:
+            raise ValueError(
+                "conflicting original elevation frame source receipt "
+                "across opening kind/type"
+            )
+        frame_claims[frame_id] = claim
+
+
 def publish_live_opening_area_quantities(
     composition: LivePhysicalOpeningVoidComposition,
 ) -> tuple[QuantityEvidence, ...]:
@@ -338,7 +370,6 @@ def publish_live_opening_area_quantities(
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
     source_scope: tuple[str, str, str] | None = None
-    elevation_frame_claims: dict[str, tuple[str, str]] = {}
     for opening in composition.canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
@@ -380,30 +411,7 @@ def publish_live_opening_area_quantities(
         if physical_id:
             physical_ids.add(physical_id)
 
-        # One source-authenticated elevation FRAME may describe several
-        # independent openings of the SAME type (e.g. repeated W01 units).
-        # It cannot be reused as authority for a different physical TYPE or
-        # door/window KIND. Check the whole inventory, including unsupported
-        # members, before filtering to commercially eligible quantities.
-        # Source root/revision equality is already enforced above.
-        if opening.area_basis == "authenticated_elevation_frame":
-            frame_id = opening.figured_area_record_id
-            if (
-                type(frame_id) is str
-                and frame_id
-                and frame_id == frame_id.strip()
-            ):
-                claim = (
-                    str(opening.opening_kind or "").strip().lower(),
-                    str(opening.type_mark or "").strip().upper(),
-                )
-                prior = elevation_frame_claims.get(frame_id)
-                if prior is not None and prior != claim:
-                    raise ValueError(
-                        "conflicting original elevation frame source receipt "
-                        "across opening kind/type"
-                    )
-                elevation_frame_claims[frame_id] = claim
+    _reject_incompatible_elevation_frame_claims(composition.canonical_openings)
 
     quantities: list[QuantityEvidence] = []
     seen_quantity_ids: set[str] = set()
