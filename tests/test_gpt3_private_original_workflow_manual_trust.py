@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1] / ".github" / "workflows"
-WORKFLOWS = ["test-gpt3-maryborough-original-floor-score-input.yml","test-gpt3-lot16-original-sealed-score-input.yml","test-gpt3-1215-paired-customer-retention.yml","gpt3-original-opening-customer-inventory.yml","diag-gpt3-maryborough-ft3-source-firstgate.yml","test-gpt3-original-scope-v1-consumer.yml","score-gpt3-lot16-1215-opening-local.yml"]
+WORKFLOWS = ["test-gpt3-maryborough-original-floor-score-input.yml","test-gpt3-lot16-original-sealed-score-input.yml","test-gpt3-1215-paired-customer-retention.yml","gpt3-original-opening-customer-inventory.yml","diag-gpt3-maryborough-ft3-source-firstgate.yml","test-gpt3-original-scope-v1-consumer.yml","score-gpt3-lot16-1215-opening-local.yml","diag-gpt3-lot16-1215-identity-readiness.yml","diag-gpt3-lot16-internal-870-identity-readiness.yml","test-gpt3-source-frame-proof.yml","test-gpt3-raster-source-discovery.yml","test-gpt3-native-dimension-original-source-cache.yml","test-gpt3-1215-opening-local-retention.yml","test-gpt3-1215-room-face-owned-retention.yml","score-gpt3-selected-two-original-projects.yml"]
 OWNER_GUARD = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
 TRUSTED_SHA = "${{ github.sha }}"
 
@@ -41,29 +41,27 @@ def validate_source_job(raw):
         (name, job) for name, job in doc["jobs"].items()
         if "ORIGINAL_SOURCES_TOKEN" in str(job)
     ]
-    assert len(token_jobs) == 1
-    name, job = token_jobs[0]
-    assert name.startswith("original")
-    assert job.get("if") == OWNER_GUARD
-    steps = job["steps"]
-    checkouts = [s for s in steps if s.get("uses", "").startswith("actions/checkout@")]
-    assert len(checkouts) == 1
-    checkout = checkouts[0]
-    assert checkout["with"]["ref"] == TRUSTED_SHA
-    assert checkout["with"]["persist-credentials"] == "false"
-    provision = [s for s in steps if "ORIGINAL_SOURCES_TOKEN" in str(s)]
-    assert len(provision) == 1
-    assert provision[0]["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
-    assert steps.index(checkout) < steps.index(provision[0])
-    assert "github.event.pull_request.head.sha" not in str(job)
-    assert not any("actions/upload-artifact@" in str(s.get("uses", "")) for s in steps)
-    assert steps[-1]["if"] == "always()"
-    assert "rm -rf documents/sources artifacts" in steps[-1]["run"]
+    assert 1 <= len(token_jobs) <= 2
+    for name, job in token_jobs:
+        assert job.get("if") == OWNER_GUARD, name
+        steps = job["steps"]
+        checkouts = [s for s in steps if s.get("uses", "").startswith("actions/checkout@")]
+        assert len(checkouts) == 1
+        checkout = checkouts[0]
+        assert checkout["with"]["ref"] == TRUSTED_SHA
+        assert checkout["with"]["persist-credentials"] == "false"
+        provision = [s for s in steps if "ORIGINAL_SOURCES_TOKEN" in str(s)]
+        assert len(provision) == 1
+        assert provision[0]["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
+        assert steps.index(checkout) < steps.index(provision[0])
+        assert "github.event.pull_request.head.sha" not in str(job)
+        assert not any("actions/upload-artifact@" in str(s.get("uses", "")) for s in steps)
+        assert steps[-1]["if"] == "always()"
+        assert "rm -rf documents/sources artifacts" in steps[-1]["run"]
     for other_name, other in doc["jobs"].items():
-        if other_name != name:
+        if other_name not in {name for name, _ in token_jobs}:
             assert "ORIGINAL_SOURCES_TOKEN" not in str(other)
     return doc
-
 
 @pytest.mark.parametrize("filename", WORKFLOWS)
 def test_private_original_is_never_run_on_pull_request_head(filename):
