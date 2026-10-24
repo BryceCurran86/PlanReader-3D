@@ -79,6 +79,8 @@ def test_translation_and_axis_rotation_do_not_change_partition_evidence():
     lambda c: c.update(opening_mark_words=(c["opening_mark_words"][0], word("door-word", "W06", 55, 70))),
     lambda c: c.update(opening_mark_words=c["opening_mark_words"] + (word("rival", "D03", 56, 72),)),
     lambda c: c.update(part_lines=(line("whole", 20, 0, 40), c["part_lines"][1])),
+    lambda c: c.update(dimension_words=(c["dimension_words"][0], c["dimension_words"][1], word("second-word", "9" * 5000, 16, 70))),
+    lambda c: c.update(opening_mark_words=(c["opening_mark_words"][0], replace(c["opening_mark_words"][1], text=123))),
 ])
 def test_conflicting_source_partition_abstains(change):
     case = example()

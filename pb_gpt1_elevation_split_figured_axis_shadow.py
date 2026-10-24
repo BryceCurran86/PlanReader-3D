@@ -43,7 +43,9 @@ def _axis(line: NativeAxisLine):
 
 
 def _word(word: NativeAxisWord, axis: str):
-    if type(word) is not NativeAxisWord or not word.source_id or not word.text:
+    if (type(word) is not NativeAxisWord or not word.source_id
+            or type(word.text) is not str or not word.text
+            or word.text != word.text.strip()):
         return None
     try:
         box = tuple(float(v) for v in word.bbox)
@@ -109,7 +111,10 @@ def audit_source_split_figured_axis_shadow(
         value = _word(word, axis)
         if value is None or not word.text.isascii() or not word.text.isdecimal():
             return base
-        number = int(word.text)
+        try:
+            number = int(word.text)
+        except (ValueError, OverflowError):
+            return base
         if number <= 0:
             return base
         numbers.append((word, number, value))
