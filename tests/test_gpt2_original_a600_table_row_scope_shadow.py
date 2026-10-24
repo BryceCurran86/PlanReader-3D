@@ -511,3 +511,77 @@ def test_schedule_code_lexeme_excludes_unpadded_native_drawing_detail():
     assert _DOOR_CODE.fullmatch("D03")
     assert _DOOR_CODE.fullmatch("D28")
     assert _DOOR_CODE.fullmatch("D100")
+
+
+
+def test_unpadded_d3_inside_authenticated_schedule_table_blocks_completeness(monkeypatch):
+    """Foreign D3 DETAIL is harmless; a source-visible D3 TABLE row must ABSTAIN."""
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    in_table=(
+        _w(70,0,0,"D3",735,302),
+        _w(70,1,0,"FOYER",735,270),
+        _w(70,2,0,"SWING",735,210),
+        _w(70,3,0,"920",735,160),
+        _w(70,4,0,"2040",735,120),
+    )
+    foreign=(_w(71,0,0,"D3",80,1000),_w(71,1,0,"DETAIL",80,950))
+    source,pub=_published_synthetic_original_source(
+        monkeypatch,_original_like_words()+in_table+foreign,
+    )
+    result=inspect_published_door_schedule(
+        source,revision_id=pub.revision.revision_id,page_id="1",
+    )
+    assert result.original_table_row_scope_authenticated
+    assert "D3" in result.unparsed_original_door_codes
+    assert "D3" not in result.all_original_source_codes
+    assert not result.complete_source_word_universe
+    assert not any(row.code=="D3" for row in result.rows)
+    shadow=_run(_original_like_words()+in_table+foreign)
+    d3=next(d for d in shadow.decisions if d.code=="D3")
+    assert d3.original_table_native_blocks==(70,)
+    assert d3.original_other_native_blocks==(71,)
+    assert not d3.source_table_row_candidate_only
+    assert d3.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.new_opening_counts==result.new_opening_areas_m2==0
+    paired=inspect_published_plan_and_schedule_door_codes(
+        source,revision_id=pub.revision.revision_id,
+        plan_page_id="2",schedule_page_id="1",
+    )
+    assert not paired.source_schedule_observation_universe_complete
+    assert paired.eligible_printed_code_pair_count==0
+    assert paired.new_opening_counts==paired.new_opening_area_quantities==0
+
+
+def test_unpadded_d3_secondary_word_in_real_table_row_blocks_completeness(monkeypatch):
+    """The second native table word must not evade the Dxx code census."""
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    original=_original_like_words()+(_w(4,5,0,"D3",655,302),)
+    source,pub=_published_synthetic_original_source(monkeypatch,original)
+    schedule=inspect_published_door_schedule(
+        source,revision_id=pub.revision.revision_id,page_id="1",
+    )
+    assert "D3" in schedule.unparsed_original_door_codes
+    assert not schedule.complete_source_word_universe
+    assert not any(row.code=="D3" for row in schedule.rows)
+    assert schedule.new_opening_counts==schedule.new_opening_areas_m2==0
+
+
+def test_unpadded_d3_outside_table_does_not_hide_authentic_rows(monkeypatch):
+    """Original D3 drawing note stays raw source evidence, never a new door."""
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    original=_original_like_words()+(
+        _w(71,0,0,"D3",80,1000),
+        _w(71,1,0,"CONTRAST",80,950),
+    )
+    source,pub=_published_synthetic_original_source(monkeypatch,original)
+    result=inspect_published_door_schedule(
+        source,revision_id=pub.revision.revision_id,page_id="1",
+    )
+    assert result.original_table_row_scope_authenticated
+    assert result.complete_source_word_universe
+    assert "D3" not in result.unparsed_original_door_codes
+    assert "D3" not in result.all_original_source_codes
+    assert result.new_opening_counts==result.new_opening_areas_m2==0
