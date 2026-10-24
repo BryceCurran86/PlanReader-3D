@@ -109,6 +109,15 @@ def diagnose_actual_window_area_gates(
             or opening.canonical_opening_id != physical_id
         ):
             reason = "canonical_source_page_or_physical_identity_unbound"
+        elif (
+            type(opening.tag_observation_id) is not str
+            or not opening.tag_observation_id
+            or opening.tag_observation_id not in opening.evidence_ids
+        ):
+            # A native Wxx word somewhere on p7 does NOT bind that word
+            # to this physical aperture. Only the producer-owned original
+            # plan tag receipt carried by the canonical issuer can do so.
+            reason = "source_owned_plan_tag_receipt_unavailable"
         elif opening.opening_kind != "window":
             reason = "independent_window_kind_unavailable"
         elif not opening.host_wall_id or not (
@@ -139,6 +148,26 @@ def diagnose_actual_window_area_gates(
             or matches[0].metadata.get("snapshot_id") != opening.snapshot_id
         ):
             reason = "issued_area_measurement_lineage_mismatch"
+        if reason is None:
+            issued = matches[0]
+            metadata = issued.metadata
+            # The exact real issuer's owner, not a lookalike quantity ID
+            # or a matching numeric area, must remain the same physical
+            # opening, wall, source revision, viewport and original tag.
+            if (
+                metadata.get("document_id") != opening.document_id
+                or metadata.get("revision_id") != opening.revision_id
+                or metadata.get("page_no") != opening.page_id
+                or metadata.get("viewport_id") != opening.viewport_id
+                or metadata.get("physical_opening_id") != physical_id
+                or metadata.get("canonical_opening_id") != physical_id
+                or metadata.get("opening_kind") != "window"
+                or metadata.get("host_wall_id") != opening.host_wall_id
+                or metadata.get("host_binding_record_id") != opening.host_binding_record_id
+                or metadata.get("host_frame_record_id") != opening.host_frame_record_id
+                or opening.tag_observation_id not in issued.evidence_ids
+            ):
+                reason = "issued_area_source_owner_mismatch"
         report.append(WindowAreaGate(
             mark, reason or "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED",
             label_count, elevation_counts[mark], physical_id,
@@ -181,6 +210,10 @@ def main() -> int:
         "pages": tuple(range(page_count)),
         "topology_pages": topology_pages,
         "room_area_support_pages": support_pages or None,
+        # Mirror the COMPLETE source-closed production family_group=all
+        # semantic universe. A p7/p29-only semantic shortcut can suppress
+        # competing source evidence and create a misleading first gate.
+        "surface_semantic_pages": tuple(range(page_count)),
     }
     if args.native_source_text:
         if "source_native_finish_text_shadow" not in params:
