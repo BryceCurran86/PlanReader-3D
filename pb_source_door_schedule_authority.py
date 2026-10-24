@@ -22,6 +22,8 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 # Printed schedule identities require at least two numeric digits; an unpadded
 # drawing detail (e.g. D3) is retained in source receipts, not a door row.
 _DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]+)$")
+# Wider D-digit tokens are negative SOURCE evidence only, never schedule codes.
+_DOOR_LIKE_TOKEN = re.compile(r"^D[0-9]+$")
 _NUMERIC = re.compile(r"^[1-9][0-9]*$")
 _MAX_ORIGINAL_WORDS = 25000
 
@@ -495,10 +497,19 @@ def inspect_published_door_schedule(
         if block not in table_member_blocks:
             continue
         for member in members[1:]:
-            if _DOOR_CODE.fullmatch(member.literal):
+            if _DOOR_LIKE_TOKEN.fullmatch(member.literal):
                 secondary_table_codes[block].add(member.literal)
+    # An unpadded/otherwise invalid D-digit glyph INSIDE a genuine table
+    # cannot disappear from the printed-table completeness proof. Foreign
+    # drawing DETAIL words such as the original D3 are retained but harmless.
+    noncanonical_table_codes={
+        word.literal for block,members in source_blocks.items()
+        if block in table_member_blocks for word in members
+        if _DOOR_LIKE_TOKEN.fullmatch(word.literal)
+        and not _DOOR_CODE.fullmatch(word.literal)
+    }
     unparsed_codes=tuple(sorted(
-        {
+        noncanonical_table_codes | {
             code for code, blocks in scoped_code_blocks.items()
             if any(block not in candidates_by_block for block in blocks)
         } | {
