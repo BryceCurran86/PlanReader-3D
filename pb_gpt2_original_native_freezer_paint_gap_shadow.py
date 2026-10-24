@@ -71,6 +71,19 @@ def _is_visible_solid_black_original_stroke(drawing, minimum_width:float=0.05)->
         return False
 
 
+def _is_visible_opaque_black_original_fill(drawing)->bool:
+    """Filled native rectangle paint is a rival even without a line stroke."""
+    fill=drawing.get("fill")
+    opacity=drawing.get("fill_opacity")
+    return (
+        type(opacity) in (int,float) and isfinite(opacity)
+        and opacity==1.0
+        and type(fill) in (tuple,list) and len(fill)==3
+        and all(type(x) in (int,float) and isfinite(x)
+                and 0.0<=x<=.04 for x in fill)
+    )
+
+
 def _selected_original_painted_line(drawings,address:int):
     # A selected invisible/dashed source stroke must fail here before the
     # stricter, already-merged native wall-cap helper examines it. Preserve
@@ -116,11 +129,30 @@ def _inspect_native_paint_gap(page, scope:NativePaintGapScope, tolerance:float):
         raise ValueError("two independent original paint-width roles unproven")
     lo,hi=caps[0]
     for index,drawing in enumerate(drawings):
-        if (index in ids or
-                not _is_visible_solid_black_original_stroke(
-                    drawing, minimum_width=min(outer_widths)-0.05)):
+        if index in ids:
+            continue
+        stroke_rival=_is_visible_solid_black_original_stroke(
+            drawing, minimum_width=min(outer_widths)-0.05)
+        filled_rival=_is_visible_opaque_black_original_fill(drawing)
+        if not (stroke_rival or filled_rival):
             continue
         for item in drawing["items"]:
+            # A solid opaque black rectangle FILL is source paint, even if
+            # it has no stroke/width/dashes at all. It is only negative
+            # opposing ink: never physical wall or door evidence.
+            if filled_rival and item[0]=="re":
+                rect=item[1]
+                if (not isinstance(rect,fitz.Rect) or
+                    not all(isfinite(v) for v in
+                            (rect.x0,rect.y0,rect.x1,rect.y1))):
+                    raise ValueError("competing original fill rectangle invalid")
+                if (any(rect.y0<=level<=rect.y1 for level in levels)
+                    and min(rect.x1,hi)-max(rect.x0,lo)>tolerance):
+                    raise ValueError(
+                        "competing original opaque black fill bridges selected gap"
+                    )
+            if not stroke_rival:
+                continue
             # Native solid outline rectangles are emitted as "re", not
             # four separate "l" entries.  Their painted horizontal edges
             # must take part in the SAME competing-thick-ink census.
