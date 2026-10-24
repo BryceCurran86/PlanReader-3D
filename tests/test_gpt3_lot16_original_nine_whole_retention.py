@@ -69,6 +69,17 @@ def test_owner_original_lot16_nine_seals_and_preserves_eight_whole_customer_bodi
     assert new_receipt["quantity_count"] == len(new_signed) == len(new_customer) == 9
 
     # Read-only original producer fixture is compared strictly POST production.
+    # Authenticate archived producer receipts against the immutable, checked-in
+    # SHA256SUMS before using them as a POST-production retention oracle.
+    digest_lines = (ARCHIVE.parent / "SHA256SUMS").read_text(encoding="ascii").splitlines()
+    digest_map = {}
+    for line in digest_lines:
+        digest, relative = line.split(" *", 1)
+        assert relative not in digest_map and len(digest) == 64
+        digest_map[relative] = digest
+    for relative in ("production/source_sealed_run.json",
+                     "production/verified_customer_rows.json"):
+        assert sha256((ARCHIVE.parent / relative).read_bytes()).hexdigest() == digest_map[relative]
     baseline_signed = _unique_quantity_rows(_object(ARCHIVE / "source_sealed_run.json")["quantities"])
     baseline_customer = _unique_quantity_rows(_object(ARCHIVE / "verified_customer_rows.json"))
     assert len(baseline_signed) == len(baseline_customer) == 8
