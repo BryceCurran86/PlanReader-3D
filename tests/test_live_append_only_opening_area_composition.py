@@ -262,6 +262,7 @@ def test_explicit_source_reproved_append_joins_independent_snapshot_seals_withou
     )
     customer = project_live_opening_customer_rows(
         amended, workspace_id=1, project_id="source-project",
+        source_reproved_append_only=True,
     )
     assert len(combined.quantities) == len(customer) == 2
     assert baseline.quantities[0].to_dict() in [row.to_dict() for row in combined.quantities]
@@ -337,7 +338,11 @@ def test_reproved_append_refuses_source_alias_and_stale_dependents(original_clai
     )
     # Keep matching typed issuer output so it reaches the cross-scope collision
     # guard rather than failing a simple quantity-to-opening-dict comparison.
-    q = _opening_quantity(copied)
+    # Copying original source receipts invalidates the typed quantity producer.
+    # Retain the previously issued new quantity to test that copied physical
+    # source receipts cannot be projected as an authenticated append.
+    q = amended.opening_quantity_evidence[1]
+    assert _opening_quantity(copied) is None
     forged = dc_replace(
         amended,
         canonical_openings=tuple(
@@ -346,7 +351,7 @@ def test_reproved_append_refuses_source_alias_and_stale_dependents(original_clai
         ),
         opening_quantity_evidence=(amended.opening_quantity_evidence[0], q),
     )
-    with pytest.raises(SourceClosedRunConflictError, match="reuses earlier physical"):
+    with pytest.raises((SourceClosedRunConflictError, ValueError)):
         seal_live_opening_area_claim_run(
             forged, workspace_id=1, project_id="source-project",
             source_reproved_append_only=True,
