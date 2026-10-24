@@ -17,8 +17,8 @@
 - [ ] New FIRM + verified frozen scorer gain evidenced, or explicitly ZERO/NOT RUN
 
 ## Review and disposition
-- AI reviewer and exact-SHA technical review:
+- Optional AI reviewer and exact-SHA technical review (or NOT REQUESTED):
 - Findings and remediation owner:
-- GitHub formal approval actually eligible (do not assume shared-login COMMENT counts):
-- Owner's explicit exact-head release authorization:
+- GitHub-enforced approval, if any (owner policy does not require separate reviewer):
+- Existing owner task authorization and required source/test/retention validation:
 - Disposition: DRAFT / CHANGES REQUIRED / SOURCE BLOCKED / RELEASE ELIGIBLE

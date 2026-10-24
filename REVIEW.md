@@ -1,15 +1,15 @@
-# PlanReader-3D — independent AI pull-request review rules
+# PlanReader-3D — optional AI pull-request review rules
 
-These instructions apply to Claude Code Review and any other reviewer that reads `REVIEW.md`. `AGENTS.md` is the controlling engineering contract. A technical review does **not** replace original-source verification, GitHub branch protection, a distinct required approval, or explicit repository-owner release authorization.
+These instructions apply to Claude Code Review and any other reviewer that reads `REVIEW.md`. `AGENTS.md` is the controlling engineering contract. **Current owner policy (2026-10-24): independent reviews are OPTIONAL, not an implementation or merge gate.** A technical review does **not** replace original-source verification, GitHub-enforced branch rules, actual owner authorization for the work, or signed/customer/frozen preservation.
 
 ## Independence
-- Reviewer must not have authored, co-authored, or edited the specific PR diff under review. Recuse and request another independent reviewer if it has.
+- Reviewer must not have authored, co-authored, or edited the specific PR diff under review. Recuse from a claim of independent AI review and identify an unrelated reviewer if the owner chooses additional review; the implementation may proceed under AGENTS.md after its own full validation.
 - Identify the model/system performing the review, current PR number, exact head SHA, base SHA and date. The shared `BryceCurran86` GitHub login is not a distinct human or GitHub approval; never describe a same-login COMMENT as formal independent approval.
 - Inspect the *actual changed files and affected production callers*, not only a PR description, synthetic claims or earlier comments.
 - For each new commit, re-review the exact new head. Do not trust older green runs.
 
 ## Hard release blockers
-Mark **BLOCKED** or **CHANGES REQUIRED**, not approved, if any applicable item is absent:
+When an OPTIONAL review is requested, report **BLOCKED** or **CHANGES REQUIRED** rather than technical PASS if any relevant validation item is absent. The same underlying source, test and security controls remain mandatory whether or not AI review is requested:
 - Original plan source SHA-256, page, revision, viewport and physical identity receipts; producer snapshot and decision scope; authentic metric/finish/host/count evidence. Unknown, conflicting, unsupported or stale evidence stays ABSTAINED.
 - Real producer -> canonical physical entity -> `QuantityEvidence` -> signed source-closed V1 -> customer row -> original frozen Full Plan V2 evaluator, with exact-source reproduction for a claimed scoring gain. A synthetic pass or candidate does not certify a quantity.
 - CI for the **exact HEAD** on applicable Python 3.13 and 3.14 workflows, focused negatives, conflicts, metamorphic/determinism and owner-private source replay where needed. Missing private PDFs or credentials mean NOT VERIFIED, never PASSED.
@@ -34,7 +34,7 @@ Signed/customer/frozen parity (proof or NOT VERIFIED):
 Findings (severity, file:line, repro, required correction):
 Verdict: TECHNICAL PASS / CHANGES REQUIRED / SOURCE BLOCKED / NOT REVIEWED
 Score delta: independently measured exact frozen numerator/denominator, or NOT RUN
-Formal GitHub approving review: YES ONLY IF ACTUALLY SUBMITTED BY AN ELIGIBLE DISTINCT REVIEWER; otherwise NO
-Owner release authorization: YES ONLY IF OWNER ACTUALLY POSTED FOR THIS EXACT HEAD; otherwise NO
+Formal GitHub approving review: if GitHub protection actually requires one, YES only if an eligible GitHub reviewer submitted it; otherwise NOT REQUIRED / NONE
+Owner task authorization: cite existing explicit owner instruction and any required exact-head release authorization; do not invent a new mandatory owner-comment gate
 ```
-Review comments must distinguish **observed**, **inferred**, and **proposed**. Flag unverifiable statements without guessing. A TECHNICAL PASS is advisory and must never automatically merge a PR.
+Review comments must distinguish **observed**, **inferred**, and **proposed**. Flag unverifiable statements without guessing. A TECHNICAL PASS is advisory. Missing technical review alone does not block owner-authorized implementation or merge under current AGENTS.md. Never automatically merge because of an AI opinion; validate all applicable source, CI, signing, customer and benchmark gates.
