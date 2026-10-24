@@ -127,8 +127,8 @@ def test_token_only_present_in_frozen_manifest_provision_step():
 
 def test_positive_source_test_required_and_private_outputs_removed():
     steps = _load()["jobs"]["original"]["steps"]
-    positive = next(s for s in steps if s["name"].startswith("Require source-positive"))
-    module = next(s for s in steps if s["name"].startswith("Run complete GPT2"))
+    positive = next(s for s in steps if s.get("name", "").startswith("Require source-positive"))
+    module = next(s for s in steps if s.get("name", "").startswith("Run complete GPT2"))
     assert "Original case was skipped" in positive["run"]
     assert "grep -Eq" in positive["run"]
     assert "if ! python -m pytest" in positive["run"]
@@ -146,7 +146,7 @@ def test_original_source_smoke_test_negative_error_is_privately_captured():
     smoke = ROOT / ".github/workflows/provision-original-sources-smoke.yml"
     document = yaml.safe_load(smoke.read_text(encoding="utf8"))
     check = next(step for step in document["jobs"]["provision"]["steps"]
-                 if step["name"] == "Prove the step fails closed without a token")
+                 if step.get("name") == "Prove the step fails closed without a token")
     script = check["run"]
     assert "ORIGINAL_SOURCES_TOKEN=" in script
     assert "denial_log=" in script
