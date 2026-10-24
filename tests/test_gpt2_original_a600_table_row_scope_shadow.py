@@ -446,6 +446,57 @@ def test_second_dcode_inside_true_schedule_row_is_unparsed_and_blocks_consumer(
     assert paired.new_opening_counts==paired.new_opening_area_quantities==0
 
 
+
+
+@pytest.mark.parametrize("inside_table", [True, False])
+def test_nonleading_dcode_in_separate_native_block_reaches_real_schedule_consumer(
+    monkeypatch, inside_table,
+):
+    """A NOTE/D99 block in TABLE must veto D13; a foreign DETAIL must not."""
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    # The code is NOT block-leading. Its own source bbox, rather than the
+    # NOTE's bbox or a nearest-row guess, establishes table membership.
+    x, y = (690, 302) if inside_table else (80, 1000)
+    extra = (
+        _w(72, 0, 0, "NOTE", x - 35, y),
+        _w(72, 0, 1, "D99", x, y),
+    )
+    plan_tag = W(
+        observation_id="original-plan:D13", page_id="2",
+        partition_id="page:2", block_no=93, line_no=0, word_no=0,
+        literal="D13", trusted=True,
+        bbox_pdf_pts=(20.0, 20.0, 32.0, 32.0),
+    )
+    original = _original_like_words() + extra
+    shadow = _run(original)
+    d99 = next(row for row in shadow.decisions if row.code == "D99")
+    assert d99.original_code_observation_ids == ("sha-owned-native:72:0:1",)
+    assert d99.original_table_native_blocks == ((72,) if inside_table else ())
+    assert not d99.source_table_row_candidate_only
+    source, published = _published_synthetic_original_source(
+        monkeypatch, original, plan_words=(plan_tag,),
+    )
+    schedule = inspect_published_door_schedule(
+        source, revision_id=published.revision.revision_id, page_id="1",
+    )
+    assert schedule.original_table_row_scope_authenticated
+    assert schedule.complete_source_word_universe is (not inside_table)
+    assert ("D99" in schedule.unparsed_original_door_codes) is inside_table
+    assert "D99" in schedule.all_original_source_codes
+    paired = inspect_published_plan_and_schedule_door_codes(
+        source, revision_id=published.revision.revision_id,
+        plan_page_id="2", schedule_page_id="1",
+    )
+    d13 = next(row for row in paired.pairs if row.code == "D13")
+    assert paired.source_schedule_observation_universe_complete is (not inside_table)
+    assert d13.source_code_correspondence_proven is (not inside_table)
+    assert paired.eligible_printed_code_pair_count == (0 if inside_table else 1)
+    assert paired.new_opening_counts == paired.new_opening_area_quantities == 0
+    assert not d13.customer_quantity_authorized
+
 def test_drawing_detail_multiple_original_codes_remains_foreign_source_not_table(
     monkeypatch,
 ):
