@@ -77,18 +77,18 @@ def test_owner_only_manual_source_triggers():
 
 
 @pytest.mark.parametrize("malformed_trigger", (
-    "on:\\n  pull_request:\\ntrue:\\n  workflow_dispatch:",
-    "on:\\n  pull_request:\\nyes:\\n  workflow_dispatch:",
-    "on:\\n  workflow_dispatch:\\non:\\n  pull_request:",
-    "true:\\n  workflow_dispatch:",
-    "on:\\n  pull_request:",
+    "on:\n  pull_request:\ntrue:\n  workflow_dispatch:",
+    "on:\n  pull_request:\nyes:\n  workflow_dispatch:",
+    "on:\n  workflow_dispatch:\non:\n  pull_request:",
+    "true:\n  workflow_dispatch:",
+    "on:\n  pull_request:",
 ))
 def test_trigger_alias_or_duplicate_cannot_masquerade_as_owner_manual(
     malformed_trigger,
 ):
     original = FILE.read_text(encoding="utf8")
-    assert original.count("on:\\n  workflow_dispatch:") == 1
-    corrupt = original.replace("on:\\n  workflow_dispatch:", malformed_trigger, 1)
+    assert original.count("on:\n  workflow_dispatch:") == 1
+    corrupt = original.replace("on:\n  workflow_dispatch:", malformed_trigger, 1)
     with pytest.raises((AssertionError, yaml.YAMLError)):
         _parse_workflow(corrupt)
 
