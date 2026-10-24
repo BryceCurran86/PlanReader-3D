@@ -1,5 +1,7 @@
 """Safety contract for owner-initiated, SHA-pinned private source replays."""
 from pathlib import Path
+import re
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,13 +15,57 @@ HEADS = {
 }
 
 
+class _WorkflowLoader(yaml.SafeLoader):
+    """Keep GitHub's 'on' trigger distinct from YAML 1.1 bool aliases."""
+
+
+_WorkflowLoader.yaml_implicit_resolvers = {
+    initial: [(tag, regex) for tag, regex in rules
+              if tag != "tag:yaml.org,2002:bool"]
+    for initial, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_WorkflowLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+    list("tTfF"),
+)
+
+
+def _unique_mapping(loader, node, deep=False):
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate mapping key {key!r}",
+                key_node.start_mark,
+            )
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+
+_WorkflowLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _unique_mapping,
+)
+
+
+def _parse_workflow(raw):
+    document = yaml.load(raw, Loader=_WorkflowLoader)
+    assert type(document) is dict
+    # A second trigger alias must not be silently discarded by YAML1.1
+    # coercion, and unreviewed top-level workflow controls must not pass.
+    assert set(document) == {"name", "on", "permissions", "concurrency", "jobs"}
+    assert document["on"] == {"workflow_dispatch": None}
+    return document
+
+
 def _load():
-    return yaml.safe_load(FILE.read_text(encoding="utf8"))
+    return _parse_workflow(FILE.read_text(encoding="utf8"))
 
 
 def test_owner_only_manual_source_triggers():
     document = _load()
-    assert document.get(True, document.get("on")) == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": None}
     assert document["permissions"] == {"contents": "read"}
     assert tuple(document["jobs"]) == ("original",)
     job = document["jobs"]["original"]
@@ -28,6 +74,23 @@ def test_owner_only_manual_source_triggers():
     assert job["strategy"]["fail-fast"] is False
     assert job["strategy"]["matrix"]["target"] == list(HEADS)
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
+
+
+@pytest.mark.parametrize("malformed_trigger", (
+    "on:\\n  pull_request:\\ntrue:\\n  workflow_dispatch:",
+    "on:\\n  pull_request:\\nyes:\\n  workflow_dispatch:",
+    "on:\\n  workflow_dispatch:\\non:\\n  pull_request:",
+    "true:\\n  workflow_dispatch:",
+    "on:\\n  pull_request:",
+))
+def test_trigger_alias_or_duplicate_cannot_masquerade_as_owner_manual(
+    malformed_trigger,
+):
+    original = FILE.read_text(encoding="utf8")
+    assert original.count("on:\\n  workflow_dispatch:") == 1
+    corrupt = original.replace("on:\\n  workflow_dispatch:", malformed_trigger, 1)
+    with pytest.raises((AssertionError, yaml.YAMLError)):
+        _parse_workflow(corrupt)
 
 
 def test_pinned_sha_allowlist_and_no_arbitrary_input():
