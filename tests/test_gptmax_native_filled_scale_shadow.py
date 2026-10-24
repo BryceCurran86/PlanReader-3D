@@ -11,7 +11,8 @@ from pb_gptmax_native_filled_scale_shadow import find_native_filled_scale_bar_sh
 
 def _synthetic(*, count=5, x=40, y=50, width=20, height=3, missing=None,
                colour=(0, 0, 0), opacity=1, wrong_label=None,
-               extra_bar=False, stroked=False, uniform_row=False, overpaint=False):
+               extra_bar=False, stroked=False, uniform_row=False,
+               overpaint=False, overpaint_label=False):
     doc = fitz.open()
     page = doc.new_page(width=500, height=250)
 
@@ -41,6 +42,11 @@ def _synthetic(*, count=5, x=40, y=50, width=20, height=3, missing=None,
             fitz.Rect(x + 2 * width, y, x + 3 * width, y + 2 * height),
             fill=(1, 1, 1), color=None,
         )
+    if overpaint_label:
+        # Erase the rendered '3' tick AFTER native text is painted; extraction
+        # must still see its old decoded word, but source visibility must not.
+        label = next(word for word in page.get_text('words') if word[4] == '3')
+        page.draw_rect(fitz.Rect(label[:4]), fill=(1, 1, 1), color=None)
     content = doc.tobytes(garbage=4, deflate=True)
     doc.close()
     return content
@@ -92,6 +98,18 @@ def test_later_opaque_overpaint_vetoes_source_native_fill():
     data = _synthetic(overpaint=True)
     doc = fitz.open(stream=data, filetype="pdf")
     assert len(doc[0].get_drawings()) >= 6  # hidden source fill still exists
+    doc.close()
+    assert _scan(data) == ()
+
+
+def test_later_opaque_overpaint_of_scale_tick_vetoes_decoded_native_word():
+    data = _synthetic(overpaint_label=True)
+    doc = fitz.open(stream=data, filetype='pdf')
+    page = doc[0]
+    # get_text still returns the hidden source label; its actual glyph ink
+    # has been erased without touching the source-native filled scale bar.
+    assert any(word[4] == '3' for word in page.get_text('words'))
+    assert len(page.get_drawings()) >= 6
     doc.close()
     assert _scan(data) == ()
 
