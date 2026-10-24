@@ -83,7 +83,6 @@ def reconcile_gpt1_area_review_with_issuer(
             or row.get("original_canonical_host_wall_id") != obj.host_wall_id
             or row.get("original_canonical_representative_observation_id") != obj.representative_observation_id
             or tuple(row.get("original_canonical_source_observation_ids") or ()) != tuple(sorted(obj.source_observation_ids))
-            or tuple(row.get("original_canonical_evidence_ids") or ()) != tuple(sorted(obj.evidence_ids))
             or row.get("measurement_published") is not False
             or row.get("customer_seal_granted") is not False
             or row.get("opening_count_granted") is not False
@@ -143,6 +142,12 @@ def reconcile_gpt1_area_review_with_issuer(
                 raise ValueError(
                     "original host/frame source receipt mismatches typed canonical issuer"
                 )
+            # Keep the more specific structural host/frame rejection as
+            # the first failure for a foreign frame. Once physical host
+            # receipts agree, require the entire original source witness
+            # universe unchanged, not merely an issuer-compatible subset.
+            if tuple(row.get("original_canonical_evidence_ids") or ()) != tuple(sorted(obj.evidence_ids)):
+                raise ValueError("foreign source/signed review decision")
             # The original source review grants FIGURED label ownership only.
             # The real issuer supports additional, separately-authenticated
             # elevation/schedule/geometry bases. A later canonical substitution
