@@ -58,7 +58,10 @@ def test_two_source_image_roots_dark_and_unpublished():
     {"same": True}, {"gap": 2}, {"lower_dark": False}, {"rotation": 90},
 ])
 def test_false_or_unsupported_seam_abstains(kwargs):
-    assert _run(_pdf(**kwargs))["status"] == ABSTAIN
+    failure = _run(_pdf(**kwargs))
+    assert failure["status"] == ABSTAIN
+    assert failure["opening_kind_granted"] is False
+    assert failure["elevation_plan_identity_granted"] is False
 
 
 def test_sha_bound_and_explicit_finite_parameters():
