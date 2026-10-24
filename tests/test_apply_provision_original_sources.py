@@ -524,3 +524,58 @@ def test_existing_artifact_and_original_absence_protection_not_weakened():
         "run: test ! -f documents/sources/Plan B.pdf"
     )
 
+
+@pytest.mark.parametrize("bad_ref", ["false", "0", "[]", "{}", "null"])
+def test_manual_source_checkout_ref_must_be_explicitly_typed(tmp_path, bad_ref):
+    # Change ONLY the checkout ref, never the top-level YAML 'on' key.
+    # Re-serialising the workflow through PyYAML would itself turn 'on' into
+    # the bool True and make the guard fail for an unrelated reason.
+    root = _write(
+        tmp_path, TRUSTED_WORKFLOW.replace(
+            "ref: ${{ github.sha }}", "ref: " + bad_ref
+        ),
+    )
+    path = root / ".github/workflows/synthetic.yml"
+    assert not T._trusted_manual_main_job(path.read_text(), "needs-a")
+    before = path.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert path.read_bytes() == before
+
+
+def test_secondary_checkout_after_token_placement_is_refused(tmp_path):
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    path = root / ".github/workflows/synthetic.yml"
+    original = path.read_text()
+    # Separate checkout can run PR HEAD code after owner originals are present.
+    mutated = original.replace(
+        "      - uses: actions/setup-python@v5",
+        "      - uses: actions/checkout@v4\\n        with:\\n          ref: ${{ github.event.pull_request.head.sha }}\\n"
+        "      - uses: actions/setup-python@v5",
+    )
+    mutated = mutated.replace("\\n", "\n")
+    path.write_text(mutated)
+    before = path.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("command", [
+    "git checkout ${{ inputs.ref }}",
+    "git clone https://github.com/third-party/unreviewed-code",
+    "git fetch origin pull/123/head",
+    "git switch feature/unreviewed",
+])
+def test_later_shell_checkout_cannot_fetch_pr_controlled_code(tmp_path, command):
+    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    path = root / ".github/workflows/synthetic.yml"
+    original = path.read_text()
+    path.write_text(original.replace(
+        "      - run: ls documents/sources",
+        "      - run: " + command + "\n      - run: ls documents/sources",
+    ))
+    before = path.read_bytes()
+    with pytest.raises(SystemExit, match="refusing to inject"):
+        T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
+    assert path.read_bytes() == before
