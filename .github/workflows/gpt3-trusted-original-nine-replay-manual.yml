@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=a54599b649cf9da92b2f00caaaeeb337f12cac7e
-          approved_head=d8fd00584558800af0b500cbd74e082ab2095262
+          approved_base=c491c5fb2a155a54825d639ef277218707b76327
+          approved_head=31439c9e4137d7f210488877cc0ab868ed7ffecb
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
