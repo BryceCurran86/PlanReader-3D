@@ -19,6 +19,9 @@ from pb_live_physical_net_wall_integration import (
 )
 from pb_live_physical_opening_void_composition import LiveCanonicalOpeningObject
 from pb_migration_contracts import QuantityEvidence
+from tools.diag_gpt1_source_hex_callout_ink_shadow import (
+    native_line_segments, diagnose_hex_ink_for_text_bbox,
+)
 
 TARGETS = ("W01", "W02", "W05", "W06")
 PLAN_PAGE_INDEX = 6
@@ -68,6 +71,21 @@ def diagnose_actual_window_area_gates(
         elevation = pdf[ELEVATION_PAGE_INDEX]
         plan_counts = {k: _native_mark_count(plan, k) for k in TARGETS}
         elevation_counts = {k: _native_mark_count(elevation, k) for k in TARGETS}
+
+        # Native original six-edge polygon is an independently inspectable
+        # callout-INK witness only. It is NOT a producer-owned tag→aperture,
+        # host, semantic-kind, frame or measurement correspondence.
+        source_lines = native_line_segments(plan)
+        plan_words = plan.get_text("words")
+        original_plan_hex_ink_witnesses = {}
+        for mark in TARGETS:
+            words = [w for w in plan_words if w[4].strip(".,:;()").upper() == mark]
+            original_plan_hex_ink_witnesses[mark] = (
+                diagnose_hex_ink_for_text_bbox(words[0][:4], source_lines)
+                if len(words) == 1
+                else {"status": "ABSTAIN", "reason": "native_tag_missing_or_ambiguous",
+                      "source_seqnos": []}
+            )
 
     openings = tuple(claim.canonical_openings)
     if any(type(o) is not LiveCanonicalOpeningObject for o in openings):
@@ -259,6 +277,7 @@ def diagnose_actual_window_area_gates(
         "physical_opening_inventory": len(openings),
         "real_issuer_quantity_inventory": len(quantities),
         "not_source_authority": True,
+        "original_plan_hex_ink_witnesses": original_plan_hex_ink_witnesses,
         "measurement_published_by_this_tool": False,
         "customer_seal_granted": False,
         "benchmark_score_granted": False,
