@@ -90,8 +90,9 @@ def test_competing_equally_scaled_bars_retained_not_elected():
 
 def test_later_opaque_overpaint_vetoes_source_native_fill():
     data = _synthetic(overpaint=True)
-    page = fitz.open(stream=data, filetype="pdf")[0]
-    assert len(page.get_drawings()) >= 6  # hidden source fill still exists
+    doc = fitz.open(stream=data, filetype="pdf")
+    assert len(doc[0].get_drawings()) >= 6  # hidden source fill still exists
+    doc.close()
     assert _scan(data) == ()
 
 
@@ -116,9 +117,10 @@ def test_native_clip_vetoes_fill_even_when_words_remain_visible():
         page.insert_text((40 + i * 20 - len(label) * 2.4, 66), label, fontsize=8)
     data = doc.tobytes(garbage=4, deflate=True)
     doc.close()
-    reread = fitz.open(stream=data, filetype="pdf")[0]
-    assert len(reread.get_drawings()) == 5
-    assert len(reread.get_text("words")) >= 6
+    reread = fitz.open(stream=data, filetype="pdf")
+    assert len(reread[0].get_drawings()) == 5
+    assert len(reread[0].get_text("words")) >= 6
+    reread.close()
     assert _scan(data) == ()
 
 
