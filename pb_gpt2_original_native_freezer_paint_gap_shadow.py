@@ -121,17 +121,37 @@ def _inspect_native_paint_gap(page, scope:NativePaintGapScope, tolerance:float):
                     drawing, minimum_width=min(outer_widths)-0.05)):
             continue
         for item in drawing["items"]:
-            if item[0]!="l":continue
-            p,q=item[1:3]
-            if (abs(p.y-q.y)>tolerance or
-                    min(abs(p.y-y) for y in levels)>tolerance):continue
-            a,b=sorted((p.x,q.x))
-            # Source-native endpoint return ≤ the existing diagnostic
-            # witness tolerance is not independent wall-bridge evidence.
-            # Beyond it, even a PARTIAL solid thick stroke contradicts
-            # the claimed unobstructed original thick-face gap.
-            if min(b,hi)-max(a,lo)>tolerance:
-                raise ValueError("competing original thick wall ink bridges selected gap")
+            # Native solid outline rectangles are emitted as "re", not
+            # four separate "l" entries.  Their painted horizontal edges
+            # must take part in the SAME competing-thick-ink census.
+            if item[0] == "l":
+                p, q = item[1:3]
+                segments = ((p.x, p.y, q.x, q.y),)
+            elif item[0] == "re":
+                rect = item[1]
+                if (
+                    not isinstance(rect, fitz.Rect)
+                    or not all(isfinite(v) for v in
+                               (rect.x0, rect.y0, rect.x1, rect.y1))
+                ):
+                    raise ValueError("competing original rectangle geometry invalid")
+                segments = (
+                    (rect.x0, rect.y0, rect.x1, rect.y0),
+                    (rect.x0, rect.y1, rect.x1, rect.y1),
+                )
+            else:
+                continue
+            for x1,y1,x2,y2 in segments:
+                if (abs(y1-y2)>tolerance or
+                        min(abs(y1-y) for y in levels)>tolerance):
+                    continue
+                a,b=sorted((x1,x2))
+                # Source-native endpoint return <= witness tolerance does
+                # not defeat a gap.  Any greater solid thick overlap does.
+                if min(b,hi)-max(a,lo)>tolerance:
+                    raise ValueError(
+                        "competing original thick wall ink bridges selected gap"
+                    )
     return NativePaintGapCandidate(scope.page_number,tuple(sorted(ids)),
         tuple(round(z,5) for z in caps[0]),tuple(levels),
         round(outer_widths[0],4),round(inner_widths[0],4))
