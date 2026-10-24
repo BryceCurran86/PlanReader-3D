@@ -173,3 +173,73 @@ def test_rekeyed_original_kind_claim_cannot_pass_source_to_issuer_parity():
     ] = "door"
     with pytest.raises(ValueError, match="foreign source/signed review decision"):
         reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)
+
+
+def test_original_authenticated_frame_receipt_matches_real_typed_issuer():
+    # A fully framed opening remains eligible for gross FIGURED area.
+    rows, canonical = fixture()
+    source = run(rows, canonical)
+    assert len(source["gpt1_new_area_review_candidates"]) == 1
+    original = source["gpt1_new_area_review_candidates"][0]
+    assert original["authenticated_frame_record_id"] == "frame-3"
+    assert original["original_host_frame_receipt_bound"] is True
+    typed = _typed(canonical)
+    assert _opening_quantity(typed.canonical_openings[2]) is not None
+    result = reconcile_gpt1_area_review_with_issuer(typed, source)
+    assert result["source_review_issuer_compatible_ids"] == ["physical-3"]
+    assert result["measurement_published"] is False
+
+
+@pytest.mark.parametrize("field,value", [
+    ("original_host_frame_receipt_bound", False),
+    ("authenticated_frame_record_id", "foreign-original-frame"),
+    ("authenticated_host_record_id", "foreign-original-host"),
+    ("authenticated_frame_record_id", ""),
+])
+def test_forged_original_host_or_frame_cannot_pass_real_issuer_preflight(
+    field, value,
+):
+    rows, canonical = fixture()
+    source = run(rows, canonical)
+    assert len(source["gpt1_new_area_review_candidates"]) == 1
+    typed = _typed(canonical)
+    # The ordinary issuer is still compatible: its typed canonical input
+    # cannot validate a DIFFERENT source review queue on the caller's behalf.
+    assert _opening_quantity(typed.canonical_openings[2]) is not None
+    source["gpt1_new_area_review_candidates"][0][field] = value
+    with pytest.raises(ValueError, match="host/frame source receipt"):
+        reconcile_gpt1_area_review_with_issuer(typed, source)
+
+
+def test_foreign_typed_frame_with_positive_real_issuer_fails_source_parity():
+    rows, canonical = fixture()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    changed = list(typed.canonical_openings)
+    original = changed[2]
+    changed[2] = replace(
+        original,
+        host_frame_record_id="foreign-typed-frame",
+        evidence_ids=original.evidence_ids + ("foreign-typed-frame",),
+    )
+    forged = replace(typed, canonical_openings=tuple(changed))
+    assert _opening_quantity(forged.canonical_openings[2]) is not None
+    with pytest.raises(ValueError, match="host/frame source receipt"):
+        reconcile_gpt1_area_review_with_issuer(forged, source)
+
+
+def test_canonical_frame_cannot_be_added_to_source_frame_absent_area():
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    changed = list(typed.canonical_openings)
+    original = changed[2]
+    changed[2] = replace(
+        original,
+        host_frame_record_id="unreviewed-canonical-frame",
+        evidence_ids=original.evidence_ids + ("unreviewed-canonical-frame",),
+    )
+    forged = replace(typed, canonical_openings=tuple(changed))
+    assert _opening_quantity(forged.canonical_openings[2]) is not None
+    with pytest.raises(ValueError, match="host/frame source receipt"):
+        reconcile_gpt1_area_review_with_issuer(forged, source)
