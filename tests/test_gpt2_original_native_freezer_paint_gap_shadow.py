@@ -16,7 +16,9 @@ def _pdf(*, displaced=False, thick_bridge=False, same_width=False,
          partial_bridge=False, endpoint_return=False,
          unrelated_thick_wall=False, thick_rect_bridge=False,
          unrelated_thick_rect=False, invisible_thick_rect=False,
-         dashed_thick_rect=False):
+         dashed_thick_rect=False, filled_black_rect=False,
+         filled_rect_invisible=False, filled_rect_white=False,
+         filled_rect_unrelated=False, filled_rect_partial=False):
     p=fitz.open()
     for index,dx in enumerate((0.,77.76)):
         if displaced and index:dx+=10
@@ -55,6 +57,20 @@ def _pdf(*, displaced=False, thick_bridge=False, same_width=False,
                 color=(0, 0, 0), width=.96,
                 stroke_opacity=0.0 if invisible_thick_rect else 1.0,
                 dashes="[2 2] 0" if dashed_thick_rect else None,
+            )
+            d.commit()
+        if (filled_black_rect or filled_rect_unrelated) and index:
+            # An opaque fill-only `re` is visible PDF source paint despite
+            # having NO stroked outline / linewidth / dash characteristics.
+            left=(260. if filled_rect_unrelated else 100.)+dx
+            right=(300. if filled_rect_unrelated else
+                   112. if filled_rect_partial else 160.)+dx
+            d=page.new_shape()
+            d.draw_rect(fitz.Rect(left,99.,right,105.))
+            d.finish(
+                color=None,
+                fill=(1,1,1) if filled_rect_white else (0,0,0),
+                fill_opacity=0.0 if filled_rect_invisible else 1.0,
             )
             d.commit()
     b=p.tobytes();p.close();return b
@@ -220,3 +236,43 @@ def test_rectangle_original_source_bytes_and_translation_order_preserved():
     b = _run(raw, shifts=((43.92, 0), (77.76, 0)))
     assert a == b
     assert sha256(raw).hexdigest() == digest
+
+
+def test_opaque_black_filled_native_rectangle_without_stroke_blocks_gap():
+    """Fill-only 're' must veto the gap, even without any black stroke."""
+    raw=_pdf(filled_black_rect=True)
+    with fitz.open(stream=raw,filetype="pdf") as doc:
+        rival=doc[1].get_drawings()[-1]
+        assert rival["fill"]==(0.0,0.0,0.0)
+        assert rival["fill_opacity"]==1.0
+        assert rival["color"] is None
+        assert any(x[0]=="re" for x in rival["items"])
+    with pytest.raises(ValueError,match="opaque black fill"):
+        _run(raw)
+
+
+def test_partially_overlapping_black_fill_still_blocks_original_wall_gap():
+    with pytest.raises(ValueError,match="opaque black fill"):
+        _run(_pdf(filled_black_rect=True,filled_rect_partial=True))
+
+
+@pytest.mark.parametrize("control",(
+    {"filled_black_rect":True,"filled_rect_invisible":True},
+    {"filled_black_rect":True,"filled_rect_white":True},
+    {"filled_rect_unrelated":True},
+))
+def test_nonblack_invisible_or_unrelated_native_rectangle_fill_is_not_wall_rival(control):
+    source=_pdf(**control)
+    result=_run(source)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.matching_translation==(77.76,0.)
+    assert not result.structural_wall_owned
+    assert not result.doorway_threshold_owned
+    assert not result.firm_quantity_issued
+
+
+def test_filled_native_rectangle_original_source_bytes_unchanged():
+    source=_pdf(filled_black_rect=True,filled_rect_white=True)
+    original=sha256(source).hexdigest()
+    assert _run(source).status is EvidenceResolutionStatus.CANDIDATE
+    assert sha256(source).hexdigest()==original
