@@ -281,8 +281,13 @@ def _w06_and_adjacent_d02(*, shared_frame):
     selected_frame = (
         window.figured_area_record_id if shared_frame else original_frame
     )
+    # _two_source_issued_distinct_window_case builds a separate synthetic
+    # PDF with its own SHA. This door is an adjacent member of W06's SAME
+    # original document/revision/snapshot: use the W06 source root rather
+    # than accidentally testing a foreign-source noncollision.
     door = replace(
         other,
+        source_sha256=window.source_sha256,
         type_mark="D02",
         opening_kind="door",
         tag_observation_id=door_tag,
