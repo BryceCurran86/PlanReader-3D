@@ -17,6 +17,12 @@ from pb_gptmax_raster_tile_seam_shadow import (
 )
 
 
+def _abstain_horizontal(digest: str, page_no: int, reason: str) -> dict[str, Any]:
+    """Keep all negative authority-grant fields explicit on every failure."""
+    return {**_abstain(digest, page_no, reason),
+            "elevation_plan_identity_granted": False, "opening_kind_granted": False}
+
+
 def prove_horizontal_tile_seam_source_pixels(
     pdf_bytes: bytes, *, expected_sha256: str, page_no: int,
     source_x: float, seam_y: float, flank_offset_pt: float = 4.0,
@@ -47,12 +53,12 @@ def prove_horizontal_tile_seam_source_pixels(
     ys = (seam_y - offset, seam_y + offset)
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         if page_no > len(document):
-            return _abstain(digest, page_no, "source_page_unavailable")
+            return _abstain_horizontal(digest, page_no, "source_page_unavailable")
         page = document[page_no - 1]
         if page.rotation != 0 or not all(
             page.rect.contains(fitz.Point(source_x, y)) for y in ys
         ):
-            return _abstain(digest, page_no, "unresolved_source_page_frame")
+            return _abstain_horizontal(digest, page_no, "unresolved_source_page_frame")
         owners: list[list[tuple[int, int, fitz.Rect, bool]]] = [[], []]
         seen = set()
         for image in page.get_images(full=True):
@@ -68,17 +74,17 @@ def prove_horizontal_tile_seam_source_pixels(
                     if rect.contains(fitz.Point(source_x, y)):
                         owners[index].append((xref, smask, rect, supported))
         if any(len(found) != 1 for found in owners):
-            return _abstain(digest, page_no, "source_tile_membership_not_unique")
+            return _abstain_horizontal(digest, page_no, "source_tile_membership_not_unique")
         top, bottom = owners[0][0], owners[1][0]
         tx, tm, tr, tok = top
         bx, bm, br, bok = bottom
         if not (tok and bok):
-            return _abstain(digest, page_no, "source_tile_image_transform_unsupported")
+            return _abstain_horizontal(digest, page_no, "source_tile_image_transform_unsupported")
         if (tx == bx or tm or bm
             or abs(tr.y1 - seam_y) > .03
             or abs(br.y0 - seam_y) > .03
             or abs(tr.y1 - br.y0) > .03):
-            return _abstain(digest, page_no, "distinct_abutting_unmasked_image_roots_unproven")
+            return _abstain_horizontal(digest, page_no, "distinct_abutting_unmasked_image_roots_unproven")
         scale = dpi / 72.0
         composite = page.get_pixmap(
             matrix=fitz.Matrix(scale, scale),
@@ -90,7 +96,7 @@ def prove_horizontal_tile_seam_source_pixels(
         for y, (xref, _smask, rect, _ok) in zip(ys, (top, bottom)):
             original = fitz.Pixmap(document, xref)
             if original.n != 3 or original.width < 1 or original.height < 1:
-                return _abstain(digest, page_no, "source_tile_pixel_format_unsupported")
+                return _abstain_horizontal(digest, page_no, "source_tile_pixel_format_unsupported")
             px = min(original.width - 1, max(0, int(
                 (source_x - rect.x0) / rect.width * original.width)))
             py = min(original.height - 1, max(0, int(
@@ -99,11 +105,11 @@ def prove_horizontal_tile_seam_source_pixels(
             cx = int(source_x * scale) - composite.x
             cy = int(y * scale) - composite.y
             if not (0 <= cx < composite.width and 0 <= cy < composite.height):
-                return _abstain(digest, page_no, "source_render_sample_outside_clip")
+                return _abstain_horizontal(digest, page_no, "source_render_sample_outside_clip")
             rendered_rgb = tuple(composite.pixel(cx, cy)[:3])
             if (max(source_rgb) > 64 or max(rendered_rgb) > 64
                     or any(abs(a - b) > 12 for a, b in zip(source_rgb, rendered_rgb))):
-                return _abstain(digest, page_no, "source_ink_or_render_corroboration_failed")
+                return _abstain_horizontal(digest, page_no, "source_ink_or_render_corroboration_failed")
             roots.append({
                 "xref": xref,
                 "image_sha256": sha256(document.extract_image(xref)["image"]).hexdigest(),
