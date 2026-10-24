@@ -119,12 +119,13 @@ def run_original_lot16_sealed_handoff(
         claim_source_openings.append(tuple(claim.canonical_openings))
         # The production-original claim is passed directly, once, from the
         # unchanged single-page source collector. There is no benchmark input.
+        seal_options = ({"source_reproved_append_only": True}
+                        if recover_additional_opening_areas else {})
         sealed = seal_live_opening_area_claim_run(
-            claim, workspace_id=1, project_id=PROJECT,
-            source_reproved_append_only=recover_additional_opening_areas,
+            claim, workspace_id=1, project_id=PROJECT, **seal_options,
         )
         rows = project_live_opening_customer_rows(
-            claim, workspace_id=1, project_id=PROJECT,
+            claim, workspace_id=1, project_id=PROJECT, **seal_options,
         )
         verified = verify_sealed_customer_output(sealed, rows)
         receipt = _validate_sealed_customer_handoff(sealed, rows, verified, sha)
