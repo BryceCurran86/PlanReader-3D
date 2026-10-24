@@ -80,6 +80,10 @@ def reconcile_gpt1_area_review_with_issuer(
             or row.get("original_canonical_opening_kind") != obj.opening_kind
             or row.get("original_canonical_page_id") != obj.page_id
             or row.get("original_canonical_viewport_id") != obj.viewport_id
+            or row.get("original_canonical_host_wall_id") != obj.host_wall_id
+            or row.get("original_canonical_representative_observation_id") != obj.representative_observation_id
+            or tuple(row.get("original_canonical_source_observation_ids") or ()) != tuple(sorted(obj.source_observation_ids))
+            or tuple(row.get("original_canonical_evidence_ids") or ()) != tuple(sorted(obj.evidence_ids))
             or row.get("measurement_published") is not False
             or row.get("customer_seal_granted") is not False
             or row.get("opening_count_granted") is not False

@@ -308,3 +308,79 @@ def test_forged_review_document_revision_receipt_rejected(source_field):
     assert _opening_quantity(_typed(canonical).canonical_openings[2]) is not None
     with pytest.raises(ValueError, match="foreign source/signed review decision"):
         reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)
+
+@pytest.mark.parametrize("field,replacement", [
+    ("host_wall_id", "foreign-wall-with-same-host-binding"),
+    ("representative_observation_id", "foreign-representative"),
+])
+def test_source_review_rejects_foreign_typed_wall_or_evidence_roster(field, replacement):
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    opening = typed.canonical_openings[2]
+    amended = replace(opening, **{field: replacement})
+    # Keep the real issuer technically eligible, to prove the independent
+    # source-review gate (not an earlier generic issuer refusal) is exercised.
+    if field == "representative_observation_id":
+        amended = replace(
+            amended,
+            source_observation_ids=opening.source_observation_ids + (replacement,),
+            evidence_ids=opening.evidence_ids + (replacement,),
+        )
+    assert _opening_quantity(amended) is not None
+    changed = tuple(amended if i == 2 else v
+                    for i, v in enumerate(typed.canonical_openings))
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(typed, canonical_openings=changed), source,
+        )
+
+
+def test_added_authenticated_looking_witness_cannot_pass_source_review():
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    opening = typed.canonical_openings[2]
+    amended = replace(
+        opening,
+        source_observation_ids=opening.source_observation_ids + ("extra-source-observation",),
+        evidence_ids=opening.evidence_ids + ("extra-source-observation",),
+    )
+    assert _opening_quantity(amended) is not None
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(typed, canonical_openings=tuple(
+                amended if i == 2 else v for i, v in enumerate(typed.canonical_openings)
+            )), source,
+        )
+
+
+def test_added_nonobservational_evidence_cannot_pass_original_roster():
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    opening = typed.canonical_openings[2]
+    amended = replace(opening, evidence_ids=opening.evidence_ids + ("unreviewed-witness",))
+    assert _opening_quantity(amended) is not None
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(typed, canonical_openings=tuple(
+                amended if i == 2 else v for i, v in enumerate(typed.canonical_openings)
+            )), source,
+        )
+
+
+@pytest.mark.parametrize("field", [
+    "original_canonical_host_wall_id",
+    "original_canonical_representative_observation_id",
+    "original_canonical_source_observation_ids",
+    "original_canonical_evidence_ids",
+])
+def test_forged_original_review_wall_or_witness_receipt_refused(field):
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    review = source["gpt1_new_area_review_candidates"][0]
+    review[field] = ("foreign-source-identity",) if field.endswith("_ids") else "foreign-source-identity"
+    assert _opening_quantity(_typed(canonical).canonical_openings[2]) is not None
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(_typed(canonical), source)

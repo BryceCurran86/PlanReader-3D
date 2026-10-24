@@ -435,6 +435,14 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "original_canonical_opening_kind": c.get("opening_kind"),
             "original_canonical_page_id": c.get("page_id"),
             "original_canonical_viewport_id": c.get("viewport_id"),
+            # Source producer's exact physical host/observation/evidence
+            # identities. Later typed objects may not add a forged witness,
+            # drop another observed face, or borrow a different wall while
+            # retaining the same host binding record ID.
+            "original_canonical_host_wall_id": c.get("host_wall_id"),
+            "original_canonical_representative_observation_id": c.get("representative_observation_id"),
+            "original_canonical_source_observation_ids": tuple(sorted(c.get("source_observation_ids") or ())),
+            "original_canonical_evidence_ids": tuple(sorted(c.get("evidence_ids") or ())),
             "source_sha256": c["source_sha256"],
             "snapshot_id": c["snapshot_id"],
             "source_decision_scope_id": row["attempted_host_selector"]["decision_scope_id"],
