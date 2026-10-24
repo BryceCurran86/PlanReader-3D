@@ -202,13 +202,14 @@ def _notched_source_pdf(turns=0, scale=1.0, outer_continuation=False):
     return payload
 
 
-def _source_records(payload, enabled):
+def _source_records(payload, enabled, *, double_face_negative=False):
     from tests.test_raster_framed_opening_g17_contract import _corroborated_records
 
     source = SourceVisibilityProducer(
         producer_method="paired-source-test",
         producer_version="1",
         raster_paired_outer_faces_shadow=enabled,
+        raster_double_face_negative_shadow=double_face_negative,
     )
     pub = source.ingest_native_pdf_bytes(
         document_id="paired-source-test",
@@ -228,16 +229,18 @@ def _source_records(payload, enabled):
 @pytest.mark.parametrize(
     "turns,scale", [(0, 1.0), (1, 1.0), (2, 1.0), (3, 1.0), (0, 0.5)]
 )
-def test_actual_original_raster_producer_reproves_notched_source_under_transforms(
+def test_paired_shadow_retains_double_painted_face_opposition_under_transforms(
     turns, scale
 ):
     payload = _notched_source_pdf(turns, scale)
     old, old_pub, old_records = _source_records(payload, False)
-    source, pub, records = _source_records(payload, True)
+    source, pub, records = _source_records(payload, True, double_face_negative=True)
     assert old_pub == pub
     assert not old_records
-    assert len(records) == 1
-    assert len(records[0].source_observation_ids) >= 8
+    # The exact original fixture paints two uninterrupted tracks at the
+    # upper/lower band quarters. The separate double-face opposing evidence
+    # introduced on main must survive a paired-outer-face shadow nomination.
+    assert not records
     comparisons = [
         r
         for rs in source.physical_opening_authority()._raster_outer_face_comparison_cache.values()
@@ -248,6 +251,17 @@ def test_actual_original_raster_producer_reproves_notched_source_under_transform
         and not r["paired_original_outer_face_continuity"]
         for r in comparisons
     )
+
+
+def test_paired_face_policy_does_not_enable_the_separate_double_face_negative():
+    payload = _notched_source_pdf()
+    source, pub, records = _source_records(payload, True)
+    negative, negative_pub, negative_records = _source_records(
+        payload, True, double_face_negative=True)
+    assert pub == negative_pub
+    assert records and not negative_records
+    assert source.physical_opening_authority()._raster_double_face_negative_shadow is False
+    assert negative.physical_opening_authority()._raster_double_face_negative_shadow is True
 
 
 def test_actual_outer_face_negative_survives_original_raster_source_replay():
@@ -270,8 +284,8 @@ def test_scaling_outside_existing_band_thickness_domain_does_not_relax_detector_
 def test_new_physical_policy_cannot_expand_original_source_capture_or_reissue_snapshot():
     payload = _notched_source_pdf()
     old, old_pub, old_records = _source_records(payload, False)
-    source, pub, records = _source_records(payload, True)
-    assert not old_records and len(records) == 1 and old_pub == pub
+    source, pub, records = _source_records(payload, True, double_face_negative=True)
+    assert not old_records and not records and old_pub == pub
     expected = old._proven_raster_opening_flank_boxes(old_pub, "1")
     actual = source._proven_raster_opening_flank_boxes(pub, "1")
     assert actual == expected == ()
@@ -281,3 +295,31 @@ def test_new_physical_policy_cannot_expand_original_source_capture_or_reissue_sn
         is False
     )
     assert source.published_snapshot_for_revision(pub.revision.revision_id) == pub
+
+
+def test_paired_outer_policy_is_separate_from_explicit_unmeasured_source_policy():
+    from inspect import signature
+    source=SourceVisibilityProducer(
+        producer_method="paired-original-g17-shadow",
+        producer_version="1.0.0",
+        raster_paired_outer_faces_shadow=True,
+    )
+    physical=source.physical_opening_authority()
+    assert physical._raster_paired_outer_faces_shadow is True
+    # The default capture cannot expand the original physical set.
+    from pb_source_visibility_authority import SourceVisibilityProducer as SourceType
+    assert "include_unmeasured_ink_closed_flanks_shadow" not in str(
+        signature(SourceType.augment_with_raster_visible_segments)
+    )
+    assert "include_unmeasured_ink_closed_flanks_shadow" in str(
+        signature(SourceType._proven_raster_opening_flank_boxes)
+    )
+
+
+def test_original_producer_default_is_not_modified_by_shadow_ctor():
+    s=SourceVisibilityProducer(
+        producer_method="old-original-paired-face-baseline",
+        producer_version="1.0.0",
+    )
+    assert s._raster_paired_outer_faces_shadow is False
+    assert s.physical_opening_authority()._raster_paired_outer_faces_shadow is False

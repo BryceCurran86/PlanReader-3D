@@ -173,18 +173,18 @@ def test_report_destination_cannot_overwrite_signed_inputs_or_alias(tmp_path):
         "--identity-map-dir", str(dirs["identity_map_dir"]),
         "--customer-dir", str(dirs["customer_dir"]),
     ]
-    with pytest.raises(ValueError, match="may not overwrite evidence"):
+    with pytest.raises(ValueError, match="may not overwrite protected evidence"):
         module.main([*args, "--output", str(input_path)])
     assert input_path.read_text(encoding="utf-8") == "unchanged signed bytes"
 
     alias = tmp_path / "alias-to-signed"
     symlink_or_skip(alias, dirs["sealed_dir"], target_is_directory=True)
-    with pytest.raises(ValueError, match="may not overwrite evidence"):
+    with pytest.raises(ValueError, match="may not overwrite protected evidence"):
         module.main([*args, "--output", str(alias / "new-report.json")])
     assert not (dirs["sealed_dir"] / "new-report.json").exists()
 
     # Never allow a diagnostic to overwrite frozen benchmark truth.
-    with pytest.raises(ValueError, match="may not overwrite evidence"):
+    with pytest.raises(ValueError, match="may not overwrite protected evidence"):
         module.main([
             *args, "--output",
             str(module.FROZEN_ROOT / "manifest.json"),
@@ -406,7 +406,13 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
         lambda data: SimpleNamespace(
             project_id=data["project_id"],
             source_sha256s=data["source_sha256s"],
-            quantities=(),
+            # Synthetic original-source attempt with an explicit ABSTAIN;
+            # unlike a completely empty V1 producer this is an execution.
+            quantities=(SimpleNamespace(
+                quantity_id=f"attempt-{data['project_id']}",
+                abstained=True,
+                object_identity_refs=(),
+            ),),
             to_dict=lambda: data,
         ),
     )
@@ -420,8 +426,8 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
     monkeypatch.setattr(
         module, "verify_sealed_customer_output",
         lambda sealed, rows: SimpleNamespace(
-            project_id=sealed.project_id, sealed_quantity_count=0,
-            valid_quantity_count=0, abstained_quantity_count=0,
+            project_id=sealed.project_id, sealed_quantity_count=1,
+            valid_quantity_count=0, abstained_quantity_count=1,
             customer_row_count=0, verified_quantity_ids=(),
         ),
     )
@@ -841,3 +847,88 @@ def test_first_failing_stage_uses_only_fixed_share_safe_identifiers(tmp_path):
         assert row["denominator"] > 0
     assert report["frozen_denominator"] == 120
     assert report["publication_status"] == "UNPUBLISHED"
+
+
+def test_full_four_project_cli_refuses_existing_report_before_original_pdf_and_seal_reads(
+    tmp_path, monkeypatch,
+):
+    dirs = _dirs(tmp_path)
+    report = tmp_path / "already-owned-customer.json"
+    report.write_text('{"customer":"preserve"}', encoding="utf-8")
+    monkeypatch.setattr(
+        module, "build_four_project_evidence_ledger",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("unsafe output path must fail before source/quantity reads")
+        ),
+    )
+    args = [
+        "--source-dir", str(dirs["source_dir"]),
+        "--sealed-dir", str(dirs["sealed_dir"]),
+        "--identity-map-dir", str(dirs["identity_map_dir"]),
+        "--customer-dir", str(dirs["customer_dir"]),
+        "--output", str(report),
+    ]
+    with pytest.raises(FileExistsError, match="new path"):
+        module.main(args)
+    assert report.read_text(encoding="utf-8") == '{"customer":"preserve"}'
+
+
+def test_full_four_project_cli_refuses_reusing_even_its_own_previous_diagnostic(tmp_path):
+    dirs = _dirs(tmp_path)
+    report = tmp_path / "first-source-readiness.json"
+    args = [
+        "--source-dir", str(dirs["source_dir"]),
+        "--sealed-dir", str(dirs["sealed_dir"]),
+        "--identity-map-dir", str(dirs["identity_map_dir"]),
+        "--customer-dir", str(dirs["customer_dir"]),
+        "--output", str(report),
+    ]
+    assert module.main(args) == 2
+    original = report.read_bytes()
+    with pytest.raises(FileExistsError, match="new path"):
+        module.main(args)
+    assert report.read_bytes() == original
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_full_four_project_cli_competing_writer_does_not_replace_existing_file(
+    tmp_path, monkeypatch,
+):
+    from tools import gpt3_safe_original_report_output as safe
+    dirs = _dirs(tmp_path)
+    report = tmp_path / "racing-report.json"
+    original_link = safe.os.link
+
+    def competing_writer(temp, target):
+        from pathlib import Path
+        Path(target).write_text('{"another-run":"already-published"}')
+        return original_link(temp, target)
+
+    monkeypatch.setattr(safe.os, "link", competing_writer)
+    with pytest.raises(FileExistsError):
+        module.main([
+            "--source-dir", str(dirs["source_dir"]),
+            "--sealed-dir", str(dirs["sealed_dir"]),
+            "--identity-map-dir", str(dirs["identity_map_dir"]),
+            "--customer-dir", str(dirs["customer_dir"]),
+            "--output", str(report),
+        ])
+    assert report.read_text(encoding="utf-8") == '{"another-run":"already-published"}'
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_full_four_project_report_output_cannot_follow_symlink_to_customer_file(tmp_path):
+    dirs = _dirs(tmp_path)
+    customer = tmp_path / "customer-lines.json"
+    customer.write_text('{"valid":"customer-output"}')
+    alias = tmp_path / "report-alias.json"
+    symlink_or_skip(alias, customer)
+    with pytest.raises(FileExistsError, match="new path"):
+        module.main([
+            "--source-dir", str(dirs["source_dir"]),
+            "--sealed-dir", str(dirs["sealed_dir"]),
+            "--identity-map-dir", str(dirs["identity_map_dir"]),
+            "--customer-dir", str(dirs["customer_dir"]),
+            "--output", str(alias),
+        ])
+    assert customer.read_text() == '{"valid":"customer-output"}'

@@ -98,6 +98,7 @@ def _graph_records(segments, opening, side, tolerance):
 
 def build_opening_local_g17_wall_shadow(
     source: SourceVisibilityProducer, selector: ObservationSelector,
+    *, original_ink_render_cache_shadow: bool = False,
 ) -> OpeningLocalG17WallShadow:
     """Address one original opening; never accept source/candidate bodies.
 
@@ -106,6 +107,8 @@ def build_opening_local_g17_wall_shadow(
     """
     if type(source) is not SourceVisibilityProducer or type(selector) is not ObservationSelector:
         raise TypeError("actual source producer and observation selector required")
+    if type(original_ink_render_cache_shadow) is not bool:
+        raise TypeError("source ink render cache shadow requires explicit bool")
     published = source.published_snapshot_for_revision(selector.revision_id)
     if published is None or any((
         selector.document_id != published.revision.document_id,
@@ -151,10 +154,15 @@ def build_opening_local_g17_wall_shadow(
     dpi = RASTER_OPENING_PRIMITIVE_RENDER_DPI
     args = {k: getattr(opening, k) for k in (
         "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id")}
-    image_png, iparent, iframe = source._producer.render_native_page_png(
-        **args, dpi=float(dpi), include_native_frame=True, images_only=True)
-    full_png, fparent, fframe = source._producer.render_native_page_png(
-        **args, dpi=float(dpi), include_native_frame=True)
+    if original_ink_render_cache_shadow:
+        ((image_png, iparent, iframe), (full_png, fparent, fframe)) = (
+            source._original_g17_render_pair_shadow(**args, dpi=dpi)
+        )
+    else:
+        image_png, iparent, iframe = source._producer.render_native_page_png(
+            **args, dpi=float(dpi), include_native_frame=True, images_only=True)
+        full_png, fparent, fframe = source._producer.render_native_page_png(
+            **args, dpi=float(dpi), include_native_frame=True)
     if iparent != fparent or iframe != fframe or iframe.rotation != 0:
         return replace(blocked, reason_codes=("g17_original_render_frame_unproven",))
     # Page-wide image placement agreement is not primitive coordinate proof.

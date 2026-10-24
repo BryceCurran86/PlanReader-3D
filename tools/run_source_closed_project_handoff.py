@@ -41,6 +41,9 @@ from pb_live_opening_count_source_closed_export import (
 from pb_live_opening_source_closed_export import (
     seal_live_opening_area_claim_run,
 )
+from pb_live_opening_metric_dimensions_source_closed_export import (
+    seal_live_opening_dimension_claim_run,
+)
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
@@ -48,7 +51,21 @@ from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
 )
 from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+from pb_live_external_wall_surface_area_quantity_publication import (
+    publish_live_per_wall_surface_area_quantities,
+    seal_live_per_wall_surface_area_run,
+)
+from pb_live_external_physical_net_wall_publication import (
+    LiveExternalPhysicalNetWallPublication,
+)
 from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
+from pb_live_floor_finish_customer_projection import (
+    project_live_floor_finish_customer_rows,
+)
+from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
+from pb_live_ceiling_area_customer_projection import (
+    project_live_ceiling_area_customer_rows,
+)
 from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
@@ -413,6 +430,16 @@ def _generate_project_handoff_locked(
         "verified_customer_row_count": 0,
         "customer_rows_verified": False,
         "customer_rows_file": None,
+        # A verified FINISH-ONLY customer projection never certifies the
+        # complete mixed-family customer universe or frozen V2 score.
+        "floor_finish_customer_rows_verified": False,
+        "floor_finish_customer_row_count": 0,
+        "floor_finish_customer_rows_file": None,
+        "floor_finish_customer_first_gate": "NO_SEALED_FLOOR_FINISH",
+        "ceiling_customer_rows_verified": False,
+        "ceiling_customer_row_count": 0,
+        "ceiling_customer_rows_file": None,
+        "ceiling_customer_first_gate": "NO_SEALED_CEILING",
         "canonical_counts": {},
         # Source-owned canonical-wall authority is distinct from overall
         # publication status. A local canonical-ID conflict must be visible
@@ -518,6 +545,33 @@ def _generate_project_handoff_locked(
             )
         )
 
+    # The existing combined/all-project source fingerprints stay unchanged.
+    # Surface-focused execution may separately seal one physical opening-
+    # deducted net area per authenticated external wall. This is not a
+    # plastering, painting, cladding or two-face trade-material quantity.
+    wall_surface_quantities: tuple[QuantityEvidence, ...] = ()
+    if clean_family_group == "surfaces":
+        # Floor/ceiling-only source claims may legitimately carry no external
+        # wall publication. Never manufacture a wall issuer or abort other
+        # independently source-proven families on a missing optional lane.
+        wall_publication = getattr(claim, "publication", None)
+        if type(wall_publication) is LiveExternalPhysicalNetWallPublication:
+            wall_surface_quantities = _non_abstained(
+                publish_live_per_wall_surface_area_quantities(wall_publication)
+            )
+        summary["family_counts"]["wall_net_area"] = len(wall_surface_quantities)
+        if wall_surface_quantities:
+            family_runs.append(
+                (
+                    "wall_net_area",
+                    seal_live_per_wall_surface_area_run(
+                        wall_publication,
+                        workspace_id=workspace_id,
+                        project_id=project_id,
+                    ),
+                )
+            )
+
     if clean_family_group in {"all", "surfaces"}:
         floor_finish_quantities = _non_abstained(
             getattr(claim, "floor_finish_quantity_evidence", ())
@@ -559,6 +613,31 @@ def _generate_project_handoff_locked(
                 ),
             )
         )
+
+    # True original opening widths and heights are distinct measured linear
+    # quantities, not inferred dimensions from an area product. Separate
+    # producer/seal from the immutable area family and absent count scope.
+    if clean_family_group in {"all", "core"}:
+        opening_dimension_quantities = _non_abstained(
+            getattr(claim, "opening_dimension_quantity_evidence", ())
+        )
+    else:
+        opening_dimension_quantities = ()
+    summary["family_counts"]["opening_width"] = sum(
+        q.family == "opening_width" for q in opening_dimension_quantities
+    )
+    summary["family_counts"]["opening_height"] = sum(
+        q.family == "opening_height" for q in opening_dimension_quantities
+    )
+    if opening_dimension_quantities:
+        run = seal_live_opening_dimension_claim_run(
+            claim,
+            workspace_id=int(workspace_id),
+            project_id=project_id,
+        )
+        if len(run.quantities) != len(opening_dimension_quantities):
+            raise RuntimeError("opening axis source seal differs from actual original family")
+        family_runs.append(("opening_metric_axes", run))
 
     if clean_family_group in {"all", "core"}:
         opening_count_quantities = _non_abstained(
@@ -749,6 +828,7 @@ def _generate_project_handoff_locked(
 
     expected_by_family = {
         "floor_area": floor_quantities,
+        "wall_net_area": wall_surface_quantities,
         "floor_finish_area": floor_finish_quantities,
         "opening_area": opening_area_quantities,
         "opening_count": opening_count_quantities,
@@ -870,6 +950,101 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise
 
+    # An independently sealed source-positive floor finish can now carry
+    # a separately verified customer receipt. Do not label the entire
+    # floor/ceiling/wall/opening project customer-verified from one family.
+    # A failure to project a finish must never silently become an approved
+    # customer row or block unrelated, already source-sealed families.
+    verified_floor_finish_customer_rows = None
+    if floor_finish_quantities:
+        finish_runs = tuple(
+            run for family, run in family_runs if family == "floor_finish_area"
+        )
+        if len(finish_runs) != 1:
+            raise RuntimeError("source floor finish family seal is ambiguous")
+        try:
+            finish_rows = tuple(project_live_floor_finish_customer_rows(
+                claim, workspace_id=workspace_id, project_id=project_id,
+            ))
+            finish_verified = verify_sealed_customer_output(
+                finish_runs[0], finish_rows,
+            )
+            sealed_ids = tuple(q.quantity_id for q in finish_runs[0].quantities)
+            if (
+                len(sealed_ids) != len(set(sealed_ids))
+                or len(finish_rows) != len(sealed_ids)
+                or set(finish_verified.verified_quantity_ids) != set(sealed_ids)
+                or finish_verified.customer_row_count != len(sealed_ids)
+            ):
+                raise RuntimeError(
+                    "sealed floor-finish customer quantity bijection unavailable"
+                )
+            verified_floor_finish_customer_rows = finish_rows
+            summary["floor_finish_customer_first_gate"] = "FAMILY_VERIFIED"
+        except Exception as exc:
+            # Preserve the signed producer evidence for independent review,
+            # but NEVER report any verified customer floor-finish output.
+            summary["floor_finish_customer_first_gate"] = (
+                f"FLOOR_FINISH_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
+            )
+            summary["claim_reason_codes"].append(
+                "floor_finish_customer_projection_unverified"
+            )
+
+    # Legacy same-scope and new cross-view RCP ceilings can both issue
+    # source-closed ceiling_lining areas. Project each through its OWN source
+    # customer authority, then verify the union against the actual combined
+    # sealed ceiling family. A ceiling-only receipt is never full-project
+    # customer approval.
+    verified_ceiling_customer_rows = None
+    if ceiling_quantities:
+        ceiling_family_runs = tuple(
+            run for family, run in family_runs if family == "ceiling_area"
+        )
+        if len(ceiling_family_runs) != 1:
+            raise RuntimeError("source ceiling family seal is ambiguous")
+        try:
+            ceiling_customer_rows = []
+            if new_ceiling_quantities:
+                ceiling_customer_rows.extend(project_live_ceiling_customer_rows(
+                    claim, workspace_id=workspace_id, project_id=project_id,
+                ))
+            if legacy_ceiling_quantities:
+                if ceiling_result is None:
+                    raise RuntimeError("legacy ceiling has no source-owned result")
+                ceiling_customer_rows.extend(
+                    project_live_ceiling_area_customer_rows(
+                        ceiling_result, workspace_id=workspace_id,
+                        project_id=project_id,
+                    )
+                )
+            ceiling_verified = verify_sealed_customer_output(
+                ceiling_family_runs[0], ceiling_customer_rows,
+            )
+            ceiling_ids = tuple(
+                row.quantity_id for row in ceiling_family_runs[0].quantities
+            )
+            if (
+                len(ceiling_ids) != len(set(ceiling_ids))
+                or len(ceiling_customer_rows) != len(ceiling_ids)
+                or ceiling_verified.customer_row_count != len(ceiling_ids)
+                or set(ceiling_verified.verified_quantity_ids) != set(ceiling_ids)
+            ):
+                raise RuntimeError(
+                    "sealed ceiling customer quantity bijection unavailable"
+                )
+            verified_ceiling_customer_rows = tuple(ceiling_customer_rows)
+            summary["ceiling_customer_first_gate"] = "FAMILY_VERIFIED"
+        except Exception as exc:
+            # Keep independently verified producer seals, but grant no
+            # customer permission to ANY ceiling in a disputed family.
+            summary["ceiling_customer_first_gate"] = (
+                f"CEILING_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
+            )
+            # Customer-family first failure is a separate diagnostic;
+            # never mutate original-source claim reason codes merely because
+            # an optional customer projection did not pass.
+
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
         summary["family_run_ids"][family] = run.run_id
@@ -897,6 +1072,30 @@ def _generate_project_handoff_locked(
             if _source_complexity_blocked(summary["claim_reason_codes"])
             else "no_sealable_quantities"
         )
+
+    if verified_ceiling_customer_rows is not None:
+        ceiling_customer_path = (
+            output_dir / "verified_ceiling_customer_rows.json"
+        )
+        _write_json(ceiling_customer_path, list(verified_ceiling_customer_rows))
+        summary["ceiling_customer_rows_verified"] = True
+        summary["ceiling_customer_row_count"] = len(
+            verified_ceiling_customer_rows
+        )
+        summary["ceiling_customer_rows_file"] = str(ceiling_customer_path)
+
+    if verified_floor_finish_customer_rows is not None:
+        finish_customer_path = (
+            output_dir / "verified_floor_finish_customer_rows.json"
+        )
+        _write_json(
+            finish_customer_path, list(verified_floor_finish_customer_rows),
+        )
+        summary["floor_finish_customer_rows_verified"] = True
+        summary["floor_finish_customer_row_count"] = len(
+            verified_floor_finish_customer_rows
+        )
+        summary["floor_finish_customer_rows_file"] = str(finish_customer_path)
 
     if verified_partial_customer_rows is not None:
         customer_path = output_dir / "verified_customer_rows.json"

@@ -224,145 +224,192 @@ def _has_rating_keywords(text: str) -> bool:
 
 
 def parse_single_dimension(text: str) -> Optional[int]:
+    """Return one plausible length. Two different lengths abstain."""
     if not text or not text.strip():
         return None
     t = text.strip()
-    val: Optional[int] = None
-    m = _MM_RE.search(t)
-    if m:
-        val = int(m.group(1))
-    else:
-        m = _M_RE.search(t)
-        if m:
-            val = round(float(m.group(1)) * 1000)
-        else:
-            t_clean = t.replace(",", "").strip()
-            try:
-                val = int(float(t_clean))
-            except (ValueError, TypeError):
-                return None
-    if val is not None and not _is_plausible_dimension(val, None):
-        return None
-    return val
+    values: List[int] = []
+    for match in _MM_RE.finditer(t):
+        values.append(int(match.group(1)))
+    if not values:
+        for match in _M_RE.finditer(t):
+            values.append(round(float(match.group(1)) * 1000))
+    if not values:
+        try:
+            values.append(int(float(t.replace(",", "").strip())))
+        except (ValueError, TypeError):
+            return None
+    plausible: List[int] = []
+    for value in values:
+        if _is_plausible_dimension(value, None) and value not in plausible:
+            plausible.append(value)
+    if len(plausible) == 1:
+        return plausible[0]
+    return None
+
+
+def _plausible_pairs(patterns: Sequence[re.Pattern[str]], text: str) -> List[Tuple[int, int]]:
+    found: List[Tuple[int, int]] = []
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            pair = (int(match.group(1)), int(match.group(2)))
+            if _is_plausible_dimension(*pair) and pair not in found:
+                found.append(pair)
+    return found
 
 
 def parse_dimension(text: str, allow_slash: bool = True) -> Tuple[Optional[int], Optional[int]]:
+    """Return one width and height.
+
+    Two different explicit pairs abstain. A fire-rating slash does not replace
+    one ``x`` pair. More than two loose lengths abstain instead of keeping the
+    first two.
+    """
     if not text or not text.strip():
         return None, None
     t = text.strip()
-    for pat in _DIMENSION_PATTERNS_X:
-        for m in pat.finditer(t):
-            a, b = int(m.group(1)), int(m.group(2))
-            if _is_plausible_dimension(a, b):
-                return a, b
-    if allow_slash:
-        for pat in _DIMENSION_PATTERNS_SLASH:
-            for m in pat.finditer(t):
-                a, b = int(m.group(1)), int(m.group(2))
-                if _is_plausible_dimension(a, b):
-                    return a, b
-    mm_match = _MM_RE.findall(t)
-    if len(mm_match) >= 2:
-        w, h = int(mm_match[0]), int(mm_match[1])
-        if _is_plausible_dimension(w, h):
-            return w, h
-    if len(mm_match) == 1:
-        val = int(mm_match[0])
-        if _MIN_PLAUSIBLE_MM <= val <= _MAX_PLAUSIBLE_MM:
-            return val, None
-    m_match = _M_RE.findall(t)
-    if len(m_match) >= 2:
-        w, h = round(float(m_match[0]) * 1000), round(float(m_match[1]) * 1000)
-        if _is_plausible_dimension(w, h):
-            return w, h
-    if len(m_match) == 1:
-        val_mm = round(float(m_match[0]) * 1000)
-        if _MIN_PLAUSIBLE_MM <= val_mm <= _MAX_PLAUSIBLE_MM:
-            return val_mm, None
-    nums = _SINGLE_NUM_RE.findall(t)
-    if len(nums) >= 2:
-        if allow_slash or "/" not in t:
-            a, b = int(nums[0]), int(nums[1])
-            if _is_plausible_dimension(a, b):
-                return a, b
-    if len(nums) == 1:
-        val = int(nums[0])
-        if _MIN_PLAUSIBLE_MM <= val <= _MAX_PLAUSIBLE_MM:
-            return val, None
+    pairs = _plausible_pairs(_DIMENSION_PATTERNS_X, t)
+    if len(pairs) > 1:
         return None, None
+    if len(pairs) == 1:
+        return pairs[0]
+    if allow_slash:
+        pairs = _plausible_pairs(_DIMENSION_PATTERNS_SLASH, t)
+        if len(pairs) > 1:
+            return None, None
+        if len(pairs) == 1:
+            return pairs[0]
+
+    def _loose(raw_values: List[int]) -> Tuple[Optional[int], Optional[int], bool]:
+        if len(raw_values) > 2:
+            return None, None, True
+        if len(raw_values) == 2 and _is_plausible_dimension(*raw_values):
+            return raw_values[0], raw_values[1], True
+        if len(raw_values) == 1:
+            return raw_values[0], None, True
+        return None, None, False
+
+    mm_values: List[int] = []
+    for raw in _MM_RE.findall(t):
+        value = int(raw)
+        if _MIN_PLAUSIBLE_MM <= value <= _MAX_PLAUSIBLE_MM and value not in mm_values:
+            mm_values.append(value)
+    width, height, handled = _loose(mm_values)
+    if handled:
+        return width, height
+    metre_values: List[int] = []
+    for raw in _M_RE.findall(t):
+        value = round(float(raw) * 1000)
+        if _MIN_PLAUSIBLE_MM <= value <= _MAX_PLAUSIBLE_MM and value not in metre_values:
+            metre_values.append(value)
+    width, height, handled = _loose(metre_values)
+    if handled:
+        return width, height
+    raw_numbers: List[int] = []
+    distinct_numbers: List[int] = []
+    for raw in _SINGLE_NUM_RE.findall(t):
+        value = int(raw)
+        if _MIN_PLAUSIBLE_MM <= value <= _MAX_PLAUSIBLE_MM:
+            raw_numbers.append(value)
+            if value not in distinct_numbers:
+                distinct_numbers.append(value)
+    if len(distinct_numbers) > 2:
+        return None, None
+    if len(raw_numbers) >= 2:
+        if (allow_slash or "/" not in t) and _is_plausible_dimension(raw_numbers[0], raw_numbers[1]):
+            return raw_numbers[0], raw_numbers[1]
+        return None, None
+    if len(raw_numbers) == 1:
+        return raw_numbers[0], None
     return None, None
 
 
 def extract_mark(text: str) -> str:
-    """Extract a structurally valid door/window mark from arbitrary text."""
+    """Extract one door/window mark. Two different marks abstain."""
     if not text:
         return ""
-    m = _MARK_SEARCH_RE.search(text.upper())
-    if not m:
+    marks = {
+        match.group(1).upper()
+        for match in _MARK_SEARCH_RE.finditer(str(text).upper())
+        if _is_opening_mark(match.group(1).upper())
+    }
+    if len(marks) != 1:
         return ""
-    mark = m.group(1).upper()
-    return mark if _is_opening_mark(mark) else ""
+    return next(iter(marks))
 
 
 def detect_header(words: Sequence[str]) -> Dict[str, Any]:
     mapping: Dict[str, Any] = {}
+    hits: Dict[str, List[Tuple[int, str, str]]] = {
+        "mark": [],
+        "dims": [],
+        "width": [],
+        "height": [],
+        "count": [],
+        "desc": [],
+    }
+
+    for i, w in enumerate(words):
+        w_clean = w.strip().lower()
+        if not w_clean:
+            continue
+        col_basis, col_source = _infer_column_basis(w)
+        # In the explicit DOOR / TYPE and WINDOW / TYPE schema, TYPE is
+        # the filling description (e.g. HINGED), beside the opening mark.
+        # It is not a second competing mark column. Other repeated mark
+        # headings remain ambiguous and are retained below.
+        if (w_clean == "type" and i > 0
+                and words[i - 1].strip().lower() in {"door", "window"}):
+            hits["desc"].append((i, "", ""))
+            continue
+        if w_clean in _HEADER_MARK_KEYWORDS:
+            hits["mark"].append((i, "", ""))
+            continue
+        if (
+            w_clean in _HEADER_DIMS_KEYWORDS
+            or any(kw in w_clean for kw in _HEADER_DIMS_KEYWORDS)
+        ):
+            hits["dims"].append((i, col_basis, col_source))
+            continue
+        if (
+            w_clean in _HEADER_WIDTH_KEYWORDS
+            or any(kw in w_clean for kw in _HEADER_WIDTH_KEYWORDS)
+        ):
+            hits["width"].append((i, col_basis, col_source))
+            continue
+        if (
+            "sill" not in w_clean
+            and (
+                w_clean in _HEADER_HEIGHT_KEYWORDS
+                or any(kw in w_clean for kw in _HEADER_HEIGHT_KEYWORDS)
+            )
+        ):
+            hits["height"].append((i, col_basis, col_source))
+            continue
+        if w_clean in _HEADER_COUNT_KEYWORDS:
+            hits["count"].append((i, "", ""))
+            continue
+        if w_clean in _HEADER_DESC_KEYWORDS:
+            hits["desc"].append((i, "", ""))
+            continue
+
     width_basis = ""
     width_basis_source = ""
     height_basis = ""
     height_basis_source = ""
     dims_basis = ""
     dims_basis_source = ""
-
-    for i, w in enumerate(words):
-        w_clean = w.strip().lower()
-        if not w_clean:
+    for role, columns in hits.items():
+        if len(columns) != 1:
             continue
-        if w_clean in _HEADER_MARK_KEYWORDS and "mark" not in mapping:
-            mapping["mark"] = i
-            continue
-
-        col_basis, col_source = _infer_column_basis(w)
-
-        if "dims" not in mapping:
-            is_dims = (
-                w_clean in _HEADER_DIMS_KEYWORDS
-                or any(kw in w_clean for kw in _HEADER_DIMS_KEYWORDS)
-            )
-            if is_dims:
-                mapping["dims"] = i
-                dims_basis = col_basis
-                dims_basis_source = col_source
-                continue
-
-        if "width" not in mapping:
-            is_width = (
-                w_clean in _HEADER_WIDTH_KEYWORDS
-                or any(kw in w_clean for kw in _HEADER_WIDTH_KEYWORDS)
-            )
-            if is_width:
-                mapping["width"] = i
-                width_basis = col_basis
-                width_basis_source = col_source
-                continue
-
-        if "height" not in mapping:
-            is_height = (
-                w_clean in _HEADER_HEIGHT_KEYWORDS
-                or any(kw in w_clean for kw in _HEADER_HEIGHT_KEYWORDS)
-            )
-            if is_height:
-                mapping["height"] = i
-                height_basis = col_basis
-                height_basis_source = col_source
-                continue
-
-        if "count" not in mapping and w_clean in _HEADER_COUNT_KEYWORDS:
-            mapping["count"] = i
-            continue
-
-        if "desc" not in mapping and w_clean in _HEADER_DESC_KEYWORDS:
-            mapping["desc"] = i
-            continue
+        index, basis, source = columns[0]
+        mapping[role] = index
+        if role == "width":
+            width_basis, width_basis_source = basis, source
+        elif role == "height":
+            height_basis, height_basis_source = basis, source
+        elif role == "dims":
+            dims_basis, dims_basis_source = basis, source
 
     basis, basis_source = _resolve_dimension_basis(
         width_basis, width_basis_source,

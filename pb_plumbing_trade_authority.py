@@ -29,7 +29,7 @@ class PlumbingFixtureSpec:
     fixture_mark: str          # e.g. "WC-01", "BASIN-01", "SINK-01", "HWS-01"
     description: str
     location: str              # e.g. "Master Ensuite", "Main Bathroom", "Kitchen"
-    count: int = 1
+    count: int = 0
     section: str = "Internal"  # "Internal", "External", "Substructure"
     source_page: str = ""
     source_reference: str = ""
@@ -97,10 +97,34 @@ class PlumbingTakeoffItem:
         }
 
 
+def _typed_physical_pipe_run(spec: PlumbingPipeRunSpec) -> bool:
+    """The physical pipe run has source-provided metric length and bore.
+
+    This checks numeric completeness; separate producer-side source receipts
+    remain necessary for commercial FIRM rather than a supplied specification.
+    """
+    if type(spec.length_m) not in (int, float):
+        return False
+    if type(spec.nominal_dia_mm) is not int or spec.nominal_dia_mm <= 0:
+        return False
+    if type(spec.material) is not str or not spec.material.strip():
+        return False
+    try:
+        length = float(spec.length_m)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(length) and length > 0.0
+
+
 def calculate_fixture_items(spec: PlumbingFixtureSpec) -> List[PlumbingTakeoffItem]:
     """Calculate trade items for sanitary fixtures and connected tapware."""
     items: List[PlumbingTakeoffItem] = []
-    count = max(1, spec.count)
+    # Physical fixture counts are exact nonnegative integers, never a
+    # rounded fractional or boolean mark. One observed symbol is not a
+    # permission to invent extra fittings.
+    if type(spec.count) is not int or spec.count <= 0:
+        return items
+    count = spec.count
 
     # 1. Primary Fixture Supply & Install (No.)
     items.append(PlumbingTakeoffItem(
@@ -129,12 +153,12 @@ def calculate_fixture_items(spec: PlumbingFixtureSpec) -> List[PlumbingTakeoffIt
         finish_system="Rough in pipework in wall cavity/slab penetration",
         quantity=float(count),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PLUMBING_SOURCE_PREFIX} · {spec.fixture_mark}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Rough-in points for {count} No. {spec.fixture_mark}.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional one-per-fixture rough-in allowance for {count} No. {spec.fixture_mark}; actual connection count and route require hydraulic source confirmation.",
         row_role="",
     ))
 
@@ -144,7 +168,7 @@ def calculate_fixture_items(spec: PlumbingFixtureSpec) -> List[PlumbingTakeoffIt
 def calculate_drainage_items(spec: PlumbingPipeRunSpec) -> List[PlumbingTakeoffItem]:
     """Calculate trade items for underground sanitary drainage pipework and fittings."""
     items: List[PlumbingTakeoffItem] = []
-    if spec.length_m <= 0.0:
+    if not _typed_physical_pipe_run(spec):
         return items
 
     # 1. Drainage Pipe Run (lm)
@@ -175,12 +199,12 @@ def calculate_drainage_items(spec: PlumbingPipeRunSpec) -> List[PlumbingTakeoffI
         finish_system="Installed at changes of direction and brought to finished surface level",
         quantity=float(io_count),
         unit="No.",
-        quantity_status="Estimated",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PLUMBING_SOURCE_PREFIX} · {spec.system_type}",
-        inclusion_status="INCLUSION",
-        confidence="High",
-        notes=f"Estimated {io_count} No. inspection openings over {spec.length_m:.2f} lm drainage run.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {io_count} No. inspection openings from 15m heuristic over {spec.length_m:.2f} lm; junction locations and source counts are not measured.",
         row_role="",
     ))
 
@@ -190,7 +214,7 @@ def calculate_drainage_items(spec: PlumbingPipeRunSpec) -> List[PlumbingTakeoffI
 def calculate_water_supply_items(spec: PlumbingPipeRunSpec) -> List[PlumbingTakeoffItem]:
     """Calculate trade items for hot and cold water reticulation."""
     items: List[PlumbingTakeoffItem] = []
-    if spec.length_m <= 0.0:
+    if not _typed_physical_pipe_run(spec):
         return items
 
     system_label = "Cold water" if spec.system_type == "cold_water" else "Hot water"
@@ -217,7 +241,7 @@ def calculate_water_supply_items(spec: PlumbingPipeRunSpec) -> List[PlumbingTake
 def calculate_stack_and_penetration_items(spec: PlumbingPipeRunSpec) -> List[PlumbingTakeoffItem]:
     """Calculate trade items for vertical soil stacks and slab cast-in fire collars."""
     items: List[PlumbingTakeoffItem] = []
-    if spec.length_m <= 0.0:
+    if not _typed_physical_pipe_run(spec):
         return items
 
     # 1. Soil & Waste Stack (lm)
@@ -250,12 +274,12 @@ def calculate_stack_and_penetration_items(spec: PlumbingPipeRunSpec) -> List[Plu
         finish_system="Fixed to formwork deck prior to concrete pour (4-hour FRL rated)",
         quantity=float(collar_count),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{PLUMBING_SOURCE_PREFIX} · {spec.system_type}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{collar_count} No. fire-rated slab penetration collars.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {collar_count} No. penetration collars from assumed 3m storey height; actual fire-rated slab crossings not source-confirmed.",
         row_role="",
     ))
 

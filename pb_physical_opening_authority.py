@@ -928,6 +928,37 @@ def _raster_wall_face_continues(
     return False
 
 
+def _raster_double_continuous_face_gap(
+    line_mask: np.ndarray,
+    pair: _RasterBandPair,
+) -> bool:
+    """Find two independently painted wall faces spanning an alleged opening.
+
+    Two painted traces across a gap are negative evidence for a bare
+    door-swing fallback, NOT independently proved solid-wall continuity.
+    The same 2D ink can represent paired window glazing/frame lines, or
+    lintel/overhead wall above a real opening. This source negative MUST NOT
+    veto independently source-supported framed candidates. It never proves
+    a canonical W4 host, opening kind or commercial area.
+    """
+    if pair.row1 - pair.row0 < 4:
+        return False
+    low = max(pair.row0, 0)
+    high = min(pair.row1, line_mask.shape[0] - 1)
+    if high - low < 4 or pair.gap_x0 < 0 or pair.gap_x1 >= line_mask.shape[1]:
+        return False
+    gap = line_mask[:, pair.gap_x0:pair.gap_x1 + 1]
+    if gap.size == 0:
+        return False
+    quarter = max(1, (high - low) // 4)
+    upper = range(low, low + quarter + 1)
+    lower = range(high - quarter, high + 1)
+    def covered(row: int) -> bool:
+        return float(gap[row].mean()) >= _RASTER_LINE_COVERAGE
+    return any(covered(row) for row in upper) and any(
+        covered(row) for row in lower)
+
+
 def _raster_hairline_mask(
     line_mask: np.ndarray,
     thick: np.ndarray,
@@ -942,6 +973,8 @@ def _raster_swing_perpendicular_scale_ratio(
     gap_box_pt: tuple[float, float, float, float],
     axis: str,
     placements: Sequence[NativePageImagePlacement],
+    *,
+    tiled_gap_shadow: bool = False,
 ) -> Optional[float]:
     """Return the producer-proved affine scale ratio for one raster gap.
 
@@ -951,6 +984,8 @@ def _raster_swing_perpendicular_scale_ratio(
     fail closed.
     """
 
+    if type(tiled_gap_shadow) is not bool:
+        raise TypeError("tiled gap capture requires an explicit boolean")
     x0, y0, x1, y1 = (float(value) for value in gap_box_pt)
     matches: list[float] = []
     tol = 1e-6
@@ -976,7 +1011,69 @@ def _raster_swing_perpendicular_scale_ratio(
         if math.isfinite(ratio) and ratio > 0.0:
             matches.append(float(ratio))
     if not matches:
-        return None
+        if not tiled_gap_shadow:
+            return None
+        # An overlapping image cannot witness pixels outside its placement.
+        # Prove the entire aperture is covered by compatible source tiles.
+        clipped = []
+        tile_transforms = []
+        for placement in placements:
+            bx0, by0, bx1, by1 = placement.bbox_pt
+            if (
+                max(x0, bx0) >= min(x1, bx1) - tol
+                or max(y0, by0) >= min(y1, by1) - tol
+            ):
+                continue
+            sx = (bx1 - bx0) / float(placement.pixel_width)
+            sy = (by1 - by0) / float(placement.pixel_height)
+            if (
+                not math.isfinite(sx)
+                or not math.isfinite(sy)
+                or sx <= 0.0
+                or sy <= 0.0
+            ):
+                continue
+            ratio = sy / sx if axis == "horizontal" else sx / sy
+            if math.isfinite(ratio) and ratio > 0.0:
+                matches.append(float(ratio))
+                clipped.append((max(x0, bx0), max(y0, by0), min(x1, bx1), min(y1, by1)))
+                tile_transforms.append((sx, sy, bx0, by0))
+        if not matches:
+            return None
+        # Equal anisotropy ratios do not prove one coherent source-pixel
+        # registration: an image with 2 pt/pixel and one with 1 pt/pixel
+        # can both have a ratio of 1. A joined raster must agree in BOTH
+        # absolute pixel scales and be on the same integer pixel grid.
+        # This extra gate applies only to explicit tiled-gap shadow capture.
+        ref_sx, ref_sy, ref_x, ref_y = tile_transforms[0]
+        for sx, sy, bx0, by0 in tile_transforms[1:]:
+            if not (math.isclose(sx, ref_sx, rel_tol=1e-6, abs_tol=1e-9)
+                    and math.isclose(sy, ref_sy, rel_tol=1e-6, abs_tol=1e-9)):
+                return None
+            for delta in ((bx0 - ref_x) / ref_sx, (by0 - ref_y) / ref_sy):
+                if not math.isfinite(delta) or not math.isclose(
+                        delta, round(delta), rel_tol=0.0, abs_tol=1e-6):
+                    return None
+        cuts = sorted({x0, x1, *(v for box in clipped for v in (box[0], box[2]))})
+        for left, right in zip(cuts, cuts[1:]):
+            if right - left <= tol:
+                continue
+            intervals = sorted((box[1], box[3]) for box in clipped
+                               if box[0] <= left + tol and box[2] >= right - tol)
+            covered = y0
+            for bottom, top in intervals:
+                if bottom > covered + tol:
+                    return None
+                covered = max(covered, top)
+            if covered < y1 - tol:
+                return None
+        first = matches[0]
+        if any(
+            not math.isclose(value, first, rel_tol=1e-6, abs_tol=1e-9)
+            for value in matches[1:]
+        ):
+            return None
+        return first
     first = matches[0]
     if any(
         not math.isclose(value, first, rel_tol=1e-6, abs_tol=1e-9)
@@ -1154,11 +1251,16 @@ class PhysicalOpeningAuthority:
         self._source_visibility_producer = _source_visibility_producer
         self._raster_source_policy_at_creation = getattr(
             _source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+        self._raster_double_face_negative_shadow = getattr(
+            _source_visibility_producer, "_raster_double_face_negative_shadow", False)
         if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
             raise ValueError("raster paired outer faces override must be explicit boolean")
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
             if _raster_paired_outer_faces_shadow_override is None else _raster_paired_outer_faces_shadow_override)
         self._raster_outer_face_comparison_cache: dict[tuple, tuple[dict, ...]] = {}
+        # One complete, immutable viewport classification per raster page
+        # candidate universe. Every use still revalidates current source bytes.
+        self._raster_viewport_candidate_cache: dict[tuple, tuple] = {}
         self._visible_viewport_scope_cache: dict[
             tuple[str, str, str, str, str],
             tuple[
@@ -1239,6 +1341,13 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             tuple[tuple[str, frozenset[str], tuple[float, ...]], ...],
         ] = {}
+        # Diagnostic-only first failing source predicate per raw raster-gap ID.
+        # Multiple exact-source alternatives remain explicit, never first-wins.
+        # Nothing consumes this cache to publish opening, host, count or area.
+        self._raster_gap_first_gate_shadow_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[tuple[str, tuple[str, ...]], ...],
+        ] = {}
         self._raster_gap_audit_incomplete: set[tuple[str, str, str, str, str]] = set()
         self._raster_candidate_gap_box_cache: dict[
             str, tuple[float, float, float, float]
@@ -1278,9 +1387,11 @@ class PhysicalOpeningAuthority:
             "_raster_primitive_snapshot_cache",
             "_raster_framed_candidate_cache",
             "_raster_gap_candidate_audit_cache",
+            "_raster_gap_first_gate_shadow_cache",
             "_raster_swing_ambiguous_support_cache",
             "_raster_existence_cache",
             "_raster_outer_face_comparison_cache",
+            "_raster_viewport_candidate_cache",
         )
         for name in keys_at_snapshot:
             cache = getattr(self, name)
@@ -1640,8 +1751,10 @@ class PhysicalOpeningAuthority:
         records: tuple[SourceObservationRecord, ...],
     ) -> tuple[CandidateSemanticOpening, ...]:
         if (self._source_visibility_producer is not None
-                and self._raster_source_policy_at_creation != getattr(
-                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)):
+                and (self._raster_source_policy_at_creation != getattr(
+                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+                    or self._raster_double_face_negative_shadow != getattr(
+                        self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         cache_key = self._visible_page_candidate_key(seed)
         cached = self._raster_framed_candidate_cache.get(cache_key)
@@ -1717,9 +1830,12 @@ class PhysicalOpeningAuthority:
             and record.page_id == seed.page_id
             and record.viewport_id is None
         )
+        # Identical pixels do not prove two source observations are the same
+        # physical primitive. Keep all owned candidates, never overwrite one
+        # observation with the last row visited in a source snapshot.
         by_kind_geometry: dict[
             tuple[str, tuple[float, float, float, float]],
-            SourceObservationRecord,
+            list[SourceObservationRecord],
         ] = {}
         line_runs: list[SourceObservationRecord] = []
         thin_runs: list[SourceObservationRecord] = []
@@ -1727,7 +1843,7 @@ class PhysicalOpeningAuthority:
             geometry = tuple(round(float(value), 6) for value in record.geometry)
             if len(geometry) != 4:
                 continue
-            by_kind_geometry[(record.observation_kind, geometry)] = record
+            by_kind_geometry.setdefault((record.observation_kind, geometry), []).append(record)
             if record.observation_kind == RASTER_LINE_RUN:
                 line_runs.append(record)
             if record.observation_kind == RASTER_THIN_INK_RUN:
@@ -1741,7 +1857,14 @@ class PhysicalOpeningAuthority:
                 round(value, 6)
                 for value in _raster_geometry_pt(geometry_px, dpi)
             )
-            return by_kind_geometry.get((kind, geometry_pt))
+            owners = by_kind_geometry.get((kind, geometry_pt), ())
+            if len(owners) != 1:
+                if owners:
+                    # Source row ancestry is ambiguous, not a valid opening
+                    # whose primitive identity can be selected by input order.
+                    self._raster_gap_audit_incomplete.add(cache_key)
+                return None
+            return owners[0]
 
         def band_support(
             page_box: tuple[int, int, int, int],
@@ -1928,6 +2051,11 @@ class PhysicalOpeningAuthority:
         ambiguous_support_ids: set[str] = set()
         framed_gap_boxes: set[tuple[float, float, float, float]] = set()
         gap_audit: dict[str, tuple[str, frozenset[str], tuple[float, ...]]] = {}
+        source_first_gates: dict[str, set[str]] = {}
+        def review_gate(gap_id: str, gate: str) -> None:
+            # A raw gap can have multiple equally owned band alternatives.
+            # Preserve their typed outcomes, without electing input order.
+            source_first_gates.setdefault(gap_id, set()).add(gate)
         face_comparisons = []
         for axis in ("horizontal", "vertical"):
             along_scale, cross_scale = _raster_axis_registration_scales(
@@ -1994,6 +2122,7 @@ class PhysicalOpeningAuthority:
                 }, digest_chars=32)
                 gap_audit[gap_id] = (gap_id, gap_support, gap_box_pt)
                 if pair.reasons:
+                    review_gate(gap_id, str(pair.reasons[0]))
                     continue
 
                 groups = _raster_frame_line_groups(
@@ -2016,11 +2145,39 @@ class PhysicalOpeningAuthority:
                         common_endpoint_rows=(pair.row0,pair.row1),frame_line_groups=groups,
                         original_common_row_continuity=legacy_face_continues,
                         paired_original_outer_face_continuity=face_continues))
+                # In the ordinary original producer, two inset ink tracks
+                # can be WINDOW FRAME or overhead-wall/lintel evidence; the
+                # heuristic double-track check cannot erase an independently
+                # authenticated framed source candidate. The original exact
+                # endpoint-face veto still applies to that ordinary producer.
+                #
+                # The paired-outer-faces SHADOW explicitly changes which
+                # endpoint rows count as physical wall opposition. It must
+                # never mint an opening that was negative under the ordinary
+                # source policy solely by reinterpreting internal paired
+                # tracks. Keep the double-track veto for shadow-only frames.
+                # Both policies retain this guard against bare swing fallback.
+                opposing_wall_faces = _raster_double_continuous_face_gap(
+                    work_line, pair,
+                ) if self._raster_double_face_negative_shadow else False
                 frames = (
                     frame_support(pair, axis, groups)
-                    if groups and not face_continues
+                    if (
+                        groups
+                        and not face_continues
+                        and not (
+                            self._raster_paired_outer_faces_shadow
+                            and opposing_wall_faces
+                        )
+                    )
                     else ()
                 )
+                if opposing_wall_faces:
+                    review_gate(gap_id, "raster_double_face_negative_shadow")
+                elif face_continues:
+                    review_gate(gap_id, "raster_wall_face_ink_continues")
+                elif not groups:
+                    review_gate(gap_id, "raster_frame_line_groups_unavailable")
                 if frames:
                     support = (*support_a, *support_b, *frames)
                     support_by_id = {
@@ -2048,7 +2205,15 @@ class PhysicalOpeningAuthority:
                         )
                         self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
                         framed_gap_boxes.add(gap_box_pt)
+                        review_gate(gap_id, "framed_source_candidate")
                         continue
+                    review_gate(gap_id, "raster_frame_parent_support_incomplete")
+
+                # Do not let the door-swing fallback override separately
+                # authenticated continuous wall-face ink. This guard applies
+                # equally to framed and swing nomination paths.
+                if face_continues or opposing_wall_faces:
+                    continue
 
                 swing_scale_ratio = _raster_swing_perpendicular_scale_ratio(
                     gap_box_pt,
@@ -2056,6 +2221,7 @@ class PhysicalOpeningAuthority:
                     image_placements,
                 )
                 if swing_scale_ratio is None:
+                    review_gate(gap_id, "raster_source_image_affine_unavailable")
                     continue
                 solutions = _raster_door_swing_solutions(
                     work_thin,
@@ -2065,12 +2231,14 @@ class PhysicalOpeningAuthority:
                     along_scale=along_scale,
                 )
                 if len(solutions) > 1:
+                    review_gate(gap_id, "raster_swing_source_alternatives_ambiguous")
                     ambiguous_support_ids.update(
                         record.observation_id
                         for record in (*support_a, *support_b)
                     )
                     continue
                 if len(solutions) != 1 or gap_box_pt in framed_gap_boxes:
+                    review_gate(gap_id, "raster_unique_swing_source_unavailable")
                     continue
                 leaf = swing_leaf_support(
                     solutions[0],
@@ -2078,12 +2246,14 @@ class PhysicalOpeningAuthority:
                     along_scale,
                 )
                 if not leaf:
+                    review_gate(gap_id, "raster_door_leaf_source_unavailable")
                     continue
                 support = (*support_a, *support_b, *leaf)
                 support_by_id = {
                     record.observation_id: record for record in support
                 }
                 if len(support_by_id) < 7:
+                    review_gate(gap_id, "raster_swing_parent_support_incomplete")
                     continue
                 payload = {
                     "document_id": seed.document_id,
@@ -2105,6 +2275,7 @@ class PhysicalOpeningAuthority:
                     RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
                 )
                 self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
+                review_gate(gap_id, "swing_source_candidate")
 
         for candidate_id in tuple(sorted(discovered)):
             if (
@@ -2155,6 +2326,10 @@ class PhysicalOpeningAuthority:
         self._raster_gap_candidate_audit_cache[cache_key] = tuple(
             gap_audit[key] for key in sorted(gap_audit)
         )
+        self._raster_gap_first_gate_shadow_cache[cache_key] = tuple(
+            (gap_id, tuple(sorted(gates)))
+            for gap_id, gates in sorted(source_first_gates.items())
+        )
         self._raster_swing_ambiguous_support_cache[cache_key] = frozenset(
             ambiguous_support_ids
         )
@@ -2173,15 +2348,32 @@ class PhysicalOpeningAuthority:
             return candidates
         from pb_physical_opening_viewport_scope_authority import (
             classify_opening_candidate_viewport_scopes,
+            _producer_source_bytes,
         )
-        scope_result = classify_opening_candidate_viewport_scopes(
-            source_visibility_producer=producer,
-            revision_id=seed.revision_id,
-            page_id=seed.page_id,
-            snapshot_id=seed.snapshot_id,
-            candidates=candidates,
-            records=records,
-        )
+        key = (seed.document_id, seed.revision_id, seed.source_sha256,
+               seed.snapshot_id, seed.page_id)
+        published = producer.published_snapshot_for_revision(seed.revision_id)
+        if (published is None
+                or published.snapshot.snapshot_id != seed.snapshot_id
+                or published.revision.source_sha256 != seed.source_sha256
+                or _producer_source_bytes(producer, seed.revision_id, seed.source_sha256) is None):
+            self._raster_viewport_candidate_cache.pop(key, None)
+            return ()
+        cached = self._raster_viewport_candidate_cache.get(key)
+        if cached is not None and cached[:2] == (records, candidates):
+            scope_result = cached[2]
+        else:
+            scope_result = classify_opening_candidate_viewport_scopes(
+                source_visibility_producer=producer,
+                revision_id=seed.revision_id,
+                page_id=seed.page_id,
+                snapshot_id=seed.snapshot_id,
+                candidates=candidates,
+                records=records,
+            )
+            if len(self._raster_viewport_candidate_cache) >= 8:
+                self._raster_viewport_candidate_cache.pop(next(iter(self._raster_viewport_candidate_cache)))
+            self._raster_viewport_candidate_cache[key] = (records, candidates, scope_result)
         if scope_result.status is not EvidenceResolutionStatus.CORROBORATED:
             return ()
         if not tuple(scope_result.authenticated_viewports):
@@ -2509,17 +2701,62 @@ class PhysicalOpeningAuthority:
         collapsed = sorted(last_by_geometry.values(), key=lambda row: row[0])
         scoped = tuple(row[1] for row in collapsed)
         cached_lines = tuple(row[2] for row in collapsed)
-        breaks: list[_FaceBreak] = []
-        for first_index, second_index in _candidate_collinear_record_pairs(
+        collinear_pairs = _candidate_collinear_record_pairs(
             scoped, line_geometries=cached_lines
-        ):
+        )
+        collinear_neighbors: dict[int, set[int]] = {}
+        for first_index, second_index in collinear_pairs:
+            collinear_neighbors.setdefault(first_index, set()).add(second_index)
+            collinear_neighbors.setdefault(second_index, set()).add(first_index)
+
+        breaks: list[_FaceBreak] = []
+        for first_index, second_index in collinear_pairs:
             found = _face_break(
                 scoped[first_index],
                 scoped[second_index],
                 first_line=cached_lines[first_index],
                 second_line=cached_lines[second_index],
             )
-            if found is not None:
+            if found is None:
+                continue
+
+            # Positive collinear wall continuation inside a proposed gap means
+            # these two segments are not adjacent face boundaries. Historically
+            # all-pairs discovery could jump across an intervening solid wall
+            # stub and mint a false spanning opening. Only a source-visible gap
+            # with no intervening collinear coverage may become a face break.
+            continuation = False
+            for other_index in (
+                collinear_neighbors.get(first_index, set())
+                | collinear_neighbors.get(second_index, set())
+            ):
+                if other_index in {first_index, second_index}:
+                    continue
+                other = cached_lines[other_index]
+                values = sorted(
+                    (
+                        _projection((other[0], other[1]), found.direction),
+                        _projection((other[2], other[3]), found.direction),
+                    )
+                )
+                overlap = min(values[1], found.gap_end) - max(
+                    values[0], found.gap_start
+                )
+                # A boundary-anchored cap is not independent proof of
+                # physical wall continuation: native dimension ticks and jamb
+                # decoration may start at either gap endpoint. Preserve that
+                # structural hypothesis for the producer-owned annotation
+                # opposition/integrity checks (which can only ABSTAIN).
+                # A positive source-visible stub strictly INSIDE the proposed
+                # gap does prove these are not adjacent wall faces.
+                interior_stub = (
+                    values[0] > found.gap_start + _COORD_EQ_ABS_TOL
+                    and values[1] < found.gap_end - _COORD_EQ_ABS_TOL
+                )
+                if interior_stub and overlap > _COORD_EQ_ABS_TOL:
+                    continuation = True
+                    break
+            if not continuation:
                 breaks.append(found)
 
         if not breaks:
@@ -3922,8 +4159,11 @@ class PhysicalOpeningAuthority:
         ))
 
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
-        if (self._source_visibility_producer is not None and self._raster_source_policy_at_creation != getattr(
-                self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)):
+        if (self._source_visibility_producer is not None and (
+                self._raster_source_policy_at_creation != getattr(
+                    self._source_visibility_producer, "_raster_paired_outer_faces_shadow", False)
+                or self._raster_double_face_negative_shadow != getattr(
+                    self._source_visibility_producer, "_raster_double_face_negative_shadow", False))):
             raise RuntimeError("original raster source policy changed after authority creation")
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")

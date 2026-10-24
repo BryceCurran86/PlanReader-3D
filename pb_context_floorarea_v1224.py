@@ -160,11 +160,15 @@ def filter_page_occurrences(items: Sequence[Dict[str, Any]], dictionary: Dict[st
 
 
 def _area_value(line: str) -> float:
-    match = auto._AREA_RE.search(str(line or ""))
-    if not match:
-        return 0.0
-    value = auto._num(match.group(1))
-    return value if 8.0 <= value <= 5000.0 else 0.0
+    """Return one printed area. Two different areas on the line abstain."""
+    values: list[float] = []
+    for match in auto._AREA_RE.finditer(str(line or "")):
+        value = auto._num(match.group(1))
+        if 8.0 <= value <= 5000.0 and value not in values:
+            values.append(value)
+    if len(values) == 1:
+        return values[0]
+    return 0.0
 
 
 def _best_unit_label_near(lines: Sequence[str], idx: int) -> str:
@@ -185,11 +189,15 @@ def floor_location(page: Dict[str, Any]) -> str:
     if unit_label:
         return unit_label
     low = full.lower()
+    levels: list[str] = []
     if "ground floor" in low or "ground level" in low:
-        return "Ground Floor"
-    match = _LEVEL_RE.search(full)
-    if match:
-        return f"Level {int(match.group(1))}"
+        levels.append("Ground Floor")
+    for match in _LEVEL_RE.finditer(full):
+        name = f"Level {int(match.group(1))}"
+        if name not in levels:
+            levels.append(name)
+    if len(levels) == 1:
+        return levels[0]
     if label_text:
         return f"Internal Floor · {label_text}"
     return f"Internal Floor · Page {int(auto._num(page.get('page_no'), auto._num(page.get('id'), 0)))}"

@@ -216,15 +216,18 @@ def _legend_semantics(lines):
 
 
 class OpeningLabelSemanticProducer:
-    def __init__(self, source: SourceVisibilityProducer) -> None:
+    def __init__(self, source: SourceVisibilityProducer, *, bifold_descriptor_shadow: bool = False) -> None:
         if type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be producer-owned")
+        if type(bifold_descriptor_shadow) is not bool:
+            raise ValueError("bifold descriptor shadow must be explicit boolean")
+        self._bifold_descriptor_shadow = bifold_descriptor_shadow
         self._source = source
         self._physical = source.physical_opening_authority()
 
     @classmethod
-    def from_source_visibility_producer(cls, source):
-        return cls(source)
+    def from_source_visibility_producer(cls, source, *, bifold_descriptor_shadow: bool = False):
+        return cls(source, bifold_descriptor_shadow=bifold_descriptor_shadow)
 
     def publish_scope(self, selector: ObservationSelector) -> OpeningLabelSemanticResult:
         physical = self._physical.prove_existence(selector)
@@ -250,7 +253,8 @@ class OpeningLabelSemanticProducer:
                 continue
             direct_kind, direct_conflict = _explicit_word_kind(line.text)
             compact_kind, compact_conflict = classify_compact_source_opening_text(
-                line.text
+                line.text,
+                **({"bifold_descriptor_shadow": True} if self._bifold_descriptor_shadow else {})
             )
             if direct_conflict or compact_conflict:
                 return OpeningLabelSemanticResult(

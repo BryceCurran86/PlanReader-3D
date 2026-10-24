@@ -73,3 +73,23 @@ def test_bad_caller_page_returns_shadow_abstention_without_throwing():
         )
         assert row.abstained and row.value is None
         assert row.metadata["page_no"] is None
+
+
+@pytest.mark.parametrize("ownership",[
+    (),(("vp-floor-1",True),),(("vp-floor-1",1.0),),
+    (("vp-floor-1","1"),),(("vp-floor-1",0),),
+    (("vp-floor-1",2),),
+    (("vp-floor-1",1),("vp-floor-1",1)),
+])
+def test_source_owned_ceiling_finish_cannot_borrow_absent_or_aliased_viewport_page(ownership):
+    context=replace(_context(),viewport_page_ownership=ownership)
+    result=_build(context=context)
+    assert result.abstained and result.value is None
+    assert "viewport_page_mismatch" in result.blocking_reasons
+
+
+def test_original_ceiling_floor_area_and_native_viewport_page_still_diagnostic_only():
+    result=_build(context=_context())
+    assert not result.abstained and result.value == 42.375
+    assert result.metadata["shadow_only"] is True
+    assert result.metadata["commercial_projection_allowed"] is False

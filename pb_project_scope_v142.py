@@ -48,11 +48,20 @@ def _is_scope_designator(token: str) -> bool:
 
 
 def normalise_group(raw: str) -> str:
+    """Return one scope group. Two different groups in the same text abstain."""
     text = re.sub(r"\s+", " ", str(raw or "").strip())
+    found: list[str] = []
     for prefix in ("block", "building", "tower", "stage"):
-        m = re.search(rf"\b{prefix}\s*[-:]?\s*([a-z0-9]+)\b", text, re.I)
-        if m:
-            return f"{prefix.title()} {m.group(1).upper()}"
+        for match in re.finditer(rf"\b{prefix}\s*[-:]?\s*([a-z0-9]+)\b", text, re.I):
+            if not _is_scope_designator(match.group(1)):
+                continue
+            label = f"{prefix.title()} {match.group(1).upper()}"
+            if label not in found:
+                found.append(label)
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        return ""
     return text
 
 

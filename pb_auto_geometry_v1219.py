@@ -401,22 +401,30 @@ def extract_unit_area_candidates(text: Any) -> List[Dict[str, Any]]:
         if not unit_match:
             continue
         label = f"Unit {unit_match.group(1)}"
-        search_lines = [line]
+
+        def _areas_on(candidate_line: str) -> List[Tuple[float, str]]:
+            found: List[Tuple[float, str]] = []
+            for match in _AREA_RE.finditer(candidate_line):
+                value = _num(match.group(1))
+                if 8.0 <= value <= 1000.0:
+                    found.append((round(value, 2), candidate_line))
+            return found
+
+        areas = _areas_on(line)
         if idx + 1 < len(lines):
-            search_lines.append(lines[idx + 1])
-        if idx > 0:
-            search_lines.append(lines[idx - 1])
-        area = None
-        source_line = line
-        for candidate_line in search_lines:
-            match = _AREA_RE.search(candidate_line)
-            if match:
-                area = _num(match.group(1))
-                source_line = candidate_line
-                break
+            next_label = _UNIT_LABEL_RE.search(lines[idx + 1])
+            if not next_label or next_label.group(1).lower() == unit_match.group(1).lower():
+                areas.extend(_areas_on(lines[idx + 1]))
+        if not areas and idx > 0:
+            previous_label = _UNIT_LABEL_RE.search(lines[idx - 1])
+            if not previous_label or previous_label.group(1).lower() == unit_match.group(1).lower():
+                areas.extend(_areas_on(lines[idx - 1]))
+        distinct = {value for value, _source in areas}
         key = label.lower()
-        if area and 8.0 <= area <= 1000.0 and key not in used:
-            out.append({"label": label, "area_m2": round(area, 2), "confidence": "Documented", "source": source_line})
+        if len(distinct) == 1 and key not in used:
+            area = next(iter(distinct))
+            source_line = next(source for value, source in areas if value == area)
+            out.append({"label": label, "area_m2": area, "confidence": "Documented", "source": source_line})
             used.add(key)
     return out
 
@@ -428,12 +436,14 @@ def extract_substrate_area_candidates(text: Any) -> List[Dict[str, Any]]:
         line = re.sub(r"\s+", " ", raw_line).strip()
         if not line:
             continue
-        area_match = _AREA_RE.search(line)
-        if not area_match:
+        area_values: List[float] = []
+        for area_match in _AREA_RE.finditer(line):
+            value = round(_num(area_match.group(1)), 2)
+            if 0.2 <= value <= 50000.0 and value not in area_values:
+                area_values.append(value)
+        if len(area_values) != 1:
             continue
-        area = _num(area_match.group(1))
-        if not (0.2 <= area <= 50000.0):
-            continue
+        area = area_values[0]
         subs = _substrates_from_text(line)
         if not subs:
             continue

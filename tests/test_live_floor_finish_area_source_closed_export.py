@@ -621,3 +621,29 @@ def test_floor_finish_customer_legitimate_abstained_only_inventory_stays_empty()
     assert project_live_floor_finish_customer_rows(
         claim, workspace_id=1, project_id="project-1"
     ) == ()
+
+
+@pytest.mark.parametrize("alias", [True, 1, 1.0, " 1", "1 ", "", None])
+def test_floor_finish_source_page_metadata_rejects_untyped_or_trimmed_aliases(alias):
+    claim = _claim()
+    quantity = claim.floor_finish_quantity_evidence[0]
+    tampered = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), "page_no": alias},
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="source page mismatch"):
+        seal_live_floor_finish_area_run(
+            replace(claim, floor_finish_quantity_evidence=(tampered,)),
+            workspace_id=1,
+            project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize("alias", [True, 1, 1.0, " 1", "1 ", "", None])
+def test_floor_finish_canonical_page_rejects_untyped_or_trimmed_aliases(alias):
+    with pytest.raises(SourceClosedRunConflictError, match="source page mismatch"):
+        seal_live_floor_finish_area_run(
+            _claim(replace(_floor(), page_id=alias)),
+            workspace_id=1,
+            project_id="project-1",
+        )

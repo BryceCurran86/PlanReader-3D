@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "tools/gpt3_original_source_preflight.py"
       - "tools/run_gpt3_lot16_original_sealed_score_input.py"
       - "tools/diag_lot16_room_face_scope.py"
       - "tests/test_gpt3_lot16_original_sealed_score_input.py"
@@ -22,6 +23,24 @@ jobs:
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --expected-sha256 '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -38,10 +57,14 @@ jobs:
           OUT=artifacts/gpt3-lot16-original-source-score-input
           mkdir -p "$OUT"
           git rev-parse HEAD > "$OUT/producer_head_sha.txt"
-          python - <<'PY'
-          import hashlib
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
+          from tools.gpt3_original_source_preflight import (
+              SOURCE_BLOCKED,
+              SOURCE_PRESENT,
+              classify_original_source_preflight,
+          )
 
           manifest=json.loads(Path(
               "benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json"
@@ -50,13 +73,14 @@ jobs:
           assert len(architects)==1
           data=architects[0]
           pdf=Path("documents/sources") / data["name"]
-          assert pdf.is_file() and pdf.stat().st_size==data["size_bytes"]
-          sha=hashlib.sha256(pdf.read_bytes()).hexdigest()
-          assert sha==data["sha256"], "frozen original architectural SHA mismatch"
+          receipt=classify_original_source_preflight(pdf, data["sha256"])
+          if receipt["status"] != SOURCE_PRESENT:
+              raise SystemExit(2 if receipt["status"] == SOURCE_BLOCKED else 1)
+          assert pdf.stat().st_size==data["size_bytes"]
           Path("artifacts/gpt3-lot16-original-source-score-input/source_sha256.txt").write_text(
-              sha + "\n", encoding="utf-8",
+              receipt["actual_sha256"] + "\n", encoding="utf-8",
           )
-          print("SOURCE SHA VERIFIED",sha,flush=True)
+          print("SOURCE SHA VERIFIED", receipt["actual_sha256"], flush=True)
           PY
           /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \

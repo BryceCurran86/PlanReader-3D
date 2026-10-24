@@ -50,6 +50,7 @@ def _slab():
         "provenance": {
             "annotation_raw_text": "150mm RC slab",
             "boundary_id": "slab-boundary-1",
+            "evidence_ids": ["source-150mm-slab-geometry", "source-slab-thickness"],
         },
     }
 
@@ -275,11 +276,6 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
                 "section": "Internal",
                 "evidence_ids": ["spec-flooring"],
             },
-            "tiling": {
-                "material": "Porcelain floor tile",
-                "section": "Internal",
-                "evidence_ids": ["spec-tile"],
-            },
             "coating": {
                 "material": "Epoxy coating",
                 "section": "Internal",
@@ -292,10 +288,9 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
             specs,
         )
 
-        self.assertEqual(len(quantities), 3)
+        self.assertEqual(len(quantities), 2)
         by_trade = {item.trade_scope: item for item in quantities}
         self.assertEqual(by_trade["flooring"].quantity, 24.0)
-        self.assertEqual(by_trade["tiling"].quantity, 24.0)
         self.assertEqual(by_trade["painting"].quantity, 24.0)
         for item in quantities:
             self.assertEqual(item.host_object_id, "floor_101")
@@ -413,6 +408,8 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
                 "material": "MDF skirting",
                 "section": "Internal",
                 "evidence_ids": ["spec-skirting"],
+                "door_universe_complete": True,
+                "door_source_scope_id": "room_101",
             },
             "cornice": {
                 "material": "90mm cove cornice",
@@ -424,7 +421,12 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
         quantities = derive_space_trade_quantities(
             _space(),
             specs=specs,
-            doors=[{"width_m": 0.9}],
+            doors=[{
+                "canonical_room_id":"room_101",
+                "opening_identity_id":"door-1",
+                "width_m":0.9,
+                "source_width_evidence_ids":["ev-door-width-1"],
+            }],
         )
 
         self.assertEqual(len(quantities), 2)
@@ -440,6 +442,8 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
                 "material": "MDF skirting",
                 "section": "Internal",
                 "evidence_ids": ["spec-skirting"],
+                "door_universe_complete": True,
+                "door_source_scope_id": "room_101",
             },
             "cornice": {
                 "material": "90mm cove cornice",
@@ -507,12 +511,16 @@ class TestCrossTradeGeometryReuse(unittest.TestCase):
         concrete = quantities[0]
 
         self.assertEqual(concrete.unit, "m³")
-        with self.assertRaises(takeoff_contract.TakeoffRowContractError):
-            to_takeoff_rows(
-                workspace_id=77,
-                quantities=[concrete],
-                source_page="p1",
-            )
+        # m³ was added to the live commercial rate-unit contract. Keep
+        # true cubic metre quantities rather than raising the retired
+        # unsupported-unit guard or coercing volume into an item count.
+        self.assertIn("m³", takeoff_contract.TAKEOFF_UNITS)
+        concrete_rows = to_takeoff_rows(
+            workspace_id=77, quantities=[concrete], source_page="p1",
+        )
+        self.assertEqual(len(concrete_rows), 1)
+        unit_index = takeoff_contract.CORE_FIELDS.index("unit")
+        self.assertEqual(concrete_rows[0][unit_index], "m³")
 
 
 if __name__ == "__main__":

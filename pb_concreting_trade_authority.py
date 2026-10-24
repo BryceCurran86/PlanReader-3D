@@ -37,7 +37,7 @@ class ConcreteElementSpec:
     width_m: float = 0.0
     thickness_m: float = 0.0
     height_m: float = 0.0
-    count: int = 1
+    count: int = 0
     area_m2: float = 0.0
     perimeter_lm: float = 0.0
     is_suspended: bool = False
@@ -92,14 +92,65 @@ class ConcreteTakeoffItem:
         }
 
 
+def _positive_original_metric(*values: object) -> bool:
+    """Physical dimensions may only be typed finite positive metres."""
+    for value in values:
+        if type(value) not in (int, float):
+            return False
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(numeric) or numeric <= 0.0:
+            return False
+    return True
+
+
+def _positive_original_count(value: object) -> bool:
+    """A boolean, decimal or guessed default is not a physical item count."""
+    if type(value) is not int or value <= 0:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def calculate_slab_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTakeoffItem]:
     """Calculate all trade items for a concrete slab (ground-bearing or suspended)."""
     items: List[ConcreteTakeoffItem] = []
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    thickness = spec.thickness_m if spec.thickness_m > 0.0 else 0.100  # Default 100mm
-    if area <= 0.0:
+    # Original slab m² and orthogonal metric axes are independent sources.
+    # Never select a convenient area over contradictory real dimensions.
+    if not _positive_original_metric(spec.thickness_m):
         return items
+    if type(spec.area_m2) not in (int, float):
+        return items
+    try:
+        recorded_area = float(spec.area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return items
+    if not math.isfinite(recorded_area) or recorded_area < 0.0:
+        return items
+    has_axes = _positive_original_metric(spec.length_m, spec.width_m)
+    if (
+        recorded_area > 0.0 and has_axes
+        and not math.isclose(recorded_area, spec.length_m * spec.width_m,
+                             rel_tol=0.0, abs_tol=0.011)
+    ):
+        return items
+    area = recorded_area if recorded_area > 0.0 else (
+        spec.length_m * spec.width_m if has_axes else None
+    )
+    if area is None or not math.isfinite(area) or area <= 0.0:
+        return items
+    thickness = float(spec.thickness_m)
 
+    if (
+        type(spec.is_suspended) is not bool
+        or not math.isfinite(area * thickness)
+        or area * thickness <= 0.0
+    ):
+        return items
     vol_m3 = round(area * thickness, 2)
     slab_type = "Suspended slab" if spec.is_suspended else "Slab on ground"
     sec = "Structure" if spec.is_suspended else "Substructure"
@@ -130,7 +181,7 @@ def calculate_slab_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
         substrate=spec.concrete_grade,
         finish_system="Supply, pump and place",
         quantity=vol_m3,
-        unit="item",
+        unit="m³",
         quantity_status="Measured",
         source_page=spec.source_page,
         source_reference=f"{CONCRETE_SOURCE_PREFIX} · {spec.element_id}",
@@ -171,12 +222,12 @@ def calculate_slab_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
             finish_system="Supplied and laid with 200mm laps and taped joints",
             quantity=round(area * 1.10, 2),  # 10% lap allowance
             unit="m²",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{CONCRETE_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
-            notes=f"Net area {area:.2f} m² + 10% lap allowance = {area*1.10:.2f} m².",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
+            notes=f"Provisional model allowance: {area:.2f} m² + 10% laps = {area*1.10:.2f} m²; DPM material, installation and laps are NOT source-authenticated.",
             row_role="",
         ))
 
@@ -205,11 +256,13 @@ def calculate_slab_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
 def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTakeoffItem]:
     """Calculate trade items for strip footings or pad footings."""
     items: List[ConcreteTakeoffItem] = []
-    if "strip" in spec.element_type:
+    if spec.element_type == "footing_strip":
         length = spec.length_m
-        width = spec.width_m if spec.width_m > 0.0 else 0.400
-        depth = spec.thickness_m if spec.thickness_m > 0.0 else 0.450
-        if length <= 0.0:
+        width = spec.width_m
+        depth = spec.thickness_m
+        if not _positive_original_metric(length, width, depth):
+            return items
+        if not math.isfinite(length * width * depth):
             return items
         vol_m3 = round(length * width * depth, 2)
 
@@ -236,7 +289,7 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
             substrate=spec.concrete_grade,
             finish_system="Supply, pump and place in trenches",
             quantity=vol_m3,
-            unit="item",
+            unit="m³",
             quantity_status="Measured",
             source_page=spec.source_page,
             source_reference=f"{CONCRETE_SOURCE_PREFIX} · {spec.element_id}",
@@ -245,12 +298,16 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
             notes=f"Volume {vol_m3:.2f} m³ ({length:.2f} lm × {width:.3f}m × {depth:.3f}m).",
             row_role="",
         ))
-    elif "pad" in spec.element_type:
-        count = max(1, spec.count)
-        length = spec.length_m if spec.length_m > 0.0 else 1.0
-        width = spec.width_m if spec.width_m > 0.0 else 1.0
-        depth = spec.thickness_m if spec.thickness_m > 0.0 else 0.500
+    elif spec.element_type == "footing_pad":
+        count = spec.count
+        length = spec.length_m
+        width = spec.width_m
+        depth = spec.thickness_m
+        if not _positive_original_count(count) or not _positive_original_metric(length, width, depth):
+            return items
         vol_per_pad = length * width * depth
+        if not math.isfinite(count * vol_per_pad):
+            return items
         total_vol_m3 = round(count * vol_per_pad, 2)
 
         items.append(ConcreteTakeoffItem(
@@ -270,11 +327,15 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
             row_role="",
         ))
     elif "bored_pier" in spec.element_type:
-        count = max(1, spec.count)
-        diam = spec.width_m if spec.width_m > 0.0 else 0.450
-        depth = spec.height_m if spec.height_m > 0.0 else 2.500
+        count = spec.count
+        diam = spec.width_m
+        depth = spec.height_m
+        if not _positive_original_count(count) or not _positive_original_metric(diam, depth):
+            return items
         radius = diam / 2.0
-        vol_per_pier = math.pi * (radius ** 2) * depth
+        vol_per_pier = math.pi * (radius * radius) * depth
+        if not math.isfinite(count * vol_per_pier):
+            return items
         total_vol_m3 = round(count * vol_per_pier, 2)
 
         items.append(ConcreteTakeoffItem(
@@ -299,14 +360,20 @@ def calculate_footing_concrete_items(spec: ConcreteElementSpec) -> List[Concrete
 def calculate_column_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTakeoffItem]:
     """Calculate trade items for reinforced concrete columns."""
     items: List[ConcreteTakeoffItem] = []
-    count = max(1, spec.count)
-    w = spec.width_m if spec.width_m > 0.0 else 0.350
-    d = spec.length_m if spec.length_m > 0.0 else 0.350
-    h = spec.height_m if spec.height_m > 0.0 else 2.700
+    count = spec.count
+    w = spec.width_m
+    d = spec.length_m
+    h = spec.height_m
+    if not _positive_original_count(count) or not _positive_original_metric(w, d, h):
+        return items
 
     vol_per_col = w * d * h
+    if not math.isfinite(count * vol_per_col):
+        return items
     total_vol = round(count * vol_per_col, 2)
     perimeter = 2 * (w + d)
+    if not math.isfinite(count * perimeter * h):
+        return items
     formwork_m2 = round(count * perimeter * h, 2)
 
     # 1. Column Count (No.)
@@ -352,13 +419,17 @@ def calculate_beam_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
     """Calculate trade items for reinforced concrete beams."""
     items: List[ConcreteTakeoffItem] = []
     length = spec.length_m
-    w = spec.width_m if spec.width_m > 0.0 else 0.400
-    d = spec.thickness_m if spec.thickness_m > 0.0 else 0.600
-    if length <= 0.0:
+    w = spec.width_m
+    d = spec.thickness_m
+    if not _positive_original_metric(length, w, d):
         return items
 
+    if not math.isfinite(length * w * d):
+        return items
     vol_m3 = round(length * w * d, 2)
     # Formwork: soffit + 2 sides (2 * d + w)
+    if not math.isfinite(length * (w + 2 * d)):
+        return items
     formwork_m2 = round(length * (w + 2 * d), 2)
 
     items.append(ConcreteTakeoffItem(
@@ -401,12 +472,18 @@ def calculate_beam_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTak
 def calculate_stairs_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteTakeoffItem]:
     """Calculate trade items for reinforced concrete stairs."""
     items: List[ConcreteTakeoffItem] = []
-    flights = max(1, spec.count)
-    steps = max(1, int(spec.height_m * 6)) if spec.height_m > 0 else 16  # approx 16 steps per storey
-    width = spec.width_m if spec.width_m > 0.0 else 1.000
+    flights = spec.count
+    width = spec.width_m
+    if not _positive_original_count(flights) or not _positive_original_metric(spec.height_m, width):
+        return items
+    if not math.isfinite(spec.height_m * 6):
+        return items
+    steps = max(1, int(spec.height_m * 6))
     # Average waist slab + steps volume: ~0.15 m³ per step per metre width
     vol_m3 = round(flights * steps * width * 0.08, 2)
     formwork_m2 = round(flights * steps * (width * 0.18 + width * 0.28), 2)
+    if not math.isfinite(vol_m3) or not math.isfinite(formwork_m2):
+        return items
 
     items.append(ConcreteTakeoffItem(
         section="Structure",
@@ -433,12 +510,12 @@ def calculate_stairs_concrete_items(spec: ConcreteElementSpec) -> List[ConcreteT
         finish_system="Form, prop and strip",
         quantity=formwork_m2,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CONCRETE_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Formwork area: {formwork_m2:.2f} m² across {steps} steps.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional stairs formwork {formwork_m2:.2f} m² based on inferred {steps} steps; actual rise, going, waist and formwork faces require source dimensions.",
         row_role="",
     ))
 

@@ -1138,7 +1138,10 @@ def test_gpt2_finish_result_floor_lookup_never_silently_overwrites_conflicts(
     competing=replace(
         authentic,occurrence_record_id="independent-competing-occurrence",
     )
-    unrelated=replace(
+    # A different floor ID is NOT a different physical room. The rekeyed
+    # record below intentionally reuses the authentic source face, physical
+    # room, native material mark and original quantity metadata.
+    rekeyed_same_source=replace(
         authentic,canonical_floor_id="other-canonical-floor",
         physical_floor_surface_id="other-canonical-floor",
         quantity=replace(
@@ -1146,16 +1149,14 @@ def test_gpt2_finish_result_floor_lookup_never_silently_overwrites_conflicts(
         ),
         occurrence_record_id="other-original-occurrence",
     )
-    disputed=replace(produced,records=(authentic,competing,unrelated))
-    assert dict(disputed.records_by_floor_id)=={
-        "other-canonical-floor":unrelated
-    }
-    # The direct QuantityEvidence accessor cannot bypass the duplicate
-    # canonical-floor quarantine into customer-facing finish takeoff.
-    assert disputed.quantities == (unrelated.quantity,)
-    assert authentic.quantity not in disputed.quantities
-    assert authentic.canonical_floor_id not in disputed.records_by_floor_id
-    assert competing.canonical_floor_id not in disputed.records_by_floor_id
+    disputed=replace(produced,records=(
+        authentic,competing,rekeyed_same_source
+    ))
+    # Neither alias may escape via the public QuantityEvidence property.
+    # An actually independent second source room is tested separately in
+    # test_gpt2_floor_finish_result_cross_room_source_quarantine.py.
+    assert dict(disputed.records_by_floor_id)=={}
+    assert disputed.quantities == ()
 
 
 def test_gpt2_two_source_faces_cannot_mint_same_physical_room_metric_floor(monkeypatch):

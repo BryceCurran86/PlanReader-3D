@@ -25,6 +25,23 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _exact_original_page_match(raw_page: object, canonical_page: object) -> bool:
+    """Match native one-based source integers or canonical decimal page text.
+
+    Both forms are issued by genuine room-area producers. Floats, bools and
+    padded/leading-zero aliases are not original page identities.
+    """
+    if type(canonical_page) is not str or not canonical_page:
+        return False
+    if not canonical_page.isascii() or not canonical_page.isdecimal():
+        return False
+    if canonical_page[0] == "0":
+        return False
+    if type(raw_page) is int:
+        return raw_page > 0 and str(raw_page) == canonical_page
+    return type(raw_page) is str and raw_page == canonical_page
+
+
 def _valid_original_source_sha(value: object) -> bool:
     """A copied source label is not a real 64-hex original PDF digest."""
     return (
@@ -295,7 +312,12 @@ def publish_live_floor_area_quantities(
             and source_room_face_id != floor.source_room_face_record_id
         ):
             continue
-        if _clean(metadata.get("page_no")) != str(floor.page_id):
+        # The room-area producer's original page is a physical source ID,
+        # not a number to cast or trim until it matches the canonical floor.
+        # Reject bools/floats/whitespace aliases even if their text happens
+        # to look like the floor's page.
+        area_page_id = metadata.get("page_no")
+        if not _exact_original_page_match(area_page_id, floor.page_id):
             continue
         q_viewport = _clean(metadata.get("viewport_id"))
         if not q_viewport:
@@ -459,9 +481,8 @@ def publish_live_canonical_room_area_quantities(
         source_viewport = _clean(metadata.get("viewport_id"))
         if room.viewport_id and source_viewport and _clean(room.viewport_id) != source_viewport:
             continue
-        if str(room.page_id) != _clean(
-            floor_quantity.metadata.get("page_no")
-        ):
+        raw_page_id = floor_quantity.metadata.get("page_no")
+        if not _exact_original_page_match(raw_page_id, room.page_id):
             continue
         # Metric-area evidence is deliberately attached to the canonical floor
         # during enrichment. The canonical room is linked through the exact

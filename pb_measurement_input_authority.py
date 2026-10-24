@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+import re
 from typing import Optional, Sequence
 
 from pb_figured_dimension_authority import resolve_measurement_authority
@@ -355,6 +356,40 @@ def _reconcile_owned_scale_binding(
     return selected, (), fresh, scale_fp
 
 
+_MM_UNITS = frozenset(("mm", "millimetre", "millimeter", "millimetres", "millimeters"))
+_M_UNITS = frozenset(("m", "metre", "meter", "metres", "meters"))
+_BARE_NUMBER_RE = re.compile(r"[+-]?[0-9][0-9,]*(?:\.[0-9]+)?")
+
+
+def _figured_resolver_inputs(
+    figured_evidence: EvidenceAtom,
+) -> tuple[tuple[str, ...], Optional[str], Optional[float]]:
+    """(blocking reasons, figured_text, figured_mm) for the figured-dimension resolver.
+
+    ``EvidenceAtom.unit`` states the unit of ``normalized_value``. It used to be ignored, so every
+    normalized value was read as millimetres: 6.5 m became 6.5 mm, a feet or area value became a
+    length. Fail closed instead of rescaling, so no value that used to be FIRM is reinterpreted:
+    an unrecognised or area unit blocks, a metre-valued number with no printed text blocks, and a
+    bare printed number beside a metre unit blocks unless the normalized value is there to be
+    compared. When both the printed text and the normalized value are present they are both
+    passed on, so ``resolve_measurement_authority`` can block a contradiction.
+    """
+    raw_text = (figured_evidence.raw_text or "").strip()
+    unit = (figured_evidence.unit or "").strip().lower()
+    if unit and unit not in _MM_UNITS and unit not in _M_UNITS:
+        return ("figured_unit_unsupported",), None, None
+    in_metres = unit in _M_UNITS
+    normalized = figured_evidence.normalized_value
+    normalized_mm = None if normalized is None else float(normalized) * (1000.0 if in_metres else 1.0)
+    if not raw_text:
+        if in_metres:
+            return ("figured_unit_unsupported",), None, None
+        return (), None, normalized_mm
+    if in_metres and normalized_mm is None and _BARE_NUMBER_RE.fullmatch(raw_text):
+        return ("figured_unit_ambiguous",), None, None
+    return (), figured_evidence.raw_text, normalized_mm
+
+
 def resolve_linear_measurement_input(
     *,
     context: ProviderContext,
@@ -436,6 +471,20 @@ def resolve_linear_measurement_input(
                 figured_evidence_id=figured_evidence.evidence_id,
             )
 
+        unit_reasons, figured_text_arg, figured_mm_arg = _figured_resolver_inputs(figured_evidence)
+        if unit_reasons:
+            return _blocked(
+                context=context,
+                document=document,
+                page_no=page_no,
+                viewport_id=viewport.viewport_id,
+                entity_id=entity.candidate_entity_id,
+                evidence_ids=evidence_ids,
+                reasons=unit_reasons,
+                source_type=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                figured_evidence_id=figured_evidence.evidence_id,
+            )
+
         trusted_scaled_mm: Optional[float] = None
         scale_fp: Optional[str] = None
         if scaled_length_page_units is not None and scale_bindings:
@@ -454,12 +503,8 @@ def resolve_linear_measurement_input(
 
         result = resolve_measurement_authority(
             scaled_mm=trusted_scaled_mm,
-            figured_text=figured_evidence.raw_text or None,
-            figured_mm=(
-                figured_evidence.normalized_value
-                if figured_evidence.normalized_value is not None and not figured_evidence.raw_text
-                else None
-            ),
+            figured_text=figured_text_arg or None,
+            figured_mm=figured_mm_arg,
             scale_reliable=trusted_scaled_mm is not None,
             max_delta_ratio=max_delta_ratio,
         )

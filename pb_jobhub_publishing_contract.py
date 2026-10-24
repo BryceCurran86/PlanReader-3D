@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from enum import Enum
 import hashlib
 import json
@@ -167,29 +168,36 @@ class PublishingPackagePayload:
 
     def compute_payload_hash(self) -> str:
         """Compute deterministic payload hash across all quantities, pricing, and identities."""
+        # V2 fingerprint binds EVERY source/customer authority field used by
+        # this publishing contract. Prior fingerprint silently rounded signed
+        # quantities to four decimals and ignored source page, approvals,
+        # geometry refs, warnings and source preflight entirely. Those changes
+        # could therefore bypass the TOCTOU/duplicate guard.
+        #
+        # Deliberately omit created_at: identical content created on different
+        # days must retain one fingerprint so duplicate import is detectable.
         normalized_data = {
+            "hash_contract": "planreader-jobhub-full-evidence-v2",
             "workspace_id": self.workspace_id,
             "mode": self.mode,
             "project": self.project_identity.to_dict(),
             "revision": self.drawing_revision.to_dict(),
             "quantities": [
-                {
-                    "id": q.row_id,
-                    "sec": q.section,
-                    "loc": q.location,
-                    "sub": q.substrate,
-                    "tag": q.finish_tag,
-                    "elem": q.element,
-                    "u": q.unit,
-                    "qty": round(q.quantity, 4),
-                    "rate": round(q.rate, 2),
-                    "tot": round(q.total_price, 2),
-                    "auth": q.authority_type,
-                    "st": q.authority_status,
-                }
+                q.to_dict()
                 for q in sorted(self.quantities, key=lambda x: x.row_id)
             ],
-            "excluded": [e.to_dict() for e in sorted(self.excluded_items, key=lambda x: x.item_code)],
+            "excluded": [
+                e.to_dict()
+                for e in sorted(self.excluded_items, key=lambda x: x.item_code)
+            ],
+            "warnings": [
+                w.to_dict() for w in self.warnings
+            ],
+            "benchmark_status": (
+                self.benchmark_status.to_dict() if self.benchmark_status else None
+            ),
+            "preflight_fingerprint": self.preflight_fingerprint,
+            "created_by": self.created_by,
         }
         raw_json = json.dumps(normalized_data, sort_keys=True, allow_nan=False)
         return hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
@@ -234,6 +242,10 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
     blocking_reasons: List[str] = []
     warnings: List[str] = []
     is_commercial = (package.mode == PublishingMode.COMMERCIAL.value)
+    if package.mode not in {
+        PublishingMode.COMMERCIAL.value, PublishingMode.DRAFT.value,
+    }:
+        blocking_reasons.append("Unsupported publishing mode cannot bypass commercial authority")
 
     # 1. Project Identity Validation
     ident = package.project_identity
@@ -242,6 +254,12 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
     if not ident.job_name or not ident.job_name.strip():
         blocking_reasons.append("Missing project job name in publishing payload")
     if is_commercial:
+        if not re.fullmatch(
+            r"[0-9a-f]{64}", str(package.drawing_revision.source_files_hash or "")
+        ):
+            blocking_reasons.append(
+                "Commercial publishing requires original document SHA-256 revision evidence"
+            )
         if not ident.estimator or not str(ident.estimator).strip():
             blocking_reasons.append("Missing estimator attribution for commercial publishing")
         if not package.created_by or not str(package.created_by).strip():
@@ -270,12 +288,20 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
     if not package.quantities:
         blocking_reasons.append("Zero takeoff quantities in publishing payload")
 
+    row_ids = [q.row_id for q in package.quantities]
+    if len(row_ids) != len(set(row_ids)):
+        blocking_reasons.append(
+            "Duplicate physical takeoff row IDs cannot enter JobHub publishing"
+        )
+
     for q in package.quantities:
         # Non-finite or negative checks
         if not math.isfinite(q.quantity):
             blocking_reasons.append(f"Row #{q.row_id} has non-finite quantity: {q.quantity}")
         elif q.quantity < 0.0:
             blocking_reasons.append(f"Row #{q.row_id} has negative quantity ({q.quantity} {q.unit})")
+        elif is_commercial and q.quantity == 0.0:
+            blocking_reasons.append(f"Row #{q.row_id} has no measured commercial quantity")
 
         if not math.isfinite(q.rate) or q.rate < 0.0:
             blocking_reasons.append(f"Row #{q.row_id} has invalid rate: {q.rate}")
@@ -283,8 +309,59 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
         if not math.isfinite(q.total_price) or q.total_price < 0.0:
             blocking_reasons.append(f"Row #{q.row_id} has invalid total price: {q.total_price}")
 
+        if is_commercial and all(
+            math.isfinite(number) and number >= 0.0
+            for number in (q.quantity, q.rate, q.total_price)
+        ):
+            # Material and labour rates are customer supplied. The quoted
+            # line total MUST correspond to the source physical quantity and
+            # that exact rate. A self-hashed but altered amount cannot become
+            # a purchase, invoice or JobHub customer commitment.
+            try:
+                rate = Decimal(str(q.rate))
+                actual = Decimal(str(q.total_price))
+                expected = (
+                    Decimal(str(q.quantity)) * rate
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                consistent = (
+                    # Per-unit labour/material prices may legitimately be
+                    # more precise than a cent (e.g. per m² / kg rates).
+                    # Only the final payable line total must be cent-exact.
+                    actual == actual.quantize(Decimal("0.01"))
+                    and actual == expected
+                )
+            except (InvalidOperation, OverflowError):
+                consistent = False
+            if not consistent:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} commercial line cost disagrees with client quantity and rate"
+                )
+
         # Commercial Mode Authority Gates
         if is_commercial:
+            if q.authority_status not in {
+                AuthorityStatus.FIRM.value,
+                AuthorityStatus.USER_APPROVED.value,
+            }:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} has no approved FIRM source quantity authority"
+                )
+            if q.authority_type not in {authority.value for authority in MeasurementAuthorityType}:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} has unrecognised measurement source authority"
+                )
+            if q.authority_type in {
+                MeasurementAuthorityType.PROVISIONAL.value,
+                MeasurementAuthorityType.EXCLUDED.value,
+                MeasurementAuthorityType.REFERENCE_ONLY.value,
+            }:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} is not commercially measurable source work"
+                )
+            if q.authority_status == AuthorityStatus.USER_APPROVED.value and not q.approved_by:
+                blocking_reasons.append(
+                    f"Row #{q.row_id} lacks named estimator user approval"
+                )
             if q.authority_status == AuthorityStatus.PROVISIONAL.value:
                 blocking_reasons.append(
                     f"Row #{q.row_id} ('{q.element}') is PROVISIONAL and cannot enter commercial publishing"
@@ -297,8 +374,12 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
             if q.authority_type in (
                 MeasurementAuthorityType.AI_DETECTED.value,
                 MeasurementAuthorityType.MODEL_DERIVED.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
             ):
-                if not q.approved_by or q.authority_status != AuthorityStatus.FIRM.value:
+                if not q.approved_by or q.authority_status not in (
+                    AuthorityStatus.FIRM.value,
+                    AuthorityStatus.USER_APPROVED.value,
+                ):
                     blocking_reasons.append(
                         f"Row #{q.row_id} ('{q.element}') is {q.authority_type} without estimator approval"
                     )
@@ -306,6 +387,22 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
             # Draft mode warnings
             if q.authority_status in (AuthorityStatus.PROVISIONAL.value, AuthorityStatus.REVIEW_REQUIRED.value):
                 warnings.append(f"Draft notice: Row #{q.row_id} ('{q.element}') is provisional/review ({q.notes})")
+
+    # Every source-owned publishing warning must be visible to the JobHub
+    # recipient. In commercial mode a BLOCKER/CRITICAL/REVIEW warning is not
+    # merely advisory: until it is resolved upstream, the buyer must not
+    # receive a supposedly approved construction quote.
+    for note in package.warnings:
+        severity = str(note.severity or "").strip().lower()
+        notice = (
+            f"Source warning {note.code}: {note.message}"
+        )
+        if is_commercial and severity not in {"info", "warning"}:
+            blocking_reasons.append(
+                "Unresolved commercial source issue: " + notice
+            )
+        else:
+            warnings.append(notice)
 
     # 4. Fingerprint & Payload Hash
     calculated_hash = package.compute_payload_hash()

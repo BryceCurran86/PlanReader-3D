@@ -1,0 +1,21 @@
+from copy import deepcopy
+
+from pb_lot16_opening_receipt_refresh_shadow import refresh_opening_first_gate_receipt
+from test_gptmax_lot16_host_frame_gpt1_handoff import ROOT, VIEW, fixture
+
+
+def test_receipt_refresh_preserves_gates_and_never_publishes():
+    rows, canonical = fixture()
+    before = deepcopy((rows, canonical))
+    report = refresh_opening_first_gate_receipt(
+        rows, canonical, VIEW, source_root=ROOT
+    )
+    assert report["shadow_only"] is True
+    assert report["pdf_bytes_consumed"] is False
+    assert report["gold_values_consumed"] is False
+    assert report["measurement_published"] is False
+    assert report["customer_seal_granted"] is False
+    assert report["opening_count_granted"] is False
+    assert report["original_physical_opening_count"] == 3
+    assert "structural_host_unavailable" in report["first_gate_counts"]
+    assert (rows, canonical) == before

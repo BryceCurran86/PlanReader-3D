@@ -90,7 +90,7 @@ def _rebuild_dictionary_item(code: str, sources: Sequence[Dict[str, Any]]) -> Op
     finishes = {str(item.get("finish") or "") for item in sources if item.get("finish")}
     entry = {
         "code": code,
-        "description": str(representative.get("description") or ""),
+        "description": "" if conflicts else str(representative.get("description") or ""),
         "substrate": next(iter(substrates)) if len(substrates) == 1 else "",
         "finish": next(iter(finishes)) if len(finishes) == 1 else "",
         "status": "Conflict" if conflicts or len(substrates) > 1 or len(finishes) > 1 else "Confirmed",

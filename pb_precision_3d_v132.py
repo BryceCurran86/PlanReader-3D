@@ -95,17 +95,22 @@ def triangulate_polygon(points: Sequence[Tuple[float, float]]) -> List[Tuple[int
 
 
 def infer_level(page_label: Any, page_text: Any = "") -> Tuple[str, int, str]:
+    """Return one printed storey. Two different storeys abstain with an empty name."""
     text = f"{page_label or ''} {page_text or ''}".lower()
-    basement = re.search(r"\b(?:basement|b)\s*[- ]?(\d+)\b", text)
-    if basement:
-        n = max(1, int(basement.group(1)))
-        return f"Basement {n}", -n, "Derived from drawing label/text"
-    level = re.search(r"\b(?:level|lvl|l)\s*[- ]?(\d{1,2})\b", text)
-    if level:
-        n = int(level.group(1))
-        return f"Level {n}", n, "Derived from drawing label/text"
+    found: Dict[str, Tuple[str, int]] = {}
+    for match in re.finditer(r"\b(?:basement|b)\s*[- ]?(\d+)\b", text):
+        number = max(1, int(match.group(1)))
+        found[f"basement {number}"] = (f"Basement {number}", -number)
+    for match in re.finditer(r"\b(?:level|lvl|l)\s*[- ]?(\d{1,2})\b", text):
+        number = int(match.group(1))
+        found[f"level {number}"] = (f"Level {number}", number)
     if re.search(r"\bground(?: floor| level)?\b|\blg\b", text):
-        return "Ground", 0, "Derived from drawing label/text"
+        found["ground"] = ("Ground", 0)
+    if len(found) > 1:
+        return "", 0, "two printed storeys"
+    if len(found) == 1:
+        name, index = next(iter(found.values()))
+        return name, index, "Derived from drawing label/text"
     return "Ground / unregistered", 0, "Level not explicit; visual placement provisional"
 
 
@@ -161,6 +166,8 @@ def build_precision_prisms(app: Any, workspace_id: int) -> List[Dict[str, Any]]:
         if px_per_m <= 0:
             continue
         level_name, level_index, level_reason = infer_level(page.get("page_label"), page.get("extracted_text"))
+        if not level_name:
+            continue
         z0 = level_index * default_height
         for index, shape in enumerate(state.get("boxes") or [], start=1):
             if not isinstance(shape, dict):

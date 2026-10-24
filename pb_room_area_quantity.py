@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from typing import Optional, Sequence
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType, ScaleCalibration
@@ -204,7 +205,33 @@ def _validate_common(
         blockers.append("source_sha256_mismatch")
     if viewport.document_id != context.document_id:
         blockers.append("viewport_document_mismatch")
-    if document.page_ids and viewport.page_id not in document.page_ids:
+    # DocumentEvidence.page_ids is an optional original manifest index:
+    # the live SHA-bound source producer publishes page_count and an exact
+    # ProviderContext viewport->native-page edge, but no duplicate text
+    # manifest of those pages. Do not veto that independently authenticated
+    # source. When a page-id manifest IS supplied, require it to be exact,
+    # complete as an identity set and contain this viewport's source page.
+    page_inventory = document.page_ids
+    page_inventory_bad = (
+        type(page_inventory) not in (tuple, list)
+        or (
+            bool(page_inventory)
+            and (
+                any(
+                    type(page) is not str or not page or page != page.strip()
+                    for page in page_inventory
+                )
+                or len(set(page_inventory)) != len(page_inventory)
+                or viewport.page_id not in page_inventory
+            )
+        )
+        or type(document.page_count) is not int
+        or document.page_count <= 0
+        or type(page_no) is not int
+        or page_no <= 0
+        or page_no > document.page_count
+    )
+    if page_inventory_bad:
         blockers.append("viewport_page_not_owned_by_document")
     if room.viewport_id != viewport.viewport_id:
         blockers.append("room_viewport_mismatch")
@@ -222,25 +249,39 @@ def _validate_common(
         blockers.append("page_not_owned")
     elif page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
-    mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and (
-        type(mapped_page) is not int or mapped_page != page_no
+    # page_for_viewport() coerces numbers with int() and returns None for
+    # missing ownership. Neither a missing binding nor True/1.9/"1" can
+    # corroborate a physical room's exact native PDF page. Source-owned
+    # FIRM room area must have one unique typed viewport-to-page edge.
+    owned_edges = tuple(
+        edge for edge in context.viewport_page_ownership
+        if isinstance(edge, (tuple, list)) and len(edge) == 2
+        and type(edge[0]) is str and edge[0] == viewport.viewport_id
+    )
+    if (
+        len(owned_edges) != 1
+        or type(owned_edges[0][1]) is not int
+        or owned_edges[0][1] != page_no
     ):
         blockers.append("viewport_page_mismatch")
-    if room.source_page:
-        try:
-            original_page = room.source_page
-            if (
-                type(original_page) not in (str, int)
-                or (type(original_page) is str and (
-                    original_page != original_page.strip()
-                    or not original_page.isdecimal()
-                ))
-                or int(original_page) != int(page_no)
-            ):
-                blockers.append("room_source_page_mismatch")
-        except (TypeError, ValueError, OverflowError):
-            blockers.append("room_source_page_mismatch")
+    # A falsy source-page identity (zero/empty string) is still a source
+    # identity error, not permission to skip page binding. An exact original
+    # page number is required even when an independent printed area exists.
+    source_page = room.source_page
+    if (
+        type(source_page) is int and source_page > 0
+        and source_page == page_no
+    ):
+        pass
+    elif (
+        type(source_page) is str
+        and source_page == str(page_no)
+        and source_page.isascii()
+        and source_page.isdecimal()
+    ):
+        pass
+    else:
+        blockers.append("room_source_page_mismatch")
     document_receipts = _original_room_receipts(document.evidence_ids)
     entity_receipts = _original_room_receipts(entity.evidence_ids)
     room_receipts = _original_room_receipts(room.evidence)
@@ -329,6 +370,40 @@ def _validate_explicit_area(
         blockers.append("explicit_area_figured_receipts_invalid")
     if str(evidence.unit or "").strip().lower() not in {"m2", "m²"}:
         blockers.append("explicit_area_unit_not_m2")
+    # A legacy native-vector text value can have its normalized m² replayed
+    # independently of the original printed source. When an explicit printed
+    # square-metre token exists, the source bytes must not disagree with the
+    # claimed area. Authenticated two-axis producers use separate dimension
+    # receipts and are intentionally not subjected to this one-token check.
+    if (
+        evidence.method == "vector_text"
+        and type(evidence.raw_text) is str
+        and type(evidence.normalized_value) in (int, float)
+    ):
+        printed = re.findall(
+            r"(?<![A-Za-z0-9.,])"
+            r"((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)"
+            r"\s*(?:m\s*(?:\^\s*)?[2²]|sq\.?\s*m)(?![A-Za-z0-9])",
+            evidence.raw_text,
+            flags=re.IGNORECASE,
+        )
+        if printed:
+            try:
+                genuine_area = float(evidence.normalized_value)
+                printed_areas = tuple(float(value.replace(",", "")) for value in printed)
+            except (TypeError, ValueError, OverflowError):
+                blockers.append("explicit_area_printed_source_mismatch")
+            else:
+                if (
+                    not math.isfinite(genuine_area)
+                    or any(
+                        not math.isfinite(value) or not math.isclose(
+                            value, genuine_area, rel_tol=0.0, abs_tol=1e-6
+                        )
+                        for value in printed_areas
+                    )
+                ):
+                    blockers.append("explicit_area_printed_source_mismatch")
     return tuple(blockers)
 
 

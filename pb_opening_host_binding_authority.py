@@ -431,6 +431,8 @@ class OpeningHostBindingProducer:
         supplemental_wall_candidate_authority: Optional[
             PhysicalWallCandidateAuthority
         ] = None,
+        source_fragment_roles_shadow: bool = False,
+        reconcile_all_source_scopes_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _BINDING_PRODUCER_SEAL:
@@ -452,6 +454,13 @@ class OpeningHostBindingProducer:
                 "supplemental_wall_candidate_authority must be producer-owned"
             )
         self._opening = physical_opening_authority
+        if type(source_fragment_roles_shadow) is not bool:
+            raise TypeError("source fragment roles shadow must be an explicit boolean")
+        self._source_fragment_roles_shadow = source_fragment_roles_shadow
+        if type(reconcile_all_source_scopes_shadow) is not bool:
+            raise TypeError("source scope reconciliation shadow must be an explicit boolean")
+        self._reconcile_all_source_scopes_shadow = (
+            reconcile_all_source_scopes_shadow or source_fragment_roles_shadow)
         self._universe = host_wall_universe_authority
         self._supplemental_wall_authority = supplemental_wall_candidate_authority
         self._results: dict[_BindingKey, OpeningHostBindingResult] = {}
@@ -469,6 +478,8 @@ class OpeningHostBindingProducer:
         supplemental_wall_candidate_authority: Optional[
             PhysicalWallCandidateAuthority
         ] = None,
+        source_fragment_roles_shadow: bool = False,
+        reconcile_all_source_scopes_shadow: bool = False,
     ) -> "OpeningHostBindingProducer":
         return cls(
             physical_opening_authority,
@@ -476,6 +487,8 @@ class OpeningHostBindingProducer:
             supplemental_wall_candidate_authority=(
                 supplemental_wall_candidate_authority
             ),
+            source_fragment_roles_shadow=source_fragment_roles_shadow,
+            reconcile_all_source_scopes_shadow=reconcile_all_source_scopes_shadow,
             _seal=_BINDING_PRODUCER_SEAL,
         )
 
@@ -717,7 +730,8 @@ class OpeningHostBindingProducer:
                                     if (
                                         supplemental_resolution.status
                                         is EvidenceResolutionStatus.CORROBORATED
-                                        and not supplemental_resolution.bands
+                                        and (not supplemental_resolution.bands
+                                             or self._reconcile_all_source_scopes_shadow)
                                     ):
                                         # The canonical wall universe may already
                                         # own one real G17 flank. The opening-local
@@ -733,6 +747,8 @@ class OpeningHostBindingProducer:
                                                 tuple(supplemental.records),
                                                 host_source_observation_ids,
                                                 tuple(supplemental.source_observation_ids),
+                                                **({"source_fragment_roles_shadow": True}
+                                                   if self._source_fragment_roles_shadow else {}),
                                             )
                                         )
                                     if (
@@ -2899,6 +2915,63 @@ def _resolve_raster_source_primitive_host(
     )
 
 
+def _raster_source_band_flanks(support, opening):
+    """Read face/end closure only; the caller must authenticate every receipt.
+
+    A physical aperture bbox describes the gap. It need not have the same
+    cross-band bounds as the independently observed solid wall faces.
+    This helper grants no host, equivalence or whole-wall authority.
+    """
+    faces = [r for r in support if r.observation_kind == "raster_wall_band_face"]
+    ends = [r for r in support if r.observation_kind == "raster_wall_band_end"]
+    if len(faces) != 4 or len(ends) != 2:
+        return None
+    by_interval: dict[tuple[float, float], list[float]] = {}
+    for face in faces:
+        line = _line(face)
+        data = None if line is None else _source_line_axis_data(line, opening)
+        if data is None:
+            return None
+        lo, hi, offset = data
+        by_interval.setdefault((lo, hi), []).append(offset)
+    if len(by_interval) != 2 or any(len(v) != 2 for v in by_interval.values()):
+        return None
+
+    flanks: dict[str, tuple[float, float, float, float, float]] = {}
+    pixel_tol = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+    for (lo, hi), offsets in by_interval.items():
+        cross_lo, cross_hi = sorted(offsets)
+        if cross_hi - cross_lo <= _COORD_TOL:
+            return None
+        if cross_lo > pixel_tol or cross_hi < -pixel_tol:
+            return None
+        if lo < -pixel_tol and abs(hi) <= pixel_tol:
+            role, edge = "left", hi
+        elif hi > opening.length + pixel_tol and abs(lo - opening.length) <= pixel_tol:
+            role, edge = "right", lo
+        else:
+            return None
+        matching_ends = []
+        for end in ends:
+            line = _line(end)
+            if line is None:
+                return None
+            points = _endpoints(line)
+            along = tuple(_project(p, opening.origin, opening.axis) for p in points)
+            cross = sorted(_project(p, opening.origin, opening.normal) for p in points)
+            if (all(abs(v - edge) <= _COORD_TOL for v in along)
+                    and abs(cross[0] - cross_lo) <= _COORD_TOL
+                    and abs(cross[1] - cross_hi) <= _COORD_TOL):
+                matching_ends.append(end)
+        if len(matching_ends) != 1 or role in flanks:
+            return None
+        flanks[role] = (lo, hi, cross_lo, cross_hi, edge)
+    if set(flanks) != {"left", "right"}:
+        return None
+
+    return flanks
+
+
 def _resolve_raster_source_band_host_from_records(
     support: Sequence[SourceObservationRecord],
     records: Sequence[PhysicalWallCandidateRecord],
@@ -2914,53 +2987,11 @@ def _resolve_raster_source_band_host_from_records(
     flank, including its authenticated end. No global wall identity is inferred.
     """
     empty = _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, ())
-    faces = [r for r in support if r.observation_kind == "raster_wall_band_face"]
-    ends = [r for r in support if r.observation_kind == "raster_wall_band_end"]
-    if len(faces) != 4 or len(ends) != 2:
+    flanks = _raster_source_band_flanks(support, opening)
+    if flanks is None:
         return empty
-    by_interval: dict[tuple[float, float], list[float]] = {}
-    for face in faces:
-        line = _line(face)
-        data = None if line is None else _source_line_axis_data(line, opening)
-        if data is None:
-            return empty
-        lo, hi, offset = data
-        by_interval.setdefault((lo, hi), []).append(offset)
-    if len(by_interval) != 2 or any(len(v) != 2 for v in by_interval.values()):
-        return empty
-
-    flanks: dict[str, tuple[float, float, float, float, float]] = {}
     pixel_tol = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
     snap_tol = DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
-    for (lo, hi), offsets in by_interval.items():
-        cross_lo, cross_hi = sorted(offsets)
-        if cross_hi - cross_lo <= _COORD_TOL:
-            return empty
-        if cross_lo > pixel_tol or cross_hi < -pixel_tol:
-            return empty
-        if lo < -pixel_tol and abs(hi) <= pixel_tol:
-            role, edge = "left", hi
-        elif hi > opening.length + pixel_tol and abs(lo - opening.length) <= pixel_tol:
-            role, edge = "right", lo
-        else:
-            return empty
-        matching_ends = []
-        for end in ends:
-            line = _line(end)
-            if line is None:
-                return empty
-            points = _endpoints(line)
-            along = tuple(_project(p, opening.origin, opening.axis) for p in points)
-            cross = sorted(_project(p, opening.origin, opening.normal) for p in points)
-            if (all(abs(v - edge) <= _COORD_TOL for v in along)
-                    and abs(cross[0] - cross_lo) <= _COORD_TOL
-                    and abs(cross[1] - cross_hi) <= _COORD_TOL):
-                matching_ends.append(end)
-        if len(matching_ends) != 1 or role in flanks:
-            return empty
-        flanks[role] = (lo, hi, cross_lo, cross_hi, edge)
-    if set(flanks) != {"left", "right"}:
-        return empty
 
     selected: list[_RoleCandidate] = []
     for role in ("left", "right"):
@@ -3008,6 +3039,8 @@ def _resolve_raster_source_band_host_from_records(
                     owners.append(((cross_lo + cross_hi) / 2.0, record))
                     break
         if not owners:
+            # This proposition proves two solid flanks. A perpendicular W4
+            # candidate cannot replace the missing source owner of either one.
             reason = (
                 f"raster_source_band_{role}_local_wall_owner_unmapped"
                 if source_members else f"raster_source_band_{role}_source_primitive_unmapped"
@@ -3035,7 +3068,7 @@ def _resolve_raster_source_band_host_from_records(
                 item.record.physical_identity.candidate_identity_id for item in selected
             )),
             member_equivalence_groups=tuple(sorted({item.candidate_group for item in selected})),
-            center_offset=sum(item.offset for item in selected) / 2.0,
+            center_offset=sum(item.offset for item in selected) / float(len(selected)),
         ),),
         (RASTER_SOURCE_BAND_HOST_RESOLVED,),
     )
@@ -3050,6 +3083,7 @@ def _resolve_opening_local_mixed_scope_source_band(
     supplemental_records: Sequence[PhysicalWallCandidateRecord],
     ordinary_source_observation_ids: Sequence[str],
     supplemental_source_observation_ids: Sequence[str],
+    *, source_fragment_roles_shadow: bool = False,
 ) -> _HostBandResolution:
     """Recover opposite G17 flanks across two source-authenticated W4 scopes.
 
@@ -3061,12 +3095,23 @@ def _resolve_opening_local_mixed_scope_source_band(
     unchanged exact source-primitive/face/end/chain resolver. No consumer input,
     nearest-wall rule, global W4 mutation, completeness claim or frame grant.
     """
+    if type(source_fragment_roles_shadow) is not bool:
+        raise TypeError("source fragment roles shadow must be an explicit boolean")
     selected: dict[str, PhysicalWallCandidateRecord] = {}
     supplemental_ids: set[str] = set()
     candidate_owner: dict[str, str] = {}
     for supplement, records in ((False, ordinary_records), (True, supplemental_records)):
         for record in records:
-            if not _candidate_host_roles(record, opening):
+            roles = _candidate_host_roles(record, opening)
+            if not roles and source_fragment_roles_shadow:
+                # Nominate local chain fragments without flattening the whole
+                # candidate. The unchanged resolver below still requires exact
+                # primitive ancestry, G17 face/end closure and local ownership.
+                points = record.wall_candidate.centerline_pts
+                roles = tuple(role for start, end in zip(points, points[1:])
+                    for role in _host_roles_from_axis_data(
+                        _source_line_axis_data((*start, *end), opening), opening))
+            if not roles:
                 continue
             wall_id = str(record.wall_candidate_id)
             # One opening-local proposition cannot count the same W4 address
@@ -3091,7 +3136,7 @@ def _resolve_opening_local_mixed_scope_source_band(
             selected[wall_id] = record
             if supplement:
                 supplemental_ids.add(wall_id)
-    if not supplemental_ids or len(selected) < 2:
+    if not supplemental_ids or len(selected) < 1:
         return _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, ())
     # No silent filtering of an ambiguous local W4 identity.  Producer-owned
     # physical-equivalence compares all role-eligible identities in this

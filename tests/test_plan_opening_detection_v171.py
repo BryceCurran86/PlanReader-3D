@@ -1540,7 +1540,7 @@ class TestConversionToEvidence(unittest.TestCase):
         self.assertEqual(ev.opening_type, OPENING_TYPE_WINDOW)
         self.assertEqual(ev.type_mark, "W01")
         self.assertAlmostEqual(ev.width_m, 1.2)
-        self.assertEqual(ev.sill_m, 0.9)
+        self.assertIsNone(ev.sill_m)  # Plan view never establishes sill elevation.
         self.assertEqual(ev.quantity, 1)
         self.assertFalse(ev.deduct)
         self.assertAlmostEqual(ev.geometry_confidence, 0.70)

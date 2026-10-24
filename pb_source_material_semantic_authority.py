@@ -81,8 +81,10 @@ _SCHEDULE_VIEW_TYPES = frozenset(
 
 
 _NONMATERIAL_GRID_DRAWING_TITLE = re.compile(
-    r"^\s*GRID\s+(?:(?:SET\s*OUT|SETOUT|LAYOUT)\s+PLAN|"
-    r"PLAN\s+(?:SET\s*OUT|SETOUT))\s*$",
+    r"^\s*(?:GRID\s+(?:(?:SET\s*OUT|SETOUT|LAYOUT)\s+PLAN|"
+    r"PLAN\s+(?:SET\s*OUT|SETOUT)|"
+    r"(?:REFLECTED\s+)?CEILING\s+(?:LAYOUT\s+)?PLAN)|"
+    r"(?:REFLECTED\s+)?CEILING\s+GRID\s+(?:LAYOUT\s+)?PLAN)\s*$",
     re.IGNORECASE,
 )
 
@@ -1208,6 +1210,122 @@ def _material_definition_candidate(
     return candidates[0]
 
 
+def _native_multirow_material_definition_candidates(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[
+    tuple[str, int, tuple[_TrustedTextWord, ...], str, dict[str, object]], ...
+]:
+    """Opt-in CAD-exported multi-code material-legend source row ownership.
+
+    One native text block can encode code, description, code, description in
+    distinct original source lines. A whole-block parser rightfully abstains
+    because many codes occur. Independently issue CANDIDATE rows only when
+    a code occupies its own complete source line and is followed by one or
+    more *original immediately subsequent* native description lines.
+    Ambiguous repeated codes, broken word ordinals or missing semantics
+    abstain. Every returned row holds ONLY its original source word IDs.
+    Producer visibility, schedule-title and raster gates still apply later.
+    """
+    import re
+
+    grouped = _group_native_material_block_words(words)
+    candidates = []
+    code_pattern = re.compile(r"^[A-Z]{2,4}(?:\d{1,4})?$")
+    stopwords = frozenset({"CODE", "TYPE", "ROOM", "WALL", "FLOOR", "DOOR", "NOTE", "FIRE"})
+    for (partition_id, block_no), block_words in sorted(grouped.items()):
+        # A single pathological PDF text block must never expand the source
+        # semantic row candidate universe without bound. A120's real legend
+        # contains fewer than 16 lines; these are generic shadow inventory
+        # caps, wholly independent of the frozen 20k raster primitive cap.
+        if len(block_words) > 4096 or len({w.line_no for w in block_words}) > 256:
+            continue
+        line_records: list[tuple[int, tuple[_TrustedTextWord, ...]]] = []
+        by_line: dict[int, list[_TrustedTextWord]] = {}
+        for word in block_words:
+            by_line.setdefault(int(word.line_no), []).append(word)
+        for line_id in sorted(by_line):
+            members = tuple(sorted(by_line[line_id], key=lambda w: (w.word_no, w.bbox[0], w.observation_id)))
+            indexes = [int(w.word_no) for w in members]
+            if (not indexes or len(set(indexes)) != len(indexes)
+                    or indexes != list(range(indexes[0], indexes[-1] + 1))):
+                line_records = []
+                break
+            line_records.append((line_id, members))
+        if not line_records:
+            continue
+        code_rows = []
+        for pos, (line_id, line_words) in enumerate(line_records):
+            if len(line_words) != 1:
+                continue
+            token = line_words[0].text.strip()
+            if code_pattern.fullmatch(token) and token not in stopwords:
+                code_rows.append((pos, token))
+        if not code_rows:
+            continue
+        codes = [token for _, token in code_rows]
+        for pos, code in code_rows:
+            if codes.count(code) != 1:
+                continue
+            end = next((other for other, _ in code_rows if other > pos), len(line_records))
+            # A valid source row has an immediately adjacent description; a
+            # code must never borrow material semantics across a missing line.
+            if pos + 1 >= end or line_records[pos + 1][0] != line_records[pos][0] + 1:
+                continue
+            if any(line_records[i + 1][0] != line_records[i][0] + 1
+                   for i in range(pos, end - 1)):
+                continue
+            owned = tuple(
+                word for _, members in line_records[pos:end] for word in members
+            )
+            # Signage-contract cladding is a separate non-ceiling service,
+            # even when its PDF text block contains a valid source code.
+            # Preserve it in source observations, never in this ceiling
+            # material-row candidate producer.
+            description_words = {w.text.strip().upper() for w in owned[1:]}
+            if {"SIGNAGE", "CLADDING"} <= description_words:
+                continue
+            candidate = _material_definition_candidate(owned)
+            if candidate is not None and candidate[0] == code:
+                candidates.append((partition_id, block_no, owned, code, candidate[1]))
+                continue
+            # The original schedule may print a code whose layout role is
+            # external to its *material* words, e.g. vinyl-faced plaster
+            # tiles labelled as GRID on a reflected-ceiling sheet. Generic
+            # material semantics can be read from the adjacent original
+            # description, but a raw code cannot assign CEILING_GRID or any
+            # other physical role. Preserve a SOURCE ROW CANDIDATE only.
+            # The trusted native schedule consumer will re-run its existing
+            # semantic proof and ABSTAIN unless independently validated.
+            description = " ".join(w.text.strip() for w in owned[1:]).strip()
+            # A material *noun* in original description is sufficient to
+            # preserve a raw SOURCE candidate, not to assign that noun a
+            # ceiling/floor role or publish a material. The generic semantic
+            # classifier intentionally cannot infer vinyl-faced plaster
+            # ceiling tiles from the standalone legend code GRID, so using
+            # it here loses an authentic printed source row.
+            has_material_noun = re.search(
+                r"\b(?:TILE|TILES|PLASTER|PLASTERBOARD|PANEL|CLADDING|"
+                r"METAL|CARPET|VINYL|PAINT|COATING|CONCRETE|BOARD)\b",
+                description.upper(),
+            ) is not None
+            if not has_material_noun or len(description) < 4:
+                continue
+            candidates.append((
+                partition_id, block_no, owned, code,
+                {
+                    "code": code,
+                    "description": description,
+                    "substrate": "",
+                    "finish": "",
+                    "page_id": int(owned[0].page_id),
+                    "page_label": f"page:{owned[0].page_id}",
+                    "source_semantic_role_unverified": True,
+                    "source_material_issuer_granted": False,
+                },
+            ))
+    return tuple(candidates)
+
+
 def _raw_material_definition_candidates(
     words: Sequence[_TrustedTextWord],
 ) -> tuple[
@@ -1339,6 +1457,7 @@ def _trusted_native_material_schedule_cluster_blocks(
     published: object,
     raster: RasterTextCorroborationProducer,
     words: Sequence[_TrustedTextWord],
+    source_native_multirow_material_shadow: bool = False,
 ) -> tuple[tuple[_TrustedScheduleBlock, ...], tuple[str, ...]]:
     """Authenticate split native material-definition rows under one schedule title.
 
@@ -1360,7 +1479,25 @@ def _trusted_native_material_schedule_cluster_blocks(
     # read-only scan and already required to contain >=2 rows by this lane.
     # Avoid *all* OCR work on impossible one-row/empty clusters while keeping
     # identical rejection semantics, even for an otherwise trusted title.
+    if type(source_native_multirow_material_shadow) is not bool:
+        raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
     candidates = _raw_material_definition_candidates(words)
+    if source_native_multirow_material_shadow:
+        # Newer native decoders may split a multirow CAD block into complete
+        # single-code blocks. Preserve those original source rows too, while
+        # never counting the same word-owned row twice across the two readers.
+        seen_rows = {
+            (partition, block, code, tuple(w.observation_id for w in owned))
+            for partition, block, owned, code, _item in candidates
+        }
+        extra = []
+        for row in _native_multirow_material_definition_candidates(words):
+            partition, block, owned, code, _item = row
+            key = (partition, block, code, tuple(w.observation_id for w in owned))
+            if key not in seen_rows:
+                seen_rows.add(key)
+                extra.append(row)
+        candidates = (*candidates, *extra)
     if len(candidates) < 2:
         return (), ()
 
@@ -1412,6 +1549,10 @@ def _trusted_native_material_schedule_cluster_blocks(
         row for row in candidates
         if row[0] == title_partition_id
         and row[2]
+        # An original code-description pair is not a trusted material role:
+        # do not spend raster OCR or issue a material definition to convert
+        # "GRID" vinyl-faced plaster tiles into an inferred ceiling grid.
+        and not row[4].get("source_semantic_role_unverified", False)
         and all(
             word.page_id == title_page_id
             and word.source_partition_id == title_partition_id
@@ -1421,6 +1562,7 @@ def _trusted_native_material_schedule_cluster_blocks(
     blocked_codes: set[str] = {
         row[3] for row in candidates
         if row[0] != title_partition_id or not row[2]
+        or row[4].get("source_semantic_role_unverified", False)
         or any(
             word.page_id != title_page_id
             or word.source_partition_id != title_partition_id
@@ -1693,16 +1835,22 @@ class SourceMaterialSemanticProducer:
         *,
         _seal: object = None,
         _physical_plan_page_ids: tuple[str, ...] = (),
+        _source_native_multirow_material_shadow: bool = False,
+        _source_native_schedule_page_ids: tuple[str, ...] = (),
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
+        if type(_source_native_multirow_material_shadow) is not bool:
+            raise ValueError("source_multirow_material_shadow_requires_explicit_bool")
+        self._source_native_multirow_material_shadow = _source_native_multirow_material_shadow
         self._source = source_visibility_producer
         self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             source_visibility_producer
         )
         self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
+        self._source_native_schedule_page_ids = frozenset(_source_native_schedule_page_ids)
         self._plan_raster = (
             RasterTextCorroborationProducer.for_physical_plan_view_shadow(
                 source_visibility_producer
@@ -1711,6 +1859,10 @@ class SourceMaterialSemanticProducer:
             else None
         )
         self._plan_viewports: dict[tuple[str, str], SegmentedViewport] = {}
+        # Unlike a consumer-supplied schedule bounding box, these are the
+        # original F07 schedule scopes used by THIS source publisher.
+        self._schedule_viewports: dict[tuple[str, str, str], SegmentedViewport] = {}
+        self._schedule_scope_rejections: dict[tuple[str, str, str], str] = {}
         self._plan_ownership_ids: dict[tuple[str, str], str] = {}
         self._plan_text_results: dict[
             tuple[str, str, str, str, str], RasterTextCorroborationResult
@@ -1732,6 +1884,45 @@ class SourceMaterialSemanticProducer:
         source_visibility_producer: SourceVisibilityProducer,
     ) -> "SourceMaterialSemanticProducer":
         return cls(source_visibility_producer, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_native_multirow_material_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+    ) -> "SourceMaterialSemanticProducer":
+        """Explicit opt-in original multi-code native CAD legend source path."""
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_multirow_material_shadow=True,
+        )
+
+    @classmethod
+    def for_source_native_multipath_schedule_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        page_ids: Sequence[str],
+    ) -> "SourceMaterialSemanticProducer":
+        """Opt-in original external CAD schedule source; NOT RCP area.
+
+        Explicit original page scope is essential: authenticating one
+        source schedule's frame does not authenticate sibling physical
+        drawing extents or any source material occurrence.
+        """
+        if (not isinstance(page_ids, Sequence)
+                or isinstance(page_ids,(str,bytes)) or not page_ids):
+            raise ValueError("explicit_original_schedule_source_page_ids_required")
+        if any(type(p) is not str or not p.isdecimal()
+               or str(int(p))!=p or int(p)<1 for p in page_ids):
+            raise ValueError("canonical_original_schedule_page_ids_required")
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _source_native_schedule_page_ids=tuple(
+                sorted(set(page_ids),key=int)
+            ),
+        )
 
     @classmethod
     def for_physical_plan_view_shadow(
@@ -1762,6 +1953,28 @@ class SourceMaterialSemanticProducer:
     def published_plan_viewports(self) -> tuple[SegmentedViewport, ...]:
         """Actual F.07 products consumed by this isolated producer."""
         return tuple(self._plan_viewports[k] for k in sorted(self._plan_viewports))
+
+    def published_source_schedule_viewports(self) -> tuple[SegmentedViewport, ...]:
+        """Exact trusted, producer-consumed F07 source schedule scopes.
+
+        This is not a physical RCP polygon, material occurrence or m2.
+        A schedule only appears here after the material producer has checked
+        its independently published source viewport and complete text.
+        """
+        return tuple(self._schedule_viewports[k]
+                     for k in sorted(self._schedule_viewports))
+
+    def published_source_schedule_revision_scopes(
+        self,
+    ) -> tuple[tuple[str,str,SegmentedViewport], ...]:
+        """Keep revision/page/view ownership for each recovered source scope."""
+        return tuple((revision,page,self._schedule_viewports[(revision,page,view)])
+                     for revision,page,view in sorted(self._schedule_viewports))
+
+    def published_source_schedule_rejections(self) -> tuple[tuple[str,str,str,str], ...]:
+        """All unresolved revision-scoped original schedules, deterministic."""
+        return tuple((*key,self._schedule_scope_rejections[key])
+                     for key in sorted(self._schedule_scope_rejections))
 
     def published_plan_text_corroboration_results(
         self,
@@ -1848,6 +2061,10 @@ class SourceMaterialSemanticProducer:
 
         published, source_bytes = self._source_bytes(revision_id)
         if published is None or source_bytes is None:
+            if self._source_native_schedule_page_ids:
+                # Explicit source evidence requested; absent revision is not a
+                # valid empty definition universe.
+                raise ValueError("original_schedule_source_revision_unavailable")
             self._published_revisions.add(revision_id)
             return self.authority()
 
@@ -1858,6 +2075,15 @@ class SourceMaterialSemanticProducer:
             "snapshot_id": str(published.snapshot.snapshot_id),
         }
         decoded_pages = {int(value) for value in published.coverage.decoded_pages}
+        # A caller-specified source schedule cannot silently disappear from
+        # the immutable PDF revision's published coverage. It is not a
+        # legitimate "schedule contains zero finishes" observation.
+        if (
+            self._source_native_schedule_page_ids
+            and not {int(p) for p in self._source_native_schedule_page_ids}
+            <= decoded_pages
+        ):
+            raise ValueError("original_schedule_page_outside_published_source_coverage")
         raw_definitions: dict[str, list[dict[str, object]]] = {}
         drawing_viewports: list[
             tuple[int, SegmentedViewport, tuple[_TrustedTextWord, ...]]
@@ -1875,6 +2101,8 @@ class SourceMaterialSemanticProducer:
         try:
             for page_number in sorted(decoded_pages):
                 if page_number < 1 or page_number > pdf.page_count:
+                    if str(page_number) in self._source_native_schedule_page_ids:
+                        raise ValueError("original_schedule_page_outside_actual_pdf")
                     continue
                 page = pdf.load_page(page_number - 1)
                 page_words = trusted_words.get(str(page_number), ())
@@ -1889,6 +2117,8 @@ class SourceMaterialSemanticProducer:
                         published=published,
                         raster=raster,
                         words=page_words,
+                        **({"source_native_multirow_material_shadow": True}
+                           if self._source_native_multirow_material_shadow else {}),
                     )
                 )
                 incomplete_definition_codes.update(cluster_blocked_codes)
@@ -1940,7 +2170,13 @@ class SourceMaterialSemanticProducer:
                         physical_plan_view_shadow=True,
                     )
                     if str(page_number) in self._physical_plan_page_ids
-                    else segment_page_viewports(page, page_number=page_number)
+                    else segment_page_viewports(
+                        page,page_number=page_number,
+                        **({
+                            "source_connected_table_cell_shadow":True,
+                            "source_native_multipath_semantic_frame_shadow":True,
+                        } if str(page_number) in self._source_native_schedule_page_ids else {}),
+                    )
                 )
                 if (
                     not viewports
@@ -1951,6 +2187,25 @@ class SourceMaterialSemanticProducer:
                 ):
                     continue
                 sibling_non_overlapping = validate_non_overlapping_viewports(viewports)
+                if str(page_number) in self._source_native_schedule_page_ids:
+                    schedule_candidates=tuple(v for v in viewports
+                        if v.view_type in _SCHEDULE_VIEW_TYPES
+                        and not _is_explicit_non_material_schedule(v))
+                    if not schedule_candidates:
+                        self._schedule_scope_rejections[
+                            (revision_id,str(page_number),"source-schedule-not-detected")
+                        ]="original_native_schedule_viewport_unavailable"
+                        schedule_universe_complete=False
+                        schedule_universe_reasons.append(
+                            SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
+                        )
+                    for candidate in schedule_candidates:
+                        if not _viewport_is_authoritative(
+                            candidate,sibling_non_overlapping=sibling_non_overlapping
+                        ):
+                            self._schedule_scope_rejections[
+                                (revision_id,str(page_number),candidate.view_id)
+                            ]="original_native_schedule_viewport_unresolved"
                 authoritative = tuple(
                     viewport
                     for viewport in viewports
@@ -2012,6 +2267,10 @@ class SourceMaterialSemanticProducer:
                     )
                     if viewport.view_type in _SCHEDULE_VIEW_TYPES:
                         if not text_complete or not lines:
+                            if str(page_number) in self._source_native_schedule_page_ids:
+                                self._schedule_scope_rejections[
+                                    (revision_id,str(page_number),viewport.view_id)
+                                ]="original_native_schedule_words_unverified"
                             schedule_universe_complete = False
                             schedule_universe_reasons.append(
                                 SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
@@ -2028,6 +2287,10 @@ class SourceMaterialSemanticProducer:
                                 )
                             )
                             continue
+                        if str(page_number) in self._source_native_schedule_page_ids:
+                            self._schedule_viewports[
+                                (revision_id,str(page_number),viewport.view_id)
+                            ]=viewport
                         text = "\n".join(line[0] for line in lines)
                         line_evidence = {
                             line[0]: line[2]

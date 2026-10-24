@@ -267,6 +267,13 @@ def build_semantic_opening_inventory_completeness(
     )
     if resolved.record is None:
         return producer.authority()
+    if (
+        type(resolved.record.structural_enumeration_complete) is not bool
+        or type(resolved.record.physical_opening_universe_complete) is not bool
+    ):
+        # A stale or structurally reconstructed producer record cannot
+        # authenticate a complete physical competitor universe via bool().
+        return producer.authority()
 
     visibility = source_visibility_producer.authority()
     semantic_members: list[_RealVisiblePrimitive] = []
@@ -324,15 +331,15 @@ def build_semantic_opening_inventory_completeness(
         enumerated_primitives=semantic_members,
         optional_content_state=producer_optional_content_state,
         xobject_traversal_truncated=producer_xobject_truncated,
-        semantic_enumeration_proven=bool(
-            resolved.record.physical_opening_universe_complete
+        semantic_enumeration_proven=(
+            resolved.record.physical_opening_universe_complete is True
         ),
     )
     authority = producer.authority()
     if (
-        bool(resolved.record.physical_opening_universe_complete)
-        and bool(completeness_record.semantic_enumeration_complete)
-        and bool(completeness_record.decision_scope_complete)
+        resolved.record.physical_opening_universe_complete is True
+        and completeness_record.semantic_enumeration_complete is True
+        and completeness_record.decision_scope_complete is True
     ):
         # Private in-process authentication consumed by GenericOpeningCountAuthority.
         # Ordinary callers cannot provide this seal or a completeness claim.

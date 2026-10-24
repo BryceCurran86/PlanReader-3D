@@ -1298,6 +1298,20 @@ def _phrase_on_line(line: str, phrase: str) -> bool:
     return re.search(rf"\b{re.escape(phrase)}s?\b", line) is not None
 
 
+_HEADING_MARK_RE = re.compile(r"^(?:[a-z]{1,3}(?:\s*-\s*[a-z]{1,3})?|\d{1,2})$")
+
+
+def _concise_heading(line: str, phrase: str) -> bool:
+    """True when the line is the phrase itself, plus an optional sheet mark."""
+    if " " in phrase:
+        pattern = re.escape(phrase)
+    else:
+        pattern = rf"\b{re.escape(phrase)}s?\b"
+    remainder = re.sub(pattern, " ", line, count=1)
+    remainder = re.sub(r"[\s\-]+", " ", remainder).strip()
+    return remainder == "" or _HEADING_MARK_RE.fullmatch(remainder) is not None
+
+
 def _sheet_type_from_page_text(text: str) -> str:
     """One sheet type from heading lines, or Other when headings disagree.
 
@@ -1322,7 +1336,10 @@ def _sheet_type_from_page_text(text: str) -> str:
         for candidate, phrase in matched:
             if any(phrase != other and phrase in other for _candidate, other in matched):
                 continue
-            found[candidate] = max(found.get(candidate, 0), len(phrase))
+            length = len(phrase)
+            if _concise_heading(line, phrase):
+                length = max(length, 8)
+            found[candidate] = max(found.get(candidate, 0), length)
     headings = {name for name, length in found.items() if length >= 8}
     if len(headings) > 1:
         return "Other"

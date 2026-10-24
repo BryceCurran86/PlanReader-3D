@@ -17,8 +17,10 @@ from typing import Any, Mapping
 
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from pb_customer_output_verification import _customer_quantity_id, verify_sealed_customer_output
+from tools.gpt3_verified_contract_delivery import verified_quote
 from tools.gpt3_verified_customer_quote import (
     _currency, _csv_text, _decimal, _money, _number, _write_new,
+    build_verified_customer_quote,
 )
 from tools.report_gpt3_four_project_evidence import _read_json_without_duplicate_keys
 
@@ -71,6 +73,9 @@ def _quote_source_lines(sealed_run: dict, customers: list[dict], quote: dict) ->
     if (type(quote) is not dict or quote.get("schema_version") != "gpt3-client-verified-quote-v1"
         or quote.get("quote_fingerprint") != _hash(quote, "quote_fingerprint")):
         raise ValueError("procurement quote was modified or is not canonical")
+    # Check the COMPLETE priced source/cost summary, not just the self-hashed
+    # quote header and each source quantity's physical fingerprint.
+    verified_quote(quote, sealed_run, customers)
     sealed = sealed_source_closed_run_from_dict(sealed_run)
     verified = verify_sealed_customer_output(sealed, customers)
     if (
@@ -109,9 +114,24 @@ def _quote_source_lines(sealed_run: dict, customers: list[dict], quote: dict) ->
             raise ValueError("procurement source row differs from original signed source")
         if row.get("pricing_status") != "PRICED_FROM_CLIENT_RATE":
             raise ValueError("procurement requires explicit client quote pricing")
-        if type(row.get("cost_components")) is not dict:
-            raise ValueError("procurement requires priced original cost components")
-        _amount(row["cost_components"].get("material"), "client material budget")
+        components = row.get("cost_components")
+        if type(components) is not dict or set(components) != {
+            "material", "labour", "plant", "subcontract",
+        }:
+            raise ValueError("procurement requires four exact client cost components")
+        cost = sum(
+            (_amount(components[key], f"client {key} budget")
+             for key in ("material", "labour", "plant", "subcontract")),
+            Decimal("0"),
+        )
+        if cost != _amount(row.get("cost_amount"), "source client cost total"):
+            raise ValueError("procurement component costs do not equal client line cost")
+        markup_pct = _decimal(row.get("markup_pct"), "client markup percent", cap=HUNDRED)
+        expected_sell = (cost * (
+            Decimal("1") + markup_pct / HUNDRED
+        )).quantize(CENT, rounding=ROUND_HALF_UP)
+        if expected_sell != _amount(row.get("sell_amount"), "client sell amount"):
+            raise ValueError("procurement line cost/markup disagree with client price")
         by_quote[qid] = row
     if set(by_quote) != set(by_signed):
         raise ValueError("procurement missing signed source-linked quote item")
@@ -147,8 +167,20 @@ def _suppliers(raw: Any, currency: str) -> dict[str, dict]:
 
 def build_procurement_plan(
     quote: dict, sealed_run: dict, customers: list[dict], book: dict,
+    *, client_rate_book: dict | None = None,
+    scope_preview: dict | None = None,
 ) -> dict:
     """Generate auditable RFQs, comparable supplier bids and approved PO drafts."""
+    if scope_preview is not None and client_rate_book is None:
+        raise ValueError("scope preview pricing requires original client rate book")
+    if client_rate_book is not None:
+        repriced = build_verified_customer_quote(
+            sealed_run, customers, client_rate_book, scope_preview=scope_preview,
+        )
+        if quote != repriced:
+            raise ValueError(
+                "procurement source quote does not reproduce from original client rates"
+            )
     qlines = _quote_source_lines(sealed_run, customers, quote)
     if type(book) is not dict or book.get("schema_version") != "gpt3-client-procurement-v1":
         raise ValueError("procurement book schema invalid")
@@ -160,6 +192,14 @@ def build_procurement_plan(
     if currency != quote["currency"]:
         raise ValueError("procurement currency must match explicit client quote")
     as_of = _date(book.get("as_of"), "procurement offer evaluation date")
+    issued_on = _date(quote.get("issued_on"), "source client quote issued_on")
+    expires_on = quote.get("expires_on")
+    if as_of < issued_on:
+        raise ValueError("client quote is not yet issued at procurement approval date")
+    if expires_on is not None and as_of > _date(
+        expires_on, "source client quote expires_on"
+    ):
+        raise ValueError("client quote expired before procurement approval date")
     suppliers = _suppliers(book.get("suppliers"), currency)
     raw_demand = book.get("requisitions")
     if type(raw_demand) is not list:
@@ -341,6 +381,11 @@ def build_procurement_plan(
         "material_requirement_authenticated_from_drawings": False,
         "official_four_project_accuracy": None,
     }
+    if client_rate_book is not None:
+        result["client_rate_source_replay_status"] = (
+            "EXACT_V1_CUSTOMER_RATE_REPLAY_NOT_SOURCE_PDF_AUTHORITY"
+        )
+        result["original_source_pdf_reverified"] = False
     result["procurement_fingerprint"] = _hash(result, "procurement_fingerprint")
     return result
 
@@ -387,12 +432,34 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("quote", "sealed_run", "customers", "procurement_book"):
         p.add_argument("--" + name.replace("_", "-"), type=Path, required=True)
+    p.add_argument("--client-rates", type=Path)
+    p.add_argument("--scope-preview", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--format", choices=("json", "rfq-csv", "po-csv"), default="json")
     args = p.parse_args(argv)
+    if args.scope_preview is not None and args.client_rates is None:
+        p.error("--scope-preview requires --client-rates")
     paths = tuple(getattr(args, name) for name in (
         "quote", "sealed_run", "customers", "procurement_book"))
-    plan = build_procurement_plan(*[_read_json_without_duplicate_keys(x) for x in paths])
+    if args.client_rates is not None:
+        paths += (args.client_rates,)
+    if args.scope_preview is not None:
+        paths += (args.scope_preview,)
+    quote, sealed, customers, book = (
+        _read_json_without_duplicate_keys(path) for path in paths[:4]
+    )
+    rates = (
+        _read_json_without_duplicate_keys(args.client_rates)
+        if args.client_rates is not None else None
+    )
+    scope = (
+        _read_json_without_duplicate_keys(args.scope_preview)
+        if args.scope_preview is not None else None
+    )
+    plan = build_procurement_plan(
+        quote, sealed, customers, book, client_rate_book=rates,
+        scope_preview=scope,
+    )
     data = (rfq_csv(plan) if args.format == "rfq-csv"
             else draft_po_csv(plan) if args.format == "po-csv"
             else json.dumps(plan, sort_keys=True, indent=2, allow_nan=False) + "\n")

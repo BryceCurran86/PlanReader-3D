@@ -34,7 +34,7 @@ def _minimal_commercial_package(
             drawing_issue="A",
             drawing_date="2026-01-01",
             sheet_count=1,
-            source_files_hash="abc123",
+            source_files_hash="a" * 64,
         ),
         quantities=[
             QuantityLineItemPayload(

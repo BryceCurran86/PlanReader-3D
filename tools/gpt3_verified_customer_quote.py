@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 import hashlib
 import io
 import json
@@ -24,6 +24,9 @@ from pb_customer_output_verification import (
     verify_sealed_customer_output,
 )
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from pb_source_scope_sidecar_v2_preview import (
+    verify_v2_preview_scope_customer_receipts,
+)
 from tools.report_gpt3_four_project_evidence import _read_json_without_duplicate_keys
 from tools.run_gpt3_original_byte_gated_exact_project import FROZEN_ROOT
 
@@ -67,6 +70,25 @@ def _percentage(book: Mapping[str, Any], name: str) -> Decimal:
     return _decimal(book[name], name, cap=_HUNDRED)
 
 
+def _equivalent_pricing_unit(unit: str) -> str:
+    """Normalize exact notation equivalence, never transform a measured value.
+
+    Rate cards may use m² where the source-owned sealed unit is m2, or 'each'
+    where the signed physical count is ea. These are notation aliases only:
+    area, volume, linear distance and object counts never cross dimensions.
+    """
+    aliases = {
+        "m²": "m2", "sqm": "m2", "m2": "m2",
+        "m³": "m3", "m3": "m3",
+        "t": "t", "tonne": "t", "tonnes": "t",
+        "metric tonne": "t", "metric tonnes": "t",
+        "lm": "m", "m": "m",
+        "ea": "ea", "each": "ea", "nr": "ea",
+        "no": "ea", "no.": "ea", "number": "ea",
+    }
+    return aliases.get(unit.lower(), unit)
+
+
 def _rates(rate_book: Mapping[str, Any]) -> dict[tuple[str, str, str], dict]:
     raw = rate_book.get("rates")
     if type(raw) is not list:
@@ -80,7 +102,7 @@ def _rates(rate_book: Mapping[str, Any]) -> dict[tuple[str, str, str], dict]:
             or key != key.strip() or type(unit) is not str or not unit
             or unit != unit.strip()):
             raise ValueError("rate card requires exact scope, source key and unit")
-        identity = (scope, key, unit)
+        identity = (scope, key, _equivalent_pricing_unit(unit))
         if identity in cards:
             raise ValueError("duplicate client rate card")
         values = {name: _decimal(card[name], name)
@@ -103,7 +125,7 @@ def _choose_rate(quantity: Any, cards: dict) -> tuple[tuple[str, str, str] | Non
         ("semantic", quantity.semantic_key),
         ("family", quantity.family),
     ):
-        card_id = (scope, key, quantity.unit)
+        card_id = (scope, key, _equivalent_pricing_unit(quantity.unit))
         if card_id in cards:
             return card_id, cards[card_id]
     return None, None
@@ -148,15 +170,55 @@ def _manual_allowances(book: Mapping[str, Any]) -> list[dict]:
     return sorted(allowances, key=lambda row: row["id"])
 
 
+def _cent_exact_cost_components(
+    billable: Decimal, card: Mapping[str, Decimal],
+) -> tuple[dict[str, str], Decimal]:
+    """Allocate final cents once, keeping component totals equal to exact unit cost.
+
+    Independently rounding four 0.5-cent subcomponents creates a 2-cent
+    overstatement. Largest residual allocation gives each component no more
+    than a cent above its truncated amount, with stable source-independent ties.
+    Client rates, source quantity and physical units are never changed.
+    """
+    if not billable.is_finite() or billable < 0:
+        raise ValueError("billable physical quantity must be finite and nonnegative")
+    exact = {key: billable * card[key] for key in _COMPONENTS}
+    total = sum(exact.values(), Decimal("0"))
+    if not total.is_finite() or total < 0 or total > _MAX_MONEY:
+        raise ValueError("client physical line cost exceeds safe financial bound")
+    rounded_total = total.quantize(_CENT, rounding=ROUND_HALF_UP)
+    allocated = {
+        key: amount.quantize(_CENT, rounding=ROUND_DOWN)
+        for key, amount in exact.items()
+    }
+    pennies = (rounded_total - sum(allocated.values(), Decimal("0"))) / _CENT
+    if pennies != pennies.to_integral_value() or not 0 <= pennies <= len(_COMPONENTS):
+        raise ValueError("cost component cent reconciliation is invalid")
+    # Never produce a negative component to counteract half-up rounding.
+    priority = sorted(_COMPONENTS, key=lambda key: (
+        -(exact[key] - allocated[key]), _COMPONENTS.index(key),
+    ))
+    for key in priority[:int(pennies)]:
+        allocated[key] += _CENT
+    if sum(allocated.values(), Decimal("0")) != rounded_total:
+        raise ValueError("source-linked customer costs fail cent reconciliation")
+    return {key: _money(allocated[key]) for key in _COMPONENTS}, rounded_total
+
+
 def build_verified_customer_quote(
     sealed_run: Mapping[str, Any], customer_rows: list[dict],
     rate_book: Mapping[str, Any],
+    *, scope_preview: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Price only independently verified, exactly signed quantities."""
     if type(sealed_run) is not dict or type(customer_rows) is not list or type(rate_book) is not dict:
         raise ValueError("signed run, customer rows and client rate book are required")
     sealed = sealed_source_closed_run_from_dict(sealed_run)
     verified = verify_sealed_customer_output(sealed, customer_rows)
+    if scope_preview is not None:
+        verify_v2_preview_scope_customer_receipts(
+            scope_preview, sealed, customer_rows,
+        )
     if (rate_book.get("schema_version") != "gpt3-client-rates-v1"
         or rate_book.get("project_id") != sealed.project_id):
         raise ValueError("client rate book project/schema does not match signed issuer")
@@ -234,8 +296,7 @@ def build_verified_customer_quote(
         else:
             billable = quantity * (Decimal("1") + card["waste_pct"] / _HUNDRED)
             unit_cost = sum((card[component] for component in _COMPONENTS), Decimal("0"))
-            components = {kind: _money(billable * card[kind]) for kind in _COMPONENTS}
-            cost = (billable * unit_cost).quantize(_CENT, rounding=ROUND_HALF_UP)
+            components, cost = _cent_exact_cost_components(billable, card)
             sell = (cost * (Decimal("1") + card["markup_pct"] / _HUNDRED)).quantize(
                 _CENT, rounding=ROUND_HALF_UP)
             hours = billable * card["labour_hours_per_unit"]
@@ -284,7 +345,13 @@ def build_verified_customer_quote(
     before_tax = before_discount - discount
     tax = (before_tax * percentages["tax_pct"] / _HUNDRED).quantize(_CENT, rounding=ROUND_HALF_UP)
     total = before_tax + tax
-    complete = not unpriced
+    # Do not issue a completed quote for an empty authenticated source run.
+    complete = bool(signed) and not unpriced
+    quote_status = (
+        "NO_VERIFIED_SOURCE_QUANTITIES" if not signed else
+        "INCOMPLETE_UNPRICED_QUANTITIES" if unpriced else
+        "CLIENT_PRICED_QUOTE"
+    )
     report: dict[str, Any] = {
         "schema_version": "gpt3-client-verified-quote-v1",
         "project_id": sealed.project_id,
@@ -292,7 +359,7 @@ def build_verified_customer_quote(
         "signed_run_fingerprint": sealed.fingerprint,
         "currency": currency, **dates,
         "evidence_scope": "SIGNED_V1_CUSTOMER_ONLY_NOT_FROZEN_V2_SCORE",
-        "publication_status": "CLIENT_PRICED_QUOTE" if complete else "INCOMPLETE_UNPRICED_QUANTITIES",
+        "publication_status": quote_status,
         "signed_quantity_count": len(signed),
         "unpriced_quantity_ids": unpriced,
         "unpriced_quantity_count": len(unpriced),
@@ -320,6 +387,12 @@ def build_verified_customer_quote(
         },
         "official_four_project_accuracy": None,
     }
+    if scope_preview is not None:
+        # Scope parity is self-attested, not original PDF issuer authority.
+        # Do not change any legacy V1-only quote output or fingerprint.
+        report["scope_preview_customer_parity"] = "SELF_ATTESTED_MATCH_ONLY"
+        report["scope_preview_source_authenticated"] = False
+        report["scope_preview_sealed_run_fingerprint"] = sealed.fingerprint
     digest = hashlib.sha256(json.dumps(
         report, ensure_ascii=True, sort_keys=True, separators=(",", ":"),
         allow_nan=False).encode("utf-8")).hexdigest()
@@ -406,15 +479,39 @@ def compare_verified_quotes(before: Mapping[str, Any], after: Mapping[str, Any])
             raise ValueError("quote contents differ from its canonical fingerprint")
     if before.get("project_id") != after.get("project_id"):
         raise ValueError("quote comparison cannot combine projects")
-    older = {row["quantity_id"]: row for row in before["items"]}
-    newer = {row["quantity_id"]: row for row in after["items"]}
+    # A locally rehashed quote is not evidence of a valid signed source
+    # universe. Reject dropped/duplicate physical IDs rather than silently
+    # collapsing duplicates in a dict comprehension.
+    rows_by_epoch = []
+    for quote in (before, after):
+        items = quote.get("items")
+        if type(items) is not list or not items:
+            raise ValueError("quote comparison requires actual signed source quantities")
+        count = quote.get("signed_quantity_count")
+        if type(count) is not int or count != len(items):
+            raise ValueError("quote signed source item count is inconsistent")
+        indexed = {}
+        for row in items:
+            if type(row) is not dict:
+                raise ValueError("quote source items must be objects")
+            qid = row.get("quantity_id")
+            if type(qid) is not str or not qid or qid.strip() != qid:
+                raise ValueError("quote source ID must be canonical")
+            if qid in indexed:
+                raise ValueError("duplicate signed source quantity in quote revision")
+            indexed[qid] = row
+        rows_by_epoch.append(indexed)
+    older, newer = rows_by_epoch
     changed = []
     for qid in sorted(set(older) | set(newer)):
         old, fresh = older.get(qid), newer.get(qid)
         if old is None or fresh is None:
             change = "SIGNED_QUANTITY_ADDED_OR_REMOVED_REQUIRES_RESEAL"
-        elif (old["quantity_fingerprint"], old["physical_quantity"], old["unit"]) != (
-            fresh["quantity_fingerprint"], fresh["physical_quantity"], fresh["unit"]):
+        elif any(old.get(key) != fresh.get(key) for key in (
+            "quantity_fingerprint", "physical_quantity", "unit",
+            "family", "semantic_key", "source_sha256", "document_id",
+            "source_page", "revision_id", "object_identity_refs",
+        )):
             change = "SOURCE_QUANTITY_CHANGED_REQUIRES_RESEAL"
         elif (old["sell_amount"], old["pricing_status"]) != (
             fresh["sell_amount"], fresh["pricing_status"]):
@@ -427,6 +524,13 @@ def compare_verified_quotes(before: Mapping[str, Any], after: Mapping[str, Any])
                             "new_sell_amount": fresh.get("sell_amount") if fresh else None})
     if before.get("signed_run_fingerprint") != after.get("signed_run_fingerprint"):
         issuer_status = "DIFFERENT_SIGNED_ISSUER_REQUIRES_INDEPENDENT_AUTHORITY"
+    elif any(row["change"] in (
+        "SOURCE_QUANTITY_CHANGED_REQUIRES_RESEAL",
+        "SIGNED_QUANTITY_ADDED_OR_REMOVED_REQUIRES_RESEAL",
+    ) for row in changed):
+        # A self-consistent quote fingerprint does not authenticate the
+        # claimed V1 physical source fingerprint. Never call this same issuer.
+        issuer_status = "SOURCE_IDENTITY_CONFLICT_REQUIRES_INDEPENDENT_AUTHORITY"
     else:
         issuer_status = "SAME_SIGNED_ISSUER"
     return {
@@ -469,10 +573,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--customers", type=Path, required=True)
     parser.add_argument("--client-rates", type=Path, required=True)
+    parser.add_argument("--scope-preview", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--format", choices=("json", "csv"), default="json")
     args = parser.parse_args(argv)
     inputs = (args.sealed_run, args.customers, args.client_rates)
+    if args.scope_preview is not None:
+        inputs += (args.scope_preview,)
     if (args.output.exists() or args.output.is_symlink()
         or args.output.resolve().is_relative_to(FROZEN_ROOT.resolve())
         or any(args.output.resolve() == source.resolve() for source in inputs)):
@@ -480,7 +587,13 @@ def main(argv: list[str] | None = None) -> int:
     sealed = _read_json_without_duplicate_keys(args.sealed_run)
     customers = _read_json_without_duplicate_keys(args.customers)
     rates = _read_json_without_duplicate_keys(args.client_rates)
-    quote = build_verified_customer_quote(sealed, customers, rates)
+    scope_preview = (
+        _read_json_without_duplicate_keys(args.scope_preview)
+        if args.scope_preview is not None else None
+    )
+    quote = build_verified_customer_quote(
+        sealed, customers, rates, scope_preview=scope_preview,
+    )
     body = (quote_csv(quote) if args.format == "csv"
             else json.dumps(quote, sort_keys=True, indent=2, allow_nan=False) + "\n")
     _write_new(args.output, body, inputs)

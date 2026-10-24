@@ -78,10 +78,11 @@ def _pdf(gray: np.ndarray) -> bytes:
         doc.close()
 
 
-def _results(gray: np.ndarray):
+def _results(gray: np.ndarray, *, raster_double_face_negative_shadow: bool = False):
     source = SourceVisibilityProducer(
         producer_method="raster-door-swing-g17-contract",
         producer_version="1",
+        raster_double_face_negative_shadow=raster_double_face_negative_shadow,
     )
     published = source.ingest_native_pdf_bytes(
         document_id="raster-door-swing-g17-contract",

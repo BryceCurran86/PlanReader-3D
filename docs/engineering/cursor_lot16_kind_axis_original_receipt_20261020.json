@@ -1,0 +1,219 @@
+{
+  "axis_gate_counts": {
+    "single_figured_dimension_second_axis_unproven": 8,
+    "source_figured_dimension_pair_unproven": 5,
+    "width_height_axis_authority_unproven": 8
+  },
+  "benchmark_score_granted": false,
+  "first_gate_counts": {
+    "opening_filling_kind_unproven": 3,
+    "source_figured_dimension_pair_unproven": 1,
+    "structural_host_unavailable": 6,
+    "whole_wall_frame_unavailable": 6,
+    "width_height_axis_authority_unproven": 5
+  },
+  "kind_gate_counts": {
+    "opening_filling_kind_evidence_unproven": 1,
+    "opening_filling_kind_source_supported": 14,
+    "opening_filling_kind_unproven": 6
+  },
+  "measurement_published": false,
+  "original_physical_opening_count": 21,
+  "original_signed_area_quantities": 8,
+  "page_id": "3",
+  "review_openings": [
+    {
+      "axis_gate": "source_figured_dimension_pair_unproven",
+      "figured_value_count": 0,
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "whole_wall_frame_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "prior_signed_quantity_id": "opening_area_11bd4d5f9acb00b9dc46f12105a374bf"
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "whole_wall_frame_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+      "prior_signed_quantity_id": "opening_area_4227fdeb71838722a4a7f0251c3dda60"
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "source_figured_dimension_pair_unproven",
+      "figured_value_count": 0,
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "whole_wall_frame_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "width_height_axis_authority_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_661fc5e6f0c5975d5e9bdd5d759bd180",
+      "prior_signed_quantity_id": "opening_area_1a755970ebeca773650f41e73eb0f113"
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "source_figured_dimension_pair_unproven",
+      "figured_value_count": 0,
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "source_figured_dimension_pair_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "width_height_axis_authority_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_91ae06327d4fcc8004a557b116a77820",
+      "prior_signed_quantity_id": "opening_area_0e2bb9501b5cefdce2eb0150d992f54f"
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "whole_wall_frame_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "source_figured_dimension_pair_unproven",
+      "figured_value_count": 0,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "width_height_axis_authority_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_bd108c2c1bfd88752311aab5901737bb",
+      "prior_signed_quantity_id": "opening_area_a26f4787e6f8b51c5474c28dc7f249ad"
+    },
+    {
+      "axis_gate": "single_figured_dimension_second_axis_unproven",
+      "figured_value_count": 1,
+      "handoff_first_remaining_gate": "whole_wall_frame_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096",
+      "prior_signed_quantity_id": null
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "width_height_axis_authority_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_c4d87543028146e1cff0b5e2ca480c55",
+      "prior_signed_quantity_id": "opening_area_0b6477e219f9117d29b2803c181af665"
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "whole_wall_frame_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+      "prior_signed_quantity_id": "opening_area_6809b61112132ffd701e6eae02076876"
+    },
+    {
+      "axis_gate": "width_height_axis_authority_unproven",
+      "figured_value_count": 2,
+      "handoff_first_remaining_gate": "width_height_axis_authority_unproven",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_source_supported",
+      "physical_opening_id": "physical_opening_existence_f5adf8438fb6f48cc03b03d8ca2125f5",
+      "prior_signed_quantity_id": "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+    },
+    {
+      "axis_gate": "source_figured_dimension_pair_unproven",
+      "figured_value_count": 0,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "invented_second_axis": false,
+      "kind_gate": "opening_filling_kind_evidence_unproven",
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "prior_signed_quantity_id": null
+    }
+  ],
+  "shadow_only": true,
+  "signed_eight_quantity_ids_retained": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_KIND_AXIS_SHADOW"
+}

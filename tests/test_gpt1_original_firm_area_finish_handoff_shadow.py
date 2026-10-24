@@ -1,5 +1,6 @@
 """Existing FIRM room area passes through finish bridge without reissuance."""
 from dataclasses import replace
+import pytest
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_migration_contracts import QuantityEvidence,EvidenceResolutionStatus as Status
 from pb_gpt1_original_crosssheet_finish_binding_shadow import (
@@ -93,3 +94,35 @@ def test_existing_plain_area_does_not_gain_firm_finish_from_candidate_mark():
         out=reuse_authenticated_room_area_for_finish_shadow(
             _floor(),a,_correspondence(),m)
         assert out.status is Status.ABSTAINED
+
+
+def test_original_firm_area_cannot_reuse_copied_quantity_for_another_room():
+    bad_dup = _area()
+    object.__setattr__(bad_dup, "evidence_ids", ("source-face-id", "source-face-id"))
+
+    for forged in (
+        replace(_area(), input_entity_ids=("different-room",)),
+        replace(_area(), semantic_key="room_area:different-room"),
+        replace(_area(), authority="model_derived"),
+        bad_dup,
+        replace(_area(), evidence_ids=("source-face-id", " forged")),
+    ):
+        out = reuse_authenticated_room_area_for_finish_shadow(
+            _floor(), forged, _correspondence(), _finish(),
+        )
+        assert out.status is Status.ABSTAINED
+        assert out.diagnostic_only
+
+    with pytest.raises(ValueError, match="evidence_ids must be unique"):
+        replace(_area(), evidence_ids=("source-face-id", "source-face-id"))
+
+
+def test_original_firm_room_area_keeps_same_semantic_owner_and_never_becomes_finish():
+    actual = _area()
+    out = reuse_authenticated_room_area_for_finish_shadow(
+        _floor(), actual, _correspondence(), _finish(),
+    )
+    assert out.status is Status.CANDIDATE
+    assert out.original_room_area_quantity_id == actual.quantity_id
+    assert out.candidate_finish_area_m2 == actual.value
+    assert out.diagnostic_only and not hasattr(out, "quantity_id")

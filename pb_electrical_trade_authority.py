@@ -30,7 +30,7 @@ class ElectricalDeviceSpec:
     device_mark: str           # e.g. "MSB", "DB-1", "L1", "GPO-D", "DATA-1", "EXIT-1"
     description: str
     location: str              # e.g. "Main Switchroom", "Office 101", "Corridor"
-    count: int = 1
+    count: int = 0
     section: str = "Internal"  # "Internal", "External", "Substructure"
     is_dedicated_circuit: bool = False
     source_page: str = ""
@@ -97,10 +97,38 @@ class ElectricalTakeoffItem:
         }
 
 
+def _source_electrical_device_count(spec: ElectricalDeviceSpec) -> bool:
+    return (
+        type(spec.count) is int and spec.count > 0
+        and type(spec.device_mark) is str
+        and bool(spec.device_mark)
+        and spec.device_mark == spec.device_mark.strip()
+    )
+
+
+def _source_containment_length(spec: ElectricalContainmentSpec) -> bool:
+    if (
+        type(spec.length_m) not in (int, float)
+        or type(spec.size_desc) is not str or not spec.size_desc.strip()
+        or type(spec.containment_type) is not str
+        or spec.containment_type not in {"tray", "ladder", "conduit", "duct"}
+    ):
+        return False
+    try:
+        length = float(spec.length_m)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(length) and length > 0.0
+
+
 def calculate_switchboard_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for main switchboards and distribution boards."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.device_type != "switchboard":
+        return items
+    if not _source_electrical_device_count(spec):
+        return items
+    count = spec.count
 
     items.append(ElectricalTakeoffItem(
         section=spec.section,
@@ -125,7 +153,11 @@ def calculate_switchboard_items(spec: ElectricalDeviceSpec) -> List[ElectricalTa
 def calculate_lighting_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for luminaires, switches, and emergency fittings."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.device_type not in {"light", "switch", "emergency"}:
+        return items
+    if not _source_electrical_device_count(spec):
+        return items
+    count = spec.count
 
     if spec.device_type == "emergency":
         element_name = f"Emergency / exit lighting fitting ({spec.description})"
@@ -160,7 +192,11 @@ def calculate_lighting_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeo
 def calculate_power_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for general power outlets and dedicated circuits."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.device_type != "gpo" or type(spec.is_dedicated_circuit) is not bool:
+        return items
+    if not _source_electrical_device_count(spec):
+        return items
+    count = spec.count
 
     if spec.is_dedicated_circuit:
         element_name = f"Dedicated power circuit & isolator ({spec.description})"
@@ -192,7 +228,11 @@ def calculate_power_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffI
 def calculate_data_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for data/communications outlets and racks."""
     items: List[ElectricalTakeoffItem] = []
-    count = max(1, spec.count)
+    if spec.device_type != "data":
+        return items
+    if not _source_electrical_device_count(spec):
+        return items
+    count = spec.count
 
     items.append(ElectricalTakeoffItem(
         section=spec.section,
@@ -217,7 +257,7 @@ def calculate_data_items(spec: ElectricalDeviceSpec) -> List[ElectricalTakeoffIt
 def calculate_containment_items(spec: ElectricalContainmentSpec) -> List[ElectricalTakeoffItem]:
     """Calculate trade items for cable tray, ladder, and conduit runs."""
     items: List[ElectricalTakeoffItem] = []
-    if spec.length_m <= 0.0:
+    if not _source_containment_length(spec):
         return items
 
     items.append(ElectricalTakeoffItem(

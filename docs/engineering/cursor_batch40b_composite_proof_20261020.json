@@ -1,0 +1,35 @@
+{
+  "status": "UNPUBLISHED_BATCH40B_COMPOSITE_PROOF",
+  "shadow_only": true,
+  "benchmark_score_granted": false,
+  "measurement_published": false,
+  "host_granted": false,
+  "lot16_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "maryborough_sha256": "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",
+  "proofs": {
+    "receipt_consistency": "BATCH40B_RECEIPT_CONSISTENCY_OK",
+    "signed_eight_retained": true,
+    "single_figured_openings": 8,
+    "kind_source_supported": 14,
+    "kind_unproven": 6,
+    "kind_evidence_unproven": 1,
+    "parent_kind_raster_opening_primitive_segment": 48,
+    "support_face": 24,
+    "support_end": 12,
+    "flank_unmapped_left_right": [6, 6],
+    "visible_observation_id_count": 0,
+    "sibling_visible_hits": 0,
+    "authorised_export_exportable_withheld": [8, 13],
+    "universe_gate": "opening_universe_incomplete",
+    "w4_collisions": 0,
+    "maryborough_finish_gate": "source_room_face_unavailable",
+    "maryborough_pitch_gate": "ceiling_plan_area_authority_unproven",
+    "three_laurel_q5446_missing": true
+  },
+  "blockers_for_owner": [
+    "host: segment parents are raster_opening_primitive_segment not RASTER_PDF_VISIBLE_SEGMENT; IDs disjoint from W4",
+    "door_height: second axis unavailable on all 21; no invent",
+    "seal: owner promotion required for signed eight",
+    "3Laurel/Q5446: no Cursor-owned first-gate producers"
+  ]
+}

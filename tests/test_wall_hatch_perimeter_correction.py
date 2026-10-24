@@ -216,21 +216,10 @@ def test_degenerate_single_line_cluster_is_excluded_from_wall_like_set() -> None
     assert len(survivors) == 2
 
 
-def test_spatial_connectivity_fallback_can_lose_a_widely_separated_wall() -> None:
-    """Known, documented limitation: with no plan-title label to scope by,
-    the fallback groups wall-like clusters purely by mutual proximity. Two
-    genuinely opposite walls of the same room (e.g. west/east, far apart by
-    definition, with no hatched north/south cluster bridging them) are NOT
-    spatially connected to each other and can end up in separate groups --
-    only the larger group survives, silently dropping the other wall. This
-    is exactly why the plan-title-anchored path is primary and this
-    fallback is a secondary, weaker mechanism, not why it should be trusted
-    to reconstruct a whole building's envelope on its own. Locked in as a
-    regression so a future change to the fallback's behaviour is a
-    deliberate, visible decision rather than a silent one.
-    """
+def test_equal_separated_wall_groups_cannot_elect_one_without_source_scope() -> None:
+    """Two equally supported groups require an owned plan scope, not a tie-break."""
     from pb_wall_hatch_perimeter_correction import _wall_like_clusters
 
     clusters = _synthetic_rectangle_clusters()  # west/east, 900pt apart, no bridge
     survivors = _wall_like_clusters(clusters, None)
-    assert len(survivors) == 1
+    assert survivors == []

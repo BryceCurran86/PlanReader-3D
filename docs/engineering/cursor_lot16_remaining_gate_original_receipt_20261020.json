@@ -1,0 +1,40 @@
+{
+  "benchmark_score_granted": false,
+  "measurement_published": false,
+  "page_id": "3",
+  "remaining_gate_attach": {
+    "authorised_export": {
+      "exportable_count": 8,
+      "jobhub_export_activated": false,
+      "withheld_count": 13
+    },
+    "benchmark_score_granted": false,
+    "frame_unproven_pair_ledger_count": 0,
+    "frame_unrecorded_competitor_count": 0,
+    "hosted_deduction_gate_counts": {
+      "deduction_host_binding_unproven": 6,
+      "deduction_opening_void_unproven": 15
+    },
+    "inventory": {
+      "fragment_shared_wall_count": 3,
+      "fragment_status": "UNPUBLISHED_OPENING_FRAGMENT_IDENTITY_SHADOW",
+      "inventory_status": "INVENTORY_IDENTITY_CLEAN",
+      "opening_count": 21
+    },
+    "measurement_published": false,
+    "receipt_refresh_status": "UNPUBLISHED_LOT16_OPENING_RECEIPT_REFRESH_SHADOW",
+    "shadow_only": true,
+    "signed_id_retention": "SIGNED_QUANTITY_IDS_RETAINED",
+    "status": "UNPUBLISHED_LOT16_REMAINING_GATE_ORIGINAL_ATTACH",
+    "universe_gate": "opening_universe_incomplete",
+    "w4_collision_count": 0,
+    "w4_collision_status": "UNPUBLISHED_W4_CANDIDATE_ID_COLLISION_SHADOW",
+    "wall_length_height_gate_counts": {
+      "wall_length_authority_unproven": 21
+    }
+  },
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_REMAINING_GATE_ORIGINAL_REPORT"
+}

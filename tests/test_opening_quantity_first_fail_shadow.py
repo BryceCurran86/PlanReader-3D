@@ -361,3 +361,50 @@ class TestNoQuantityOrLiveWiring:
         assert "pb_opening_quantity_first_fail_shadow" not in source
         assert "pb_annotation_cycle_shadow" not in source
         assert "pb_source_join_readiness_shadow" not in source
+
+
+def test_figured_area_on_unpublished_canonical_opening_is_not_signed_or_counted():
+    result = _classify(
+        host_wall_id_present=True,
+        host_binding_present=True,
+        host_frame_present=True,
+        area_m2=None,
+        label_status="corroborated",
+        label_dimension_values_mm=(2127.0, 2665.0),
+        label_area_m2=5.67,
+    )
+    assert result["first_failing_authority"] == "canonical_opening_area_not_published"
+    assert not result["would_publish_live_opening_area"]
+    assert result["invented_second_axis_mm"] is None
+
+
+def test_canonical_area_requires_independent_producer_publication_even_with_figured_label():
+    result = classify_opening_quantity_first_fail_from_producer(
+        {"host_wall_id": "source-wall", "host_binding_record_id": "original-host",
+         "host_frame_record_id": "original-frame", "area_m2": None},
+        {"status": "corroborated", "evidence": {
+            "dimension_values_mm": [1200.0, 1800.0], "area_m2": 2.16,
+        }},
+    )
+    assert result["first_failing_authority"] == "canonical_opening_area_not_published"
+    assert result["diagnostic_only"] is True
+
+
+def test_metric_candidate_source_overflow_is_abstained_not_an_exception():
+    assert _classify(**{**_laundry_kwargs(),
+        "label_dimension_values_mm": (870.0, 10**400)
+    })["first_failing_authority"] == "figured_label_second_axis_unavailable"
+    assert not _classify(**{**_laundry_kwargs(),
+        "area_m2": 10**400,
+        "label_area_m2": 10**400,
+    })["would_publish_live_opening_area"]
+
+
+def test_source_valid_published_area_retains_unchanged_first_gate():
+    result=_classify(
+        host_wall_id_present=True,host_binding_present=True,host_frame_present=False,
+        area_m2=2.16,label_status="corroborated",
+        label_dimension_values_mm=(1200,1800),label_area_m2=2.16,
+    )
+    assert result["first_failing_authority"] == "none_area_already_published"
+    assert result["would_publish_live_opening_area"] is True

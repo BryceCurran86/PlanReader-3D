@@ -30,7 +30,7 @@ class CarpentryElementSpec:
     description: str
     section: str = "Structure" # "Structure", "External", "Internal", "Roof"
     length_m: float = 0.0
-    height_m: float = 2.70
+    height_m: float = 0.0
     width_m: float = 0.0
     area_m2: float = 0.0
     perimeter_lm: float = 0.0
@@ -92,13 +92,42 @@ class CarpentryTakeoffItem:
 def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTakeoffItem]:
     """Calculate trade items for timber stud wall framing: plates, studs, noggings, and frame area."""
     items: List[CarpentryTakeoffItem] = []
+    # Architectural wall dimensions do not certify an exact count of
+    # studs, plate layers, corner members or nogging rows. Validate the
+    # complete model inputs and preserve construction estimates explicitly.
+    def positive(value: object) -> bool:
+        if type(value) not in (int, float):
+            return False
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return math.isfinite(numeric) and numeric > 0.0
+
     length = spec.length_m
-    height = spec.height_m if spec.height_m > 0.0 else 2.70
-    if length <= 0.0:
+    height = spec.height_m
+    if (
+        not positive(length) or not positive(height)
+        or not math.isfinite(length * height)
+        or height <= 0.135
+        or type(spec.stud_spacing_mm) is not int
+        or spec.stud_spacing_mm <= 0
+        or not isinstance(spec.openings, (list, tuple))
+    ):
         return items
+    # No rough structural opening may be silently omitted from stud counts.
+    for op in spec.openings:
+        if not isinstance(op, dict):
+            return items
+        if not positive(op.get("width")) or not positive(op.get("height")):
+            return items
+        if op["height"] > height:
+            return items
 
     gross_area = round(length * height, 2)
-    spacing_m = (spec.stud_spacing_mm or 450) / 1000.0
+    spacing_m = spec.stud_spacing_mm / 1000.0
+    if not math.isfinite(length / spacing_m):
+        return items
 
     # 1. Total Wall Frame Area (m²)
     items.append(CarpentryTakeoffItem(
@@ -109,12 +138,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system=f"Prefabricated/stick-built frame with studs @ {spec.stud_spacing_mm}mm centres",
         quantity=gross_area,
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Gross framing elevation: {length:.2f} lm × {height:.2f}m = {gross_area:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional gross framing elevation: {length:.2f} lm × {height:.2f}m = {gross_area:.2f} m²; framing material/type needs original structural schedule.",
         row_role="external_wall" if spec.section == "External" else "internal_partition",
     ))
 
@@ -128,12 +157,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system="Anchored to slab/joists and tied at corners",
         quantity=plates_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Plates run: 3 × {length:.2f} lm = {plates_lm:.2f} lm.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional 3-plate assumption: 3 × {length:.2f} lm = {plates_lm:.2f} lm; actual plate layers need framing schedule.",
         row_role="",
     ))
 
@@ -151,12 +180,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system=f"Spaced @ {spec.stud_spacing_mm}mm crs with double jambs at openings",
         quantity=float(total_studs),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{total_studs} No. studs ({base_studs} common + {extra_studs} jamb/corner). Total length: {studs_lm:.2f} lm.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {total_studs} studs ({base_studs} common + {extra_studs} assumed jamb/corner) based on spacing; source stud and opening framing layouts unverified.",
         row_role="",
     ))
 
@@ -171,12 +200,12 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system=f"Installed horizontally at mid-height between studs ({nogging_rows} row)",
         quantity=noggings_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Nogging run: {noggings_lm:.2f} lm.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional nogging {noggings_lm:.2f} lm using generic row count; actual framing/nogging schedule unverified.",
         row_role="",
     ))
 
@@ -186,8 +215,33 @@ def calculate_wall_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
 def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTakeoffItem]:
     """Calculate trade items for timber floor bearers, joists, and structural sheet flooring."""
     items: List[CarpentryTakeoffItem] = []
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    if area <= 0.0:
+    # Source area and independently supplied rectangle axes may not
+    # contradict one another. Do not coerce text, bool, NaN, infinite or
+    # overflowing values into an apparently verified subfloor.
+    def _metric_or_none(value: object) -> float | None:
+        if type(value) not in (int, float):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) and number >= 0.0 else None
+
+    source_area = _metric_or_none(spec.area_m2)
+    source_length = _metric_or_none(spec.length_m)
+    source_width = _metric_or_none(spec.width_m)
+    if None in (source_area, source_length, source_width):
+        return items
+    rectangular_area = (
+        source_length * source_width
+        if source_length > 0.0 and source_width > 0.0 else None
+    )
+    if (source_area > 0.0 and rectangular_area is not None
+            and not math.isclose(source_area, rectangular_area,
+                                 rel_tol=0.0, abs_tol=0.011)):
+        return items
+    area = source_area if source_area > 0.0 else rectangular_area
+    if area is None or not math.isfinite(area) or area <= 0.0:
         return items
 
     # 1. Structural Subfloor Sheets (m²)
@@ -199,12 +253,12 @@ def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[Carpent
         finish_system="Glued and screw-fixed to floor joists",
         quantity=round(area, 2),
         unit="m²",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Structural subfloor area: {area:.2f} m².",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional subfloor area: {area:.2f} m²; 19mm particleboard material not authenticated from original drawing.",
         row_role="floor_area",
     ))
 
@@ -218,12 +272,12 @@ def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[Carpent
         finish_system="Spaced @ 450mm centres, blocked at ends and over bearers",
         quantity=joists_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Estimated joist run: {joists_lm:.2f} lm across {area:.2f} m² floor.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional 2.4 lm/m² joist estimate: {joists_lm:.2f} lm across {area:.2f} m²; structural layout and sizing unverified.",
         row_role="",
     ))
 
@@ -233,17 +287,55 @@ def calculate_subfloor_framing_items(spec: CarpentryElementSpec) -> List[Carpent
 def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTakeoffItem]:
     """Calculate trade items for prefabricated timber roof trusses and battens."""
     items: List[CarpentryTakeoffItem] = []
-    length = spec.length_m
-    span = spec.width_m if spec.width_m > 0.0 else 8.0
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (length * span)
-    if area <= 0.0:
+    # A previous 8.0 m fallback labelled roof trusses as Measured even
+    # when the source supplied no physical span. Keep numeric candidates
+    # only for real dimensions. Standard 900 mm centres are still a design
+    # assumption, not a counted original truss layout.
+    def _positive_metric(value: object) -> float | None:
+        if type(value) not in (int, float):
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return numeric if math.isfinite(numeric) and numeric > 0.0 else None
+
+    length = _positive_metric(spec.length_m)
+    span = _positive_metric(spec.width_m)
+    explicit_area = _positive_metric(spec.area_m2)
+    physical_rectangle_area = (
+        length * span if length is not None and span is not None else None
+    )
+    if (
+        explicit_area is not None and physical_rectangle_area is not None
+        and not math.isclose(explicit_area, physical_rectangle_area,
+                             rel_tol=0.0, abs_tol=0.011)
+    ):
+        return items
+    # Missing/zero is the legacy absent-area sentinel. A nonzero, invalid
+    # original area claim must not be hidden by substituting an L x W guess.
+    if type(spec.area_m2) not in (int, float):
+        return items
+    try:
+        claimed_area = float(spec.area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return items
+    if not math.isfinite(claimed_area) or claimed_area < 0.0:
+        return items
+    area = explicit_area if explicit_area is not None else physical_rectangle_area
+    if area is None or not math.isfinite(area) or area <= 0.0:
         return items
 
-    # Trusses spaced at 900mm centres
-    truss_count = int(math.ceil(length / 0.900)) + 1
+    if length is None or span is None:
+        # Without both dimensions the count of complete trusses is not
+        # measured, and the roof area alone must not mint a nominal span.
+        truss_count = None
+    else:
+        truss_count = int(math.ceil(length / 0.900)) + 1
 
     # 1. Prefabricated Trusses (No.)
-    items.append(CarpentryTakeoffItem(
+    if truss_count is not None:
+        items.append(CarpentryTakeoffItem(
         section="Roof",
         element=f"Prefabricated timber roof trusses ({span:.1f}m span)",
         location=f"Roof trusses · {spec.element_id}",
@@ -251,16 +343,17 @@ def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system="Erected, braced with speed-bracing and tied down with triple-grips",
         quantity=float(truss_count),
         unit="No.",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"{truss_count} No. trusses spaced @ 900mm crs over {length:.2f}m run.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional {truss_count} No. trusses estimated @ 900mm crs over {length:.2f}m source run; original truss setting-out and material unverified.",
         row_role="",
     ))
 
-    # 2. Roof Battens: approx 1.2 lm per m² of roof area (@ 900mm crs)
+    # 2. Roof Battens: approx 1.25 lm per m², not actual measured
+    # original batten lengths. Preserve it as a provisional design estimate.
     battens_lm = round(area * 1.25, 2)
     items.append(CarpentryTakeoffItem(
         section="Roof",
@@ -270,12 +363,12 @@ def calculate_roof_framing_items(spec: CarpentryElementSpec) -> List[CarpentryTa
         finish_system="Fixed across truss top chords to receive roof sheeting",
         quantity=battens_lm,
         unit="lm",
-        quantity_status="Measured",
+        quantity_status="Provisional",
         source_page=spec.source_page,
         source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-        inclusion_status="INCLUSION",
-        confidence="Verified",
-        notes=f"Roof battens run: {battens_lm:.2f} lm over {area:.2f} m² roof plane.",
+        inclusion_status="PROVISIONAL",
+        confidence="Provisional",
+        notes=f"Provisional batten rate-based estimate: {battens_lm:.2f} lm over {area:.2f} m²; actual battens/spacing/material not source-confirmed.",
         row_role="",
     ))
 
@@ -286,9 +379,63 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
     """Calculate trade items for external cladding and eave soffits."""
     items: List[CarpentryTakeoffItem] = []
     if spec.element_type == "cladding":
-        gross_area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.height_m)
-        op_ded = sum(float(op.get("area") or 0.0) for op in spec.openings)
-        net_area = round(max(0.0, gross_area - op_ded), 2)
+        # Claimed gross area and explicit elevation dimensions are separate
+        # original metric witnesses. A contradictory pair is not resolved by
+        # choosing whichever value creates a plausible net cladding quantity.
+        def _native_nonnegative(value: object) -> float | None:
+            if type(value) not in (int, float):
+                return None
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            return number if math.isfinite(number) and number >= 0.0 else None
+
+        claimed = _native_nonnegative(spec.area_m2)
+        length = _native_nonnegative(spec.length_m)
+        height = _native_nonnegative(spec.height_m)
+        if None in (claimed, length, height):
+            return items
+        rectangle = length * height if length > 0.0 and height > 0.0 else None
+        if (
+            claimed > 0.0 and rectangle is not None
+            and not math.isclose(claimed, rectangle,
+                                 rel_tol=0.0, abs_tol=0.011)
+        ):
+            return items
+        gross_area = claimed if claimed > 0.0 else (
+            rectangle if rectangle is not None else 0.0
+        )
+        # The cladding gross/net area must remain an actual possible
+        # physical surface. A missing original opening area is not a zero-
+        # area proof, and deductions larger than their containing elevation
+        # cannot be silently clamped into a credible measured takeoff.
+        if type(gross_area) not in (int, float):
+            return items
+        try:
+            gross_area = float(gross_area)
+        except (TypeError, ValueError, OverflowError):
+            return items
+        if not math.isfinite(gross_area) or gross_area <= 0.0:
+            return items
+        deduction_areas = []
+        for opening in spec.openings:
+            if not isinstance(opening, dict):
+                return items
+            value = opening.get("area")
+            if type(value) not in (int, float):
+                return items
+            try:
+                area = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return items
+            if not math.isfinite(area) or area <= 0.0:
+                return items
+            deduction_areas.append(area)
+        op_ded = math.fsum(deduction_areas)
+        if not math.isfinite(op_ded) or op_ded >= gross_area:
+            return items
+        net_area = round(gross_area - op_ded, 2)
         if net_area > 0.0:
             items.append(CarpentryTakeoffItem(
                 section="External",
@@ -308,8 +455,14 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
             ))
     elif spec.element_type == "eaves":
         perimeter = spec.perimeter_lm if spec.perimeter_lm > 0.0 else spec.length_m
-        overhang = spec.overhang_width_m or 0.600
-        if perimeter > 0.0:
+        # A zero-width overhang is not an invitation to invent 600 mm.
+        # The dataclass's 0.60 default is itself only a provisional estimate.
+        overhang = spec.overhang_width_m
+        # Eave dimensions/materials are modelling inputs, not issued drawing
+        # geometry or a verified material schedule. Never promote this generic
+        # fallback to measured customer quantities without a source authority.
+        if (perimeter > 0.0 and overhang > 0.0
+                and math.isfinite(perimeter) and math.isfinite(overhang)):
             eave_area = round(perimeter * overhang, 2)
             # Eave soffit lining (m²)
             items.append(CarpentryTakeoffItem(
@@ -320,12 +473,13 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
                 finish_system="Fixed to eave bearer/truss overhang with eave mould trim",
                 quantity=eave_area,
                 unit="m²",
-                quantity_status="Measured",
-                source_page=spec.source_page,
+                quantity_status="Provisional",
+                source_page=spec.source_page or "UNVERIFIED - model input only",
                 source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-                inclusion_status="INCLUSION",
-                confidence="Verified",
-                notes=f"Eaves area: {perimeter:.2f} lm × {overhang:.2f}m width = {eave_area:.2f} m².",
+                inclusion_status="PROVISIONAL",
+                confidence="Provisional",
+                notes=(f"Provisional eaves estimate: {perimeter:.2f} lm × {overhang:.2f}m = {eave_area:.2f} m²; "
+                       "perimeter, overhang, 4.5mm FC material and physical soffit face NOT source-authenticated."),
                 row_role="",
             ))
             # Timber Fascia (lm)
@@ -337,12 +491,13 @@ def calculate_eaves_and_cladding_items(spec: CarpentryElementSpec) -> List[Carpe
                 finish_system="Fixed to truss tails ready to receive gutter",
                 quantity=round(perimeter, 2),
                 unit="lm",
-                quantity_status="Measured",
-                source_page=spec.source_page,
+                quantity_status="Provisional",
+                source_page=spec.source_page or "UNVERIFIED - model input only",
                 source_reference=f"{CARPENTRY_SOURCE_PREFIX} · {spec.element_id}",
-                inclusion_status="INCLUSION",
-                confidence="Verified",
-                notes=f"Fascia perimeter: {perimeter:.2f} lm.",
+                inclusion_status="PROVISIONAL",
+                confidence="Provisional",
+                notes=(f"Provisional fascia estimate: {perimeter:.2f} lm; "
+                       "timber fascia material and actual fascia extent NOT source-authenticated."),
                 row_role="",
             ))
 

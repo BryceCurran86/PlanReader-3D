@@ -347,15 +347,19 @@ def _assemble(
                 end = max(end, other["x"] + other["w"])
         text = "".join(item["t"] for item in sorted(cluster, key=lambda item: item["x"]))
         text = text.replace("--", "-")
-        joined = re.search(r"([WD])-([0-9]{1,2})", text)
-        if joined:
+        joined = []
+        for match in re.finditer(r"([WD])-([0-9]{1,2})", text):
+            label = f"{match.group(1).upper()}{int(match.group(2))}"
+            if label not in joined:
+                joined.append(label)
+        if len(joined) == 1:
             cx, cy = to_page(
                 sum(item["x"] + item["w"] / 2.0 for item in cluster) / len(cluster),
                 sum(item["y"] + item["h"] / 2.0 for item in cluster) / len(cluster),
             )
             _emit_mark(
                 marks,
-                f"{joined.group(1).upper()}{int(joined.group(2))}",
+                joined[0],
                 min(item["conf"] for item in cluster),
                 cx,
                 cy,

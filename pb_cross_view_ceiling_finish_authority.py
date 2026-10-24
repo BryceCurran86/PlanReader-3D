@@ -215,8 +215,19 @@ class CrossViewCeilingFinishResult:
     def records_by_physical_room_id(
         self,
     ) -> Mapping[str, CrossViewCeilingFinishRecord]:
+        if self.status not in (
+            EvidenceResolutionStatus.CORROBORATED,
+            EvidenceResolutionStatus.CANDIDATE,
+        ):
+            return MappingProxyType({})
         # Never expose source receipt aliases or a last-wins room dictionary,
         # including when a public result dataclass is reconstructed.
+        # A reconstructed public result is not an issuer receipt. A rogue
+        # record object cannot be discarded and let a competing legitimate
+        # record appear uniquely owned; quarantine the entire projection.
+        if any(type(record) is not CrossViewCeilingFinishRecord
+               for record in self.records):
+            return MappingProxyType({})
         survivors, _disputed = _quarantine_reused_ceiling_source_ownership(
             self.records
         )
@@ -243,6 +254,9 @@ def _quarantine_reused_ceiling_source_ownership(
     disputed: set[str] = set()
     by_physical: dict[str, int] = Counter()
     fields = (
+        # The producer's issued finish record cannot be rekeyed to a second
+        # physical room or left blank in reconstructed result records.
+        "record_id",
         "canonical_room_id",
         "source_room_face_record_id",
         "occurrence_record_id",
@@ -276,8 +290,17 @@ def _quarantine_reused_ceiling_source_ownership(
                     or len(set(receipts)) != len(receipts)):
                 disputed.add(room_id)
                 continue
+            # Source observation/receipt ownership is independent of whether
+            # a caller named the role "room label" or "finish occurrence".
+            # Do not let one original ink/text receipt own two physical rooms
+            # merely by relabelling the consumer field.
+            source_namespace = (
+                "physical_source_observation"
+                if field.endswith("_observation_ids")
+                else "physical_source_receipt"
+            )
             for value in receipts:
-                owners[(field, value)].add(room_id)
+                owners[(source_namespace, value)].add(room_id)
 
     disputed.update(
         room_id for room_id, count in by_physical.items() if count > 1
@@ -423,11 +446,36 @@ def _definition_is_ceiling_finish(
     # such as SIGNAGE-CONTRACTOR; tokenize semantics without source guessing.
     import re
     role_tokens = set(re.findall(r"[a-z]+", original_material_text))
-    # Exterior wall, facade and fascia cladding are independently printed
-    # non-ceiling material roles too; never let a stale ceiling-grid semantic
-    # turn these into square metres of internal suspended ceiling.
+    # A refrigerated-panel enclosure can have a genuine ceiling role when
+    # independently identified on the RCP. It is not a suspended plaster
+    # GRID definition just because a stale semantic class says ceiling_grid.
+    is_coldroom = (
+        "coldroom" in role_tokens
+        or {"cold", "room"}.issubset(role_tokens)
+    )
+    if (
+        semantic == "ceiling_grid"
+        and is_coldroom
+        and bool(role_tokens.intersection({"panel", "panels"}))
+        and "grid" not in role_tokens
+    ):
+        return False
+    # A schedule's original material description takes precedence over a
+    # stale ceiling-grid semantic. Exterior soffit/eaves/canopy cladding is
+    # NOT the internal suspended GRID/IPF1 ceiling finish, even when drawn
+    # on a reflected-ceiling sheet.
     if "cladding" in role_tokens and role_tokens.intersection(
-        {"signage", "wall", "facade", "fascia"}
+        {"signage", "wall", "facade", "fascia", "soffit", "eaves", "canopy"}
+    ):
+        return False
+    # A steel roofing/wall cladding specification appearing in an RCP
+    # material legend is NOT itself proof of an internal suspended ceiling.
+    # An explicit native ceiling role is required to avoid mistaking a
+    # Colorbond sheet-cladding note for a GRID plaster-tile finish.
+    if (
+        "cladding" in role_tokens
+        and "colorbond" in role_tokens
+        and not role_tokens.intersection({"ceiling", "suspended", "grid"})
     ):
         return False
     # The semantic family must still come from a non-empty authenticated

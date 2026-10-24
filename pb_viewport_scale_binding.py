@@ -116,18 +116,21 @@ def _normalize_revision_id(revision_id: Optional[str]) -> Optional[str]:
 
 
 def _parse_ratio_from_raw(scale_raw: Optional[str]) -> Optional[float]:
+    """Return one printed ratio. Two different ratios abstain."""
     if not scale_raw:
         return None
-    match = _SCALE_RE.search(str(scale_raw))
-    if not match:
+    found: set[float] = set()
+    for match in _SCALE_RE.finditer(str(scale_raw)):
+        numerator = float(match.group(1))
+        denominator = float(match.group(2))
+        if numerator <= 0.0 or denominator <= 0.0:
+            continue
+        if not math.isfinite(numerator) or not math.isfinite(denominator):
+            continue
+        found.add(round(denominator / numerator, 9))
+    if len(found) != 1:
         return None
-    numerator = float(match.group(1))
-    denominator = float(match.group(2))
-    if numerator <= 0.0 or denominator <= 0.0:
-        return None
-    if not math.isfinite(numerator) or not math.isfinite(denominator):
-        return None
-    return denominator / numerator
+    return next(iter(found))
 
 
 def _valid_denominator(scale_denominator: Optional[float]) -> Optional[float]:

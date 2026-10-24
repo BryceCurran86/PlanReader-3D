@@ -192,3 +192,63 @@ def test_genuine_pdf_scaled_room_with_trusted_scale_remains_firm():
     measured = _scaled_qty()
     assert measured.abstained is False
     assert measured.value == 25.0
+
+
+@pytest.mark.parametrize("source_page", [0, "", "0", None, -1, "01", "  ", "1.0"])
+def test_falsy_or_noncanonical_room_source_page_cannot_publish_firm_printed_area(source_page):
+    room = copy(_room())
+    object.__setattr__(room, "source_page", source_page)
+    quantity = build_room_area_quantity(
+        room=room, context=_context(), document=_document(),
+        viewport=_viewport(), entity=_entity(), page_no=1,
+        explicit_area_evidence=_explicit_area(25.0),
+    )
+    assert quantity.abstained
+    assert quantity.value is None
+    assert "room_source_page_mismatch" in quantity.blocking_reasons
+
+
+@pytest.mark.parametrize("source_page", [1, "1"])
+def test_exact_original_room_source_page_preserves_documented_area(source_page):
+    room = copy(_room())
+    object.__setattr__(room, "source_page", source_page)
+    quantity = build_room_area_quantity(
+        room=room, context=_context(), document=_document(),
+        viewport=_viewport(), entity=_entity(), page_no=1,
+        explicit_area_evidence=_explicit_area(25.0),
+    )
+    assert not quantity.abstained
+    assert quantity.value == 25.0
+
+
+@pytest.mark.parametrize("native_text", [
+    "ROOM 40 m2", "40m²", "4,000 sq m", "25 m2 40 m2",
+])
+def test_original_printed_room_area_conflict_cannot_be_laundered_to_firm(native_text):
+    atom = copy(_explicit_area(25.0))
+    object.__setattr__(atom, "raw_text", native_text)
+    result = source_area(atom)
+    assert result.abstained
+    assert "explicit_area_printed_source_mismatch" in result.blocking_reasons
+
+
+@pytest.mark.parametrize("native_text", [
+    "ROOM 25 m2", "25m²", "ROOM 25.0 sq m",
+])
+def test_original_matching_printed_room_area_keeps_firm_source_measurement(native_text):
+    atom = copy(_explicit_area(25.0))
+    object.__setattr__(atom, "raw_text", native_text)
+    result = source_area(atom)
+    assert not result.abstained
+    assert result.value == 25.0
+
+
+def test_authenticated_cross_view_figured_m2_has_separate_original_dimension_receipts():
+    atom = copy(_explicit_area(25.0))
+    object.__setattr__(atom, "method", "authenticated_cross_view_figured_dimensions")
+    object.__setattr__(atom, "raw_text", "ROOM 40 m2")
+    # This source is authenticated by the independent pair of original
+    # dimension receipts, not by an unrelated printed area text token.
+    result = source_area(atom)
+    assert not result.abstained
+    assert result.value == 25.0

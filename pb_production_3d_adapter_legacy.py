@@ -430,10 +430,19 @@ def _strong_floor_level_claim(floor_data: Dict[str, Any]) -> Optional[Any]:
     floors must carry either an explicit floor level field or the structured
     registration record produced by ``collect_workspace_3d_evidence``.
     """
-    for key in ("storey_id", "level_id", "level", "level_name"):
-        value = _level_evidence_value(floor_data, key)
-        if value is not None:
-            return value
+    values = [
+        _level_evidence_value(floor_data, key)
+        for key in ("storey_id", "level_id", "level", "level_name")
+        if _level_evidence_value(floor_data, key) is not None
+    ]
+    if len(values) == 1:
+        return values[0]
+    if len(values) > 1:
+        identities = {_normalise_level_identity(value) for value in values}
+        identities.discard("")
+        if len(identities) == 1:
+            return values[0]
+        return None
 
     source_level = floor_data.get("_source_level")
     if isinstance(source_level, dict) and source_level.get("derivation_source") in {
@@ -453,15 +462,23 @@ def _normalise_level_identity(value: Any) -> str:
     text = str(raw or "").strip().lower()
     if not text:
         return ""
+    found: list[str] = []
+
+    def add(token: str) -> None:
+        if token not in found:
+            found.append(token)
+
     if re.search(r"\bground(?:\s+(?:floor|level))?\b", text) or text in {"g", "gf", "lvl 0", "level 0", "0"}:
-        return "ground"
-    basement = re.search(r"\b(?:basement|b)\s*[- ]?(\d+)\b", text)
-    if basement:
-        return f"basement_{int(basement.group(1))}"
-    level = re.search(r"\b(?:level|lvl|l)\s*[- ]?(\d+)\b", text)
-    if level:
-        number = int(level.group(1))
-        return "ground" if number == 0 else f"level_{number}"
+        add("ground")
+    for match in re.finditer(r"\b(?:basement|b)\s*[- ]?(\d+)\b", text):
+        add(f"basement_{int(match.group(1))}")
+    for match in re.finditer(r"\b(?:level|lvl|l)\s*[- ]?(\d+)\b", text):
+        number = int(match.group(1))
+        add("ground" if number == 0 else f"level_{number}")
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        return ""
     return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
 
 

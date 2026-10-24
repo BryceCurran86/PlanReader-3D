@@ -52,12 +52,15 @@ _HARDWARE_PATTERN = re.compile(
 
 def _specific_tag(default_tag: str, clause: str) -> str:
     """Preserve a printed W/D mark when its trade agrees with the item."""
-    match = _TAG_PATTERN.search(clause)
-    if not match:
-        return default_tag
-    prefix = match.group("tag").upper()
-    if (default_tag == "windows" and prefix == "W") or (default_tag == "doors" and prefix == "D"):
-        return f"{prefix}{int(match.group('number'))}"
+    found: list[str] = []
+    for match in _TAG_PATTERN.finditer(clause):
+        prefix = match.group("tag").upper()
+        if (default_tag == "windows" and prefix == "W") or (default_tag == "doors" and prefix == "D"):
+            mark = f"{prefix}{int(match.group('number'))}"
+            if mark not in found:
+                found.append(mark)
+    if len(found) == 1:
+        return found[0]
     return default_tag
 
 

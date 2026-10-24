@@ -173,10 +173,14 @@ def _schedule_page(page: Dict[str, Any]) -> bool:
 
 
 def _infer_substrate(description: Any) -> str:
+    """Return one substrate family. Two different families abstain."""
     low = str(description or "").lower()
+    names: List[str] = []
     for needles, name in _MATERIAL_HINTS:
-        if any(token in low for token in needles):
-            return name
+        if any(token in low for token in needles) and name not in names:
+            names.append(name)
+    if len(names) == 1:
+        return names[0]
     return ""
 
 
@@ -250,7 +254,11 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         return ""
     description_text = _normalise(entry.get("description"))
     finish_text = _normalise(entry.get("finish"))
-    if finish_text and finish_text == description_text:
+    # The material schedule may omit an independent finish field. In that
+    # case the SOURCE description owns the primary material role: floor tile
+    # remains tile even when its ancillary grout is epoxy. An independently
+    # specified nonempty finish still takes precedence over this description.
+    if not finish_text or finish_text == description_text:
         leading_semantic = _leading_composite_finish_semantic(description_text)
         if leading_semantic:
             return leading_semantic
@@ -400,7 +408,7 @@ def build_material_dictionary(app: Any, workspace_id: int) -> Dict[str, Any]:
         finish_names = {item.get("finish") for item in items if item.get("finish")}
         dictionary[code] = {
             "code": code,
-            "description": representative["description"],
+            "description": "" if conflicting else representative["description"],
             "substrate": next(iter(substrate_names)) if len(substrate_names) == 1 else "",
             "finish": next(iter(finish_names)) if len(finish_names) == 1 else "",
             "status": status,

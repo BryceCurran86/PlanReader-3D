@@ -400,3 +400,121 @@ def test_resolve_requires_complete_binding_set_reconciliation() -> None:
     )
     assert result.abstained
     assert "conflicting_eligible_scale_bindings" in result.blocking_reasons
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# EvidenceAtom.unit and raw/normalized disagreement in the figured-dimension path
+# ---------------------------------------------------------------------------------------------------------------------
+
+import copy
+
+import pytest
+
+
+def _figured_atom(raw: str = "", normalized=None, unit=None) -> EvidenceAtom:
+    return replace(_figured(raw), normalized_value=normalized, unit=unit)
+
+
+def _resolve_figured(figured: EvidenceAtom):
+    return resolve_linear_measurement_input(
+        context=_context(),
+        document=_document(),
+        viewport=_viewport(),
+        entity=_entity(),
+        page_no=1,
+        figured_evidence=figured,
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "normalized", "unit"),
+    [
+        ("", 6.5, "m"),          # read as 6.5 mm before: 0.0065 m FIRM
+        ("", 6.5, "Metres"),
+        ("", 21.3, "ft"),
+        ("", 650.0, "cm"),
+        ("", 12.5, "m2"),        # an area atom is not a length
+        ("", 12.5, "m\u00b2"),
+        ("", 6500.0, "px"),
+    ],
+)
+def test_normalized_value_in_an_unsupported_or_metre_unit_blocks_instead_of_being_read_as_mm(raw, normalized, unit) -> None:
+    result = _resolve_figured(_figured_atom(raw, normalized, unit))
+    assert result.abstained and result.value_m is None
+    assert result.blocking_reasons == ("figured_unit_unsupported",)
+
+
+@pytest.mark.parametrize(("raw", "unit"), [("6.5", "m"), ("6,5", "m"), ("6500", "metres")])
+def test_bare_printed_number_beside_a_metre_unit_with_nothing_to_compare_is_ambiguous(raw, unit) -> None:
+    result = _resolve_figured(_figured_atom(raw, None, unit))
+    assert result.abstained and result.value_m is None
+    assert result.blocking_reasons == ("figured_unit_ambiguous",)
+
+
+@pytest.mark.parametrize(
+    ("raw", "normalized", "unit"),
+    [
+        ("6500", 3.2, "m"),       # the contradiction used to be dropped: 6.5 FIRM
+        ("6500", 650.0, "mm"),
+        ("6500", 650.0, None),
+        ("6.5m", 650.0, "mm"),
+        ("6.5m", 3.2, "m"),
+        ("6500", 6501.0, "mm"),
+    ],
+)
+def test_printed_text_and_normalized_value_that_disagree_block_in_both_directions(raw, normalized, unit) -> None:
+    result = _resolve_figured(_figured_atom(raw, normalized, unit))
+    assert result.abstained and result.value_m is None
+    assert result.blocking_reasons == ("figured_measurement_not_firm",)
+    assert "disagree" in result.notes
+
+
+@pytest.mark.parametrize(
+    ("raw", "normalized", "unit"),
+    [
+        ("6500", None, None),
+        ("6500", None, "mm"),
+        ("6500mm", None, "mm"),
+        ("6.5m", None, None),
+        ("6.5m", None, "m"),
+        ("", 6500.0, None),
+        ("", 6500.0, "mm"),
+        ("", 6500.0, " MM "),
+        ("", 6500.0, "Millimetres"),
+        ("6500", 6500.0, "mm"),
+        ("6500", 6500.0, None),
+        ("6500", 6.5, "m"),       # agree: bare printed mm beside the same length in metres
+        ("6.5m", 6.5, "m"),
+        ("6.5m", 6500.0, "mm"),
+    ],
+)
+def test_consistent_figured_dimensions_stay_firm_at_the_same_value(raw, normalized, unit) -> None:
+    result = _resolve_figured(_figured_atom(raw, normalized, unit))
+    assert result.abstained is False
+    assert result.authority_status == AuthorityStatus.FIRM.value
+    assert result.source_type == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert result.value_m == 6.5
+    assert result.blocking_reasons == ()
+
+
+def test_figured_resolution_is_deterministic_and_does_not_mutate_the_evidence() -> None:
+    figured = _figured_atom("6500", 650.0, "mm")
+    before = copy.deepcopy(figured)
+    assert _resolve_figured(figured) == _resolve_figured(figured)
+    assert figured == before
+
+
+def test_unrelated_document_evidence_does_not_change_the_figured_outcome() -> None:
+    figured = _figured_atom("6500", 6.5, "m")
+    plain = _resolve_figured(figured)
+    wider = resolve_linear_measurement_input(
+        context=_context(),
+        document=_document(evidence_ids=("ev-wall", "ev-dim", "ev-other-1", "ev-other-2")),
+        viewport=_viewport(),
+        entity=_entity(),
+        page_no=1,
+        figured_evidence=figured,
+    )
+    assert (wider.value_m, wider.authority_status, wider.blocking_reasons) == (
+        plain.value_m, plain.authority_status, plain.blocking_reasons,
+    )

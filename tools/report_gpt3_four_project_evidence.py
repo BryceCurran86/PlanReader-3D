@@ -18,7 +18,10 @@ import importlib
 import importlib.util
 import sys
 
-from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
+from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+from tools.gpt3_safe_original_report_output import (
+    preflight_new_diagnostic, write_new_diagnostic,
+)
 from pb_customer_output_verification import (
     _customer_quantity_id,
     verify_sealed_customer_output,
@@ -52,11 +55,13 @@ def _load_unchanged_frozen_modules():
     evaluator = importlib.import_module(f"{package_name}.evaluator")
     manifest_io = importlib.import_module(f"{package_name}.manifest_io")
     reconciliation = importlib.import_module(f"{package_name}.sealed_reconciliation")
+    development = importlib.import_module(f"{package_name}.development_scoreboard")
     return (
         evaluator.evaluate_suite_v2,
         manifest_io.load_suite_manifests,
         reconciliation.identity_map_from_dict,
         reconciliation.reconcile_sealed_run_v2,
+        development.evaluate_development_suite_v2,
     )
 
 
@@ -65,6 +70,7 @@ def _load_unchanged_frozen_modules():
     load_suite_manifests,
     identity_map_from_dict,
     reconcile_sealed_run_v2,
+    evaluate_development_suite_v2,
 ) = _load_unchanged_frozen_modules()
 
 
@@ -220,8 +226,8 @@ def build_four_project_evidence_ledger(
 ) -> dict[str, Any]:
     """Inventory all frozen projects, verify supplied original bytes and score safely."""
     manifests = load_suite_manifests(FROZEN_ROOT)
-    if len(manifests) != 4:
-        raise ValueError("frozen V2 suite must contain exactly four projects")
+    if len(manifests) != 4 or len({m.project_id for m in manifests}) != 4:
+        raise ValueError("frozen V2 suite must contain four distinct projects")
     eligible = sum(
         1 for manifest in manifests for item in manifest.verified_items
         if item.denominator_eligible
@@ -231,6 +237,10 @@ def build_four_project_evidence_ledger(
 
     rows: list[dict[str, Any]] = []
     scored: dict[str, tuple] = {}
+    # A source/customer-verified project may still have an INCOMPLETE frozen
+    # manifest. Retain its genuine production evidence for development-only
+    # scoring, separately from the official-publication eligible set.
+    verified_development: dict[str, tuple] = {}
     source_hashes_by_project: dict[str, tuple[str, ...]] = {}
     completed_by_project: dict[str, bool] = {}
     seen_signed_quantity_ids: dict[str, str] = {}
@@ -321,6 +331,15 @@ def build_four_project_evidence_ledger(
             }
             first_failure_stage = "sealed_source_run_parse_or_signature"
             sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
+            # The V1 container can be well-formed even when there is no
+            # physical quantity or explicit source-owned ABSTAIN receipt.
+            # Never turn "producer did not execute" into a four-project
+            # development score of zero, regardless of original PDF presence.
+            first_failure_stage = "signed_source_quantity_universe_empty"
+            if not sealed.quantities:
+                raise ValueError(
+                    "signed production contains no physical quantity or abstention receipts"
+                )
             first_failure_stage = "independent_identity_map_parse"
             mapping = identity_map_from_dict(_json_object(identity_path))
             first_failure_stage = "signed_source_document_envelope"
@@ -367,6 +386,7 @@ def build_four_project_evidence_ledger(
             _enforce_cross_project_quantity_uniqueness(
                 sealed, project_id=project_id, seen=seen_signed_quantity_ids,
             )
+            verified_development[project_id] = produced
             entry["customer_bijection_verified"] = True
             entry["reconciliation_input_presence_status"] = "INDEPENDENTLY_VERIFIED"
             entry["reconciliation_complete"] = True
@@ -402,9 +422,34 @@ def build_four_project_evidence_ledger(
         "projects": rows,
         "reason_codes": [],
         "official_suite_result": None,
+        # Development-only results must be absent unless every project's
+        # original bytes, V1 seal, customer bijection and identity mapping
+        # were independently verified. Never infer missing outputs as zeros.
+        "development_suite_result": None,
+        "independently_verified_execution_count": len(verified_development),
     }
     if len(scored) != 4:
-        result["reason_codes"] = ["four_project_signed_source_universe_not_complete"]
+        if len(verified_development) == 4:
+            # All four original production/customer executions are complete,
+            # but the unchanged frozen evaluator may still refuse to publish
+            # because a project *manifest* is INCOMPLETE. Invoke only the
+            # existing development scorer, with the genuine source-verified
+            # produced objects. No synthetic VERIFIED manifest is persisted.
+            development = evaluate_development_suite_v2(
+                manifests, verified_development,
+            )
+            result["development_suite_result"] = asdict(development)
+            result["reason_codes"] = ["frozen_project_manifests_incomplete"]
+        else:
+            result["reason_codes"] = [
+                "four_project_signed_source_universe_not_complete",
+                *(
+                    f'{entry["project_id"]}:{entry["first_failing_authority_stage"]}'
+                    for entry in rows
+                    if entry["first_failing_authority_stage"] is not None
+                    and entry["publication_status"] != "DIAGNOSTIC_UNPUBLISHED"
+                ),
+            ]
         return result
     # The unchanged evaluator fails closed unless the caller supplies BOTH
     # complete original-source SHA receipts and independent reconciliation
@@ -431,6 +476,80 @@ def build_four_project_evidence_ledger(
     return result
 
 
+def _snapshot_four_project_publication_inputs(
+    *, source_dir: Path, sealed_dir: Path,
+    identity_map_dir: Path, customer_dir: Path,
+) -> tuple[tuple[Path, str | None], ...]:
+    """Content-address every source the official suite publication depends on.
+
+    None is an explicit missing-file receipt: an original PDF or signed
+    output appearing halfway through scoring cannot silently turn an
+    incomplete previous evaluation into a current published report.
+    """
+    required: list[Path] = [FROZEN_ROOT / "manifest.json"]
+    manifests = load_suite_manifests(FROZEN_ROOT)
+    for manifest in manifests:
+        project_id = manifest.project_id
+        project = FROZEN_ROOT / "projects" / project_id
+        required.extend((
+            project / "source_manifest.json",
+            project / "reference_takeoff.json",
+            project / "object_universe.json",
+            project / "verification_report.json",
+        ))
+        original_files, conflicts = _resolve_original_paths(
+            source_dir, project_id, manifest.source_documents,
+        )
+        if conflicts:
+            raise ValueError("unsafe original source path in publication preflight")
+        required.extend(original_files)
+        # The source resolver permits both project-scoped and flat originals.
+        # Even an absent *alternative* path is material source evidence:
+        # a conflicting scoped/flat PDF arriving after reconciliation must
+        # invalidate publication rather than evade the selected-path digest.
+        for document in manifest.source_documents:
+            required.extend((
+                source_dir / project_id / document.name,
+                source_dir / document.name,
+            ))
+        required.extend((
+            sealed_dir / f"{project_id}.json",
+            identity_map_dir / f"{project_id}.identity_map.json",
+            customer_dir / f"{project_id}.customer_rows.json",
+        ))
+    seen: set[Path] = set()
+    receipts: list[tuple[Path, str | None]] = []
+    for source in required:
+        if source in seen:
+            continue
+        seen.add(source)
+        if source.is_symlink():
+            raise ValueError("original or signed publication source is a symlink")
+        if source.is_file():
+            receipts.append((source, _sha256(source)))
+        elif not source.exists():
+            receipts.append((source, None))
+        else:
+            raise ValueError("publication input path is not a regular file")
+    return tuple(receipts)
+
+
+def _assert_four_project_publication_inputs_stable(
+    expected: tuple[tuple[Path, str | None], ...],
+) -> None:
+    for path, expected_hash in expected:
+        if path.is_symlink():
+            raise ValueError("four-project input changed during report publication")
+        try:
+            actual = _sha256(path) if path.is_file() else None
+        except OSError as exc:
+            raise ValueError(
+                "four-project input changed during report publication"
+            ) from exc
+        if actual != expected_hash:
+            raise ValueError("four-project input changed during report publication")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path, required=True)
@@ -439,16 +558,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--customer-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    protected = (
+        FROZEN_ROOT, args.source_dir, args.sealed_dir,
+        args.identity_map_dir, args.customer_dir,
+    )
+    # Reject an existing output or alias BEFORE reading original source PDFs
+    # and all four projects' sealed/customer data. No two jobs can race to
+    # replace an earlier signed-release decision.
+    preflight_new_diagnostic(args.output, protected_roots=protected)
+    snapshot = _snapshot_four_project_publication_inputs(
+        source_dir=args.source_dir, sealed_dir=args.sealed_dir,
+        identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
+    )
     report = build_four_project_evidence_ledger(
         source_dir=args.source_dir, sealed_dir=args.sealed_dir,
         identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
     )
-    _write_readiness_report(
+    _assert_four_project_publication_inputs_stable(snapshot)
+    write_new_diagnostic(
         args.output,
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        protected_roots=(
-            FROZEN_ROOT, args.source_dir, args.sealed_dir,
-            args.identity_map_dir, args.customer_dir,
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        protected_roots=protected,
+        verify_inputs=lambda: _assert_four_project_publication_inputs_stable(
+            snapshot
         ),
     )
     print(json.dumps({

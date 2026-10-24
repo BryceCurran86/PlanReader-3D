@@ -1,0 +1,770 @@
+{
+  "benchmark_score_granted": false,
+  "digit_tail_collision_count_distribution": [
+    8,
+    7,
+    8,
+    7,
+    8,
+    6
+  ],
+  "face_end_ratios_per_opening": [
+    {
+      "end_count": 2,
+      "end_mean_pdf_pts": 2.519999999999982,
+      "end_over_face_mean_ratio": 0.061046511627906495,
+      "face_count": 4,
+      "face_mean_pdf_pts": 41.28000000000003,
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+    },
+    {
+      "end_count": 2,
+      "end_mean_pdf_pts": 2.400000000000034,
+      "end_over_face_mean_ratio": 0.13157894736842296,
+      "face_count": 4,
+      "face_mean_pdf_pts": 18.239999999999995,
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d"
+    },
+    {
+      "end_count": 2,
+      "end_mean_pdf_pts": 3.1200000000000045,
+      "end_over_face_mean_ratio": 0.08306709265175731,
+      "face_count": 4,
+      "face_mean_pdf_pts": 37.56,
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f"
+    },
+    {
+      "end_count": 2,
+      "end_mean_pdf_pts": 2.6400000000001,
+      "end_over_face_mean_ratio": 0.08461538461538781,
+      "face_count": 4,
+      "face_mean_pdf_pts": 31.200000000000003,
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd"
+    },
+    {
+      "end_count": 2,
+      "end_mean_pdf_pts": 3.1200000000000045,
+      "end_over_face_mean_ratio": 0.06388206388206394,
+      "face_count": 4,
+      "face_mean_pdf_pts": 48.84000000000003,
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b"
+    },
+    {
+      "end_count": 2,
+      "end_mean_pdf_pts": 2.400000000000034,
+      "end_over_face_mean_ratio": 0.17094017094017364,
+      "face_count": 4,
+      "face_mean_pdf_pts": 14.039999999999978,
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787"
+    }
+  ],
+  "flank_disposition_counts": {
+    "raster_source_band_left_source_primitive_unmapped": 6,
+    "raster_source_band_right_source_primitive_unmapped": 6
+  },
+  "frame_resolved_opening_ids": [
+    "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+    "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+    "physical_opening_existence_661fc5e6f0c5975d5e9bdd5d759bd180",
+    "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+    "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+    "physical_opening_existence_91ae06327d4fcc8004a557b116a77820",
+    "physical_opening_existence_bd108c2c1bfd88752311aab5901737bb",
+    "physical_opening_existence_c4d87543028146e1cff0b5e2ca480c55",
+    "physical_opening_existence_f5adf8438fb6f48cc03b03d8ca2125f5"
+  ],
+  "gptmax_pr_sync_note": {
+    "3405": "cached opening invalidation \u2014 complementary, not host grant",
+    "3412": "GPT MAX requires owned W2 fragments for local G17-to-W4 end-reach; Cursor digit-tail abstain remains independent \u2014 do not merge as host",
+    "merged_into_cursor_branch": false
+  },
+  "host_granted": false,
+  "kind_empty_evidence_ids": [
+    "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+    "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+    "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+    "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+    "physical_opening_existence_f819752382d44a00d9f28feca4b00787"
+  ],
+  "kind_label_only_ids": [
+    "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+    "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f"
+  ],
+  "kind_supported_opening_kind_tokens": {
+    "door": 7,
+    "window": 7
+  },
+  "kind_unproven_joint": [
+    {
+      "evidence_id_count": 0,
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+      "unhosted": false
+    },
+    {
+      "evidence_id_count": 0,
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+      "unhosted": false
+    },
+    {
+      "evidence_id_count": 1,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "unhosted": true
+    },
+    {
+      "evidence_id_count": 0,
+      "handoff_first_remaining_gate": "opening_filling_kind_unproven",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+      "unhosted": false
+    },
+    {
+      "evidence_id_count": 1,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "unhosted": true
+    },
+    {
+      "evidence_id_count": 0,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_unproven",
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "unhosted": true
+    },
+    {
+      "evidence_id_count": 0,
+      "handoff_first_remaining_gate": "structural_host_unavailable",
+      "kind_gate": "opening_filling_kind_evidence_unproven",
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "unhosted": true
+    }
+  ],
+  "label_bound_unsigned_opening_ids": [
+    "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+    "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+    "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+    "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+    "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+    "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+    "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+    "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096"
+  ],
+  "measurement_published": false,
+  "namespace_bridge_gate_counts": {
+    "digit_tail_collision_ambiguous_abstain": 6
+  },
+  "namespace_bridge_rows": [
+    {
+      "digit_tail_collision_count": 8,
+      "digit_tail_collision_pairs_sample": [
+        {
+          "digit_tail": "1325",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1325"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1325"
+          ]
+        },
+        {
+          "digit_tail": "1332",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1332"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1332"
+          ]
+        },
+        {
+          "digit_tail": "1467",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1467"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1467"
+          ]
+        },
+        {
+          "digit_tail": "1468",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1468"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1468"
+          ]
+        },
+        {
+          "digit_tail": "1486",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1486"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1486"
+          ]
+        },
+        {
+          "digit_tail": "1487",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1487"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1487"
+          ]
+        },
+        {
+          "digit_tail": "955",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:955"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:955"
+          ]
+        },
+        {
+          "digit_tail": "958",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:958"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:958"
+          ]
+        }
+      ],
+      "host_granted": false,
+      "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "seg_vs_d_index_digit_tail_count": 0,
+      "seg_vs_raster_segment_digit_tail_count": 8,
+      "segment_line_id_count": 8,
+      "w4_d_index_id_count": 213,
+      "w4_raster_segment_id_count": 2035
+    },
+    {
+      "digit_tail_collision_count": 7,
+      "digit_tail_collision_pairs_sample": [
+        {
+          "digit_tail": "1295",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1295"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1295"
+          ]
+        },
+        {
+          "digit_tail": "1296",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1296"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1296"
+          ]
+        },
+        {
+          "digit_tail": "1448",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1448"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1448"
+          ]
+        },
+        {
+          "digit_tail": "1453",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1453"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1453"
+          ]
+        },
+        {
+          "digit_tail": "1454",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1454"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1454"
+          ]
+        },
+        {
+          "digit_tail": "183",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:183"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "d183i0",
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:183"
+          ]
+        },
+        {
+          "digit_tail": "188",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:188"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:188"
+          ]
+        }
+      ],
+      "host_granted": false,
+      "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "seg_vs_d_index_digit_tail_count": 1,
+      "seg_vs_raster_segment_digit_tail_count": 7,
+      "segment_line_id_count": 8,
+      "w4_d_index_id_count": 213,
+      "w4_raster_segment_id_count": 2035
+    },
+    {
+      "digit_tail_collision_count": 8,
+      "digit_tail_collision_pairs_sample": [
+        {
+          "digit_tail": "1356",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1356"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1356"
+          ]
+        },
+        {
+          "digit_tail": "1362",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1362"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1362"
+          ]
+        },
+        {
+          "digit_tail": "1498",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1498"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1498"
+          ]
+        },
+        {
+          "digit_tail": "1499",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1499"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1499"
+          ]
+        },
+        {
+          "digit_tail": "1515",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1515"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1515"
+          ]
+        },
+        {
+          "digit_tail": "1516",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1516"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1516"
+          ]
+        },
+        {
+          "digit_tail": "482",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:482"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:482"
+          ]
+        },
+        {
+          "digit_tail": "483",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:483"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:483"
+          ]
+        }
+      ],
+      "host_granted": false,
+      "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "seg_vs_d_index_digit_tail_count": 0,
+      "seg_vs_raster_segment_digit_tail_count": 8,
+      "segment_line_id_count": 8,
+      "w4_d_index_id_count": 213,
+      "w4_raster_segment_id_count": 2035
+    },
+    {
+      "digit_tail_collision_count": 7,
+      "digit_tail_collision_pairs_sample": [
+        {
+          "digit_tail": "1328",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1328"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1328"
+          ]
+        },
+        {
+          "digit_tail": "1480",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1480"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1480"
+          ]
+        },
+        {
+          "digit_tail": "1481",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1481"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1481"
+          ]
+        },
+        {
+          "digit_tail": "1484",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1484"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1484"
+          ]
+        },
+        {
+          "digit_tail": "1485",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1485"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1485"
+          ]
+        },
+        {
+          "digit_tail": "367",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:367"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:367"
+          ]
+        },
+        {
+          "digit_tail": "370",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_line_run:370"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:370"
+          ]
+        }
+      ],
+      "host_granted": false,
+      "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+      "seg_vs_d_index_digit_tail_count": 0,
+      "seg_vs_raster_segment_digit_tail_count": 7,
+      "segment_line_id_count": 8,
+      "w4_d_index_id_count": 213,
+      "w4_raster_segment_id_count": 2035
+    },
+    {
+      "digit_tail_collision_count": 8,
+      "digit_tail_collision_pairs_sample": [
+        {
+          "digit_tail": "1320",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1320"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1320"
+          ]
+        },
+        {
+          "digit_tail": "1321",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1321"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1321"
+          ]
+        },
+        {
+          "digit_tail": "1469",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1469"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1469"
+          ]
+        },
+        {
+          "digit_tail": "1472",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1472"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1472"
+          ]
+        },
+        {
+          "digit_tail": "1476",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1476"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1476"
+          ]
+        },
+        {
+          "digit_tail": "1477",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1477"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1477"
+          ]
+        },
+        {
+          "digit_tail": "942",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:942"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:942"
+          ]
+        },
+        {
+          "digit_tail": "943",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:943"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:943"
+          ]
+        }
+      ],
+      "host_granted": false,
+      "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "seg_vs_d_index_digit_tail_count": 0,
+      "seg_vs_raster_segment_digit_tail_count": 8,
+      "segment_line_id_count": 8,
+      "w4_d_index_id_count": 213,
+      "w4_raster_segment_id_count": 2035
+    },
+    {
+      "digit_tail_collision_count": 6,
+      "digit_tail_collision_pairs_sample": [
+        {
+          "digit_tail": "1298",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1298"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1298"
+          ]
+        },
+        {
+          "digit_tail": "1299",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_end:1299"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1299"
+          ]
+        },
+        {
+          "digit_tail": "1452",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1452"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1452"
+          ]
+        },
+        {
+          "digit_tail": "1453",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1453"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1453"
+          ]
+        },
+        {
+          "digit_tail": "1455",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_wall_band_face:1455"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1455"
+          ]
+        },
+        {
+          "digit_tail": "848",
+          "segment_ids": [
+            "raster_opening_primitive:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:2.0.0:raster_thin_ink_run:848"
+          ],
+          "selected_id": null,
+          "w4_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:848"
+          ]
+        }
+      ],
+      "host_granted": false,
+      "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+      "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+      "seg_vs_d_index_digit_tail_count": 0,
+      "seg_vs_raster_segment_digit_tail_count": 6,
+      "segment_line_id_count": 8,
+      "w4_d_index_id_count": 213,
+      "w4_raster_segment_id_count": 2035
+    }
+  ],
+  "page_id": "3",
+  "parent_kind_counts": {
+    "raster_opening_primitive_segment": 48
+  },
+  "seg_vs_d_index_digit_tail_counts": [
+    0,
+    1,
+    0,
+    0,
+    0,
+    0
+  ],
+  "seg_vs_raster_segment_digit_tail_counts": [
+    8,
+    7,
+    8,
+    7,
+    8,
+    6
+  ],
+  "segment_line_counts": [
+    8,
+    8,
+    8,
+    8,
+    8,
+    8
+  ],
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "signed_first_gate_counts": {
+    "whole_wall_frame_unavailable": 3,
+    "width_height_axis_authority_unproven": 5
+  },
+  "single_figured_mm_values": [
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+      "single_value_mm": 870.0
+    },
+    {
+      "door_height_would_need_second_axis": true,
+      "physical_opening_id": "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096",
+      "single_value_mm": 870.0
+    }
+  ],
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_BATCH42_NAMESPACE_JOINT_CENSUS",
+  "unsigned_first_gate_counts": {
+    "opening_filling_kind_unproven": 3,
+    "source_figured_dimension_pair_unproven": 1,
+    "structural_host_unavailable": 6,
+    "whole_wall_frame_unavailable": 3
+  },
+  "visible_observation_id_count": 0,
+  "wall_candidate_unusable_count": 0,
+  "wall_candidate_usable_count": 2094
+}

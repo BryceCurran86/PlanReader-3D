@@ -178,19 +178,19 @@ def _find_tag_near(
     words: Sequence[TextWord],
     max_dist_pt: float = 120.0,
 ) -> Tuple[str, str]:
-    best_dist = max_dist_pt + 1.0
-    best_tag = ""
-    best_class = ""
+    found: List[Tuple[str, str]] = []
     for w in words:
         cls = _classify_tag(w.text)
         if not cls:
             continue
-        d = math.hypot(w.cx - cx, w.cy - cy)
-        if d < best_dist:
-            best_dist = d
-            best_tag = w.text.strip().upper()
-            best_class = cls
-    return best_tag, best_class
+        if math.hypot(w.cx - cx, w.cy - cy) > max_dist_pt:
+            continue
+        item = (w.text.strip().upper(), cls)
+        if item not in found:
+            found.append(item)
+    if len(found) == 1:
+        return found[0]
+    return "", ""
 
 
 def _canonical_wall_direction(seg: Segment) -> Tuple[float, float, float, float]:
@@ -730,7 +730,7 @@ def window_to_opening_evidence(cand: WindowCandidate) -> OpeningEvidence:
         height_m=None,
         dimension_basis=DIMENSION_BASIS_UNKNOWN,
         dimension_source="plan_vector",
-        sill_m=0.9,
+        sill_m=None,  # Plan jambs do not prove window elevation.
         position_along_wall_m=cand.position_along_wall_m,
         extraction_method="plan_vector",
         geometry_confidence=cand.geometry_confidence,
@@ -766,7 +766,7 @@ def gap_to_opening_evidence(cand: GapCandidate) -> OpeningEvidence:
         height_m=None,
         dimension_basis=DIMENSION_BASIS_UNKNOWN,
         dimension_source="plan_vector",
-        sill_m=0.0 if opening_type == OPENING_TYPE_DOOR else 0.9,
+        sill_m=0.0 if opening_type == OPENING_TYPE_DOOR else None,
         position_along_wall_m=cand.position_along_wall_m,
         extraction_method="plan_vector",
         geometry_confidence=cand.geometry_confidence,

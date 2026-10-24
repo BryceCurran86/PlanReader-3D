@@ -87,7 +87,7 @@ class SurfaceEngineRegistry:
                 if "pitched" in elem_str or "raked" in elem_str:
                     stype = "CEILING_PITCHED"
                     flat_a = qty_val
-                    net_a = calculate_pitched_surface_area(flat_a, 25.0)  # 25 deg default pitch
+                    net_a = qty_val
                     lin_m = 0.0
                 else:
                     stype = "CEILING_FLAT"
@@ -115,7 +115,7 @@ class SurfaceEngineRegistry:
                 surface_type=stype,
                 location_name=str(loc or "General"),
                 flat_area_m2=flat_a,
-                pitch_degrees=25.0 if stype == "CEILING_PITCHED" else 0.0,
+                pitch_degrees=0.0,
                 net_paintable_area_m2=net_a,
                 linear_metres=lin_m,
                 substrate=str(sub or "Plasterboard"),

@@ -14,6 +14,8 @@ state fails closed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import OrderedDict
+from weakref import WeakKeyDictionary
 import hashlib
 import math
 from types import MappingProxyType
@@ -52,6 +54,12 @@ TYPED_NON_PLAN_VIEW_TYPES = frozenset(
         DrawingViewType.SPECIFICATION,
     )
 )
+
+# Memoize the SAME source-authenticated original F.07 sibling viewport proof.
+# Every lookup still checks current source SHA and producer snapshot before reuse.
+# Only immutable typed derived outcomes are stored, never fitz.Page objects.
+_VIEWPORT_PROOF_CACHE_MAX_PAGES = 3
+_VIEWPORT_PROOF_CACHE: WeakKeyDictionary = WeakKeyDictionary()
 
 _BBOX_TOLERANCE = 0.5
 BBox = tuple[float, float, float, float]
@@ -287,40 +295,68 @@ def classify_opening_candidate_viewport_scopes(
             authenticated_viewports=(),
         )
 
-    try:
-        document = fitz.open(stream=payload, filetype="pdf")
-        try:
-            gate = _authenticated_viewports(
-                document.load_page(int(page_id) - 1),
-                page_number=int(page_id),
-            )
-        finally:
-            document.close()
-    except Exception:
-        gate = None
-    if gate is None:
-        return OpeningViewportScopeAuthorityResult(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            reason_codes=(OPENING_VIEWPORT_SCOPE_SEGMENTATION_FAILED,),
-            decisions=MappingProxyType({}),
-            authenticated_viewports=(),
-        )
-
-    rows, eligible = gate
-    authenticated = tuple(
-        AuthenticatedViewportRecord(
-            view_id=str(viewport.view_id),
-            view_type=str(viewport.view_type),
-            status=str(viewport.status),
-            boundary_source=str(viewport.boundary_source),
-            bounding_box=box,
-        )
-        for viewport in eligible
-        for box in (_finite_bbox(viewport.bounding_box),)
-        if box is not None
+    key = (
+        str(published.revision.document_id), str(revision_id),
+        str(published.revision.source_sha256), str(snapshot_id), str(page_id),
     )
-    authenticated_ids = frozenset(item.view_id for item in authenticated)
-    contesting, unlocalised = _contesting_boxes(rows, authenticated_ids, authenticated)
+    try:
+        producer_cache = _VIEWPORT_PROOF_CACHE.get(source_visibility_producer)
+    except TypeError:
+        # Unhashable/ non-weakrefable producers remain fully functional without
+        # cache; never make memoization itself a source-authority grant.
+        producer_cache = None
+    proof = producer_cache.get(key) if producer_cache is not None else None
+    if proof is not None:
+        producer_cache.move_to_end(key)
+    else:
+        try:
+            document = fitz.open(stream=payload, filetype="pdf")
+            try:
+                gate = _authenticated_viewports(
+                    document.load_page(int(page_id) - 1),
+                    page_number=int(page_id),
+                )
+            finally:
+                document.close()
+        except Exception:
+            gate = None
+        if gate is None:
+            return OpeningViewportScopeAuthorityResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(OPENING_VIEWPORT_SCOPE_SEGMENTATION_FAILED,),
+                decisions=MappingProxyType({}),
+                authenticated_viewports=(),
+            )
+
+        rows, eligible = gate
+        authenticated = tuple(
+            AuthenticatedViewportRecord(
+                view_id=str(viewport.view_id),
+                view_type=str(viewport.view_type),
+                status=str(viewport.status),
+                boundary_source=str(viewport.boundary_source),
+                bounding_box=box,
+            )
+            for viewport in eligible
+            for box in (_finite_bbox(viewport.bounding_box),)
+            if box is not None
+        )
+        authenticated_ids = frozenset(item.view_id for item in authenticated)
+        contesting, unlocalised = _contesting_boxes(rows, authenticated_ids, authenticated)
+        proof = (authenticated, contesting, unlocalised)
+        if producer_cache is None:
+            try:
+                producer_cache = _VIEWPORT_PROOF_CACHE.setdefault(
+                    source_visibility_producer, OrderedDict(),
+                )
+            except TypeError:
+                producer_cache = None
+        if producer_cache is not None:
+            producer_cache[key] = proof
+            producer_cache.move_to_end(key)
+            while len(producer_cache) > _VIEWPORT_PROOF_CACHE_MAX_PAGES:
+                producer_cache.popitem(last=False)
+    authenticated, contesting, unlocalised = proof
     by_id = {
         str(getattr(record, "observation_id", "")): record
         for record in records

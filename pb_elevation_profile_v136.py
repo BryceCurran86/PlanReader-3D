@@ -43,14 +43,12 @@ def solve_height_from_text(text: Any, default_height: float = 2.7) -> Dict[str, 
         for b in rls[i+1:]:
             d=round(abs(b-a),4)
             if 1.8 <= d <= 12.0: rl_diffs.append(d)
-    candidates=sorted(set(rl_diffs+dims))
-    if rl_diffs:
-        # Prefer the smallest credible storey-height RL difference.
-        h=min(rl_diffs, key=lambda x: abs(x-3.0))
-        return {"height_m":h,"status":"Verified from RL difference","confidence":"Verified","rls":rls,"dimensions":dims}
-    if dims:
-        h=min(dims, key=lambda x: abs(x-3.0))
-        return {"height_m":h,"status":"Measured from elevation dimension","confidence":"High","rls":rls,"dimensions":dims}
+    if len(set(rl_diffs)) == 1:
+        return {"height_m":rl_diffs[0],"status":"Verified from RL difference","confidence":"Verified","rls":rls,"dimensions":dims}
+    if len(set(rl_diffs)) > 1:
+        return {"height_m":round(max(.5,_num(default_height,2.7)),3),"status":"Default height; elevation evidence unresolved","confidence":"Review","rls":rls,"dimensions":dims}
+    if len(set(dims)) == 1:
+        return {"height_m":dims[0],"status":"Measured from elevation dimension","confidence":"High","rls":rls,"dimensions":dims}
     return {"height_m":round(max(.5,_num(default_height,2.7)),3),"status":"Default height; elevation evidence unresolved","confidence":"Review","rls":rls,"dimensions":dims}
 
 

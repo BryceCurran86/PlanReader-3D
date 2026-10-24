@@ -211,7 +211,8 @@ def test_v1_replay_cli_permits_own_output_beside_archived_inputs(tmp_path, monke
     ]
     assert drift.main(args) == 2
     first = (tmp_path / "audit.json").read_bytes()
-    assert drift.main(args) == 2
+    with pytest.raises(FileExistsError, match="new path"):
+        drift.main(args)
     assert (tmp_path / "audit.json").read_bytes() == first
     assert original.read_bytes() == (_OLD / "source_sealed_run.json").read_bytes()
 
@@ -223,14 +224,14 @@ def test_v1_replay_cli_rejects_unrelated_json_binary_and_output_symlink(tmp_path
     ):
         path = tmp_path / filename
         path.write_bytes(before)
-        with pytest.raises(ValueError, match="cannot overwrite unrelated evidence"):
+        with pytest.raises(FileExistsError, match="new path"):
             drift.main(_historical_cli_args(path))
         assert path.read_bytes() == before
     original = tmp_path / "source.json"
     original.write_text("DO NOT MUTATE", encoding="utf-8")
     alias = tmp_path / "alias.json"
     symlink_or_skip(alias, original)
-    with pytest.raises(ValueError, match="cannot follow an output symlink"):
+    with pytest.raises(FileExistsError, match="new path"):
         drift.main(_historical_cli_args(alias))
     assert original.read_text(encoding="utf-8") == "DO NOT MUTATE"
 
@@ -272,3 +273,44 @@ def test_v1_replay_damaged_automated_row_not_masked_by_manual_row_exclusion():
                 {"commercial_projection_provenance": {"adapter": "commercial_takeoff"}},
             ],
         )
+
+
+def test_v1_cli_refuses_existing_report_before_reading_any_original_signed_evidence(
+    tmp_path, monkeypatch,
+):
+    report = tmp_path / "already-created.json"
+    report.write_text('{"unrelated":"must not be overwritten"}', encoding="utf-8")
+    def forbid_reader(_):
+        raise AssertionError("historical signed run must not be read")
+    monkeypatch.setattr(drift, "_json_object", forbid_reader)
+    with pytest.raises(FileExistsError, match="new path"):
+        drift.main(_historical_cli_args(report))
+    assert report.read_text() == '{"unrelated":"must not be overwritten"}'
+
+
+def test_v1_diagnostic_racing_writer_preserves_competing_result(
+    tmp_path, monkeypatch,
+):
+    original = tmp_path / "original.json"
+    candidate = tmp_path / "candidate.json"
+    customers = tmp_path / "customers.json"
+    original.write_bytes((_OLD / "source_sealed_run.json").read_bytes())
+    candidate.write_bytes((_NEW / "au_qld_lot16_power.json").read_bytes())
+    customers.write_bytes((_OLD / "verified_customer_rows.json").read_bytes())
+    args = [
+        "--archived-v1", str(original),
+        "--candidate-v1", str(candidate),
+        "--archived-customers", str(customers),
+        "--output", str(tmp_path / "new-report.json"),
+    ]
+    from tools import gpt3_safe_original_report_output as safe
+    link = safe.os.link
+    def race(temp, target):
+        Path(target).write_text('{"owned":"someone-else"}')
+        return link(temp, target)
+    monkeypatch.setattr(safe.os, "link", race)
+    with pytest.raises(FileExistsError):
+        drift.main(args)
+    assert (tmp_path / "new-report.json").read_text() == '{"owned":"someone-else"}'
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+    assert original.read_bytes() == (_OLD / "source_sealed_run.json").read_bytes()

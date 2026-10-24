@@ -144,6 +144,14 @@ class SemanticOpeningEnumerationRecord:
     schema_version: str = SEMANTIC_OPENING_ENUMERATION_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
+        # Only the source producer can certify semantic and competitor
+        # enumeration. Python truthiness must not turn "false", 1, or a
+        # reconstructed packet into an authenticated completeness claim.
+        if (
+            type(self.structural_enumeration_complete) is not bool
+            or type(self.physical_opening_universe_complete) is not bool
+        ):
+            raise TypeError("semantic opening completeness must be typed booleans")
         if not self.record_id:
             raise ValueError("record_id must be non-empty")
         if self.decision_scope_kind not in {"document", "pages"}:
@@ -369,16 +377,34 @@ class SemanticOpeningEnumerationProducer:
             return cached_result
 
         coverage = published.coverage
-        decoded_pages = tuple(sorted({int(page) for page in coverage.decoded_pages}))
+        # A source decoder's exact original page addresses may not be derived
+        # from int(True), int("1") or truncated fractional page values.
+        total = coverage.total_pages
+        decoded = tuple(coverage.decoded_pages)
+        failed = tuple(coverage.failed_pages)
+        if (type(total) is not int or total <= 0
+                or any(type(page) is not int or page < 1 or page > total
+                       for page in (*decoded, *failed))
+                or len(set(decoded)) != len(decoded)
+                or len(set(failed)) != len(failed)
+                or set(decoded) & set(failed)):
+            return self._store(
+                selector,
+                SemanticOpeningEnumerationResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(SEMANTIC_OPENING_SOURCE_COVERAGE_INCOMPLETE,),
+                    record=None,
+                ),
+            )
+        decoded_pages = tuple(sorted(decoded))
         decoded_page_ids = {str(page) for page in decoded_pages}
-        failed_page_ids = {str(page) for page in coverage.failed_pages}
+        failed_page_ids = {str(page) for page in failed}
         if decision_scope_kind == "document":
             source_complete = (
                 str(coverage.state) == "complete"
-                and int(coverage.total_pages) > 0
-                and not failed_page_ids
-                and len(decoded_pages) == int(coverage.total_pages)
-                and decoded_pages == tuple(range(1, int(coverage.total_pages) + 1))
+                and not failed
+                and len(decoded_pages) == total
+                and decoded_pages == tuple(range(1, total + 1))
             )
             scoped_page_ids = tuple(str(page) for page in decoded_pages)
         else:

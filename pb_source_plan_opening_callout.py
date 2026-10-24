@@ -81,6 +81,7 @@ def _round_bbox(box: BBox) -> tuple[float, float, float, float]:
 
 def classify_source_opening_descriptor(
     tokens: Iterable[str],
+    *, bifold_descriptor_shadow: bool = False,
 ) -> tuple[str | None, bool]:
     """Classify generic opening descriptors without creating an opening.
 
@@ -90,13 +91,15 @@ def classify_source_opening_descriptor(
     authorities can fail closed instead of selecting one.
     """
 
+    if type(bifold_descriptor_shadow) is not bool:
+        raise ValueError("bifold descriptor shadow must be explicit boolean")
     normalized = {
         _clean_token(token)
         for token in tokens
         if _clean_token(token)
     }
     has_window = bool(normalized & _WINDOW_TOKENS)
-    has_door = bool(normalized & _DOOR_TOKENS)
+    has_door = bool(normalized & _DOOR_TOKENS) or (bifold_descriptor_shadow and "BIFOLD" in normalized)
     if has_window and has_door:
         return None, True
     if has_window:
@@ -113,9 +116,12 @@ def _classify_descriptor(tokens: tuple[str, ...]) -> str | None:
 
 def classify_compact_source_opening_text(
     text: str,
+    *, bifold_descriptor_shadow: bool = False,
 ) -> tuple[str | None, bool]:
     """Resolve kind only for one plausible HHWW + descriptor source callout."""
 
+    if type(bifold_descriptor_shadow) is not bool:
+        raise ValueError("bifold descriptor shadow must be explicit boolean")
     tokens = tuple(
         token
         for token in str(text or "").strip().split()
@@ -132,7 +138,8 @@ def classify_compact_source_opening_text(
     descriptor_tokens = tuple(
         token for index, token in enumerate(tokens) if index != code_index
     )
-    kind, conflict = classify_source_opening_descriptor(descriptor_tokens)
+    kind, conflict = classify_source_opening_descriptor(descriptor_tokens,
+        **({"bifold_descriptor_shadow": True} if bifold_descriptor_shadow else {}))
     if conflict:
         return None, True
     if kind is None or _compact_dimensions_mm(tokens[code_index], kind) is None:

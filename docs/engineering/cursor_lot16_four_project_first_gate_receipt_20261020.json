@@ -1,0 +1,47 @@
+{
+  "benchmark_matched": null,
+  "benchmark_score_granted": false,
+  "four_project_report": {
+    "evaluator_invoked": false,
+    "first_gate_counts_by_project": {
+      "au_qld_3laurel": {},
+      "au_qld_lot16_power": {
+        "opening_filling_kind_unproven": 3,
+        "source_figured_dimension_pair_unproven": 1,
+        "structural_host_unavailable": 6,
+        "whole_wall_frame_unavailable": 6,
+        "width_height_axis_authority_unproven": 5
+      },
+      "au_qld_maryborough_service_station": {},
+      "au_qld_q5446": {}
+    },
+    "gold_values_consumed": false,
+    "missing_project_keys": [
+      "au_qld_maryborough_service_station",
+      "au_qld_3laurel",
+      "au_qld_q5446"
+    ],
+    "required_project_keys": [
+      "au_qld_lot16_power",
+      "au_qld_maryborough_service_station",
+      "au_qld_3laurel",
+      "au_qld_q5446"
+    ],
+    "status": "UNPUBLISHED_FOUR_PROJECT_FIRST_GATE_SHADOW",
+    "total_object_rows": 21
+  },
+  "lot16_first_gate_counts": {
+    "opening_filling_kind_unproven": 3,
+    "source_figured_dimension_pair_unproven": 1,
+    "structural_host_unavailable": 6,
+    "whole_wall_frame_unavailable": 6,
+    "width_height_axis_authority_unproven": 5
+  },
+  "lot16_opening_count": 21,
+  "lot16_signed_quantity_id_count": 8,
+  "measurement_published": false,
+  "page_id": "3",
+  "shadow_only": true,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_FOUR_PROJECT_FIRST_GATE_SHADOW"
+}

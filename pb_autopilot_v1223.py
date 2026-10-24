@@ -187,9 +187,12 @@ def triage_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
 
 
 def _printed_scale(page: Dict[str, Any]) -> str:
+    """Return one printed scale. Two different denominators abstain."""
     haystack = f"{page.get('scale_text') or ''}\n{page.get('extracted_text') or ''}"
-    match = _SCALE_RE.search(haystack)
-    return f"1:{int(match.group(1))}" if match else ""
+    found = {int(match.group(1)) for match in _SCALE_RE.finditer(haystack)}
+    if len(found) != 1:
+        return ""
+    return f"1:{next(iter(found))}"
 
 
 def _image_size(page: Dict[str, Any]) -> Tuple[int, int]:
@@ -257,7 +260,10 @@ def cross_page_calibration(app: Any, workspace_id: int) -> List[Dict[str, Any]]:
 
 def _render_reference_page(page: Dict[str, Any]) -> bool:
     text = f"{page.get('page_type') or ''} {page.get('page_label') or ''} {page.get('extracted_text') or ''}".lower()
-    return any(token in text for token in ("render", "artist", "impression", "perspective", "3d view", "3d image"))
+    return any(
+        re.search(rf"(?<!\w){re.escape(token)}(?!\w)", text)
+        for token in ("render", "artist", "impression", "perspective", "3d view", "3d image")
+    )
 
 
 def _hex(rgb: Sequence[int]) -> str:

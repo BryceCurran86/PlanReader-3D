@@ -15,7 +15,7 @@ ordering convention.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import re
 from types import MappingProxyType
@@ -134,6 +134,8 @@ class OpeningLabelDimensionEvidence:
     axis_order_resolved: bool = False
     basis: str = "figured_opening_label"
     schema_version: str = OPENING_LABEL_DIMENSION_SCHEMA_VERSION
+    width_mm: Optional[float] = None
+    height_mm: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -925,7 +927,8 @@ _AUTHORITY_SEAL = object()
 
 
 class OpeningLabelDimensionProducer:
-    def __init__(self, source: SourceVisibilityProducer, *, _seal: object = None) -> None:
+    def __init__(self, source: SourceVisibilityProducer, *, _seal: object = None,
+                 bifold_descriptor_shadow: bool = False) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError(
                 "OpeningLabelDimensionProducer must be obtained from "
@@ -933,6 +936,9 @@ class OpeningLabelDimensionProducer:
             )
         if type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be producer-owned")
+        if type(bifold_descriptor_shadow) is not bool:
+            raise ValueError("bifold descriptor shadow must be explicit boolean")
+        self._bifold_descriptor_shadow = bifold_descriptor_shadow
         self._source = source
         self._physical = source.physical_opening_authority()
         self._results: dict[_Key, OpeningLabelDimensionResult] = {}
@@ -971,8 +977,9 @@ class OpeningLabelDimensionProducer:
     def from_source_visibility_producer(
         cls,
         source: SourceVisibilityProducer,
+        *, bifold_descriptor_shadow: bool = False,
     ) -> "OpeningLabelDimensionProducer":
-        return cls(source, _seal=_PRODUCER_SEAL)
+        return cls(source, _seal=_PRODUCER_SEAL, bifold_descriptor_shadow=bifold_descriptor_shadow)
 
     def publish_scope(self, selector: ObservationSelector) -> OpeningLabelDimensionResult:
         if type(selector) is not ObservationSelector:
@@ -1021,7 +1028,8 @@ class OpeningLabelDimensionProducer:
 
         semantic_result = (
             OpeningLabelSemanticProducer.from_source_visibility_producer(
-                self._source
+                self._source,
+                **({"bifold_descriptor_shadow": True} if self._bifold_descriptor_shadow else {})
             ).publish_scope(selector)
         )
         semantic_evidence = getattr(semantic_result, "evidence", None)
@@ -1173,6 +1181,46 @@ class OpeningLabelDimensionProducer:
                 evidence=evidence,
             ),
         )
+
+    def ordered_compact_axes_shadow(self, selector: ObservationSelector) -> OpeningLabelDimensionResult:
+        """Reissue owned HHWW axis facts separately from the legacy area row.
+
+        The existing source convention reader defines HHWW as nominal height
+        then width. An explicit type plus four-digit code may resolve those
+        two axes only AFTER this producer has proved exact physical ownership.
+        No host-frame, rough-opening, vertical placement or count is inferred.
+        Legacy publisher/authority results remain immutable and unchanged.
+        """
+        base = self.publish_scope(selector)
+        evidence = base.evidence
+        if base.status is not EvidenceResolutionStatus.CORROBORATED or evidence is None:
+            return base
+        from pb_source_plan_opening_callout import (
+            classify_compact_source_opening_text, _compact_dimensions_mm,
+        )
+        match = _COMPACT_CODE_RE.fullmatch(evidence.raw_text)
+        kind, conflict = classify_compact_source_opening_text(evidence.raw_text)
+        axes = None if match is None or conflict or kind != evidence.semantic_kind else (
+            _compact_dimensions_mm(match.group("code"), kind))
+        if (axes is None or len(evidence.dimension_values_mm) != 2
+                or tuple(evidence.dimension_values_mm) != (axes[1], axes[0])):
+            return _blocked(EvidenceResolutionStatus.ABSTAINED,
+                            "opening_label_compact_axis_order_unresolved")
+        width, height = axes
+        ordered = replace(evidence,
+            evidence_id=stable_contract_id("opening_label_compact_axes_shadow", {
+                "parent_label_evidence_id": evidence.evidence_id,
+                "opening_record_id": evidence.opening_record_id,
+                "source_text_observation_ids": evidence.source_text_observation_ids,
+                "width_mm": width, "height_mm": height,
+            }, digest_chars=32),
+            axis_order_resolved=True, width_mm=width, height_mm=height,
+            basis="figured_compact_HHWW_nominal_axes_shadow")
+        return OpeningLabelDimensionResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=(OPENING_LABEL_DIMENSION_RESOLVED,
+                          "opening_label_nominal_compact_axes_shadow"),
+            evidence=ordered)
 
     def _store(self, key: _Key, result: OpeningLabelDimensionResult) -> OpeningLabelDimensionResult:
         existing = self._results.get(key)

@@ -37,11 +37,11 @@ class FormworkElementSpec:
     depth_m: float = 0.0
     area_m2: float = 0.0
     perimeter_lm: float = 0.0
-    count: int = 1
+    count: int = 0
     is_circular: bool = False
     is_single_faced: bool = False
     is_cantilever: bool = False
-    propping_height_m: float = 2.70
+    propping_height_m: float = 0.0
     openings: List[Dict[str, float]] = field(default_factory=list)  # [{"width": 1.2, "height": 2.1, "area": 2.52}]
     source_page: str = ""
     source_reference: str = ""
@@ -94,17 +94,102 @@ class FormworkTakeoffItem:
         }
 
 
+def _positive_original_metres(*values: object) -> bool:
+    for value in values:
+        if type(value) not in (int, float):
+            return False
+        try:
+            measured = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(measured) or measured <= 0.0 or not math.isfinite(measured * 1000.0):
+            return False
+    return True
+
+
+def _typed_original_count(value: object) -> bool:
+    if type(value) is not int or value <= 0:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _closed_original_wall_opening_areas(openings: object) -> list[float] | None:
+    """Every supplied physical aperture needs real positive metric area."""
+    if not isinstance(openings, (list, tuple)):
+        return None
+    values = []
+    for opening in openings:
+        if not isinstance(opening, dict):
+            return None
+        recorded = opening.get("area")
+        width, height = opening.get("width"), opening.get("height")
+        axes = _positive_original_metres(width, height)
+        if ((width is None) != (height is None)):
+            return None
+        if (width is not None and height is not None and not axes):
+            return None
+        if recorded is None and not axes:
+            return None
+        if recorded is not None and not _positive_original_metres(recorded):
+            return None
+        metric = float(recorded) if recorded is not None else float(width * height)
+        if axes and not math.isclose(metric, float(width * height), rel_tol=0, abs_tol=0.011):
+            return None
+        values.append(metric)
+    return values
+
+
 def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkTakeoffItem]:
     """Calculate formwork items for suspended slab soffits, drop panels, and cantilevers."""
     items: List[FormworkTakeoffItem] = []
-    area = spec.area_m2 if spec.area_m2 > 0.0 else (spec.length_m * spec.width_m)
-    if area <= 0.0:
+    if type(spec.area_m2) not in (int, float):
+        return items
+    try:
+        original_area = float(spec.area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return items
+    if not math.isfinite(original_area) or original_area < 0.0:
+        return items
+    axes = _positive_original_metres(spec.length_m, spec.width_m)
+    # A structural SOFFIT area and repeated DROP PANEL length/width are
+    # different physical scopes. In the latter case LxW is the size of one
+    # drop panel, not the global slab footprint. Validate the global area
+    # against global rectangle axes only when no separate drop-panel
+    # dimensions were supplied.
+    drop_panel_scope = (
+        _positive_original_metres(spec.depth_m, spec.length_m, spec.width_m)
+        and _typed_original_count(spec.count)
+    )
+    if (
+        original_area > 0.0 and axes and not drop_panel_scope
+        and not math.isclose(original_area, float(spec.length_m * spec.width_m),
+                             rel_tol=0.0, abs_tol=0.011)
+    ):
+        return items
+    area = original_area if original_area > 0.0 else (
+        float(spec.length_m * spec.width_m) if axes else None
+    )
+    if area is None or not math.isfinite(area) or area <= 0.0:
+        return items
+    if type(spec.is_cantilever) is not bool or type(spec.propping_height_m) not in (int,float):
+        return items
+    try:
+        prop=float(spec.propping_height_m)
+    except (TypeError,ValueError,OverflowError):
+        return items
+    if not math.isfinite(prop) or prop < 0.0:
         return items
 
     # Standard flat soffit formwork
-    propping_desc = f"propping up to {spec.propping_height_m:.1f}m"
     if spec.propping_height_m > 3.6:
         propping_desc = f"high propping ({spec.propping_height_m:.1f}m)"
+    elif spec.propping_height_m > 0.0:
+        propping_desc = f"propping up to {spec.propping_height_m:.1f}m"
+    else:
+        propping_desc = "propping height not stated"
 
     element_name = "Suspended slab soffit formwork (Class 3)"
     if spec.is_cantilever:
@@ -128,9 +213,14 @@ def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
     ))
 
     # Drop panels / column capitals if specified
-    if spec.depth_m > 0.0 and spec.count > 0:
+    if (
+        _positive_original_metres(spec.depth_m, spec.length_m, spec.width_m)
+        and _typed_original_count(spec.count)
+    ):
         panel_area = spec.count * (spec.length_m * spec.width_m)
         panel_edge = spec.count * 2 * (spec.length_m + spec.width_m)
+        if not math.isfinite(panel_area + panel_edge * spec.depth_m):
+            return items
         items.append(FormworkTakeoffItem(
             section=spec.section or "Structure",
             element=f"Drop panel formwork ({int(spec.depth_m*1000)}mm drop)",
@@ -139,11 +229,11 @@ def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
             finish_system="Form stepped down drop panel",
             quantity=round(panel_area + (panel_edge * spec.depth_m), 2),
             unit="m²",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FORMWORK_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
             notes=f"{spec.count} No. drop panels: {panel_area:.2f} m² base + {panel_edge * spec.depth_m:.2f} m² edge drops.",
             row_role="",
         ))
@@ -154,11 +244,13 @@ def calculate_soffit_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
 def calculate_edge_formwork_items(spec: FormworkElementSpec) -> List[FormworkTakeoffItem]:
     """Calculate formwork items for slab edges and perimeter boards."""
     items: List[FormworkTakeoffItem] = []
-    length = spec.perimeter_lm if spec.perimeter_lm > 0.0 else spec.length_m
-    depth = spec.depth_m if spec.depth_m > 0.0 else (spec.height_m or 0.150)
-    if length <= 0.0:
+    length = spec.perimeter_lm if _positive_original_metres(spec.perimeter_lm) else spec.length_m
+    depth = spec.depth_m if _positive_original_metres(spec.depth_m) else spec.height_m
+    if not _positive_original_metres(length, depth):
         return items
 
+    if not math.isfinite(length * depth):
+        return items
     contact_area = round(length * depth, 2)
     depth_band = f"depth <= {int(depth*1000)}mm" if depth <= 0.300 else f"depth {int(depth*1000)}mm"
 
@@ -187,14 +279,34 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     """Calculate formwork items for concrete walls (double or single faced) and opening blockouts."""
     items: List[FormworkTakeoffItem] = []
     length = spec.length_m
-    height = spec.height_m if spec.height_m > 0.0 else 2.70
-    if length <= 0.0 or height <= 0.0:
+    height = spec.height_m
+    if (
+        not _positive_original_metres(length, height)
+        or type(spec.is_single_faced) is not bool
+    ):
         return items
-
-    gross_face = length * height
-    # Deduct openings
-    total_ded = sum(float(op.get("area") or (float(op.get("width", 0)) * float(op.get("height", 0)))) for op in spec.openings)
-    net_face = max(0.0, gross_face - total_ded)
+    openings_area = _closed_original_wall_opening_areas(spec.openings)
+    if openings_area is None:
+        return items
+    gross_face = float(length * height)
+    total_ded = math.fsum(openings_area)
+    if (
+        not math.isfinite(gross_face)
+        or not math.isfinite(total_ded)
+        or total_ded >= gross_face
+    ):
+        return items
+    net_face = gross_face - total_ded
+    if not math.isfinite(net_face * 2.0):
+        return items
+    if type(spec.depth_m) not in (int, float):
+        return items
+    try:
+        source_depth = float(spec.depth_m)
+    except (TypeError, ValueError, OverflowError):
+        return items
+    if not math.isfinite(source_depth) or source_depth < 0.0:
+        return items
 
     if spec.is_single_faced:
         total_form_area = round(net_face, 2)
@@ -225,9 +337,10 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     for i, op in enumerate(spec.openings):
         op_w = float(op.get("width") or 0.0)
         op_h = float(op.get("height") or 0.0)
-        thick = spec.depth_m if spec.depth_m > 0.0 else 0.200  # Default 200mm wall
+        thick = spec.depth_m if spec.depth_m > 0.0 else 0.0
         if op_w > 0.0 and op_h > 0.0:
             blockout_perim = 2 * (op_w + op_h)
+            thick_note = f" in {int(thick*1000)}mm thick wall" if thick > 0.0 else ""
             items.append(FormworkTakeoffItem(
                 section=spec.section or "Structure",
                 element=f"Opening blockout formwork ({int(op_w*1000)}×{int(op_h*1000)}mm)",
@@ -236,12 +349,12 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
                 finish_system="Construct internal boxout, brace and strip",
                 quantity=round(blockout_perim, 2),
                 unit="lm",
-                quantity_status="Measured",
+                quantity_status="Provisional",
                 source_page=spec.source_page,
                 source_reference=f"{FORMWORK_SOURCE_PREFIX} · {spec.element_id}",
-                inclusion_status="INCLUSION",
-                confidence="Verified",
-                notes=f"Boxout perimeter: {blockout_perim:.2f} lm in {int(thick*1000)}mm thick wall.",
+                inclusion_status="PROVISIONAL",
+                confidence="Provisional",
+                notes=f"Boxout perimeter: {blockout_perim:.2f} lm{thick_note}.",
                 row_role="",
             ))
 
@@ -251,10 +364,16 @@ def calculate_wall_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
 def calculate_column_formwork_items(spec: FormworkElementSpec) -> List[FormworkTakeoffItem]:
     """Calculate formwork items for reinforced concrete columns."""
     items: List[FormworkTakeoffItem] = []
-    count = max(1, spec.count)
-    height = spec.height_m if spec.height_m > 0.0 else 2.70
-    w = spec.width_m if spec.width_m > 0.0 else 0.400
-    d = spec.depth_m if spec.depth_m > 0.0 else (spec.length_m or w)
+    count = spec.count
+    height = spec.height_m
+    w = spec.width_m
+    d = spec.depth_m if _positive_original_metres(spec.depth_m) else spec.length_m
+    if (
+        not _typed_original_count(count)
+        or not _positive_original_metres(height, w, d)
+        or type(spec.is_circular) is not bool
+    ):
+        return items
 
     if spec.is_circular:
         diameter = w
@@ -268,6 +387,8 @@ def calculate_column_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
         element_name = f"Rectangular column formwork ({int(w*1000)}×{int(d*1000)}mm)"
         substrate="Plywood column boxes with steel column clamps"
 
+    if not math.isfinite(total_form_area) or total_form_area <= 0.0:
+        return items
     items.append(FormworkTakeoffItem(
         section=spec.section or "Structure",
         element=element_name,
@@ -295,11 +416,11 @@ def calculate_column_formwork_items(spec: FormworkElementSpec) -> List[FormworkT
             finish_system="Additional bracing and multi-tier access",
             quantity=float(count),
             unit="No.",
-            quantity_status="Measured",
+            quantity_status="Provisional",
             source_page=spec.source_page,
             source_reference=f"{FORMWORK_SOURCE_PREFIX} · {spec.element_id}",
-            inclusion_status="INCLUSION",
-            confidence="Verified",
+            inclusion_status="PROVISIONAL",
+            confidence="Provisional",
             notes=f"Height allowance for {count} No. columns at {height:.2f}m.",
             row_role="",
         ))
@@ -311,15 +432,17 @@ def calculate_beam_formwork_items(spec: FormworkElementSpec) -> List[FormworkTak
     """Calculate formwork items for concrete beams (sides and soffit)."""
     items: List[FormworkTakeoffItem] = []
     length = spec.length_m
-    w = spec.width_m if spec.width_m > 0.0 else 0.400
-    d = spec.depth_m if spec.depth_m > 0.0 else 0.600
-    if length <= 0.0:
+    w = spec.width_m
+    d = spec.depth_m
+    if not _positive_original_metres(length, w, d):
         return items
 
     # Formwork contact area: beam soffit + 2 vertical sides
     soffit_area = length * w
     sides_area = length * (2 * d)
     total_form_area = round(soffit_area + sides_area, 2)
+    if not math.isfinite(total_form_area) or total_form_area <= 0.0:
+        return items
 
     items.append(FormworkTakeoffItem(
         section=spec.section or "Structure",
@@ -346,8 +469,8 @@ def calculate_stepdowns_and_penetrations(spec: FormworkElementSpec) -> List[Form
     items: List[FormworkTakeoffItem] = []
     if spec.element_type == "stepdown":
         length = spec.length_m
-        drop = spec.depth_m if spec.depth_m > 0.0 else 0.050  # Default 50mm stepdown
-        if length > 0.0:
+        drop = spec.depth_m
+        if _positive_original_metres(length, drop):
             items.append(FormworkTakeoffItem(
                 section=spec.section or "Structure",
                 element=f"Slab stepdown rebate formwork ({int(drop*1000)}mm drop)",
@@ -365,7 +488,13 @@ def calculate_stepdowns_and_penetrations(spec: FormworkElementSpec) -> List[Form
                 row_role="",
             ))
     elif spec.element_type == "penetration":
-        count = max(1, spec.count)
+        count = spec.count
+        if not _typed_original_count(count) or type(spec.is_circular) is not bool:
+            return items
+        if not _positive_original_metres(spec.width_m):
+            return items
+        if not spec.is_circular and not _positive_original_metres(spec.depth_m):
+            return items
         size_desc = f"{int(spec.width_m*1000)}mm dia" if spec.is_circular else f"{int(spec.width_m*1000)}×{int(spec.depth_m*1000)}mm"
         items.append(FormworkTakeoffItem(
             section=spec.section or "Structure",

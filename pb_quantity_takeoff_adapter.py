@@ -26,6 +26,7 @@ _VALID_COMMERCIAL_UNITS = {
     "m", "lm",
     "m2", "m²", "sqm",
     "m3", "m³",
+    "t",
 }
 _RESOLVED_SCALE_STATES = {"resolved", "verified", "authoritative", "calibrated"}
 

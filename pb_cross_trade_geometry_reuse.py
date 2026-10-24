@@ -22,6 +22,7 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from pb_auto_geometry_v1219 import SOURCE_PREFIX
 import pb_takeoff_row_contract as takeoff_contract
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 
 
 _ALLOWED_HOST_TYPES = {"WALL", "SLAB", "ROOF", "SPACE", "FLOOR", "CEILING"}
@@ -44,6 +45,9 @@ def normalise_trade_unit(unit: object) -> str:
         return "m²"
     if cleaned in {"m3", "cum", "m^3"}:
         return "m³"
+    if cleaned.lower() in {"t", "tonne", "tonnes", "metric tonne", "metric tonnes"}:
+        return "t"
+    # Imperial short/long tons are not metric tonnes and must NEVER alias.
     if cleaned.lower() in {"ea", "count", "nr", "no"}:
         return "No."
     if cleaned in {"m", "lin.m", "linear_m"}:
@@ -52,14 +56,25 @@ def normalise_trade_unit(unit: object) -> str:
 
 
 def require_evidence_ids(value: object, name: str) -> tuple[str, ...]:
-    """Clean an evidence-id sequence; a bare string is a caller bug, not a list."""
+    """Preserve exact original company-rate source receipt identities.
 
-    if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
-        raise TypeError(f"{name} must be a sequence of evidence ids, not a bare string")
-    return tuple(dict.fromkeys(_clean(item) for item in value if _clean(item)))
+    An empty tuple is legal for unbound geometry. Rate binding itself
+    requires at least one nonempty original receipt. Never cast, trim or
+    silently collapse duplicate source evidence.
+    """
+    if type(value) not in (list, tuple):
+        raise TypeError(f"{name} must be a list/tuple of original evidence ids")
+    if any(type(e) is not str or not e or e != e.strip() for e in value):
+        raise ValueError(f"{name} has missing, untyped or padded evidence ids")
+    if len(set(value)) != len(value):
+        raise ValueError(f"{name} has duplicate original evidence ids")
+    return tuple(value)
 
 
 def _positive(value: object) -> Optional[float]:
+    """Canonical metric amounts must be native numeric, never coerced text or booleans."""
+    if type(value) not in (int, float):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -68,6 +83,9 @@ def _positive(value: object) -> Optional[float]:
 
 
 def _nonnegative(value: object) -> Optional[float]:
+    """Native source deductions may be zero, but not cast text or True."""
+    if type(value) not in (int, float):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -76,9 +94,19 @@ def _nonnegative(value: object) -> Optional[float]:
 
 
 def _evidence_ids(value: object) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set, frozenset)):
+    """Preserve literal original evidence identity; no trimming/cast/dedup.
+
+    A canonical source with colliding, padded or untyped receipts must abstain
+    rather than laundering a false proof into wall, floor or ceiling quantities.
+    """
+    if type(value) not in (list, tuple) or not value:
         return ()
-    return tuple(dict.fromkeys(_clean(item) for item in value if _clean(item)))
+    if any(type(item) is not str or not item or item != item.strip()
+           for item in value):
+        return ()
+    if len(set(value)) != len(value):
+        return ()
+    return tuple(value)
 
 
 def _trade_spec(
@@ -92,13 +120,19 @@ def _trade_spec(
 
 
 def _material(spec: Mapping[str, Any]) -> Optional[str]:
-    value = _clean(
-        spec.get("material")
-        or spec.get("system")
-        or spec.get("profile")
-        or spec.get("substrate")
-    )
-    return value or None
+    """Preserve literal source-defined material; do not stringify truthy fields."""
+    for key in ("material", "system", "profile", "substrate"):
+        if key not in spec:
+            continue
+        value = spec.get(key)
+        # Explicit unset fields may fall through to an independent semantic
+        # description, but an invalid nonempty original field is a conflict.
+        if value is None or value == "":
+            continue
+        if type(value) is not str or not value or value != value.strip():
+            return None
+        return value
+    return None
 
 
 def _spec_evidence(spec: Mapping[str, Any]) -> tuple[str, ...]:
@@ -106,7 +140,20 @@ def _spec_evidence(spec: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _face_ids(spec: Mapping[str, Any]) -> tuple[str, ...]:
-    return _evidence_ids(spec.get("physical_face_ids"))
+    """One physical wall has no more than two independently owned faces.
+
+    Never reduce repeated physical faces to a credible smaller set, repair
+    malformed receipts by trimming, or turn "face ids" into guessed sides.
+    """
+    raw = spec.get("physical_face_ids")
+    if not isinstance(raw, (tuple, list)) or not 1 <= len(raw) <= 2:
+        return ()
+    if any(type(face) is not str or not face or face != face.strip()
+           for face in raw):
+        return ()
+    if len(set(raw)) != len(raw):
+        return ()
+    return tuple(raw)
 
 
 def _spec_section(spec: Mapping[str, Any]) -> Optional[str]:
@@ -141,16 +188,28 @@ def _polygon_perimeter_m(value: object) -> Optional[float]:
         for point in value:
             if not isinstance(point, (list, tuple)) or len(point) != 2:
                 return None
+            if any(type(axis) not in (int, float) for axis in point):
+                return None
             x, y = float(point[0]), float(point[1])
             if not math.isfinite(x) or not math.isfinite(y):
                 return None
             points.append((x, y))
-    except (TypeError, ValueError, OverflowError):
+        # An explicit closing vertex is legitimate; repeated interior
+        # vertices, self-crossings and degenerate rings do not establish a
+        # physical pour edge.
+        if points[0] == points[-1]:
+            points.pop()
+        if len(points) < 3 or len(set(points)) != len(points):
+            return None
+        from shapely.geometry import Polygon
+        polygon = Polygon(points)
+        if not polygon.is_valid or not polygon.exterior.is_simple:
+            return None
+        if not math.isfinite(polygon.area) or polygon.area <= 0.0:
+            return None
+        perimeter = float(polygon.length)
+    except (TypeError, ValueError, OverflowError, ImportError):
         return None
-    perimeter = 0.0
-    for index, first in enumerate(points):
-        second = points[(index + 1) % len(points)]
-        perimeter += math.hypot(second[0] - first[0], second[1] - first[1])
     return perimeter if math.isfinite(perimeter) and perimeter > 0.0 else None
 
 
@@ -177,11 +236,17 @@ class DerivedTradeQuantity:
     status: str = "Measured"
 
     def __post_init__(self) -> None:
-        if not math.isfinite(float(self.quantity)) or float(self.quantity) < 0.0:
+        if type(self.quantity) not in (int, float):
+            raise ValueError("Derived trade quantity must be native numeric, never bool/text")
+        try:
+            numeric = float(self.quantity)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Derived trade quantity cannot overflow") from exc
+        if not math.isfinite(numeric) or numeric < 0.0:
             raise ValueError(
                 "Derived trade quantity must be a non-negative finite number"
             )
-        self.quantity = round(float(self.quantity), 6)
+        self.quantity = round(numeric, 6)
         if not _clean(self.host_object_id):
             raise ValueError("host_object_id must be a canonical object id")
         if self.host_object_type not in _ALLOWED_HOST_TYPES:
@@ -191,8 +256,9 @@ class DerivedTradeQuantity:
         if not _clean(self.derivation_formula):
             raise ValueError("derivation_formula must be explicit")
         self.unit = normalise_trade_unit(self.unit)
-        self.host_evidence_ids = tuple(dict.fromkeys(self.host_evidence_ids))
-        self.spec_evidence_ids = tuple(dict.fromkeys(self.spec_evidence_ids))
+        # Keep raw original receipt sequences intact. A duplicate, padded or
+        # foreign owner is NOT cured by deduplication before final source-closed
+        # takeoff issuance; canonical pricing identity has separate normalization.
         self.rate_key = _clean(self.rate_key) or None
         self.rate_binding_evidence_ids = require_evidence_ids(
             self.rate_binding_evidence_ids, "rate_binding_evidence_ids"
@@ -412,17 +478,17 @@ def derive_slab_trade_quantities(
     host_evidence = ()
     if isinstance(provenance, Mapping):
         host_evidence = _evidence_ids(provenance.get("evidence_ids"))
-        if not host_evidence:
-            annotation = _clean(provenance.get("annotation_raw_text"))
-            boundary_id = _clean(provenance.get("boundary_id"))
-            host_evidence = tuple(
-                value
-                for value in (
-                    f"annotation:{annotation}" if annotation else "",
-                    f"boundary:{boundary_id}" if boundary_id else "",
-                )
-                if value
-            )
+    # A copied text label and boundary ID do NOT prove the physical source
+    # receipts needed for a priced concrete slab. Never invent evidence IDs
+    # from display strings, or yield rows with no original provenance.
+    if not host_evidence:
+        return []
+    # Two separately finite metric source values can overflow once
+    # multiplied. Never let an impossible slab volume crash all trade
+    # issuers or mint an infinite construction amount.
+    structural_volume_m3 = area_m2 * thickness_m
+    if not math.isfinite(structural_volume_m3) or structural_volume_m3 <= 0.0:
+        return []
 
     results: List[DerivedTradeQuantity] = []
     context = _clean(
@@ -451,7 +517,7 @@ def derive_slab_trade_quantities(
                     element="Slab concrete",
                     location=slab_id,
                     material=material,
-                    quantity=area_m2 * thickness_m,
+                    quantity=structural_volume_m3,
                     unit="m³",
                     host_id=slab_id,
                     host_type="SLAB",
@@ -467,7 +533,12 @@ def derive_slab_trade_quantities(
 
     perimeter_m = _polygon_perimeter_m(slab.get("polygon_m"))
     edge_formwork = _trade_spec(specs, "edge_formwork")
-    if edge_formwork is not None and perimeter_m is not None:
+    if (
+        edge_formwork is not None
+        and perimeter_m is not None
+        and math.isfinite(perimeter_m * thickness_m)
+        and perimeter_m * thickness_m > 0.0
+    ):
         material = _material(edge_formwork)
         spec_evidence = _spec_evidence(edge_formwork)
         if material and spec_evidence:
@@ -708,18 +779,31 @@ def _derive_area_surface_trade_quantities(
     authority_field: str,
     trade_definitions: Sequence[tuple[str, str, str]],
 ) -> List[DerivedTradeQuantity]:
-    host_id = _clean(surface.get(host_id_field))
+    host_id = surface.get(host_id_field)
     area_m2 = _positive(surface.get(area_field))
-    quantity_id = _clean(surface.get(quantity_id_field))
-    authority = _clean(surface.get(authority_field))
+    quantity_id = surface.get(quantity_id_field)
+    authority = surface.get(authority_field)
     host_evidence = _evidence_ids(surface.get("evidence_ids"))
     if (
-        not host_id
+        type(host_id) is not str or not host_id or host_id!=host_id.strip()
         or area_m2 is None
-        or not quantity_id
-        or not authority
+        or type(quantity_id) is not str or not quantity_id
+        or quantity_id != quantity_id.strip()
+        or type(authority) is not str or not authority
+        or authority != authority.strip()
         or not host_evidence
     ):
+        return []
+    if (
+        host_type=="FLOOR"
+        and authority not in {
+            MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            MeasurementAuthorityType.PDF_SCALED.value,
+            MeasurementAuthorityType.USER_APPROVED.value,
+        }
+    ):
+        # A provisional, AI, label-only or arbitrary authority string cannot
+        # be promoted by copying an already-known area into trade coverage.
         return []
 
     host_evidence = tuple(
@@ -768,6 +852,11 @@ def derive_floor_surface_trade_quantities(
     """Reuse one canonical floor surface across explicitly scoped floor trades."""
 
     if floor.get("geometry_complete") is not True:
+        return []
+    # One physical, whole-room finished floor cannot be 100% timber/vinyl
+    # covering and 100% tile simultaneously. Without disjoint source-owned
+    # zones, the metric area must not be priced twice as incompatible work.
+    if _trade_spec(specs, "flooring") is not None and _trade_spec(specs, "tiling") is not None:
         return []
     return _derive_area_surface_trade_quantities(
         surface=floor,
@@ -864,10 +953,14 @@ def derive_space_trade_quantities(
     CEILING surface objects instead.
     """
 
-    space_id = _clean(space.get("canonical_room_id"))
+    space_id = space.get("canonical_room_id")
     perimeter_m = _positive(space.get("perimeter_m"))
     host_evidence = _evidence_ids(space.get("evidence_ids"))
-    if not space_id or perimeter_m is None or not host_evidence:
+    if (
+        type(space_id) is not str or not space_id
+        or space_id != space_id.strip()
+        or perimeter_m is None or not host_evidence
+    ):
         return []
 
     results: List[DerivedTradeQuantity] = []
@@ -878,17 +971,52 @@ def derive_space_trade_quantities(
         spec_evidence = _spec_evidence(skirting)
         section = _spec_section(skirting)
         widths: list[float] = []
-        valid_widths = True
-        for door in doors:
-            width = _positive(
-                door.get("width_m") if isinstance(door, Mapping) else None
-            )
-            if width is None:
-                valid_widths = False
-                break
-            widths.append(width)
+        doorway_ids: set[str] = set()
+        claimed_original_width_ids: set[str] = set()
+        valid_widths = (
+            type(skirting.get("door_universe_complete")) is bool
+            and skirting.get("door_universe_complete") is True
+            and type(skirting.get("door_source_scope_id")) is str
+            and skirting.get("door_source_scope_id") == space_id
+            and isinstance(doors,(tuple,list))
+        )
+        if valid_widths:
+            for door in doors:
+                if not isinstance(door,Mapping):
+                    valid_widths=False
+                    break
+                raw_width=door.get("width_m")
+                doorway=door.get("opening_identity_id")
+                source_ids=door.get("source_width_evidence_ids")
+                if (
+                    type(door.get("canonical_room_id")) is not str
+                    or door.get("canonical_room_id")!=space_id
+                    or type(doorway) is not str or not doorway
+                    or doorway!=doorway.strip()
+                    or doorway in doorway_ids
+                    or type(raw_width) not in (int,float)
+                    or not isinstance(source_ids,(list,tuple))
+                    or not source_ids
+                    or any(type(eid) is not str or not eid or eid!=eid.strip()
+                           for eid in source_ids)
+                    or len(set(source_ids))!=len(source_ids)
+                    or not claimed_original_width_ids.isdisjoint(source_ids)
+                ):
+                    valid_widths=False
+                    break
+                try:
+                    width=float(raw_width)
+                except (TypeError,ValueError,OverflowError):
+                    valid_widths=False
+                    break
+                if not math.isfinite(width) or width<=0.0:
+                    valid_widths=False
+                    break
+                doorway_ids.add(doorway)
+                claimed_original_width_ids.update(source_ids)
+                widths.append(width)
         if material and spec_evidence and section and valid_widths:
-            door_deduction_m = sum(widths)
+            door_deduction_m = math.fsum(widths)
             if door_deduction_m <= perimeter_m:
                 quantity_m = perimeter_m - door_deduction_m
                 if quantity_m > 0.0:
@@ -953,10 +1081,36 @@ def to_takeoff_rows(
     function raises instead of corrupting the unit.
     """
 
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise takeoff_contract.TakeoffRowContractError(
+            "source takeoff workspace requires exact positive integer"
+        )
+    if (
+        type(source_page) is not str or not source_page or
+        source_page != source_page.strip() or
+        type(source_prefix) is not str or not source_prefix or
+        source_prefix != source_prefix.strip()
+    ):
+        raise takeoff_contract.TakeoffRowContractError(
+            "source page and producer identity require exact original strings"
+        )
+
     rows: List[Tuple[Any, ...]] = []
     stamp = ""
 
     for q in quantities:
+        if type(q) is not DerivedTradeQuantity:
+            raise takeoff_contract.TakeoffRowContractError(
+                "cross trade row requires typed DerivedTradeQuantity"
+            )
+        if q.quantity <= 0.0:
+            raise takeoff_contract.TakeoffRowContractError(
+                "zero-area or zero-count construction cannot be charged as a row"
+            )
+        if not _evidence_ids(q.host_evidence_ids) or not _evidence_ids(q.spec_evidence_ids):
+            raise takeoff_contract.TakeoffRowContractError(
+                "cross trade row missing exact original host or trade source receipts"
+            )
         if q.unit not in takeoff_contract.TAKEOFF_UNITS:
             raise takeoff_contract.TakeoffRowContractError(
                 f"canonical cross-trade quantity unit {q.unit!r} is not "

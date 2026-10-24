@@ -1,0 +1,32 @@
+{
+  "status": "UNPUBLISHED_BATCH41_COMPOSITE_PROOF",
+  "shadow_only": true,
+  "benchmark_score_granted": false,
+  "measurement_published": false,
+  "host_granted": false,
+  "ci_triage": {
+    "test_collection_import": "restored _axis_values_match_figured_pair helper (gptmax rename breakage)",
+    "original_lot16_pdf": "CI missing documents/sources PDF artifact — not Cursor regression",
+    "original_maryborough_pdf": "CI missing documents/sources PDF artifact — not Cursor regression"
+  },
+  "proofs": {
+    "namespace_bridge_gate": "digit_tail_collision_ambiguous_abstain",
+    "namespace_bridge_openings": 6,
+    "exact_intersection": 0,
+    "face_span_mean_pdf_pts": 31.86,
+    "end_span_mean_pdf_pts": 2.7,
+    "kind_unproven_empty": 5,
+    "kind_unproven_label_only": 2,
+    "single_figured_mm_count": 8,
+    "signed_id_sets_equal": true,
+    "visible_observation_id_count": 0,
+    "proximity_nearest_wins": false,
+    "signed_eight_retained": true
+  },
+  "blockers_for_owner": [
+    "digit-tail ID collisions are ambiguous — must not grant host",
+    "parents remain raster_opening_primitive_segment not RASTER_PDF_VISIBLE_SEGMENT",
+    "door height second axis still unavailable",
+    "3Laurel/Q5446 producers still missing"
+  ]
+}

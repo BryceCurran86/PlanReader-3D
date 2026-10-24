@@ -1,1 +1,4 @@
 pytest>=8.3,<9
+# Public CI tests import yaml to validate ORIGINAL provisioning policy;
+# keep this in CI only, not memory-constrained Render production.
+PyYAML>=6.0.3,<7

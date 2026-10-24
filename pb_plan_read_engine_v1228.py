@@ -35,7 +35,7 @@ VISUAL_PREFIX = "visual_page_read_v1228_"
 _FIELD_DRAWING = re.compile(r"\b(?:DRAWING|DWG|SHEET)\s*(?:NO\.?|NUMBER|#)?\b", re.I)
 _FIELD_TITLE = re.compile(r"\b(?:DRAWING\s+TITLE|SHEET\s+TITLE|TITLE)\b", re.I)
 _FIELD_SCALE = re.compile(r"\bSCALE\b", re.I)
-_FIELD_REV = re.compile(r"\bREV(?:ISION)?\b", re.I)
+_FIELD_REV = re.compile(r"\bREV(?:ISION)?(?![A-Z0-9])\b", re.I)
 _SCALE_VALUE = re.compile(r"(?<!\d)1\s*:\s*(\d{2,4})(?!\d)")
 _REV_VALUE = re.compile(r"^[A-Z0-9]{1,4}$", re.I)
 
@@ -256,7 +256,47 @@ def _title_zone_lines(
     return selected
 
 
-def _nearest_value(lines: Sequence[Dict[str, Any]], label_index: int, label_re: re.Pattern, validator=None) -> str:
+def _field_values(
+    lines: Sequence[Dict[str, Any]],
+    label_index: int,
+    label_re: re.Pattern,
+    validator=None,
+) -> List[str]:
+    """Every accepted value in a field label's own cell or adjacent cells."""
+    label = lines[label_index]
+    label_text = str(label.get("text") or "")
+    found: List[str] = []
+    same = label_re.sub(" ", label_text, count=1).strip(" :#-\t")
+    if same and (validator is None or validator(same)):
+        found.append(same)
+    lx0, ly0, lx1, ly1 = label["bbox"]
+    for idx, line in enumerate(lines):
+        if idx == label_index:
+            continue
+        text = _norm(line.get("text"))
+        if not text or label_re.search(text) or text in found:
+            continue
+        if validator is not None and not validator(text):
+            continue
+        x0, y0, x1, y1 = line["bbox"]
+        same_row = abs(((y0 + y1) / 2.0) - ((ly0 + ly1) / 2.0)) <= max(8.0, ly1 - ly0)
+        right_gap = x0 - lx1
+        below_gap = y0 - ly1
+        if same_row and -4.0 <= right_gap <= 220.0:
+            found.append(text)
+        elif -10.0 <= x0 - lx0 <= 180.0 and 0.0 <= below_gap <= 80.0:
+            found.append(text)
+    return found
+
+
+def _nearest_value(
+    lines: Sequence[Dict[str, Any]],
+    label_index: int,
+    label_re: re.Pattern,
+    validator=None,
+    *,
+    unique: bool = False,
+) -> str:
     label = lines[label_index]
     label_text = str(label.get("text") or "")
     # First try value appearing in the same visual line/cell.
@@ -284,6 +324,14 @@ def _nearest_value(lines: Sequence[Dict[str, Any]], label_index: int, label_re: 
         elif -10.0 <= x0 - lx0 <= 180.0 and 0.0 <= below_gap <= 80.0:
             score = 70.0 + below_gap + abs(x0 - lx0) * 0.4
             candidates.append((score, text))
+    texts: List[str] = []
+    for _score, text in candidates:
+        if text not in texts:
+            texts.append(text)
+    if unique and len(texts) != 1:
+        return ""
+    if len(texts) == 1:
+        return texts[0]
     return min(candidates, default=(0.0, ""), key=lambda item: item[0])[1]
 
 
@@ -302,59 +350,89 @@ def spatial_title_block_evidence(
     def valid_drawing(value: str) -> bool:
         return bool(registration._candidate_code(f"DRAWING NO {value}"))
 
+    drawings: List[str] = []
+    labelled_drawing = False
     for idx, line in enumerate(lines):
         text = str(line.get("text") or "")
-        if _FIELD_DRAWING.search(text):
-            value = _nearest_value(lines, idx, _FIELD_DRAWING, valid_drawing)
-            candidate = registration._candidate_code(f"DRAWING NO {value}") if value else ""
-            if candidate:
-                base["drawing_no"] = candidate
-                break
-    if not base.get("drawing_no"):
-        # Rank architectural-looking codes by title-block corner proximity.
-        ranked = sorted(lines, key=lambda item: (-_num(item.get("corner_score")), -_num(item.get("size"))))
-        for line in ranked:
+        if not _FIELD_DRAWING.search(text):
+            continue
+        labelled_drawing = True
+        for value in _field_values(lines, idx, _FIELD_DRAWING, valid_drawing):
+            candidate = registration._candidate_code(f"DRAWING NO {value}")
+            if candidate and candidate not in drawings:
+                drawings.append(candidate)
+    if len(drawings) == 1:
+        base["drawing_no"] = drawings[0]
+    elif len(drawings) > 1:
+        base["drawing_no"] = ""
+    elif not labelled_drawing and not base.get("drawing_no"):
+        codes: List[str] = []
+        for line in lines:
             candidate = registration._candidate_code(line.get("text"))
-            if candidate:
-                base["drawing_no"] = candidate; break
+            if candidate and candidate not in codes:
+                codes.append(candidate)
+        if len(codes) == 1:
+            base["drawing_no"] = codes[0]
 
+    scales: List[str] = []
     for idx, line in enumerate(lines):
         text = str(line.get("text") or "")
-        if _FIELD_SCALE.search(text):
-            value = _nearest_value(lines, idx, _FIELD_SCALE, lambda v: bool(_SCALE_VALUE.search(v)))
-            match = _SCALE_VALUE.search(value or text)
-            if match:
-                base["scale"] = f"1:{int(match.group(1))}"; break
+        if not _FIELD_SCALE.search(text):
+            continue
+        values = _field_values(lines, idx, _FIELD_SCALE, lambda v: bool(_SCALE_VALUE.search(v)))
+        for match in _SCALE_VALUE.finditer("\n".join([text, *values])):
+            label = f"1:{int(match.group(1))}"
+            if label not in scales:
+                scales.append(label)
+    if len(scales) == 1:
+        base["scale"] = scales[0]
+    elif len(scales) > 1:
+        base["scale"] = ""
 
+    revisions: List[str] = []
     for idx, line in enumerate(lines):
         text = str(line.get("text") or "")
-        if _FIELD_REV.search(text):
-            value = _nearest_value(lines, idx, _FIELD_REV, lambda v: bool(_REV_VALUE.fullmatch(_norm(v))))
-            if value:
-                base["revision"] = _norm(value).upper(); break
+        if not _FIELD_REV.search(text):
+            continue
+        for value in _field_values(lines, idx, _FIELD_REV, lambda v: bool(_REV_VALUE.fullmatch(_norm(v)))):
+            token = _norm(value).upper()
+            if token not in revisions:
+                revisions.append(token)
+    if len(revisions) == 1:
+        base["revision"] = revisions[0]
+    elif len(revisions) > 1:
+        base["revision"] = ""
 
+    titles: List[str] = []
+    for idx, line in enumerate(lines):
+        if not _FIELD_TITLE.search(str(line.get("text") or "")):
+            continue
+        value = _nearest_value(lines, idx, _FIELD_TITLE, lambda v: 3 <= len(_norm(v)) <= 140)
+        title = _norm(value)
+        if title and title not in titles:
+            titles.append(title)
     explicit_title = ""
-    for idx, line in enumerate(lines):
-        if _FIELD_TITLE.search(str(line.get("text") or "")):
-            value = _nearest_value(lines, idx, _FIELD_TITLE, lambda v: 3 <= len(_norm(v)) <= 140)
-            if value:
-                explicit_title = _norm(value); break
-    if not explicit_title:
-        # Largest-font non-admin title-block line with drawing-type language wins.
-        candidates: List[Tuple[float, str]] = []
+    title_conflict = len(titles) > 1
+    if len(titles) == 1:
+        explicit_title = titles[0]
+    elif not title_conflict:
+        candidates: List[str] = []
         for line in lines:
             text = _norm(line.get("text"))
             low = text.lower()
             if not (3 <= len(text) <= 140) or any(word in low for word in _ADMIN_TITLE_WORDS):
                 continue
-            type_bonus = 8.0 if any(token in low for token in (
+            if any(token in low for token in (
                 "plan", "elevation", "section", "schedule", "legend", "abbreviation", "detail", "perspective"
-            )) else 0.0
-            candidates.append((_num(line.get("size")) + type_bonus + _num(line.get("corner_score")), text))
-        if candidates:
-            explicit_title = max(candidates, key=lambda item: item[0])[1]
+            )) and text not in candidates:
+                candidates.append(text)
+        if len(candidates) == 1:
+            explicit_title = candidates[0]
 
-    if explicit_title:
+    if title_conflict:
+        base["drawing_title"] = ""
+        base["text"] = title_text
+    elif explicit_title:
         base["drawing_title"] = explicit_title
         base["text"] = explicit_title + "\n" + title_text
     else:

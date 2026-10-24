@@ -7,6 +7,7 @@ on:
       # every module the replayed production chain can import must re-run the signed-output replay
       - "pb_*.py"
       - "tools/diag_pdf_symbol_byte_glyph_shadow.py"
+      - "tools/diag_original_pdf_active_clip_operator_authority.py"
       - "tools/run_source_closed_project_handoff.py"
       - "tools/diag_gpt2_room_measurement_gates.py"
       - "tools/diag_gpt3_maryborough_floor_customer_gate.py"
@@ -24,6 +25,8 @@ on:
       - "pb_material_schedule_v1222.py"
       - "pb_source_material_semantic_authority.py"
       - "tools/prepare_gpt3_pending_floor_surface_identity_activation.py"
+      - "tools/gpt3_original_source_preflight.py"
+      - "tests/test_gpt3_original_source_preflight.py"
       - "tools/diag_native_multipath_cad_grid_source_shadow.py"
       - "tests/test_live_floor_family_customer_output.py"
       - "tests/test_gpt3_pending_floor_surface_identity_activation.py"
@@ -63,6 +66,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Provision original sources
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+      - name: Classify original source
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p artifacts
+          python3 -m tools.gpt3_original_source_preflight \
+            --pdf 'documents/sources/Arch_Combined_Maryborough_Service_Station.pdf' \
+            --expected-sha256 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007' \
+            --output artifacts/original-source-preflight.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -77,7 +98,7 @@ jobs:
           git rev-parse HEAD > "$OUT/producer_head_sha.txt"
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -m tools.gpt3_original_source_preflight --pdf "$PDF" --expected-sha256 "$SHA"
           /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_maryborough_original_floor_score_input \
             --pdf "$PDF" \
             --output-dir "$OUT/production" 2>&1 | tee "$OUT/producer_console.log"

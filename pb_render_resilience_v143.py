@@ -36,9 +36,22 @@ def _mass_figure(rows: List[Dict[str, Any]]) -> go.Figure:
         x = _num(row.get("x"), idx * 4.0)
         y = _num(row.get("y"), 0.0)
         z = _num(row.get("z"), 0.0)
-        w = max(0.1, _num(row.get("width_m") or row.get("width"), 3.0))
-        d = max(0.1, _num(row.get("depth_m") or row.get("depth"), 3.0))
-        h = max(0.1, _num(row.get("height_m") or row.get("height"), 2.7))
+        width = row.get("width_m")
+        if width is None:
+            width = row.get("width")
+        depth = row.get("depth_m")
+        if depth is None:
+            depth = row.get("depth")
+        height = row.get("height_m")
+        if height is None:
+            height = row.get("height")
+        if width in (None, "") or depth in (None, "") or height in (None, ""):
+            continue
+        w = _num(width)
+        d = _num(depth)
+        h = _num(height)
+        if w <= 0.0 or d <= 0.0 or h <= 0.0:
+            continue
         xs = [x,x+w,x+w,x,x,x+w,x+w,x]
         ys = [y,y,y+d,y+d,y,y,y+d,y+d]
         zs = [z,z,z,z,z+h,z+h,z+h,z+h]

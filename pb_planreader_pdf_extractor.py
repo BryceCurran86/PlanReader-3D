@@ -707,17 +707,22 @@ class GenericPlanReaderExtractor:
         return False
 
     def extract_sheet_number(self, page_text: str, page_number: int) -> str:
-        """Extract sheet number from drawing title block, or fallback to page index."""
-        m = re.search(
+        """Return one labelled sheet number.
+
+        Two different labelled numbers abstain. A code that is not beside a
+        drawing-number or sheet-number label is not this page's number.
+        """
+        labelled: List[str] = []
+        for match in re.finditer(
             r"(?:drawing\s*no\.?|drg\s*no\.?|sheet\s*no\.?)\s*[:.\-]?\s*([A-Za-z0-9/\-_]+)",
-            page_text,
+            page_text or "",
             re.I,
-        )
-        if m:
-            return m.group(1).strip()
-        m_code = re.search(r"\b([A-Z]{1,4}/\d{1,4}/[A-Za-z0-9\-]+|[A-Z]{1,2}\-?\d{2,3})\b", page_text)
-        if m_code:
-            return m_code.group(1).strip()
+        ):
+            code = match.group(1).strip()
+            if code and code.upper() not in {item.upper() for item in labelled}:
+                labelled.append(code)
+        if len(labelled) == 1:
+            return labelled[0]
         return f"Page-{page_number}"
 
     @staticmethod
@@ -747,12 +752,42 @@ class GenericPlanReaderExtractor:
         replacement privilege. Existing behaviour remains deterministic: a
         positive later physical quantity replaces only a smaller existing one.
         """
-        del new_metadata
-        if new_quantity <= 0:
+        # Partial compound floor arithmetic is useful for diagnostics but
+        # must never displace a smaller complete structural bed/DPM/mesh
+        # quantity. Conversely, authentic complete geometry can replace a
+        # larger provisional estimate. Neither declared areas nor unrelated
+        # receipt strings confer this status; it comes from source geometry.
+        try:
+            if isinstance(new_quantity, bool):
+                return False
+            new_m2 = float(new_quantity)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(new_m2) or new_m2 <= 0:
             return False
         if existing is None:
             return True
-        return new_quantity > float(existing.quantity or 0)
+        current = getattr(existing, "quantity", None)
+        try:
+            if isinstance(current, bool):
+                return False
+            current_m2 = float(current) if current is not None else 0.0
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(current_m2):
+            return False
+        source_complete = (
+            isinstance(new_metadata, dict)
+            and new_metadata.get("commercial_area_authorized") is True
+        )
+        previous_meta = getattr(existing, "metadata", None)
+        previous_complete = (
+            isinstance(previous_meta, dict)
+            and previous_meta.get("commercial_area_authorized") is True
+        )
+        if source_complete != previous_complete:
+            return source_complete
+        return new_m2 > current_m2
 
     @staticmethod
     def _has_dpc_specification(page_text: str) -> bool:
@@ -1400,8 +1435,11 @@ class GenericPlanReaderExtractor:
         # ------------------------------------------------------------------
         _addr_kws = ("P.O. BOX", "P.O BOX", "PO BOX", "P O BOX", "TEL:", "FAX:", "EMAIL:", "BOX 100727", "BOX 9656")
         detected_span: Optional[float] = None
-        global_verandah_width: Optional[float] = None  # None unless explicitly parsed
-        global_has_verandah_mention = False
+        # Keep secondary source components in their own original-page scope.
+        # A label/width found on another sheet is not proof that it belongs to
+        # this physical plan; cross-page reuse needs a separate correspondence.
+        verandah_mention_pages: set[int] = set()
+        verandah_width_by_page: Dict[int, float] = {}
         global_roof_pitch_deg: Optional[float] = None
         global_has_dpc = False
         global_has_dpm = False
@@ -1454,9 +1492,13 @@ class GenericPlanReaderExtractor:
                     "evidence_present_reconciliation_only"
                 )
 
-            # Track verandah mention across drawings
-            if any(k in norm_pg for k in ("verandah", "veranda")):
-                global_has_verandah_mention = True
+            # An unfigured secondary space on this *same* page must remain
+            # an explicit partial component rather than a borrowed width.
+            page_has_verandah_mention = any(
+                k in norm_pg for k in ("verandah", "veranda")
+            )
+            if page_has_verandah_mention:
+                verandah_mention_pages.add(p_idx + 1)
 
             # Only record verandah width if an explicit dimension is figured in text.
             # F.23: prefer same-viewport, adjacency-validated spatial evidence
@@ -1465,7 +1507,7 @@ class GenericPlanReaderExtractor:
             # sentence regex below -- the regex is purely additive as a
             # fallback for wording this stricter resolver does not (yet)
             # anchor to a viewport, never a replacement for it.
-            if global_verandah_width is None:
+            if page_has_verandah_mention:
                 from pb_secondary_footprint_evidence import (
                     resolve_secondary_footprint_width_m,
                 )
@@ -1473,16 +1515,20 @@ class GenericPlanReaderExtractor:
                 spatial_evidence = resolve_secondary_footprint_width_m(
                     doc[p_idx], page_num=p_idx + 1
                 )
-                if spatial_evidence is not None:
-                    global_verandah_width = spatial_evidence.width_m
+                from pb_gpt1_page_secondary_width_authority import (
+                    bind_page_secondary_width,
+                )
 
-            if global_verandah_width is None:
-                vm = re.search(r"(\d+(?:[,.]\d+)?)\s*(?:m|mm)?\s*wide\s*veranda", norm_pg)
-                if not vm:
-                    vm = re.search(r"veranda[h]?\s*[:\-\(]?\s*(\d+(?:[,.]\d+)?)\s*(?:m|mm)", norm_pg)
-                if vm:
-                    raw_v = float(vm.group(1).replace(",", "."))
-                    global_verandah_width = raw_v / 1000.0 if raw_v > 10 else raw_v
+                # Exact original-page witnesses must agree: do not borrow a
+                # dimension from another drawing or select the first of two
+                # contradicting printed widths. A conflicting annotation
+                # leaves this component partial and blocks total-area issue.
+                _page_width = bind_page_secondary_width(
+                    pg_txt,
+                    spatial_evidence.width_m if spatial_evidence is not None else None,
+                )
+                if _page_width.width_m is not None:
+                    verandah_width_by_page[p_idx + 1] = _page_width.width_m
 
             # Roof pitch angle: only if explicitly specified
             if global_roof_pitch_deg is None:
@@ -1817,7 +1863,7 @@ class GenericPlanReaderExtractor:
                 and page_num in global_resolved_explicit_floor_area.source_pages
                 else None
             )
-            resolved_verandah_width_for_page = global_verandah_width
+            resolved_verandah_width_for_page = verandah_width_by_page.get(page_num)
             floor_plan_dims_m: Optional[List[float]] = None
             if not is_elevation_page:
                 try:
@@ -1863,7 +1909,7 @@ class GenericPlanReaderExtractor:
                     source_page=page_num,
                 )
 
-                if global_has_verandah_mention:
+                if page_num in verandah_mention_pages:
                     builder.add_verandah(
                         length_m=length_m,
                         width_m=resolved_verandah_width_for_page,
@@ -1952,8 +1998,49 @@ class GenericPlanReaderExtractor:
                 existing_area = pred_dict.get("floor_screed")
                 current_best_area = existing_area.quantity if existing_area else 0.0
                 page_has_plan_footprint_authority = self._has_plan_footprint_context(page_text)
+                # Preserve the legacy source-neutral diagnostic estimates for
+                # incomplete plans (including independently evidenced DPC);
+                # never mislabel a partial footprint as commercially closed.
+                # A real FIRM issuer still needs complete source/physical
+                # floor correspondence, independent metric proof and material.
+                from pb_multi_space_footprint_geometry import FootprintStatus
+
+                # A figured secondary depth is not an authenticated
+                # FULL-LENGTH frontage. The legacy builder synthesizes the
+                # entire 'front' strip from the main rectangle. Its quantity
+                # remains diagnostic; no source-complete floor can be sealed
+                # until the secondary span, edge and polygon are corroborated.
+                secondary_span_source_owned = (
+                    page_num not in verandah_mention_pages
+                )
+                compound_area_complete = (
+                    footprint_res.status == FootprintStatus.CONFIRMED.value
+                    and not footprint_res.missing_components
+                    and secondary_span_source_owned
+                    and math.isfinite(structural_bed_area_m2)
+                    and structural_bed_area_m2 > 0.0
+                )
+                # Legacy output retains one envelope per document. A larger
+                # *incomplete* compound cannot displace a smaller complete
+                # footprint simply because its partial arithmetic is bigger.
+                # Equally, a subsequently proved complete physical envelope
+                # must replace an older incomplete estimate even when its m²
+                # is smaller. With equal proof status retain the established
+                # largest-area behaviour. FIRM floor/finish source issuers
+                # remain separate and require their own physical source scope.
+                previous_complete = (
+                    existing_area is not None
+                    and (existing_area.metadata or {}).get(
+                        "commercial_area_authorized"
+                    ) is True
+                )
                 should_replace_area = page_has_plan_footprint_authority and (
-                    total_floor_screed > current_best_area or current_best_area == 0
+                    existing_area is None
+                    or (compound_area_complete and not previous_complete)
+                    or (
+                        compound_area_complete == previous_complete
+                        and (total_floor_screed > current_best_area or current_best_area == 0)
+                    )
                 )
 
                 if should_replace_area:
@@ -1995,11 +2082,14 @@ class GenericPlanReaderExtractor:
                         description=desc_flr,
                         quantity=total_floor_screed,
                         unit="SM",
-                        confidence=0.92,
+                        confidence=0.92 if compound_area_complete else 0.45,
                         source_page=page_num,
                         sheet_number=sheet_no,
                         dimensions=[length_m, width_m],
                         metadata={
+                            "commercial_area_authorized": compound_area_complete,
+                            "secondary_span_source_owned": secondary_span_source_owned,
+                            "original_source_compound_complete": compound_area_complete,
                             "component_areas": footprint_res.component_areas,
                             "gross_floor_area_m2": footprint_res.gross_floor_area_m2,
                             "dpm_area_m2": footprint_res.dpm_area_m2,
@@ -2283,8 +2373,18 @@ class GenericPlanReaderExtractor:
                             dimensions=[width_m, round(gable_h, 2)],
                         )
 
-            # Finishes: strictly gated on drawing annotation presence
-            if "floor_screed" in pred_dict:
+            # Finishes require the physical floor and the wall they cover to
+            # belong to THIS source page. pred_dict is document-scoped; on
+            # another elevation, RCP or smaller floor plan it may still hold
+            # the previously selected largest envelope. A keyword on that
+            # other sheet is not a source-owned room-to-finish correspondence.
+            # Preserve the original plan-page finish logic unchanged.
+            if (
+                "floor_screed" in pred_dict
+                and "perimeter_walling" in pred_dict
+                and pred_dict["floor_screed"].source_page == page_num
+                and pred_dict["perimeter_walling"].source_page == page_num
+            ):
                 cur_wall = pred_dict["perimeter_walling"].quantity
                 cur_perim = pred_dict["perimeter_walling"].dimensions[0] if pred_dict["perimeter_walling"].dimensions else 0.0
                 cur_wall_dims = pred_dict["perimeter_walling"].dimensions
@@ -2482,6 +2582,16 @@ class GenericPlanReaderExtractor:
                         dpc_meta["dpc_envelope_reason"] = _envelope.reason
                         dpc_meta["dpc_envelope_source"] = _envelope.source
                         dpc_meta["dpc_envelope_base_m"] = dpc_envelope_base_m
+                        # A fallback wall perimeter is a diagnostic, not the
+                        # authenticated external envelope of an incomplete
+                        # compound. Preserve its numeric legacy quantity but
+                        # distinguish it from source-complete DPC for all
+                        # future customer quantity consumers.
+                        dpc_source_complete = (
+                            _envelope.status == "confirmed_external"
+                            and dpc_meta.get("commercial_area_authorized") is True
+                        )
+                        dpc_meta["commercial_perimeter_authorized"] = dpc_source_complete
                         if internal_partition_dpc_length_m is not None:
                             dpc_meta["internal_partition_length_m"] = internal_partition_dpc_length_m
                             dpc_meta["transverse_runs_count"] = transverse_runs_count
@@ -2514,7 +2624,7 @@ class GenericPlanReaderExtractor:
                                 description=dpc_description,
                                 quantity=dpc_qty,
                                 unit="M",
-                                confidence=0.90,
+                                confidence=0.90 if dpc_source_complete else 0.45,
                                 source_page=page_num,
                                 sheet_number=sheet_no,
                                 metadata=dpc_meta,

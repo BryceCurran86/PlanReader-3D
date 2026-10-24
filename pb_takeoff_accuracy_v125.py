@@ -157,17 +157,33 @@ def _migrate(app: Any) -> None:
 
 
 def level_of(v: Any) -> str:
+    """Return one printed storey. Two different storeys stay unassigned."""
     low = clean(v).lower()
-    if re.search(r"\blower\s+ground\b|\blg\b", low): return "Lower Ground"
-    m = re.search(r"\bbasement\s*([0-9]+)?\b|\bb\s*([0-9]+)\b", low)
-    if m: return f"Basement {int(next((g for g in m.groups() if g), '1'))}"
-    if re.search(r"\bground(?:\s+floor)?\b|\bgf\b", low): return "Ground"
-    if re.search(r"\bmezz(?:anine)?\b", low): return "Mezzanine"
-    m = re.search(r"\b(?:level|lvl)\s*[-:]?\s*([0-9]{1,2})\b", low) or re.search(r"\b([0-9]{1,2})(?:st|nd|rd|th)?\s+floor\b", low)
-    if m: return f"Level {int(m.group(1))}"
-    for word, n in {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,"seventh":7,"eighth":8,"ninth":9,"tenth":10}.items():
-        if f"{word} floor" in low: return f"Level {n}"
-    if "roof" in low: return "Roof"
+    found: list[str] = []
+
+    def add(name: str) -> None:
+        if name not in found:
+            found.append(name)
+
+    if re.search(r"\blower\s+ground\b|\blg\b", low):
+        add("Lower Ground")
+    for match in re.finditer(r"\bbasement\s*([0-9]+)?\b|\bb\s*([0-9]+)\b", low):
+        add(f"Basement {int(next((group for group in match.groups() if group), '1'))}")
+    if re.search(r"\bground(?:\s+floor)?\b|\bgf\b", low) and not re.search(r"\blower\s+ground\b", low):
+        add("Ground")
+    if re.search(r"\bmezz(?:anine)?\b", low):
+        add("Mezzanine")
+    for match in re.finditer(r"\b(?:level|lvl)\s*[-:]?\s*([0-9]{1,2})\b", low):
+        add(f"Level {int(match.group(1))}")
+    for match in re.finditer(r"\b([0-9]{1,2})(?:st|nd|rd|th)\s+floor\b", low):
+        add(f"Level {int(match.group(1))}")
+    for word, number in {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,"seventh":7,"eighth":8,"ninth":9,"tenth":10}.items():
+        if f"{word} floor" in low:
+            add(f"Level {number}")
+    if re.search(r"\broof\b", low):
+        add("Roof")
+    if len(found) == 1:
+        return found[0]
     return "Unassigned"
 
 
@@ -184,9 +200,18 @@ def level_sort_key(v: str) -> float:
 
 def scope_of(v: Any) -> str:
     text, low, parts = clean(v), clean(v).lower(), []
-    for p in [r"\bunits?\s*[#:-]?\s*[a-z0-9]+", r"\b(?:apartment|apt|townhouse|villa|lot)\s*[#:-]?\s*[a-z0-9]+", r"\b(?:block|building|wing|stage)\s*[#:-]?\s*[a-z0-9]+"]:
-        m = re.search(p, low, re.IGNORECASE)
-        if m: parts.append(clean(m.group()).title())
+    for pattern in (
+        r"\bunits?\s*[#:-]?\s*[a-z0-9]+",
+        r"\b(?:apartment|apt|townhouse|villa|lot)\s*[#:-]?\s*[a-z0-9]+",
+        r"\b(?:block|building|wing|stage)\s*[#:-]?\s*[a-z0-9]+",
+    ):
+        matches = []
+        for match in re.finditer(pattern, low, re.IGNORECASE):
+            label = clean(match.group()).title()
+            if label not in matches:
+                matches.append(label)
+        if len(matches) == 1:
+            parts.append(matches[0])
     parts.append(level_of(text))
     return " | ".join(dict.fromkeys(parts))
 

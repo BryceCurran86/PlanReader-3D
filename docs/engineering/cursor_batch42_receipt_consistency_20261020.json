@@ -1,0 +1,27 @@
+{
+  "benchmark_score_granted": false,
+  "blockers": [],
+  "kind_supported_opening_kind_tokens": {
+    "door": 7,
+    "window": 7
+  },
+  "measurement_published": false,
+  "seg_vs_d_index_digit_tail_counts": [
+    0,
+    1,
+    0,
+    0,
+    0,
+    0
+  ],
+  "seg_vs_raster_segment_digit_tail_counts": [
+    8,
+    7,
+    8,
+    7,
+    8,
+    6
+  ],
+  "shadow_only": true,
+  "status": "BATCH42_RECEIPT_CONSISTENCY_OK"
+}

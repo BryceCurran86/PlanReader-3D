@@ -25,6 +25,7 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     QuantityEvidence,
     ViewportEvidence,
+    ViewportResolutionStatus,
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
@@ -207,6 +208,36 @@ def _validate_owned_evidence(
     elif target_entity_id != entity.candidate_entity_id:
         blockers.append("height_target_entity_mismatch")
     return tuple(dict.fromkeys(blockers))
+
+
+def _context_viewport_blockers(
+    *,
+    context: ProviderContext,
+    document: DocumentEvidence,
+    viewport: ViewportEvidence,
+) -> tuple[str, ...]:
+    """Run-level revision and viewport ownership checks the sibling FIRM seams already apply.
+
+    ``_validate_owned_evidence`` compares each atom's revision to ``current_revision_id`` but never
+    reads ``context.revision_id`` or the viewport's own status, document or page, so a stale or
+    unbound run, an unresolved viewport or a viewport from another document could still publish.
+    Reason codes are the ones ``pb_measurement_input_authority._validate_ownership`` emits.
+    """
+    blockers: list[str] = []
+    if not context.revision_id or not context.current_revision_id:
+        blockers.append("revision_unbound")
+    elif context.revision_id != context.current_revision_id:
+        blockers.append("stale_revision")
+    if viewport.document_id != context.document_id:
+        blockers.append("viewport_document_mismatch")
+    if document.page_ids and viewport.page_id not in document.page_ids:
+        blockers.append("viewport_page_not_owned_by_document")
+    if viewport.status not in (
+        ViewportResolutionStatus.RESOLVED,
+        ViewportResolutionStatus.DERIVED,
+    ):
+        blockers.append("viewport_unresolved")
+    return tuple(blockers)
 
 
 def _entity_height_profile_blockers(entity: EntityEvidence) -> tuple[str, ...]:
@@ -530,16 +561,20 @@ def build_wall_height_quantity(
             evidence_ids=tuple(entity.evidence_ids),
         )
 
+    context_blockers = _context_viewport_blockers(
+        context=context, document=document, viewport=viewport
+    )
     if direct_height_evidence is not None:
-        blockers = list(
-            _validate_owned_evidence(
+        blockers = [
+            *context_blockers,
+            *_validate_owned_evidence(
                 direct_height_evidence,
                 context=context,
                 document=document,
                 viewport=viewport,
                 entity=entity,
-            )
-        )
+            ),
+        ]
         if direct_height_evidence.kind not in _ALLOWED_DIRECT_KINDS:
             blockers.append("unsupported_direct_height_semantics")
         value_m = None
@@ -627,7 +662,11 @@ def build_wall_height_quantity(
         entity=entity,
     )
 
-    blockers: list[str] = [*lower_relation_blockers, *upper_relation_blockers]
+    blockers: list[str] = [
+        *context_blockers,
+        *lower_relation_blockers,
+        *upper_relation_blockers,
+    ]
     for evidence, label, allowed_kinds, allow_cross_view in (
         (lower_datum_evidence, "lower", _ALLOWED_LOWER_DATUM_KINDS, lower_cross_view),
         (upper_datum_evidence, "upper", _ALLOWED_UPPER_DATUM_KINDS, upper_cross_view),

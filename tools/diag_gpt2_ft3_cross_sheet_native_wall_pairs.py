@@ -547,6 +547,30 @@ def audit_registration_candidate_sides(
     }
 
 
+def require_complete_original_native_source_primitive_ids(
+    source_ids: Sequence[str],
+    native: Mapping[str, Mapping[str, Any]],
+    *,
+    page_id: int,
+) -> tuple[str, ...]:
+    """Retain all source-issued W4 primitive IDs or reject the whole page.
+
+    An apparently clean registration assembled by skipping a missing
+    source primitive is not an authenticated competing-source census.
+    """
+    if (type(page_id) is not int or page_id <= 0
+            or type(source_ids) not in (tuple, list)
+            or not source_ids or len(source_ids) > 120000
+            or any(type(identity) is not str or not identity
+                   or identity != identity.strip()
+                   for identity in source_ids)
+            or len(set(source_ids)) != len(source_ids)):
+        raise ValueError("original_source_native_primitive_universe_invalid")
+    if any(identity not in native for identity in source_ids):
+        raise ValueError("original_source_native_primitive_universe_incomplete")
+    return tuple(source_ids)
+
+
 def original_source_side_pair_census(
     pdf: Path, *, expected_sha256: str,
 ) -> dict[str, Any]:
@@ -559,11 +583,17 @@ def original_source_side_pair_census(
         page:indexed_original_native_primitives(_native_segments(payload,page))
         for page in (SOURCE_PAGE,MARK_PAGE)
     }
+    native_source_ids = {
+        page: require_complete_original_native_source_primitive_ids(
+            evidence[str(page)]["primitive_ids"],
+            native[page],
+            page_id=page,
+        )
+        for page in (SOURCE_PAGE,MARK_PAGE)
+    }
     lines = {
-        page:build_lines(
-            native[page][identity] for identity in evidence[str(page)]["primitive_ids"]
-            if identity in native[page]
-        ) for page in (SOURCE_PAGE,MARK_PAGE)
+        page: build_lines(native[page][identity] for identity in native_source_ids[page])
+        for page in (SOURCE_PAGE,MARK_PAGE)
     }
     contenders = rank_registrations(lines[MARK_PAGE],lines[SOURCE_PAGE])
     if not contenders:

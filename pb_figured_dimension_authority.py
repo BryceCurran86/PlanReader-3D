@@ -68,6 +68,12 @@ def parse_figured_dimension_mm(raw: Optional[str]) -> float:
     return value_mm
 
 
+# Two representations of the same figured dimension (printed text and a normalized number) agree when they match to
+# float rounding; anything looser would let a real contradiction through.
+_REPRESENTATION_REL_TOL = 1e-9
+_REPRESENTATION_ABS_TOL_MM = 1e-6
+
+
 def _validate_direct_figured_mm(value: float) -> float:
     """A direct figured value must be a real number, never bool or coerced text."""
     if isinstance(value, bool) or not isinstance(value, (numbers.Real, Decimal)):
@@ -156,6 +162,29 @@ def resolve_measurement_authority(
             figured_value_mm = parse_figured_dimension_mm(figured_text)
         except DimensionParseError as exc:
             figured_error = str(exc)
+        if figured_error is None and figured_mm is not None:
+            # Two representations of one dimension must agree. Silently letting the text win
+            # (or the number win) would hide a contradiction behind a FIRM result.
+            try:
+                direct_mm = _validate_direct_figured_mm(figured_mm)
+            except DimensionParseError as exc:
+                figured_error = str(exc)
+            else:
+                if not math.isclose(
+                    figured_value_mm, direct_mm, rel_tol=_REPRESENTATION_REL_TOL, abs_tol=_REPRESENTATION_ABS_TOL_MM
+                ):
+                    return MeasurementAuthorityResult(
+                        value_m=None,
+                        source_type=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                        authority_status=AuthorityStatus.BLOCKED.value,
+                        scaled_delta_mm=None,
+                        figured_mm=None,
+                        scaled_mm=scaled_mm,
+                        notes=(
+                            "Blocked: figured representations disagree "
+                            f"(text {figured_value_mm}mm vs value {direct_mm}mm)"
+                        ),
+                    )
     elif figured_mm is not None:
         try:
             figured_value_mm = _validate_direct_figured_mm(figured_mm)

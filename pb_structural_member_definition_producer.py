@@ -98,18 +98,14 @@ class StructuralDefinitionBinding:
     unresolved_observation_ids: tuple[str, ...]
 
 
-def _section_name(text: str) -> str | None:
-    match = _SECTION.search(text)
-    if match is not None:
-        name = " ".join(match.group(0).lower().split())
-        if name.endswith(" sections"):
-            name = name[:-1]
-        return _CANONICAL_SECTION.get(name, name)
+def _named_section(match: re.Match[str]) -> str:
+    name = " ".join(match.group(0).lower().split())
+    if name.endswith(" sections"):
+        name = name[:-1]
+    return _CANONICAL_SECTION.get(name, name)
 
-    rolled = _ROLLED_SECTION.search(text)
-    if rolled is None:
-        return None
-    token = re.sub(r"\s+", "", rolled.group(0)).upper()
+
+def _rolled_section_name(token: str) -> str | None:
     for abbreviation, name in (
         ("PFC", "parallel flange channel"),
         ("UB", "universal beam"),
@@ -125,16 +121,46 @@ def _section_name(text: str) -> str | None:
     return None
 
 
-def _member_role(text: str) -> str | None:
-    match = _ROLE.search(text)
-    if match is None:
+def _unique(values: list[str]) -> tuple[str, ...] | None:
+    found: list[str] = []
+    for value in values:
+        if value not in found:
+            found.append(value)
+    if len(found) > 1:
         return None
+    return tuple(found)
+
+
+def _section_name(text: str) -> str | None:
+    named = _unique([_named_section(match) for match in _SECTION.finditer(text)])
+    if named is None:
+        return None
+    if named:
+        return named[0]
+    rolled = _unique([
+        name
+        for match in _ROLLED_SECTION.finditer(text)
+        if (name := _rolled_section_name(re.sub(r"\s+", "", match.group(0)).upper()))
+    ])
+    if not rolled:
+        return None
+    return rolled[0]
+
+
+def _canonical_role(match: re.Match[str]) -> str:
     name = match.group(0).lower()
     if name.startswith("stanchion"):
         return "stanchion"
     if name == "bracing":
         return "brace"
     return name.rstrip("s")
+
+
+def _member_role(text: str) -> str | None:
+    roles = _unique([_canonical_role(match) for match in _ROLE.finditer(text)])
+    if not roles:
+        return None
+    return roles[0]
 
 
 def _compatible_kind(selector_kind: str, role: str) -> bool:
@@ -192,14 +218,27 @@ def parse_structural_member_definitions(
         if role is None or not _compatible_kind(selector.member_kind, role):
             continue
         combined_text = f"{block.text} {member.text}"
-        size = _SIZE.search(combined_text)
-        rolled = _ROLLED_SECTION.search(combined_text)
-        size_text = " ".join(size.group(0).lower().split()) if size else ""
-        rolled_text = (
-            re.sub(r"\s+", "", rolled.group(0)).lower()
-            if rolled is not None
-            else ""
-        )
+        sizes = _unique([
+            " ".join(match.group(0).lower().split())
+            for match in _SIZE.finditer(combined_text)
+        ])
+        rolled_texts = _unique([
+            re.sub(r"\s+", "", match.group(0)).lower()
+            for match in _ROLLED_SECTION.finditer(combined_text)
+        ])
+        rolled_names = _unique([
+            name
+            for match in _ROLLED_SECTION.finditer(combined_text)
+            if (name := _rolled_section_name(
+                re.sub(r"\s+", "", match.group(0)).upper()
+            ))
+        ])
+        if sizes is None or rolled_texts is None or rolled_names is None:
+            continue
+        if rolled_names and rolled_names[0] != section:
+            continue
+        size_text = sizes[0] if sizes else ""
+        rolled_text = rolled_texts[0] if rolled_texts else ""
         section_spec = "; ".join(
             part for part in (section, rolled_text, size_text, role) if part
         )

@@ -121,7 +121,7 @@ class WallTopologyRegistry:
                 room_id=int(rid),
                 page_id=int(pid),
                 room_name=f"Room Space #{rid} ({plabel})",
-                storey_level="Level 1",
+                storey_level="Unspecified",
                 area_m2=area_val,
                 perimeter_m=perim_val,
                 default_wall_height_m=default_wall_height,

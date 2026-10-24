@@ -89,7 +89,7 @@ def _publish_new(path: Path, data: object) -> None:
     temp: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent,
+            "w", encoding="utf-8", newline="\n", dir=path.parent,
             prefix=f".{path.name}.", suffix=".tmp", delete=False,
         ) as stream:
             temp = Path(stream.name)

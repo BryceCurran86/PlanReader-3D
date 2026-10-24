@@ -339,6 +339,9 @@ class TesseractOCRBackend(RasterOCRBackend):
 
     def __init__(self, tesseract_cmd: Optional[str] = None) -> None:
         self._custom_cmd = tesseract_cmd or os.environ.get("TESSERACT_CMD")
+        # Successful probe cache is keyed to the actual executable identity.
+        # This does NOT cache source OCR readings or bypass text integrity.
+        self._healthy_executable_signature = None
 
     @property
     def name(self) -> str:
@@ -366,11 +369,27 @@ class TesseractOCRBackend(RasterOCRBackend):
         if not cmd:
             return False
         try:
+            info = os.stat(cmd)
+        except OSError:
+            return False
+        signature = (
+            cmd, info.st_dev, info.st_ino, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns, info.st_mode,
+        )
+        if self._healthy_executable_signature == signature:
+            # pytesseract keeps a process-global executable path. A separate
+            # OCR backend may have changed it since this instance's probe.
+            pytesseract.pytesseract.tesseract_cmd = cmd
+            return True
+        try:
             pytesseract.pytesseract.tesseract_cmd = cmd
             test_img = Image.new("RGB", (10, 10), "white")
             pytesseract.image_to_data(test_img, output_type=pytesseract.Output.DICT)
+            self._healthy_executable_signature = signature
             return True
         except Exception:
+            # Failed probes must recheck and recover after engine repairs.
+            self._healthy_executable_signature = None
             return False
 
     def extract_lines(self, image: Image.Image, dpi: int = 150) -> tuple[OCRLine, ...]:

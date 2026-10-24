@@ -18,13 +18,22 @@ _EXPECTED_CENTRES = {3: (798.5, 438.0), 5: (734.3, 467.6)}
 
 
 def paired_native_2127_tokens(page):
-    """Require adjacent native source words on one same original text line."""
+    """Require a spatially contiguous, source-native two-word callout.
+
+    PDF word-block adjacency alone is not geometric adjacency: unrelated
+    same-line drawing text may be many letter-heights apart. A gap no larger
+    than the taller word's OWN ink height is a scale-covariant source-space
+    word-pair gate, not an opening width, 3D axis, or host tolerance.
+    """
     words = page.get_text("words")
     pairs = []
     for a, b in zip(words, words[1:]):
         if (str(a[4]).upper() == "2127" and str(b[4]).upper() == "STACKER"
                 and (a[5], a[6]) == (b[5], b[6])
-                and a[7] + 1 == b[7] and float(a[2]) <= float(b[0])):
+                and a[7] + 1 == b[7]
+                and float(a[3]) > float(a[1]) and float(b[3]) > float(b[1])
+                and 0 <= float(b[0]) - float(a[2]) <= max(
+                    float(a[3]) - float(a[1]), float(b[3]) - float(b[1]))):
             pairs.append((min(float(a[0]), float(b[0])),
                           min(float(a[1]), float(b[1])),
                           max(float(a[2]), float(b[2])),

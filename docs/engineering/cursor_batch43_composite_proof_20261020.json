@@ -1,0 +1,23 @@
+{
+  "status": "UNPUBLISHED_BATCH43_COMPOSITE_PROOF",
+  "shadow_only": true,
+  "benchmark_score_granted": false,
+  "measurement_published": false,
+  "host_granted": false,
+  "proofs": {
+    "exact_geometry_gate": "exact_geometry_identity_unavailable_x6",
+    "exact_match_hits": 0,
+    "digit_tail_still_ambiguous": true,
+    "gptmax_3412_fields_on_branch": false,
+    "kind_unproven": 7,
+    "single_figured_870mm": 8,
+    "signed_eight_retained": true
+  },
+  "blockers_for_owner": [
+    "exact geometry identity unavailable — cannot bridge host via centerline equality",
+    "digit-tail vs raster_segment remains ambiguous abstain",
+    "parents not RASTER_PDF_VISIBLE_SEGMENT",
+    "door height: 870mm width-only labels",
+    "await GPT MAX #3412 merge for stricter fragment diagnostic (still not host)"
+  ]
+}

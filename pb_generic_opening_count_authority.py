@@ -515,6 +515,9 @@ class GenericOpeningCountProducer:
                 or p_rec.revision_id != selector.revision_id
                 or p_rec.source_sha256 != selector.source_sha256
                 or p_rec.snapshot_id != selector.snapshot_id
+                # A producer-owned complete enumeration is page-scoped.
+                # Never import an opening from an unaccounted drawing sheet.
+                or p_rec.page_id not in univ_rec.page_ids
             ):
                 return self._store(
                     selector,
@@ -576,6 +579,21 @@ class GenericOpeningCountProducer:
                     ),
                 )
 
+            previous = distinct_openings.get(p_rec.record_id)
+            if previous is not None and previous != p_rec:
+                # A repeated source observation of the SAME signed physical
+                # ID must re-prove the identical physical record. Record-ID
+                # dedup must never elect a different source parent, wall
+                # pattern or page according to source enumeration order.
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.CONFLICT,
+                        GENERIC_OPENING_COUNT_IDENTITY_CONTRADICTION,
+                        f"physical_record_id_{p_rec.record_id}_source_conflict",
+                        *diagnostic_reasons,
+                    ),
+                )
             distinct_openings[p_rec.record_id] = p_rec
             representative_selectors.setdefault(p_rec.record_id, obs_sel)
 

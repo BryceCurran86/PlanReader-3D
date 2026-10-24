@@ -8,6 +8,7 @@ coating systems, rates, coats or productivity.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+import re
 from typing import Any
 
 from pb_takeoff_authority_v164 import (
@@ -79,17 +80,41 @@ def _measured_status(raw_status: Any, calibrated: bool, quantity: float) -> tupl
     return "Provisional measured", "Derived"
 
 
+def _context_token(text: str, token: str) -> bool:
+    if " " in token:
+        pattern = rf"(?<!\w){re.escape(token)}(?!\w)"
+    else:
+        pattern = rf"(?<!\w){re.escape(token)}s?(?!\w)"
+    return re.search(pattern, text) is not None
+
+
+def _context_text(*values: Any) -> str:
+    lines = []
+    for raw in _text(*values).splitlines():
+        line = " ".join(raw.split())
+        if line and not line.startswith(("refer ", "see ", "matchline ", "keynote ")):
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def classify_context(*, page_type: Any = "", view_type: Any = "", label: Any = "", substrate: Any = "") -> dict[str, str]:
-    """Return conservative painting scope labels from explicit drawing metadata only."""
-    text = _text(page_type, view_type, label, substrate)
-    if any(token in text for token in ("soffit", "eave", "canopy underside", "balcony underside")):
-        return {"section": "External", "element": "Soffits / eaves", "row_role": ""}
-    if any(token in text for token in ("ceiling", "reflected ceiling", "rcp")):
-        return {"section": "Internal", "element": "Ceilings", "row_role": ""}
-    if any(token in text for token in ("elevation", "external", "exterior", "facade", "façade", "cladding", "render")):
-        return {"section": "External", "element": "External walls / cladding", "row_role": ""}
-    if "floor" in text and any(token in text for token in ("area", "plan", "footprint", "internal")):
-        return {"section": "Internal", "element": "Floor area", "row_role": "floor_area"}
+    """Return one painting scope from explicit drawing metadata.
+
+    Two scopes abstain. A keyword inside another word is not a hit, and a
+    reference line does not vote.
+    """
+    text = _context_text(page_type, view_type, label, substrate)
+    hits: list[dict[str, str]] = []
+    if any(_context_token(text, token) for token in ("soffit", "eave", "canopy underside", "balcony underside")):
+        hits.append({"section": "External", "element": "Soffits / eaves", "row_role": ""})
+    if any(_context_token(text, token) for token in ("ceiling", "reflected ceiling", "rcp")):
+        hits.append({"section": "Internal", "element": "Ceilings", "row_role": ""})
+    if any(_context_token(text, token) for token in ("elevation", "external", "exterior", "facade", "façade", "cladding", "render")):
+        hits.append({"section": "External", "element": "External walls / cladding", "row_role": ""})
+    if _context_token(text, "floor") and any(_context_token(text, token) for token in ("area", "plan", "footprint", "internal")):
+        hits.append({"section": "Internal", "element": "Floor area", "row_role": "floor_area"})
+    if len(hits) == 1:
+        return hits[0]
     return {"section": "General", "element": "Measured area", "row_role": ""}
 
 

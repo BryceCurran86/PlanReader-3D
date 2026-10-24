@@ -1,0 +1,69 @@
+{
+  "benchmark_score_granted": false,
+  "host_granted": false,
+  "host_identity_attach": {
+    "disposition_counts": {
+      "structural_host_unavailable": 6
+    },
+    "openings": [
+      {
+        "disposition": "structural_host_unavailable",
+        "elected_host_wall_id": null,
+        "exact_source_w4_candidate_count": 0,
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+        "retained_candidate_count": 0
+      },
+      {
+        "disposition": "structural_host_unavailable",
+        "elected_host_wall_id": null,
+        "exact_source_w4_candidate_count": 0,
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+        "retained_candidate_count": 0
+      },
+      {
+        "disposition": "structural_host_unavailable",
+        "elected_host_wall_id": null,
+        "exact_source_w4_candidate_count": 0,
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+        "retained_candidate_count": 0
+      },
+      {
+        "disposition": "structural_host_unavailable",
+        "elected_host_wall_id": null,
+        "exact_source_w4_candidate_count": 0,
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+        "retained_candidate_count": 0
+      },
+      {
+        "disposition": "structural_host_unavailable",
+        "elected_host_wall_id": null,
+        "exact_source_w4_candidate_count": 0,
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+        "retained_candidate_count": 0
+      },
+      {
+        "disposition": "structural_host_unavailable",
+        "elected_host_wall_id": null,
+        "exact_source_w4_candidate_count": 0,
+        "host_granted": false,
+        "physical_opening_id": "physical_opening_existence_f819752382d44a00d9f28feca4b00787",
+        "retained_candidate_count": 0
+      }
+    ],
+    "status": "UNPUBLISHED_UNHOSTED_HOST_IDENTITY_ORIGINAL_ATTACH",
+    "unhosted_opening_count": 6
+  },
+  "measurement_published": false,
+  "page_id": "3",
+  "shadow_only": true,
+  "signed_eight_retained": true,
+  "signed_quantity_count": 8,
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "status": "UNPUBLISHED_LOT16_UNHOSTED_HOST_IDENTITY_SHADOW",
+  "unhosted_g17_flank_opening_count": 6
+}

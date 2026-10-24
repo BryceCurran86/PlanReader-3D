@@ -77,12 +77,34 @@ def build_publishing_package_from_workspace(
     )
 
     # 2. Fetch Document & Revision Metadata
+    cur.execute("PRAGMA table_info(documents)")
+    document_columns = {row[1] for row in cur.fetchall()}
+    has_original_sha = "sha256" in document_columns
     cur.execute(
-        "SELECT file_name FROM documents WHERE workspace_id=? ORDER BY id ASC",
+        (
+            "SELECT file_name, sha256 FROM documents WHERE workspace_id=? ORDER BY id ASC"
+            if has_original_sha else
+            "SELECT file_name FROM documents WHERE workspace_id=? ORDER BY id ASC"
+        ),
         (workspace_id,),
     )
     doc_rows = cur.fetchall()
-    file_names = [str(r["file_name"]) for r in doc_rows if r["file_name"]]
+    file_names = [str(row["file_name"]) for row in doc_rows if row["file_name"]]
+    # The publisher must never substitute filename equality for PDF byte
+    # identity. SHA values originate from source ingestion; separate original
+    # byte replay is still required for full benchmark/issuer certification.
+    revision_documents = []
+    if has_original_sha:
+        for doc in doc_rows:
+            name = str(doc["file_name"] or "").strip()
+            digest = str(doc["sha256"] or "").strip()
+            if (
+                not name or len(digest) != 64
+                or any(ch not in "0123456789abcdef" for ch in digest)
+            ):
+                revision_documents = []
+                break
+            revision_documents.append((name, digest))
 
     cur.execute(
         "SELECT COUNT(*) FROM pages WHERE workspace_id=?",
@@ -91,7 +113,14 @@ def build_publishing_package_from_workspace(
     sheet_count = cur.fetchone()[0] or 0
 
     drawing_issue = str(ws_row["drawing_issue"] or "BA")
-    rev_hash = hashlib.sha256(",".join(file_names).encode("utf-8")).hexdigest()
+    rev_hash = (
+        hashlib.sha256(json.dumps(
+            sorted(revision_documents),
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        if revision_documents and len(revision_documents) == len(doc_rows)
+        else ""  # source SHA missing or invalid: not commercial-publishable
+    )
 
     drawing_revision = DrawingRevisionPayload(
         drawing_issue=drawing_issue,
@@ -114,7 +143,7 @@ def build_publishing_package_from_workspace(
     ORDER BY id ASC
     """ if "commercial_authority_status" in cols else """
     SELECT id, section, location, substrate, '' AS finish_tag, element, unit, quantity, rate, total_price,
-           'firm' AS commercial_authority_status, 'documented_dimension' AS commercial_authority_source,
+           'provisional' AS commercial_authority_status, 'provisional' AS commercial_authority_source,
            NULL AS commercial_authority_reviewed_by, NULL AS commercial_authority_reviewed_at,
            '' AS source_page, '' AS notes
     FROM takeoff_rows
@@ -139,25 +168,45 @@ def build_publishing_package_from_workspace(
         unit = str(r["unit"] or "m²")
         qty = float(r["quantity"] or 0.0)
         rate = float(r["rate"] or 0.0)
-        tot = float(r["total_price"] or (qty * rate))
+        # Price is a client-owned commercial input. A zero entered amount is
+        # never permission to silently replace it with quantity × rate, nor
+        # is a missing price approval to quote a computed line to JobHub.
+        if r["total_price"] is None and mode == PublishingMode.COMMERCIAL:
+            raise ValueError(
+                f"Missing client commercial line total for takeoff row #{row_id}"
+            )
+        tot = (
+            float(r["total_price"])
+            if r["total_price"] is not None
+            else (qty * rate)  # draft estimate only, never a published sale
+        )
 
-        auth_status = str(r["commercial_authority_status"] or AuthorityStatus.FIRM.value).lower()
-        auth_src = str(r["commercial_authority_source"] or MeasurementAuthorityType.DOCUMENTED_DIMENSION.value).lower()
+        # Missing provenance cannot become source-authenticated FIRM by a
+        # schema fallback or NULL from an older PlanReader workspace.
+        auth_status = str(
+            r["commercial_authority_status"] or AuthorityStatus.PROVISIONAL.value
+        ).lower()
+        auth_src = str(
+            r["commercial_authority_source"] or MeasurementAuthorityType.PROVISIONAL.value
+        ).lower()
         reviewed_by = r["commercial_authority_reviewed_by"]
         reviewed_at = r["commercial_authority_reviewed_at"]
         source_page = str(r["source_page"] or "")
         notes = str(r["notes"] or "")
 
-        # Check for excluded items
-        sec_lower = section.lower()
-        sub_lower = sub.lower()
-        tag_lower = tag.lower()
-        if any(k in sec_lower or k in sub_lower or k in tag_lower for k in ["exclude", "screed", "mastic", "sealant", "powdercoat"]):
+        # Do not guess exclusion by section/finish/material words. Screed,
+        # sealants, powder-coated products and mastic can be genuine separately
+        # measured construction trade scope. Only the issuer's EXPLICIT
+        # excluded authority can remove a row from a customer takeoff.
+        if auth_status == AuthorityStatus.EXCLUDED.value or (
+            auth_src == MeasurementAuthorityType.EXCLUDED.value
+        ):
             excluded_items.append(
                 ExcludedScopePayload(
                     item_code=tag or f"EXCL_{row_id}",
                     description=f"{elem} ({sub})",
-                    reason="Factory finish / other trade exclusion",
+                    reason=notes or "Explicitly excluded by source measurement authority",
+                    trade=section,
                 )
             )
             continue
@@ -212,9 +261,16 @@ def execute_jobhub_publishing(
     if not bridge:
         raise RuntimeError("JobHub bridge is unavailable")
 
+    # Historical override flag was a commercial safety bypass: a blocked
+    # source / wrong project / fabricated quantity could be written as Published.
+    # Keep the parameter for callers but never allow a gate override.
+    if override_preflight_check:
+        raise RuntimeError(
+            "Publishing gate override is prohibited: correct evidence and rerun preflight"
+        )
     # 1. Evaluate Publishing Gate
     gate_result = validate_publishing_gate(package)
-    if not gate_result.is_publishable and not override_preflight_check:
+    if not gate_result.is_publishable:
         reasons = "; ".join(gate_result.blocking_reasons)
         raise RuntimeError(f"Publishing blocked by gate QA checks: {reasons}")
 
@@ -223,9 +279,22 @@ def execute_jobhub_publishing(
         raise RuntimeError("Target JobHub job ID is required to publish package")
 
     # Verify target job exists in JobHub
-    job_rows = bridge.query("SELECT id, status FROM jobs WHERE id=?", (target_job_id,))
+    # The numeric row ID is not an authoritative cross-system project ID.
+    job_rows = bridge.query(
+        "SELECT id, status, job_no FROM jobs WHERE id=?", (target_job_id,)
+    )
     if not job_rows:
         raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
+    target_no = job_rows[0].get("job_no")
+    original_no = package.project_identity.job_no
+    if (
+        type(target_no) is not str
+        or not target_no.strip()
+        or target_no.strip() != original_no.strip()
+    ):
+        raise RuntimeError(
+            "JobHub target job number conflicts with PlanReader project identity"
+        )
 
     # Calculate aggregates
     total_qty_m2 = 0.0

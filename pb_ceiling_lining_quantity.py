@@ -65,7 +65,8 @@ _AUTHORITATIVE_AREA_STATUSES = frozenset(
 _EXPLICIT_CEILING_FINISH_RE = re.compile(
     r"\bceiling\s+(?:finish|lining)\b"
     r"\s*(?::|=|-|–|—)?\s*"
-    r"(?P<descriptor>[A-Za-z0-9][A-Za-z0-9 /.,()'\"+\-]{1,119})",
+    r"(?P<descriptor>[A-Za-z0-9]"
+    r"(?:(?!\bceiling\s+(?:finish|lining)\b)[A-Za-z0-9 /.,()'\"+\-]){1,119})",
     re.IGNORECASE,
 )
 _UNRESOLVED_REFERENCE_RE = re.compile(
@@ -91,18 +92,26 @@ def _scope_id(atom: EvidenceAtom) -> str:
     return _clean(_metadata(atom.metadata).get("scope_entity_id"))
 
 
-def _finish_descriptor(raw_text: str) -> Optional[str]:
-    """Return canonical explicit finish descriptor, or None if not explicit."""
-    text = " ".join(_clean(raw_text).replace("\u00a0", " ").split())
-    match = _EXPLICIT_CEILING_FINISH_RE.search(text)
-    if match is None:
-        return None
+def _descriptor_text(match: re.Match[str]) -> Optional[str]:
     descriptor = match.group("descriptor").strip(" \t:;,.=-–—")
     # Stop common sentence/title delimiters from swallowing unrelated content.
     descriptor = re.split(r"\s{2,}|\s+\|\s+|\s+•\s+", descriptor, maxsplit=1)[0].strip()
     if len(descriptor) < 2 or _UNRESOLVED_REFERENCE_RE.fullmatch(descriptor):
         return None
     return _norm(descriptor)
+
+
+def _finish_descriptor(raw_text: str) -> Optional[str]:
+    """Return one explicit finish. Two different descriptors abstain."""
+    text = " ".join(_clean(raw_text).replace("\u00a0", " ").split())
+    found: list[str] = []
+    for match in _EXPLICIT_CEILING_FINISH_RE.finditer(text):
+        descriptor = _descriptor_text(match)
+        if descriptor and descriptor not in found:
+            found.append(descriptor)
+    if len(found) != 1:
+        return None
+    return found[0]
 
 
 def explicit_ceiling_finish_descriptor(raw_text: str) -> Optional[str]:
@@ -173,9 +182,18 @@ def _base_context_blockers(
         blockers.append("viewport_unresolved")
     if _original_page_no_or_none(page_no) is None or page_no not in context.trusted_page_numbers():
         blockers.append("page_not_owned")
-    mapped_page = context.page_for_viewport(viewport.viewport_id)
-    if mapped_page is not None and (
-        type(mapped_page) is not int or mapped_page != page_no
+    # page_for_viewport() converts numeric aliases with int() and returns
+    # None for absent ownership. Neither a missing page edge nor true/1.0
+    # proves the ORIGINAL physical drawing for a ceiling finish occurrence.
+    owned_edges = tuple(
+        edge for edge in context.viewport_page_ownership
+        if isinstance(edge,(tuple,list)) and len(edge)==2
+        and type(edge[0]) is str and edge[0]==viewport.viewport_id
+    )
+    if (
+        len(owned_edges)!=1
+        or type(owned_edges[0][1]) is not int
+        or owned_edges[0][1]!=page_no
     ):
         blockers.append("viewport_page_mismatch")
     return tuple(dict.fromkeys(blockers))

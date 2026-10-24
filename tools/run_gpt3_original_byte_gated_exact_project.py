@@ -212,6 +212,20 @@ def build_original_byte_gated_project_report(
             "project_evaluation": None,
         }
 
+    # A structurally valid V1 envelope with no produced source-owned
+    # measurement OR explicit ABSTAIN is not an executed original project.
+    # The frozen evaluator must never receive the all-empty project as a
+    # purported genuine zero-result benchmark attempt.
+    quantities = sealed_claim.get("quantities")
+    if type(quantities) is not list or not quantities:
+        return {
+            "project_id": project_id, "publication_status": "UNPUBLISHED",
+            "score_claim": False, "reconciliation_complete": False,
+            "original_source_sha_verified": True,
+            "source_sha256s": hashes,
+            "reason_codes": ["signed_source_quantity_universe_empty"],
+            "project_evaluation": None,
+        }
     # An independently supplied identity map must not reclassify a genuine
     # producer-owned floor_area as tiling/ceiling, or a window as a door.
     # Signed source documents and complete original source envelopes were

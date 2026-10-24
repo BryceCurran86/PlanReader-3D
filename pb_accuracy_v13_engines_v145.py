@@ -168,8 +168,18 @@ def attach_room_labels(faces: Sequence[Sequence[Point]], labels: Sequence[Dict[s
     rows=[]
     for idx,poly in enumerate(faces,1):
         matches=[l for l in labels if _point_in_polygon((float(l.get('x',0)),float(l.get('y',0))),poly)]
-        label=str(matches[0].get('label')) if matches else f"Room {idx}"
-        rows.append({"room_ref":f"R{idx:02d}","label":label,"polygon":[list(p) for p in poly],"floor_area_m2":_r(_polygon_area(poly),3),"ceiling_reference_m2":_r(_polygon_area(poly),3),"perimeter_m":_r(_polygon_perimeter(poly),3),"geometry_confidence":0.98 if matches else 0.9,"evidence":[m.get('evidence') for m in matches if m.get('evidence')]})
+        names=[]
+        for match in matches:
+            text=str(match.get('label') or '').strip()
+            if text and text not in names:
+                names.append(text)
+        if len(names)==1:
+            label=names[0]
+        elif names:
+            label=""
+        else:
+            label=f"Room {idx}"
+        rows.append({"room_ref":f"R{idx:02d}","label":label,"polygon":[list(p) for p in poly],"floor_area_m2":_r(_polygon_area(poly),3),"ceiling_reference_m2":_r(_polygon_area(poly),3),"perimeter_m":_r(_polygon_perimeter(poly),3),"geometry_confidence":0.98 if len(names)==1 else (0.4 if names else 0.9),"evidence":[m.get('evidence') for m in matches if m.get('evidence')]})
     return rows
 
 
@@ -180,7 +190,11 @@ def detect_openings(opening_candidates: Sequence[Dict[str,Any]]) -> List[Dict[st
         tag=str(c.get('tag') or '').upper(); kind=str(c.get('kind') or '').lower()
         swing=bool(c.get('swing')); parallel=int(c.get('parallel_lines') or 0)
         if not kind:
-            if swing or tag.startswith('D'): kind='door'
+            doorish=bool(re.search(r'\bD\d', tag)) or swing
+            windowish=bool(re.search(r'\bW\d', tag)) or (parallel>=2 and not swing)
+            if doorish and windowish:
+                kind='opening'
+            elif swing or tag.startswith('D'): kind='door'
             elif parallel>=2 or tag.startswith('W'): kind='window'
             else: kind='opening'
         width=c.get('width_m'); height=c.get('height_m')
@@ -269,7 +283,7 @@ def semantic_assignment(code: str, schedules: Sequence[Dict[str,Any]], context: 
     text=' '.join(str(m.get(k) or '') for m in matches for k in ('description','substrate','colour','coating_system','notes'))
     excluded=bool(re.search(r'\bby others\b|\bnot in scope\b|\bexclude(?:d)?\b',text,re.I))
     ambiguous=len(matches)!=1
-    m=matches[0] if matches else {}
+    m=matches[0] if len(matches)==1 else {}
     result={"code":code_u,"description":m.get('description'),"substrate":m.get('substrate'),"colour":m.get('colour'),"coating_system":m.get('coating_system'),"included":False if excluded else (True if matches else None),"semantic_confidence":0.98 if len(matches)==1 and evidence else 0.86 if len(matches)==1 else 0.35,"geometry_confidence":None,"evidence":evidence,"status":"review" if ambiguous else ("excluded" if excluded else "resolved")}
     if context:
         result['references']=[c.get('reference') for c in context if c.get('reference')]
