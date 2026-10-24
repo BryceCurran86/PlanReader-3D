@@ -152,32 +152,44 @@ def classify_original_door_table_row_scope_shadow(
                       if members and _DOOR_LIKE_TOKEN.fullmatch(members[0].literal)
                       and members[0].line_no==0 and members[0].word_no==0}
     scopes=_find_title_and_headers(blocks)
-    # Retain all original same-code words, including repeated detail labels.
-    code_blocks=defaultdict(list)
+    # Retain every native D-digit word, not just the first word in a block.
+    # A NOTE followed by D99 inside the independently authenticated table
+    # must block the complete schedule census. Foreign drawing details remain
+    # observations, not additional schedule rows or physical openings.
     all_code_mentions=defaultdict(list)
     for block,members in blocks.items():
         for word in members:
             if _DOOR_LIKE_TOKEN.fullmatch(word.literal):
                 all_code_mentions[word.literal].append(word)
-    for block,word in first_code_words.items():
-        code_blocks[word.literal].append((block,word))
     original_ordered_words=tuple(w for members in blocks.values() for w in members)
     parsed={(row.code,row.native_block_no):row
             for row in _original_source_row_candidates(original_ordered_words)}
     decisions=[]
     for code in sorted(all_code_mentions):
-        entries=code_blocks.get(code,())
         table=[]
         outside=[]
-        for block,word in sorted(entries):
+        for word in all_code_mentions[code]:
+            block=word.block_no
+            # The existing foreign-detail block census intentionally counts
+            # only block-leading codes; secondary foreign words are still
+            # retained in original_code_observation_ids and cannot grant rows.
+            block_leading=first_code_words.get(block) is word
             if scopes is None:
-                outside.append(block)
+                if block_leading:
+                    outside.append(block)
                 continue
             _,_,no,header_right=scopes
             left,top,right,bottom=word.bbox_pdf_pts
             in_source_table=(left>header_right and
                 min(bottom,no.bbox_pdf_pts[3])>max(top,no.bbox_pdf_pts[1]))
-            (table if in_source_table else outside).append(block)
+            if in_source_table:
+                table.append(block)
+            elif block_leading:
+                outside.append(block)
+        # Multiple D-like words in one block are separately audited below
+        # by the schedule consumer, not two independently printed rows.
+        table=sorted(set(table))
+        outside=sorted(set(outside))
         if scopes is None:
             reason='original_schedule_header_or_caption_unproven'
         elif not table:
