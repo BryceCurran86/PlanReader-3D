@@ -9,7 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pb_live_opening_area_quantity_publication import _opening_quantity
+from pb_live_opening_area_quantity_publication import (
+    LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY,
+    _opening_quantity,
+)
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
     LivePhysicalOpeningVoidComposition,
@@ -133,6 +136,18 @@ def reconcile_gpt1_area_review_with_issuer(
             ):
                 raise ValueError(
                     "original host/frame source receipt mismatches typed canonical issuer"
+                )
+            # The original source review grants FIGURED label ownership only.
+            # The real issuer supports additional, separately-authenticated
+            # elevation/schedule/geometry bases. A later canonical substitution
+            # must not borrow a figured-only original approval merely because
+            # its numeric value and receipt ID still match this review row.
+            if obj.area_basis != "figured_opening_label" or (
+                issued is not None
+                and issued.authority != LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
+            ):
+                raise ValueError(
+                    "original figured-label area basis mismatches typed canonical issuer"
                 )
             if original_signed or row.get("opening_area_first_remaining_gate") != (
                 "independent_gpt1_opening_area_measurement_validation_required"

@@ -243,3 +243,32 @@ def test_canonical_frame_cannot_be_added_to_source_frame_absent_area():
     assert _opening_quantity(forged.canonical_openings[2]) is not None
     with pytest.raises(ValueError, match="host/frame source receipt"):
         reconcile_gpt1_area_review_with_issuer(forged, source)
+
+def test_source_figured_review_cannot_borrow_elevation_frame_issuer_basis():
+    # The real quantity issuer supports both bases using the same physical
+    # object, value and figured-area evidence ID. Only one was source reviewed.
+    rows, canonical = _original_case()
+    source = run(rows, canonical)
+    typed = _typed(canonical)
+    original = typed.canonical_openings[2]
+    assert original.area_basis == "figured_opening_label"
+    figured_quantity = _opening_quantity(original)
+    assert figured_quantity is not None
+    substitute = replace(original, area_basis="authenticated_elevation_frame")
+    elevation_quantity = _opening_quantity(substitute)
+    assert elevation_quantity is not None
+    assert elevation_quantity.value == figured_quantity.value
+    assert elevation_quantity.evidence_ids == figured_quantity.evidence_ids
+    # Reject only the false original source preflight approval, never the
+    # independently authorized elevation branch of the production issuer.
+    with pytest.raises(ValueError, match="figured-label area basis"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(
+                typed, canonical_openings=(
+                    *typed.canonical_openings[:2],
+                    substitute,
+                    *typed.canonical_openings[3:],
+                ),
+            ),
+            source,
+        )
