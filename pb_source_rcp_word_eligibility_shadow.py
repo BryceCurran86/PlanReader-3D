@@ -16,6 +16,7 @@ Non-negotiable invariants:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Optional, Sequence, Tuple
@@ -28,6 +29,8 @@ from pb_migration_contracts import (
 
 class RcpWordRole(str, Enum):
     IN_PLAN_CEILING_ANNOTATION = "IN_PLAN_CEILING_ANNOTATION"
+    NON_CEILING_LABEL = "NON_CEILING_LABEL"
+    OTHER_PLAN_TEXT = "OTHER_PLAN_TEXT"
     SCHEDULE_TABLE_CELL = "SCHEDULE_TABLE_CELL"
     GENERAL_NOTE_PROSE = "GENERAL_NOTE_PROSE"
     TITLE_BLOCK_METADATA = "TITLE_BLOCK_METADATA"
@@ -80,6 +83,20 @@ def _bbox_inside(
     )
 
 
+def _source_scope_rect_valid(bbox: object) -> bool:
+    """Fail closed on any caller-supplied unowned PDF viewport/table rectangle."""
+    if type(bbox) not in (tuple, list) or len(bbox) != 4:
+        return False
+    try:
+        if not all(type(x) in (int, float) and math.isfinite(float(x))
+                   for x in bbox):
+            return False
+        left, top, right, bottom = (float(x) for x in bbox)
+        return left < right and top < bottom
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 class SourceRcpWordEligibilityShadowAuthority:
     """Evaluates text word tokens for reflected ceiling plan mark eligibility."""
 
@@ -97,11 +114,44 @@ class SourceRcpWordEligibilityShadowAuthority:
         plan_viewport_bbox: Optional[Tuple[float, float, float, float]] = None,
         schedule_table_bboxes: Sequence[Tuple[float, float, float, float]] = (),
         title_block_bboxes: Sequence[Tuple[float, float, float, float]] = (),
+        source_defined_ceiling_codes: Sequence[str] = (),
     ) -> RcpWordEvidence:
         """Classifies a single word token for ceiling mark eligibility."""
         clean_text = word_text.strip()
-        wb = (float(word_bbox[0]), float(word_bbox[1]), float(word_bbox[2]), float(word_bbox[3]))
+        # A caller-supplied bbox is NOT a trusted PDF geometry witness.
+        # Refuse booleans, strings, oversized integers, incomplete boxes and
+        # non-finite coordinates before constructing ANY contract ID.
+        valid_bbox = type(word_bbox) in (tuple, list) and len(word_bbox) == 4
+        if valid_bbox:
+            try:
+                valid_bbox = all(
+                    type(v) in (int, float) and math.isfinite(float(v))
+                    for v in word_bbox
+                )
+            except (OverflowError, TypeError, ValueError):
+                valid_bbox = False
 
+        # Never feed malformed PDF coordinates to stable_contract_id:
+        # an unusable geometry token gets a deterministic JSON-safe receipt
+        # with zero geometry, never CANDIDATE or publishing authority.
+        if not valid_bbox:
+            return RcpWordEvidence(
+                word_id=stable_contract_id(
+                    "RCP_WORD_INVALID_BBOX",
+                    (document_id, page_id, clean_text, block_index, line_index, word_index),
+                ),
+                text=clean_text,
+                bbox_pdf_pts=(0.0, 0.0, 0.0, 0.0),
+                block_index=block_index,
+                line_index=line_index,
+                word_index=word_index,
+                role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Non-finite original PDF word bounding box; no source geometry authority.",
+            )
+
+        wb = tuple(float(v) for v in word_bbox)
         word_id = stable_contract_id(
             "RCP_WORD",
             (document_id, page_id, clean_text, wb, block_index, line_index, word_index),
@@ -119,6 +169,30 @@ class SourceRcpWordEligibilityShadowAuthority:
                 is_eligible_for_ceiling_mark=False,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 notes="Degenerate or empty word bounding box.",
+            )
+
+        # A NaN, inverted or otherwise malformed caller-drawn source scope
+        # must NEVER turn an original schedule/legend cell into an apparent
+        # in-plan material mark by making all overlap tests false. Source
+        # scopes here are candidates, never producer-issued original truth.
+        scope_valid = (
+            (plan_viewport_bbox is None
+             or _source_scope_rect_valid(plan_viewport_bbox))
+            and type(schedule_table_bboxes) in (tuple, list)
+            and all(_source_scope_rect_valid(rect)
+                    for rect in schedule_table_bboxes)
+            and type(title_block_bboxes) in (tuple, list)
+            and all(_source_scope_rect_valid(rect)
+                    for rect in title_block_bboxes)
+        )
+        if not scope_valid:
+            return RcpWordEvidence(
+                word_id=word_id, text=clean_text, bbox_pdf_pts=wb,
+                block_index=block_index, line_index=line_index,
+                word_index=word_index, role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Malformed source-owned viewport/schedule/title scope; no original material authority.",
             )
 
         # 1. Schedule table check (takes priority over general viewport check)
@@ -153,8 +227,10 @@ class SourceRcpWordEligibilityShadowAuthority:
                     notes="Word is located inside sheet title block or revision block.",
                 )
 
-        # 3. Viewport boundary check
-        if plan_viewport_bbox is not None and not _bbox_inside(wb, plan_viewport_bbox):
+        # 3. Viewport boundary check. The bbox is only a caller-supplied
+        # candidate: even when present it cannot CORROBORATE original paint,
+        # typed plan viewport, material or physical ceiling-zone ownership.
+        if plan_viewport_bbox is None or not _bbox_inside(wb, plan_viewport_bbox):
             return RcpWordEvidence(
                 word_id=word_id,
                 text=clean_text,
@@ -168,24 +244,74 @@ class SourceRcpWordEligibilityShadowAuthority:
                 notes="Word bbox is outside designated plan drawing viewport.",
             )
 
-        # 4. Syntactic prose / general note check
-        # Notes are multi-word prose paragraphs (e.g. > 6 words or length > 35 chars)
-        block_words = block_text.strip().split()
-        if len(block_words) > 6 or len(block_text.strip()) > 35:
+        # 4. A source-visible word is not a ceiling code merely because its
+        # spelling looks familiar. Require a caller-provided original schedule
+        # code universe, and keep the whole native source block's rivals.
+        # These caller scopes are only candidates, never source-producer trust.
+        defined=frozenset(
+            code.strip().upper() for code in source_defined_ceiling_codes
+            if type(code) is str and code.strip()
+        )
+        tokens=tuple(part.upper() for part in block_text.strip().split())
+        upper=clean_text.upper()
+        # Multiword original coordination notes (including the four-word
+        # OFFICE warning) are not material even when their PDF text is legible.
+        if (len(tokens)>6 or len(block_text.strip())>35
+                or (len(tokens)>=3 and upper not in defined)):
             return RcpWordEvidence(
-                word_id=word_id,
-                text=clean_text,
-                bbox_pdf_pts=wb,
-                block_index=block_index,
-                line_index=line_index,
-                word_index=word_index,
-                role=RcpWordRole.GENERAL_NOTE_PROSE,
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=RcpWordRole.GENERAL_NOTE_PROSE,
                 is_eligible_for_ceiling_mark=False,
                 status=EvidenceResolutionStatus.ABSTAINED,
-                notes=f"Word is part of a general note prose block ({len(block_words)} words).",
+                notes=f"Word is part of a general note prose block ({len(tokens)} words).",
+            )
+        if upper not in defined and defined:
+            return RcpWordEvidence(
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=RcpWordRole.NON_CEILING_LABEL,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Word is not an original schedule-defined ceiling material code.",
+            )
+        if not schedule_table_bboxes or not defined:
+            return RcpWordEvidence(
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=RcpWordRole.OUT_OF_VIEWPORT,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Complete original schedule/ceiling code scope is not issued.",
+            )
+        # Native sibling text must corroborate ONE code, not allow a same
+        # block to mint two material occurrences, borrow a room label or use
+        # a note/device word as a ceiling role. Pure height/CLG support only.
+        in_block_codes=tuple(token for token in tokens if token in defined)
+        support=frozenset(("CLG","/","AFFL","FFL","A.F.F.L","CEILING"))
+        unsupported=tuple(
+            token for token in tokens
+            if token not in defined and token not in support
+            and not re.fullmatch(r"[0-9]+(?:[.]?[0-9]+)?(?:MM|M)?",token)
+        )
+        if in_block_codes != (upper,) or unsupported:
+            role=(
+                RcpWordRole.GENERAL_NOTE_PROSE
+                if unsupported and len(tokens)>=3
+                else RcpWordRole.OTHER_PLAN_TEXT
+            )
+            return RcpWordEvidence(
+                word_id=word_id,text=clean_text,bbox_pdf_pts=wb,
+                block_index=block_index,line_index=line_index,
+                word_index=word_index,role=role,
+                is_eligible_for_ceiling_mark=False,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                notes="Competing code or unsupported sibling original source text.",
             )
 
-        # 5. Authentic in-plan ceiling callout candidate
+        # 6. Lexically plausible ceiling callout CANDIDATE only.
+        # Complete real source PDF/snapshot/viewport/W4 zone and material
+        # definition must be proved by independent typed authorities.
         return RcpWordEvidence(
             word_id=word_id,
             text=clean_text,
@@ -195,6 +321,6 @@ class SourceRcpWordEligibilityShadowAuthority:
             word_index=word_index,
             role=RcpWordRole.IN_PLAN_CEILING_ANNOTATION,
             is_eligible_for_ceiling_mark=True,
-            status=EvidenceResolutionStatus.CORROBORATED,
-            notes="Corroborated in-plan ceiling annotation candidate.",
+            status=EvidenceResolutionStatus.CANDIDATE,
+            notes="Lexical RCP candidate only: original source, viewport and ceiling zone unproved.",
         )
