@@ -291,14 +291,29 @@ def reconcile_gpt1_append_only_area_review_scopes(
         raise ValueError("append-only physical opening/source observation alias")
     old_decisions = historical_source_queue["opening_decisions"]
     new_decisions = additional_source_queue["opening_decisions"]
+    # An append-only audit cannot treat two physical openings as two
+    # historical predecessors if they reuse the same signed quantity ID.
+    # Even a blank/whitespace or non-string ID must fail, not silently
+    # disappear under bool() in a signed-count check. The shadow verifier
+    # cannot certify whole-body retention: the production signer must
+    # independently compare the archived signed and customer row bodies.
+    old_signed_ids = [
+        row.get("prior_signed_quantity_id")
+        for row in old_decisions
+        if row.get("prior_signed_quantity_id") is not None
+    ]
     if (
-        not any(row.get("prior_signed_quantity_id") for row in old_decisions)
-        or any(row.get("prior_signed_quantity_id") for row in new_decisions)
+        not old_signed_ids
+        or any(
+            type(qid) is not str or not qid or qid != qid.strip()
+            for qid in old_signed_ids
+        )
+        or len(set(old_signed_ids)) != len(old_signed_ids)
+        or any(row.get("prior_signed_quantity_id") is not None
+               for row in new_decisions)
         or historical["source_review_issuer_compatible_ids"]
         or not additional["source_review_issuer_compatible_ids"]
-        or historical_source_queue.get("original_signed_area_quantities") != sum(
-            bool(row.get("prior_signed_quantity_id")) for row in old_decisions
-        )
+        or historical_source_queue.get("original_signed_area_quantities") != len(old_signed_ids)
         or additional_source_queue.get("original_signed_area_quantities") != 0
     ):
         raise ValueError("historical signed/append candidate scope contract missing")

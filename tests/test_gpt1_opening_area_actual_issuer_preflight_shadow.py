@@ -511,3 +511,31 @@ def test_append_only_review_refuses_unapproved_foreign_or_aliased_scopes(
             old, old_source, new, new_source,
             source_reproved_append_only=bool(tamper),
         )
+
+@pytest.mark.parametrize("mutation", [
+    "duplicate_historical_quantity",
+    "blank_historical_quantity",
+    "whitespace_historical_quantity",
+    "new_scope_empty_signed_quantity",
+])
+def test_append_only_source_review_rejects_signed_id_alias_or_invalid_receipt(mutation):
+    from pb_gpt1_opening_area_actual_issuer_preflight_shadow import (
+        reconcile_gpt1_append_only_area_review_scopes,
+    )
+    old, old_source, new, new_source = _append_only_original_source_fixture()
+    if mutation == "duplicate_historical_quantity":
+        old_source["opening_decisions"][0]["prior_signed_quantity_id"] = (
+            "historical-source-sealed-area"
+        )
+        old_source["original_signed_area_quantities"] = 2
+    elif mutation == "blank_historical_quantity":
+        old_source["opening_decisions"][2]["prior_signed_quantity_id"] = ""
+    elif mutation == "whitespace_historical_quantity":
+        old_source["opening_decisions"][2]["prior_signed_quantity_id"] = "  "
+    else:
+        new_source["opening_decisions"][0]["prior_signed_quantity_id"] = ""
+    with pytest.raises(ValueError, match="historical signed/append candidate scope contract"):
+        reconcile_gpt1_append_only_area_review_scopes(
+            old, old_source, new, new_source,
+            source_reproved_append_only=True,
+        )
