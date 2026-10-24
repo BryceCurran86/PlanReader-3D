@@ -200,6 +200,7 @@ def _two_source_issued_distinct_window_case():
         type_mark="W02",
         host_wall_id="different-original-wall",
         host_binding_record_id="different-original-binding",
+        host_frame_record_id="different-original-frame",
         tag_observation_id="original-plan-W02-word",
         representative_observation_id="original-opening-observation-2",
         source_observation_ids=("original-opening-observation-2",),
@@ -209,6 +210,7 @@ def _two_source_issued_distinct_window_case():
             "original-plan-W02-word",
             "source-elevation-frame-W02",
             "different-original-binding",
+            "different-original-frame",
         ),
     )
     q02 = _opening_quantity(w02)
