@@ -220,3 +220,57 @@ def test_image_transform_mirror_shear_and_duplicate_boxes_all_fail_closed():
     assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0.02, 0, 100, 0, 0))
     assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0.02, 100, 0, 0))
     assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0, 100, 0.1, 0))
+
+
+def test_subpixel_source_image_gap_is_not_interpolated_into_dark_ink():
+    """A render can hide a small gap; the original placements still refute it."""
+    from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
+    pdf = _source(gap=0.01)
+    report = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=hashlib.sha256(pdf).hexdigest(),
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,
+    )
+    assert report["status"] == ABSTAIN
+    assert "source_tile_boundary_gap_unproven" in report["reason_codes"]
+    assert not report["quantity_granted"]
+
+
+def test_numerical_seam_cannot_hide_white_original_edge_pixel():
+    """Both source image edges, not just the rendered seam, must be dark."""
+    from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
+    from unittest.mock import patch
+    pdf = _source()
+    # Synthetic transform-precision seam: a single floating-point boundary
+    # column is accepted only if both original source edge pixels are dark.
+    # A real white interior stripe is still rejected by the strict scan.
+    white = _source(interior_gap=True)
+    report = prove_contiguous_source_ink_across_tile_seam(
+        white, expected_sha256=hashlib.sha256(white).hexdigest(),
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,
+    )
+    assert report["status"] == ABSTAIN
+    assert not report["quantity_granted"]
+
+
+def test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots():
+    """Original-source-only positive: not an opening/host/kind/quantity grant."""
+    from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
+    source = os.environ.get("LOT16_ARCH_ORIGINAL")
+    if not source or not Path(source).is_file():
+        pytest.skip("private original absent: 2124 source proof NOT verified")
+    pdf = Path(source).read_bytes()
+    digest = hashlib.sha256(pdf).hexdigest()
+    assert digest == "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    report = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=digest, page_no=3, seam_x=952.44,
+        source_y=279.5, flank_offset_pt=7, dpi=300,
+    )
+    assert report["status"] == "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert [r["xref"] for r in report["image_roots"]] == [97, 99]
+    assert report["source_painted_pixel_columns"] == 58
+    assert report["source_seam_boundary_columns"] == 1
+    assert sum(report["source_pixel_columns_per_image_root"]) + report["source_seam_boundary_columns"] == 58
+    assert all(not report[k] for k in (
+        "structural_host_granted", "whole_wall_frame_granted",
+        "opening_count_granted", "quantity_granted",
+    ))
