@@ -627,3 +627,56 @@ def test_noncanonical_d3_on_original_plan_remains_source_word_not_door(monkeypat
     assert result.eligible_printed_code_pair_count==1
     assert result.new_opening_counts==result.new_opening_area_quantities==0
     assert not codes["D17"].customer_quantity_authorized
+
+
+
+def test_private_original_a110_plan_to_a600_schedule_same_snapshot_if_provisioned():
+    """Original two-sheet code receipts are complete, not installed opening counts.
+
+    The source producer must retain all native words on p7 and p28 while an
+    unpadded p28 drawing D3 stays outside schedule/plan code correspondence.
+    """
+    loc=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not loc:
+        pytest.skip("original private source not available in public CI")
+    import fitz
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    from pb_source_door_schedule_authority import _DOOR_CODE
+    content=Path(loc).read_bytes()
+    assert sha256(content).hexdigest()==SHA
+    with fitz.open(stream=content,filetype="pdf") as pdf:
+        plan_words=pdf[6].get_text("words",sort=False)
+        schedule_words=pdf[27].get_text("words",sort=False)
+    canonical={f"D{i:02d}" for i in range(1,29)}
+    actual_plan=[str(w[4]) for w in plan_words if _DOOR_CODE.fullmatch(str(w[4]))]
+    assert len(actual_plan)==28
+    assert set(actual_plan)==canonical
+    assert canonical <= {str(w[4]) for w in schedule_words}
+    assert any(str(w[4])=="D3" for w in schedule_words)
+    producer=SourceVisibilityProducer(
+        producer_method="gpt2-private-original-cross-sheet-lexical-review",
+        producer_version="1",
+    )
+    publication=producer.ingest_native_pdf_bytes(
+        document_id="maryborough-original-a110-a600",
+        source_bytes=content,
+        source_locator="memory://private-original.pdf",
+        page_ids=("7","28"),
+    )
+    result=inspect_published_plan_and_schedule_door_codes(
+        producer,revision_id=publication.revision.revision_id,
+        plan_page_id="7",schedule_page_id="28",
+    )
+    assert result.source_sha256==SHA
+    assert result.snapshot_id==publication.snapshot.snapshot_id
+    assert result.source_plan_observation_universe_complete
+    assert canonical <= {row.code for row in result.pairs}
+    assert "D3" not in {row.code for row in result.pairs}
+    assert all(row.opening_count is None and
+               row.installed_opening_area_m2 is None and
+               not row.customer_quantity_authorized for row in result.pairs)
+    assert result.new_opening_counts==result.new_opening_area_quantities==0
+    assert result.frozen_benchmark_accuracy is None
