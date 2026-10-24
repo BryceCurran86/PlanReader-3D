@@ -525,15 +525,18 @@ def test_existing_artifact_and_original_absence_protection_not_weakened():
     )
 
 
-@pytest.mark.parametrize("bad_ref", [False, 0, [], {}, None])
+@pytest.mark.parametrize("bad_ref", ["false", "0", "[]", "{}", "null"])
 def test_manual_source_checkout_ref_must_be_explicitly_typed(tmp_path, bad_ref):
-    root = _write(tmp_path, TRUSTED_WORKFLOW)
+    # Change ONLY the checkout ref, never the top-level YAML 'on' key.
+    # Re-serialising the workflow through PyYAML would itself turn 'on' into
+    # the bool True and make the guard fail for an unrelated reason.
+    root = _write(
+        tmp_path, TRUSTED_WORKFLOW.replace(
+            "ref: ${{ github.sha }}", "ref: " + bad_ref
+        ),
+    )
     path = root / ".github/workflows/synthetic.yml"
-    # Explicit YAML booleans/numbers/null/list/map are NOT missing-ref defaults.
-    import yaml
-    obj = yaml.safe_load(path.read_text())
-    obj["jobs"]["needs-a"]["steps"][0]["with"]["ref"] = bad_ref
-    path.write_text(yaml.safe_dump(obj, sort_keys=False), encoding="utf-8")
+    assert not T._trusted_manual_main_job(path.read_text(), "needs-a")
     before = path.read_bytes()
     with pytest.raises(SystemExit, match="refusing to inject"):
         T.main(["--root", str(root), "--action-ref", PINNED_ACTION, "--apply"])
