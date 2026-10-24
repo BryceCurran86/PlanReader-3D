@@ -747,7 +747,10 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
 
 
 def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = (),
-                   on_original_claim=None, source_owned_plan_view: bool = False) -> dict:
+                   on_original_claim=None, source_owned_plan_view: bool = False,
+                   recover_additional_opening_areas: bool = False) -> dict:
+    if type(recover_additional_opening_areas) is not bool:
+        raise ValueError("opening area recovery must be an explicit boolean")
     payload = pdf.read_bytes()
     original_native_label_census = _native_word_label_census(
         payload, page_index, labels=diagnostic_labels,
@@ -879,6 +882,8 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
         claim = collect_live_physical_net_wall_claim(
             pdf, pages=(page_index,), topology_pages=(page_index,),
             room_area_support_pages=None,
+            **({"recover_additional_opening_areas": True}
+               if recover_additional_opening_areas else {}),
         )
         # Exact source-owned claim is handed once to a trusted read-only
         # source-sealed export caller; no benchmark/truth/identity map input.

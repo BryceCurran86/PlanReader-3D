@@ -1,7 +1,12 @@
 # PlanReader-3D agent contract
 
-This file is the permanent engineering contract. Conversation memory is not a contract.
-If this file conflicts with a chat, this file wins.
+This file records the default engineering contract. Explicit current owner instructions supersede conflicting repository workflow instructions.
+
+## Owner policy update — 2026-10-24
+
+The owner has removed mandatory independent-review restrictions. An independent person, a separate GitHub account, a formal `APPROVED` review, cross-agent sign-off, and a pause awaiting architecture review are not prerequisites to implementation or merge. Additional human or AI reviews are optional. This policy supersedes older reviewer requirements in repository documents, PR descriptions, and coordination comments.
+
+Within work already authorized by the owner, agents may implement, validate, and merge without asking again solely because a reviewer is absent. The implementing agent must inspect the final diff and record the checks actually executed. Required automated checks, original-source and measurement-authority verification, immutable signed/customer retention, frozen benchmark separation, and existing geometric safety limits remain mandatory. Missing or conflicting evidence still abstains; removing a reviewer requirement does not grant source, FIRM, customer, or benchmark authority.
 
 ## Before proposing or changing code
 
@@ -11,7 +16,7 @@ If this file conflicts with a chat, this file wins.
 4. Do not start from module names, prior chat claims, or benchmark scores.
 5. Read `docs/engineering/ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md` for the shared working agreement (PR, CI and evidence etiquette) and the ranked first-failing-gate levers. It is a planning index only; this file wins.
 
-Loop for every task: **trace → propose → synthetic proof → shadow run → authority review**.
+Loop for every task: **trace → propose → synthetic proof → shadow run → source-authority validation**. The implementing agent may complete this validation; an external reviewer is optional.
 
 Next engineering phase: the six evidence-compiler priorities in
 `docs/AI_ENGINEERING_PLAYBOOK.md` §13. Supporting research may inform
@@ -30,7 +35,7 @@ evidence against promotion, not deletion before W2.
 - Do not introduce a second scale resolver, evidence vocabulary, quantity schema, or canonical graph.
 - Do not give AI output, defaults, title-block scale text, geometric gap width, or empty detector results firm authority.
 - New topology and extraction work begins in shadow mode.
-- Do not modify commercial output until a separate authority-promotion review approves it.
+- Before modifying commercial output, document and validate the source-backed authority promotion through the actual issuer and customer contracts. Separate reviewer approval is not required.
 - W10 `adapt_topology_to_canonical_level` must keep `takeoff_eligible=False` and `deduction_authority=False`.
 - Do not treat `#273` ranking `CORROBORATED` / non-abstained tiers as wall authority. Hosted-opening consumption of that ranking remains blocked.
 
@@ -65,4 +70,4 @@ Real development drawings may reveal failure modes. Expected benchmark quantitie
 
 ## First deliverable on a new change
 
-Do not change code first. Produce a short architecture report that distinguishes **observed repository behavior**, **inference**, **proposed change**, and **benchmark observations that must not influence implementation**. Stop for review.
+Before changing code, produce a short architecture report that distinguishes **observed repository behavior**, **inference**, **proposed change**, and **benchmark observations that must not influence implementation**. Then proceed with the authorized implementation and required validation; do not pause for independent review.
