@@ -209,6 +209,74 @@ def _source_ink_visible(
     return True
 
 
+
+def _source_word_visible(
+    page: fitz.Page,
+    witness: tuple[str, tuple[float, float, float, float]],
+    bboxlog: Sequence[tuple],
+    texttrace: Sequence[dict],
+) -> bool:
+    """A decoded native tick is not a witness if its glyph ink was erased.
+
+    Texttrace only supplies a source-paint/visibility witness, never trusted
+    glyph mapping, physical units, viewport scope, or metric authority.
+    """
+    label, bounds = witness
+    word_box = fitz.Rect(bounds)
+    glyphs: list[tuple[float, int, str, fitz.Rect]] = []
+    for span in texttrace:
+        seq = span.get("seqno")
+        if (
+            span.get("type") != 0
+            or span.get("opacity") != 1.0
+            or not isinstance(seq, int)
+            or not 0 <= seq < len(bboxlog)
+            or bboxlog[seq][0] != "fill-text"
+        ):
+            continue
+        for char in span.get("chars") or ():
+            code = char[0]
+            glyph_box = fitz.Rect(char[3])
+            if (
+                not isinstance(code, int)
+                or not 32 <= code <= 126
+                or glyph_box.is_empty
+                or not all(map(math.isfinite, tuple(glyph_box)))
+                or not glyph_box.intersects(word_box)
+            ):
+                continue
+            overlap = (glyph_box & word_box).get_area()
+            if overlap / glyph_box.get_area() >= 0.8:
+                glyphs.append((glyph_box.x0, seq, chr(code), glyph_box))
+    glyphs.sort(key=lambda row: (row[0], row[1]))
+    if not glyphs or "".join(row[2] for row in glyphs) != label:
+        return False
+    matched_seqs = {row[1] for row in glyphs}
+    for _, seq, _, glyph_box in glyphs:
+        # The native glyph must remain unpainted-over by later source objects.
+        # Adjacent glyphs of this same authenticated word may overlap slightly.
+        for later in range(seq + 1, len(bboxlog)):
+            later_kind, later_box = bboxlog[later]
+            intersection = glyph_box & fitz.Rect(later_box)
+            if intersection.is_empty or intersection.get_area() < 0.1:
+                continue
+            if later in matched_seqs and later_kind == "fill-text":
+                continue
+            return False
+        # A source trace is insufficient if clipping/graphics state erased it.
+        # Render is a negative witness only; never a source or scale grant.
+        pix = page.get_pixmap(
+            matrix=fitz.Matrix(4, 4), colorspace=fitz.csRGB,
+            alpha=False, clip=glyph_box,
+        )
+        if not any(
+            max(pix.pixel(x, y)[:3]) < 120
+            for y in range(pix.height) for x in range(pix.width)
+        ):
+            return False
+    return True
+
+
 def find_native_filled_scale_bar_shadows(
     source_bytes: bytes, *, expected_source_sha256: str, page_id: str,
 ) -> tuple[NativeFilledScaleBarShadow, ...]:
@@ -269,13 +337,19 @@ def find_native_filled_scale_bar_shadows(
                     tuple(page.get_bboxlog()),
                     {p["seqno"]: p for p in drawings if isinstance(p.get("seqno"), int)},
                     _source_clip_receipts(page),
+                    tuple(page.get_texttrace()),
                 )
-            bboxlog, paths_by_seq, clips_by_seq = visibility_context
+            bboxlog, paths_by_seq, clips_by_seq, texttrace = visibility_context
             if not all(
                 _source_ink_visible(
                     page, drawings[rect.index], rect,
                     bboxlog, paths_by_seq, clips_by_seq,
                 ) for rect in chain
+            ):
+                continue
+            if not all(
+                _source_word_visible(page, word, bboxlog, texttrace)
+                for word in label_witnesses
             ):
                 continue
             ids = tuple(rect.index for rect in chain)
