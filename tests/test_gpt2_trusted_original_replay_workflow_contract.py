@@ -75,3 +75,22 @@ def test_positive_source_test_required_and_private_outputs_removed():
     assert "No FIRM quantity or benchmark score granted." in module["run"]
     assert steps[-1]["if"] == "always()"
     assert "rm -rf documents/sources" in steps[-1]["run"]
+
+
+def test_original_source_smoke_test_negative_error_is_privately_captured():
+    # A deliberate negative may fail inside the shell but must not emit a
+    # GitHub ::error:: annotation on the successful smoke-test run.
+    smoke = ROOT / ".github/workflows/provision-original-sources-smoke.yml"
+    document = yaml.safe_load(smoke.read_text(encoding="utf8"))
+    check = next(step for step in document["jobs"]["provision"]["steps"]
+                 if step["name"] == "Prove the step fails closed without a token")
+    script = check["run"]
+    assert "ORIGINAL_SOURCES_TOKEN=" in script
+    assert "denial_log=" in script
+    assert "2>&1" in script
+    assert 'test "${rc}" -eq 1' in script
+    assert "grep -Fq 'original sources NOT provisioned:'" in script
+    assert "grep -Fq 'no ORIGINAL_SOURCES_TOKEN is available'" in script
+    assert 'test ! -e "${RUNNER_TEMP}/empty-sources"' in script
+    assert 'rm -f "${denial_log}"' in script
+    assert "Verified expected no-token refusal" in script
