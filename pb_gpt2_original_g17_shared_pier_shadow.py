@@ -59,6 +59,10 @@ def audit_gpt2_original_g17_shared_piers_shadow(
             "ABSTAIN", "", (), (), ("original_g17_source_roster_missing",),
         )
     digests: set[str] = set()
+    # A uniform page *per owner* is insufficient: unrelated PDF pages may
+    # contain identical geometry. Preserve one original canonical page across
+    # ALL submitted owners before the source-only geometric delegate runs.
+    original_pages: set[str] = set()
     indexed: dict[str, dict[str, dict]] = {}
     for physical_id, entry in original_sources.items():
         if (type(physical_id) is not str or not physical_id
@@ -74,9 +78,14 @@ def audit_gpt2_original_g17_shared_piers_shadow(
                 or not owner.shadow_only
                 or owner.host_binding_granted or owner.w4_wall_membership_granted
                 or owner.firm_area_granted or owner.opening_count_granted
+                or owner.whole_wall_frame_granted
+                or owner.customer_publication_granted
                 or parents.status != "SOURCE_ONLY_CANDIDATE"
                 or not parents.shadow_only or parents.unresolved_parent_ids
                 or parents.structural_host_granted
+                or parents.whole_wall_frame_granted
+                or parents.metric_quantity_granted
+                or parents.customer_publication_granted
                 or owner.source_sha256 != parents.source_sha256
                 or not parents.lines):
             return OriginalG17SharedPierCandidateResult(
@@ -105,12 +114,14 @@ def audit_gpt2_original_g17_shared_piers_shadow(
                 or set(root_ids) != set(parents.requested_parent_ids)
                 or len(scoped_pages) != 1
                 or any(type(page) is not str or not page.isdecimal()
-                       or int(page) < 1 for page in scoped_pages)
+                       or int(page) < 1 or str(int(page)) != page
+                       for page in scoped_pages)
                 or not receipt_ids):
             return OriginalG17SharedPierCandidateResult(
                 "ABSTAIN", "", (), (),
                 ("original_g17_source_parent_or_cap_ownership_conflict",),
             )
+        original_pages.update(scoped_pages)
         inventory = {}
         for line in parents.lines:
             if (type(line.page_id) is not str or not line.page_id
@@ -130,6 +141,11 @@ def audit_gpt2_original_g17_shared_piers_shadow(
         return OriginalG17SharedPierCandidateResult(
             "ABSTAIN", "", (), (),
             ("original_g17_pier_source_sha_scope_conflict",),
+        )
+    if len(original_pages) != 1:
+        return OriginalG17SharedPierCandidateResult(
+            "ABSTAIN", "", (), (),
+            ("original_g17_cross_owner_page_scope_conflict",),
         )
     digest = next(iter(digests))
     try:

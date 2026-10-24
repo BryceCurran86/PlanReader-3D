@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from pathlib import Path
+import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_gpt2_g17_opening_source_band_ownership_shadow import (
@@ -196,3 +197,58 @@ def test_mixed_original_source_pages_not_silently_united_as_one_pier():
     result = audit_gpt2_original_g17_shared_piers_shadow(owned)
     assert result.status == "ABSTAIN"
     assert result.source_sharing_pairs == ()
+
+
+def test_entire_other_owner_on_foreign_page_cannot_nominate_a_shared_pier():
+    # Both owners are internally page-consistent. A same-SHA page-3 and
+    # page-4 geometry match is NOT a physical original shared pier.
+    owned = _original_pair()
+    key = _IDS[1]
+    owner, source = owned[key]
+    owned[key] = (owner, replace(
+        source, lines=tuple(replace(line, page_id="4") for line in source.lines),
+    ))
+    result = audit_gpt2_original_g17_shared_piers_shadow(owned)
+    assert result.status == "ABSTAIN"
+    assert result.source_sharing_pairs == ()
+    assert result.reason_codes == ("original_g17_cross_owner_page_scope_conflict",)
+    assert not result.opening_host_granted and not result.metric_area_granted
+
+
+@pytest.mark.parametrize(("target", "authority_flag"), (
+    ("owner", "whole_wall_frame_granted"),
+    ("owner", "customer_publication_granted"),
+    ("parent", "whole_wall_frame_granted"),
+    ("parent", "metric_quantity_granted"),
+    ("parent", "customer_publication_granted"),
+))
+def test_already_authoritative_input_cannot_enter_source_only_pier(
+    target, authority_flag,
+):
+    owned = _original_pair()
+    key = _IDS[1]
+    owner, source = owned[key]
+    if target == "owner":
+        owner = replace(owner, **{authority_flag: True})
+    else:
+        source = replace(source, **{authority_flag: True})
+    owned[key] = (owner, source)
+    result = audit_gpt2_original_g17_shared_piers_shadow(owned)
+    assert result.status == "ABSTAIN"
+    assert result.source_sharing_pairs == ()
+    assert result.reason_codes == ("original_g17_source_owner_not_reproved",)
+    assert not result.w4_structural_wall_granted
+    assert not result.opening_host_granted
+    assert not result.customer_release_granted
+
+
+def test_noncanonical_zero_padded_page_is_not_source_page_identity():
+    owned = _original_pair()
+    key = _IDS[1]
+    owner, source = owned[key]
+    owned[key] = (owner, replace(
+        source, lines=tuple(replace(line, page_id="03") for line in source.lines),
+    ))
+    report = audit_gpt2_original_g17_shared_piers_shadow(owned)
+    assert report.status == "ABSTAIN"
+    assert report.source_sharing_pairs == ()
