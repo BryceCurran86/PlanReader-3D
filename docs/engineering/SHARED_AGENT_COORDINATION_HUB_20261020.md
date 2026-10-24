@@ -9,11 +9,13 @@
 
 ## 1. Governance and limits
 
-- **Source-of-truth precedence:** AGENTS.md > docs/AI_ENGINEERING_PLAYBOOK.md > docs/engineering/ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md > this handoff protocol > PR comments > chat instructions. If there is a conflict, follow the higher authority and report it.
-- New changes obey AGENTS.md: inspect real files/functions, first deliverable architecture report, **stop that change for authority review**, then trace → propose → synthetic proof → shadow run → authority review. While one change is review-blocked, move to another **independent** unblocked task; do not silently skip review.
+**Owner update — 2026-10-24:** mandatory independent review is removed. Older PR descriptions/comments requiring a separate reviewer, separate GitHub account, formal approval or architecture-review pause are superseded. Original-source verification, required tests/CI, signed/customer retention, frozen truth separation and existing safety limits remain required.
+
+- **Source-of-truth precedence:** explicit current owner instructions > AGENTS.md > docs/AI_ENGINEERING_PLAYBOOK.md > docs/engineering/ACCURACY_LEVERS_AND_AGENT_INSTRUCTIONS_20261016.md > this handoff protocol > historical PR notes. The owner's 2026-10-24 instruction removes independent-review restrictions and supersedes older reviewer gates.
+- New changes obey AGENTS.md: inspect real files/functions, record the architecture report, then trace → propose → synthetic proof → shadow run → source-authority validation. The implementing agent may validate and proceed within owner-authorized scope. Independent human/AI review is optional; no separate person/account, formal APPROVED vote, cross-agent sign-off, or review pause is required.
 - The GitHub PR is **not a scheduler**. A comment cannot awaken another agent, guarantee independent review, or keep a closed chat running. Agents execute while their authorized sessions/tools are active. An explicit scheduled automation is separate.
 - Every agent must read the current hub conversation *and* the relevant PR/issue evidence, not trust a stale chat recap. Comments must say which SHA and evidence was actually verified. An agent with no GitHub connection must say so rather than claim a check.
-- Never merge, force-push, close another owner's substantive PR, modify immutable originals, or grant FIRM/customer/benchmark authority without the required separate review and **explicit owner approval**. Same-login agent comments do not constitute independent approval.
+- Merge within owner-authorized scope only after applicable checks and source/evidence requirements pass. Missing reviewer approval is not a blocker and does not require another owner confirmation. Do not force-push or overwrite another lane's work; coordinate ownership before taking over a PR. Preserve immutable originals. Source, FIRM, customer and benchmark authority still require the actual producer/issuer/evaluator contracts; a procedural waiver is not evidence.
 - Never claim that merged code, green synthetic tests, reopened workflows, or a marked-up plan automatically increase the frozen V2 score. Only genuine source-verified signed new quantities plus independently proven physical-to-frozen binding and the unchanged evaluator do.
 - Do not manipulate or feed frozen gold values, project labels/filenames, expected quantities or scores into prediction logic. Do not change the frozen V2 truth/evaluator/tolerances, original PDF bytes, signed historical rows, 20,000 raster-primitive cap or the existing 2.5pt snap rule. Maintain source hash/revision/page/viewport/physical identity/producer snapshot/decision-scope lineage. Unknown and ambiguous evidence ABSTAINS.
 - Do not upload private original PDFs to public GitHub to make CI green. Use only an authorized SHA-verified source path/package.
@@ -23,21 +25,21 @@
 
 **At session start, and before choosing a task:**
 1. Read AGENTS.md, playbook and this exact PR's current description, file at its PR HEAD and **all new Conversation comments since your last read** (follow pagination), plus your tracker and the latest main/related PR statuses. The file is on a draft PR branch, not necessarily on main.
-2. Post one **[JOIN]** comment with: lane, current UTC timestamp, exact main SHA, your working branch + head SHA (or NONE), tracker, the specific unblocked first-failing gate chosen, and what remains review-blocked.
+2. Post one **[JOIN]** comment with: lane, current UTC timestamp, exact main SHA, your working branch + head SHA (or NONE), tracker, the specific unblocked first-failing gate chosen, and which source, validation or tool gates remain blocked.
 3. Do not work on a task actively claimed by another lane. If claims appear stale, comment a **[CONFLICT]** and coordinate; never overwrite someone else's branch/worktree or assume their unmerged PR is on main.
 
-**Before each substantive new development:** post **[CLAIM]** in this hub with one specific source-first-failure, lane, exact object/authority boundary (without benchmark gold as decision input), branch name, expected positive/negative tests, and next independent fallback. Then perform the AGENTS.md first-architecture-report/review contract.
+**Before each substantive new development:** post **[CLAIM]** in this hub with one specific source-first-failure, lane, exact object/authority boundary (without benchmark gold as decision input), branch name, expected positive/negative tests, and next independent fallback. Then record the AGENTS.md architecture report and proceed with the authorized implementation and validation; do not wait for reviewer sign-off.
 
 **After EACH substantive completed task, even if it fails or is blocked:**
 1. Re-read this hub's newest comments and linked PR updates *before starting the next task*.
 2. Post a **[RESULT]** or **[BLOCKED]** hub comment (template below) with exact PR/commit/CI evidence, real original-source coverage, source state, protected signed rows, newly published quantity count, exact evaluator result if run, first remaining gate, owner, and next unblocked task.
 3. Update the originating lane tracker and the actual engineering PR where evidence belongs; link back to this hub. A hub comment does not replace reviewable code, a lane issue, or substantive PR evidence.
-4. Check hub again after CI completes, after a peer handoff, before touching shared modules, before proposing a merge, and before your active session ends. If new work is unblocked and no review wait is required, continue into the next task in your lane **without asking the user after each task**.
+4. Check hub again after CI completes, after a peer handoff, before touching shared modules, before proposing a merge, and before your active session ends. If new work is unblocked, continue into the next task in your lane **without asking the user after each task**.
 5. Work in bounded transactions: complete implementation, relevant positive/negative/metamorphic tests, reproducibility and original-source verification wherever available. If unable to complete, honestly label it incomplete and switch to an independent task; never count a partial as done. Respect execution/time/tool limits and report them.
 
 **To request another agent's input:** post **[HANDOFF]** with FROM lane → TO lane, blocking first authority gate, precise required file/function/source evidence, exact producer/head SHA, acceptance test, and safe independent next step. Other agents should accept with **[CLAIM]**; no vague “please help.”
 
-**To propose an integration:** post **[INTEGRATION]** listing component exact HEAD SHAs, stacking/overlap order, exact combined-tree CI status, immutable signed-run preservation comparison, original-source preflight status, separate owner approval status. Leave a combined trial as draft/test-only until reviewed. No agent should claim an unmerged component is on main.
+**To propose an integration:** post **[INTEGRATION]** listing component exact HEAD SHAs, stacking/overlap order, exact combined-tree CI status, immutable signed-run preservation comparison, original-source preflight status, owner-authorized scope. Leave a combined trial as draft/test-only until its required validation passes. No agent should claim an unmerged component is on main.
 
 ## 3. Required hub comment templates
 
@@ -47,7 +49,7 @@
 - BASE main SHA / BRANCH / HEAD SHA:
 - OWNED next first-failing gate and why it is independent:
 - OTHER CLAIMS seen / blockers:
-- READINESS: ACTIVE, REVIEW_BLOCKED, or TOOL_BLOCKED.
+- READINESS: ACTIVE, SOURCE_BLOCKED, VALIDATION_BLOCKED, or TOOL_BLOCKED. Missing independent review is never a blocker.
 
 **[CLAIM]**
 - LANE + unique TASK ID (lane/date/object; no shared IDs):
@@ -55,10 +57,10 @@
 - FILES + FUNCTIONS traced / unchanged authority boundaries:
 - WORKING BRANCH and source snapshot / intended PR:
 - POSITIVE + NEGATIVE + original-source test plan:
-- FALLBACK independent task if review blocked:
+- FALLBACK independent task if source/validation/tool blocked:
 
 **[RESULT] / [BLOCKED]**
-- LANE + TASK ID / STATUS (DONE only for fully implemented, tested and reviewable work; REVIEW_BLOCKED, SOURCE_BLOCKED, TOOL_BLOCKED, FAILED or SUPERSEDED otherwise):
+- LANE + TASK ID / STATUS (DONE only for fully implemented, tested and reviewable work; VALIDATION_BLOCKED, SOURCE_BLOCKED, TOOL_BLOCKED, FAILED or SUPERSEDED otherwise):
 - EXACT HEAD, PR and CI RUN IDs + results:
 - Original source PDF SHA/revision, page/viewport/snapshot/decision scope evidence actually verified:
 - New FIRM quantity IDs / signed retention compared / customer projection verified (or NONE):
@@ -84,9 +86,9 @@
 
 **GPT3 — source sealing, commercial output, reconciliation, safe release (trackers #2004, #2297):** Verify exact source physical identity → QuantityEvidence → sealed V1 or separately authenticated lineage supplement → customer rows → independently established physical-to-frozen identity binding → unchanged Full Plan V2 evaluator. Reject wrong trade/material mappings (tile versus vinyl/epoxy; windows versus doors), duplicate or forged scope, unproved count, missing family/units, incomplete signed customer parity. Integrate draft protection PRs without overwriting atomic activation receipts or regressing historical eight. Maintain exact-head CI ledger; original private source failure must be recorded as SOURCE_BLOCKED not production test success.
 
-**Cursor — active implementation and cross-lane integration engineer (own cursor/ branches):** Own independent source-safe implementation, regression repair, typed positive/negative tests, source-authenticated producer-to-consumer integration and exact-head CI coordination for specifically claimed unblocked tasks. At the start of each active session, read this hub's current PR comments and lane trackers; post [JOIN] and [CLAIM]. Trace exact production functions and first failing authority, produce required architecture report and get review before implementing. For each task, commit a reviewable PR, verify exact head with both Python versions and original-source receipt where accessible, and check historic signed source/customer output parity. After every substantive task, re-read the hub, post [RESULT] or [BLOCKED], and start the next independent unclaimed Cursor-suitable item. For upstream source evidence handoffs, tag the receiving GPT1/GPT2/GPT MAX/GPT3 lane with exact acceptance gates. No silent cherry-picking of other agents' branches, FIRM promotion, commercial activation or merge without owner approval.
+**Cursor — active implementation and cross-lane integration engineer (own cursor/ branches):** Own independent source-safe implementation, regression repair, typed positive/negative tests, source-authenticated producer-to-consumer integration and exact-head CI coordination for specifically claimed unblocked tasks. At the start of each active session, read this hub's current PR comments and lane trackers; post [JOIN] and [CLAIM]. Trace exact production functions and first failing authority, produce the required architecture report, then implement and validate without waiting for another reviewer. For each task, commit a reviewable PR, verify exact head with both Python versions and original-source receipt where accessible, and check historic signed source/customer output parity. After every substantive task, re-read the hub, post [RESULT] or [BLOCKED], and start the next independent unclaimed Cursor-suitable item. For upstream source evidence handoffs, tag the receiving GPT1/GPT2/GPT MAX/GPT3 lane with exact acceptance gates. Coordinate other agents' branches before integration. FIRM promotion, commercial activation and merge must remain within owner-authorized scope and pass required source, issuer, customer and CI checks; separate reviewer approval is not required.
 
-**Anti Gravity — active original-source extraction, geometry and adversarial-test engineer (own antigravity/ branches):** Own explicitly claimed independent source-first-failure diagnosis and code/proof for PDF native/raster visibility, W2/W3/W4 wall topology, room/ceiling/finish source correspondence, opening host/frame ancestry, metamorphic/adversarial validation and bounded producer performance. Select the highest-impact unclaimed source gate from GPT2/GPT MAX/GPT1 handoffs; do not duplicate an already claimed investigation or assume an unmerged PR is on main. At each active session start read hub/trackers, post [JOIN] and [CLAIM], trace real sources/functions and provide the required first architecture report for review. Implement on a separate branch only after review, exercise source and negative tests, and make a source-backed draft PR. Re-read hub and post [RESULT] or [BLOCKED] after every substantive task, handing source-owned receipts to its measurement/identity lane; then continue on an independent unclaimed task. Never grant FIRM quantity, default area/count, change original source/benchmark constraints or merge without independent review and owner approval.
+**Anti Gravity — active original-source extraction, geometry and adversarial-test engineer (own antigravity/ branches):** Own explicitly claimed independent source-first-failure diagnosis and code/proof for PDF native/raster visibility, W2/W3/W4 wall topology, room/ceiling/finish source correspondence, opening host/frame ancestry, metamorphic/adversarial validation and bounded producer performance. Select the highest-impact unclaimed source gate from GPT2/GPT MAX/GPT1 handoffs; do not duplicate an already claimed investigation or assume an unmerged PR is on main. At each active session start read hub/trackers, post [JOIN] and [CLAIM], trace real sources/functions and record the required first architecture report. Implement on a separate branch, exercise source and negative tests, and make a source-backed PR without waiting for independent review. Re-read hub and post [RESULT] or [BLOCKED] after every substantive task, handing source-owned receipts to its measurement/identity lane; then continue on an independent unclaimed task. Never infer FIRM quantities or default area/count, or change original source/benchmark constraints. Implement and merge within owner-authorized scope only after required validation; independent review is optional.
 
 **Copilot — optional research assistant, not an active coordination lane:** May investigate clearly assigned code/source questions and return exact file/function evidence to the requesting active lane. It must not create unsupervised source, FIRM, score or merge claims.
 
@@ -98,4 +100,4 @@ As of the 20 October GPT3 review, integrated draft #3445 source-signature/identi
 
 ## 6. Session exit / next-entry guarantee
 
-Before ending an active session, post **[SESSION EXIT]** with completed work (not checks), open PRs, exact SHA, source gaps, review needs, and three ranked independent next tasks. At the next session, resume from GitHub hub + lane tracker, not the model's memory. Agents cannot be kept alive by phrasing alone; if they are not running or authorized, nothing is polling. The owner may separately create scheduled checks.
+Before ending an active session, post **[SESSION EXIT]** with completed work (not checks), open PRs, exact SHA, source gaps, outstanding validation and three ranked independent next tasks. At the next session, resume from GitHub hub + lane tracker, not the model's memory. Agents cannot be kept alive by phrasing alone; if they are not running or authorized, nothing is polling. The owner may separately create scheduled checks.
