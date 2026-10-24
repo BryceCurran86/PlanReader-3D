@@ -32,7 +32,6 @@ jobs:
       # Match required public CI: source omissions are not source verification.
       PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
       # Indexed owner receipts reject even harmless unindexed bytecode.
-      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-pycache
       PYTHONDONTWRITEBYTECODE: "1"
     timeout-minutes: 30
     steps:
@@ -46,12 +45,17 @@ jobs:
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Integrity and provider isolation
+        # runner context is available at step scope, not job env.
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-pycache
         run: |
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           python -m compileall -q .
           ruff check --select F821,F823 .
       - name: Full regression suite
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/planreader-pycache
         run: PYTHONPATH=. python -m pytest -q tests/
       - name: Smoke test
         run: python tests/ci_smoke.py
