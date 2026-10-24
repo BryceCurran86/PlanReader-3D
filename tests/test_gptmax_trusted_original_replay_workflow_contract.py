@@ -12,6 +12,7 @@ HEADS = {
     "host": "b58d435efa65e003ba55754c2bdc152df5c91e8b",
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
+    "cache": "d5cdf829c135389d58a668dfdd55ccbd5834e707",
 }
 PATHS = {
     "host": (
@@ -28,6 +29,12 @@ PATHS = {
         "docs/engineering/gptmax_g17_source_receipt_registration_20261020.md",
         "pb_source_visibility_authority.py",
         "tests/test_raster_opening_receipt_registration.py",
+    ),
+    "cache": (
+        ".github/workflows/gptmax-g17-source-receipt-integrity.yml",
+        "docs/engineering/gptmax_g17_cached_source_integrity_20261020.md",
+        "pb_physical_opening_authority.py",
+        "tests/test_raster_opening_cached_source_integrity.py",
     ),
 }
 
@@ -100,6 +107,22 @@ def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
         for path in PATHS[name]:
             assert path in guard
     assert "ORIGINAL_SOURCES_TOKEN" not in guard
+
+
+def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    guard = next(
+        step["run"]
+        for step in _load()["jobs"]["verify"]["steps"]
+        if step.get("name", "").startswith("Authenticate immutable")
+    )
+    assert "cache)" in guard
+    assert "approved_base=c491c5fb2a155a54825d639ef277218707b76327" in guard
+    assert "approved_head=d5cdf829c135389d58a668dfdd55ccbd5834e707" in guard
+    assert "focused_test=tests/test_raster_opening_cached_source_integrity.py" in guard
+    assert 'git checkout --detach "$approved_head"' in guard
+    assert "github.event.pull_request" not in source
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" not in guard
 
 
 def test_secret_only_in_manifest_authenticated_source_provisioner():
