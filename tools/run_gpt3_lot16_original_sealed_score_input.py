@@ -103,8 +103,11 @@ def _publish_new(path: Path, data: object) -> None:
 
 
 def run_original_lot16_sealed_handoff(
-    pdf: Path, output_dir: Path, *, manifest_path: Path = MANIFEST
+    pdf: Path, output_dir: Path, *, manifest_path: Path = MANIFEST,
+    recover_additional_opening_areas: bool = False,
 ) -> dict:
+    if type(recover_additional_opening_areas) is not bool:
+        raise ValueError("opening area recovery must be an explicit boolean")
     sha = _verify_original_source(pdf, manifest_path)
     if output_dir.is_symlink() or (output_dir.exists() and any(output_dir.iterdir())):
         raise FileExistsError("original Lot16 sealed output directory must be fresh")
@@ -126,7 +129,11 @@ def run_original_lot16_sealed_handoff(
         receipt = _validate_sealed_customer_handoff(sealed, rows, verified, sha)
         received.append((sealed, rows, receipt))
 
-    source_diagnostic = inspect_source(pdf, 2, on_original_claim=source_seal)
+    source_diagnostic = inspect_source(
+        pdf, 2, on_original_claim=source_seal,
+        **({"recover_additional_opening_areas": True}
+           if recover_additional_opening_areas else {}),
+    )
     if len(claim_source_openings) != 1 or len(received) != 1 or source_diagnostic["pdf_sha256"] != sha:
         raise ValueError("original source production did not return one verified seal")
     if source_diagnostic["opening_sealing_diagnostic"]["status"] != (
@@ -156,8 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pdf", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--recover-additional-opening-areas", action="store_true")
     args = parser.parse_args(argv)
-    receipt = run_original_lot16_sealed_handoff(args.pdf, args.output_dir)
+    receipt = run_original_lot16_sealed_handoff(
+        args.pdf, args.output_dir,
+        recover_additional_opening_areas=args.recover_additional_opening_areas,
+    )
     print(json.dumps(receipt, sort_keys=True))
     return 0
 
