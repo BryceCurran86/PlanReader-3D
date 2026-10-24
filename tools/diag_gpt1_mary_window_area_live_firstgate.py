@@ -85,6 +85,11 @@ def diagnose_actual_window_area_gates(
     tags_by_source = defaultdict(set)
     representatives_by_source = defaultdict(set)
     frame_types_by_source = defaultdict(lambda: defaultdict(set))
+    # A window elevation frame and an adjacent door leaf can belong to one
+    # architectural assembly (W06 beside D02), but the SAME metric source
+    # frame record must never certify BOTH filling areas. Keep this proof
+    # separate from legitimate same-type repeated physical windows.
+    frame_filling_kinds_by_source = defaultdict(lambda: defaultdict(set))
     for opening in openings:
         if opening.tag_observation_id:
             tags_by_source[opening.tag_observation_id].add(
@@ -97,6 +102,20 @@ def diagnose_actual_window_area_gates(
         if (
             opening.area_basis == "authenticated_elevation_frame"
             and opening.figured_area_record_id
+            and opening.opening_kind in {"door", "window"}
+        ):
+            frame_scope = (
+                opening.document_id, opening.revision_id,
+                opening.source_sha256, opening.snapshot_id,
+                opening.figured_area_record_id,
+            )
+            frame_filling_kinds_by_source[frame_scope][
+                opening.opening_kind
+            ].add(opening.physical_opening_id)
+        if (
+            opening.area_basis == "authenticated_elevation_frame"
+            and opening.figured_area_record_id
+            and opening.opening_kind == "window"
             and opening.type_mark
         ):
             frame_types_by_source[opening.figured_area_record_id][
@@ -118,6 +137,13 @@ def diagnose_actual_window_area_gates(
         for type_owners in frame_types_by_source.values()
         if len(type_owners) > 1
         for members in type_owners.values()
+        for identity in members
+    }
+    conflicting_frame_filling_kinds = {
+        identity
+        for kind_owners in frame_filling_kinds_by_source.values()
+        if len(kind_owners) > 1
+        for members in kind_owners.values()
         for identity in members
     }
     by_mark = {}
@@ -166,6 +192,8 @@ def diagnose_actual_window_area_gates(
             reason = "original_representative_shared_across_physical_openings"
         elif physical_id in conflicting_frame_types:
             reason = "original_elevation_frame_shared_across_different_window_types"
+        elif physical_id in conflicting_frame_filling_kinds:
+            reason = "original_elevation_frame_shared_across_door_and_window"
         elif opening.opening_kind != "window":
             reason = "independent_window_kind_unavailable"
         elif not opening.host_wall_id or not (

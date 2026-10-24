@@ -257,3 +257,95 @@ def test_original_cross_window_source_receipt_rivals_never_count_as_distinct(
     ]
     assert all(w["quantity_id"] is None for w in output["windows"][:2])
     assert output["benchmark_score_granted"] is False
+
+
+def _w06_and_adjacent_d02(*, shared_frame):
+    pdf, window, _q = _source_issued_window_case()
+    window_tag = "original-plan-W06-word"
+    window = replace(
+        window,
+        type_mark="W06",
+        tag_observation_id=window_tag,
+        evidence_ids=tuple(
+            window_tag if item == "original-plan-W01-word" else item
+            for item in window.evidence_ids
+        ),
+    )
+    # D02 is a DISTINCT physical door, not a second W06 window. Both
+    # objects remain independently positive at the real typed area issuer;
+    # this test checks the complete source inventory for a stolen metric
+    # elevation-frame receipt, not merely whether each area is numeric.
+    _pdf, _w01, _q01, other, _q02 = _two_source_issued_distinct_window_case()
+    door_tag = "original-plan-D02-word"
+    original_frame = other.figured_area_record_id
+    selected_frame = (
+        window.figured_area_record_id if shared_frame else original_frame
+    )
+    door = replace(
+        other,
+        type_mark="D02",
+        opening_kind="door",
+        tag_observation_id=door_tag,
+        figured_area_record_id=selected_frame,
+        evidence_ids=tuple(
+            dict.fromkeys((
+                *(
+                    item for item in other.evidence_ids
+                    if item not in ("original-plan-W02-word", original_frame)
+                ),
+                door_tag, selected_frame,
+            ))
+        ),
+    )
+    window_quantity = _opening_quantity(window)
+    door_quantity = _opening_quantity(door)
+    assert window_quantity is not None
+    assert door_quantity is not None
+    assert window_quantity.semantic_key.startswith("window_area:")
+    assert door_quantity.semantic_key.startswith("door_area:")
+    return pdf, window, window_quantity, door, door_quantity
+
+
+def test_w06_and_d02_independent_original_frames_remain_issuer_positive_only():
+    pdf, window, window_quantity, door, door_quantity = _w06_and_adjacent_d02(
+        shared_frame=False,
+    )
+    result = _run(pdf, _claim((window, door), (window_quantity, door_quantity)))
+    assert result["windows"][3]["first_missing_gate"] == (
+        "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED"
+    )
+    assert result["windows"][3]["quantity_id"] == window_quantity.quantity_id
+    assert result["customer_seal_granted"] is False
+    assert result["benchmark_score_granted"] is False
+
+
+def test_w06_cannot_borrow_adjacent_d02_metric_elevation_frame():
+    pdf, window, window_quantity, door, door_quantity = _w06_and_adjacent_d02(
+        shared_frame=True,
+    )
+    assert window.figured_area_record_id == door.figured_area_record_id
+    result = _run(pdf, _claim((window, door), (window_quantity, door_quantity)))
+    assert result["windows"][3]["first_missing_gate"] == (
+        "original_elevation_frame_shared_across_door_and_window"
+    )
+    assert result["windows"][3]["quantity_id"] is None
+    assert result["measurement_published_by_this_tool"] is False
+    assert result["customer_seal_granted"] is False
+    assert result["benchmark_score_granted"] is False
+
+
+def test_foreign_revision_d02_frame_id_cannot_create_false_w06_conflict():
+    pdf, window, window_quantity, door, door_quantity = _w06_and_adjacent_d02(
+        shared_frame=True,
+    )
+    # A different source revision is not the same original source authority
+    # scope, even when an external caller repeats a local record ID.
+    door = replace(door, revision_id="independent-source-revision")
+    door_quantity = _opening_quantity(door)
+    assert door_quantity is not None
+    result = _run(pdf, _claim((window, door), (window_quantity, door_quantity)))
+    assert result["windows"][3]["first_missing_gate"] == (
+        "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED"
+    )
+    assert result["windows"][3]["quantity_id"] == window_quantity.quantity_id
+    assert result["benchmark_score_granted"] is False
