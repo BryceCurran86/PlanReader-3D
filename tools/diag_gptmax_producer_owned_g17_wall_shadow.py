@@ -47,7 +47,12 @@ def _retention(composition, voids, *, verify_customer_rows=False,
             figured = q.metadata.get("area_basis") == "figured_opening_label" and bool(record_id)
             authorities[q.quantity_id] = CommercialMeasurementAuthority(
                 method="figured_dimension" if figured else "direct_evidence",
-                figured_dimension_ids=(record_id,) if figured else ())
+                figured_dimension_ids=(record_id,) if figured else (),
+                metadata={
+                    "source": "live_opening_customer_projection",
+                    "quantity_id": q.quantity_id,
+                    "area_basis": q.metadata.get("area_basis") or None,
+                })
         rows = quantities_to_takeoff_output_rows(quantities,
             traces_by_quantity_id=traces, authorities_by_quantity_id=authorities)
         sealed = seal_live_opening_area_run(

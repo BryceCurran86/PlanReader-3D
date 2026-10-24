@@ -3,6 +3,12 @@
 Repository study for PlanReader-3D. Read this after `AGENTS.md`. Do not treat
 this as permission to change production or commercial output.
 
+**Owner policy update (2026-10-24):** independent review is optional, as set out
+in `AGENTS.md`. No separate person/account, formal approval, or architecture
+review wait is required for owner-authorized work. Source-authority validation,
+automated checks, signed/customer retention, and frozen benchmark separation
+remain required; the implementing agent may perform and document validation.
+
 W-numbers below follow the **adopted observability stack** in
 `docs/wall_topology_observability_architecture.md`. They are **not** the
 historical PR sequence in `docs/planreader_wall_room_topology_spec.md` §18.
@@ -53,8 +59,8 @@ change production code and benchmark-defining files in the same PR.
 New work starts in shadow mode.
 
 FIRST DELIVERABLE
-Do not change code yet. Write the architecture report required by
-AGENTS.md. Stop for review.
+Before changing code, write the architecture report required by AGENTS.md.
+Then implement and validate the authorized task without waiting for a reviewer.
 ```
 
 A report that only restates documentation, without file-and-function traces,
@@ -267,7 +273,7 @@ Do not tune thresholds against known V2 projects. Do not change source-closed V2
 
 ---
 
-## 10. Review checklist (teach through review)
+## 10. Validation checklist (additional review is optional)
 
 Reject the work if any of these fail:
 
@@ -277,12 +283,12 @@ Reject the work if any of these fail:
 - Expected abstentions were not predicted before tests were written.
 - Production code and Full Plan V2 truth files (`source_manifest.json`, `reference_takeoff.json`, `object_universe.json`, `verification_report.json`, `unresolved_items.json`, or the V2 suite manifest) appear in one PR.
 - A second scale resolver, quantity schema, evidence enum, or canonical graph was added.
-- Commercial rows, JobHub payload, or `takeoff_eligible=True` changed without an authority-promotion review.
-- After implementation, an independent pass must inspect for leakage, duplicated authority, and hidden project/filename special cases.
+- Commercial rows, JobHub payload, or `takeoff_eligible=True` changed without documented source-authority validation through the actual issuer and customer contracts.
+- After implementation, inspect the final diff for leakage, duplicated authority, and hidden project/filename special cases. The implementing agent may perform this pass; another reviewer is optional.
 
 ---
 
-## 11. Files that must remain untouched unless a later review says otherwise
+## 11. Files that must remain untouched unless the owner-authorized task requires a validated change
 
 - `pb_planreader_pdf_extractor.py` and other live commercial writers
 - `pb_planreader_jobhub_publish_contract.py` production payload behavior
@@ -300,7 +306,7 @@ Safe first homes for new topology work: diagnostic harnesses, shadow providers, 
 
 **OBSERVED:** W1–W10 are not live-wired into `pb_planreader_pdf_extractor`. Wall length/height quantity modules exist but require caller-built `EntityEvidence` and firm measurement input. Hosted-opening geometry is diagnostic only.
 
-**INFERRED smallest next step, not a change order:** keep new signals in shadow. If a later task consumes ranked walls, consume only after an independent validation that the tier means “physical wall,” and still leave W10 `takeoff_eligible=False`. Do not feed `#273` tiers into hosted-opening diagnostics until that review happens.
+**INFERRED smallest next step, not a change order:** keep new signals in shadow. If a later task consumes ranked walls, consume only after source-backed validation that the tier means “physical wall,” and still leave W10 `takeoff_eligible=False`. Do not feed `#273` tiers into hosted-opening diagnostics until that validation passes. The implementing agent may perform validation; separate reviewer approval is not required.
 
 Governing validation target: increase the V2 multi-metric scoreboard through source-closed object truth, canonicalization, geometry/quantity correctness, provenance, correct abstention and customer publication. No retired percentage is an implementation knob or roadmap headline.
 

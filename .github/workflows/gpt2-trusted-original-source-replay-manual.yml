@@ -1,0 +1,160 @@
+name: GPT2 trusted original replay (manual)
+
+# Owner-run only. No push / PR / pull_request_target source-secret exposure.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt2-trusted-original-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  original:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    name: ${{ matrix.target }} original (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+        target: [a600, freezer, d15, rcp]
+
+    steps:
+      - name: Checkout the trusted workflow context
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate immutable target and full tree diff before provisioning
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          approved_base=ce322d69bbc9f47b5b2aed001684e01cbe04f48b
+          case "$TARGET" in
+            a600)
+              approved_head=d7209dc93fa18348774f3ce3477ffdd0b49430bc
+              expected_paths='pb_gpt2_original_a600_table_row_scope_shadow.py|pb_source_door_schedule_authority.py|pb_source_plan_door_correspondence_authority.py|tests/test_gpt2_original_a600_table_row_scope_shadow.py'
+              original_test=test_original_private_source_publisher_table_census_if_provisioned
+              test_path=tests/test_gpt2_original_a600_table_row_scope_shadow.py
+              ;;
+            freezer)
+              approved_head=d7662c9f2c442051ed02dc513f4c3b096610dd2c
+              expected_paths='pb_gpt2_original_native_freezer_paint_gap_shadow.py|tests/test_gpt2_original_native_freezer_paint_gap_shadow.py'
+              original_test=test_original_freezer_d17_private_pdf_if_provisioned
+              test_path=tests/test_gpt2_original_native_freezer_paint_gap_shadow.py
+              ;;
+            d15)
+              approved_head=49e3914e3da581d9cf8ac4a7d1d5186cbc4f67d1
+              expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|tests/test_gpt2_mary_original_figured_door_leader_shadow.py'
+              original_test=test_private_original_maryborough_native_leader_source_if_provisioned
+              test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py
+              ;;
+            rcp)
+              approved_head=753415e2e0aedde27dc4e8d0acd1bc3c22a73af8
+              expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
+              original_test=test_real_original_page9_native_source_rivals_if_available
+              test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
+              ;;
+            *)
+              echo "::error::Unapproved original-source code selection"
+              exit 1
+              ;;
+          esac
+          # Compare immutable Git tree objects, never a mutable branch or an
+          # arbitrary caller-provided commit SHA. Any changed workflow,
+          # provisioner, dependency, manifest or unreviewed file is a veto.
+          git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
+          observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
+          allowed="$(printf '%s\n' "$expected_paths" | tr '|' '\n' | LC_ALL=C sort)"
+          if [[ "$observed" != "$allowed" ]]; then
+            echo "::error::Pinned code tree differs from reviewed GPT2 allowlist"
+            exit 1
+          fi
+          git checkout --detach "$approved_head"
+          [[ "$(git rev-parse HEAD)" == "$approved_head" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          [[ -f "$test_path" ]]
+          echo "GPT2_TEST_PATH=$test_path" >> "$GITHUB_ENV"
+          echo "GPT2_ORIGINAL_TEST=$original_test" >> "$GITHUB_ENV"
+          echo "GPT2_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
+          echo "Verified pinned $TARGET source/test diff against trusted main."
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install unchanged pinned CI dependencies before receiving sources
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Provision only SHA-verified Maryborough original
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
+
+      - name: Require source-positive test to PASS (skipped never counts)
+        shell: bash
+        env:
+          PLANREADER_MARYBOROUGH_ORIGINAL_PDF: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+          PLANREADER_MARYBOROUGH_SOURCE_SHA256: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/gpt2-private-positive.log"
+          if ! python -m pytest -q --tb=no --disable-warnings \
+               "$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST" > "$output" 2>&1; then
+            echo "::error::Original source-positive test FAILED: $GPT2_ORIGINAL_TEST"
+            grep -E '^FAILED |^ERROR ' "$output" | head -10 || true
+            exit 1
+          fi
+          if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
+            echo "::error::Original case was skipped or not successfully collected"
+            exit 1
+          fi
+          echo "Original source-positive test PASSED on $GPT2_APPROVED_HEAD"
+
+      - name: Run complete GPT2 module against verified original
+        shell: bash
+        env:
+          PLANREADER_MARYBOROUGH_ORIGINAL_PDF: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+          PLANREADER_MARYBOROUGH_SOURCE_SHA256: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/gpt2-private-module.log"
+          if ! python -m pytest -q --tb=no --disable-warnings "$GPT2_TEST_PATH" > "$output" 2>&1; then
+            echo "::error::Original-provisioned GPT2 module FAILED: $GPT2_TEST_PATH"
+            grep -E '^FAILED |^ERROR ' "$output" | head -10 || true
+            exit 1
+          fi
+          echo "Full source-provisioned GPT2 module PASSED on $GPT2_APPROVED_HEAD"
+          {
+            echo "### GPT2 private original manual replay"
+            echo "- Exact immutable SHA: $GPT2_APPROVED_HEAD"
+            echo "- Original immutable Maryborough SHA: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+            echo "- Source-positive and module: PASSED"
+            echo "- No FIRM quantity or benchmark score granted."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove ephemeral originals and unpublished test logs
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/gpt2-private-positive.log" "$RUNNER_TEMP/gpt2-private-module.log"
+          rm -rf documents/sources
