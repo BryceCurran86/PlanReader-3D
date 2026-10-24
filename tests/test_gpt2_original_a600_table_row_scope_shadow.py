@@ -500,3 +500,14 @@ def test_real_published_consumer_cannot_claim_complete_table_if_another_code_is_
     assert d13.first_unclosed_gate=="original_schedule_row_or_universe_unverified"
     assert paired.eligible_printed_code_pair_count==0
     assert paired.new_opening_counts==paired.new_opening_area_quantities==0
+
+
+def test_schedule_code_lexeme_excludes_unpadded_native_drawing_detail():
+    # Source-integrity still retains the original D3 observation; this only
+    # prevents an unpadded detail label from acquiring schedule-row identity.
+    from pb_source_door_schedule_authority import _DOOR_CODE
+    assert not _DOOR_CODE.fullmatch("D3")
+    assert not _DOOR_CODE.fullmatch("D0")
+    assert _DOOR_CODE.fullmatch("D03")
+    assert _DOOR_CODE.fullmatch("D28")
+    assert _DOOR_CODE.fullmatch("D100")
