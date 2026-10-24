@@ -238,11 +238,7 @@ def test_subpixel_source_image_gap_is_not_interpolated_into_dark_ink():
 def test_numerical_seam_cannot_hide_white_original_edge_pixel():
     """Both source image edges, not just the rendered seam, must be dark."""
     from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
-    from unittest.mock import patch
-    pdf = _source()
-    # Synthetic transform-precision seam: a single floating-point boundary
-    # column is accepted only if both original source edge pixels are dark.
-    # A real white interior stripe is still rejected by the strict scan.
+    # A white stripe must still be rejected by the strict source scan.
     white = _source(interior_gap=True)
     report = prove_contiguous_source_ink_across_tile_seam(
         white, expected_sha256=hashlib.sha256(white).hexdigest(),
