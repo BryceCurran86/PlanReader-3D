@@ -12,7 +12,7 @@ from typing import Any
 import fitz
 
 from pb_gptmax_raster_tile_seam_shadow import (
-    ABSTAIN, SOURCE_ONLY, _abstain, _canonical_source_image_placement,
+    SOURCE_ONLY, _abstain, _canonical_source_image_placement,
     _number,
 )
 
