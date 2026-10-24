@@ -121,15 +121,82 @@ def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
     return tuple(sorted({wall_id for group in node for wall_id in group}))
 
 
+def _source_equivalence_group_overlap_members(equivalence) -> frozenset[str]:
+    """An original physical wall cannot occupy incompatible SAME groups."""
+    first_by_member: dict[str, tuple[str, ...]] = {}
+    unsafe: set[str] = set()
+    for raw_group in getattr(equivalence, "equivalence_groups", ()):
+        normalized = tuple(sorted(str(member) for member in raw_group))
+        if len(normalized) != len(set(normalized)):
+            # Duplicate original wall membership is not a second witness.
+            unsafe.update(normalized)
+        for member in normalized:
+            previous = first_by_member.get(member)
+            if previous is not None and previous != normalized:
+                unsafe.update(previous)
+                unsafe.update(normalized)
+            else:
+                first_by_member.setdefault(member, normalized)
+    return frozenset(unsafe)
+
+
+def _source_equivalence_group_pair_conflicts(equivalence) -> frozenset[tuple[str, str]]:
+    """Exact source SAME group cannot coexist with an issued non-SAME pair."""
+    groups_by_member: dict[str, set[int]] = {}
+    for index, group in enumerate(getattr(equivalence, "equivalence_groups", ())):
+        for member in group:
+            groups_by_member.setdefault(str(member), set()).add(index)
+    conflicted: set[tuple[str, str]] = set()
+    for left, right, raw in equivalence.pair_classifications:
+        try:
+            issued = PhysicalEquivalenceClass(raw)
+        except (TypeError, ValueError):
+            # An explicitly malformed original issuer is an unknown source
+            # claim, never permission to trust a contrary positive SAME group.
+            issued = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if issued is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
+            continue
+        left_id, right_id = str(left), str(right)
+        if groups_by_member.get(left_id, set()) & groups_by_member.get(right_id, set()):
+            conflicted.add(tuple(sorted((left_id, right_id))))
+    return frozenset(conflicted)
+
+
+def _source_equivalence_group_unsafe_members(equivalence) -> frozenset[str]:
+    """Veto the entire original SAME identity when any pair contradicts it."""
+    unsafe = set(_source_equivalence_group_overlap_members(equivalence))
+    conflicted_pairs = _source_equivalence_group_pair_conflicts(equivalence)
+    for raw_group in getattr(equivalence, "equivalence_groups", ()):
+        group = {str(member) for member in raw_group}
+        if any(left in group and right in group
+               for left, right in conflicted_pairs):
+            unsafe.update(group)
+    return frozenset(unsafe)
+
+
 def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    group_conflicts = _source_equivalence_group_pair_conflicts(equivalence)
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for left, right, raw in equivalence.pair_classifications:
         key = tuple(sorted((str(left), str(right))))
         try:
             classification = PhysicalEquivalenceClass(raw)
-        except ValueError:
+        except (TypeError, ValueError):
+            # Malformed issuer classes are contradictory source evidence, not
+            # permission to ignore an observed wall-pair relationship.
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
-        if key in result and result[key] is not classification:
+        if key in group_conflicts:
+            # A source-issued SAME cluster and a source-issued DISTINCT pair
+            # are contradictory W4 physical facts, not exclusion authority.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        # Conflicting original SAME/DISTINCT/AMBIGUOUS pair receipts must
+        # be monotonic: a later repeated record can never erase a conflict
+        # already observed for the same physical wall pair. No source-order
+        # tie-breaking is a legitimate whole-wall frame authority.
+        prior = result.get(key)
+        if prior is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+            classification = prior
+        elif prior is not None and prior is not classification:
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
         result[key] = classification
     return result
@@ -321,6 +388,10 @@ class OpeningHostFrameProducer:
         self._raster_split_frame_shadow = raster_split_frame_shadow
         self._source_fragment_roles_shadow = source_fragment_roles_shadow
         self._results: dict[_Key, OpeningHostFrameResult] = {}
+        # Proven representative selectors for this exact canonical frame.
+        # Keep witnesses separate: shared-wall source_observation_ids may
+        # also include a real sibling opening and cannot authorize revocation.
+        self._accepted_opening_selectors: dict[_Key, set[ObservationSelector]] = {}
 
     @classmethod
     def from_authorities(
@@ -854,6 +925,26 @@ class OpeningHostFrameProducer:
                 return None
             records_by_id[wall_key] = candidate
 
+        if any(
+            member_id in _source_equivalence_group_overlap_members(
+                wall_scope.equivalence
+            )
+            for member_id in binding.member_wall_candidate_ids
+        ):
+            # Live W4 can disagree with an older host-binding receipt.
+            return None
+
+        if any(
+            member_id in _source_equivalence_group_unsafe_members(
+                wall_scope.equivalence
+            )
+            for member_id in binding.member_wall_candidate_ids
+        ):
+            # Single-member shortcut must not bypass the physical W4
+            # SAME-group-vs-DISTINCT-pair contradiction veto enforced on the
+            # connected-frame path.
+            return None
+
         host_resolution = host_geometry._resolve_raster_whole_wall_host(
             wall_scope.records,
             geometry,
@@ -1012,6 +1103,25 @@ class OpeningHostFrameProducer:
         )
         if not component_ids or any(wall_id not in records_by_id for wall_id in component_ids):
             return None
+        if any(
+            wall_id in _source_equivalence_group_overlap_members(
+                wall_scope.equivalence
+            )
+            for wall_id in component_ids
+        ):
+            # No W4 host/frame from a non-partitioned source wall scope,
+            # including a cached host that predates this contradiction.
+            return fail("opening_host_frame_whole_wall_unproven")
+
+        if any(
+            wall_id in _source_equivalence_group_unsafe_members(
+                wall_scope.equivalence
+            )
+            for wall_id in component_ids
+        ):
+            # This contradiction touches the selected physical frame itself.
+            # Do not let a grouped rival enter as SAME or be excluded as DISTINCT.
+            return fail("opening_host_frame_equivalence_group_pair_conflict")
 
         axis = (float(geometry.axis[0]), float(geometry.axis[1]))
         normal = (float(geometry.normal[0]), float(geometry.normal[1]))
@@ -1233,13 +1343,42 @@ class OpeningHostFrameProducer:
         if type(host_binding_selector) is not OpeningHostBindingSelector:
             raise TypeError("host_binding_selector must be OpeningHostBindingSelector")
 
+        # Selector-scoped reproof. A previously positive frame cannot remain
+        # in a newly issued authority after the original source or host fails.
+        frame_selector = OpeningHostFrameSelector(
+            document_id=host_binding_selector.document_id,
+            revision_id=host_binding_selector.revision_id,
+            source_sha256=host_binding_selector.source_sha256,
+            snapshot_id=host_binding_selector.snapshot_id,
+            page_id=host_binding_selector.page_id,
+            decision_scope_id=host_binding_selector.decision_scope_id,
+            opening_identity_id=host_binding_selector.opening_identity_id,
+        )
+
+        # An arbitrary wrong caller observation must not revoke a valid frame
+        # for a different canonical opening. Trust source-owned opening
+        # identity only after the exact selector root and record ID re-prove.
+        validated_opening_identity = False
+
+        def fail_closed(status, *reasons):
+            # A failed reproof of a previously accepted original observation
+            # must revoke its own cached frame, even if prove_existence now
+            # abstains before returning an opening record. A foreign sibling
+            # caller can never revoke this exact selector's former positive.
+            previously_accepted = opening_selector in self._accepted_opening_selectors.get(
+                frame_selector.key, ()
+            )
+            if validated_opening_identity or previously_accepted:
+                self._results.pop(frame_selector.key, None)
+            return _blocked(status, *reasons)
+
         opening_result = self._opening.prove_existence(opening_selector)
         if (
             opening_result.status is not EvidenceResolutionStatus.CORROBORATED
             or opening_result.proposition != PHYSICAL_OPENING_EXISTS
             or opening_result.existence_record is None
         ):
-            return _blocked(
+            return fail_closed(
                 opening_result.status
                 if opening_result.status in {
                     EvidenceResolutionStatus.ABSTAINED,
@@ -1250,6 +1389,14 @@ class OpeningHostFrameProducer:
                 *opening_result.reason_codes,
             )
         opening = opening_result.existence_record
+        validated_opening_identity = (
+            opening.document_id == host_binding_selector.document_id
+            and opening.revision_id == host_binding_selector.revision_id
+            and opening.source_sha256 == host_binding_selector.source_sha256
+            and opening.snapshot_id == host_binding_selector.snapshot_id
+            and opening.page_id == host_binding_selector.page_id
+            and opening.record_id == host_binding_selector.opening_identity_id
+        )
 
         host_result = self._host.resolve(host_binding_selector)
         if (
@@ -1257,7 +1404,7 @@ class OpeningHostFrameProducer:
             or host_result.record is None
             or OPENING_HOST_BINDING_RESOLVED not in host_result.reason_codes
         ):
-            return _blocked(
+            return fail_closed(
                 host_result.status
                 if host_result.status in {
                     EvidenceResolutionStatus.ABSTAINED,
@@ -1280,19 +1427,19 @@ class OpeningHostFrameProducer:
             and binding.decision_scope_id == host_binding_selector.decision_scope_id
         )
         if not lineage_matches:
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.CONFLICT,
                 OPENING_HOST_FRAME_SCOPE_MISMATCH,
             )
 
         geometry = host_geometry._opening_geometry(self._opening, opening)
         if geometry is None:
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_GEOMETRY_UNAVAILABLE,
             )
         if not _valid_aperture_geometry(geometry):
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.CONFLICT,
                 OPENING_HOST_FRAME_GEOMETRY_INVALID,
             )
@@ -1309,22 +1456,14 @@ class OpeningHostFrameProducer:
                 failure_reasons=frame_failure_reasons,
             )
         if frame is None:
-            return _blocked(
+            return fail_closed(
                 EvidenceResolutionStatus.ABSTAINED,
                 OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN,
                 OPENING_HOST_FRAME_WALL_UNAVAILABLE,
                 *frame_failure_reasons,
             )
 
-        selector = OpeningHostFrameSelector(
-            document_id=binding.document_id,
-            revision_id=binding.revision_id,
-            source_sha256=binding.source_sha256,
-            snapshot_id=binding.snapshot_id,
-            page_id=binding.page_id,
-            decision_scope_id=binding.decision_scope_id,
-            opening_identity_id=binding.opening_identity_id,
-        )
+        selector = frame_selector
         payload = {
             "selector": selector.key,
             "host_binding_record_id": binding.record_id,
@@ -1375,8 +1514,17 @@ class OpeningHostFrameProducer:
         )
         existing = self._results.get(selector.key)
         if existing is not None and existing != result:
+            # A contradictory new positive on one immutable selector makes
+            # the previously issued cached positive unsafe for any newly
+            # acquired authority. Retain the error but revoke its old proof.
+            self._results.pop(selector.key, None)
+            self._accepted_opening_selectors.pop(selector.key, None)
             raise RuntimeError("opening host-frame producer equivocation")
         self._results[selector.key] = result
+        # Only producer-verified successful publication can add a witness.
+        self._accepted_opening_selectors.setdefault(selector.key, set()).add(
+            opening_selector
+        )
         return result
 
     def authority(self) -> OpeningHostFrameAuthority:
