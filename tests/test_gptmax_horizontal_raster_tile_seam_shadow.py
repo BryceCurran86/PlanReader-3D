@@ -132,6 +132,8 @@ def test_original_elevation_panel_rail_is_continuous_across_horizontal_source_ti
     if not path or not Path(path).is_file():
         pytest.skip("owner-private original unavailable: NOT VERIFIED")
     original = Path(path).read_bytes()
+    assert sha256(original).hexdigest() == (
+        "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844")
     report = prove_contiguous_source_ink_across_horizontal_tile_seam(
         original, expected_sha256=sha256(original).hexdigest(),
         page_no=5, source_x=532.172, seam_y=210.48002,
