@@ -245,7 +245,7 @@ def _trusted_manual_main_job(raw: str, job_name: str) -> bool:
     """Only an explicit owner/manual-main job may receive an original-source token."""
     # PyYAML follows YAML 1.1 and treats an unquoted 'on' mapping key as True.
     # A second raw top-level 'on' could otherwise last-key-win past this check.
-    if len(re.findall(r"(?m)^(?:on|['\"]on['\"])\\s*:", raw)) != 1:
+    if len(re.findall(r"(?m)^(?:on|['\"]on['\"])\s*:", raw)) != 1:
         return False
     definition = yaml.safe_load(raw)
     if not isinstance(definition, dict):
@@ -273,7 +273,7 @@ def _trusted_manual_main_job(raw: str, job_name: str) -> bool:
     condition = condition.strip()
     if condition.startswith("${{") and condition.endswith("}}"):
         condition = condition[3:-2].strip()
-    if re.sub(r"\\s+", "", condition) != re.sub(r"\\s+", "", _TRUSTED_JOB_IF):
+    if re.sub(r"\s+", "", condition) != re.sub(r"\s+", "", _TRUSTED_JOB_IF):
         return False
     steps = job.get("steps")
     if not isinstance(steps, list):

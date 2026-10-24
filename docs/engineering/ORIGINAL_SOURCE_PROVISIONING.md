@@ -59,11 +59,11 @@ verified, and nowhere else.
 
 ## Applying provisioning safely (owner-trusted manual workflows only)
 
-**Security change (2026-10-24): do NOT mass-inject \`ORIGINAL_SOURCES_TOKEN\` into public pull-request CI or arbitrary branch push jobs.** Existing automatic PR checks must remain source-neutral and report private-original replay as **NOT VERIFIED**. A same-repo PR can contain adversarial code: lack of secrets on *fork* PRs is NOT a sufficient protection.
+**Security change (2026-10-24): do NOT mass-inject `ORIGINAL_SOURCES_TOKEN` into public pull-request CI or arbitrary branch push jobs.** Existing automatic PR checks must remain source-neutral and report private-original replay as **NOT VERIFIED**. A same-repo PR can contain adversarial code: lack of secrets on *fork* PRs is NOT a sufficient protection.
 
-The installer \`scripts/apply_provision_original_sources.py\` remains a dry-run diagnostic by default. Its \`--apply\` writes **only** if every candidate workflow is triggered exclusively by \`workflow_dispatch\`, every target job has this exact owner/repository/main condition, the first checkout has no untrusted ref override, and \`--action-ref\` is a pinned 40-hex action commit:
+The installer `scripts/apply_provision_original_sources.py` remains a dry-run diagnostic by default. Its `--apply` writes **only** if every candidate workflow is triggered exclusively by `workflow_dispatch`, every target job has this exact owner/repository/main condition, the first checkout has no untrusted ref override, and `--action-ref` is a pinned 40-hex action commit:
 
-\`\`\`yaml
+```yaml
 on: workflow_dispatch
 jobs:
   trusted-original-replay:
@@ -72,15 +72,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Provisioning is inserted after checkout by the reviewed tool, only on this trusted job.
-\`\`\`
+```
 
-A mixed event (including \`pull_request\`, \`pull_request_target\`, \`push\`, or \`workflow_run\`), an unrecognized condition or mutable action ref is rejected **before any file changes**. Dry-run output still enumerates other candidate jobs but warns they cannot be applied. Run \`--apply\` only after owner-created, security-reviewed trusted-main workflow and an owner-authorized original-source smoke test; this restriction deliberately means the historical mass-rollout command cannot run. Never weaken this gate to turn PR-source tests green.
+A mixed event (including `pull_request`, `pull_request_target`, `push`, or `workflow_run`), an unrecognized condition or mutable action ref is rejected **before any file changes**. Dry-run output still enumerates other candidate jobs but warns they cannot be applied. Run `--apply` only after owner-created, security-reviewed trusted-main workflow and an owner-authorized original-source smoke test; this restriction deliberately means the historical mass-rollout command cannot run. Never weaken this gate to turn PR-source tests green.
 
 For eligible manual workflows only:
 
-\`\`\`bash
+```bash
 python scripts/apply_provision_original_sources.py --only 'trusted-original-replay.yml' --action-ref <reviewed-full-40-hex-action-commit> --apply
-\`\`\`
+```
 
 Do not expose private PDF bytes in GitHub Actions artifacts, logs or caches. Original source shape/hash verification, sealed/customer parity and the unchanged frozen scorer remain required after secure provisioning.
 

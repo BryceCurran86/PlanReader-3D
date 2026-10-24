@@ -72,11 +72,11 @@ TRUSTED_MAIN_IF = "github.event_name == 'workflow_dispatch' && github.ref == 're
 # A manual-only original replay with an exact trusted-main job guard is the
 # ONLY shape whose workflow YAML may be rewritten by --apply.
 TRUSTED_WORKFLOW = LF_WORKFLOW.replace(
-    "on:\\n  pull_request:\\n    paths:\\n      - tools/x.py\\n",
-    "on: workflow_dispatch\\n",
+    "on:\n  pull_request:\n    paths:\n      - tools/x.py\n",
+    "on: workflow_dispatch\n",
 ).replace(
     "    runs-on: ubuntu-latest",
-    "    if: " + TRUSTED_MAIN_IF + "\\n    runs-on: ubuntu-latest",
+    "    if: " + TRUSTED_MAIN_IF + "\n    runs-on: ubuntu-latest",
 ).replace(
     "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
     "ref: ${{ github.sha }}",
@@ -508,7 +508,7 @@ def test_yaml_11_on_key_and_raw_duplicate_on_declarations_fail_closed(tmp_path):
     assert T._trusted_manual_main_job(path.read_text(), "needs-a")
     duplicate = TRUSTED_WORKFLOW.replace(
         "on: workflow_dispatch",
-        "on: [pull_request]\\non: workflow_dispatch",
+        "on: [pull_request]\non: workflow_dispatch",
     )
     path.write_text(duplicate, encoding="utf-8")
     assert not T._trusted_manual_main_job(path.read_text(), "needs-a")
