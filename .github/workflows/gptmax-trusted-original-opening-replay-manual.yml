@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [host, frame, receipt]
+        target: [host, frame, receipt, cache]
     steps:
       - name: Checkout trusted workflow context
         uses: actions/checkout@v4
@@ -45,6 +45,15 @@ jobs:
               approved_head=cef7e07d1df950c654fe8d8bd25d93184d3733c3
               expected_paths='docs/engineering/gptmax_g17_source_receipt_registration_20261020.md|pb_source_visibility_authority.py|tests/test_raster_opening_receipt_registration.py'
               focused_test=tests/test_raster_opening_receipt_registration.py
+              ;;
+            cache)
+              # Source-cache integrity #3405 is a separate immutable child of
+              # the already merged G17 receipt registration; pin its exact
+              # reviewed main parent, never an arbitrary PR branch or input.
+              approved_base=c491c5fb2a155a54825d639ef277218707b76327
+              approved_head=d5cdf829c135389d58a668dfdd55ccbd5834e707
+              expected_paths='.github/workflows/gptmax-g17-source-receipt-integrity.yml|docs/engineering/gptmax_g17_cached_source_integrity_20261020.md|pb_physical_opening_authority.py|tests/test_raster_opening_cached_source_integrity.py'
+              focused_test=tests/test_raster_opening_cached_source_integrity.py
               ;;
             *)
               echo "::error::Unknown source replay target"
