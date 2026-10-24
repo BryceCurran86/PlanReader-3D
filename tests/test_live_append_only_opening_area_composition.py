@@ -324,8 +324,11 @@ def test_reproved_append_refuses_source_alias_and_stale_dependents(original_clai
             dc_replace(amended, opening_count_quantity_evidence=counted_claim.opening_count_quantity_evidence),
             workspace_id=1, project_id="source-project", source_reproved_append_only=True,
         )
-    old = amended.canonical_openings[0]
-    fresh = amended.canonical_openings[1]
+    # Select the two ACTUALLY measured physical identities. Original source
+    # production may also carry unmeasured canonical opening candidates.
+    by_id = {o.canonical_opening_id: o for o in amended.canonical_openings}
+    old = by_id[amended.opening_quantity_evidence[0].input_entity_ids[0]]
+    fresh = by_id[amended.opening_quantity_evidence[1].input_entity_ids[0]]
     copied = dc_replace(
         fresh,
         source_observation_ids=old.source_observation_ids,
@@ -336,7 +339,11 @@ def test_reproved_append_refuses_source_alias_and_stale_dependents(original_clai
     # guard rather than failing a simple quantity-to-opening-dict comparison.
     q = _opening_quantity(copied)
     forged = dc_replace(
-        amended, canonical_openings=(old, copied),
+        amended,
+        canonical_openings=tuple(
+            copied if o.canonical_opening_id == fresh.canonical_opening_id else o
+            for o in amended.canonical_openings
+        ),
         opening_quantity_evidence=(amended.opening_quantity_evidence[0], q),
     )
     with pytest.raises(SourceClosedRunConflictError, match="reuses earlier physical"):
