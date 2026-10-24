@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -25,9 +26,22 @@ def test_untouched_inputs_publish_all_three_exclusive_outputs(tmp_path: Path):
         inputs=inputs, expected_input_hashes=snapshot,
     )
 
-    assert [json.loads(path.read_text(encoding="utf-8")) for path in outputs] == [
-        {"mapping": 1}, {"activation": 1}, {"score": None},
-    ]
+    saved_map, saved_receipt, saved_report = (
+        json.loads(path.read_text(encoding="utf-8")) for path in outputs
+    )
+    assert saved_map == {"mapping": 1}
+    assert saved_report == {"score": None}
+    # The final receipt is the commit marker, not a verbatim copy of the
+    # caller's activation payload. Verify both exact on-disk byte digests.
+    assert saved_receipt["activation"] == 1
+    assert saved_receipt["activation_commit_marker_version"] == (
+        module.ACTIVATION_COMMIT_MARKER_VERSION
+    )
+    assert saved_receipt["identity_map_sha256"] == sha256(outputs[0].read_bytes()).hexdigest()
+    assert saved_receipt["exact_report_sha256"] == sha256(outputs[2].read_bytes()).hexdigest()
+    assert saved_receipt["identity_map_project_id"] is None
+    assert saved_receipt["identity_map_source_sha256s"] is None
+    assert module.read_committed_guarded_exact_report(*outputs) == {"score": None}
     assert original.read_text(encoding="utf-8") == '{"source":"immutable"}'
 
 
@@ -72,7 +86,9 @@ def test_changed_source_input_during_hardlinks_rolls_back_outputs(
             outputs, ({"map": True}, {"receipt": True}, {"score": None}),
             inputs=inputs, expected_input_hashes=snapshot,
         )
-    assert len(calls) == 3
+    # The changed input must fail closed immediately after the FIRST map link;
+    # continuing to publish a report or marker would violate crash safety.
+    assert len(calls) == 1
     assert all(not path.exists() and not path.is_symlink() for path in outputs)
     assert not list(tmp_path.glob(".gpt3-activation-*.tmp"))
     assert original.read_text(encoding="utf-8") == '[{"quantity_id":"replacement"}]'
@@ -89,7 +105,14 @@ def test_cli_rejects_signed_input_change_during_evaluation(
         )
     ]
     for path in inputs:
-        path.write_text("[]" if path.name == "customers.json" else "{}", encoding="utf-8")
+        if path.name == "customers.json":
+            content = "[]"
+        elif path.name == "identity-map.json":
+            # A truly empty active baseline is the only receiptless bootstrap.
+            content = '{"bindings":[]}'
+        else:
+            content = "{}"
+        path.write_text(content, encoding="utf-8")
     outputs = _outputs(tmp_path)
 
     def simulate_scoring_after_source_mutation(**_kwargs):
@@ -113,3 +136,51 @@ def test_cli_rejects_signed_input_change_during_evaluation(
     with pytest.raises(ValueError, match="input changed during scoring"):
         module.main(argv)
     assert all(not path.exists() for path in outputs)
+
+@pytest.mark.parametrize("race", ["after_map_reader", "after_report_read"])
+def test_guarded_reader_rechecks_map_after_full_report_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, race: str,
+):
+    """A modified map cannot remain ACTIVE after an earlier successful read."""
+    inputs = (tmp_path / "original.json",)
+    inputs[0].write_text('{"source":"immutable"}', encoding="utf-8")
+    outputs = _outputs(tmp_path)
+    module._write_triplet(
+        outputs, ({"mapping": 1}, {"activation": 1}, {"score": None}),
+        inputs=inputs,
+    )
+    original_receipt = outputs[1].read_bytes()
+    original_report = outputs[2].read_bytes()
+    mutated_map = b'{"mapping":999}\n'
+    if race == "after_map_reader":
+        actual_reader = module.read_committed_active_identity_map
+
+        def replace_after_initial_verification(*args, **kwargs):
+            verified = actual_reader(*args, **kwargs)
+            outputs[0].write_bytes(mutated_map)
+            return verified
+
+        monkeypatch.setattr(
+            module, "read_committed_active_identity_map",
+            replace_after_initial_verification,
+        )
+    else:
+        actual_read_bytes = Path.read_bytes
+        tampered = False
+
+        def replace_after_report_bytes(path):
+            nonlocal tampered
+            data = actual_read_bytes(path)
+            if path == outputs[2] and not tampered:
+                outputs[0].write_bytes(mutated_map)
+                tampered = True
+            return data
+
+        monkeypatch.setattr(Path, "read_bytes", replace_after_report_bytes)
+
+    with pytest.raises(ValueError, match="guarded exact report.*map.*changed"):
+        module.read_committed_guarded_exact_report(*outputs)
+    assert outputs[0].read_bytes() == mutated_map
+    assert outputs[1].read_bytes() == original_receipt
+    assert outputs[2].read_bytes() == original_report
+    assert inputs[0].read_text(encoding="utf-8") == '{"source":"immutable"}'

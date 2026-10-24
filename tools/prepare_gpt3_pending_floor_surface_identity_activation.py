@@ -17,6 +17,16 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
+from tools.report_gpt3_four_project_evidence import (
+    _read_json_without_duplicate_keys,
+)
+from tools.gpt3_atomic_pending_activation_pair import (
+    preflight_new_activation_pair, source_input_snapshot,
+    publish_new_activation_pair, read_committed_active_identity_map,
+)
 
 _PACKAGE_DIR = (
     Path(__file__).resolve().parents[1]
@@ -49,14 +59,16 @@ def _clean(value: object) -> str:
 
 
 def _object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    # The same strict reader as the guarded scorer: a duplicate JSON key would
+    # otherwise silently keep the last claim before any source/identity proof.
+    value = _read_json_without_duplicate_keys(path)
     if not isinstance(value, dict):
         raise TypeError(f"{path} must contain a JSON object")
     return value
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _read_json_without_duplicate_keys(path)
     if not isinstance(value, list) or any(
         not isinstance(row, dict) for row in value
     ):
@@ -298,9 +310,13 @@ def build_floor_surface_activation(
     )
 
     active_items = {binding.benchmark_item_id for binding in active.bindings}
+    # A floor can have an independently mapped floor_area and
+    # floor_finish_area. Only an existing finish mapping competes with
+    # this source-signed floor-finish activation.
     active_entities = {
         ref
         for binding in active.bindings
+        if binding.production_family == "floor_finish_area"
         for ref in binding.production_object_identity_refs
     }
     sealed_by_canonical = {}
@@ -349,6 +365,26 @@ def build_floor_surface_activation(
         unit = frozen_item.get("unit")
         if type(unit) is not str or quantity.unit != unit:
             raise ValueError("sealed floor quantity unit does not match frozen item")
+        # Floor identity and m2 do not authenticate its construction trade.
+        # Only the actual signed source material owner authorizes TILE for
+        # a frozen tiling target; no FT3-label or expected-area inference.
+        original_finish_parts = quantity.semantic_key.split(":")
+        if (
+            len(original_finish_parts) != 4
+            or original_finish_parts[0] != "floor_finish_area"
+            or original_finish_parts[1] != canonical
+            or any(not part or part != part.strip() for part in original_finish_parts)
+        ):
+            raise ValueError(
+                "source-signed floor finish semantic identity incomplete at activation"
+            )
+        if (
+            frozen_item.get("trade_category") == "tiling"
+            and original_finish_parts[3] != "tile"
+        ):
+            raise ValueError(
+                "original source finish is not tile for frozen tiling identity"
+            )
 
         frozen_object = frozen.get(object_ref)
         if frozen_object is None:
@@ -432,6 +468,13 @@ def build_floor_surface_activation(
         ] + additions,
     }
     identity_map_from_dict(output)
+    # Same exact signed family/trade veto as the four-project reporter and
+    # guarded V2 scorer, before any externally visible activation receipt.
+    require_signed_v2_family_trade_integrity(
+        verified_items=source_manifest["verified_takeoff_items"],
+        sealed_quantities=sealed.quantities,
+        identity_bindings=output["bindings"],
+    )
 
     receipt = {
         "project_id": sealed.project_id,
@@ -453,31 +496,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--customer-rows", type=Path, required=True)
     parser.add_argument("--active-identity-map", type=Path, required=True)
+    parser.add_argument("--active-identity-receipt", type=Path)
     parser.add_argument("--source-manifest", type=Path, required=True)
     parser.add_argument("--source-identity-proof", type=Path, required=True)
     parser.add_argument("--object-universe", type=Path, required=True)
     parser.add_argument("--output-map", type=Path, required=True)
     parser.add_argument("--output-receipt", type=Path, required=True)
     args = parser.parse_args(argv)
+    inputs = (
+        args.pending_ledger, args.sealed_run, args.customer_rows,
+        args.active_identity_map, args.source_manifest,
+        args.source_identity_proof, args.object_universe,
+    )
+    if args.active_identity_receipt is not None:
+        inputs += (args.active_identity_receipt,)
+    outputs = (args.output_map, args.output_receipt)
+    # Source and frozen collisions must be caught BEFORE reading any untrusted
+    # source/identity content, never after a signed handoff has been built.
+    preflight_new_activation_pair(outputs, inputs=inputs)
+    before = source_input_snapshot(inputs)
 
     output, receipt = build_floor_surface_activation(
         pending_ledger=_object(args.pending_ledger),
         sealed_run_payload=_object(args.sealed_run),
         customer_rows=_rows(args.customer_rows),
-        active_identity_map_payload=_object(args.active_identity_map),
+        active_identity_map_payload=read_committed_active_identity_map(
+            args.active_identity_map, receipt_path=args.active_identity_receipt,
+        ),
         source_manifest=_object(args.source_manifest),
         source_identity_proof=_object(args.source_identity_proof),
         object_universe=_object(args.object_universe),
     )
-    args.output_map.parent.mkdir(parents=True, exist_ok=True)
-    args.output_receipt.parent.mkdir(parents=True, exist_ok=True)
-    args.output_map.write_text(
-        json.dumps(output, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    args.output_receipt.write_text(
-        json.dumps(receipt, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    publish_new_activation_pair(
+        outputs, (output, receipt),
+        inputs=inputs, source_snapshot=before,
     )
     print(json.dumps(receipt, sort_keys=True))
     return 0
