@@ -90,9 +90,22 @@ def test_private_original_maryborough_native_leader_source_if_provisioned():
     loc=os.environ.get('PLANREADER_MARYBOROUGH_ORIGINAL_PDF')
     if not loc:pytest.skip('original private PDF not provided to test runner')
     b=Path(loc).read_bytes()
+    # Native block ordinals change between MuPDF extractors (61 vs 62).
+    # Locate the one source-visible figured glyph by original text AND its
+    # exact PDF glyph geometry, not by an assumed 1.26/1.28 block ordinal.
+    # This is private original-source test selection, not production authority.
+    with fitz.open(stream=b,filetype='pdf') as pdf:
+        figures=[
+            w for w in pdf[10].get_text('words')
+            if w[4]=='1000'
+            and all(abs(float(w[i])-target)<0.25 for i,target in
+                    enumerate((274.25,1359.99,292.80,1373.71)))
+        ]
+    assert len(figures)==1, 'original figured glyph not uniquely located'
+    block,line,word=map(int,figures[0][5:8])
     r=inspect_original_door_figure_leader_shadow(
         b,source_sha256=os.environ['PLANREADER_MARYBOROUGH_SOURCE_SHA256'],
-        scope=OriginalDoorLeaderScope(11,62,0,0,25698,(2843,2850),
+        scope=OriginalDoorLeaderScope(11,block,line,word,25698,(2843,2850),
             (25699,25700,25701,25702),(25703,25704,25705,25706)),
         expected_cap_x_pdf_pt=(254.87999,311.75998))
     assert r.status=='SOURCE_FIGURE_LEADER_CANDIDATE'
