@@ -585,3 +585,45 @@ def test_unpadded_d3_outside_table_does_not_hide_authentic_rows(monkeypatch):
     assert "D3" not in result.unparsed_original_door_codes
     assert "D3" not in result.all_original_source_codes
     assert result.new_opening_counts==result.new_opening_areas_m2==0
+
+
+
+def test_noncanonical_d3_on_original_plan_remains_source_word_not_door(monkeypatch):
+    """Plan and A600 must share the canonical door code policy.
+
+    A foreign D3 detail on the plan must not create an unresolved phantom
+    schedule row or suppress valid D13/D17 source correspondence.
+    The full raw source word universe remains unchanged.
+    """
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    canonical=W(
+        observation_id="original-plan:D17",page_id="2",
+        partition_id="page:2",block_no=100,line_no=0,word_no=0,
+        literal="D17",trusted=True,
+        bbox_pdf_pts=(20.0,20.0,32.0,32.0),
+    )
+    foreign=W(
+        observation_id="original-plan:detail-D3",page_id="2",
+        partition_id="page:2",block_no=101,line_no=0,word_no=0,
+        literal="D3",trusted=True,
+        bbox_pdf_pts=(35.0,20.0,47.0,32.0),
+    )
+    source,published=_published_synthetic_original_source(
+        monkeypatch,_original_like_words(),plan_words=(foreign,canonical),
+    )
+    result=inspect_published_plan_and_schedule_door_codes(
+        source,revision_id=published.revision.revision_id,
+        plan_page_id="2",schedule_page_id="1",
+    )
+    codes={item.code:item for item in result.pairs}
+    assert "D3" not in codes
+    assert "D3" not in result.unresolved_codes
+    assert codes["D17"].source_code_correspondence_proven
+    assert codes["D17"].first_unclosed_gate=="physical_door_symbol_host_and_customer_scope_unproven"
+    assert result.source_plan_observation_universe_complete
+    assert result.source_schedule_observation_universe_complete
+    assert result.eligible_printed_code_pair_count==1
+    assert result.new_opening_counts==result.new_opening_area_quantities==0
+    assert not codes["D17"].customer_quantity_authorized
