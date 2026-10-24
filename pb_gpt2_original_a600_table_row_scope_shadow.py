@@ -17,12 +17,13 @@ import re
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_door_schedule_authority import (
     SourceDoorScheduleWord,
+    _DOOR_CODE,
+    _DOOR_LIKE_TOKEN,
     _original_source_row_candidates,
     _producer_owned_native_words,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-_DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$")
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,7 @@ def classify_original_door_table_row_scope_shadow(
     if any(w.page_id != page_id for members in blocks.values() for w in members):
         raise ValueError('source words from foreign page')
     first_code_words={block:members[0] for block,members in blocks.items()
-                      if members and _DOOR_CODE.fullmatch(members[0].literal)
+                      if members and _DOOR_LIKE_TOKEN.fullmatch(members[0].literal)
                       and members[0].line_no==0 and members[0].word_no==0}
     scopes=_find_title_and_headers(blocks)
     # Retain all original same-code words, including repeated detail labels.
@@ -156,7 +157,7 @@ def classify_original_door_table_row_scope_shadow(
     all_code_mentions=defaultdict(list)
     for block,members in blocks.items():
         for word in members:
-            if _DOOR_CODE.fullmatch(word.literal):
+            if _DOOR_LIKE_TOKEN.fullmatch(word.literal):
                 all_code_mentions[word.literal].append(word)
     for block,word in first_code_words.items():
         code_blocks[word.literal].append((block,word))
@@ -181,6 +182,8 @@ def classify_original_door_table_row_scope_shadow(
             reason='original_schedule_header_or_caption_unproven'
         elif not table:
             reason='no_source_table_row_for_code'
+        elif not _DOOR_CODE.fullmatch(code):
+            reason='noncanonical_door_code_inside_printed_table'
         elif len(table)>1:
             reason='duplicate_original_schedule_table_rows'
         elif (code,table[0]) not in parsed:
