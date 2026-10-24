@@ -9,8 +9,8 @@ import pytest
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/gpt3-trusted-original-nine-replay-manual.yml"
-APPROVED = "d8fd00584558800af0b500cbd74e082ab2095262"
-BASE = "a54599b649cf9da92b2f00caaaeeb337f12cac7e"
+APPROVED = "31439c9e4137d7f210488877cc0ab868ed7ffecb"
+BASE = "c491c5fb2a155a54825d639ef277218707b76327"
 
 
 class StrictWorkflowLoader(yaml.SafeLoader):
