@@ -1,5 +1,6 @@
 """Security contract for manual, immutable MAX original-source validation."""
 from pathlib import Path
+import re
 import yaml
 
 WORKFLOW = (
@@ -41,6 +42,8 @@ StrictLoader.yaml_implicit_resolvers = {
     key: [(tag, regex) for tag, regex in rules if tag != "tag:yaml.org,2002:bool"]
     for key, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
+
+StrictLoader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|false|True|False|TRUE|FALSE)$"), list("tTfF"))
 
 
 def _strict_mapping(loader, node):
