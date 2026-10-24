@@ -717,3 +717,77 @@ def test_openings_from_multiple_original_pages_keep_one_document_snapshot():
     quantities = publish_live_opening_area_quantities(_composition(first, second))
     assert len(quantities) == 2
     assert {q.metadata["page_no"] for q in quantities} == {"3", "11"}
+
+
+def _elevation_opening(
+    physical_id: str, *, kind: str = "window",
+    type_mark: str = "W01", frame_id: str = "elevation-frame-1",
+    area_m2: float | None = 7.2,
+) -> LiveCanonicalOpeningObject:
+    return replace(
+        _opening(
+            canonical_id=physical_id, kind=kind, area_m2=area_m2,
+            area_basis="authenticated_elevation_frame",
+            figured_area_record_id=frame_id,
+        ),
+        type_mark=type_mark,
+    )
+
+
+def test_same_original_elevation_frame_can_serve_repeated_same_type_windows():
+    first = _elevation_opening("physical-w01-a")
+    second = _elevation_opening("physical-w01-b")
+    result = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(result) == 2
+    assert {q.input_entity_ids[0] for q in result} == {
+        "physical-w01-a", "physical-w01-b",
+    }
+    assert {q.metadata["measurement_record_id"] for q in result} == {
+        "elevation-frame-1",
+    }
+
+
+@pytest.mark.parametrize(
+    "second_kind,second_type",
+    [("door", "D02"), ("window", "W02"), ("door", "W01")],
+)
+def test_original_elevation_frame_cannot_claim_incompatible_kind_or_type(
+    second_kind, second_type,
+):
+    first = _elevation_opening("physical-w01")
+    second = _elevation_opening(
+        "physical-other", kind=second_kind, type_mark=second_type,
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is not None
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        publish_live_opening_area_quantities(_composition(first, second))
+
+
+def test_unpublishable_conflicting_frame_member_cannot_hide_source_collision():
+    first = _elevation_opening("physical-w01")
+    second = _elevation_opening(
+        "physical-d02", kind="door", type_mark="D02", area_m2=None,
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is None
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        publish_live_opening_area_quantities(_composition(first, second))
+
+
+def test_independent_elevation_frame_receipts_can_serve_different_types():
+    first = _elevation_opening("physical-w01")
+    second = _elevation_opening(
+        "physical-d02", kind="door", type_mark="D02",
+        frame_id="elevation-frame-d02",
+    )
+    result = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(result) == 2
+    assert {q.metadata["opening_kind"] for q in result} == {"window", "door"}
+
+
+def test_figured_label_measurement_receipts_do_not_inherit_elevation_frame_conflict():
+    first = _opening(canonical_id="physical-w01")
+    second = _opening(canonical_id="physical-d02", kind="door")
+    result = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(result) == 2

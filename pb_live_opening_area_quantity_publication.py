@@ -338,6 +338,7 @@ def publish_live_opening_area_quantities(
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
     source_scope: tuple[str, str, str] | None = None
+    elevation_frame_claims: dict[str, tuple[str, str]] = {}
     for opening in composition.canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
@@ -378,6 +379,31 @@ def publish_live_opening_area_quantities(
             canonical_ids.add(canonical_id)
         if physical_id:
             physical_ids.add(physical_id)
+
+        # One source-authenticated elevation FRAME may describe several
+        # independent openings of the SAME type (e.g. repeated W01 units).
+        # It cannot be reused as authority for a different physical TYPE or
+        # door/window KIND. Check the whole inventory, including unsupported
+        # members, before filtering to commercially eligible quantities.
+        # Source root/revision equality is already enforced above.
+        if opening.area_basis == "authenticated_elevation_frame":
+            frame_id = opening.figured_area_record_id
+            if (
+                type(frame_id) is str
+                and frame_id
+                and frame_id == frame_id.strip()
+            ):
+                claim = (
+                    str(opening.opening_kind or "").strip().lower(),
+                    str(opening.type_mark or "").strip().upper(),
+                )
+                prior = elevation_frame_claims.get(frame_id)
+                if prior is not None and prior != claim:
+                    raise ValueError(
+                        "conflicting original elevation frame source receipt "
+                        "across opening kind/type"
+                    )
+                elevation_frame_claims[frame_id] = claim
 
     quantities: list[QuantityEvidence] = []
     seen_quantity_ids: set[str] = set()
