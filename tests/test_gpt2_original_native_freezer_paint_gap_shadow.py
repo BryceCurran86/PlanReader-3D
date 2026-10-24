@@ -14,7 +14,9 @@ def _pdf(*, displaced=False, thick_bridge=False, same_width=False,
          invisible_selected=False, dashed_selected=False,
          invisible_bridge=False, dashed_bridge=False,
          partial_bridge=False, endpoint_return=False,
-         unrelated_thick_wall=False):
+         unrelated_thick_wall=False, thick_rect_bridge=False,
+         unrelated_thick_rect=False, invisible_thick_rect=False,
+         dashed_thick_rect=False):
     p=fitz.open()
     for index,dx in enumerate((0.,77.76)):
         if displaced and index:dx+=10
@@ -41,6 +43,20 @@ def _pdf(*, displaced=False, thick_bridge=False, same_width=False,
             line((159.8+dx,100),(164+dx,100),.96)
         if unrelated_thick_wall and index:
             line((260+dx,100),(300+dx,100),.96)
+
+        # A solid BLACK native rectangle outline is one PyMuPDF "re" item,
+        # even when its horizontal painted edge contradicts the thick gap.
+        if (thick_rect_bridge or unrelated_thick_rect) and index:
+            left = (100. if thick_rect_bridge else 260.) + dx
+            right = (160. if thick_rect_bridge else 300.) + dx
+            d = page.new_shape()
+            d.draw_rect(fitz.Rect(left, 100., right, 104.))
+            d.finish(
+                color=(0, 0, 0), width=.96,
+                stroke_opacity=0.0 if invisible_thick_rect else 1.0,
+                dashes="[2 2] 0" if dashed_thick_rect else None,
+            )
+            d.commit()
     b=p.tobytes();p.close();return b
 
 
@@ -165,3 +181,42 @@ def test_unrelated_original_solid_thick_stroke_preserves_valid_gap():
     assert result.matching_translation == (77.76, 0.)
     assert not result.structural_wall_owned
     assert not result.firm_quantity_issued
+
+
+def test_original_thick_rectangle_outline_edges_veto_contradictory_gap():
+    # get_drawings returns ONE "re" primitive, not four "l" strokes.
+    original = _pdf(thick_rect_bridge=True)
+    with fitz.open(stream=original, filetype="pdf") as doc:
+        rects = [
+            item[0] for drawing in doc[1].get_drawings()
+            for item in drawing["items"] if item[0] == "re"
+        ]
+    assert rects
+    with pytest.raises(ValueError, match="competing original thick"):
+        _run(original)
+
+
+def test_unrelated_original_rectangle_outline_does_not_veto_gap():
+    r = _run(_pdf(unrelated_thick_rect=True))
+    assert r.status is EvidenceResolutionStatus.CANDIDATE
+    assert r.matching_translation == (77.76, 0.)
+    assert not r.structural_wall_owned and not r.firm_quantity_issued
+
+
+@pytest.mark.parametrize("style", (
+    {"invisible_thick_rect": True},
+    {"dashed_thick_rect": True},
+))
+def test_nonvisible_rectangle_outline_cannot_fake_thick_wall_conflict(style):
+    r = _run(_pdf(thick_rect_bridge=True, **style))
+    assert r.status is EvidenceResolutionStatus.CANDIDATE
+    assert not r.physical_door_owned and not r.commercial_projection_allowed
+
+
+def test_rectangle_original_source_bytes_and_translation_order_preserved():
+    raw = _pdf(unrelated_thick_rect=True)
+    digest = sha256(raw).hexdigest()
+    a = _run(raw, shifts=((77.76, 0), (43.92, 0)))
+    b = _run(raw, shifts=((43.92, 0), (77.76, 0)))
+    assert a == b
+    assert sha256(raw).hexdigest() == digest
