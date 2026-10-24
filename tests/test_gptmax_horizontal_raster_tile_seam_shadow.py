@@ -14,7 +14,7 @@ from pb_gptmax_horizontal_raster_tile_seam_shadow import (
 from pb_gptmax_raster_tile_seam_shadow import SOURCE_ONLY, ABSTAIN
 
 
-def _pdf(*, same=False, gap=0, lower_dark=True, rotation=0):
+def _pdf(*, same=False, gap=0, lower_dark=True, rotation=0, inner_gap=False):
     doc = fitz.open()
     p = doc.new_page(width=250, height=250)
     imgs = []
@@ -22,6 +22,8 @@ def _pdf(*, same=False, gap=0, lower_dark=True, rotation=0):
         im = Image.new("RGB", (100, 100), "white")
         if n == 0 or lower_dark:
             ImageDraw.Draw(im).rectangle((45, 0, 54, 99), fill="black")
+        if n == 1 and inner_gap:
+            ImageDraw.Draw(im).rectangle((45, 1, 54, 4), fill="white")
         if n == 1 and not same:
             ImageDraw.Draw(im).point((1, 1), fill="red")
         buf = BytesIO()
@@ -91,3 +93,52 @@ def test_original_elevation_3_four_panel_crosses_two_image_roots():
     assert [r["xref"] for r in report["image_roots"]] == [116, 115]
     assert not report["opening_kind_granted"]
     assert not report["elevation_plan_identity_granted"]
+
+
+def test_contiguous_scanline_uses_every_row_in_two_original_image_roots():
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    payload = _pdf()
+    report = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, expected_sha256=sha256(payload).hexdigest(),
+        page_no=1, source_x=50, seam_y=100, flank_offset_pt=7,
+    )
+    assert report["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert report["source_painted_pixel_rows"] >= 50
+    assert all(report["source_pixel_rows_per_image_root"])
+    assert report["opening_kind_granted"] is False
+
+
+def test_inner_white_stripe_refutes_connected_source_ink_despite_dark_endpoints():
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    payload = _pdf(inner_gap=True)
+    kw = dict(expected_sha256=sha256(payload).hexdigest(),
+              page_no=1, source_x=50, seam_y=100, flank_offset_pt=7)
+    assert prove_horizontal_tile_seam_source_pixels(payload, **kw)["status"] == SOURCE_ONLY
+    strong = prove_contiguous_source_ink_across_horizontal_tile_seam(payload, **kw)
+    assert strong["status"] == ABSTAIN
+    assert "contiguous_source_ink_scan_failed" in strong["reason_codes"]
+    assert strong["opening_kind_granted"] is False
+
+
+def test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles():
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    path = os.environ.get("PLANREADER_LOT16_ORIGINAL_PDF")
+    if not path or not Path(path).is_file():
+        pytest.skip("owner-private original unavailable: NOT VERIFIED")
+    original = Path(path).read_bytes()
+    report = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        original, expected_sha256=sha256(original).hexdigest(),
+        page_no=5, source_x=532.172, seam_y=210.48002,
+        flank_offset_pt=4, dpi=300,
+    )
+    assert report["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert [r["xref"] for r in report["image_roots"]] == [116, 115]
+    assert report["source_painted_pixel_rows"] == 33
+    assert report["source_pixel_rows_per_image_root"] == [17, 16]
+    assert report["elevation_plan_identity_granted"] is False
