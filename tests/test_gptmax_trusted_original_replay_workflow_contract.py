@@ -84,8 +84,8 @@ def test_manual_only_owner_main_context_never_pr_or_push():
 
 def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
     steps = _load()["jobs"]["verify"]["steps"]
-    guard_index = next(i for i, s in enumerate(steps) if s["name"].startswith("Authenticate immutable"))
-    provision_index = next(i for i, s in enumerate(steps) if s["name"].startswith("Provision original"))
+    guard_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Authenticate immutable"))
+    provision_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Provision original"))
     assert guard_index < provision_index
     guard = steps[guard_index]["run"]
     assert f"approved_base={BASE}" in guard
@@ -125,13 +125,13 @@ def test_secret_only_in_manifest_authenticated_source_provisioner():
 
 def test_real_original_requires_pass_and_archived_customer_parity():
     steps = _load()["jobs"]["verify"]["steps"]
-    source = next(step for step in steps if step["name"].startswith("Verify real original"))
+    source = next(step for step in steps if step.get("name", "").startswith("Verify real original"))
     script = source["run"]
     assert "test_original_source_appends_one_area_and_preserves_all_eight_signed_customer_bodies" in script
     assert "PLANREADER_LOT16_ORIGINAL_PDF" in source["env"]
     assert "grep -Eq" in script and " passed" in script
     assert "source-positive replay skipped" in script
-    other = next(step for step in steps if step["name"].startswith("Verify original-provisioned"))
+    other = next(step for step in steps if step.get("name", "").startswith("Verify original-provisioned"))
     assert 'python -m pytest -q --tb=no --disable-warnings "$GPTMAX_FOCUSED_TEST"' in other["run"]
     assert "grep -Eq" in other["run"]
     cleanup = steps[-1]
@@ -149,9 +149,16 @@ def test_trigger_aliases_and_duplicates_cannot_bypass_manual_only_gate():
         "on:\n  workflow_dispatch:\non:\n  pull_request:",
         "on:\n  pull_request:\ntrue:\n  workflow_dispatch:",
         "yes:\n  workflow_dispatch:",
+        "on:\n  workflow_dispatch:\n  workflow_dispatch:",
+        "on:\n  workflow_dispatch:\n1: ignored",
+        "on:\n  workflow_dispatch:\nunreviewed: ignored",
     ):
         mutated = source.replace("on:\n  workflow_dispatch:", replacement, 1)
         with pytest.raises((ValueError, KeyError, AssertionError, yaml.YAMLError)):
             data = yaml.load(mutated, Loader=StrictLoader)
             assert data["on"] == {"workflow_dispatch": None}
             assert set(data) == {"name", "on", "permissions", "concurrency", "jobs"}
+
+
+def test_strict_loader_does_not_mutate_global_safe_loader():
+    assert yaml.safe_load("on: true") == {True: True}
