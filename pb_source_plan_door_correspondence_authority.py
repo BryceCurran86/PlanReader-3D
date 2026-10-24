@@ -13,18 +13,18 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, replace
-import re
 
 from pb_source_door_schedule_authority import (
     SourceDoorScheduleResult,
     SourceDoorScheduleWord,
+    _DOOR_CODE,
     _producer_owned_native_words,
     inspect_published_door_schedule,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-_DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$")
-
+# Share the exact canonical table lexeme policy: foreign unpadded D3
+# remains in raw producer receipts but cannot become a plan-door code.
 
 @dataclass(frozen=True)
 class SourcePlanDoorCodePair:
