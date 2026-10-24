@@ -455,7 +455,7 @@ def test_contiguous_blank_tile_grid_vetoes_the_plan_frame_by_default_and_not_wit
 
 
 def test_real_text_filled_table_frame_still_vetoes_a_plan_title_with_the_flag():
-    doc, box = _table_page(plan_title=PLAN_TITLE)
+    doc, _table_box = _table_page(plan_title=PLAN_TITLE)
     assert _vector_resolved(_segment(doc)) == []
     shadow = _segment(doc, **{FLAG: True})
     assert _vector_resolved(shadow) == []
