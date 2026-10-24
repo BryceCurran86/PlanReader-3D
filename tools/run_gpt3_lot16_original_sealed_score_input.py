@@ -121,6 +121,7 @@ def run_original_lot16_sealed_handoff(
         # unchanged single-page source collector. There is no benchmark input.
         sealed = seal_live_opening_area_claim_run(
             claim, workspace_id=1, project_id=PROJECT,
+            source_reproved_append_only=recover_additional_opening_areas,
         )
         rows = project_live_opening_customer_rows(
             claim, workspace_id=1, project_id=PROJECT,
