@@ -278,20 +278,47 @@ def _trusted_manual_main_job(raw: str, job_name: str) -> bool:
     steps = job.get("steps")
     if not isinstance(steps, list):
         return False
-    checkout = next(
-        (step for step in steps
-         if isinstance(step, dict) and str(step.get("uses", "")).startswith("actions/checkout@")),
-        None,
-    )
-    if checkout is None:
+    checkouts = [
+        step for step in steps
+        if isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+    # A second checkout after token provisioning could swap in attacker-
+    # controlled PR code while the private original PDFs remain in the workspace.
+    if len(checkouts) != 1:
         return False
-    arguments = checkout.get("with") or {}
+    checkout = checkouts[0]
+    arguments = checkout.get("with", {})
     if not isinstance(arguments, dict):
         return False
-    ref = arguments.get("ref") or ""
-    return isinstance(ref, str) and ref.strip() in (
+    ref = arguments.get("ref", "")
+    if type(ref) is not str or ref.strip() not in (
         "", "main", "refs/heads/main", "${{ github.sha }}",
+    ):
+        return False
+    # Workflow-dispatch inputs and PR/event-controlled ref expressions are
+    # never acceptable for jobs receiving private source credentials.
+    untrusted = (
+        "github.event.pull_request", "github.head_ref",
+        "github.event.inputs", "inputs.", "github.event.workflow_run",
+        "github.event.client_payload", "github.event.merge_group",
     )
+    for step in steps:
+        if not isinstance(step, dict):
+            return False
+        source = str(step)
+        if any(token in source for token in untrusted):
+            return False
+        # A later shell checkout/clone/fetch would bypass the single pinned
+        # actions/checkout ref guard. Trusted replay jobs must use checked-out
+        # main code, not download arbitrary later repository code.
+        command = step.get("run")
+        if isinstance(command, str) and re.search(
+            r"(?m)(?:^|[;&|]\s*)\s*git\s+(?:clone|fetch|checkout|switch|pull)\b",
+            command,
+        ):
+            return False
+    return True
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

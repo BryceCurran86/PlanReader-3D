@@ -74,7 +74,7 @@ jobs:
       # Provisioning is inserted after checkout by the reviewed tool, only on this trusted job.
 ```
 
-A mixed event (including `pull_request`, `pull_request_target`, `push`, or `workflow_run`), an unrecognized condition or mutable action ref is rejected **before any file changes**. Dry-run output still enumerates other candidate jobs but warns they cannot be applied. Run `--apply` only after owner-created, security-reviewed trusted-main workflow and an owner-authorized original-source smoke test; this restriction deliberately means the historical mass-rollout command cannot run. Never weaken this gate to turn PR-source tests green.
+The installer also refuses a second checkout, malformed checkout-ref types, and obvious subsequent shell git checkout/clone/fetch or event-input-driven ref expressions. This static analysis is a defense in depth, **not proof that an arbitrary workflow is secure**; manually audit all commands/actions in the trusted workflow, and never execute downloaded PR-supplied code after original PDFs appear.\n\nA mixed event (including `pull_request`, `pull_request_target`, `push`, or `workflow_run`), an unrecognized condition or mutable action ref is rejected **before any file changes**. Dry-run output still enumerates other candidate jobs but warns they cannot be applied. Run `--apply` only after owner-created, security-reviewed trusted-main workflow and an owner-authorized original-source smoke test; this restriction deliberately means the historical mass-rollout command cannot run. Never weaken this gate to turn PR-source tests green.
 
 For eligible manual workflows only:
 
