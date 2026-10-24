@@ -384,14 +384,17 @@ def test_original_private_source_publisher_table_census_if_provisioned():
     }
     assert len(result.rows)==28
     assert result.new_opening_counts==result.new_opening_areas_m2==0
-    if result.original_table_row_scope_authenticated:
-        assert result.complete_source_word_universe
-        assert "D13" not in result.unparsed_original_door_codes
-        assert "D16" not in result.unparsed_original_door_codes
-        assert "D17" not in result.unparsed_original_door_codes
-        assert len(result.original_detail_code_observation_ids)>=6
-        assert all(row.status!="source_schedule_row_duplicate_code_conflict"
-                   for row in result.rows)
+    # A private-original positive must prove table membership and the
+    # COMPLETE source census, not merely a plausible 28-row lexical parse.
+    # A skipped/failed source authority gate is never a passing release test.
+    assert result.original_table_row_scope_authenticated
+    assert result.complete_source_word_universe
+    assert "D13" not in result.unparsed_original_door_codes
+    assert "D16" not in result.unparsed_original_door_codes
+    assert "D17" not in result.unparsed_original_door_codes
+    assert len(result.original_detail_code_observation_ids)>=6
+    assert all(row.status!="source_schedule_row_duplicate_code_conflict"
+               for row in result.rows)
     assert sha256(Path(loc).read_bytes()).hexdigest()==SHA
 
 
@@ -673,6 +676,11 @@ def test_private_original_a110_plan_to_a600_schedule_same_snapshot_if_provisione
     assert result.source_sha256==SHA
     assert result.snapshot_id==publication.snapshot.snapshot_id
     assert result.source_plan_observation_universe_complete
+    # The real two-sheet consumer must authenticate at least one source
+    # code pair; a zero-positive source graph is NOT an original replay pass.
+    # This remains source text correspondence, never an installed door.
+    assert result.source_schedule_observation_universe_complete
+    assert result.eligible_printed_code_pair_count > 0
     assert canonical <= {row.code for row in result.pairs}
     assert "D3" not in {row.code for row in result.pairs}
     assert all(row.opening_count is None and
