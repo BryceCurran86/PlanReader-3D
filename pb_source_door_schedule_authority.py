@@ -19,7 +19,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-_DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$")
+# Printed schedule identities require at least two numeric digits; an unpadded\n# drawing detail (e.g. D3) is retained in source receipts, not a door row.\n_DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]+)$")
 _NUMERIC = re.compile(r"^[1-9][0-9]*$")
 _MAX_ORIGINAL_WORDS = 25000
 
