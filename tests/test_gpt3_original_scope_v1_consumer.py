@@ -438,7 +438,17 @@ def test_original_scope_replay_cannot_be_disabled_or_evade_original_inputs():
     workflow_path_included = checker["workflow_path_included"]
     workflow = (root / ".github/workflows/test-gpt3-original-scope-v1-consumer.yml").read_text()
     pull_request_trigger_reaches_main(workflow)
-    replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow)
+    # The original-producer job is intentionally absent from PR runs: never
+    # inject private source credentials into untrusted PR-head code. Only
+    # this exact owner/main/manual job guard is allowed; the existing strict
+    # step and continue-on-error checks still cover every other gate.
+    trusted_guard = (
+        "    if: ${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}\\n"
+    )
+    assert workflow.count(trusted_guard) == 1
+    unguarded_for_other_checks = workflow.replace(trusted_guard, "", 1)
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(unguarded_for_other_checks)
     assert not has_paths_ignore(workflow)
     patterns = pull_request_paths(workflow)
     assert patterns is not None
@@ -461,12 +471,17 @@ def test_original_scope_replay_cannot_be_disabled_or_evade_original_inputs():
         "        if: failure()\n",
     )
     with pytest.raises(ValueError, match="condition"):
-        replay_jobs_cannot_be_disabled_or_made_non_blocking(disabled)
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(
+            disabled.replace(trusted_guard, "", 1)
+        )
     with pytest.raises(ValueError, match="does not include main"):
         pull_request_trigger_reaches_main(
             workflow.replace("    branches: [main]", "    branches: [release]")
         )
     with pytest.raises(ValueError, match="job-level"):
         replay_jobs_cannot_be_disabled_or_made_non_blocking(
-            workflow.replace("    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest", 1)
+            unguarded_for_other_checks.replace(
+                "    runs-on: ubuntu-latest",
+                "    continue-on-error: true\n    runs-on: ubuntu-latest", 1,
+            )
         )
