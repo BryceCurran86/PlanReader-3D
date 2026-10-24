@@ -444,7 +444,7 @@ def test_original_scope_replay_cannot_be_disabled_or_evade_original_inputs():
     # step and continue-on-error checks still cover every other gate.
     trusted_guard = (
         "    if: ${{ github.event_name == 'workflow_dispatch' && "
-        "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}\\n"
+        "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}\n"
     )
     assert workflow.count(trusted_guard) == 1
     unguarded_for_other_checks = workflow.replace(trusted_guard, "", 1)
