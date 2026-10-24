@@ -109,12 +109,18 @@ def diagnose_actual_window_area_gates(
     # separate from legitimate same-type repeated physical windows.
     frame_filling_kinds_by_source = defaultdict(lambda: defaultdict(set))
     for opening in openings:
+        # Source observation IDs are local to a published document snapshot.
+        # Foreign revisions may legitimately reuse a local observation ID.
+        source_scope = (
+            opening.document_id, opening.revision_id,
+            opening.source_sha256, opening.snapshot_id,
+        )
         if opening.tag_observation_id:
-            tags_by_source[opening.tag_observation_id].add(
+            tags_by_source[(*source_scope, opening.tag_observation_id)].add(
                 opening.physical_opening_id
             )
         if opening.representative_observation_id:
-            representatives_by_source[opening.representative_observation_id].add(
+            representatives_by_source[(*source_scope, opening.representative_observation_id)].add(
                 opening.physical_opening_id
             )
         if (
@@ -136,7 +142,7 @@ def diagnose_actual_window_area_gates(
             and opening.opening_kind == "window"
             and opening.type_mark
         ):
-            frame_types_by_source[opening.figured_area_record_id][
+            frame_types_by_source[(*source_scope, opening.figured_area_record_id)][
                 str(opening.type_mark).strip().upper()
             ].add(opening.physical_opening_id)
     reused_plan_tags = {
@@ -167,7 +173,9 @@ def diagnose_actual_window_area_gates(
     by_mark = {}
     for opening in openings:
         mark = str(opening.type_mark or "").strip().upper()
-        if mark in TARGETS:
+        # A different PDF's W01 is not a second original-plan instance.
+        # Same-PDF duplicate type marks remain an explicit conflict.
+        if mark in TARGETS and opening.source_sha256 == digest:
             by_mark.setdefault(mark, []).append(opening)
 
     report = []

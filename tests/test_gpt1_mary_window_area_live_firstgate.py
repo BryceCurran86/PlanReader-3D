@@ -354,3 +354,58 @@ def test_foreign_revision_d02_frame_id_cannot_create_false_w06_conflict():
     )
     assert result["windows"][3]["quantity_id"] == window_quantity.quantity_id
     assert result["benchmark_score_granted"] is False
+
+@pytest.mark.parametrize("foreign_field,foreign_value", [
+    ("document_id", "other-independent-document"),
+    ("revision_id", "other-independent-revision"),
+    ("snapshot_id", "other-independent-snapshot"),
+    ("source_sha256", "f" * 64),
+])
+def test_local_tag_representative_and_type_frame_ids_are_scoped_to_source(
+    foreign_field, foreign_value,
+):
+    pdf, w01, q01, w02, _q02 = _two_source_issued_distinct_window_case()
+    # A different source can reuse all local tag/representative/frame IDs.
+    # This is not proof that the original W01 stole another opening's ink.
+    foreign = replace(
+        w02, **{foreign_field: foreign_value},
+        tag_observation_id=w01.tag_observation_id,
+        representative_observation_id=w01.representative_observation_id,
+        source_observation_ids=w01.source_observation_ids,
+        figured_area_record_id=w01.figured_area_record_id,
+        evidence_ids=tuple(dict.fromkeys((*w02.evidence_ids, *w01.evidence_ids))),
+    )
+    q02 = _opening_quantity(foreign)
+    assert q02 is not None
+    report = _run(pdf, _claim((w01, foreign), (q01, q02)))
+    assert report["windows"][0]["first_missing_gate"] == (
+        "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED"
+    )
+    assert report["windows"][0]["quantity_id"] == q01.quantity_id
+    assert report["benchmark_score_granted"] is False
+
+
+def test_foreign_pdf_same_type_mark_is_not_second_original_plan_instance():
+    pdf, w01, q01, w02, _q02 = _two_source_issued_distinct_window_case()
+    foreign = replace(w02, source_sha256="e" * 64, type_mark="W01")
+    foreign_quantity = _opening_quantity(foreign)
+    assert foreign_quantity is not None
+    report = _run(pdf, _claim((w01, foreign), (q01, foreign_quantity)))
+    assert report["windows"][0]["first_missing_gate"] == (
+        "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED"
+    )
+    assert report["windows"][0]["quantity_id"] == q01.quantity_id
+    assert report["benchmark_score_granted"] is False
+
+
+def test_same_source_duplicate_type_mark_still_abstains():
+    pdf, w01, q01, w02, _q02 = _two_source_issued_distinct_window_case()
+    duplicate = replace(w02, type_mark="W01")
+    q02 = _opening_quantity(duplicate)
+    assert q02 is not None
+    report = _run(pdf, _claim((w01, duplicate), (q01, q02)))
+    assert report["windows"][0]["first_missing_gate"] == (
+        "physical_type_mark_binding_conflict"
+    )
+    assert report["windows"][0]["quantity_id"] is None
+    assert report["benchmark_score_granted"] is False
