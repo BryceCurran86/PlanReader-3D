@@ -1,5 +1,4 @@
 """Only actual live publisher output counts; original words are not authority."""
-from dataclasses import replace
 from hashlib import sha256
 
 import fitz
@@ -7,8 +6,6 @@ import pytest
 
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import EvidenceResolutionStatus
-from tests.test_gpt1_opening_area_actual_issuer_preflight_shadow import _typed
-from tests.test_gptmax_lot16_host_frame_gpt1_handoff import fixture
 from tools.diag_gpt1_mary_window_area_live_firstgate import (
     TARGETS, diagnose_actual_window_area_gates,
 )
@@ -33,9 +30,6 @@ def _pdf(*, duplicate=False, missing_elevation=False):
 
 
 def _claim(canonical=(), quantities=()):
-    from pb_live_physical_net_wall_integration import (
-        LiveExternalPhysicalNetWallPublication,
-    )
     # Construct an actual typed claim without authority or signed publication.
     return LivePhysicalNetWallClaim(
         status=EvidenceResolutionStatus.ABSTAINED,
