@@ -31,13 +31,42 @@ PATHS = {
 }
 
 
+class StrictLoader(yaml.SafeLoader):
+    pass
+
+
+# YAML 1.1 aliases "on", "yes", and "true" to one boolean mapping key.
+# Use YAML-1.2-style bools and reject duplicate mapping keys.
+StrictLoader.yaml_implicit_resolvers = {
+    key: [(tag, regex) for tag, regex in rules if tag != "tag:yaml.org,2002:bool"]
+    for key, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def _strict_mapping(loader, node):
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if not isinstance(key, str) or key in result:
+            raise ValueError("Non-string or repeated YAML mapping key")
+        result[key] = loader.construct_object(value_node, deep=True)
+    return result
+
+
+StrictLoader.add_constructor("tag:yaml.org,2002:map", _strict_mapping)
+
+
 def _load():
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    data = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=StrictLoader)
+    if not isinstance(data, dict):
+        raise ValueError("Workflow must be a mapping")
+    return data
 
 
 def test_manual_only_owner_main_context_never_pr_or_push():
     data = _load()
-    assert data.get(True, data.get("on")) == {"workflow_dispatch": None}
+    assert data["on"] == {"workflow_dispatch": None}
+    assert set(data) == {"name", "on", "permissions", "concurrency", "jobs"}
     assert data["permissions"] == {"contents": "read"}
     assert tuple(data["jobs"]) == ("verify",)
     job = data["jobs"]["verify"]
@@ -106,3 +135,20 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     assert cleanup["if"] == "always()"
     assert "rm -rf documents/sources" in cleanup["run"]
     assert "rm -f" in cleanup["run"]
+
+
+def test_trigger_aliases_and_duplicates_cannot_bypass_manual_only_gate():
+    import pytest
+
+    source = WORKFLOW.read_text(encoding="utf-8")
+    for replacement in (
+        "on:\n  workflow_dispatch:\n  pull_request:",
+        "on:\n  workflow_dispatch:\non:\n  pull_request:",
+        "on:\n  pull_request:\ntrue:\n  workflow_dispatch:",
+        "yes:\n  workflow_dispatch:",
+    ):
+        mutated = source.replace("on:\n  workflow_dispatch:", replacement, 1)
+        with pytest.raises((ValueError, KeyError, AssertionError, yaml.YAMLError)):
+            data = yaml.load(mutated, Loader=StrictLoader)
+            assert data["on"] == {"workflow_dispatch": None}
+            assert set(data) == {"name", "on", "permissions", "concurrency", "jobs"}
