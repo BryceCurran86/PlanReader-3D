@@ -17,7 +17,14 @@ def _contract(document):
     jobs = document["jobs"]
     public = jobs["full-regressions"]
     assert public["env"][POLICY] == "skip_missing_in_public_ci"
-    assert public["env"]["PYTHONPYCACHEPREFIX"] == "${{ runner.temp }}/planreader-pycache"
+    assert "PYTHONPYCACHEPREFIX" not in public["env"]
+    assert all("${{ runner." not in str(value) for value in public["env"].values())
+    # The runner context exists only after job dispatch, at step scope.
+    cache_steps = [step for step in public["steps"] if step.get("name") in
+                   ("Integrity and provider isolation", "Full regression suite")]
+    assert len(cache_steps) == 2
+    assert all(step.get("env", {}).get("PYTHONPYCACHEPREFIX") ==
+               "${{ runner.temp }}/planreader-pycache" for step in cache_steps)
     assert public["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
     assert public["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
     scripts = [step.get("run", "") for step in public["steps"]]
@@ -44,17 +51,21 @@ def test_public_regressions_match_required_ci_without_skipping_source_jobs(workf
     _contract(document)
 
 
-@pytest.mark.parametrize("damage", ("local_cache", "bytecode", "source_policy", "narrow_tests"))
+@pytest.mark.parametrize("damage", ("local_cache", "bytecode", "source_policy", "narrow_tests", "job_runner_context", "missing_test_cache"))
 def test_regression_contract_rejects_archive_pollution_and_false_source_pass(damage):
     document = yaml.safe_load((ROOT / ".github/workflows" / WORKFLOWS[0]).read_text())
     damaged = deepcopy(document)
     public = damaged["jobs"]["full-regressions"]
     if damage == "local_cache":
-        public["env"]["PYTHONPYCACHEPREFIX"] = "docs/engineering/cache"
+        next(s for s in public["steps"] if s.get("name") == "Integrity and provider isolation")["env"]["PYTHONPYCACHEPREFIX"] = "docs/engineering/cache"
     elif damage == "bytecode":
         public["env"].pop("PYTHONDONTWRITEBYTECODE")
     elif damage == "source_policy":
         damaged["jobs"]["source-proof"].setdefault("env", {})[POLICY] = "skip_missing_in_public_ci"
+    elif damage == "job_runner_context":
+        public["env"]["PYTHONPYCACHEPREFIX"] = "${{ runner.temp }}/planreader-pycache"
+    elif damage == "missing_test_cache":
+        next(s for s in public["steps"] if s.get("name") == "Full regression suite")["env"].pop("PYTHONPYCACHEPREFIX")
     else:
         for step in public["steps"]:
             if "pytest" in step.get("run", ""):
