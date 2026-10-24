@@ -412,3 +412,102 @@ def test_abstained_original_physical_member_must_retain_complete_evidence_roster
             ),
             source,
         )
+
+def _append_only_original_source_fixture(*, same_snapshot=False,
+                                         same_physical=False,
+                                         same_observation=False,
+                                         foreign_revision=False):
+    """Generate TWO original source-producer ledgers, not a mixed fake queue."""
+    from copy import deepcopy
+    from tools.diag_gptmax_lot16_host_frame_gpt1_handoff import (
+        assess_gpt1_opening_candidates,
+    )
+    from tests.test_gptmax_lot16_host_frame_gpt1_handoff import ROOT, VIEW
+
+    old_rows, old_c = _original_case()
+    old_rows[2]["quantity_id"] = "historical-source-sealed-area"
+    old_source = run(old_rows, old_c)
+    old_typed = _typed(old_c)
+    new_rows, new_c = _original_case()
+    renamed = {
+        "source_snapshot_example": (
+            "source_snapshot_example" if same_snapshot else "new_original_source_snapshot"
+        ),
+        "source-own-1": (
+            "source-own-1" if same_observation else "new-source-observation"
+        ),
+        "figured": "new-figured",
+        "figured-word-3": "new-figured-word",
+        "binding-3": "new-binding-3",
+        "frame-3": "new-frame-3",
+        "binding-2": "new-binding-2",
+        "physical-1": "physical-1" if same_physical else "fresh-physical-1",
+        "physical-2": "physical-2" if same_physical else "fresh-physical-2",
+        "physical-3": "physical-3" if same_physical else "fresh-physical-3",
+        "source_revision_example": (
+            "foreign_original_revision" if foreign_revision else "source_revision_example"
+        ),
+    }
+    def rename(obj):
+        if isinstance(obj, dict):
+            return {key: rename(value) for key, value in obj.items()}
+        if isinstance(obj, (tuple, list)):
+            values = [rename(item) for item in obj]
+            return tuple(values) if isinstance(obj, tuple) else values
+        if type(obj) is str:
+            return renamed.get(obj, obj)
+        return obj
+    new_rows = rename(deepcopy(new_rows))
+    new_c = rename(deepcopy(new_c))
+    alt_root = rename(ROOT)
+    new_source = assess_gpt1_opening_candidates(
+        new_rows, new_c, VIEW, source_root=alt_root,
+    )
+    new_typed = _typed(new_c)
+    return old_typed, old_source, new_typed, new_source
+
+
+def test_explicit_two_original_snapshot_scopes_preserve_strict_individual_reviews():
+    from pb_gpt1_opening_area_actual_issuer_preflight_shadow import (
+        reconcile_gpt1_append_only_area_review_scopes,
+    )
+    original, old_source, additional, new_source = _append_only_original_source_fixture()
+    # The existing verifier stays single-snapshot; only this scoped read-only
+    # comparison is allowed and still signs NOTHING.
+    result = reconcile_gpt1_append_only_area_review_scopes(
+        original, old_source, additional, new_source,
+        source_reproved_append_only=True,
+    )
+    assert result["status"] == "UNPUBLISHED_GPT1_APPEND_ONLY_TWO_SOURCE_SCOPE_REVIEW"
+    assert result["historical_review"]["source_review_issuer_compatible_ids"] == []
+    assert result["additional_review"]["source_review_issuer_compatible_ids"] == [
+        "fresh-physical-3"
+    ]
+    assert result["historical_snapshot_id"] != result["additional_snapshot_id"]
+    assert result["measurement_published"] is False
+    assert result["customer_seal_granted"] is False
+    assert result["signed_customer_retention_verified"] is False
+    assert result["benchmark_score_granted"] is False
+
+
+@pytest.mark.parametrize("tamper,expected_error", [
+    ({}, "explicit source-reproved"),
+    ({"same_snapshot": True}, "snapshot conflict"),
+    ({"same_physical": True}, "physical opening/source observation alias"),
+    ({"same_observation": True}, "physical opening/source observation alias"),
+    ({"foreign_revision": True}, "document/revision/snapshot conflict"),
+])
+def test_append_only_review_refuses_unapproved_foreign_or_aliased_scopes(
+    tamper, expected_error,
+):
+    from pb_gpt1_opening_area_actual_issuer_preflight_shadow import (
+        reconcile_gpt1_append_only_area_review_scopes,
+    )
+    old, old_source, new, new_source = _append_only_original_source_fixture(
+        **tamper,
+    )
+    with pytest.raises(ValueError, match=expected_error):
+        reconcile_gpt1_append_only_area_review_scopes(
+            old, old_source, new, new_source,
+            source_reproved_append_only=bool(tamper),
+        )

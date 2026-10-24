@@ -222,3 +222,99 @@ def reconcile_gpt1_area_review_with_issuer(
         "benchmark_score_granted": False,
         "shadow_only": True,
     }
+
+
+def reconcile_gpt1_append_only_area_review_scopes(
+    historical_composition: LivePhysicalOpeningVoidComposition,
+    historical_source_queue: Mapping[str, Any],
+    additional_composition: LivePhysicalOpeningVoidComposition,
+    additional_source_queue: Mapping[str, Any],
+    *,
+    source_reproved_append_only: bool = False,
+) -> dict[str, Any]:
+    """Read-only comparison of two independently source-reproved snapshots.
+
+    The single-snapshot verifier above is NEVER weakened. This opt-in path
+    cannot mint, sign, combine or project any quantities; downstream signing
+    must separately authenticate and seal each snapshot and prove historical
+    whole-body customer retention before any scored publication.
+    """
+    if source_reproved_append_only is not True:
+        raise ValueError("explicit source-reproved append-only review required")
+    historical = reconcile_gpt1_area_review_with_issuer(
+        historical_composition, historical_source_queue
+    )
+    additional = reconcile_gpt1_area_review_with_issuer(
+        additional_composition, additional_source_queue
+    )
+    historic_objects = historical_composition.canonical_openings
+    new_objects = additional_composition.canonical_openings
+    if not historic_objects or not new_objects:
+        raise ValueError("two complete nonempty source scopes required")
+    old_root = (
+        historic_objects[0].document_id,
+        historic_objects[0].revision_id,
+        historic_objects[0].source_sha256,
+    )
+    new_root = (
+        new_objects[0].document_id,
+        new_objects[0].revision_id,
+        new_objects[0].source_sha256,
+    )
+    old_snapshot = historic_objects[0].snapshot_id
+    new_snapshot = new_objects[0].snapshot_id
+    if (
+        old_root != new_root
+        or not all(type(x) is str and x and x == x.strip() for x in old_root)
+        or not old_snapshot or not new_snapshot
+        or old_snapshot == new_snapshot
+    ):
+        raise ValueError("append-only original document/revision/snapshot conflict")
+    # Scope-local reviewers above already checked one complete inventory and
+    # exactly one source snapshot per scope. Cross-scope source reproof must
+    # not alias the SAME physical opening or source observation under a new
+    # snapshot. Treat both previously signed and still-abstained members as
+    # equally identity-bearing.
+    old_physical = {x.physical_opening_id for x in historic_objects}
+    new_physical = {x.physical_opening_id for x in new_objects}
+    old_observations = {
+        oid for x in historic_objects for oid in x.source_observation_ids
+    }
+    new_observations = {
+        oid for x in new_objects for oid in x.source_observation_ids
+    }
+    if (
+        old_physical & new_physical
+        or old_observations & new_observations
+        or not old_observations or not new_observations
+    ):
+        raise ValueError("append-only physical opening/source observation alias")
+    old_decisions = historical_source_queue["opening_decisions"]
+    new_decisions = additional_source_queue["opening_decisions"]
+    if (
+        not any(row.get("prior_signed_quantity_id") for row in old_decisions)
+        or any(row.get("prior_signed_quantity_id") for row in new_decisions)
+        or historical["source_review_issuer_compatible_ids"]
+        or not additional["source_review_issuer_compatible_ids"]
+        or historical_source_queue.get("original_signed_area_quantities") != sum(
+            bool(row.get("prior_signed_quantity_id")) for row in old_decisions
+        )
+        or additional_source_queue.get("original_signed_area_quantities") != 0
+    ):
+        raise ValueError("historical signed/append candidate scope contract missing")
+    return {
+        "status": "UNPUBLISHED_GPT1_APPEND_ONLY_TWO_SOURCE_SCOPE_REVIEW",
+        "original_document_id": old_root[0],
+        "source_sha256": old_root[2],
+        "revision_id": old_root[1],
+        "historical_snapshot_id": old_snapshot,
+        "additional_snapshot_id": new_snapshot,
+        "historical_review": historical,
+        "additional_review": additional,
+        "measurement_published": False,
+        "customer_seal_granted": False,
+        "opening_count_granted": False,
+        "benchmark_score_granted": False,
+        "signed_customer_retention_verified": False,
+        "shadow_only": True,
+    }
