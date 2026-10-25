@@ -4,10 +4,14 @@ A source-authenticated figure/leader pair is not a physical W4 doorway, a
 measurement scale, a floor threshold or a FIRM construction quantity.
 """
 from __future__ import annotations
+from collections import Counter
 from dataclasses import dataclass, asdict
 from hashlib import sha256
 from math import isfinite
 import fitz
+from pb_native_text_render_authority import (
+    PROVEN_RENDERED, extract_native_text_render_evidence,
+)
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,64 @@ def _native_line(page, drawings, n: int):
     return vals
 
 
+def _require_visible_original_figure_word(page, word, expected: str) -> None:
+    """Fail closed unless the decoded word is covered by visible native glyph ink.
+
+    A PyMuPDF word may be invisible (PDF text render mode 3). Texttrace spans
+    can contain *several* words, and even reverse their character order:
+    resolve the exact glyph subset by its source word bbox, never by
+    span-level string equality, first span, or a nearest-text guess.
+    This is negative-only appearance evidence, not Unicode/font authority.
+    """
+    box = tuple(float(v) for v in word[:4])
+    if not all(isfinite(v) for v in box) or box[0] >= box[2] or box[1] >= box[3]:
+        raise ValueError('figured text source glyph bounds invalid')
+    try:
+        traces = tuple(page.get_texttrace())
+        bboxlog = tuple(page.get_bboxlog())
+        render = extract_native_text_render_evidence(page)
+    except Exception as exc:
+        raise ValueError('figured text native render evidence unavailable') from exc
+    render_by_seq = {}
+    for receipt in render:
+        seq = receipt.sequence_number
+        if seq is None or seq in render_by_seq:
+            raise ValueError('figured text native render sequence ambiguous')
+        render_by_seq[seq] = receipt
+    selected = []
+    for trace in traces:
+        seq = trace.get('seqno')
+        for glyph in trace.get('chars') or ():
+            try:
+                codepoint, glyph_id, _origin, raw_box = glyph
+                glyph_box = tuple(float(v) for v in raw_box)
+                if (len(glyph_box) != 4 or not all(isfinite(v) for v in glyph_box)
+                        or glyph_box[0] >= glyph_box[2] or glyph_box[1] >= glyph_box[3]):
+                    raise ValueError('invalid glyph bounds')
+                centre_x = (glyph_box[0] + glyph_box[2]) / 2
+                centre_y = (glyph_box[1] + glyph_box[3]) / 2
+            except (TypeError, ValueError, IndexError) as exc:
+                raise ValueError('figured text glyph integrity unresolved') from exc
+            if not (box[0] - .1 <= centre_x <= box[2] + .1
+                    and box[1] - .1 <= centre_y <= box[3] + .1):
+                continue
+            receipt = render_by_seq.get(seq)
+            if (type(seq) is not int or not 0 <= seq < len(bboxlog)
+                    or bboxlog[seq][0] not in ('fill-text', 'stroke-text')
+                    or receipt is None or not receipt.render_eligible
+                    or receipt.render_state != PROVEN_RENDERED):
+                raise ValueError('figured text is not visibly painted original glyph ink')
+            if (type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff
+                    or type(glyph_id) is not int or glyph_id < 0):
+                raise ValueError('figured text glyph identity unresolved')
+            selected.append((chr(codepoint), glyph_box))
+    if len(selected) != len(expected) or Counter(char for char, _ in selected) != Counter(expected):
+        raise ValueError('figured text exact source glyph coverage unavailable')
+    if (abs(min(b[0] for _, b in selected) - box[0]) > .5
+            or abs(max(b[2] for _, b in selected) - box[2]) > .5):
+        raise ValueError('figured text native glyph geometry disagrees with source word')
+
+
 def inspect_original_door_figure_leader_shadow(original_pdf_bytes:bytes, *,
     source_sha256:str, scope:OriginalDoorLeaderScope,
     expected_cap_x_pdf_pt:tuple[float,float],
@@ -104,6 +166,7 @@ def inspect_original_door_figure_leader_shadow(original_pdf_bytes:bytes, *,
                (scope.text_block,scope.text_line,scope.text_word)]
         if len(words)!=1 or words[0][4] != expected_figured_word or not expected_figured_word.isdigit():
             raise ValueError('exact figured dimension original word unavailable')
+        _require_visible_original_figure_word(pg, words[0], expected_figured_word)
         rivals=tuple(sorted(w[4] for w in pg.get_text('words') if
             w[5]==scope.text_block and w[6]==scope.text_line and w[7]!=scope.text_word))
         drawings=pg.get_drawings()

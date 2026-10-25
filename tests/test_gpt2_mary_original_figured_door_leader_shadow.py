@@ -11,7 +11,8 @@ from pb_gpt2_mary_original_figured_door_leader_shadow import (
 
 def _fixture(*,missing_tick=False, wrong_figure=False, shifted_cap=False,
              far_figure=False, invisible_baseline=False, dashed_tick=False,
-             translucent_cap=False):
+             translucent_cap=False, invisible_figure=False,
+             white_figure=False, later_overpaint=False, partial_overpaint=False):
     pdf=fitz.open();page=pdf.new_page(width=700,height=700)
     def line(p,q,*,opacity=1.0,dashes=None):
         d=page.new_shape();d.draw_line(fitz.Point(*p),fitz.Point(*q))
@@ -27,7 +28,13 @@ def _fixture(*,missing_tick=False, wrong_figure=False, shifted_cap=False,
         line((x,150),(x,138))
         line((x,150),(x,160))
     page.insert_text((350,350) if far_figure else (145,160),
-                     '70' if wrong_figure else '1000',fontsize=11)
+                     '70' if wrong_figure else '1000',fontsize=11,
+                     render_mode=3 if invisible_figure else 0,
+                     color=(1,1,1) if white_figure else (0,0,0))
+    if later_overpaint:
+        page.draw_rect(fitz.Rect(144,147,171,165), color=None, fill=(1,1,1))
+    if partial_overpaint:
+        page.draw_rect(fitz.Rect(153,152,159,159), color=None, fill=(1,1,1))
     data=pdf.tobytes();pdf.close()
     return data,OriginalDoorLeaderScope(1,0,0,0,0,(1,2),(3,4,5,6),(7,8,9,10))
 
@@ -148,3 +155,28 @@ def test_original_native_dimension_paint_must_have_finite_black_channels(foreign
         _native_line(None,[native],0)
     actual=dict(native,color=(0.0,0.0,0.0))
     assert _native_line(None,[actual],0)==(20.0,30.0,40.0,30.0,0.48)
+
+
+@pytest.mark.parametrize("source_style", [
+    {"invisible_figure": True},
+    {"white_figure": True},
+    {"later_overpaint": True},
+    {"partial_overpaint": True},
+])
+def test_invisible_or_occluded_original_figure_cannot_be_source_authenticated(source_style):
+    source, scope = _fixture(**source_style)
+    with pytest.raises(ValueError, match="figured text"):
+        _run(source, scope)
+
+
+def test_source_figure_native_word_and_trace_may_share_span_with_foreign_70():
+    """Private original p11 uses one texttrace for 1000 and the distinct 70.
+
+    The SHA-gated original test above exercises the exact real word; this
+    source-neutral regression preserves the subspan requirement without
+    relying on source-private PDF bytes in public CI.
+    """
+    source, scope = _fixture()
+    with fitz.open(stream=source, filetype='pdf') as pdf:
+        assert any(t['type'] == 0 and t['opacity'] == 1 for t in pdf[0].get_texttrace())
+    assert _run(source, scope).status == 'SOURCE_FIGURE_LEADER_CANDIDATE'
