@@ -647,3 +647,87 @@ def test_floor_finish_canonical_page_rejects_untyped_or_trimmed_aliases(alias):
             workspace_id=1,
             project_id="project-1",
         )
+
+
+@pytest.mark.parametrize("stolen_identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+def test_original_abstained_source_claim_cannot_fund_new_firm_floor_finish(
+    stolen_identity,
+):
+    """A failed physical claimant still owns a competing original source mark."""
+    firm = _quantity()
+    rival_meta = dict(firm.metadata)
+    other_key = (
+        "finish_occurrence_evidence_id"
+        if stolen_identity == "finish_occurrence_record_id"
+        else "finish_occurrence_record_id"
+    )
+    rival_meta[other_key] = "originally-independent-source-receipt"
+    denied = replace(
+        firm, quantity_id="floor-finish-original-abstained-rival",
+        abstained=True, value=None,
+        blocking_reasons=("original_room_identity_ambiguous",),
+        metadata=rival_meta,
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(firm, denied),
+    )
+    for produce in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original material source owner contested by an abstained quantity",
+        ):
+            produce(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("foreign_field,foreign_value", (
+    ("source_sha256", "b"*64),
+    ("revision_id", "independent-original-revision"),
+))
+def test_foreign_source_abstained_receipt_not_a_false_finish_collision(
+    foreign_field, foreign_value,
+):
+    firm = _quantity()
+    rival = replace(
+        firm, quantity_id="independent-foreign-source-rival",
+        abstained=True, value=None,
+        blocking_reasons=("foreign_source_unmeasured",),
+        metadata={**dict(firm.metadata), foreign_field: foreign_value},
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(rival,firm),
+    )
+    sealed=seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities)==1
+    rows=project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows)==1
+    assert rows[0]["quantity_id"]==firm.quantity_id
+
+
+def test_different_abstained_original_material_mark_keeps_signed_floor():
+    firm=_quantity()
+    denied=replace(
+        firm,quantity_id="independent-abstained-material",
+        abstained=True,value=None,
+        blocking_reasons=("unproven_other_floor",),
+        metadata={
+            **dict(firm.metadata),
+            "finish_occurrence_record_id":"independent-mark",
+            "finish_occurrence_evidence_id":"independent-native-word",
+        },
+    )
+    claim=replace(_claim(),floor_finish_quantity_evidence=(firm,denied))
+    assert len(seal_live_floor_finish_area_run(
+        claim,workspace_id=1,project_id="project-1"
+    ).quantities)==1
+    assert len(project_live_floor_finish_customer_rows(
+        claim,workspace_id=1,project_id="project-1"
+    ))==1
