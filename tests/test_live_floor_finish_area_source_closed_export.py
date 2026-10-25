@@ -822,7 +822,12 @@ def _two_original_floor_finish_claims(
         canonical_floor_id="floor-2",
         physical_floor_surface_id="floor-2",
         room_entity_id="room-2",
-        document_id="doc-2" if second_sha != first_floor.source_sha256 else "doc-1",
+        document_id=(
+            "doc-2"
+            if (second_sha, second_revision)
+            != (first_floor.source_sha256, first_floor.revision_id)
+            else "doc-1"
+        ),
         revision_id=second_revision,
         source_sha256=second_sha,
         source_room_face_record_id="face-2",
@@ -932,4 +937,32 @@ def test_unproved_revision_never_licenses_independent_original_mark(
         project_live_floor_finish_customer_rows,
     ):
         with pytest.raises(SourceClosedRunConflictError, match="revision mismatch"):
+            output(claim, workspace_id=1, project_id="project-1")
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_same_document_cannot_mix_source_revisions_even_when_mark_roots_differ(
+    reverse,
+):
+    """The downstream sealed-run document snapshot veto must remain intact."""
+    claim = _two_original_floor_finish_claims(
+        second_sha="a" * 64, second_revision="rev-2",
+    )
+    second = replace(claim.canonical_floors[1], document_id="doc-1")
+    claim = replace(claim, canonical_floors=(claim.canonical_floors[0], second))
+    if reverse:
+        claim = replace(
+            claim,
+            canonical_floors=tuple(reversed(claim.canonical_floors)),
+            floor_finish_quantity_evidence=tuple(
+                reversed(claim.floor_finish_quantity_evidence)
+            ),
+        )
+    for output in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="conflicting sealed source revisions or snapshots",
+        ):
             output(claim, workspace_id=1, project_id="project-1")
