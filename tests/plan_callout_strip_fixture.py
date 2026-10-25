@@ -170,8 +170,9 @@ def types_of(sheet: Sheet, *, with_marks=None, width_scale=1.0):
 def scope_for(sheet: Sheet, *, ownership=OWNERSHIP, viewports="page", **kw):
     if viewports == "page":
         viewports = (shadow.PlanViewportRef("view_plan", (0.0, 0.0, sheet.size[0], sheet.size[1])),)
+    kw.setdefault("callout_mark_pattern", PATTERN)
     return shadow.PlanCalloutStripScope(
-        ownership=ownership, plan_page_id="1", elevation_page_id="2", callout_mark_pattern=PATTERN,
+        ownership=ownership, plan_page_id="1", elevation_page_id="2",
         coordinate_quantum_pt=Q_PT, dimension_quantum_mm=Q_MM, plan_viewports=viewports, **kw)
 
 

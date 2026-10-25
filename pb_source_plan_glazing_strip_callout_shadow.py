@@ -43,7 +43,7 @@ from typing import Callable, Iterable, Optional, Sequence
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
 
-PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.1.0"
+PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.2.0"
 PRODUCER_INPUT_PROVENANCE = "source_visibility_producer"
 WHOLE_PAGE_UNSEGMENTED = "whole_page_unsegmented"
 
@@ -60,6 +60,7 @@ CONDITION_NAMES = (
     "panel_count_measurable",
     "count_matching_strip_exists",
     "scale_consistent_strip_unique",
+    "one_common_ratio_group",
     "fingerprint_exclusive_across_tags",
     "callout_beside_fingerprint_strip",
     "no_other_callout_claims_strip",
@@ -205,6 +206,9 @@ class CalloutCorrespondence:
     record_id: str
 
     def __post_init__(self) -> None:
+        if (tuple(name for name, _ in self.conditions) != CONDITION_NAMES
+                or any(state not in (PASSED, FAILED, NOT_EVALUATED) for _, state in self.conditions)):
+            raise ValueError("a correspondence carries exactly the complete, ordered, unique condition set")
         if self.status is EvidenceResolutionStatus.CANDIDATE:
             if self.strip_id is None or any(state != PASSED for _, state in self.conditions):
                 raise ValueError("a CANDIDATE needs a strip and every condition passed")
@@ -655,11 +659,12 @@ class _TypeFact:
 
 
 def _scale_support(facts: Sequence[_TypeFact], strips: Sequence[GlazingStrip], q_pt: float, q_mm: float):
-    """Dimensionless cross-window consistency of the plan/elevation length ratio.
+    """Cross-window consistency of the plan/elevation length ratio.
 
     A pair (type, strip) is supported when a pair of another type on another strip has the
     same ratio of printed width to drawn extent within the sum of the two pairs' own quantum
-    tolerances (two plan endpoints plus the dimension print step). No ratio is published."""
+    tolerances (two plan endpoints plus the dimension print step). The ratios are computed for
+    this test only; none is exported, published or granted."""
     pairs = []
     for fact in facts:
         for strip in strips:
@@ -679,7 +684,46 @@ def _scale_support(facts: Sequence[_TypeFact], strips: Sequence[GlazingStrip], q
             difference = abs(ratio - ratio2) / max(ratio, ratio2)
             if difference <= tol + tol2:
                 supporters[(key, sid)].append(difference)
-    return supporters
+    return supporters, {(key, sid): (ratio, tol) for key, sid, ratio, tol in pairs}
+
+
+def _ratio_groups(chosen: dict[str, tuple[float, float]]) -> dict[str, str]:
+    """Is there ONE shared ratio behind every chosen pair?
+
+    Chosen pairs (one per type) are linked when their ratios agree within their own tolerances.
+    A component of two or more is a group and must be a clique; two groups, a non-clique group,
+    or a pair with no partner cannot claim one shared ratio. States: ok / competing / unshared."""
+    keys = sorted(chosen)
+
+    def agree(a: str, b: str) -> bool:
+        (ra, ta), (rb, tb) = chosen[a], chosen[b]
+        return abs(ra - rb) / max(ra, rb) <= ta + tb
+
+    parent = {k: k for k in keys}
+
+    def find(k: str) -> str:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            if agree(a, b):
+                parent[find(a)] = find(b)
+    components: dict[str, list[str]] = defaultdict(list)
+    for k in keys:
+        components[find(k)].append(k)
+    groups = [members for members in components.values() if len(members) >= 2]
+    state: dict[str, str] = {}
+    for members in components.values():
+        if len(members) < 2:
+            state[members[0]] = "unshared"
+            continue
+        is_clique = all(agree(a, b) for i, a in enumerate(members) for b in members[i + 1:])
+        for k in members:
+            state[k] = "ok" if (is_clique and len(groups) == 1) else "competing"
+    return state
 
 
 def audit_plan_callout_to_glazing_strip_shadow(
@@ -728,36 +772,54 @@ def audit_plan_callout_to_glazing_strip_shadow(
                 and math.isfinite(group[0].display_width_mm) and group[0].display_width_mm > 0.0
                 and group[0].panel_count >= 2):
             facts.append(_TypeFact(key, float(group[0].display_width_mm), int(group[0].panel_count)))
-    supporters = _scale_support(facts, strips, scope.coordinate_quantum_pt, scope.dimension_quantum_mm)
-    if supporters is None:
+    scale = _scale_support(facts, strips, scope.coordinate_quantum_pt, scope.dimension_quantum_mm)
+    if scale is None:
         page_reasons.append("scale_pair_budget_exceeded")
-        supporters = {}
+        supporters, pair_info = {}, {}
+    else:
+        supporters, pair_info = scale
     supported: dict[str, set[str]] = defaultdict(set)
     for (key, sid), _diffs in supporters.items():
         supported[key].add(sid)
+    ratio_state = _ratio_groups({key: pair_info[(key, next(iter(sids)))] for key, sids in supported.items()
+                                 if len(sids) == 1})
 
-    ring_ok = {oid: r for oid, r in rings.items() if r is not None and r.status is EvidenceResolutionStatus.CANDIDATE}
+    # The target pattern only selects what is REPORTED. Every native word that could label an opening
+    # (the repository's own tag syntax, trusted or not) is a possible claimant, and a ring that cannot be
+    # decided stays a claimant by its word's position instead of disappearing.
+    budget_spent = "stroke_budget_exceeded" in page_reasons
+    reported_ids = {w.observation_id for w in callouts}
+    claim_words = sorted((w for w in words if w.observation_id in reported_ids or _tag_key(w.text) is not None),
+                         key=lambda w: (w.text, w.observation_id))
+    all_rings = dict(rings)
+    for w in claim_words:
+        if w.observation_id not in all_rings:
+            all_rings[w.observation_id] = None if budget_spent else _ring_for_word(w, lines, eq)
     position: dict[tuple[str, str], tuple[bool, float]] = {}
     claimants: dict[str, list[str]] = defaultdict(list)
-    for oid, ring in sorted(ring_ok.items()):
+    uncertain: dict[str, list[tuple[str, str]]] = defaultdict(list)
+
+    def note_claims(word: PlanTextObservation, ring: Optional[CalloutRing], reason: str, label: str) -> None:
+        if ring is None:
+            return
         for strip in strips:
-            ok, gap = _position(ring, strip, eq)
-            position[(oid, strip.strip_id)] = (ok, gap)
-            if ok:
-                claimants[strip.strip_id].append(oid)
-    # an untrusted native word inside a ring beside a strip may be a second callout: its label is unknown,
-    # so it is an unverified claimant and the strip's exclusivity cannot be proven
-    untrusted_claimants: dict[str, list[str]] = defaultdict(list)
-    if "stroke_budget_exceeded" not in page_reasons:
-        for word in sorted(scope.untrusted_plan_words, key=lambda w: w.observation_id):
-            ring = _ring_for_word(word, lines, eq)
-            for strip in strips:
-                if ring.status is EvidenceResolutionStatus.CANDIDATE:
-                    claims = _position(ring, strip, eq)[0]
-                else:
-                    claims = bool(set(ring.reason_codes) & _INCONCLUSIVE_RING) and _word_claims(word, strip, eq)
-                if claims:
-                    untrusted_claimants[strip.strip_id].append("untrusted:" + word.observation_id)
+            if ring.status is EvidenceResolutionStatus.CANDIDATE:
+                ok, gap = _position(ring, strip, eq)
+                if label == "":
+                    position[(word.observation_id, strip.strip_id)] = (ok, gap)
+                    if ok:
+                        claimants[strip.strip_id].append(word.observation_id)
+                elif ok:
+                    uncertain[strip.strip_id].append((reason, label + word.observation_id))
+            elif set(ring.reason_codes) & _INCONCLUSIVE_RING and _word_claims(word, strip, eq):
+                uncertain[strip.strip_id].append(("strip_has_unresolved_ring_claimant", "unresolved:" + word.observation_id))
+
+    for w in claim_words:
+        note_claims(w, all_rings.get(w.observation_id), "", "")
+    # an untrusted native word inside a ring beside a strip may be a second callout: its label is unknown
+    if not budget_spent:
+        for w in sorted(scope.untrusted_plan_words, key=lambda w: w.observation_id):
+            note_claims(w, _ring_for_word(w, lines, eq), "strip_has_claimant_with_untrusted_label", "untrusted:")
     fingerprint_owners: dict[str, set[str]] = defaultdict(set)
     for key, sids in supported.items():
         for sid in sids:
@@ -767,7 +829,7 @@ def audit_plan_callout_to_glazing_strip_shadow(
     for word in callouts:
         correspondences.append(_decide(
             word, scope, rings.get(word.observation_id), key_count, types_by_key, facts, strips, by_id,
-            supported, supporters, fingerprint_owners, position, claimants, untrusted_claimants, page_reasons))
+            supported, supporters, fingerprint_owners, position, claimants, uncertain, ratio_state, page_reasons))
     correspondences.sort(key=lambda c: (c.tag_mark, c.tag_observation_id))
     return PlanCalloutStripShadow(
         ownership=ownership, plan_page_id=scope.plan_page_id, elevation_page_id=scope.elevation_page_id,
@@ -777,7 +839,7 @@ def audit_plan_callout_to_glazing_strip_shadow(
 
 
 def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, supported, supporters,
-            fingerprint_owners, position, claimants, untrusted_claimants, page_reasons) -> CalloutCorrespondence:
+            fingerprint_owners, position, claimants, uncertain, ratio_state, page_reasons) -> CalloutCorrespondence:
     oid = word.observation_id
     key = _tag_key(word.text)
     states: dict[str, str] = {}
@@ -875,6 +937,12 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
         return finish(CONFLICT, ("several_scale_consistent_strips",))
     states["scale_consistent_strip_unique"] = PASSED
     chosen = scale_consistent[0]
+    shared = ratio_state.get(key, "unshared")
+    if shared != "ok":
+        states["one_common_ratio_group"] = FAILED
+        return finish(CONFLICT if shared == "competing" else ABSTAIN,
+                      ("competing_ratio_groups",) if shared == "competing" else ("ratio_group_unshared",))
+    states["one_common_ratio_group"] = PASSED
     strip = by_id[chosen]
     numbers["strip_extent_pt"] = float(strip.frame_along[1] - strip.frame_along[0])
     diffs = supporters.get((key, chosen), [])
@@ -895,16 +963,20 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
     states["callout_beside_fingerprint_strip"] = PASSED
     # 8 no other callout ring (of any kind) satisfies the same location conditions
     trusted_rivals = [c for c in claimants.get(chosen, []) if c != oid]
-    unverified_rivals = list(untrusted_claimants.get(chosen, []))
-    rival_callouts.extend(trusted_rivals + unverified_rivals)
+    uncertain_rivals = [(reason, ident) for reason, ident in uncertain.get(chosen, [])
+                        if ident != "unresolved:" + oid]
+    rival_callouts.extend(trusted_rivals + [ident for _, ident in uncertain_rivals])
     numbers["other_callout_claimants"] = float(len(trusted_rivals))
-    numbers["unverified_label_claimants"] = float(len(unverified_rivals))
+    numbers["unresolved_or_unverified_claimants"] = float(len(uncertain_rivals))
     if trusted_rivals:
         states["no_other_callout_claims_strip"] = FAILED
         return finish(CONFLICT, ("strip_has_other_callout_claimants",))
-    if unverified_rivals:
+    if uncertain_rivals:
         states["no_other_callout_claims_strip"] = FAILED
-        return finish(ABSTAIN, ("strip_has_claimant_with_untrusted_label",))
+        reasons_here = {reason for reason, _ in uncertain_rivals}
+        return finish(ABSTAIN, ("strip_has_unresolved_ring_claimant",)
+                      if "strip_has_unresolved_ring_claimant" in reasons_here
+                      else ("strip_has_claimant_with_untrusted_label",))
     states["no_other_callout_claims_strip"] = PASSED
     # 9 the strip lies in the same resolved viewport as the callout
     if strip.plan_viewport_id != viewport:

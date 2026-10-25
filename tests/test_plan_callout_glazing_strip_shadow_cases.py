@@ -7,6 +7,8 @@ import fitz
 import pytest
 
 import pb_source_plan_glazing_strip_callout_shadow as shadow
+from dataclasses import replace
+
 from plan_callout_strip_fixture import (
     ABST, CAND, CONF, GAP, HEX_H, MM_PER_PT, Sheet, add_window, by_mark, decision, ink_of, run, three_windows, types_of, words_of,
 )
@@ -408,7 +410,7 @@ def test_an_undecidable_ring_around_an_untrusted_word_blocks_by_the_words_own_po
     sheet = three_windows()
     sheet.callout((100.0, 305.52 + GAP + HEX_H), "X9", extra_ring=True)      # two rings: undecidable
     got = by_mark(_with_untrusted(sheet, {"X9"}))
-    assert got["W1"].status is ABST and "strip_has_claimant_with_untrusted_label" in got["W1"].reason_codes
+    assert got["W1"].status is ABST and "strip_has_unresolved_ring_claimant" in got["W1"].reason_codes
 
 
 # ------------------------------------------------------------------------------------
@@ -456,3 +458,104 @@ def test_an_elevation_mark_printed_outside_its_type_frame_is_a_caveat_not_a_bloc
         t.type_mark, t.record_id, t.display_width_mm, t.panel_count, outside_frame_mark_count=2) for t in types_of(sheet)]
     got = by_mark(run(sheet, types=types))["W1"]
     assert got.status is CAND and "elevation_mark_also_printed_outside_type_frame" in got.reason_codes
+
+
+# ------------------------------------------------------------------------------------
+# second exact-head review: unresolved TRUSTED rivals, target-pattern independence, receipt contract,
+# one shared ratio group
+# ------------------------------------------------------------------------------------
+
+def _dense_cluster(sheet, centre, radius=9.0, points=22):
+    import math as _m
+    pts = [(centre[0] + radius * _m.cos(2 * _m.pi * k / points), centre[1] + radius * _m.sin(2 * _m.pi * k / points))
+           for k in range(points)]
+    for a in range(points):
+        for b in range(a + 1, points):
+            sheet.line(pts[a], pts[b])
+
+
+def test_a_trusted_second_ring_that_cannot_be_decided_is_an_exclusion_only_rival_not_an_absence():
+    sheet = three_windows()
+    sheet.callout((100.0, 320.0), "D99", extra_ring=True)                    # two rings around a trusted opening tag
+    got = by_mark(run(sheet))
+    assert got["D99"].status is CONF and "callout_ring_not_unique" in got["D99"].reason_codes
+    assert got["W1"].status is ABST and "strip_has_unresolved_ring_claimant" in got["W1"].reason_codes
+    assert any(c.startswith("unresolved:") for c in got["W1"].rival_callout_ids)
+    assert got["W2"].status is CAND and got["W3"].status is CAND
+
+
+def test_a_trusted_ring_whose_search_hits_the_budget_still_opposes_the_strip():
+    sheet = three_windows()
+    sheet.text((95.0, 322.0), "D99")
+    _dense_cluster(sheet, (100.0, 320.0))
+    got = by_mark(run(sheet))
+    assert got["D99"].status is ABST and "callout_ring_search_budget_exceeded" in got["D99"].reason_codes
+    assert got["W1"].status is ABST and "strip_has_unresolved_ring_claimant" in got["W1"].reason_codes
+
+
+def test_trusting_a_label_cannot_erase_unresolved_competing_geometry():
+    trusted = three_windows()
+    trusted.callout((100.0, 320.0), "D99", extra_ring=True)
+    untrusted = three_windows()
+    untrusted.callout((100.0, 320.0), "D99", extra_ring=True)
+    a = by_mark(run(trusted))["W1"]
+    b = by_mark(_with_untrusted(untrusted, {"D99"}))["W1"]
+    assert a.status is ABST and b.status is ABST          # the same geometry blocks whichever way its label is trusted
+    assert (a.conditions == b.conditions)
+
+
+def test_the_target_pattern_selects_what_is_reported_never_which_rivals_exist():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "D99")                        # a unique trusted door-tag ring beside W1's strip
+    broad = by_mark(run(sheet))
+    narrow = by_mark(run(sheet, callout_mark_pattern=r"W\d+"))
+    assert broad["W1"].status is CONF
+    assert narrow["W1"].status is CONF and "D99" not in narrow                  # not reported, still a rival
+    assert any(c for c in narrow["W1"].rival_callout_ids)
+
+
+def test_a_trusted_ring_whose_label_is_not_an_opening_tag_is_not_a_rival():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "A7")                         # a grid or finish bubble
+    assert by_mark(run(sheet))["W1"].status is CAND
+
+
+def test_a_correspondence_must_carry_exactly_the_complete_ordered_condition_set():
+    c = by_mark(run(three_windows()))["W1"]
+    for bad in ((), c.conditions[:1], c.conditions + c.conditions[:1], tuple(reversed(c.conditions)),
+                tuple((name, "passed") for name in ["x"] * len(c.conditions)),
+                tuple((n, "maybe") for n, _ in c.conditions)):
+        with pytest.raises(ValueError):
+            replace(c, conditions=bad)
+    failed = tuple((n, shadow.FAILED if i == 2 else s) for i, (n, s) in enumerate(c.conditions))
+    assert replace(c, status=ABST, strip_id=None, conditions=failed).status is ABST
+
+
+def _four_strips_two_incompatible_groups():
+    sheet = Sheet(size=(1800.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0, width_mm=120.0 * MM_PER_PT * 1.31)
+    add_window(sheet, 3, "W4", panels=7, length=300.0, width_mm=300.0 * MM_PER_PT * 1.31)
+    return sheet
+
+
+def test_two_internally_consistent_but_incompatible_ratio_groups_cannot_each_claim_one_shared_ratio():
+    got = by_mark(run(_four_strips_two_incompatible_groups()))
+    assert {m: c.status for m, c in got.items()} == {"W1": CONF, "W2": CONF, "W3": CONF, "W4": CONF}
+    assert all("competing_ratio_groups" in c.reason_codes for c in got.values())
+    assert all(dict(c.conditions)["one_common_ratio_group"] == shadow.FAILED for c in got.values())
+
+
+def test_a_pair_with_no_partner_in_the_chosen_group_abstains_while_the_group_stays():
+    sheet = Sheet(size=(1800.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0, width_mm=120.0 * MM_PER_PT * 1.31)
+    got = by_mark(run(sheet))
+    assert got["W1"].status is CAND and got["W2"].status is CAND
+    assert got["W3"].status is ABST
+
+
+def test_the_one_group_case_is_unchanged():
+    assert {m: c.status for m, c in by_mark(run(three_windows())).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
