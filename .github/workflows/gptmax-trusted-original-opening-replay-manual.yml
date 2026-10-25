@@ -83,10 +83,17 @@ jobs:
             echo "::error::Exact reviewed source/test path allowlist mismatch"
             exit 1
           fi
-          git checkout --detach "$approved_head"
-          [[ "$(git rev-parse HEAD)" == "$approved_head" ]]
+          # Keep trusted main as the local-action execution root.
+          # Export reviewed PR code as inert data; never check it out on the
+          # token-bearing host before private original-source provisioning.
+          approved_tree="$RUNNER_TEMP/gptmax-approved-target"
+          mkdir -p "$approved_tree"
+          git archive "$approved_head" | tar -x -C "$approved_tree"
+          mkdir -p "$approved_tree/documents/sources"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
-          [[ -f "$focused_test" ]]
+          [[ -f "$approved_tree/$focused_test" ]]
+          echo "GPTMAX_APPROVED_TREE=$approved_tree" >> "$GITHUB_ENV"
           echo "GPTMAX_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
           echo "GPTMAX_FOCUSED_TEST=$focused_test" >> "$GITHUB_ENV"
           echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"
@@ -136,7 +143,9 @@ jobs:
             docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 256 --memory 6g \
               --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
-              --volume "$GITHUB_WORKSPACE:/repo:ro" --workdir /repo \
+              --mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly" \
+              --workdir /repo \
               --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
               --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
               --env "LOT16_ARCH_ORIGINAL=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
@@ -170,7 +179,9 @@ jobs:
             docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 256 --memory 6g \
               --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
-              --volume "$GITHUB_WORKSPACE:/repo:ro" --workdir /repo \
+              --mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly" \
+              --workdir /repo \
               --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
               --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
               --env "LOT16_ARCH_ORIGINAL=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
@@ -227,4 +238,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gptmax-original-positive.log" "$RUNNER_TEMP/gptmax-source-regressions.log"
-          rm -rf documents/sources
+          rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources

@@ -122,6 +122,15 @@ def _opening_quantity(
                for observation_id in source_observation_ids)
     ):
         return None
+    # Producer-owned INSTANCE tags must survive in the commercial evidence.
+    # An adjacent native word or a type-level schedule mark cannot replace it.
+    tag_id = opening.tag_observation_id
+    if tag_id is not None and (
+        type(tag_id) is not str or not tag_id or tag_id != tag_id.strip()
+        or tag_id not in evidence_ids
+    ):
+        return None
+
     # A caller-replayed host string alone cannot certify the physical opening
     # owner. The composer retains each authenticated host binding/frame record
     # on canonical evidence; require that receipt at quantity publication.
@@ -376,6 +385,10 @@ def _validate_canonical_opening_inventory(
     # favourable member and conceal contradictory identity lineage.
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
+    # A physical plan-tag observation belongs to one opening instance,
+    # including when a conflicting sibling is not individually publishable.
+    # Repeated Wxx type marks with distinct tag observations remain allowed.
+    instance_tag_owners: dict[str, str] = {}
     mismatched_identity_pair = False
     source_scope: tuple[str, str, str] | None = None
     for opening in canonical_openings:
@@ -426,6 +439,14 @@ def _validate_canonical_opening_inventory(
             )
         canonical_ids.add(canonical_id)
         physical_ids.add(physical_id)
+        tag_id = opening.tag_observation_id
+        if tag_id is not None:
+            if type(tag_id) is not str or not tag_id or tag_id != tag_id.strip():
+                raise ValueError("invalid original instance tag receipt in canonical inventory")
+            prior = instance_tag_owners.get(tag_id)
+            if prior is not None and prior != physical_id:
+                raise ValueError("original instance tag observation shared across physical openings")
+            instance_tag_owners[tag_id] = physical_id
         if canonical_id != physical_id:
             mismatched_identity_pair = True
     # Preserve the more specific duplicate-ID error above when a foreign

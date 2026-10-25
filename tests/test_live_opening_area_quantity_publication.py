@@ -1044,3 +1044,90 @@ def test_complete_original_source_witness_roster_preserves_valid_issuer():
         complete, source_observation_ids=tuple(reversed(complete.source_observation_ids)),
     )
     assert publish_live_opening_area_quantities(_composition(reordered)) == published
+
+def _with_original_instance_tag(opening, tag):
+    return replace(
+        opening, tag_observation_id=tag,
+        evidence_ids=opening.evidence_ids + (tag,),
+    )
+
+
+def test_authenticated_instance_tag_survives_real_opening_area_issuer():
+    opening = _with_original_instance_tag(
+        _elevation_opening("physical-w01-original"), "original-w01-plan-tag",
+    )
+    issued = _opening_quantity(opening)
+    assert issued is not None
+    assert "original-w01-plan-tag" in issued.evidence_ids
+
+
+@pytest.mark.parametrize("tag", ["", " ", "unretained-original-tag", 123])
+def test_present_original_instance_tag_requires_exact_issuer_evidence(tag):
+    original = _with_original_instance_tag(
+        _elevation_opening("physical-w01-original"), "original-w01-plan-tag",
+    )
+    assert _opening_quantity(replace(original, tag_observation_id=tag)) is None
+
+
+def test_original_instance_tag_cannot_be_reused_by_abstained_sibling():
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "one-original-w01-tag",
+    )
+    second = _with_original_instance_tag(
+        _elevation_opening("physical-w01-b", area_m2=None), "one-original-w01-tag",
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is None
+    with pytest.raises(ValueError, match="instance tag observation shared"):
+        publish_live_opening_area_quantities(_composition(first, second))
+    with pytest.raises(ValueError, match="instance tag observation shared"):
+        seal_live_opening_area_claim_run(
+            _opening_area_claim(first, second),
+            workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_instance_tag_cannot_be_reused_by_second_issued_window():
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "one-original-w01-tag",
+    )
+    second = _with_original_instance_tag(
+        _elevation_opening("physical-w01-b"), "one-original-w01-tag",
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is not None
+    with pytest.raises(ValueError, match="instance tag observation shared"):
+        publish_live_opening_area_quantities(_composition(first, second))
+
+
+def test_repeated_type_frame_with_distinct_original_instance_tags_still_seals():
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "first-original-w01-tag",
+    )
+    second = _with_original_instance_tag(
+        _elevation_opening("physical-w01-b"), "second-original-w01-tag",
+    )
+    published = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(published) == 2
+    assert {q.metadata["measurement_record_id"] for q in published} == {
+        "elevation-frame-1",
+    }
+    sealed = seal_live_opening_area_claim_run(
+        _opening_area_claim(first, second),
+        workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(q.lineage_ok for q in sealed.quantities)
+
+
+@pytest.mark.parametrize("invalid", ["", "  ", 17])
+def test_abstained_member_invalid_instance_tag_cannot_hide_from_inventory(invalid):
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "first-original-w01-tag",
+    )
+    second = replace(
+        _elevation_opening("physical-w01-b", area_m2=None),
+        tag_observation_id=invalid,
+    )
+    with pytest.raises(ValueError, match="invalid original instance tag"):
+        publish_live_opening_area_quantities(_composition(first, second))
