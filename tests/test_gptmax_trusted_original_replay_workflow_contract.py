@@ -109,8 +109,10 @@ def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
     assert "git fetch --no-tags --depth=1 origin" in guard
     assert "git diff --name-only" in guard
     assert '[[ "$observed" != "$expected" ]]' in guard
-    assert 'git checkout --detach "$approved_head"' in guard
-    assert '[[ "$(git rev-parse HEAD)" == "$approved_head" ]]' in guard
+    assert 'git checkout --detach "$approved_head"' not in guard
+    assert 'git archive "$approved_head" | tar -x -C "$approved_tree"' in guard
+    assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in guard
+    assert 'echo "GPTMAX_APPROVED_TREE=$approved_tree" >> "$GITHUB_ENV"' in guard
     for name, head in HEADS.items():
         assert f"{name})" in guard
         assert f"approved_head={head}" in guard
@@ -130,7 +132,7 @@ def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
     assert "approved_base=c491c5fb2a155a54825d639ef277218707b76327" in guard
     assert "approved_head=d5cdf829c135389d58a668dfdd55ccbd5834e707" in guard
     assert "focused_test=tests/test_raster_opening_cached_source_integrity.py" in guard
-    assert 'git checkout --detach "$approved_head"' in guard
+    assert 'git checkout --detach "$approved_head"' not in guard
     assert "github.event.pull_request" not in source
     assert "secrets.ORIGINAL_SOURCES_TOKEN" not in guard
 
@@ -260,7 +262,8 @@ def test_private_original_never_enters_networked_pr_head_execution_or_raw_logs()
         script = steps[index]["run"]
         assert "docker run --rm --network none --read-only --cap-drop ALL" in script
         assert "--security-opt no-new-privileges" in script
-        assert '--volume "$GITHUB_WORKSPACE:/repo:ro"' in script
+        assert '--mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly"' in script
+        assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly"' in script
         assert "--tmpfs /tmp:" in script
         assert '--env PYTHONPATH=/repo' in script
         assert "run_isolated python -m pytest" in script
@@ -271,3 +274,33 @@ def test_private_original_never_enters_networked_pr_head_execution_or_raw_logs()
         assert "secrets.ORIGINAL_SOURCES_TOKEN" not in script
     assert steps[focused_index]["run"].count("run_isolated python -m pytest") == 3
     assert steps[replay_index]["run"].count("run_isolated python -m pytest") == 1
+
+
+def test_token_bearing_provisioner_uses_trusted_main_not_reviewed_pr_checkout():
+    """Immutable PR test code is inert until executed in the offline container."""
+    steps = _load()["jobs"]["verify"]["steps"]
+    guard_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Authenticate immutable"))
+    provision_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Provision original"))
+    build_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Build no-network"))
+    assert guard_index < build_index < provision_index
+    guard = steps[guard_index]["run"]
+    assert 'git checkout --detach "$approved_head"' not in guard
+    assert 'git archive "$approved_head" | tar -x -C "$approved_tree"' in guard
+    assert 'mkdir -p "$approved_tree/documents/sources"' in guard
+    assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in guard
+    assert '[[ -z "$(git status --porcelain)" ]]' in guard
+    assert '[[ -f "$approved_tree/$focused_test" ]]' in guard
+    assert steps[provision_index]["uses"] == "./.github/actions/provision-original-sources"
+    for step in steps[provision_index + 1:]:
+        script = step.get("run", "")
+        assert "git checkout" not in script
+        assert "python -m pytest" not in script.replaceAll("run_isolated python -m pytest", "")
+        assert "--network host" not in script
+    for step in steps:
+        if step.get("name", "").startswith(("Verify real original", "Verify original-provisioned")):
+            script = step["run"]
+            assert '--mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly"' in script
+            assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly"' in script
+            assert "docker run --rm --network none --read-only --cap-drop ALL" in script
+    cleanup = steps[-1]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources' in cleanup["run"]
