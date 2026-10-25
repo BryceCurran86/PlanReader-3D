@@ -85,6 +85,15 @@ jobs:
           APPROVED_SOURCE_TEST_PATHS
           )"
           [[ "$observed" == "$expected" ]] || { echo "::error::Unreviewed GPT3 source/test diff"; exit 1; }
+          # Before seeing any private source, reject an approved PR file that
+          # has independently changed on trusted main since the candidate base.
+          # A safe post-replay restack must keep BOTH code ancestries intact.
+          main_changed="$(git diff --name-only "$approved_base" "$GITHUB_SHA" | LC_ALL=C sort)"
+          conflicting="$(comm -12 <(printf '%s\n' "$observed") <(printf '%s\n' "$main_changed"))"
+          if [[ -n "$conflicting" ]]; then
+            echo "::error::Trusted main modified an immutable GPT3 release path"
+            exit 1
+          fi
           # Keep trusted main checked out: the subsequent local provisioner
           # MUST be resolved from main, not from the candidate PR tree.
           target_tree="$RUNNER_TEMP/gpt3-approved-candidate"
