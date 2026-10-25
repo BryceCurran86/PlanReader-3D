@@ -125,20 +125,26 @@ def test_token_only_present_in_frozen_manifest_provision_step():
     assert "\n  pull_request_target:" not in text
 
 
-def test_positive_source_test_required_and_private_outputs_removed():
+def test_private_source_tests_only_execute_in_offline_container():
     steps = _load()["jobs"]["original"]["steps"]
-    positive = next(s for s in steps if s.get("name", "").startswith("Require source-positive"))
-    module = next(s for s in steps if s.get("name", "").startswith("Run complete GPT2"))
-    assert "Original case was skipped" in positive["run"]
-    assert "grep -Eq" in positive["run"]
-    assert "if ! python -m pytest" in positive["run"]
-    assert "if ! python -m pytest" in module["run"]
-    assert SOURCE == positive["env"]["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
-    assert SOURCE == module["env"]["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
-    assert "No FIRM quantity or benchmark score granted." in module["run"]
+    build = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Build sealed Python"))
+    provision = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Provision only SHA"))
+    isolated = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Run private original"))
+    assert build < provision < isolated
+    assert len(steps[provision + 1:-1]) == 1
+    script = steps[isolated]["run"]
+    for required in ("docker run --rm --network none --read-only --cap-drop ALL",
+                     "--security-opt no-new-privileges", "dst=/workspace,readonly",
+                     "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "run_test source-positive",
+                     "run_test full-module", "grep -Eq", "details withheld to protect source"):
+        assert required in script
+    assert "grep -E '^FAILED" not in script
+    assert "cat \"$output\"" not in script
+    assert "docker build" not in script
+    assert SOURCE == steps[isolated]["env"]["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
     assert steps[-1]["if"] == "always()"
     assert "rm -rf documents/sources" in steps[-1]["run"]
-
+    assert "docker build" in steps[build]["run"]
 
 def test_original_source_smoke_test_negative_error_is_privately_captured():
     # A deliberate negative may fail inside the shell but must not emit a
