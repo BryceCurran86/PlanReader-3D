@@ -12,7 +12,8 @@ from pb_gpt2_native_grid_row_membership_shadow import (
 )
 
 
-def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,\n          overpaint=None, rotation=0):
+def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,
+          overpaint=None, rotation=0):
     pdf = fitz.open()
     page = pdf.new_page(width=420, height=340)
     for x in (100+shifted, 142+shifted):
