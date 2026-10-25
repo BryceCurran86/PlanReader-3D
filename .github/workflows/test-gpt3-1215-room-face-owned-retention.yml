@@ -1,6 +1,7 @@
 name: TEST GPT3 1215 Room Face Owned Retention
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -44,6 +45,7 @@ jobs:
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
 
   original-before-after:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
@@ -56,7 +58,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
           fetch-depth: 0
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
@@ -158,9 +161,9 @@ jobs:
           assert before["source_owned_wall_scopes"][0]["records"] == after["source_owned_wall_scopes"][0]["records"]
           print("GPT3_ROOM_FACE_OWNED_RETENTION", json.dumps(receipt,sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-1215-room-face-owned-retention
-          path: artifacts
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f maryborough-*.json lot16-*.json

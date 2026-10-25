@@ -47,10 +47,13 @@ def test_exact_original_replay_requires_frozen_source_provision_before_any_score
     assert "official_four_project_accuracy" in replay
 
 
-def test_private_sources_never_enter_public_replay_artifacts():
+def test_private_source_runs_never_upload_original_derived_reports():
     replay = _job("original-two-project-replay")
-    assert "actions/upload-artifact" in replay
-    assert "path: artifacts/gpt3-selected-source-v2/" in replay
-    assert "path: documents/" not in replay
-    assert "path: ./" not in replay
-    assert "path: ${{ github.workspace }}" not in replay
+    assert "github.event_name == 'workflow_dispatch'" in replay
+    assert "github.ref == 'refs/heads/main'" in replay
+    assert "github.actor == 'BryceCurran86'" in replay
+    assert "ref: ${{ github.sha }}" in replay
+    assert "persist-credentials: false" in replay
+    assert "actions/upload-artifact" not in replay
+    assert "rm -rf documents/sources artifacts" in replay
+    assert "if: always()" in replay

@@ -39,7 +39,6 @@ jobs:
           python scripts/check_full_plan_v2_integrity.py
 
   original-source:
-    # Only owner-dispatched trusted main code may provision private originals.
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -105,9 +104,8 @@ jobs:
           print("ORIGINAL_LOT16_EIGHT_RETAINED")
           PY
           python scripts/check_full_plan_v2_integrity.py
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-original-opening-customer-inventory
-          path: artifacts/gpt3-opening-customer-inventory/
-          retention-days: 14
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
