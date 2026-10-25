@@ -213,11 +213,36 @@ def pull_request_trigger_reaches_main(workflow_text: str) -> None:
             raise ValueError(f"pull_request.types {values} must include opened and synchronize")
 
 
+_OWNER_TRUSTED_MAIN_SOURCE_IF = (
+    "    if: ${{ github.event_name == 'workflow_dispatch' && "
+    "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
+)
+_OWNER_ORIGINAL_JOB_NAMES = frozenset({
+    "original-source", "original-source-score", "original-lot16",
+    "original-lot16-real-seal", "original-paired-source-customer",
+})
+
+
 def replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow_text: str) -> None:
-    """No job-level ``if`` / ``continue-on-error``, no ``continue-on-error: true`` anywhere, step conditions only always()-style."""
+    """Reject nonblocking replay conditions; permit only exact owner-main source isolation.
+
+    This narrow exception protects private originals from PR-head code. Public PR
+    regressions are still mandatory and the manually run source replay remains
+    a distinct acceptance gate, not a skipped passing score.
+    """
+    current_job = None
     for number, line in enumerate(workflow_text.splitlines(), 1):
         stripped = line.strip()
+        job_match = re.fullmatch(r"  ([a-z][\w-]*):", line)
+        if job_match:
+            current_job = job_match.group(1)
         if re.match(r"^    (if|continue-on-error):", line):
+            if (
+                line == _OWNER_TRUSTED_MAIN_SOURCE_IF
+                and current_job in _OWNER_ORIGINAL_JOB_NAMES
+                and re.search(r"^  workflow_dispatch:\s*$", workflow_text, re.M)
+            ):
+                continue
             raise ValueError(f"line {number}: job-level {stripped.split(':')[0]} can disable or neutralise the replay")
         if re.match(r"^\s*continue-on-error:[ \t]*(?!false\b)\S", line):
             raise ValueError(f"line {number}: continue-on-error makes the replay non-blocking")
@@ -418,6 +443,27 @@ def test_trigger_that_never_reaches_main_pull_requests_is_rejected():
         "    branches-ignore: [release]\n",
     ):
         pull_request_trigger_reaches_main(base.format(extra=extra))  # must not raise
+
+
+def test_only_exact_manual_owner_main_original_job_guard_is_permitted():
+    base = ("name: Owner original only\non:\n  pull_request:\n"
+            "  workflow_dispatch:\njobs:\n  original-lot16:\n")
+    permitted = base + _OWNER_TRUSTED_MAIN_SOURCE_IF + "\n    runs-on: ubuntu-latest\n"
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(permitted)
+    for unsafe in (
+        "    if: ${{ github.event_name == 'workflow_dispatch' }}",
+        "    if: ${{ github.ref == 'refs/heads/main' }}",
+        "    if: ${{ github.event_name == 'pull_request' }}",
+        "    continue-on-error: true",
+    ):
+        with __import__("pytest").raises(ValueError):
+            replay_jobs_cannot_be_disabled_or_made_non_blocking(
+                permitted.replace(_OWNER_TRUSTED_MAIN_SOURCE_IF, unsafe)
+            )
+    with __import__("pytest").raises(ValueError):
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(
+            permitted.replace("original-lot16:", "replay:")
+        )
 
 
 def test_a_disabled_or_non_blocking_replay_job_is_rejected():

@@ -180,11 +180,12 @@ def reconcile_source_producer_finish_batch_shadow(
         ("existing_room_area_quantity_id", "gpt1_original_finish_area_issuer_reused"),
         ("source_finish_occurrence_id", "gpt1_original_finish_plan_mark_reused"),
     )
-    accepted = tuple(row for row in records if
-        row.status is EvidenceResolutionStatus.CANDIDATE
-    )
+    # A rejected source claimant is still evidence of an ownership rival.
+    # Counting only CANDIDATE records lets an accepted physical room borrow a
+    # source area, room identity or plan mark already named by an ABSTAINED
+    # sibling.  Retain the complete caller-supplied source witness universe.
     owners = {
-        field: Counter(getattr(row, field) for row in accepted
+        field: Counter(getattr(row, field) for row in records
                        if isinstance(getattr(row, field), str)
                        and getattr(row, field))
         for field, _ in keys
@@ -226,6 +227,16 @@ def reconcile_source_producer_finish_batch_shadow(
             EvidenceResolutionStatus.CONFLICT,
             ("gpt1_original_finish_batch_reused_source_authority",),
             tuple(ordered),tuple(sorted(quarantine)),
+        )
+    if not any(
+        row.status is EvidenceResolutionStatus.CANDIDATE for row in ordered
+    ):
+        # A batch of exclusively rejected source facts cannot become a
+        # positive handoff simply because it has no inter-room collision.
+        return SourceProducerFloorFinishBatch(
+            EvidenceResolutionStatus.ABSTAINED,
+            ("gpt1_original_finish_batch_no_source_candidates",),
+            tuple(ordered),(),
         )
     return SourceProducerFloorFinishBatch(
         EvidenceResolutionStatus.CANDIDATE,

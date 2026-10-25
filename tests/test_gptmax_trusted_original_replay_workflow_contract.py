@@ -12,6 +12,9 @@ HEADS = {
     "host": "b58d435efa65e003ba55754c2bdc152df5c91e8b",
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
+    "cache": "d5cdf829c135389d58a668dfdd55ccbd5834e707",
+    "vertical": "d993bac877fb1c5afc2327fae1ff1995274aea6a",
+    "horizontal": "8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0",
 }
 PATHS = {
     "host": (
@@ -28,6 +31,20 @@ PATHS = {
         "docs/engineering/gptmax_g17_source_receipt_registration_20261020.md",
         "pb_source_visibility_authority.py",
         "tests/test_raster_opening_receipt_registration.py",
+    ),
+    "cache": (
+        ".github/workflows/gptmax-g17-source-receipt-integrity.yml",
+        "docs/engineering/gptmax_g17_cached_source_integrity_20261020.md",
+        "pb_physical_opening_authority.py",
+        "tests/test_raster_opening_cached_source_integrity.py",
+    ),
+    "vertical": (
+        "pb_gptmax_raster_tile_seam_shadow.py",
+        "tests/test_gptmax_raster_tile_seam_source.py",
+    ),
+    "horizontal": (
+        "pb_gptmax_horizontal_raster_tile_seam_shadow.py",
+        "tests/test_gptmax_horizontal_raster_tile_seam_shadow.py",
     ),
 }
 
@@ -92,14 +109,78 @@ def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
     assert "git fetch --no-tags --depth=1 origin" in guard
     assert "git diff --name-only" in guard
     assert '[[ "$observed" != "$expected" ]]' in guard
-    assert 'git checkout --detach "$approved_head"' in guard
-    assert '[[ "$(git rev-parse HEAD)" == "$approved_head" ]]' in guard
+    assert 'git checkout --detach "$approved_head"' not in guard
+    assert 'git archive "$approved_head" | tar -x -C "$approved_tree"' in guard
+    assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in guard
+    assert 'echo "GPTMAX_APPROVED_TREE=$approved_tree" >> "$GITHUB_ENV"' in guard
     for name, head in HEADS.items():
         assert f"{name})" in guard
         assert f"approved_head={head}" in guard
         for path in PATHS[name]:
             assert path in guard
     assert "ORIGINAL_SOURCES_TOKEN" not in guard
+
+
+def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    guard = next(
+        step["run"]
+        for step in _load()["jobs"]["verify"]["steps"]
+        if step.get("name", "").startswith("Authenticate immutable")
+    )
+    assert "cache)" in guard
+    assert "approved_base=c491c5fb2a155a54825d639ef277218707b76327" in guard
+    assert "approved_head=d5cdf829c135389d58a668dfdd55ccbd5834e707" in guard
+    assert "focused_test=tests/test_raster_opening_cached_source_integrity.py" in guard
+    assert 'git checkout --detach "$approved_head"' not in guard
+    assert "github.event.pull_request" not in source
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" not in guard
+
+
+def test_vertical_original_source_target_cannot_be_satisfied_by_synthetic_passes():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    steps = _load()["jobs"]["verify"]["steps"]
+    guard = next(step["run"] for step in steps if step.get("name", "").startswith("Authenticate immutable"))
+    assert "vertical)" in guard
+    assert "approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed" in guard
+    assert "approved_head=d993bac877fb1c5afc2327fae1ff1995274aea6a" in guard
+    assert "focused_test=tests/test_gptmax_raster_tile_seam_source.py" in guard
+    assert 'echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"' in guard
+    focused = next(step for step in steps if step.get("name", "").startswith("Verify original-provisioned"))
+    assert focused["env"]["LOT16_ARCH_ORIGINAL"].endswith("1. Construction Plans - Lot 16 Power (REV E).pdf")
+    script = focused["run"]
+    assert '[[ "$GPTMAX_TARGET" == "vertical" ]]' in script
+    assert "test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots" in script
+    assert "1 passed" in script
+    assert "source ink test skipped or missing" in script
+    assert "github.event.pull_request" not in source
+
+
+def test_horizontal_original_source_gap_guard_cannot_be_satisfied_by_synthetic_passes():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    steps = _load()["jobs"]["verify"]["steps"]
+    guard = next(
+        step["run"] for step in steps
+        if step.get("name", "").startswith("Authenticate immutable")
+    )
+    assert "horizontal)" in guard
+    assert "approved_base=96d6c737167c8dcc94e006488c86f47bf573274a" in guard
+    assert "approved_head=8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0" in guard
+    assert "focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py" in guard
+    assert "git diff --name-only" in guard
+    focused = next(
+        step for step in steps
+        if step.get("name", "").startswith("Verify original-provisioned")
+    )
+    assert focused["env"]["PLANREADER_LOT16_ORIGINAL_PDF"].endswith(
+        "1. Construction Plans - Lot 16 Power (REV E).pdf"
+    )
+    script = focused["run"]
+    assert '[[ "$GPTMAX_TARGET" == "horizontal" ]]' in script
+    assert "test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles" in script
+    assert "1 passed" in script
+    assert "Original p5 horizontal rail test skipped or missing" in script
+    assert "github.event.pull_request" not in source
 
 
 def test_secret_only_in_manifest_authenticated_source_provisioner():
@@ -136,7 +217,7 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     assert "grep -Eq" in other["run"]
     cleanup = steps[-1]
     assert cleanup["if"] == "always()"
-    assert "rm -rf documents/sources" in cleanup["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources' in cleanup["run"]
     assert "rm -f" in cleanup["run"]
 
 
@@ -162,3 +243,64 @@ def test_trigger_aliases_and_duplicates_cannot_bypass_manual_only_gate():
 
 def test_strict_loader_does_not_mutate_global_safe_loader():
     assert yaml.safe_load("on: true") == {True: True}
+
+
+def test_private_original_never_enters_networked_pr_head_execution_or_raw_logs():
+    """Immutable SHA/path pinning alone is not a sandbox for executable PR-head tests."""
+    steps = _load()["jobs"]["verify"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    build_index = next(i for i, name in enumerate(names) if name.startswith("Build no-network"))
+    provision_index = next(i for i, name in enumerate(names) if name.startswith("Provision original"))
+    replay_index = next(i for i, name in enumerate(names) if name.startswith("Verify real original"))
+    focused_index = next(i for i, name in enumerate(names) if name.startswith("Verify original-provisioned"))
+    assert build_index < provision_index < replay_index < focused_index
+    build = steps[build_index]["run"]
+    assert "docker build" in build
+    assert "COPY requirements.txt requirements-ci-v1228.txt /deps/" in build
+    assert "documents/sources" not in build
+    for index in (replay_index, focused_index):
+        script = steps[index]["run"]
+        assert "docker run --rm --network none --read-only --cap-drop ALL" in script
+        assert "--security-opt no-new-privileges" in script
+        assert '--mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly"' in script
+        assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly"' in script
+        assert "--tmpfs /tmp:" in script
+        assert '--env PYTHONPATH=/repo' in script
+        assert "run_isolated python -m pytest" in script
+        assert "grep -E '^(FAILED |ERROR )'" not in script
+        assert "curl " not in script and "wget " not in script
+        assert "--volume /var/run/docker.sock" not in script
+        assert "--network host" not in script
+        assert "secrets.ORIGINAL_SOURCES_TOKEN" not in script
+    assert steps[focused_index]["run"].count("run_isolated python -m pytest") == 3
+    assert steps[replay_index]["run"].count("run_isolated python -m pytest") == 1
+
+
+def test_token_bearing_provisioner_uses_trusted_main_not_reviewed_pr_checkout():
+    """Immutable PR test code is inert until executed in the offline container."""
+    steps = _load()["jobs"]["verify"]["steps"]
+    guard_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Authenticate immutable"))
+    provision_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Provision original"))
+    build_index = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Build no-network"))
+    assert guard_index < build_index < provision_index
+    guard = steps[guard_index]["run"]
+    assert 'git checkout --detach "$approved_head"' not in guard
+    assert 'git archive "$approved_head" | tar -x -C "$approved_tree"' in guard
+    assert 'mkdir -p "$approved_tree/documents/sources"' in guard
+    assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in guard
+    assert '[[ -z "$(git status --porcelain)" ]]' in guard
+    assert '[[ -f "$approved_tree/$focused_test" ]]' in guard
+    assert steps[provision_index]["uses"] == "./.github/actions/provision-original-sources"
+    for step in steps[provision_index + 1:]:
+        script = step.get("run", "")
+        assert "git checkout" not in script
+        assert "python -m pytest" not in script.replace("run_isolated python -m pytest", "")
+        assert "--network host" not in script
+    for step in steps:
+        if step.get("name", "").startswith(("Verify real original", "Verify original-provisioned")):
+            script = step["run"]
+            assert '--mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly"' in script
+            assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly"' in script
+            assert "docker run --rm --network none --read-only --cap-drop ALL" in script
+    cleanup = steps[-1]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources' in cleanup["run"]
