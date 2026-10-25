@@ -136,21 +136,24 @@ def _inspect_native_paint_gap(page, scope:NativePaintGapScope, tolerance:float):
         filled_rival=_is_visible_opaque_black_original_fill(drawing)
         if not (stroke_rival or filled_rival):
             continue
+        # PDF fill paint is not limited to "re" rectangles. PyMuPDF emits
+        # filled closed polygons as "l" paths, including fill-only paths with
+        # no stroke. A source-visible black fill whose complete native path
+        # bounds intersect either wall-face gap is competing ink. The bounds
+        # are deliberately conservative: unsupported fill geometry abstains
+        # rather than silently proving a clear physical gap.
+        if filled_rival:
+            rect=drawing.get("rect")
+            if (not isinstance(rect,fitz.Rect) or
+                not all(isfinite(v) for v in
+                        (rect.x0,rect.y0,rect.x1,rect.y1))):
+                raise ValueError("competing original fill geometry invalid")
+            if (any(rect.y0<=level<=rect.y1 for level in levels)
+                and min(rect.x1,hi)-max(rect.x0,lo)>tolerance):
+                raise ValueError(
+                    "competing original opaque black fill bridges selected gap"
+                )
         for item in drawing["items"]:
-            # A solid opaque black rectangle FILL is source paint, even if
-            # it has no stroke/width/dashes at all. It is only negative
-            # opposing ink: never physical wall or door evidence.
-            if filled_rival and item[0]=="re":
-                rect=item[1]
-                if (not isinstance(rect,fitz.Rect) or
-                    not all(isfinite(v) for v in
-                            (rect.x0,rect.y0,rect.x1,rect.y1))):
-                    raise ValueError("competing original fill rectangle invalid")
-                if (any(rect.y0<=level<=rect.y1 for level in levels)
-                    and min(rect.x1,hi)-max(rect.x0,lo)>tolerance):
-                    raise ValueError(
-                        "competing original opaque black fill bridges selected gap"
-                    )
             if not stroke_rival:
                 continue
             # Native solid outline rectangles are emitted as "re", not
