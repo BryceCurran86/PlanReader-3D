@@ -155,7 +155,7 @@ def test_private_source_tests_only_execute_in_offline_container():
     for required in ("docker run --rm --network none --read-only --cap-drop ALL",
                      "--security-opt no-new-privileges", "dst=/workspace,readonly",
                      "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "run_test source-positive",
-                     "run_test full-module", "grep -Eq", "details withheld to protect source"):
+                     "run_test full-module", "grep -Eq", "private log withheld"):
         assert required in script
     assert '--mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly"' in script
     assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in script
