@@ -180,3 +180,102 @@ def test_source_figure_native_word_and_trace_may_share_span_with_foreign_70():
     with fitz.open(stream=source, filetype='pdf') as pdf:
         assert any(t['type'] == 0 and t['opacity'] == 1 for t in pdf[0].get_texttrace())
     assert _run(source, scope).status == 'SOURCE_FIGURE_LEADER_CANDIDATE'
+
+
+# A separate original-p7/p11 wall-cap check is a physical-identity veto only.
+# It is not a dimension leader, threshold, floor finish, count, or FIRM quantity.
+def _two_sheet_caps(*, left_error=0.0, target_width=.48, dashed=False):
+    doc = fitz.open()
+    for page_index, dx in ((0, 0.0), (1, 78.0)):
+        pg = doc.new_page(width=500, height=500)
+        for index, x in enumerate((100.0, 160.0)):
+            x += dx + (left_error if page_index and index == 0 else 0)
+            drawing = pg.new_shape()
+            drawing.draw_line(fitz.Point(x, 100), fitz.Point(x, 107))
+            drawing.finish(
+                color=(0, 0, 0),
+                width=(target_width if page_index else .48),
+                dashes="[2 2] 0" if dashed and page_index else None,
+            )
+            drawing.commit()
+    blob = doc.tobytes()
+    doc.close()
+    return blob
+
+
+def _crosssheet_caps(blob, *, hypotheses=((78., 0.), (43.92, 0.)), **kwargs):
+    from pb_gpt2_mary_original_figured_door_leader_shadow import (
+        audit_original_crosssheet_door_caps_shadow,
+    )
+    return audit_original_crosssheet_door_caps_shadow(
+        blob, source_sha256=sha256(blob).hexdigest(),
+        floor_page=1, finish_page=2,
+        cap_path_pairs=((0, 0), (1, 1)),
+        translation_hypotheses=hypotheses, **kwargs,
+    )
+
+
+def test_source_equal_caps_are_diagnostic_only_and_preserve_rival_shift():
+    receipt = _crosssheet_caps(_two_sheet_caps())
+    assert receipt["status"] == "SOURCE_CAP_PAIR_CANDIDATE"
+    assert receipt["matches"][0]["translation_pdf_pt"] == (78.0, 0.0)
+    assert len(receipt["all_tested_hypotheses"]) == 2
+    assert receipt["unexamined_transforms_remain"] is True
+    assert not receipt["physical_opening_authority"]
+    assert not receipt["doorway_threshold_issued"]
+    assert not receipt["floor_finish_area_issued"]
+    assert not receipt["firm_quantity_issued"]
+
+
+def test_subpoint_original_cap_conflict_abstains_not_global_snap():
+    receipt = _crosssheet_caps(_two_sheet_caps(left_error=.24))
+    assert receipt["status"] == "ABSTAINED"
+    assert receipt["matches"] == ()
+    assert receipt["all_tested_hypotheses"][0]["max_cap_residual_pdf_pt"] > .23
+
+
+def test_second_equally_valid_translation_retained_not_tiebroken():
+    receipt = _crosssheet_caps(
+        _two_sheet_caps(), hypotheses=((78., 0.), (78.03, 0.))
+    )
+    assert receipt["status"] == "ABSTAINED"
+    assert len(receipt["matches"]) == 2
+
+
+def test_original_cap_width_or_ink_conflict_fails_closed():
+    receipt = _crosssheet_caps(_two_sheet_caps(target_width=.96))
+    assert receipt["status"] == "ABSTAINED"
+    with pytest.raises(ValueError, match="solid"):
+        _crosssheet_caps(_two_sheet_caps(dashed=True))
+
+
+def test_reused_original_cap_address_foreign_sha_and_global_snap_rejected():
+    from pb_gpt2_mary_original_figured_door_leader_shadow import (
+        audit_original_crosssheet_door_caps_shadow as audit,
+    )
+    blob = _two_sheet_caps()
+    parameters = dict(source_sha256=sha256(blob).hexdigest(),
+                      floor_page=1, finish_page=2,
+                      cap_path_pairs=((0, 0), (1, 1)),
+                      translation_hypotheses=((78., 0.),))
+    with pytest.raises(ValueError, match="SHA"):
+        audit(blob, **{**parameters, "source_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="distinct"):
+        audit(blob, **{**parameters, "cap_path_pairs": ((0, 0), (0, 1))})
+    with pytest.raises(ValueError, match="tolerance"):
+        audit(blob, **parameters, tolerance_pdf_pt=2.5)
+    assert sha256(blob).hexdigest() == parameters["source_sha256"]
+
+
+def test_original_cap_receipt_is_order_invariant_and_never_mutates_source():
+    from pb_gpt2_mary_original_figured_door_leader_shadow import (
+        audit_original_crosssheet_door_caps_shadow as audit,
+    )
+    source = _two_sheet_caps()
+    data = dict(source_sha256=sha256(source).hexdigest(),
+                floor_page=1, finish_page=2,
+                translation_hypotheses=((78., 0.), (43.92, 0.)))
+    first = audit(source, cap_path_pairs=((0, 0), (1, 1)), **data)
+    second = audit(source, cap_path_pairs=((1, 1), (0, 0)), **data)
+    assert first["all_tested_hypotheses"] == second["all_tested_hypotheses"]
+    assert sha256(source).hexdigest() == data["source_sha256"]
