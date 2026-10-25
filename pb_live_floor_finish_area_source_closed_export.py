@@ -158,6 +158,23 @@ def build_live_floor_finish_area_source_traces(
                 f"duplicate original floor-finish quantity id: {original_id}"
             )
         seen_original_quantity_ids.add(original_id)
+    # The customer boundary already rejects a non-abstained numeric source
+    # that retains producer blockers. Apply the same veto at the independent
+    # source-seal boundary: a caller must not bypass customer projection and
+    # seal a contradictory original FIRM (or other numeric) receipt directly.
+    # Keep this AFTER the complete original family/ID census so duplicate
+    # original identities retain their established first-failure precedence.
+    for original in claim.floor_finish_quantity_evidence:
+        if (
+            not original.abstained
+            and original.value is not None
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "numeric floor-finish source quantity retains unresolved blockers: "
+                f"{original.quantity_id}"
+            )
+
     # Keep an explicit negative-claimant census BEFORE the FIRM-only path.
     # Original material records can remain attached to an ABSTAINED quantity
     # even when its physical floor cannot yet be published. A positive floor
