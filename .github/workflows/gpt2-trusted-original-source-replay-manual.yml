@@ -127,10 +127,10 @@ jobs:
           # No private test stdout/stderr is ever printed into public logs.
           # Host has a network, isolated test container has none.
           output="$RUNNER_TEMP/gpt2-private-isolated.log"
-          run_test() {
-            local label="$1"; shift
-            : > "$output"
-            if ! docker run --rm --network none --read-only --cap-drop ALL \
+          # Every command below runs in the same source-isolated container.
+          # Neither PR code nor original PDF bytes are exposed to the host log.
+          run_offline() {
+            docker run --rm --network none --read-only --cap-drop ALL \
                 --security-opt no-new-privileges --pids-limit 128 \
                 --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
                 --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
@@ -140,9 +140,30 @@ jobs:
                 -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
                 -e PLANREADER_MARYBOROUGH_ORIGINAL_PDF="documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
                 -e PLANREADER_MARYBOROUGH_SOURCE_SHA256 \
-                "gpt2-offline:${{ matrix.python-version }}" \
-                python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings "$@" \
-                > "$output" 2>&1; then
+                "gpt2-offline:\${{ matrix.python-version }}" "$@"
+          }
+          run_stage() {
+            local label="$1"; shift
+            : > "$output"
+            if ! run_offline "$@" > "$output" 2>&1; then
+              echo "::error::Isolated GPT2 $label failed (details withheld to protect source)"
+              exit 1
+            fi
+            echo "Isolated GPT2 $label PASS"
+          }
+          # Source bytes, digest and imports are checked INSIDE the offline
+          # container. Only a stage name leaves the container; no PDF data,
+          # exception, stdout or stderr enters the public job log.
+          run_stage source-mount-sha-import python -c 'import hashlib,os,pathlib,fitz,pytest; p=pathlib.Path(os.environ["PLANREADER_MARYBOROUGH_ORIGINAL_PDF"]); assert p.is_file(); assert hashlib.sha256(p.read_bytes()).hexdigest()==os.environ["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]'
+          run_stage source-test-collection python -m pytest -q -p no:cacheprovider --collect-only --tb=no --disable-warnings "$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST"
+          if ! grep -Eq '(^|[ ,])1 test collected' "$output"; then
+            echo "::error::Isolated GPT2 source-test-collection incomplete (details withheld to protect source)"
+            exit 1
+          fi
+          run_test() {
+            local label="$1"; shift
+            : > "$output"
+            if ! run_offline python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings "$@" > "$output" 2>&1; then
               echo "::error::Isolated GPT2 $label failed (details withheld to protect source)"
               exit 1
             fi
