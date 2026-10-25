@@ -119,6 +119,21 @@ def build_live_floor_area_source_traces(
             )
         original_room_area_ids.add(source_id)
 
+        # The producer may correctly abstain from a numeric FIRM room-area
+        # receipt that still carries source blockers. The final floor seal
+        # must not quietly treat that contradictory original as absent,
+        # including when no floor-area quantity survives publication.
+        if (
+            not original.abstained
+            and original.value is not None
+            and _clean(original.status).casefold() == "firm"
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "original numeric firm room-area source retains unresolved blockers: "
+                f"{source_id}"
+            )
+
     floors_by_physical_id = {}
     for floor in claim.canonical_floors:
         physical_id = _clean(floor.physical_floor_surface_id)
