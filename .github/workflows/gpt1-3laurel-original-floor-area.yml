@@ -7,22 +7,42 @@ on:
       - "tests/test_gpt1_source_positive_scoped_floor_area.py"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   original-canonical-floor-production:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Install original-source dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Provision exact private original from trusted main
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 3LAUREL - Construction Plan Set Rev3 08.05.26.pdf
+          allow-missing: "false"
       - name: Measure original p3 floor source with fail-closed customer handoff
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-3.sh"
+          private_output="$RUNNER_TEMP/guarded-original-3.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           python - <<'PY'
           from pathlib import Path
           import hashlib, fitz, subprocess, sys
@@ -41,11 +61,22 @@ jobs:
               "--output-dir","laurel-original-floor-produced",
           ],check=True,timeout=1600)
           PY
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
       - name: Independently validate signed output and customer row bijection
         if: success()
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-4.sh"
+          private_output="$RUNNER_TEMP/guarded-original-4.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           python - <<'PY'
           from pathlib import Path
           import hashlib,json
@@ -86,9 +117,16 @@ jobs:
                             "customer_rows_verified":bool(summary["customer_rows_verified"]),
                             "benchmark_identity_score":None},sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished diagnostics
         if: always()
-        with:
-          name: gpt1-3laurel-original-firm-floor-area-and-customer
-          path: laurel-original-floor-produced/
-          retention-days: 14
+        run: |
+          rm -rf documents/sources artifacts q5446-original-positive-floor laurel-original-floor-produced laurel-source-positive-core
+          rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
+          rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log
