@@ -77,10 +77,15 @@ jobs:
             echo "::error::Pinned code tree differs from reviewed GPT2 allowlist"
             exit 1
           fi
-          git checkout --detach "$approved_head"
-          [[ "$(git rev-parse HEAD)" == "$approved_head" ]]
+          # Preserve trusted main as the local-action execution root.
+          # Export the immutable reviewed PR tree as inert test data only.
+          target_tree="$RUNNER_TEMP/gpt2-approved-target"
+          mkdir -p "$target_tree"
+          git archive "$approved_head" | tar -x -C "$target_tree"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
-          [[ -f "$test_path" ]]
+          [[ -f "$target_tree/$test_path" ]]
+          echo "GPT2_APPROVED_TREE=$target_tree" >> "$GITHUB_ENV"
           echo "GPT2_TEST_PATH=$test_path" >> "$GITHUB_ENV"
           echo "GPT2_ORIGINAL_TEST=$original_test" >> "$GITHUB_ENV"
           echo "GPT2_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
@@ -125,7 +130,8 @@ jobs:
             if ! docker run --rm --network none --read-only --cap-drop ALL \
                 --security-opt no-new-privileges --pids-limit 128 \
                 --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
-                --mount "type=bind,src=$PWD,dst=/workspace,readonly" \
+                --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+                --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
                 --workdir /workspace \
                 -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
                 -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
@@ -157,4 +163,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
-          rm -rf documents/sources
+          rm -rf "$RUNNER_TEMP/gpt2-approved-target" documents/sources
