@@ -99,6 +99,20 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Build no-network original-test sandbox before private source provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This image contains dependencies only. The client original is not yet present.
+          docker build --pull --build-arg PYTHON_VERSION="${{ matrix.python-version }}" \
+            --tag "gptmax-original-sandbox:${{ matrix.python-version }}" -f - . <<'DOCKERFILE'
+          ARG PYTHON_VERSION
+          FROM python:${PYTHON_VERSION}-slim
+          ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
+          RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 libgomp1 && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          DOCKERFILE
       - name: Provision original Lot16 authenticated SHA and size
         uses: ./.github/actions/provision-original-sources
         with:
@@ -116,12 +130,24 @@ jobs:
           PLANREADER_LOT16_ORIGINAL_PDF: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
         run: |
           set -euo pipefail
+          run_isolated() {
+            # PR-head code can read the original only inside this sealed, no-egress container.
+            # No runner token, GitHub env, writable workspace, host socket or network is mounted.
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+              --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --volume "$GITHUB_WORKSPACE:/repo:ro" --workdir /repo \
+              --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
+              --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
+              --env "LOT16_ARCH_ORIGINAL=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --env "PLANREADER_LOT16_ORIGINAL_PDF=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              "gptmax-original-sandbox:${{ matrix.python-version }}" "$@"
+          }
           output="$RUNNER_TEMP/gptmax-original-positive.log"
-          if ! python -m pytest -q --tb=no --disable-warnings \
+          if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
               tests/test_live_append_only_opening_area_original.py::test_original_source_appends_one_area_and_preserves_all_eight_signed_customer_bodies \
               > "$output" 2>&1; then
             echo "::error::Actual original source signed/customer replay FAILED"
-            grep -E '^(FAILED |ERROR )' "$output" | head -5 || true
             exit 1
           fi
           if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
@@ -138,10 +164,22 @@ jobs:
           PLANREADER_LOT16_ORIGINAL_PDF: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
         run: |
           set -euo pipefail
+          run_isolated() {
+            # PR-head code can read the original only inside this sealed, no-egress container.
+            # No runner token, GitHub env, writable workspace, host socket or network is mounted.
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+              --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --volume "$GITHUB_WORKSPACE:/repo:ro" --workdir /repo \
+              --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
+              --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
+              --env "LOT16_ARCH_ORIGINAL=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --env "PLANREADER_LOT16_ORIGINAL_PDF=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              "gptmax-original-sandbox:${{ matrix.python-version }}" "$@"
+          }
           output="$RUNNER_TEMP/gptmax-source-regressions.log"
-          if ! python -m pytest -q --tb=no --disable-warnings "$GPTMAX_FOCUSED_TEST" > "$output" 2>&1; then
+          if ! run_isolated python -m pytest -q --tb=no --disable-warnings "$GPTMAX_FOCUSED_TEST" > "$output" 2>&1; then
             echo "::error::Original-provisioned MAX source guard FAILED"
-            grep -E '^(FAILED |ERROR )' "$output" | head -5 || true
             exit 1
           fi
           if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
@@ -151,12 +189,11 @@ jobs:
           if [[ "$GPTMAX_TARGET" == "vertical" ]]; then
             # A synthetic passing suite cannot conceal a skipped original.
             # Require this exact original-only positive to report 1 passed.
-            if ! python -m pytest -q --tb=no --disable-warnings \
+            if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
               tests/test_gptmax_raster_tile_seam_source.py::test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots \
               > "$output" 2>&1; then
               echo "::error::Original 2124 two-root source ink test FAILED"
-              grep -E '^(FAILED |ERROR )' "$output" | head -5 || true
-              exit 1
+                exit 1
             fi
             if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
               echo "::error::Original 2124 source ink test skipped or missing"
@@ -166,12 +203,11 @@ jobs:
           if [[ "$GPTMAX_TARGET" == "horizontal" ]]; then
             # The focused suite may pass synthetics with the original skipped.
             # Require the immutable source p5 xref116/115 positive explicitly.
-            if ! python -m pytest -q --tb=no --disable-warnings \
+            if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
               tests/test_gptmax_horizontal_raster_tile_seam_shadow.py::test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles \
               > "$output" 2>&1; then
               echo "::error::Original p5 horizontal source rail test FAILED"
-              grep -E '^(FAILED |ERROR )' "$output" | head -5 || true
-              exit 1
+                exit 1
             fi
             if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
               echo "::error::Original p5 horizontal rail test skipped or missing"
