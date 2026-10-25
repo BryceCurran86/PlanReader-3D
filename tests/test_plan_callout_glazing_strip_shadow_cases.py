@@ -559,3 +559,58 @@ def test_a_pair_with_no_partner_in_the_chosen_group_abstains_while_the_group_sta
 
 def test_the_one_group_case_is_unchanged():
     assert {m: c.status for m, c in by_mark(run(three_windows())).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
+
+
+# ------------------------------------------------------------------------------------
+# third review: an unsegmented page is not a resolved viewport; uniqueness ignores the report pattern
+# ------------------------------------------------------------------------------------
+
+def test_toggling_only_the_viewport_basis_flips_every_candidate_to_a_typed_abstention_and_back():
+    sheet = three_windows()
+    resolved = run(sheet)
+    unsegmented = run(sheet, plan_viewport_basis=shadow.WHOLE_PAGE_UNSEGMENTED)
+    assert {c.status for c in resolved.correspondences} == {CAND}
+    assert {c.status for c in unsegmented.correspondences} == {ABST}
+    assert all("plan_viewport_not_resolved" in c.reason_codes for c in unsegmented.correspondences)
+    assert [s.strip_id for s in unsegmented.strips] == [s.strip_id for s in resolved.strips]      # diagnostics kept
+    assert "plan_viewport_whole_page_unsegmented" in unsegmented.page_reason_codes
+    assert decision(run(sheet, plan_viewport_basis=shadow.WHOLE_PAGE_UNSEGMENTED)) == decision(unsegmented)
+    assert decision(run(sheet)) == decision(resolved)
+
+
+def _w01_family(second_text="W1", ring_second=False):
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W01", panels=3, length=204.0)
+    add_window(sheet, 1, "W02", panels=3, length=232.0)
+    add_window(sheet, 2, "W03", panels=5, length=120.0)
+    if ring_second:
+        sheet.callout((700.0, 700.0), second_text)
+    else:
+        sheet.text((700.0, 700.0), second_text)
+    return sheet
+
+
+@pytest.mark.parametrize("pattern", [r"[WD]\d+", r"W\d{2}", r"W01"])
+@pytest.mark.parametrize("ring_second", [False, True])
+def test_a_second_trusted_word_with_the_same_type_key_disproves_uniqueness_whatever_the_report_pattern(pattern, ring_second):
+    # W01 and W1 normalise to one type key; a narrow report pattern must not hide the duplicate, with or without a ring
+    got = by_mark(run(_w01_family(ring_second=ring_second), callout_mark_pattern=pattern))
+    assert got["W01"].status is ABST and "tag_not_unique_on_plan_page" in got["W01"].reason_codes
+    assert dict(got["W01"].conditions)["tag_unique_on_plan_page"] == shadow.FAILED
+
+
+def test_the_duplicate_is_found_whatever_the_insertion_order_of_the_words():
+    sheet = _w01_family()
+    pdf = sheet.pdf()
+    forward = words_of(pdf)
+    got = by_mark(run(sheet, words=list(reversed(forward)), callout_mark_pattern=r"W\d{2}"))
+    assert got["W01"].status is ABST and "tag_not_unique_on_plan_page" in got["W01"].reason_codes
+
+
+def test_without_the_duplicate_the_narrow_pattern_reports_only_its_marks_and_they_stay_candidates():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W01", panels=3, length=204.0)
+    add_window(sheet, 1, "W02", panels=3, length=232.0)
+    add_window(sheet, 2, "W03", panels=5, length=120.0)
+    got = by_mark(run(sheet, callout_mark_pattern=r"W\d{2}"))
+    assert {m: c.status for m, c in got.items()} == {"W01": CAND, "W02": CAND, "W03": CAND}

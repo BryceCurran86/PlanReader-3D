@@ -43,7 +43,7 @@ from typing import Callable, Iterable, Optional, Sequence
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
 
-PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.2.0"
+PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.3.0"
 PRODUCER_INPUT_PROVENANCE = "source_visibility_producer"
 WHOLE_PAGE_UNSEGMENTED = "whole_page_unsegmented"
 
@@ -755,7 +755,12 @@ def audit_plan_callout_to_glazing_strip_shadow(
     if scope.plan_viewport_basis == WHOLE_PAGE_UNSEGMENTED:
         page_reasons.append("plan_viewport_whole_page_unsegmented")
 
-    key_count = Counter(_tag_key(w.text) for w in callouts)
+    # uniqueness of a type mark is a fact about ALL trusted native words of the page (W01 and W1 are one
+    # key); the report pattern only selects what is reported
+    key_count = Counter(k for k in (_tag_key(w.text) for w in words) if k is not None)
+    for w in callouts:
+        if _tag_key(w.text) is None:
+            key_count[None] += 1
     rings = {w.observation_id: (None if "stroke_budget_exceeded" in page_reasons else _ring_for_word(w, lines, eq))
              for w in callouts}
     types_by_key: dict[str, list[ElevationTypeObservation]] = defaultdict(list)
@@ -763,7 +768,7 @@ def audit_plan_callout_to_glazing_strip_shadow(
         key = _tag_key(t.type_mark)
         if key is not None:
             types_by_key[key].append(t)
-    plan_keys = {k for k in key_count if k is not None}
+    plan_keys = {k for k in (_tag_key(w.text) for w in callouts) if k is not None}
 
     facts: list[_TypeFact] = []
     for key in sorted(plan_keys):
@@ -891,12 +896,16 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
     states["callout_ring_unique"] = PASSED
     box = _ring_box(ring)
     viewport = _viewport_of(box, scope.plan_viewports)
+    # position of this callout against every strip, as data (kept even when the viewport is not resolved)
+    position_ids.extend(s.strip_id for s in strips if position.get((oid, s.strip_id), (False, 0.0))[0])
+    if scope.plan_viewport_basis == WHOLE_PAGE_UNSEGMENTED:
+        # the whole page admitted for want of any segmentation is a caveat about the page, not a RESOLVED viewport
+        states["callout_in_one_resolved_plan_viewport"] = FAILED
+        return finish(ABSTAIN, ("plan_viewport_not_resolved",))
     if viewport is None:
         states["callout_in_one_resolved_plan_viewport"] = FAILED
         return finish(ABSTAIN, ("callout_outside_resolved_plan_viewport",))
     states["callout_in_one_resolved_plan_viewport"] = PASSED
-    # position of this callout against every strip, as data
-    position_ids.extend(s.strip_id for s in strips if position.get((oid, s.strip_id), (False, 0.0))[0])
     # 3 the elevation type
     group = types_by_key.get(key, [])
     if len(group) != 1:

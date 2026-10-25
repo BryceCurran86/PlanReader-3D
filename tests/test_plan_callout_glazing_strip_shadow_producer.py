@@ -67,8 +67,35 @@ def _audit(source, published, **kw):
         dimension_quantum_mm=5.0, **kw)
 
 
+def _resolved_viewport(monkeypatch, bbox=(10.0, 10.0, 1490.0, 690.0)):
+    """The repository's own test convention: stamp a RESOLVED floor-plan viewport at the segmentation boundary."""
+    import pb_viewport_segmentation as seg
+
+    def segment(_page, *, page_number):
+        return tuple(seg._stamp_segment_page_viewports_product([seg.SegmentedViewport(
+            view_id="vp-plan", page_number=page_number, view_type="floor_plan", label="FLOOR_PLAN",
+            title_bbox=(20.0, 10.0, 160.0, 25.0), bounding_box=bbox,
+            status=seg.ViewportSegmentationStatus.RESOLVED.value,
+            boundary_source=seg.ViewportBoundarySource.VECTOR_FRAME.value, confidence=1.0)]))
+
+    monkeypatch.setattr(seg, "segment_page_viewports", segment)
+
+
+def test_a_page_with_no_segmented_viewport_never_yields_a_candidate_but_keeps_its_diagnostics():
+    source, published = _publish(_plan_sheet())
+    result = _audit(source, published)
+    got = {c.tag_mark: c for c in result.correspondences}
+    assert {m: c.status for m, c in got.items()} == {m: EvidenceResolutionStatus.ABSTAINED for m in ("W1", "W2", "W3")}
+    assert all("plan_viewport_not_resolved" in c.reason_codes for c in got.values())
+    assert all(dict(c.conditions)["callout_in_one_resolved_plan_viewport"] == shadow.FAILED for c in got.values())
+    assert "plan_viewport_whole_page_unsegmented" in result.page_reason_codes
+    assert {s.panel_count for s in result.strips} == {3, 7}               # the strip inventory is still reported
+    assert all(c.position_strip_ids for c in got.values())
+
+
 @pytest.mark.parametrize("plan_rotation", [0, 90])
-def test_the_adapter_reads_only_producer_owned_records_and_finds_the_three_windows(plan_rotation):
+def test_the_adapter_reads_only_producer_owned_records_and_finds_the_three_windows(plan_rotation, monkeypatch):
+    _resolved_viewport(monkeypatch)
     source, published = _publish(_plan_sheet(plan_rotation=plan_rotation))
     result = _audit(source, published)
     got = {c.tag_mark: c for c in result.correspondences}
@@ -84,18 +111,21 @@ def test_the_adapter_reads_only_producer_owned_records_and_finds_the_three_windo
     for c in got.values():
         assert c.ring.ink_ids and set(c.ring.ink_ids) <= visible
     assert all(set(s.ink_ids) <= visible for s in result.strips)
-    assert "plan_viewport_whole_page_unsegmented" in result.page_reason_codes
+    assert "plan_viewport_whole_page_unsegmented" not in result.page_reason_codes
+    assert {c.plan_viewport_id for c in got.values()} == {"vp-plan"}
     assert {s.panel_count for s in result.strips} == {3, 7}
     for flag in shadow._GRANT_FLAGS:
         assert getattr(result, flag) is False
 
 
-def test_the_adapter_is_replay_stable():
+def test_the_adapter_is_replay_stable(monkeypatch):
+    _resolved_viewport(monkeypatch)
     source, published = _publish(_plan_sheet())
     assert _audit(source, published) == _audit(source, published)
 
 
-def test_an_elevation_type_without_its_figured_dimension_abstains_and_does_not_borrow_another_frame():
+def test_an_elevation_type_without_its_figured_dimension_abstains_and_does_not_borrow_another_frame(monkeypatch):
+    _resolved_viewport(monkeypatch)
     source, published = _publish(_plan_sheet(drop_dimension_for="W2"))
     got = {c.tag_mark: c for c in _audit(source, published).correspondences}
     assert got["W2"].status is EvidenceResolutionStatus.ABSTAINED
@@ -103,7 +133,8 @@ def test_an_elevation_type_without_its_figured_dimension_abstains_and_does_not_b
     assert got["W1"].status is CAND and got["W3"].status is CAND
 
 
-def test_a_second_identical_strip_for_a_type_is_a_conflict_through_the_producer_path_too():
+def test_a_second_identical_strip_for_a_type_is_a_conflict_through_the_producer_path_too(monkeypatch):
+    _resolved_viewport(monkeypatch)
     source, published = _publish(_plan_sheet(second_strip_for_w2=True))
     got = {c.tag_mark: c for c in _audit(source, published).correspondences}
     assert got["W2"].status is EvidenceResolutionStatus.CONFLICT
