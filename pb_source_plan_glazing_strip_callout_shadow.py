@@ -43,7 +43,7 @@ from typing import Callable, Iterable, Optional, Sequence
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
 
-PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.0.0"
+PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.1.0"
 PRODUCER_INPUT_PROVENANCE = "source_visibility_producer"
 WHOLE_PAGE_UNSEGMENTED = "whole_page_unsegmented"
 
@@ -73,6 +73,8 @@ _EQ_FRACTION_OF_QUANTUM = 0.25
 # Work bounds. They stop a pathological page from being analysed; they decide nothing.
 _MAX_INK = 200_000
 _MAX_RING_EDGES = 250
+# Path expansions allowed while looking for one callout ring; past it the word abstains.
+_MAX_RING_PATH_EXPANSIONS = 100_000
 _MAX_SCALE_PAIRS = 5_000
 # A post between two panels of one strip is narrower than the strip's own frame depth.
 _MAX_CHAIN_GAP_DEPTHS = 1.0
@@ -146,7 +148,7 @@ class PlanCalloutStripScope:
     dimension_quantum_mm: float
     plan_viewports: tuple[PlanViewportRef, ...] = ()
     elevation_viewport_id: Optional[str] = None
-    untrusted_plan_text_count: int = 0
+    untrusted_plan_words: tuple[PlanTextObservation, ...] = ()
     plan_viewport_basis: str = "caller_supplied"
 
     def __post_init__(self) -> None:
@@ -225,6 +227,7 @@ class PlanCalloutStripShadow:
     strips: tuple[GlazingStrip, ...]
     correspondences: tuple[CalloutCorrespondence, ...]
     page_reason_codes: tuple[str, ...]
+    untrusted_plan_word_count: int
     shadow_only: bool = True
     text_trust_verified_by_this_module: bool = False
     physical_opening_granted: bool = False
@@ -531,11 +534,27 @@ def _ring_for_word(word: PlanTextObservation, lines, eq: float) -> CalloutRing:
                 del neighbours[vertex]
                 changed = True
                 break
+    # a vertex with fewer than two neighbours cannot lie on a cycle
+    pruned = True
+    while pruned:
+        pruned = False
+        for vertex in sorted(neighbours):
+            if len(neighbours[vertex]) < 2:
+                for other in neighbours[vertex]:
+                    neighbours[other].discard(vertex)
+                del neighbours[vertex]
+                pruned = True
+                break
     cycles: dict[tuple, tuple] = {}
     centre = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+    expansions = 0
     for start in sorted(neighbours):
         stack = [(start, (start,))]
         while stack:
+            expansions += 1
+            if expansions > _MAX_RING_PATH_EXPANSIONS:
+                return CalloutRing(status=EvidenceResolutionStatus.ABSTAINED,
+                                   reason_codes=("callout_ring_search_budget_exceeded",), **base)
             node, path = stack.pop()
             if len(path) == 6:
                 if start in neighbours[node] and _convex(path):
@@ -615,6 +634,19 @@ def _position(ring: CalloutRing, strip: GlazingStrip, eq: float) -> tuple[bool, 
     return bool(inside and (beyond or before)), float(gap)
 
 
+_INCONCLUSIVE_RING = {"callout_ring_search_budget_exceeded", "callout_ring_not_unique", "callout_local_ink_unbounded"}
+
+
+def _word_claims(word: PlanTextObservation, strip: GlazingStrip, eq: float) -> bool:
+    """Location filter on a word's centre alone, for a ring that could not be decided: beside the
+    strip's along-extent and not over its band."""
+    cx, cy = (word.bbox[0] + word.bbox[2]) / 2.0, (word.bbox[1] + word.bbox[3]) / 2.0
+    along, normal = (cx, cy) if strip.axis == "H" else (cy, cx)
+    flo, fhi = strip.frame_along
+    o0, o1 = strip.band
+    return bool(flo - eq <= along <= fhi + eq and not (o0 - eq <= normal <= o1 + eq))
+
+
 @dataclass(frozen=True)
 class _TypeFact:
     key: str
@@ -674,8 +706,8 @@ def audit_plan_callout_to_glazing_strip_shadow(
     strips = [replace(s, plan_viewport_id=_viewport_of(_strip_box(s), scope.plan_viewports)) for s in strips]
     strips.sort(key=lambda s: (s.axis, s.band, s.along, s.panel_count, s.strip_id))
     by_id = {s.strip_id: s for s in strips}
-    if scope.untrusted_plan_text_count:
-        page_reasons.append("callout_universe_limited_to_trusted_text")
+    # rings are inventoried around native words only: a ring whose tag is not a native word is not seen
+    page_reasons.append("callout_rings_without_native_words_not_inventoried")
     if scope.plan_viewport_basis == WHOLE_PAGE_UNSEGMENTED:
         page_reasons.append("plan_viewport_whole_page_unsegmented")
 
@@ -713,6 +745,19 @@ def audit_plan_callout_to_glazing_strip_shadow(
             position[(oid, strip.strip_id)] = (ok, gap)
             if ok:
                 claimants[strip.strip_id].append(oid)
+    # an untrusted native word inside a ring beside a strip may be a second callout: its label is unknown,
+    # so it is an unverified claimant and the strip's exclusivity cannot be proven
+    untrusted_claimants: dict[str, list[str]] = defaultdict(list)
+    if "stroke_budget_exceeded" not in page_reasons:
+        for word in sorted(scope.untrusted_plan_words, key=lambda w: w.observation_id):
+            ring = _ring_for_word(word, lines, eq)
+            for strip in strips:
+                if ring.status is EvidenceResolutionStatus.CANDIDATE:
+                    claims = _position(ring, strip, eq)[0]
+                else:
+                    claims = bool(set(ring.reason_codes) & _INCONCLUSIVE_RING) and _word_claims(word, strip, eq)
+                if claims:
+                    untrusted_claimants[strip.strip_id].append("untrusted:" + word.observation_id)
     fingerprint_owners: dict[str, set[str]] = defaultdict(set)
     for key, sids in supported.items():
         for sid in sids:
@@ -722,16 +767,17 @@ def audit_plan_callout_to_glazing_strip_shadow(
     for word in callouts:
         correspondences.append(_decide(
             word, scope, rings.get(word.observation_id), key_count, types_by_key, facts, strips, by_id,
-            supported, supporters, fingerprint_owners, position, claimants, page_reasons))
+            supported, supporters, fingerprint_owners, position, claimants, untrusted_claimants, page_reasons))
     correspondences.sort(key=lambda c: (c.tag_mark, c.tag_observation_id))
     return PlanCalloutStripShadow(
         ownership=ownership, plan_page_id=scope.plan_page_id, elevation_page_id=scope.elevation_page_id,
         elevation_viewport_id=scope.elevation_viewport_id, strips=tuple(strips),
-        correspondences=tuple(correspondences), page_reason_codes=tuple(page_reasons))
+        correspondences=tuple(correspondences), page_reason_codes=tuple(page_reasons),
+        untrusted_plan_word_count=len(scope.untrusted_plan_words))
 
 
 def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, supported, supporters,
-            fingerprint_owners, position, claimants, page_reasons) -> CalloutCorrespondence:
+            fingerprint_owners, position, claimants, untrusted_claimants, page_reasons) -> CalloutCorrespondence:
     oid = word.observation_id
     key = _tag_key(word.text)
     states: dict[str, str] = {}
@@ -848,11 +894,17 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
         return finish(ABSTAIN, ("callout_not_at_fingerprint_strip",))
     states["callout_beside_fingerprint_strip"] = PASSED
     # 8 no other callout ring (of any kind) satisfies the same location conditions
-    rival_callouts.extend(c for c in claimants.get(chosen, []) if c != oid)
-    numbers["other_callout_claimants"] = float(len(rival_callouts))
-    if rival_callouts:
+    trusted_rivals = [c for c in claimants.get(chosen, []) if c != oid]
+    unverified_rivals = list(untrusted_claimants.get(chosen, []))
+    rival_callouts.extend(trusted_rivals + unverified_rivals)
+    numbers["other_callout_claimants"] = float(len(trusted_rivals))
+    numbers["unverified_label_claimants"] = float(len(unverified_rivals))
+    if trusted_rivals:
         states["no_other_callout_claims_strip"] = FAILED
         return finish(CONFLICT, ("strip_has_other_callout_claimants",))
+    if unverified_rivals:
+        states["no_other_callout_claims_strip"] = FAILED
+        return finish(ABSTAIN, ("strip_has_claimant_with_untrusted_label",))
     states["no_other_callout_claims_strip"] = PASSED
     # 9 the strip lies in the same resolved viewport as the callout
     if strip.plan_viewport_id != viewport:
@@ -864,8 +916,6 @@ def _decide(word, scope, ring, key_count, types_by_key, facts, strips, by_id, su
         reasons.append("elevation_viewport_unproven")
     if kind.outside_frame_mark_count:
         reasons.append("elevation_mark_also_printed_outside_type_frame")
-    if "callout_universe_limited_to_trusted_text" in page_reasons:
-        reasons.append("callout_universe_limited_to_trusted_text")
     return finish(EvidenceResolutionStatus.CANDIDATE, reasons)
 
 
@@ -952,7 +1002,7 @@ def audit_plan_callout_to_glazing_strip_from_source(
     text_authority = source.text_integrity_authority()
     plan_words: list[PlanTextObservation] = []
     elevation_words: list[PlanTextObservation] = []
-    untrusted_plan = 0
+    untrusted_plan: list[PlanTextObservation] = []
     for observation_id in published.text_observation_ids:
         result = text_authority.resolve_text(selector(observation_id))
         receipt = result.receipt
@@ -963,8 +1013,11 @@ def audit_plan_callout_to_glazing_strip_from_source(
             word = PlanTextObservation(
                 str(observation_id), str(result.trusted_text), tuple(float(v) for v in receipt.geometry[:4]))
             (plan_words if str(receipt.page_id) == str(plan_page_id) else elevation_words).append(word)
-        elif str(receipt.page_id) == str(plan_page_id):
-            untrusted_plan += 1
+        elif str(receipt.page_id) == str(plan_page_id) and len(receipt.geometry) >= 4:
+            # only the box is used: an untrusted word's text is never an identity
+            untrusted_plan.append(PlanTextObservation(
+                str(observation_id), str(getattr(receipt, "raw_text", "") or ""),
+                tuple(float(v) for v in receipt.geometry[:4])))
 
     with fitz.open(stream=bytes(source_bytes), filetype="pdf") as document:
         plan_page = document[plan_page_id - 1]
@@ -1040,7 +1093,7 @@ def audit_plan_callout_to_glazing_strip_from_source(
         ownership=ownership, plan_page_id=str(plan_page_id), elevation_page_id=str(elevation_page_id),
         callout_mark_pattern=callout_mark_pattern, coordinate_quantum_pt=coordinate_quantum_pt,
         dimension_quantum_mm=dimension_quantum_mm, plan_viewports=viewports, elevation_viewport_id=None,
-        untrusted_plan_text_count=untrusted_plan, plan_viewport_basis=viewport_basis)
+        untrusted_plan_words=tuple(untrusted_plan), plan_viewport_basis=viewport_basis)
     return audit_plan_callout_to_glazing_strip_shadow(scope, ink=ink, words=plan_words, elevation_types=types)
 
 

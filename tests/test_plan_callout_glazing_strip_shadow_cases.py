@@ -366,8 +366,93 @@ def test_a_page_over_the_ink_budget_abstains_for_every_tag_instead_of_raising(mo
     assert all("stroke_budget_exceeded" in c.reason_codes for c in result.correspondences)
 
 
-def test_untrusted_plan_text_is_carried_as_a_caveat_on_every_candidate():
-    result = run(three_windows(), untrusted_plan_text_count=3)
-    assert "callout_universe_limited_to_trusted_text" in result.page_reason_codes
-    for c in result.correspondences:
-        assert c.status is CAND and "callout_universe_limited_to_trusted_text" in c.reason_codes
+def _with_untrusted(sheet, marks):
+    """Run with the named plan words withheld from the trusted set and passed as untrusted native words."""
+    pdf = sheet.pdf()
+    everything = words_of(pdf)
+    trusted = [w for w in everything if w.text not in marks]
+    untrusted = tuple(w for w in everything if w.text in marks)
+    return run(sheet, words=trusted, untrusted_plan_words=untrusted)
+
+
+def test_an_untrusted_word_inside_a_ring_beside_the_strip_is_an_unverified_rival_and_blocks_the_candidate():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "X9")           # a second ring beside W1's strip, label not trusted
+    result = _with_untrusted(sheet, {"X9"})
+    got = by_mark(result)
+    assert got["W1"].status is ABST and "strip_has_claimant_with_untrusted_label" in got["W1"].reason_codes
+    assert dict(got["W1"].conditions)["no_other_callout_claims_strip"] == shadow.FAILED
+    assert any(c.startswith("untrusted:") for c in got["W1"].rival_callout_ids)
+    assert got["W2"].status is CAND and got["W3"].status is CAND
+    assert result.untrusted_plan_word_count == 1
+
+
+def test_a_trusted_second_claimant_wins_over_an_unverified_one_as_a_conflict():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "D1")
+    sheet.callout((220.0, 305.52 + GAP + HEX_H), "X9")
+    assert by_mark(_with_untrusted(sheet, {"X9"}))["W1"].status is CONF
+
+
+def test_untrusted_words_without_a_ring_or_beside_another_strip_leave_every_candidate_alone():
+    sheet = three_windows()
+    sheet.text((700.0, 700.0), "X8")                              # a stray untrusted word, no ring
+    sheet.callout((350.0, 305.52 + GAP + HEX_H + 90.0), "X9")              # a ring between the strips, outside every extent
+    result = _with_untrusted(sheet, {"X8", "X9"})
+    assert {m: c.status for m, c in by_mark(result).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
+    assert result.untrusted_plan_word_count == 2
+    assert "callout_rings_without_native_words_not_inventoried" in result.page_reason_codes
+
+
+def test_an_undecidable_ring_around_an_untrusted_word_blocks_by_the_words_own_position():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "X9", extra_ring=True)      # two rings: undecidable
+    got = by_mark(_with_untrusted(sheet, {"X9"}))
+    assert got["W1"].status is ABST and "strip_has_claimant_with_untrusted_label" in got["W1"].reason_codes
+
+
+# ------------------------------------------------------------------------------------
+# bounded ring search
+# ------------------------------------------------------------------------------------
+
+def _dense_ink(points=22, radius=9.0, centre=(300.0, 300.0)):
+    import math as _m
+    pts = [(centre[0] + radius * _m.cos(2 * _m.pi * k / points), centre[1] + radius * _m.sin(2 * _m.pi * k / points))
+           for k in range(points)]
+    ink = []
+    for a in range(points):
+        for b in range(a + 1, points):
+            ink.append(shadow.PlanInkSegment(f"e{a}-{b}", pts[a][0], pts[a][1], pts[b][0], pts[b][1], 0.48, True))
+    return ink
+
+
+def test_a_dense_endpoint_graph_under_the_edge_cap_abstains_promptly_instead_of_enumerating_millions_of_paths():
+    import time
+    ink = _dense_ink()
+    assert len(ink) == 231 < shadow._MAX_RING_EDGES
+    word = shadow.PlanTextObservation("p1:W1:0", "W1", (294.0, 296.0, 306.0, 304.0))
+    scope = shadow.PlanCalloutStripScope(
+        ownership=shadow.SourceOwnership("d", "r", "s", "a" * 64, shadow.PRODUCER_INPUT_PROVENANCE),
+        plan_page_id="1", elevation_page_id="2", callout_mark_pattern=r"[WD]\d+", coordinate_quantum_pt=0.24,
+        dimension_quantum_mm=5.0, plan_viewports=(shadow.PlanViewportRef("v", (0.0, 0.0, 600.0, 600.0)),))
+    started = time.perf_counter()
+    result = shadow.audit_plan_callout_to_glazing_strip_shadow(scope, ink=ink, words=[word], elevation_types=[])
+    assert time.perf_counter() - started < 20.0
+    got = by_mark(result)["W1"]
+    assert got.status is ABST and "callout_ring_search_budget_exceeded" in got.reason_codes
+    assert got.strip_id is None and result.strips == ()
+    assert all(getattr(result, flag) is False for flag in shadow._GRANT_FLAGS)
+
+
+def test_the_ring_search_budget_is_deterministic_and_does_not_change_ordinary_rings():
+    sheet = three_windows()
+    assert decision(run(sheet)) == decision(run(sheet))
+    assert {m: c.status for m, c in by_mark(run(sheet)).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
+
+
+def test_an_elevation_mark_printed_outside_its_type_frame_is_a_caveat_not_a_block():
+    sheet = three_windows()
+    types = [t if t.type_mark != "W1" else shadow.ElevationTypeObservation(
+        t.type_mark, t.record_id, t.display_width_mm, t.panel_count, outside_frame_mark_count=2) for t in types_of(sheet)]
+    got = by_mark(run(sheet, types=types))["W1"]
+    assert got.status is CAND and "elevation_mark_also_printed_outside_type_frame" in got.reason_codes

@@ -59,6 +59,7 @@ def census(
         "plan_page": plan_page, "elevation_page": elevation_page,
         "native_finish_text_shadow": bool(native_finish_text_shadow),
         "page_reason_codes": list(result.page_reason_codes),
+        "untrusted_plan_words": result.untrusted_plan_word_count,
         "strips": len(result.strips),
         "strips_by_panel_count": dict(sorted(collections.Counter(s.panel_count for s in result.strips).items())),
         "callouts": len(rows),
