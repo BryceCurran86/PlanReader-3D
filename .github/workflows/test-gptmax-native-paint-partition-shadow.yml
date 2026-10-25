@@ -4,6 +4,12 @@ concurrency:
   group: test-gptmax-native-paint-partition-shadow-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: "Proper trusted-main ancestor for exact original retention"
+        required: true
+        type: string
   pull_request:
     paths:
       - scripts/gptmax_native_dimension_source_partition.py
@@ -12,6 +18,9 @@ on:
       - pb_pdf_text_integrity_authority.py
       - docs/engineering/gptmax_native_dimension_source_partition.md
       - .github/workflows/test-gptmax-native-paint-partition-shadow.yml
+permissions:
+  contents: read
+
 jobs:
   focused:
     runs-on: ubuntu-latest
@@ -32,20 +41,47 @@ jobs:
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   original-lot16:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Exact original PR-base and head opening receipts
+      - name: Validate explicit trusted main baseline before private source
+        env:
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
         run: |
-          git worktree add --detach /tmp/native-partition-original-base "${{ github.event.pull_request.base.sha }}"
+          set -euo pipefail
+          [[ "$BASELINE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE_SHA" != "$GITHUB_SHA" ]]
+          git cat-file -e "${BASELINE_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASELINE_SHA" "$GITHUB_SHA"
+          echo "BASELINE_SHA=$BASELINE_SHA" >> "$GITHUB_ENV"
+      - name: Provision exact private original from trusted main
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
+      - name: Exact trusted main baseline and head opening receipts
+        run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-3.sh"
+          private_output="$RUNNER_TEMP/guarded-original-3.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
+          git worktree add --detach /tmp/native-partition-original-base "$BASELINE_SHA"
+          PYTHONPATH=. python scripts/copy_provisioned_originals_into_worktree.py \
+            --workspace "$GITHUB_WORKSPACE" --worktree /tmp/native-partition-original-base \
+            --name '1. Construction Plans - Lot 16 Power (REV E).pdf'
           (
             cd /tmp/native-partition-original-base
             PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
@@ -57,8 +93,19 @@ jobs:
             --page-id 3 --output source-after.json
           PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
             --baseline source-before.json --candidate source-after.json --output source-retention.json
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
       - name: Preserve untrusted original paint partitions without promotion
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-4.sh"
+          private_output="$RUNNER_TEMP/guarded-original-4.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           PYTHONPATH=. python -u scripts/gptmax_native_dimension_source_partition.py \
             --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
             --page-id 3 \
@@ -119,13 +166,19 @@ jobs:
               'host_publication_allowed','opening_count_publication_allowed','metric_quantity_publication_allowed'):
               assert audit[key] is False
           PY
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished diagnostics
         if: always()
-        with:
-          name: gptmax-original-native-paint-partitions
-          path: |
-            source-before.json
-            source-after.json
-            source-retention.json
-            native-paint-partitions.json
-          retention-days: 14
+        run: |
+          rm -rf documents/sources artifacts q5446-original-positive-floor laurel-original-floor-produced laurel-source-positive-core
+          rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
+          rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log
+          if [ -d /tmp/native-partition-original-base ]; then
+            git worktree remove --force /tmp/native-partition-original-base
+          fi

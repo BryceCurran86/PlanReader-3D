@@ -13,6 +13,9 @@ concurrency:
   group: gpt1-original-live-source-plan-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   focused:
     runs-on: ubuntu-latest
@@ -35,20 +38,35 @@ jobs:
           python scripts/check_full_plan_v2_integrity.py
 
   original-lot16:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Provision exact private original from trusted main
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
       - name: Original immutable Lot16 live source to customer output, no inferred metric
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-3.sh"
+          private_output="$RUNNER_TEMP/guarded-original-3.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           set -euo pipefail
           mkdir -p artifacts/gpt1-source-plan
           python -u tools/diag_lot16_room_face_scope.py \
@@ -91,20 +109,29 @@ jobs:
           },sort_keys=True,indent=2)+"\n")
           PY
           python scripts/check_full_plan_v2_integrity.py
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished diagnostics
         if: always()
-        with:
-          name: gpt1-original-lot16-live-source-scale-firstgate
-          path: artifacts/gpt1-source-plan/
-          retention-days: 14
-
+        run: |
+          rm -rf documents/sources artifacts q5446-original-positive-floor laurel-original-floor-produced laurel-source-positive-core
+          rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
+          rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log
   original-maryborough-retention:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -113,10 +140,22 @@ jobs:
       # the system Tesseract executable, not merely the Python wrapper.
       - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Provision exact private original from trusted main
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
       - name: Preserve exact original three measured floors and customer source closure
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-4.sh"
+          private_output="$RUNNER_TEMP/guarded-original-4.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           set -euo pipefail
           mkdir -p artifacts/gpt1-source-plan
           python - <<'PY'
@@ -170,9 +209,16 @@ jobs:
           },sort_keys=True,indent=2)+"\n")
           PY
           python scripts/check_full_plan_v2_integrity.py
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished diagnostics
         if: always()
-        with:
-          name: gpt1-original-maryborough-three-floor-retention
-          path: artifacts/gpt1-source-plan/
-          retention-days: 14
+        run: |
+          rm -rf documents/sources artifacts q5446-original-positive-floor laurel-original-floor-produced laurel-source-positive-core
+          rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
+          rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log
