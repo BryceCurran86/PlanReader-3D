@@ -222,10 +222,11 @@ def test_image_transform_mirror_shear_and_duplicate_boxes_all_fail_closed():
     assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0, 100, 0.1, 0))
 
 
-def test_subpixel_source_image_gap_is_not_interpolated_into_dark_ink():
-    """A render can hide a small gap; the original placements still refute it."""
+@pytest.mark.parametrize("gap", [0.0005, -0.0005, 0.01])
+def test_subpixel_source_image_gap_or_overlap_is_not_interpolated(gap):
+    """A dark render cannot replace independently abutting original placements."""
     from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
-    pdf = _source(gap=0.01)
+    pdf = _source(gap=gap)
     report = prove_contiguous_source_ink_across_tile_seam(
         pdf, expected_sha256=hashlib.sha256(pdf).hexdigest(),
         page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,

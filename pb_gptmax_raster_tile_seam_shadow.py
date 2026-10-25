@@ -166,9 +166,10 @@ def prove_contiguous_source_ink_across_tile_seam(
         counts = {left["xref"]: 0, right["xref"]: 0}
         seam_boundary_columns = 0
         left_rect, right_rect = (fitz.Rect(root["placement"]) for root in (left, right))
-        # The two PDF image matrices may differ by sub-millipoint rounding.
-        # Never bridge a real unpainted source gap, even if it is subpixel.
-        if abs(left_rect.x1 - right_rect.x0) > 0.001:
+        # Original PDF matrices can disagree by float rounding (~0.000061pt
+        # on the 2124 source), but 0.0005pt is a real placement gap/overlap
+        # that no 300dpi sample need hit. Fail closed before pixel proof.
+        if abs(left_rect.x1 - right_rect.x0) > 0.0001:
             return _abstain(basis["source_sha256"], page_no, "source_tile_boundary_gap_unproven")
         x0, x1 = int(low * scale), int(high * scale)
         if x1 <= x0 or x1 - x0 > 250:
