@@ -189,8 +189,8 @@ def build_live_ceiling_lining_source_traces(
             )
         seen_source_ids.add(original_id)
     source_area_ceiling_owners: dict[str, str] = {}
-    original_mark_ceiling_owners: dict[str, str] = {}
-    original_occurrence_ceiling_owners: dict[str, str] = {}
+    original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
+    original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
     # Preserve source-owned rivals rejected by geometry/measurement authority.
     # The FIRM-only loop below cannot independently see such claimants.
     abstained_original_marks: set[tuple[str, str, str, str]] = set()
@@ -405,6 +405,16 @@ def build_live_ceiling_lining_source_traces(
             )
         # An unmeasurable rival does not relinquish the original RCP mark.
         # Compare source roots to distinguish unrelated PDF/revision-local IDs.
+        if (
+            not _valid_original_source_sha(ceiling.source_sha256)
+            or type(ceiling.revision_id) is not str
+            or not ceiling.revision_id
+            or ceiling.revision_id != ceiling.revision_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original source SHA/revision root is invalid: "
+                + quantity.quantity_id
+            )
         root = (ceiling.source_sha256.lower(), ceiling.revision_id)
         if any(
             ((*root, field, original_id) in abstained_original_marks
@@ -512,12 +522,16 @@ def build_live_ceiling_lining_source_traces(
             (mark_id, original_mark_ceiling_owners),
             (occurrence_id, original_occurrence_ceiling_owners),
         ):
-            earlier = owners.get(original_id)
+            # Source-native mark addresses are local to a verified original
+            # document and revision, not globally unique across PDF projects.
+            # The source-root check above must run before this key is formed.
+            original_owner_key = (*root, original_id)
+            earlier = owners.get(original_owner_key)
             if earlier is not None and earlier != canonical_ceiling_id:
                 raise SourceClosedRunConflictError(
                     f"original RCP material mark has competing ceilings: {original_id}"
                 )
-            owners[original_id] = canonical_ceiling_id
+            owners[original_owner_key] = canonical_ceiling_id
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
