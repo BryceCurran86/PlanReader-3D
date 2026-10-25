@@ -72,38 +72,109 @@ def test_original_source_candidate_rect_has_no_material_grant():
     assert not r.original_plan_viewport_authorized
 
 
+def _unique_original_source_word_address(words, text, source_region):
+    """Resolve one SHA-owned original glyph by text and its bounded source box.
+
+    PyMuPDF block/line ordinals are extraction-version diagnostics, not a
+    stable physical identity. Require exactly one full source word in the
+    independent printed region; never choose the first/nearest rival.
+    """
+    x0, y0, x1, y1 = source_region
+    hits = [
+        w for w in words
+        if w[4] == text and x0 <= w[0] and y0 <= w[1]
+        and w[2] <= x1 and w[3] <= y1
+    ]
+    assert len(hits) == 1, "original source word must be unique in printed region"
+    return tuple(int(v) for v in hits[0][5:8])
+
+
+def _expected_ceiling_lexical_role(result, token):
+    """Use ALL actually decoded block siblings, never a remembered block ID."""
+    codes = {'IPF1', 'GRID', 'WFPB', 'FPB', 'IP'}
+    allowed = codes | {'CLG', 'CEILING', '/'}
+    siblings = tuple(t.upper() for t in result.original_block_words)
+    isolated = (
+        len(siblings) <= 4
+        and [t for t in siblings if t in codes] == [token]
+        and all(t in allowed or t.isdigit() for t in siblings)
+    )
+    return ('SOURCE_CEILING_CODE_WORD_CANDIDATE' if isolated
+            else 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
+
+
 def test_real_original_page9_native_source_rivals_if_available():
-    path=os.getenv('PLANREADER_MARYBOROUGH_ORIGINAL_PDF')
-    if not path:pytest.skip('private owner original not present on runner')
-    b=Path(path).read_bytes()
-    hash_expected=os.environ['PLANREADER_MARYBOROUGH_SOURCE_SHA256']
-    def orig(addr):return inspect_original_mary_rcp_word_scope_shadow(
-        b,expected_source_sha256=hash_expected,page_number=9,
-        native_word_address=addr,candidate_plan_bbox_pdf_pt=(100,100,1100,1700))
-    assert orig((9,0,0)).original_source_role=='SOURCE_NON_CEILING_CODE_WORD'
-    grid=orig((10,1,0))
-    assert grid.original_text=='GRID'
-    # PyMuPDF native block grouping differs across pinned/source builds.
-    # A GRID glyph with any unlisted sibling is a mixed source note,
-    # not an independent ceiling-code lexical candidate.
-    codes={'IPF1','GRID','WFPB','FPB','IP'}
-    allowed=codes | {'CLG','CEILING','/'}
-    siblings=tuple(t.upper() for t in grid.original_block_words)
-    isolated=(len(siblings)<=4 and
-              [t for t in siblings if t in codes]==['GRID'] and
-              all(t in allowed or t.isdigit() for t in siblings))
-    assert grid.original_source_role==(
-        'SOURCE_CEILING_CODE_WORD_CANDIDATE' if isolated
-        else 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
-    assert not grid.original_material_definition_authorized
-    assert not grid.physical_ceiling_zone_authorized
-    assert orig((10,0,0)).original_source_role=='SOURCE_NUMERIC_CALLOUT_WORD'
-    assert orig((212,0,2)).original_source_role=='SOURCE_GENERAL_NOTE_OR_MIXED_TEXT'
-    assert orig((5,4,0)).original_source_role=='SOURCE_OUTSIDE_PROPOSED_PLAN_VIEWPORT'
-    assert orig((85,5,0)).original_source_role=='SOURCE_GENERAL_NOTE_OR_MIXED_TEXT'
-    assert orig((87,0,0)).original_source_role=='SOURCE_CEILING_CODE_WORD_CANDIDATE'
-    assert all(not orig(addr).firm_ceiling_quantity_authorized for addr in
-               [(9,0,0),(10,1,0),(212,0,2),(87,0,0)])
+    path = os.getenv('PLANREADER_MARYBOROUGH_ORIGINAL_PDF')
+    if not path:
+        pytest.skip('private owner original not present on runner')
+    b = Path(path).read_bytes()
+    hash_expected = os.environ['PLANREADER_MARYBOROUGH_SOURCE_SHA256']
+    assert sha256(b).hexdigest() == hash_expected
+    with fitz.open(stream=b, filetype='pdf') as doc:
+        assert doc.page_count == 31
+        words = tuple(doc[8].get_text('words'))
+
+    def orig(text, source_region):
+        return inspect_original_mary_rcp_word_scope_shadow(
+            b, expected_source_sha256=hash_expected, page_number=9,
+            native_word_address=_unique_original_source_word_address(
+                words, text, source_region),
+            candidate_plan_bbox_pdf_pt=(100, 100, 1100, 1700),
+        )
+
+    # Independent source regions are from the printed original p9/A120,
+    # not a frozen expected quantity or a nearest-text correspondence.
+    office = orig('OFFICE', (289, 1458, 318, 1510))
+    grid = orig('GRID', (385, 1494, 410, 1527))
+    height = orig('2400', (398, 1493, 424, 1528))
+    review = orig('REVIEW', (400, 1453, 426, 1498))
+    foreign_office = orig('OFFICE', (400, 1409, 426, 1450))
+    legend_grid = orig('GRID', (1387, 331, 1412, 363))
+    mixed_ipf1 = orig('IPF1', (562, 1391, 587, 1422))
+    isolated_ipf1 = orig('IPF1', (666, 1391, 691, 1422))
+
+    assert office.original_text == 'OFFICE'
+    assert office.original_source_role in (
+        'SOURCE_NON_CEILING_CODE_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
+    assert grid.original_text == 'GRID'
+    assert grid.original_source_role == _expected_ceiling_lexical_role(grid, 'GRID')
+    assert height.original_text == '2400'
+    assert height.original_source_role in (
+        'SOURCE_NUMERIC_CALLOUT_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
+    assert review.original_text == 'REVIEW'
+    assert foreign_office.original_text == 'OFFICE'
+    assert review.original_source_role in (
+        'SOURCE_NON_CEILING_CODE_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
+    assert foreign_office.original_source_role in (
+        'SOURCE_NON_CEILING_CODE_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
+    assert legend_grid.original_source_role == 'SOURCE_OUTSIDE_PROPOSED_PLAN_VIEWPORT'
+    assert mixed_ipf1.original_source_role == _expected_ceiling_lexical_role(
+        mixed_ipf1, 'IPF1')
+    assert isolated_ipf1.original_source_role == _expected_ceiling_lexical_role(
+        isolated_ipf1, 'IPF1')
+    assert grid.original_word_address != legend_grid.original_word_address
+    assert mixed_ipf1.original_word_address != isolated_ipf1.original_word_address
+
+    # Neither extraction grouping nor lexical mark can promote a material,
+    # independent ceiling zone, scale, area, FIRM or customer quantity.
+    for result in (office, grid, height, review, foreign_office, legend_grid,
+                   mixed_ipf1, isolated_ipf1):
+        assert result.original_source_word_verified
+        assert not result.original_plan_viewport_authorized
+        assert not result.original_material_definition_authorized
+        assert not result.physical_ceiling_zone_authorized
+        assert not result.w4_wall_face_authorized
+        assert not result.metric_area_authorized
+        assert not result.firm_ceiling_quantity_authorized
+        assert not result.commercial_projection_allowed
+
+
+def test_original_source_locator_refuses_multiple_matching_rivals():
+    with fitz.open(stream=_fixture(), filetype='pdf') as doc:
+        words = doc[0].get_text('words')
+    with pytest.raises(AssertionError, match='must be unique'):
+        _unique_original_source_word_address(
+            words, 'GRID', (100, 100, 500, 500))
 
 
 def test_two_word_mixed_native_grid_office_block_is_not_ceiling_mark():
