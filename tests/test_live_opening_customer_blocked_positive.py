@@ -97,8 +97,14 @@ def test_legitimate_abstained_and_noncommercial_shadows_are_still_filtered(claim
         blocking_reasons=("unpublished_measurement_shadow",),
         metadata={**dict(original.metadata), "commercial_projection_allowed": False},
     )
-    mixed = replace(claim, opening_quantity_evidence=(abstained, shadow, original))
-    rows = project(mixed)
+    # Source-owned ABSTAIN never blocks a separate true positive, and
+    # noncommercial shadows never become customer rows on their own.
+    with_abstention = replace(claim, opening_quantity_evidence=(abstained, original))
+    rows = project(with_abstention)
     assert len(rows) == 1
     assert rows[0]["origin"] == "AI"
+    only_noncommercial = replace(
+        claim, opening_quantity_evidence=(abstained, shadow),
+    )
+    assert project(only_noncommercial) == ()
     assert len(project(claim)) == 1
