@@ -158,7 +158,19 @@ def resolve_graphic_block_bar_scale(
                 candidate_count=len(bars),
                 points_per_mm_values=tuple(sorted(float(k) for k in ppm_groups)),
             )
-    chosen = sorted(bars, key=lambda bar: (bar.axis, bar.label_ids, bar.edge_segment_ids))[0]
+    if len(bars) > 1:
+        # A numerically identical ppm does NOT establish one source graphic
+        # bar. Different original label/edge witnesses may be a detail,
+        # legend or foreign viewport. Never select the first source owner.
+        return _conflict(
+            GRAPHIC_SCALE_CONFLICT,
+            candidate_count=len(bars),
+            points_per_mm_values=tuple(sorted(bar.points_per_mm for bar in bars)),
+            source_candidate_ids=tuple(sorted(
+                (bar.axis, bar.label_ids, bar.edge_segment_ids) for bar in bars
+            )),
+        )
+    chosen = bars[0]
     record_id = stable_contract_id(
         "source_block_bar_scale_shadow",
         {
