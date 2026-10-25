@@ -923,3 +923,86 @@ def test_final_claim_seal_preserves_distinct_pages_one_original_source():
     )
     assert len(sealed.quantities) == 2
     assert all(quantity.lineage_ok for quantity in sealed.quantities)
+
+@pytest.mark.parametrize("field,invalid", [
+    ("canonical_opening_id", None),
+    ("canonical_opening_id", ""),
+    ("canonical_opening_id", "  "),
+    ("canonical_opening_id", " unsupported-opening "),
+    ("canonical_opening_id", 42),
+    ("physical_opening_id", None),
+    ("physical_opening_id", ""),
+    ("physical_opening_id", "  "),
+    ("physical_opening_id", " unsupported-opening "),
+    ("physical_opening_id", 42),
+    ("physical_opening_id", "foreign-physical-opening"),
+])
+def test_complete_original_inventory_refuses_invalid_abstained_sibling_identity(
+    field, invalid,
+):
+    firm = _opening(canonical_id="signed-physical-opening")
+    unsupported = replace(
+        _opening(canonical_id="unsupported-opening", area_m2=None),
+        **{field: invalid},
+    )
+    assert _opening_quantity(firm) is not None
+    assert _opening_quantity(unsupported) is None
+    expected = (
+        "canonical/physical opening identity mismatch"
+        if invalid == "foreign-physical-opening"
+        else "invalid canonical/physical opening identity"
+    )
+    with pytest.raises(ValueError, match=expected):
+        publish_live_opening_area_quantities(_composition(firm, unsupported))
+
+
+@pytest.mark.parametrize("field,invalid", [
+    ("canonical_opening_id", None),
+    ("canonical_opening_id", ""),
+    ("canonical_opening_id", "  "),
+    ("canonical_opening_id", " unsupported-opening "),
+    ("canonical_opening_id", 42),
+    ("physical_opening_id", None),
+    ("physical_opening_id", ""),
+    ("physical_opening_id", "  "),
+    ("physical_opening_id", " unsupported-opening "),
+    ("physical_opening_id", 42),
+    ("physical_opening_id", "foreign-physical-opening"),
+])
+def test_customer_claim_seal_refuses_invalid_abstained_sibling_identity(
+    field, invalid,
+):
+    firm = _opening(canonical_id="signed-physical-opening")
+    unsupported = replace(
+        _opening(canonical_id="unsupported-opening", area_m2=None),
+        **{field: invalid},
+    )
+    claim = _opening_area_claim(firm, unsupported)
+    assert len(claim.opening_quantity_evidence) == 1
+    expected = (
+        "canonical/physical opening identity mismatch"
+        if invalid == "foreign-physical-opening"
+        else "invalid canonical/physical opening identity"
+    )
+    with pytest.raises(ValueError, match=expected):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_inventory_preserves_distinct_source_page_and_abstained_sibling():
+    first = _opening(canonical_id="source-opening-p3")
+    second = replace(_opening(canonical_id="source-opening-p11"), page_id="11")
+    unsupported = replace(
+        _opening(canonical_id="source-opening-unresolved"), area_m2=None,
+    )
+    quantities = publish_live_opening_area_quantities(
+        _composition(first, second, unsupported)
+    )
+    assert len(quantities) == 2
+    claim = _opening_area_claim(first, second, unsupported)
+    sealed = seal_live_opening_area_claim_run(
+        claim, workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(quantity.lineage_ok for quantity in sealed.quantities)

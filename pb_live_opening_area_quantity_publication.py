@@ -371,6 +371,7 @@ def _validate_canonical_opening_inventory(
     # favourable member and conceal contradictory identity lineage.
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
+    mismatched_identity_pair = False
     source_scope: tuple[str, str, str] | None = None
     for opening in canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
@@ -398,20 +399,37 @@ def _validate_canonical_opening_inventory(
             raise ValueError(
                 "canonical opening revision conflicts with quantity composition"
             )
-        canonical_id = str(opening.canonical_opening_id or "").strip()
-        physical_id = str(opening.physical_opening_id or "").strip()
-        if canonical_id and canonical_id in canonical_ids:
+        # The dataclass is not runtime-validated. An unsupported opening
+        # remains part of the original physical inventory: never stringify,
+        # trim or silently discard its source-owned identity before sealing.
+        canonical_id = opening.canonical_opening_id
+        physical_id = opening.physical_opening_id
+        if any(
+            type(value) is not str or not value or value != value.strip()
+            for value in (canonical_id, physical_id)
+        ):
+            raise ValueError(
+                "invalid canonical/physical opening identity in complete quantity inventory"
+            )
+        if canonical_id in canonical_ids:
             raise ValueError(
                 f"duplicate canonical opening identity in quantity publication: {canonical_id}"
             )
-        if physical_id and physical_id in physical_ids:
+        if physical_id in physical_ids:
             raise ValueError(
                 f"duplicate physical opening identity in quantity publication: {physical_id}"
             )
-        if canonical_id:
-            canonical_ids.add(canonical_id)
-        if physical_id:
-            physical_ids.add(physical_id)
+        canonical_ids.add(canonical_id)
+        physical_ids.add(physical_id)
+        if canonical_id != physical_id:
+            mismatched_identity_pair = True
+    # Preserve the more specific duplicate-ID error above when a foreign
+    # physical ID copies a previously observed sibling. A unique but
+    # mismatched pair is still a forbidden physical source identity.
+    if mismatched_identity_pair:
+        raise ValueError(
+            "canonical/physical opening identity mismatch in complete quantity inventory"
+        )
 
 
 def publish_live_opening_area_quantities(
