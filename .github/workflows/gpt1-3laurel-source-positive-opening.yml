@@ -4,14 +4,52 @@ on:
     paths:
       - ".github/workflows/gpt1-3laurel-source-positive-opening.yml"
       - "tools/run_source_closed_project_handoff.py"
+      - "tests/test_gpt1_3laurel_original_workflow_trust_boundary.py"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  source-neutral:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: PYTHONPATH=. python -m pytest -q tests/test_live_opening_area_quantity_publication.py tests/test_gpt1_3laurel_original_workflow_trust_boundary.py
+
   original-opening-production:
+    # Source-positive production must never execute untrusted PR-head Python.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prove immutable trusted main SHA
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Provision owner-private 3Laurel original (fail closed)
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          projects: au_qld_3laurel
+          allow-missing: "false"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -81,14 +119,10 @@ jobs:
           else:
               assert s["status"]=="no_sealable_quantities" and s["combined_run_file"] is None
               assert s["customer_rows_verified"] is False
-          print(json.dumps({"original_source_sha":sha,
-                            "signed_source_opening_quantities":amount,
-                            "customer_rows_verified":bool(s["customer_rows_verified"]),
-                            "frozen_identity_matches":None},sort_keys=True))
+          print("Owner-main 3Laurel source/customer checks complete; no frozen score claimed")
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and source-derived customer files
         if: always()
-        with:
-          name: gpt1-3laurel-source-positive-opening-output
-          path: laurel-source-positive-core/
-          retention-days: 14
+        shell: bash
+        run: |
+          rm -rf documents/sources laurel-source-positive-core
