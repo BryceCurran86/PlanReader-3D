@@ -452,3 +452,125 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+@pytest.mark.parametrize("stolen", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+def test_original_abstained_rcp_mark_cannot_be_reissued_on_firm_ceiling(stolen):
+    published=_quantity()
+    rival_source=dict(published.metadata)
+    other_key=("finish_occurrence_evidence_id"
+               if stolen=="finish_occurrence_record_id"
+               else "finish_occurrence_record_id")
+    rival_source[other_key]="distinct-source-claim"
+    blocked=replace(
+        published,quantity_id="blocked-other-ceiling",
+        value=None,abstained=True,
+        blocking_reasons=("original_room_ceiling_unresolved",),
+        metadata=rival_source,
+    )
+    claim=replace(
+        _claim(published),ceiling_lining_quantity_evidence=(published,blocked),
+    )
+    for consumer in (
+        seal_live_ceiling_lining_run,project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original RCP material mark contested by abstained source quantity",
+        ):
+            consumer(claim,workspace_id=1,project_id="project-1")
+
+
+@pytest.mark.parametrize("foreign_field,foreign_value", (
+    ("source_sha256","b"*64),
+    ("revision_id","foreign-original-revision"),
+))
+def test_independent_source_abstained_ceiling_mark_is_not_a_false_rival(
+    foreign_field,foreign_value,
+):
+    published=_quantity()
+    blocked=replace(
+        published,quantity_id="foreign-ceiling-candidate",
+        value=None,abstained=True,
+        blocking_reasons=("foreign_unscaled_ceiling",),
+        metadata={**dict(published.metadata),foreign_field:foreign_value},
+    )
+    claim=replace(
+        _claim(published),ceiling_lining_quantity_evidence=(blocked,published),
+    )
+    sealed=seal_live_ceiling_lining_run(
+        claim,workspace_id=1,project_id="project-1",
+    )
+    assert len(sealed.quantities)==1
+    projected=project_live_ceiling_customer_rows(
+        claim,workspace_id=1,project_id="project-1",
+    )
+    assert len(projected)==1
+
+
+def test_unrelated_abstained_rcp_occurrence_preserves_existing_ceiling_quantity():
+    published=_quantity()
+    blocked=replace(
+        published,quantity_id="unrelated-rcp-source",
+        value=None,abstained=True,
+        blocking_reasons=("original_coverage_incomplete",),
+        metadata={
+            **dict(published.metadata),
+            "finish_occurrence_record_id":"unrelated-occurrence",
+            "finish_occurrence_evidence_id":"unrelated-observation",
+        },
+    )
+    claim=replace(
+        _claim(published),ceiling_lining_quantity_evidence=(published,blocked),
+    )
+    assert len(seal_live_ceiling_lining_run(
+        claim,workspace_id=1,project_id="project-1",
+    ).quantities)==1
+    assert len(project_live_ceiling_customer_rows(
+        claim,workspace_id=1,project_id="project-1",
+    ))==1
+
+
+@pytest.mark.parametrize("bad_root", (
+    {"source_sha256": None}, {"source_sha256": "not-a-sha"},
+    {"revision_id": None}, {"revision_id": " unresolved-revision "},
+))
+@pytest.mark.parametrize("identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_unknown_original_root_does_not_erase_an_abstained_rcp_claim(
+    bad_root, identity, reverse,
+):
+    firm = _quantity()
+    other = ("finish_occurrence_evidence_id" if identity == "finish_occurrence_record_id"
+             else "finish_occurrence_record_id")
+    rival = replace(
+        firm, quantity_id="unknown-root-original-rival", value=None, abstained=True,
+        blocking_reasons=("original_source_root_unverified",),
+        metadata={**firm.metadata, **bad_root, other: "independent-other-identity"},
+    )
+    quantities = (rival, firm) if reverse else (firm, rival)
+    claim = replace(_claim(firm), ceiling_lining_quantity_evidence=quantities)
+    for consumer in (seal_live_ceiling_lining_run, project_live_ceiling_customer_rows):
+        with pytest.raises(SourceClosedRunConflictError, match="original RCP material mark contested"):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("bad_root", ({"source_sha256": None}, {"revision_id": None}))
+def test_unknown_root_with_independent_original_mark_does_not_veto_ceiling(bad_root):
+    firm = _quantity()
+    rival = replace(
+        firm, quantity_id="unknown-root-independent-source", value=None, abstained=True,
+        blocking_reasons=("original_source_root_unverified",),
+        metadata={**firm.metadata, **bad_root,
+                  "finish_occurrence_record_id": "independent-occurrence",
+                  "finish_occurrence_evidence_id": "independent-source-word"},
+    )
+    claim = replace(_claim(firm), ceiling_lining_quantity_evidence=(rival, firm))
+    sealed = seal_live_ceiling_lining_run(claim, workspace_id=1, project_id="project-1")
+    rows = project_live_ceiling_customer_rows(claim, workspace_id=1, project_id="project-1")
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == firm.quantity_id
