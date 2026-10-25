@@ -105,7 +105,12 @@ jobs:
           COPY requirements.txt requirements-ci-v1228.txt /deps/
           RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt && python -m pip install --no-cache-dir fonttools==4.60.2
           DOCKER
-          docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" .
+          # Build from ONLY immutable approved-candidate dependency inputs.
+          # Independently moving main and candidate code are not image context.
+          deps_dir="$RUNNER_TEMP/gpt2-approved-deps"
+          mkdir -p "$deps_dir"
+          cp -- "$GPT2_APPROVED_TREE/requirements.txt" "$GPT2_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"
+          docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" "$deps_dir"
 
       - name: Preflight offline pinned test collection before private source exists
         shell: bash
@@ -246,4 +251,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log" "$RUNNER_TEMP/gpt2-private-mount-integrity.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
-          rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" documents/sources
+          rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" "$RUNNER_TEMP/gpt2-approved-deps" documents/sources
