@@ -49,7 +49,12 @@ jobs:
     # Public CI has no client-owned original PDFs. Skipped means NOT VERIFIED,
     # not a pass. Only enable after the private SHA-pinned source has been
     # provisioned through an authorised separate workflow/owner runner.
-    if: ${{ vars.PLANREADER_OWNER_ORIGINAL_SOURCE_READY == 'true' }}
+    # PR-authored executable Python must never see private originals. This
+    # source-positive gate is intentionally disabled in this PR workflow;
+    # skipped is NOT original-source verification. Run the separate hardened,
+    # owner-controlled trusted-main original replay before release/merge.
+    # Readiness variables must not make this PR-head path executable.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -149,9 +154,3 @@ jobs:
           print('Original source replay and 8 historical ids retained; '
                 'independent new GPT1 reviews:',len(r['gpt1_new_handoff_candidates']))
           PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gptmax-lot16-original-host-frame-dimension-first-gates
-          path: artifacts/gptmax-original-lot16-host-frame-dimension-gate.json
-          retention-days: 21
