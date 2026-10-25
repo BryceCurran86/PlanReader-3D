@@ -1,6 +1,7 @@
 """Safety contract for owner-initiated, SHA-pinned private source replays."""
 from pathlib import Path
 import re
+import shlex
 import pytest
 import yaml
 
@@ -165,7 +166,13 @@ def test_private_source_tests_only_execute_in_offline_container():
     assert "docker build" not in script
     assert SOURCE == steps[isolated]["env"]["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
     assert steps[-1]["if"] == "always()"
-    assert 'rm -rf "$RUNNER_TEMP/gpt2-approved-target" documents/sources' in steps[-1]["run"]
+    cleanup_lines = [line.strip() for line in steps[-1]["run"].splitlines()
+                     if line.strip().startswith("rm -rf ")]
+    assert len(cleanup_lines) == 1
+    assert set(shlex.split(cleanup_lines[0])) == {
+        "rm", "-rf", "$RUNNER_TEMP/gpt2-empty-original-preflight",
+        "$RUNNER_TEMP/gpt2-approved-target", "documents/sources",
+    }
     assert "docker build" in steps[build]["run"]
 
 def test_original_source_smoke_test_negative_error_is_privately_captured():
