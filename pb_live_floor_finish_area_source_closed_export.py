@@ -135,6 +135,41 @@ def build_live_floor_finish_area_source_traces(
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
     seen_original_quantity_ids: set[str] = set()
+    # Keep an explicit negative-claimant census BEFORE the FIRM-only path.
+    # Original material records can remain attached to an ABSTAINED quantity
+    # even when its physical floor cannot yet be published. A positive floor
+    # must not silently reuse that same source mark or observation.
+    abstained_original_claims: set[tuple[str, str, str, str]] = set()
+    for original in claim.floor_finish_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            continue  # Existing typed inventory check below raises.
+        if not (original.abstained or original.value is None):
+            continue
+        original_metadata = (
+            original.metadata if isinstance(original.metadata, Mapping) else {}
+        )
+        digest = original_metadata.get("source_sha256")
+        revision = original_metadata.get("revision_id")
+        if (
+            not _valid_original_source_sha(digest)
+            or type(revision) is not str
+            or not revision
+            or revision != revision.strip()
+        ):
+            continue  # Foreign or unresolved source cannot prove a collision.
+        for field in (
+            "finish_occurrence_record_id",
+            "finish_occurrence_evidence_id",
+        ):
+            source_identity = original_metadata.get(field)
+            if (
+                type(source_identity) is str
+                and source_identity
+                and source_identity == source_identity.strip()
+            ):
+                abstained_original_claims.add((
+                    digest.lower(), revision, field, source_identity,
+                ))
     for quantity in claim.floor_finish_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -362,6 +397,24 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 "floor-finish source occurrence/definition receipt is missing: "
                 f"{quantity.quantity_id}"
+            )
+        # This source ID must be unique across the complete original source
+        # inventory, including rejected source-owner rivals. Source/revision
+        # scope avoids falsely colliding unrelated original documents that
+        # reuse a local observation identifier.
+        source_root = (
+            floor.source_sha256.lower(), floor.revision_id,
+        )
+        if any(
+            (*source_root, field, receipt) in abstained_original_claims
+            for field, receipt in (
+                ("finish_occurrence_record_id", occurrence_id),
+                ("finish_occurrence_evidence_id", occurrence_evidence_id),
+            )
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish original material source owner contested by "
+                "an abstained quantity: " + quantity.quantity_id
             )
         prior_floor = floor_owner_by_occurrence.get(occurrence_id)
         if prior_floor is not None and prior_floor != floor_id:
