@@ -217,7 +217,7 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     assert "grep -Eq" in other["run"]
     cleanup = steps[-1]
     assert cleanup["if"] == "always()"
-    assert "rm -rf documents/sources" in cleanup["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources' in cleanup["run"]
     assert "rm -f" in cleanup["run"]
 
 
