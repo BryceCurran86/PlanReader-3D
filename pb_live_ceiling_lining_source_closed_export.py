@@ -166,6 +166,28 @@ def build_live_ceiling_lining_source_traces(
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     seen_source_ids: set[str] = set()
+    # Exact original quantity IDs are the earliest family gate. Preserve
+    # existing duplicate/invalid-source failures before any new RCP mark
+    # rivalry, including an ABSTAINED clone preceding a positive record.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            raise TypeError(
+                "ceiling_lining_quantity_evidence must contain QuantityEvidence"
+            )
+        if original.family != "ceiling_lining":
+            raise SourceClosedRunConflictError(
+                f"non-ceiling quantity reached ceiling exporter: {original.quantity_id}"
+            )
+        original_id = original.quantity_id
+        if (
+            type(original_id) is not str or not original_id
+            or original_id != original_id.strip()
+            or original_id in seen_source_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid original ceiling-lining quantity id: {original_id}"
+            )
+        seen_source_ids.add(original_id)
     source_area_ceiling_owners: dict[str, str] = {}
     original_mark_ceiling_owners: dict[str, str] = {}
     original_occurrence_ceiling_owners: dict[str, str] = {}
@@ -198,26 +220,7 @@ def build_live_ceiling_lining_source_traces(
                     digest.lower(), revision, key, original_id,
                 ))
     for quantity in claim.ceiling_lining_quantity_evidence:
-        if not isinstance(quantity, QuantityEvidence):
-            raise TypeError(
-                "ceiling_lining_quantity_evidence must contain QuantityEvidence"
-            )
-        if quantity.family != "ceiling_lining":
-            raise SourceClosedRunConflictError(
-                f"non-ceiling quantity reached ceiling exporter: {quantity.quantity_id}"
-            )
-        # Source quantity identity belongs to the full producer family,
-        # including blocked/abstained items. A conflicting rejected replay
-        # cannot be filtered away to let another candidate retain FIRM status.
-        raw_id = quantity.quantity_id
-        if (
-            type(raw_id) is not str or not raw_id or raw_id != raw_id.strip()
-            or raw_id in seen_source_ids
-        ):
-            raise SourceClosedRunConflictError(
-                f"duplicate or invalid original ceiling-lining quantity id: {raw_id}"
-            )
-        seen_source_ids.add(raw_id)
+        # Complete original source identity was prevalidated above.
         if quantity.abstained or quantity.value is None:
             continue
         if len(quantity.input_entity_ids) != 1:
