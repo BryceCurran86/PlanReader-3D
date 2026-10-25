@@ -140,7 +140,7 @@ jobs:
                 -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
                 -e PLANREADER_MARYBOROUGH_ORIGINAL_PDF="documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
                 -e PLANREADER_MARYBOROUGH_SOURCE_SHA256 \
-                "gpt2-offline:\${{ matrix.python-version }}" "$@"
+                "gpt2-offline:${{ matrix.python-version }}" "$@"
           }
           run_stage() {
             local label="$1"; shift
