@@ -136,7 +136,16 @@ def test_private_source_tests_only_execute_in_offline_container():
     provision = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Provision only SHA"))
     isolated = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Run private original"))
     assert build < provision < isolated
-    assert len(steps[provision + 1:-1]) == 1
+    assert len(steps[provision + 1:-1]) == 2
+    trusted_mount = steps[provision + 1]
+    assert trusted_mount["name"].startswith("Verify original PDF SHA")
+    assert "python -I -c" in trusted_mount["run"]
+    assert "--network none --read-only --cap-drop ALL" in trusted_mount["run"]
+    assert "gpt2-private-mount-integrity.log" in trusted_mount["run"]
+    assert "private output withheld" in trusted_mount["run"]
+    assert "EXPECTED_SHA256" in trusted_mount["env"]
+    assert SOURCE == trusted_mount["env"]["EXPECTED_SHA256"]
+    assert steps[provision + 2]["name"].startswith("Run private original checks")
     guard = next(s for s in steps if s.get("name", "").startswith("Validate immutable"))
     assert steps.index(guard) < build
     assert 'git checkout --detach' not in guard["run"]
