@@ -148,6 +148,32 @@ jobs:
             Arch_Combined_Maryborough_Service_Station.pdf
           allow-missing: "false"
 
+      - name: Verify original PDF SHA inside isolated read-only source mount
+        shell: bash
+        env:
+          EXPECTED_SHA256: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+        run: |
+          set -euo pipefail
+          # Trusted stdlib-only isolated interpreter, -I ignores PR PYTHONPATH.
+          # Only a fixed success/failure bit leaves the sandbox; no bytes,
+          # filenames from PR code or raw logs reach the public Actions log.
+          result="$RUNNER_TEMP/gpt2-private-mount-integrity.log"
+          status=0
+          docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+              --workdir /tmp -e EXPECTED_SHA256 \
+              "gpt2-offline:${{ matrix.python-version }}" \
+              python -I -c 'import hashlib,os,pathlib,sys; p=pathlib.Path("/workspace/documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"); sys.exit(0 if hashlib.sha256(p.read_bytes()).hexdigest()==os.environ["EXPECTED_SHA256"] else 2)' \
+              > "$result" 2>&1 || status=$?
+          if (( status != 0 )); then
+            echo "::error::Isolated original mount/read/SHA verification FAILED (exit $status); private output withheld"
+            exit 1
+          fi
+          echo "Isolated original mount and full SHA verification PASS"
+
       - name: Run private original checks inside no-network read-only container
         shell: bash
         env:
@@ -219,5 +245,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
+          rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log" "$RUNNER_TEMP/gpt2-private-mount-integrity.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
           rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" documents/sources
