@@ -1,5 +1,6 @@
 name: GPT3 Source Frame Proof Retention
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - pb_opening_host_frame_authority.py
@@ -24,6 +25,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   source-proof:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     env:
       ORT_DISABLE_TELEMETRY: "1"
@@ -32,7 +34,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -122,16 +125,14 @@ jobs:
                                            message="original framed host receipt changed")
           print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: lot16-connected-frame-source-handoff
-          path: |
-            prerequisite-lot16/lot16-connected-frame-source-handoff.json
-            lot16-connected-frame-source-handoff.json
-            lot16-source-opposition-fresh-retention.json
-          retention-days: 14
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f maryborough-*.json lot16-*.json
   maryborough-source-proof:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -140,7 +141,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -204,9 +206,9 @@ jobs:
           assert 'quantities' not in current
           print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'host_identity_parity': True, 'existing_frame_identity_parity': True}))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: maryborough-connected-frame-source-handoff
-          path: maryborough-*.json
-          retention-days: 14
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f maryborough-*.json lot16-*.json

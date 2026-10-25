@@ -41,12 +41,14 @@ jobs:
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
 
   original-source:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -141,9 +143,9 @@ jobs:
           assert all(row["status"]=="IDENTITY_READY_QUANTITY_UNSEALED" for row in d["pending_identities"])
           print(json.dumps(d,sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-lot16-internal-870-identity-readiness
-          path: artifacts/gpt3-lot16-internal-870-identity-readiness
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f maryborough-*.json lot16-*.json
