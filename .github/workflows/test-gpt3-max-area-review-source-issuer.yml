@@ -55,6 +55,15 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Provision manifest-verified owner Lot16 original
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
