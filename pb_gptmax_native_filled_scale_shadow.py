@@ -17,7 +17,8 @@ from typing import Sequence
 import fitz
 
 
-_END_LABEL = re.compile(r"^([1-9]\d*)m$", re.IGNORECASE)
+_NEARBY_SCALE_TOKEN = re.compile(r"^\d+(?:[A-Za-z]+)?$")
+# Foreign-unit neighbours remain rivals; filtering them elects a false winner.
 
 
 @dataclass(frozen=True)
@@ -112,7 +113,9 @@ def _word_at_boundary(
     hits = []
     for row in words:
         x0, y0, x1, y1, text = row[:5]
-        if not (str(text).isdigit() or _END_LABEL.fullmatch(str(text))):
+        # A competing "5ft" or "5cm" is not ignorable merely because
+        # the expected label is "5m". Retain every numeric-unit rival.
+        if not _NEARBY_SCALE_TOKEN.fullmatch(str(text)):
             continue
         if (
             abs((x0 + x1) / 2 - boundary_x) <= tolerance

@@ -13,9 +13,17 @@ def _synthetic(*, count=5, x=40, y=50, width=20, height=3, missing=None,
                colour=(0, 0, 0), opacity=1, wrong_label=None,
                extra_bar=False, stroked=False, uniform_row=False,
                overpaint=False, overpaint_label=False,
-               invisible_labels_with_black_strokes=False):
+               invisible_labels_with_black_strokes=False,
+               conflicting_unit_label=False):
     doc = fitz.open()
     page = doc.new_page(width=500, height=250)
+    if conflicting_unit_label:
+        # Earlier independently printed foreign-unit tick, near the same
+        # terminal boundary but not the intended metre source label.
+        page.insert_text(
+            (x + count * width - 7.2, y + 2 * height + 19),
+            f"{count}ft", fontsize=8, fontname="helv", color=(0, 0, 0),
+        )
 
     def add_bar(x0, y0):
         for i in range(count):
@@ -137,6 +145,18 @@ def test_invisible_white_tick_glyphs_cannot_borrow_unrelated_black_ink():
     doc.close()
     # All source words exist and unrelated black hairlines are rendered in
     # their bboxes, but no native black tick glyph exists. ABSTAIN.
+    assert _scan(data) == ()
+
+
+def test_foreign_unit_rival_at_same_boundary_must_abstain():
+    data = _synthetic(conflicting_unit_label=True)
+    doc = fitz.open(stream=data, filetype="pdf")
+    words = doc[0].get_text("words")
+    assert any(word[4] == "5m" for word in words)
+    assert any(word[4] == "5ft" for word in words)
+    doc.close()
+    # All five native fill blocks remain source-valid; the conflicting
+    # unit cannot be discarded while electing the otherwise valid "5m".
     assert _scan(data) == ()
 
 
