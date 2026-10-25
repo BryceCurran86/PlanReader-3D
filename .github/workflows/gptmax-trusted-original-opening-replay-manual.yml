@@ -109,7 +109,7 @@ jobs:
           ARG PYTHON_VERSION
           FROM python:${PYTHON_VERSION}-slim
           ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
-          RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 libgomp1 && rm -rf /var/lib/apt/lists/*
+          RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 libgomp1 tesseract-ocr && rm -rf /var/lib/apt/lists/*
           COPY requirements.txt requirements-ci-v1228.txt /deps/
           RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
           DOCKERFILE
@@ -193,7 +193,7 @@ jobs:
               tests/test_gptmax_raster_tile_seam_source.py::test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots \
               > "$output" 2>&1; then
               echo "::error::Original 2124 two-root source ink test FAILED"
-                exit 1
+              exit 1
             fi
             if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
               echo "::error::Original 2124 source ink test skipped or missing"
@@ -207,7 +207,7 @@ jobs:
               tests/test_gptmax_horizontal_raster_tile_seam_shadow.py::test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles \
               > "$output" 2>&1; then
               echo "::error::Original p5 horizontal source rail test FAILED"
-                exit 1
+              exit 1
             fi
             if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
               echo "::error::Original p5 horizontal rail test skipped or missing"
