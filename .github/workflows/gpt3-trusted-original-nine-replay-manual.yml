@@ -88,7 +88,8 @@ jobs:
           # Before seeing any private source, reject an approved PR file that
           # has independently changed on trusted main since the candidate base.
           # A safe post-replay restack must keep BOTH code ancestries intact.
-          main_changed="$(git diff --name-only "$approved_base" "$GITHUB_SHA" | LC_ALL=C sort)"
+          # Disable rename similarity detection: a move must expose BOTH its old approved path and new destination.
+          main_changed="$(git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA" | LC_ALL=C sort)"
           conflicting="$(comm -12 <(printf '%s\n' "$observed") <(printf '%s\n' "$main_changed"))"
           if [[ -n "$conflicting" ]]; then
             echo "::error::Trusted main modified an immutable GPT3 release path"
