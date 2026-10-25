@@ -111,8 +111,15 @@ jobs:
         run: |
           set -euo pipefail
           # This image contains dependencies only. The client original is not yet present.
+          # SHA-approved code owns dependencies; moving main cannot alter source replay.
+          approved_deps="$RUNNER_TEMP/gptmax-approved-deps"
+          mkdir -p "$approved_deps"
+          for dep in requirements.txt requirements-ci-v1228.txt; do
+            [[ -f "$GPTMAX_APPROVED_TREE/$dep" && ! -L "$GPTMAX_APPROVED_TREE/$dep" ]] || exit 1
+            cp -- "$GPTMAX_APPROVED_TREE/$dep" "$approved_deps/$dep"
+          done
           docker build --pull --build-arg PYTHON_VERSION="${{ matrix.python-version }}" \
-            --tag "gptmax-original-sandbox:${{ matrix.python-version }}" -f - . <<'DOCKERFILE'
+            --tag "gptmax-original-sandbox:${{ matrix.python-version }}" -f - "$approved_deps" <<'DOCKERFILE'
           ARG PYTHON_VERSION
           FROM python:${PYTHON_VERSION}-slim
           ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
@@ -238,4 +245,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gptmax-original-positive.log" "$RUNNER_TEMP/gptmax-source-regressions.log"
-          rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources
+          rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" documents/sources
