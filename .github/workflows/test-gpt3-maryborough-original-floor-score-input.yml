@@ -60,7 +60,6 @@ jobs:
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
 
   original-source:
-    # Only owner-dispatched trusted main code may provision private originals.
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -214,9 +213,8 @@ jobs:
           print("MARYBOROUGH_CURRENT_SOURCE_EXACT24",json.dumps(d,sort_keys=True))
           PY
 
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-maryborough-original-floor-score-input
-          path: artifacts/gpt3-maryborough-original-floor-score-input
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
