@@ -129,8 +129,8 @@ def build_live_floor_finish_area_source_traces(
     # mint independent customer rows from the same upstream physical fact.
     quantity_owner_by_floor: dict[str, str] = {}
     quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
-    floor_owner_by_occurrence: dict[str, str] = {}
-    floor_owner_by_original_observation: dict[str, str] = {}
+    floor_owner_by_occurrence: dict[tuple[str, str, str], str] = {}
+    floor_owner_by_original_observation: dict[tuple[str, str, str], str] = {}
     # Original quantity identity is a producer-owned family invariant, not
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
@@ -311,7 +311,15 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish source SHA is malformed: {quantity.quantity_id}"
             )
-        if _clean(metadata.get("revision_id")) != _clean(floor.revision_id):
+        # Source-local mark IDs can be reused across documents/revisions.
+        # A missing or coerced revision never proves a distinct original.
+        if (
+            type(floor.revision_id) is not str
+            or not floor.revision_id
+            or floor.revision_id != floor.revision_id.strip()
+            or type(metadata.get("revision_id")) is not str
+            or metadata["revision_id"] != floor.revision_id
+        ):
             raise SourceClosedRunConflictError(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
             )
@@ -427,7 +435,11 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish original material source owner contested by "
                 "an abstained quantity: " + quantity.quantity_id
             )
-        prior_floor = floor_owner_by_occurrence.get(occurrence_id)
+        # An original producer receipt is local to its exact SHA+revision.
+        # Do not collide two independently verified source roots merely
+        # because their PDF-local mark numbers are equal.
+        occurrence_owner_key = (*source_root, occurrence_id)
+        prior_floor = floor_owner_by_occurrence.get(occurrence_owner_key)
         if prior_floor is not None and prior_floor != floor_id:
             raise SourceClosedRunConflictError(
                 "floor-finish source occurrence has competing physical floors: "
@@ -463,8 +475,9 @@ def build_live_floor_finish_area_source_traces(
             finish_code=metadata.get("finish_code"),
             semantic_finish=metadata.get("semantic_finish"),
         )
+        observation_owner_key = (*source_root, occurrence_evidence_id)
         prior_observation_floor = floor_owner_by_original_observation.get(
-            occurrence_evidence_id
+            observation_owner_key
         )
         if (
             prior_observation_floor is not None
@@ -474,8 +487,8 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish original observation has competing physical floors: "
                 f"{occurrence_evidence_id}"
             )
-        floor_owner_by_original_observation[occurrence_evidence_id] = floor_id
-        floor_owner_by_occurrence[occurrence_id] = floor_id
+        floor_owner_by_original_observation[observation_owner_key] = floor_id
+        floor_owner_by_occurrence[occurrence_owner_key] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
         quantity_owner_by_physical_floor[physical_floor_id] = (
             floor_id, quantity.quantity_id
