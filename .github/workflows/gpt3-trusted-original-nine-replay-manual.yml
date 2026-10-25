@@ -85,22 +85,34 @@ jobs:
           APPROVED_SOURCE_TEST_PATHS
           )"
           [[ "$observed" == "$expected" ]] || { echo "::error::Unreviewed GPT3 source/test diff"; exit 1; }
-          git checkout --detach "$approved_head"
-          [[ "$(git rev-parse HEAD)" == "$approved_head" ]]
+          # Keep trusted main checked out: the subsequent local provisioner
+          # MUST be resolved from main, not from the candidate PR tree.
+          target_tree="$RUNNER_TEMP/gpt3-approved-candidate"
+          mkdir -p "$target_tree"
+          git archive "$approved_head" | tar -x -C "$target_tree"
+          mkdir -p "$target_tree/documents/sources"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
-          test -f tests/test_gpt3_lot16_original_nine_whole_retention.py
-          test -f tools/run_gpt3_lot16_original_sealed_score_input.py
+          test -f "$target_tree/tests/test_gpt3_lot16_original_nine_whole_retention.py"
+          test -f "$target_tree/tools/run_gpt3_lot16_original_sealed_score_input.py"
+          test -f .github/actions/provision-original-sources/action.yml
+          echo "GPT3_APPROVED_TREE=$target_tree" >> "$GITHUB_ENV"
           echo "GPT3_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
-          echo "Verified immutable producer/customer/retention code SHA, no unapproved path."
-      - name: Configure Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-      - name: Install unchanged exact-version source dependencies
+          echo "Validated immutable PR tree while retaining trusted-main provisioner."
+      - name: Build offline exact-version test image before private source exists
+        shell: bash
         run: |
           set -euo pipefail
-          python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+          dockerfile="$RUNNER_TEMP/gpt3-offline.Dockerfile"
+          cat > "$dockerfile" <<'DOCKER'
+          FROM python:${{ matrix.python-version }}-slim
+          ENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+          WORKDIR /workspace
+          RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 libgomp1 tesseract-ocr && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          DOCKER
+          docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" .
       - name: Provision SHA-verified original Lot16 source
         uses: ./.github/actions/provision-original-sources
         with:
@@ -119,14 +131,25 @@ jobs:
           set -euo pipefail
           test -s 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           output="$RUNNER_TEMP/gpt3-owner-original-positive.log"
-          if ! python -m pytest -q --tb=no --disable-warnings \
-            tests/test_gpt3_lot16_original_nine_whole_retention.py \
-            > "$output" 2>&1; then
-            echo "::error::Original Lot16 GPT3 8+9 source-to-customer retention test FAILED"
-            grep -E '^(FAILED |ERROR )' "$output" | head -5 || true
+          # Private original never reaches candidate Python on the networked
+          # runner. Only trusted main resolved the token-bearing local action.
+          # Candidate code and the original are independent read-only mounts.
+          if ! docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 \
+              --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+              --mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
+              "gpt3-offline:${{ matrix.python-version }}" \
+              python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings \
+              tests/test_gpt3_lot16_original_nine_whole_retention.py \
+              > "$output" 2>&1; then
+            echo "::error::Isolated GPT3 Lot16 8+9 replay FAILED (private details withheld)"
             exit 1
           fi
-          if ! grep -Eq '(^|[ ,])1 passed' "$output" || grep -Eq '(^|[ ,])[1-9][0-9]* skipped' "$output"; then
+          if ! grep -Eq '(^|[ ,])1 passed([, ]|$)' "$output" || grep -Eq '(^|[ ,])[1-9][0-9]* skipped([, ]|$)' "$output"; then
             echo "::error::Original producer was skipped or did not pass"
             exit 1
           fi
@@ -139,9 +162,9 @@ jobs:
             echo '- New ninth distinct physical/snapshot and verified customer: PASS'
             echo '- Frozen V2 score promotion: NOT GRANTED by this test'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Destroy private PDF and unpublished logs
+      - name: Destroy original PDF, untrusted code archive and unpublished logs
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log"
-          rm -rf documents/sources
+          rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log" "$RUNNER_TEMP/gpt3-offline.Dockerfile"
+          rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources
