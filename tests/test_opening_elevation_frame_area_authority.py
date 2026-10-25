@@ -18,6 +18,9 @@ from pb_opening_elevation_frame_area_authority import (
     OpeningElevationFrameAreaProducer,
     OpeningElevationFrameAreaSelector,
     _dimension_is_mixed_opening_assembly_span,
+    _TrustedWord,
+    _opening_tags,
+    _record_candidates_for_page,
     opening_elevation_claim_family,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -491,3 +494,78 @@ def test_unknown_mark_never_inherits_another_elevation_frame() -> None:
 
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
+
+
+def _native_elevation_word_claims(page) -> tuple[_TrustedWord, ...]:
+    # The direct page function test deliberately distinguishes the full raw
+    # source claimant inventory from independently authenticated words.
+    return tuple(
+        _TrustedWord(
+            observation_id=f"native-word-{index}",
+            text=str(raw[4]),
+            bbox=tuple(float(v) for v in raw[:4]),
+            block_no=int(raw[5]),
+            line_no=int(raw[6]),
+            word_no=int(raw[7]),
+            sequence_number=index,
+        )
+        for index, raw in enumerate(page.get_text("words"))
+    )
+
+
+@pytest.mark.parametrize("reverse_claim_order", [False, True])
+def test_untrusted_second_native_tag_inside_frame_blocks_type_area(
+    reverse_claim_order: bool,
+) -> None:
+    payload = _elevation_pdf(composite=True)
+    published, _authority_unused = _authority(payload)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        page = document[0]
+        raw_words = _native_elevation_word_claims(page)
+        # A source-visible D1 is deliberately not in the trusted-positive
+        # word set: it may have failed glyph integrity or raster verification.
+        trusted = tuple(word for word in raw_words if word.text != "D1")
+        raw_claims = _opening_tags(raw_words)
+        if reverse_claim_order:
+            raw_claims = tuple(reversed(raw_claims))
+        records = _record_candidates_for_page(
+            page=page, page_id="1", published=published,
+            trusted_words=trusted, all_claim_tags=raw_claims,
+        )
+    assert records == ()
+
+
+def test_untrusted_native_tag_outside_frame_does_not_poison_inside_mark() -> None:
+    payload = _elevation_pdf(external_same_mark=True)
+    published, _authority_unused = _authority(payload)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        page = document[0]
+        raw_words = _native_elevation_word_claims(page)
+        inside_trusted = tuple(
+            word for word in raw_words
+            if word.text != "W1" or word.bbox[0] < 300.0
+        )
+        records = _record_candidates_for_page(
+            page=page, page_id="1", published=published,
+            trusted_words=inside_trusted,
+            all_claim_tags=_opening_tags(raw_words),
+        )
+    assert len(records) == 1
+    assert records[0].type_mark == "W1"
+    assert records[0].area_m2 == pytest.approx(7.2)
+
+
+def test_complete_raw_tag_claimant_universe_preserves_single_mark_positive() -> None:
+    payload = _elevation_pdf()
+    published, _authority_unused = _authority(payload)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        page = document[0]
+        raw_words = _native_elevation_word_claims(page)
+        records = _record_candidates_for_page(
+            page=page, page_id="1", published=published,
+            trusted_words=raw_words,
+            all_claim_tags=_opening_tags(raw_words),
+        )
+    assert len(records) == 1
+    assert records[0].type_mark == "W1"
+    assert records[0].area_m2 == pytest.approx(7.2)
