@@ -182,6 +182,35 @@ def test_source_figure_native_word_and_trace_may_share_span_with_foreign_70():
     assert _run(source, scope).status == 'SOURCE_FIGURE_LEADER_CANDIDATE'
 
 
+def test_unrelated_trace_sharing_paint_sequence_does_not_erase_selected_source(monkeypatch):
+    from dataclasses import replace
+    import pb_gpt2_mary_original_figured_door_leader_shadow as module
+    original=module.extract_native_text_render_evidence
+    def additional(page):
+        records=original(page)
+        assert records
+        unrelated=replace(records[0],bbox=(800.,800.,820.,820.),raw_text='UNRELATED',
+                          render_state='PROVEN_NON_RENDERING',render_eligible=False)
+        return records+(unrelated,)
+    monkeypatch.setattr(module,'extract_native_text_render_evidence',additional)
+    source,scope=_fixture()
+    assert _run(source,scope).status == 'SOURCE_FIGURE_LEADER_CANDIDATE'
+
+
+@pytest.mark.parametrize('reverse',(False,True))
+def test_duplicate_selected_render_trace_is_never_first_or_last_wins(monkeypatch,reverse):
+    import pb_gpt2_mary_original_figured_door_leader_shadow as module
+    original=module.extract_native_text_render_evidence
+    def duplicated(page):
+        records=original(page)
+        duplicate=records+records
+        return tuple(reversed(duplicate)) if reverse else duplicate
+    monkeypatch.setattr(module,'extract_native_text_render_evidence',duplicated)
+    source,scope=_fixture()
+    with pytest.raises(ValueError,match='selected native render trace ambiguous'):
+        _run(source,scope)
+
+
 # A separate original-p7/p11 wall-cap check is a physical-identity veto only.
 # It is not a dimension leader, threshold, floor finish, count, or FIRM quantity.
 def _two_sheet_caps(*, left_error=0.0, target_width=.48, dashed=False):

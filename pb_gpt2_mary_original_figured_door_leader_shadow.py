@@ -99,12 +99,13 @@ def _require_visible_original_figure_word(page, word, expected: str) -> None:
         render = extract_native_text_render_evidence(page)
     except Exception as exc:
         raise ValueError('figured text native render evidence unavailable') from exc
-    render_by_seq = {}
+    render_by_trace = {}
     for receipt in render:
         seq = receipt.sequence_number
-        if seq is None or seq in render_by_seq:
-            raise ValueError('figured text native render sequence ambiguous')
-        render_by_seq[seq] = receipt
+        if type(seq) is int:
+            # A PDF paint command can own several source text traces. Bind
+            # its exact native trace bounds too; never elect one by order.
+            render_by_trace.setdefault((seq,receipt.bbox),[]).append(receipt)
     selected = []
     for trace in traces:
         seq = trace.get('seqno')
@@ -122,7 +123,14 @@ def _require_visible_original_figure_word(page, word, expected: str) -> None:
             if not (box[0] - .1 <= centre_x <= box[2] + .1
                     and box[1] - .1 <= centre_y <= box[3] + .1):
                 continue
-            receipt = render_by_seq.get(seq)
+            trace_box=trace.get('bbox')
+            if (not isinstance(trace_box,(tuple,list)) or len(trace_box)!=4
+                    or not all(type(v) in (int,float) and isfinite(v) for v in trace_box)):
+                raise ValueError('figured text native trace geometry unavailable')
+            receipts=render_by_trace.get((seq,tuple(float(v) for v in trace_box)),())
+            if len(receipts)!=1:
+                raise ValueError('figured text selected native render trace ambiguous')
+            receipt=receipts[0]
             if (type(seq) is not int or not 0 <= seq < len(bboxlog)
                     or bboxlog[seq][0] not in ('fill-text', 'stroke-text')
                     or receipt is None or not receipt.render_eligible
