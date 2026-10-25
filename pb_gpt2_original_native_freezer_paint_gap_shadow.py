@@ -102,7 +102,7 @@ def _inspect_native_paint_gap(page, scope:NativePaintGapScope, tolerance:float):
     thin=[_selected_original_painted_line(drawings,i) for i in scope.thin_inner_filling_paths]
     if any(abs(a[1]-a[3])>tolerance for a in (*thick,*thin)):
         raise ValueError("source painted wall/filling spans are not horizontal")
-    levels=sorted({round(a[1],2) for a in thick})
+    levels=sorted({float(a[1]) for a in thick})
     if len(levels)!=2 or levels[1]-levels[0]<=tolerance:
         raise ValueError("no independent two-line original thick wall faces")
     caps=[]
@@ -136,6 +136,21 @@ def _inspect_native_paint_gap(page, scope:NativePaintGapScope, tolerance:float):
         filled_rival=_is_visible_opaque_black_original_fill(drawing)
         if not (stroke_rival or filled_rival):
             continue
+        if stroke_rival and any(
+            item and item[0] not in ('l','re')
+            for item in drawing.get('items',())
+        ):
+            # Curves/quads are original painted rivals too. Their complete
+            # source bounds, expanded by their own stroke width, can exclude
+            # a clear-gap hypothesis; they never prove a physical wall role.
+            rect=drawing.get('rect')
+            if (not isinstance(rect,fitz.Rect) or not all(isfinite(v) for v in
+                    (rect.x0,rect.y0,rect.x1,rect.y1))):
+                raise ValueError('competing original stroked path geometry invalid')
+            radius=float(drawing['width'])/2
+            if (any(rect.y0-radius<=level<=rect.y1+radius for level in levels)
+                    and min(rect.x1+radius,hi)-max(rect.x0-radius,lo)>tolerance):
+                raise ValueError('competing original curved or unhandled thick ink overlaps selected gap')
         # PDF fill paint is not limited to "re" rectangles. PyMuPDF emits
         # filled closed polygons as "l" paths, including fill-only paths with
         # no stroke. A source-visible black fill whose complete native path
@@ -188,7 +203,7 @@ def _inspect_native_paint_gap(page, scope:NativePaintGapScope, tolerance:float):
                         "competing original thick wall ink bridges selected gap"
                     )
     return NativePaintGapCandidate(scope.page_number,tuple(sorted(ids)),
-        tuple(round(z,5) for z in caps[0]),tuple(levels),
+        tuple(float(z) for z in caps[0]),tuple(levels),
         round(outer_widths[0],4),round(inner_widths[0],4))
 
 
@@ -217,7 +232,7 @@ def audit_original_paint_gap_crossview_shadow(
         if (type(trans) not in (tuple,list) or len(trans)!=2
                 or any(type(x) not in (int,float) or not isfinite(x) for x in trans)):
             raise ValueError("invalid original source translation")
-        dx,dy=(round(float(x),5) for x in trans)
+        dx,dy=(float(x) for x in trans)
         if (dx,dy) in seen:raise ValueError("repeated translation cannot cast two votes")
         seen.add((dx,dy))
         matching=(all(abs(x+dx-y)<=tolerance for x,y in zip(a.gap_x_pdf_pt,b.gap_x_pdf_pt))

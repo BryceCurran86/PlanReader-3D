@@ -158,6 +158,50 @@ def test_source_transform_order_invariance_and_immutable_bytes():
     assert a==z and sha256(b).hexdigest()==before
 
 
+def test_display_rounding_cannot_make_outside_source_transform_a_candidate():
+    raw=_pdf()
+    with fitz.open(stream=raw,filetype='pdf') as document:
+        first=document[0].get_drawings()[0]['items'][0][2].x
+        second=document[1].get_drawings()[0]['items'][0][2].x
+    dx=(second-first)-(.25+1e-7)
+    assert abs(first+dx-second)>.25
+    result=_run(raw,shifts=((dx,0.),))
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.matching_translation is None
+    assert result.candidate_translations == ((dx,0.,False),)
+
+
+@pytest.mark.parametrize('curve_y_offset',(0.,.3))
+def test_original_opaque_thick_curve_paint_cannot_disappear_from_gap_rivals(curve_y_offset):
+    raw=_pdf()
+    with fitz.open(stream=raw,filetype='pdf') as document:
+        shape=document[1].new_shape()
+        shape.draw_bezier(fitz.Point(177.76,100+curve_y_offset),
+                          fitz.Point(197.76,100.01+curve_y_offset),
+                          fitz.Point(217.76,99.99+curve_y_offset),
+                          fitz.Point(237.76,100+curve_y_offset))
+        shape.finish(color=(0,0,0),width=.96,closePath=False)
+        shape.commit()
+        changed=document.tobytes()
+    with fitz.open(stream=changed,filetype='pdf') as document:
+        assert [item[0] for item in document[1].get_drawings()[-1]['items']] == ['c']
+    before=sha256(changed).hexdigest()
+    with pytest.raises(ValueError,match='curved or unhandled thick ink'):
+        _run(changed)
+    assert sha256(changed).hexdigest()==before
+
+
+def test_unrelated_original_thick_curve_preserves_gap_candidate():
+    with fitz.open(stream=_pdf(),filetype='pdf') as document:
+        page=document[1]
+        shape=page.new_shape()
+        shape.draw_bezier(fitz.Point(177.76,200),fitz.Point(197.76,200.01),
+                          fitz.Point(217.76,199.99),fitz.Point(237.76,200))
+        shape.finish(color=(0,0,0),width=.96,closePath=False);shape.commit()
+        raw=document.tobytes()
+    assert _run(raw).status is EvidenceResolutionStatus.CANDIDATE
+
+
 def test_original_freezer_d17_private_pdf_if_provisioned():
     loc=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
     if not loc:
