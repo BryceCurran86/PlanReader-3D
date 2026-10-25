@@ -4,6 +4,7 @@ No benchmark, original PDF, secrets or producer authority is used by this test.
 """
 from pathlib import Path
 import re
+import subprocess
 
 import pytest
 import yaml
@@ -74,7 +75,7 @@ def test_main_owner_only_immutable_source_positive_workflow():
                      'mkdir -p "$target_tree/documents/sources"',
                      '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]',
                      'test -f .github/actions/provision-original-sources/action.yml',
-                     'git diff --name-only "$approved_base" "$GITHUB_SHA"',
+                     'git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA"',
                      "comm -12", 'if [[ -n "$conflicting" ]]',
                      "Trusted main modified an immutable GPT3 release path",
                      "GPT3_APPROVED_TREE=$target_tree", "git status --porcelain"):
@@ -150,7 +151,7 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert checkout["uses"] == "actions/checkout@v4"
         assert checkout["with"]["persist-credentials"] is False
         assert 'git archive "$approved_head"' in guard["run"]
-        assert 'git diff --name-only "$approved_base" "$GITHUB_SHA"' in guard["run"]
+        assert 'git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA"' in guard["run"]
         assert "comm -12" in guard["run"]
         assert 'if [[ -n "$conflicting" ]]' in guard["run"]
         assert "Trusted main modified an immutable GPT3 release path" in guard["run"]
@@ -186,6 +187,8 @@ def test_private_source_token_never_reaches_candidate_tree_on_host():
     ('dst=/workspace/documents/sources,readonly', 'dst=/workspace/documents/sources'),
     ('github.actor == \'BryceCurran86\'', "github.actor == 'attacker'"),
     ('persist-credentials: false', 'persist-credentials: true'),
+    ('git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA"',
+     'git diff --name-only "$approved_base" "$GITHUB_SHA"'),
     ('comm -12', 'comm -23'),
     ('if [[ -n "$conflicting" ]]', 'if [[ -z "$conflicting" ]]'),
     ('rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources',
@@ -196,3 +199,42 @@ def test_trust_boundary_mutations_cannot_certify_owner_source(old, new):
     assert old in raw
     assert _isolated_private_source_contract(raw)
     assert not _isolated_private_source_contract(raw.replace(old, new, 1))
+
+
+def test_git_rename_of_approved_source_path_remains_visible_to_overlap_veto(tmp_path):
+    """Git's default rename detection hides an approved source path when moved.
+
+    A rename away from an approved path is a MAIN incompatibility and must be
+    present in the intersection of approved candidate paths with changed main.
+    This is pure synthetic Git: no owner PDFs or benchmark truth are needed.
+    """
+    def git(*args):
+        run = subprocess.run(
+            ["git", *args], cwd=tmp_path, text=True,
+            capture_output=True, check=True,
+        )
+        return run.stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.name", "GPT3 source-neutral test")
+    git("config", "user.email", "test@example.invalid")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "approved.py").write_text(
+        "def trusted():\n    return 'immutable'\n", encoding="utf-8",
+    )
+    git("add", ".")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    git("mv", "tools/approved.py", "tools/renamed.py")
+    git("commit", "-qm", "rename")
+    final = git("rev-parse", "HEAD")
+    default_paths = git("diff", "--name-only", base, final).splitlines()
+    unchanged_path_dropped = "tools/approved.py" not in default_paths
+    assert unchanged_path_dropped, default_paths
+    original_and_destination = git(
+        "diff", "--no-renames", "--name-only", base, final,
+    ).splitlines()
+    assert original_and_destination == ["tools/approved.py", "tools/renamed.py"]
+    approved_paths = {"tools/approved.py"}
+    assert approved_paths.intersection(original_and_destination)
+    assert not approved_paths.intersection(default_paths)
