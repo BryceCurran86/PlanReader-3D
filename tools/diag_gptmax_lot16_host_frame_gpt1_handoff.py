@@ -435,6 +435,14 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "original_canonical_opening_kind": c.get("opening_kind"),
             "original_canonical_page_id": c.get("page_id"),
             "original_canonical_viewport_id": c.get("viewport_id"),
+            # Preserve the producer's exact tag/type/schedule identities
+            # independently of a later typed issuer-compatible area. These
+            # fields are parity receipts only, NOT source authentication.
+            "original_canonical_type_mark": c.get("type_mark"),
+            "original_canonical_tag_observation_id": c.get("tag_observation_id"),
+            "original_canonical_schedule_binding_record_id": c.get("schedule_binding_record_id"),
+            "original_canonical_schedule_page_id": c.get("schedule_page_id"),
+            "original_canonical_schedule_row_observation_ids": tuple(sorted(c.get("schedule_row_observation_ids") or ())),
             # Source producer's exact physical host/observation/evidence
             # identities. Later typed objects may not add a forged witness,
             # drop another observed face, or borrow a different wall while

@@ -539,3 +539,53 @@ def test_append_only_source_review_rejects_signed_id_alias_or_invalid_receipt(mu
             old, old_source, new, new_source,
             source_reproved_append_only=True,
         )
+
+@pytest.mark.parametrize("field,original,foreign", [
+    ("type_mark", "W01", "W02"),
+    ("tag_observation_id", "source-tag-W01", "foreign-tag-W02"),
+    ("schedule_binding_record_id", "source-schedule-W01", "foreign-schedule-W02"),
+    ("schedule_page_id", "29", "28"),
+    ("schedule_row_observation_ids", ("source-row-W01",), ("foreign-row-W02",)),
+])
+def test_original_wxx_source_type_mark_and_schedule_identity_cannot_be_rekeyed(
+    field, original, foreign
+):
+    rows, canonical = _original_case()
+    canonical[2][field] = original
+    source = run(rows, canonical)
+    real = _typed(canonical)
+    opening = real.canonical_openings[2]
+    assert _opening_quantity(opening) is not None
+    forged = replace(opening, **{field: foreign})
+    # The real generic figured-area issuer legitimately does not decide
+    # external Wxx tag or schedule instance identity. The original source
+    # review must refuse this changed typed lineage even when area survives.
+    assert _opening_quantity(forged) is not None
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(real, canonical_openings=real.canonical_openings[:2] + (forged,)),
+            source,
+        )
+
+
+@pytest.mark.parametrize("field,original,foreign", [
+    ("type_mark", "W01", "W05"),
+    ("tag_observation_id", "source-tag-W01", "foreign-tag-W05"),
+    ("schedule_binding_record_id", "source-schedule-W01", "foreign-schedule-W05"),
+    ("schedule_page_id", "29", "28"),
+    ("schedule_row_observation_ids", ("source-row-W01",), ("foreign-row-W05",)),
+])
+def test_abstained_original_wxx_sibling_retains_type_tag_and_schedule_roster(
+    field, original, foreign
+):
+    rows, canonical = _original_case()
+    canonical[0][field] = original
+    source = run(rows, canonical)
+    real = _typed(canonical)
+    assert _opening_quantity(real.canonical_openings[0]) is None
+    changed = replace(real.canonical_openings[0], **{field: foreign})
+    with pytest.raises(ValueError, match="foreign source/signed review decision"):
+        reconcile_gpt1_area_review_with_issuer(
+            replace(real, canonical_openings=(changed,) + real.canonical_openings[1:]),
+            source,
+        )
