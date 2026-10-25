@@ -12,13 +12,18 @@ from pb_gpt2_native_grid_row_membership_shadow import (
 )
 
 
-def _case(*, duplicate_code=False, untrusted=False, shifted=0.0):
+def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,\n          overpaint=None, rotation=0):
     pdf = fitz.open()
     page = pdf.new_page(width=420, height=340)
     for x in (100+shifted, 142+shifted):
         for a,b in ((30,100),(100,170),(170,260)):
             page.draw_line(fitz.Point(x,a),fitz.Point(x,b),
                            color=(0,0,0),width=.48)
+    if overpaint is not None:
+        for x in (100+shifted, 142+shifted):
+            page.draw_rect(fitz.Rect(x-2,30,x+2,260),
+                           color=None,fill=overpaint,overlay=True)
+    page.set_rotation(rotation)
     content = pdf.tobytes()
     pdf.close()
     words = [
@@ -89,6 +94,23 @@ def test_unrelated_outside_row_code_does_not_grant_extra_door():
     assert result.status is EvidenceResolutionStatus.CANDIDATE
     assert result.competing_same_code_observation_ids==("native:outside",)
     assert not result.opening_count_granted
+
+
+def test_rotated_original_schedule_row_is_a_vertical_strip():
+    # Original A600 p28 is rotated 90 degrees. The two vertical
+    # unrotated ink chains delimit one physical row, not a text column.
+    b,w,s=_case(rotation=90)
+    result=_audit(b,w,s)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.member_observation_ids==(
+        "native:0","native:1","native:2","native:3")
+
+
+@pytest.mark.parametrize("overpaint", [(1,1,1),(0,0,0)])
+def test_later_opaque_overpaint_vetoes_historical_grid_paths(overpaint):
+    b,w,s=_case(overpaint=overpaint)
+    with pytest.raises(ValueError,match="overpainted"):
+        _audit(b,w,s)
 
 
 def test_wrong_original_hash_cannot_use_source_ink():
