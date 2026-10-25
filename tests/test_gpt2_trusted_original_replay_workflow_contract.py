@@ -176,3 +176,29 @@ def test_original_source_smoke_test_negative_error_is_privately_captured():
     assert 'test ! -e "${RUNNER_TEMP}/empty-sources"' in script
     assert 'rm -f "${denial_log}"' in script
     assert "Verified expected no-token refusal" in script
+
+
+def test_offline_source_failure_stages_are_diagnostic_without_disclosure():
+    """Classify first failure inside the already-isolated container only."""
+    steps = _load()["jobs"]["original"]["steps"]
+    script = next(s["run"] for s in steps
+                  if s.get("name", "").startswith("Run private original"))
+    assert "run_offline() {" in script
+    assert "run_stage() {" in script
+    assert 'run_stage source-mount-sha-import python -c' in script
+    assert 'hashlib.sha256(p.read_bytes()).hexdigest()' in script
+    assert 'run_stage source-test-collection python -m pytest' in script
+    assert "--collect-only" in script
+    assert "1 test collected" in script
+    assert 'run_test source-positive "$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST"' in script
+    assert 'run_test full-module "$GPT2_TEST_PATH"' in script
+    assert script.index("run_stage source-mount-sha-import") < script.index(
+        "run_stage source-test-collection") < script.index("run_test source-positive")
+    assert 'if ! run_offline "$@" > "$output" 2>&1' in script
+    assert 'if ! run_offline python -m pytest' in script
+    assert "details withheld to protect source" in script
+    assert 'cat "$output"' not in script
+    assert 'tail "$output"' not in script
+    assert 'grep -E "^FAILED' not in script
+    assert 'git checkout --detach' not in script
+    assert 'actions/upload-artifact' not in FILE.read_text(encoding="utf8")
