@@ -56,10 +56,10 @@ jobs:
               focused_test=tests/test_raster_opening_cached_source_integrity.py
               ;;
             vertical)
-              # The source-only 2124 vertical seam hypothesis is pinned to
-              # its exact original two-file head and current-main parent.
-              approved_base=e405d5da857eadac9a842811fdcab3082df021e6
-              approved_head=f934aebc6c6241df4dee784f00a7d3606971fe70
+              # Only the two reviewed source/test paths differ from the
+              # exact trusted main base; no secret workflow or PDF changes.
+              approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed
+              approved_head=d993bac877fb1c5afc2327fae1ff1995274aea6a
               expected_paths='pb_gptmax_raster_tile_seam_shadow.py|tests/test_gptmax_raster_tile_seam_source.py'
               focused_test=tests/test_gptmax_raster_tile_seam_source.py
               ;;
