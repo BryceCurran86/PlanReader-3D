@@ -557,9 +557,14 @@ def test_original_wxx_source_type_mark_and_schedule_identity_cannot_be_rekeyed(
     opening = real.canonical_openings[2]
     assert _opening_quantity(opening) is not None
     forged = replace(opening, **{field: foreign})
-    # The real generic figured-area issuer legitimately does not decide
-    # external Wxx tag or schedule instance identity. The original source
-    # review must refuse this changed typed lineage even when area survives.
+    if field == "tag_observation_id":
+        # The real issuer now requires a present instance tag in its
+        # complete evidence roster. Retain the foreign tag there so this
+        # test exercises the *later* original source-review mismatch,
+        # rather than the issuer's earlier missing-evidence refusal.
+        forged = replace(forged, evidence_ids=forged.evidence_ids + (foreign,))
+    # Source-review still refuses a foreign Wxx type/tag/schedule identity
+    # even when the real generic figured-area issuer remains positive.
     assert _opening_quantity(forged) is not None
     with pytest.raises(ValueError, match="foreign source/signed review decision"):
         reconcile_gpt1_area_review_with_issuer(
