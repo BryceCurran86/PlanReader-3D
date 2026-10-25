@@ -25,7 +25,14 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from test_pdf_text_integrity_source_state_v1 import _SYSINFO_DUP, _cmap, _pdf, _stream_obj
 
 
-def _elevation_pdf(*, composite: bool = False, far_width_dimension: bool = False) -> bytes:
+def _elevation_pdf(
+    *,
+    composite: bool = False,
+    far_width_dimension: bool = False,
+    duplicate_same_mark: bool = False,
+    reverse_duplicate_order: bool = False,
+    external_same_mark: bool = False,
+) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=500.0, height=400.0)
@@ -34,7 +41,15 @@ def _elevation_pdf(*, composite: bool = False, far_width_dimension: bool = False
         # Closed source frame: 150pt x 120pt. Figured dimensions are 3000 x
         # 2400, preserving the same aspect ratio without requiring page scale.
         page.draw_rect(fitz.Rect(150.0, 120.0, 300.0, 240.0), width=1.0)
-        page.insert_text((215.0, 185.0), "W1", fontsize=9.0)
+        marks = [(215.0, 185.0)]
+        if duplicate_same_mark:
+            marks.append((258.0, 185.0))
+        if reverse_duplicate_order:
+            marks.reverse()
+        for position in marks:
+            page.insert_text(position, "W1", fontsize=9.0)
+        if external_same_mark:
+            page.insert_text((340.0, 185.0), "W1", fontsize=9.0)
 
         if composite:
             page.insert_text((258.0, 185.0), "D1", fontsize=9.0)
@@ -417,6 +432,34 @@ def test_marked_window_elevation_proves_closed_gross_frame_area() -> None:
     assert record.dimension_line_ids
     assert len(record.witness_line_ids) >= 4
     assert record.frame_geometry_ids
+
+
+@pytest.mark.parametrize("reverse_duplicate_order", [False, True])
+def test_two_identical_source_marks_inside_one_frame_must_abstain(
+    reverse_duplicate_order: bool,
+) -> None:
+    # Two separate trusted W1 word observations are not a unique physical
+    # elevation mark, even though their normalized mark strings are equal.
+    # The old set-based test collapsed both words into {"W1"} and emitted
+    # a false positive; reversing PDF insertion order must not change this.
+    published, authority = _authority(
+        _elevation_pdf(
+            duplicate_same_mark=True,
+            reverse_duplicate_order=reverse_duplicate_order,
+        )
+    )
+    result = authority.resolve(_selector(published, "W1"))
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE in result.reason_codes
+
+
+def test_same_type_word_outside_closed_frame_does_not_poison_unique_mark() -> None:
+    published, authority = _authority(_elevation_pdf(external_same_mark=True))
+    result = authority.resolve(_selector(published, "W1"))
+    assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
+    assert result.record is not None
+    assert result.record.area_m2 == pytest.approx(7.2)
 
 
 def test_composite_window_door_outer_frame_cannot_become_single_window_area() -> None:

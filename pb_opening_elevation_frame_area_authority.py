@@ -667,13 +667,18 @@ def _record_candidates_for_page(
                 ) > locality_limit:
                     continue
 
-                contained = {
-                    contained_mark
-                    for contained_word, contained_mark, _kind in all_tags
+                # Source observation multiplicity, not normalized tag
+                # multiplicity, proves one explicit opening mark per frame.
+                # A set of tag strings collapses two distinct W1 observations
+                # into {"W1"} and incorrectly authorizes the same frame.
+                # Preserve exact selected-word ownership as well: a different
+                # same-type tag inside the frame cannot stand in for this one.
+                contained_ids = [
+                    contained_word.observation_id
+                    for contained_word, _contained_mark, _kind in all_tags
                     if _inside(_center(contained_word.bbox), frame_bbox)
-                }
-                # Composite assemblies are not one opening's gross frame.
-                if contained != {mark}:
+                ]
+                if contained_ids != [mark_word.observation_id]:
                     continue
 
                 # A second composite shape occurs when the selected figured
