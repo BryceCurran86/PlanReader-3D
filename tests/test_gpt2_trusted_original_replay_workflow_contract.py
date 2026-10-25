@@ -193,7 +193,10 @@ def test_all_four_originals_collect_without_private_source_before_token_step():
     assert "--collect-only" in source_free
     assert '"$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST"' in source_free
     assert "1 test collected" in source_free
-    assert "documents/sources" not in source_free
+    assert "gpt2-empty-original-preflight" in source_free
+    assert "NO_REAL_SOURCE.txt" in source_free
+    assert "dst=/workspace/documents/sources,readonly" in source_free
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in source_free
     assert "ORIGINAL_SOURCES_TOKEN" not in source_free
     assert "> \"$output\" 2>&1" in source_free
     assert "no private source accessed" in source_free
