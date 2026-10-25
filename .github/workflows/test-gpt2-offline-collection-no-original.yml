@@ -40,12 +40,15 @@ jobs:
             mkdir -p "$tree/documents/sources"
             git fetch --no-tags --depth=1 origin "$head"
             git archive "$head" | tar -x -C "$tree"
+            mkdir -p "$RUNNER_TEMP/gpt2-dummy-source-$label"
+            printf "public synthetic nested bind\\n" > "$RUNNER_TEMP/gpt2-dummy-source-$label/NO_REAL_SOURCE.txt"
             output="$RUNNER_TEMP/gpt2-no-original-$label.log"
             rc=0
             docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 128 \
               --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
               --mount "type=bind,src=$tree,dst=/workspace,readonly" \
+              --mount "type=bind,src=$RUNNER_TEMP/gpt2-dummy-source-$label,dst=/workspace/documents/sources,readonly" \
               --workdir /workspace \
               -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
               -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
