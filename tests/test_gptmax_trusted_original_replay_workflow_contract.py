@@ -217,7 +217,7 @@ def test_real_original_requires_pass_and_archived_customer_parity():
     assert "grep -Eq" in other["run"]
     cleanup = steps[-1]
     assert cleanup["if"] == "always()"
-    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources' in cleanup["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" documents/sources' in cleanup["run"]
     assert "rm -f" in cleanup["run"]
 
 
@@ -303,4 +303,71 @@ def test_token_bearing_provisioner_uses_trusted_main_not_reviewed_pr_checkout():
             assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly"' in script
             assert "docker run --rm --network none --read-only --cap-drop ALL" in script
     cleanup = steps[-1]
-    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources' in cleanup["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gptmax-approved-target" "$RUNNER_TEMP/gptmax-approved-deps" documents/sources' in cleanup["run"]
+
+
+def _assert_approved_dependency_context(build):
+    """Fail closed if moving main or a broad checkout enters Docker context."""
+    assert 'approved_deps="$RUNNER_TEMP/gptmax-approved-deps"' in build
+    assert 'mkdir -p "$approved_deps"' in build
+    assert 'for dep in requirements.txt requirements-ci-v1228.txt; do' in build
+    assert '[[ -f "$GPTMAX_APPROVED_TREE/$dep" && ! -L "$GPTMAX_APPROVED_TREE/$dep" ]]' in build
+    assert 'cp -- "$GPTMAX_APPROVED_TREE/$dep" "$approved_deps/$dep"' in build
+    assert '-f - "$approved_deps" <<' in build
+    assert '-f - . <<' not in build
+    assert 'cp -- "$GITHUB_WORKSPACE/$dep"' not in build
+
+
+def test_dependency_image_uses_only_immutable_sha_approved_requirements():
+    steps = _load()["jobs"]["verify"]["steps"]
+    build = next(step["run"] for step in steps if step.get("name", "").startswith("Build no-network"))
+    _assert_approved_dependency_context(build)
+    cleanup = steps[-1]
+    assert cleanup["if"] == "always()"
+    assert '"$RUNNER_TEMP/gptmax-approved-deps"' in cleanup["run"]
+
+
+def test_dependency_context_static_tampering_is_rejected():
+    import pytest
+
+    steps = _load()["jobs"]["verify"]["steps"]
+    build = next(step["run"] for step in steps if step.get("name", "").startswith("Build no-network"))
+    tampered = (
+        build.replace('cp -- "$GPTMAX_APPROVED_TREE/$dep"', 'cp -- "$GITHUB_WORKSPACE/$dep"'),
+        build.replace('-f - "$approved_deps" <<', '-f - . <<'),
+        build.replace('mkdir -p "$approved_deps"', 'mkdir -p "$GITHUB_WORKSPACE"'),
+        build.replace('[[ -f "$GPTMAX_APPROVED_TREE/$dep" && ! -L "$GPTMAX_APPROVED_TREE/$dep" ]]', ':'),
+    )
+    for mutated in tampered:
+        assert mutated != build
+        with pytest.raises(AssertionError):
+            _assert_approved_dependency_context(mutated)
+
+
+def test_dependency_copy_shell_ignores_moving_main_and_private_sentinel(tmp_path):
+    """Execute actual pre-build copy, without Docker, network or originals."""
+    import os
+    import subprocess
+
+    steps = _load()["jobs"]["verify"]["steps"]
+    build = next(step["run"] for step in steps if step.get("name", "").startswith("Build no-network"))
+    copy_script = build.split("docker build --pull", 1)[0]
+    approved = tmp_path / "approved"
+    moving_main = tmp_path / "moving-main"
+    approved.mkdir()
+    moving_main.mkdir()
+    for name in ("requirements.txt", "requirements-ci-v1228.txt"):
+        (approved / name).write_text("PINNED-" + name, encoding="utf-8")
+        (moving_main / name).write_text("MOVING-MAIN-" + name, encoding="utf-8")
+    (moving_main / "private-original.pdf").write_bytes(b"private-sentinel")
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GPTMAX_APPROVED_TREE=str(approved),
+               GITHUB_WORKSPACE=str(moving_main))
+    subprocess.run(["bash", "-euo", "pipefail", "-c", copy_script], cwd=moving_main,
+                   env=env, check=True, capture_output=True, text=True)
+    context = tmp_path / "gptmax-approved-deps"
+    assert sorted(p.name for p in context.iterdir()) == [
+        "requirements-ci-v1228.txt", "requirements.txt"
+    ]
+    for name in ("requirements.txt", "requirements-ci-v1228.txt"):
+        assert (context / name).read_text(encoding="utf-8") == "PINNED-" + name
+    assert not (context / "private-original.pdf").exists()
