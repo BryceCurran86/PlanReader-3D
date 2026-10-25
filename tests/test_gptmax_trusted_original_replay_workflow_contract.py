@@ -294,7 +294,7 @@ def test_token_bearing_provisioner_uses_trusted_main_not_reviewed_pr_checkout():
     for step in steps[provision_index + 1:]:
         script = step.get("run", "")
         assert "git checkout" not in script
-        assert "python -m pytest" not in script.replaceAll("run_isolated python -m pytest", "")
+        assert "python -m pytest" not in script.replace("run_isolated python -m pytest", "")
         assert "--network host" not in script
     for step in steps:
         if step.get("name", "").startswith(("Verify real original", "Verify original-provisioned")):
