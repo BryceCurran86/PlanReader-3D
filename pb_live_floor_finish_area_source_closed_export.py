@@ -163,9 +163,8 @@ def build_live_floor_finish_area_source_traces(
     # even when its physical floor cannot yet be published. A positive floor
     # must not silently reuse that same source mark or observation.
     abstained_original_claims: set[tuple[str, str, str, str]] = set()
+    unresolved_root_original_claims: set[tuple[str, str]] = set()
     for original in claim.floor_finish_quantity_evidence:
-        if not isinstance(original, QuantityEvidence):
-            continue  # Existing typed inventory check below raises.
         if not (original.abstained or original.value is None):
             continue
         original_metadata = (
@@ -173,26 +172,32 @@ def build_live_floor_finish_area_source_traces(
         )
         digest = original_metadata.get("source_sha256")
         revision = original_metadata.get("revision_id")
-        if (
-            not _valid_original_source_sha(digest)
-            or type(revision) is not str
-            or not revision
-            or revision != revision.strip()
-        ):
-            continue  # Foreign or unresolved source cannot prove a collision.
+        root_proved = (
+            _valid_original_source_sha(digest)
+            and type(revision) is str
+            and bool(revision)
+            and revision == revision.strip()
+        )
         for field in (
             "finish_occurrence_record_id",
             "finish_occurrence_evidence_id",
         ):
             source_identity = original_metadata.get(field)
             if (
-                type(source_identity) is str
-                and source_identity
-                and source_identity == source_identity.strip()
+                type(source_identity) is not str
+                or not source_identity
+                or source_identity != source_identity.strip()
             ):
+                continue
+            if root_proved:
                 abstained_original_claims.add((
                     digest.lower(), revision, field, source_identity,
                 ))
+            else:
+                # A missing/malformed SHA or revision does NOT make an
+                # original mark disappear. Without a provable independent
+                # source root, an identical source ID contests the FIRM row.
+                unresolved_root_original_claims.add((field, source_identity))
     for quantity in claim.floor_finish_quantity_evidence:
         # Every original family/source ID has already been validated above.
         if quantity.abstained or quantity.value is None:
@@ -411,7 +416,8 @@ def build_live_floor_finish_area_source_traces(
             floor.source_sha256.lower(), floor.revision_id,
         )
         if any(
-            (*source_root, field, receipt) in abstained_original_claims
+            ((*source_root, field, receipt) in abstained_original_claims
+             or (field, receipt) in unresolved_root_original_claims)
             for field, receipt in (
                 ("finish_occurrence_record_id", occurrence_id),
                 ("finish_occurrence_evidence_id", occurrence_evidence_id),
