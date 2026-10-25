@@ -6,6 +6,7 @@ never provision private PDFs, run a producer, or touch the frozen benchmark.
 """
 from pathlib import Path
 from runpy import run_path
+import re
 
 import pytest
 import yaml
@@ -61,7 +62,7 @@ def check_original_token_boundary(raw: str) -> int:
         assert "actions/upload-artifact@" not in str(job)
         assert any(
             s.get("if") == "always()"
-            and "rm -rf documents/sources" in str(s.get("run", ""))
+            and re.search(r"(?m)^\s*rm\s+-rf\s+[^\n]*\bdocuments/sources(?:\s|$)", str(s.get("run", "")))
             for s in steps if type(s) is dict
         ), name
     return len(matches)
