@@ -66,7 +66,17 @@ def test_original_numeric_firm_with_blockers_cannot_disappear_from_seal_or_custo
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_provisional_abstention_remains_nonpublishing_without_poisoning_valid_floor(reverse):
-    source = _source_area()
+    original = _source_area()
+    # The commercial adapter separately requires both original figured axes.
+    # Keep that independent customer authority gate genuinely satisfied in
+    # this preservation positive, rather than weakening or mocking it.
+    source = replace(
+        original,
+        metadata={
+            **original.metadata,
+            "figured_dimension_ids": ("figured-original-horizontal", "figured-original-vertical"),
+        },
+    )
     provisional = replace(
         source,
         quantity_id="independent-unresolved-original-area",
