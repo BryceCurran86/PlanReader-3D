@@ -3,6 +3,7 @@
 No benchmark, original PDF, secrets or producer authority is used by this test.
 """
 from pathlib import Path
+import os
 import re
 import subprocess
 
@@ -87,8 +88,11 @@ def test_main_owner_only_immutable_source_positive_workflow():
     guard_index = steps.index(guards[0])
     build_index = next(i for i, x in enumerate(steps) if x.get("name", "").startswith("Build offline"))
     assert guard_index < build_index < source_index
-    assert 'docker build -q' in steps[build_index]["run"]
-    assert 'docker run' not in steps[build_index]["run"]
+    build_script = steps[build_index]["run"]
+    assert 'deps_dir="$RUNNER_TEMP/gpt3-approved-deps"' in build_script
+    assert 'cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in build_script
+    assert 'docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" "$deps_dir"' in build_script
+    assert 'docker run' not in build_script
     assert "git checkout --detach" not in WORKFLOW.read_text(encoding="utf-8")
     secret = steps[source_index]
     assert secret["uses"] == "./.github/actions/provision-original-sources"
@@ -112,7 +116,7 @@ def test_main_owner_only_immutable_source_positive_workflow():
     assert 'cat "$output"' not in test_step["run"]
     assert 'python -m pip install' not in test_step["run"]
     assert steps[-1]["if"] == "always()"
-    assert 'rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources' in steps[-1]["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" "$RUNNER_TEMP/gpt3-approved-deps" documents/sources' in steps[-1]["run"]
     assert "gpt3-owner-original-positive.log" in steps[-1]["run"]
     assert "gpt3-offline.Dockerfile" in steps[-1]["run"]
     raw = WORKFLOW.read_text(encoding="utf-8")
@@ -157,7 +161,9 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert "Trusted main modified an immutable GPT3 release path" in guard["run"]
         assert "git checkout --detach" not in raw
         assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in guard["run"]
-        assert 'docker build -q' in build["run"]
+        assert 'deps_dir="$RUNNER_TEMP/gpt3-approved-deps"' in build["run"]
+        assert 'cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in build["run"]
+        assert 'docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" "$deps_dir"' in build["run"]
         assert "ORIGINAL_SOURCES_TOKEN" not in str(build)
         assert provision["uses"] == "./.github/actions/provision-original-sources"
         assert provision["with"]["token"] == "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
@@ -169,7 +175,7 @@ def _isolated_private_source_contract(raw: str) -> bool:
         assert "grep -Eq" in script and "skipped" in script
         assert "private details withheld" in script
         assert cleanup["if"] == "always()"
-        assert 'rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources' in cleanup["run"]
+        assert 'rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" "$RUNNER_TEMP/gpt3-approved-deps" documents/sources' in cleanup["run"]
     except (AssertionError, KeyError, TypeError, ValueError, yaml.YAMLError):
         return False
     return True
@@ -189,10 +195,14 @@ def test_private_source_token_never_reaches_candidate_tree_on_host():
     ('persist-credentials: false', 'persist-credentials: true'),
     ('git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA"',
      'git diff --name-only "$approved_base" "$GITHUB_SHA"'),
+    ('cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"',
+     'cp -- requirements.txt requirements-ci-v1228.txt "$deps_dir/"'),
+    ('docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" "$deps_dir"',
+     'docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" .'),
     ('comm -12', 'comm -23'),
     ('if [[ -n "$conflicting" ]]', 'if [[ -z "$conflicting" ]]'),
-    ('rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources',
-     'rm -rf "$RUNNER_TEMP/gpt3-approved-candidate"'),
+    ('rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" "$RUNNER_TEMP/gpt3-approved-deps" documents/sources',
+     'rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources'),
 ])
 def test_trust_boundary_mutations_cannot_certify_owner_source(old, new):
     raw = WORKFLOW.read_text(encoding="utf-8")
@@ -238,3 +248,37 @@ def test_git_rename_of_approved_source_path_remains_visible_to_overlap_veto(tmp_
     approved_paths = {"tools/approved.py"}
     assert approved_paths.intersection(original_and_destination)
     assert not approved_paths.intersection(default_paths)
+
+
+def test_offline_image_dependencies_are_copied_from_approved_snapshot_not_main(tmp_path):
+    """Exercise the workflow's actual shell copy with divergent main/candidate deps.
+
+    No Docker, private originals, credentials, or benchmark files are required.
+    The networked image builder must receive only immutable approved dependency
+    inputs, never the independently mutable trusted-main dependency files.
+    """
+    main = tmp_path / "main"
+    approved = tmp_path / "approved"
+    deps = tmp_path / "image-context"
+    for directory in (main, approved, deps):
+        directory.mkdir()
+    for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
+        (main / filename).write_text("main-only==99\\n", encoding="utf-8")
+        (approved / filename).write_text("approved-only==1\\n", encoding="utf-8")
+    (main / "private-original.pdf").write_bytes(b"DO NOT COPY")
+    (approved / "candidate-code.py").write_text("pass\\n", encoding="utf-8")
+
+    steps = _load()["jobs"]["original"]["steps"]
+    build = next(step["run"] for step in steps if step["name"].startswith("Build offline"))
+    copy_line, = (line.strip() for line in build.splitlines()
+                  if line.strip().startswith("cp -- "))
+    env = os.environ.copy()
+    env.update(GPT3_APPROVED_TREE=str(approved), deps_dir=str(deps))
+    subprocess.run(["bash", "-c", "set -euo pipefail\\n" + copy_line],
+                   cwd=main, env=env, check=True, capture_output=True, text=True)
+    assert sorted(path.name for path in deps.iterdir()) == [
+        "requirements-ci-v1228.txt", "requirements.txt",
+    ]
+    for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
+        assert (deps / filename).read_bytes() == (approved / filename).read_bytes()
+        assert (deps / filename).read_bytes() != (main / filename).read_bytes()
