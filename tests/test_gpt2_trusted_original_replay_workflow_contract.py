@@ -1,5 +1,7 @@
 """Safety contract for owner-initiated, SHA-pinned private source replays."""
 from pathlib import Path
+import os
+import subprocess
 import re
 import shlex
 import pytest
@@ -171,7 +173,7 @@ def test_private_source_tests_only_execute_in_offline_container():
     assert len(cleanup_lines) == 1
     assert set(shlex.split(cleanup_lines[0])) == {
         "rm", "-rf", "$RUNNER_TEMP/gpt2-empty-original-preflight",
-        "$RUNNER_TEMP/gpt2-approved-target", "documents/sources",
+        "$RUNNER_TEMP/gpt2-approved-target", "$RUNNER_TEMP/gpt2-approved-deps", "documents/sources",
     }
     assert "docker build" in steps[build]["run"]
 
@@ -237,3 +239,65 @@ def test_private_failure_reports_only_fixed_categories_and_exit_status():
     assert "grep -E '^FAILED" not in run
     assert "actions/upload-artifact" not in FILE.read_text(encoding="utf8")
     assert 'rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log"' in steps[-1]["run"]
+
+def _approved_dependency_image_context_contract(raw: str) -> bool:
+    """The networked build may see approved dependency bytes, not moving main."""
+    try:
+        steps = _parse_workflow(raw)["jobs"]["original"]["steps"]
+        build = next(step["run"] for step in steps
+                     if step["name"].startswith("Build sealed Python"))
+        cleanup = steps[-1]["run"]
+        assert 'deps_dir="$RUNNER_TEMP/gpt2-approved-deps"' in build
+        assert 'mkdir -p "$deps_dir"' in build
+        assert 'cp -- "$GPT2_APPROVED_TREE/requirements.txt" "$GPT2_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"' in build
+        assert 'docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" "$deps_dir"' in build
+        assert 'rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" "$RUNNER_TEMP/gpt2-approved-deps" documents/sources' in cleanup
+    except (AssertionError, KeyError, StopIteration, TypeError, yaml.YAMLError):
+        return False
+    return True
+
+
+@pytest.mark.parametrize(("old", "new"), (
+    ('cp -- "$GPT2_APPROVED_TREE/requirements.txt" "$GPT2_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"',
+     'cp -- requirements.txt requirements-ci-v1228.txt "$deps_dir/"'),
+    ('docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" "$deps_dir"',
+     'docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" .'),
+    ('deps_dir="$RUNNER_TEMP/gpt2-approved-deps"', 'deps_dir="$GITHUB_WORKSPACE"'),
+    ('rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" "$RUNNER_TEMP/gpt2-approved-deps" documents/sources',
+     'rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" documents/sources'),
+))
+def test_moving_main_dependency_context_mutations_are_rejected(old, new):
+    original = FILE.read_text(encoding="utf8")
+    assert _approved_dependency_image_context_contract(original)
+    assert original.count(old) == 1
+    assert not _approved_dependency_image_context_contract(original.replace(old, new, 1))
+
+
+def test_offline_image_copies_only_approved_dependency_bytes(tmp_path):
+    """Execute the actual workflow copy command with deliberately divergent main."""
+    main = tmp_path / "moving-main"
+    approved = tmp_path / "approved-snapshot"
+    deps = tmp_path / "image-context"
+    for directory in (main, approved, deps):
+        directory.mkdir()
+    for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
+        (main / filename).write_text("main-only==99\n", encoding="utf8")
+        (approved / filename).write_text("approved-only==1\n", encoding="utf8")
+    (main / "private-original.pdf").write_bytes(b"NEVER COPY")
+    (approved / "candidate-code.py").write_text("pass\n", encoding="utf8")
+    steps = _load()["jobs"]["original"]["steps"]
+    build = next(step["run"] for step in steps
+                 if step["name"].startswith("Build sealed Python"))
+    copy_lines = [line.strip() for line in build.splitlines()
+                  if line.strip().startswith("cp -- ")]
+    assert len(copy_lines) == 1
+    env = os.environ.copy()
+    env.update(GPT2_APPROVED_TREE=str(approved), deps_dir=str(deps))
+    subprocess.run(["bash", "-c", "set -euo pipefail\n" + copy_lines[0]],
+                   cwd=main, env=env, check=True, capture_output=True, text=True)
+    assert sorted(path.name for path in deps.iterdir()) == [
+        "requirements-ci-v1228.txt", "requirements.txt",
+    ]
+    for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
+        assert (deps / filename).read_bytes() == (approved / filename).read_bytes()
+        assert (deps / filename).read_bytes() != (main / filename).read_bytes()
