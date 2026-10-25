@@ -104,6 +104,7 @@ def test_pinned_sha_allowlist_and_no_arbitrary_input():
     assert "git diff --name-only" in script
     assert "git checkout --detach" not in script
     assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in script
+    assert 'mkdir -p "$target_tree/documents/sources"' in script
     assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in script
     assert '[[ -f "$target_tree/$test_path" ]]' in script
     assert 'GPT2_APPROVED_TREE=$target_tree' in script
