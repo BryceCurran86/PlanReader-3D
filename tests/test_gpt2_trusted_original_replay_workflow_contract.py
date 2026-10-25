@@ -102,7 +102,11 @@ def test_pinned_sha_allowlist_and_no_arbitrary_input():
         assert target + ")" in script
         assert "approved_head=" + sha in script
     assert "git diff --name-only" in script
-    assert "git checkout --detach" in script
+    assert "git checkout --detach" not in script
+    assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in script
+    assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in script
+    assert '[[ -f "$target_tree/$test_path" ]]' in script
+    assert 'GPT2_APPROVED_TREE=$target_tree' in script
     assert "expected_paths=" in script
     assert "github.event.inputs" not in FILE.read_text(encoding="utf8")
 
@@ -132,18 +136,26 @@ def test_private_source_tests_only_execute_in_offline_container():
     isolated = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Run private original"))
     assert build < provision < isolated
     assert len(steps[provision + 1:-1]) == 1
+    guard = next(s for s in steps if s.get("name", "").startswith("Validate immutable"))
+    assert steps.index(guard) < build
+    assert 'git checkout --detach' not in guard["run"]
+    assert 'git archive "$approved_head"' in guard["run"]
+    assert steps[provision]["uses"] == "./.github/actions/provision-original-sources"
     script = steps[isolated]["run"]
     for required in ("docker run --rm --network none --read-only --cap-drop ALL",
                      "--security-opt no-new-privileges", "dst=/workspace,readonly",
                      "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1", "run_test source-positive",
                      "run_test full-module", "grep -Eq", "details withheld to protect source"):
         assert required in script
+    assert '--mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly"' in script
+    assert '--mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly"' in script
+    assert '--mount "type=bind,src=$PWD,dst=/workspace,readonly"' not in script
     assert "grep -E '^FAILED" not in script
     assert "cat \"$output\"" not in script
     assert "docker build" not in script
     assert SOURCE == steps[isolated]["env"]["PLANREADER_MARYBOROUGH_SOURCE_SHA256"]
     assert steps[-1]["if"] == "always()"
-    assert "rm -rf documents/sources" in steps[-1]["run"]
+    assert 'rm -rf "$RUNNER_TEMP/gpt2-approved-target" documents/sources' in steps[-1]["run"]
     assert "docker build" in steps[build]["run"]
 
 def test_original_source_smoke_test_negative_error_is_privately_captured():
