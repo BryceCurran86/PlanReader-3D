@@ -12,9 +12,9 @@ FILE = ROOT / ".github/workflows/gpt2-trusted-original-source-replay-manual.yml"
 SOURCE = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 HEADS = {
     "a600": "91cc96a445d6441a640547ce089cd756b56873b3",
-    "freezer": "f424c6c16fca7c83d4b7a8425faaa1172afd5045",
-    "d15": "37ed51dd024db1979bf4a114c656c6985519aa8b",
-    "rcp": "bf26820aa89d0c911448dd67d1f4bb2ef226eaf0",
+    "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
+    "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
+    "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
 }
 
 

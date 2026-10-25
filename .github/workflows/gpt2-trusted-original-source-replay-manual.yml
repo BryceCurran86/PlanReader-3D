@@ -45,19 +45,19 @@ jobs:
               test_path=tests/test_gpt2_original_a600_table_row_scope_shadow.py
               ;;
             freezer)
-              approved_head=f424c6c16fca7c83d4b7a8425faaa1172afd5045
+              approved_head=2e2e622515db29203f6299d537b1ccb232adea30
               expected_paths='pb_gpt2_original_native_freezer_paint_gap_shadow.py|tests/test_gpt2_original_native_freezer_paint_gap_shadow.py'
               original_test=test_original_freezer_d17_private_pdf_if_provisioned
               test_path=tests/test_gpt2_original_native_freezer_paint_gap_shadow.py
               ;;
             d15)
-              approved_head=37ed51dd024db1979bf4a114c656c6985519aa8b
+              approved_head=e8700f3030d66121d793f1a1924f20f7e3b2ddb9
               expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|tests/test_gpt2_mary_original_figured_door_leader_shadow.py'
               original_test=test_private_original_maryborough_native_leader_source_if_provisioned
               test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py
               ;;
             rcp)
-              approved_head=bf26820aa89d0c911448dd67d1f4bb2ef226eaf0
+              approved_head=8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1
               expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
               original_test=test_real_original_page9_native_source_rivals_if_available
               test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
