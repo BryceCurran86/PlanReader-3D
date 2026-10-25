@@ -194,6 +194,7 @@ def build_live_ceiling_lining_source_traces(
     # Preserve source-owned rivals rejected by geometry/measurement authority.
     # The FIRM-only loop below cannot independently see such claimants.
     abstained_original_marks: set[tuple[str, str, str, str]] = set()
+    unresolved_root_original_marks: set[tuple[str, str]] = set()
     for prior in claim.ceiling_lining_quantity_evidence:
         if not isinstance(prior, QuantityEvidence):
             continue  # Existing complete inventory validation below raises.
@@ -202,13 +203,12 @@ def build_live_ceiling_lining_source_traces(
         prior_meta = prior.metadata if isinstance(prior.metadata, Mapping) else {}
         digest = prior_meta.get("source_sha256")
         revision = prior_meta.get("revision_id")
-        if (
-            not _valid_original_source_sha(digest)
-            or type(revision) is not str
-            or not revision
-            or revision != revision.strip()
-        ):
-            continue
+        root_proved = (
+            _valid_original_source_sha(digest)
+            and type(revision) is str
+            and bool(revision)
+            and revision == revision.strip()
+        )
         for key in (
             "finish_occurrence_record_id",
             "finish_occurrence_evidence_id",
@@ -216,9 +216,14 @@ def build_live_ceiling_lining_source_traces(
             original_id = prior_meta.get(key)
             if (type(original_id) is str and original_id
                     and original_id == original_id.strip()):
-                abstained_original_marks.add((
-                    digest.lower(), revision, key, original_id,
-                ))
+                if root_proved:
+                    abstained_original_marks.add((
+                        digest.lower(), revision, key, original_id,
+                    ))
+                else:
+                    # Missing source ownership cannot prove that a known
+                    # competing original mark belongs to another document.
+                    unresolved_root_original_marks.add((key, original_id))
     for quantity in claim.ceiling_lining_quantity_evidence:
         # Complete original source identity was prevalidated above.
         if quantity.abstained or quantity.value is None:
@@ -402,7 +407,8 @@ def build_live_ceiling_lining_source_traces(
         # Compare source roots to distinguish unrelated PDF/revision-local IDs.
         root = (ceiling.source_sha256.lower(), ceiling.revision_id)
         if any(
-            (*root, field, original_id) in abstained_original_marks
+            ((*root, field, original_id) in abstained_original_marks
+             or (field, original_id) in unresolved_root_original_marks)
             for field, original_id in (
                 ("finish_occurrence_record_id", occurrence_id),
                 ("finish_occurrence_evidence_id", mark_id),

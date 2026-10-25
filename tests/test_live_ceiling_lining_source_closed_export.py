@@ -531,3 +531,46 @@ def test_unrelated_abstained_rcp_occurrence_preserves_existing_ceiling_quantity(
     assert len(project_live_ceiling_customer_rows(
         claim,workspace_id=1,project_id="project-1",
     ))==1
+
+
+@pytest.mark.parametrize("bad_root", (
+    {"source_sha256": None}, {"source_sha256": "not-a-sha"},
+    {"revision_id": None}, {"revision_id": " unresolved-revision "},
+))
+@pytest.mark.parametrize("identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_unknown_original_root_does_not_erase_an_abstained_rcp_claim(
+    bad_root, identity, reverse,
+):
+    firm = _quantity()
+    other = ("finish_occurrence_evidence_id" if identity == "finish_occurrence_record_id"
+             else "finish_occurrence_record_id")
+    rival = replace(
+        firm, quantity_id="unknown-root-original-rival", value=None, abstained=True,
+        blocking_reasons=("original_source_root_unverified",),
+        metadata={**firm.metadata, **bad_root, other: "independent-other-identity"},
+    )
+    quantities = (rival, firm) if reverse else (firm, rival)
+    claim = replace(_claim(firm), ceiling_lining_quantity_evidence=quantities)
+    for consumer in (seal_live_ceiling_lining_run, project_live_ceiling_customer_rows):
+        with pytest.raises(SourceClosedRunConflictError, match="original RCP material mark contested"):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("bad_root", ({"source_sha256": None}, {"revision_id": None}))
+def test_unknown_root_with_independent_original_mark_does_not_veto_ceiling(bad_root):
+    firm = _quantity()
+    rival = replace(
+        firm, quantity_id="unknown-root-independent-source", value=None, abstained=True,
+        blocking_reasons=("original_source_root_unverified",),
+        metadata={**firm.metadata, **bad_root,
+                  "finish_occurrence_record_id": "independent-occurrence",
+                  "finish_occurrence_evidence_id": "independent-source-word"},
+    )
+    claim = replace(_claim(firm), ceiling_lining_quantity_evidence=(rival, firm))
+    sealed = seal_live_ceiling_lining_run(claim, workspace_id=1, project_id="project-1")
+    rows = project_live_ceiling_customer_rows(claim, workspace_id=1, project_id="project-1")
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == firm.quantity_id
