@@ -97,6 +97,29 @@ def test_translation_and_uniform_scale_invariance(delta_x, delta_y, scale):
     assert result[0].points_per_mm == pytest.approx(20 * scale / 1000)
 
 
+@pytest.mark.parametrize('rotation', (0, 90, 180, 270))
+@pytest.mark.parametrize('damage', (None, 'bar', 'label'))
+def test_display_rotation_preserves_native_witness_and_overpaint_veto(rotation, damage):
+    data = _synthetic(overpaint=damage == 'bar', overpaint_label=damage == 'label')
+    with fitz.open(stream=data, filetype='pdf') as document:
+        document[0].set_rotation(rotation)
+        rotated = document.tobytes()
+    before = hashlib.sha256(rotated).hexdigest()
+    result = _scan(rotated)
+    assert hashlib.sha256(rotated).hexdigest() == before
+    if damage:
+        assert result == ()
+    else:
+        reference, = _scan(data)
+        actual, = result
+        assert actual.source_sha256 == before
+        assert actual.drawing_indices == reference.drawing_indices
+        assert actual.text_witnesses == reference.text_witnesses
+        assert actual.source_span_pt == reference.source_span_pt
+        assert actual.points_per_mm == reference.points_per_mm
+        assert result == _scan(rotated)
+
+
 @pytest.mark.parametrize('kwargs', [
     {'missing': 2}, {'colour': (0.1, 0.1, 0.1)},
     {'opacity': 0.7}, {'wrong_label': 3}, {'stroked': True},

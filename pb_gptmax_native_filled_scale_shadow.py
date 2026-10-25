@@ -195,16 +195,21 @@ def _source_ink_visible(
     # The final rendered ink must also survive clipping and graphics-state
     # operations. Nine interior samples avoid mistaking only an edge for a
     # source-visible filled rectangle. Rendering never grants scale authority.
+    # Native observations stay unrotated; MuPDF raster clips/pixel locations
+    # use displayed coordinates. Transform only the rendering boundary.
     pix = page.get_pixmap(
         matrix=fitz.Matrix(4, 4), colorspace=fitz.csRGB,
-        alpha=False, clip=box,
+        alpha=False, clip=box * page.rotation_matrix,
     )
     if pix.width < 3 or pix.height < 3:
         return False
     for fx in (0.2, 0.5, 0.8):
         for fy in (0.2, 0.5, 0.8):
-            px = round((box.x0 + box.width * fx) * 4) - pix.x
-            py = round((box.y0 + box.height * fy) * 4) - pix.y
+            displayed = fitz.Point(
+                box.x0 + box.width * fx, box.y0 + box.height * fy,
+            ) * page.rotation_matrix
+            px = round(displayed.x * 4) - pix.x
+            py = round(displayed.y * 4) - pix.y
             if not (0 <= px < pix.width and 0 <= py < pix.height):
                 return False
             if max(pix.pixel(px, py)) > 50:
@@ -273,7 +278,7 @@ def _source_word_visible(
         # Render is a negative witness only; never a source or scale grant.
         pix = page.get_pixmap(
             matrix=fitz.Matrix(4, 4), colorspace=fitz.csRGB,
-            alpha=False, clip=glyph_box,
+            alpha=False, clip=glyph_box * page.rotation_matrix,
         )
         if not any(
             max(pix.pixel(x, y)[:3]) < 120
