@@ -124,15 +124,26 @@ def inspect_native_door_swing_source_shadow(
     v1=(b1[0]-a1[0],b1[1]-a1[1])
     if abs(v0[0]*v1[1]-v0[1]*v1[0])/(math.dist(a0,b0)*math.dist(a1,b1))>0.02:
         raise ValueError("original two-face door leaf is not parallel")
+    cap_end_roles = []
     for k in short:
         a, b, _ = leaves[k]
-        if any(not any(math.dist(p, q) <= tolerance_pt
-                       for q in leaves[m][:2])
-               for p, m in ((a,mains[0]),(b,mains[1]))) and any(
-                not any(math.dist(p,q) <= tolerance_pt
-                        for q in leaves[m][:2])
-                for p,m in ((a,mains[1]),(b,mains[0]))):
-            raise ValueError("door leaf end caps do not join both long strokes")
+        roles = {
+            (left_end, right_end)
+            for left_end in (0, 1) for right_end in (0, 1)
+            if (
+                math.dist(a, leaves[mains[0]][left_end]) <= tolerance_pt
+                and math.dist(b, leaves[mains[1]][right_end]) <= tolerance_pt
+            ) or (
+                math.dist(b, leaves[mains[0]][left_end]) <= tolerance_pt
+                and math.dist(a, leaves[mains[1]][right_end]) <= tolerance_pt
+            )
+        }
+        if len(roles) != 1:
+            raise ValueError("door leaf end caps do not uniquely join both long strokes")
+        cap_end_roles.append(roles.pop())
+    if (set(role[0] for role in cap_end_roles) != {0, 1}
+            or set(role[1] for role in cap_end_roles) != {0, 1}):
+        raise ValueError("door leaf end caps do not close opposite source termini")
     if any(row[2] >= leaves[0][2] for row in arcs):
         raise ValueError("door swing ink not distinct from thick leaf")
     def dist(a,b): return math.dist(a,b)

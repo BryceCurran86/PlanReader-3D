@@ -93,6 +93,31 @@ def test_invalid_leaf_end_cap_fails_closed():
     with pytest.raises(ValueError):check(pdf(leaf_broken=True))
 
 
+@pytest.mark.parametrize('retained_cap',(1,3))
+@pytest.mark.parametrize('reverse_cap',(False,True))
+def test_two_distinct_source_caps_at_same_end_do_not_close_leaf(
+    retained_cap,reverse_cap,monkeypatch,
+):
+    leaf=list(LEAF)
+    cap=leaf[retained_cap]
+    leaf[1]=cap
+    leaf[3]=tuple(reversed(cap)) if reverse_cap else cap
+    monkeypatch.setattr(__import__(__name__), 'LEAF', leaf)
+    raw=pdf()
+    with pytest.raises(ValueError,match='opposite source termini'):
+        check(raw)
+
+
+@pytest.mark.parametrize('leaf_ids',(
+    (0,1,2,3),(3,2,1,0),(2,3,0,1),
+))
+def test_complete_opposite_leaf_caps_survive_source_selector_order(leaf_ids):
+    raw=pdf()
+    result=check(raw,leaf_path_ids=leaf_ids)
+    assert result.hinge_pt == check(raw).hinge_pt
+    assert result.shadow_only and not result.physical_door_identity_issued
+
+
 def test_reversing_complete_arc_source_order_is_invariant():
     raw=pdf()
     assert check(raw,swing_path_ids=tuple(reversed(range(4,13)))).hinge_pt==check(raw).hinge_pt
