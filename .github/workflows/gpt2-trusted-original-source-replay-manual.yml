@@ -82,6 +82,9 @@ jobs:
           target_tree="$RUNNER_TEMP/gpt2-approved-target"
           mkdir -p "$target_tree"
           git archive "$approved_head" | tar -x -C "$target_tree"
+          # Nested source mount must exist even when the Git archive omits
+          # untracked/private documents/sources entirely.
+          mkdir -p "$target_tree/documents/sources"
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
           [[ -f "$target_tree/$test_path" ]]
