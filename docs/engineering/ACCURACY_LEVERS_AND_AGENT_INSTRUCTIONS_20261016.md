@@ -2,6 +2,8 @@
 
 **Status.** Planning index and working agreement. `AGENTS.md` and `docs/AI_ENGINEERING_PLAYBOOK.md` win over this file. It does not change any rule, grants no authority, and is not an input to any producer. It was written after the production receipts and the frozen development scoreboard were read *post-producer*; no expected quantity was used, and none appears here. Written by the Claude integration lane from evidence gathered on 2026-10-16 (`main` `e43d656a`); the sources are named per claim so each can be re-derived.
 
+**Owner policy update — 2026-10-24:** independent review is optional. No separate reviewer/account, formal approval vote, cross-agent sign-off, or architecture review pause is required. Within existing owner authorization, agents may implement, validate, and merge after the applicable automated and original-source checks pass. The implementing agent may perform validation. Older reviewer-gated PR notes and comments are superseded; the evidence and retention safeguards below still apply.
+
 ## 1. Why accuracy is hard when the plan set is complete
 
 A full set is easy for a person because a person interprets: reads a schedule, applies a convention, recognises that two views show one room. This system may publish a number only when each link is proven from the drawing's own evidence, so it fails at the weakest link, not at detection.
@@ -30,16 +32,16 @@ Door heights. The 13-page Lot16 set has no door schedule and no door-height note
 ## 3. Instructions for all agents
 
 **Work selection**
-1. Do not start from this table or from a score (`AGENTS.md`, point 4). Use it only to choose which first-failing gate to trace; then run the contract loop: trace, propose, synthetic proof, shadow run, authority review.
+1. Do not start from this table or from a score (`AGENTS.md`, point 4). Use it only to choose which first-failing gate to trace; then run the contract loop: trace, propose, synthetic proof, shadow run, source-authority validation.
 2. Report the **first failing authority per object** (the receipt field, not a count), the way `#2807` does. A change is judged by how many objects move past a gate with their identity and receipts intact.
 3. Never use item ids, project names, file names or expected quantities as an input, a threshold or a test oracle for production code. Real drawings may reveal failure modes; expected values may not choose algorithms.
 4. Abstain on unknown, conflicting, stale or ambiguous evidence. Retain every plausible candidate. Never break a tie by nearest, first or smallest. No scale, height, count or area default is authority.
-5. New topology and extraction work starts in shadow mode (default-False, explicit-bool, forwarded only when on). Production-affecting changes need an independent review comment on the exact head.
+5. New topology and extraction work starts in shadow mode (default-False, explicit-bool, forwarded only when on). Production-affecting changes need documented exact-head validation through the actual downstream consumer, not an independent review comment.
 
 **Evidence and releases**
-6. Signed-output retention, by kind of change. (a) A production-module change that makes no approved promotion (shadow, refactor, performance, default-off flag) must keep the historical signed outputs byte-identical: compare `source_sealed_run.json` and `verified_customer_rows.json` from the Lot16 and Maryborough replays with the archived originals (`docs/engineering/lot16_original_signed_eight_row_20261015/` for Lot16; hash-pinned, `* -text`). (b) A change that carries an independently reviewed, owner-approved promotion (an additional FIRM quantity) cannot be byte-identical, because the new aggregate run necessarily differs. There, every existing signed row, quantity, fingerprint, ID and lineage must stay immutable, and the authorised new rows must be explicitly appended, newly signed, verified and independently reconciled; no silent rewrite of an old row. Do not edit the fixture, the benchmark files, the scorer or the source PDFs in a PR that changes production code (`scripts/check_v2_truth_separation.py` enforces it).
+6. Signed-output retention, by kind of change. (a) A production-module change that makes no validated promotion (shadow, refactor, performance, default-off flag) must keep the historical signed outputs byte-identical: compare `source_sealed_run.json` and `verified_customer_rows.json` from the Lot16 and Maryborough replays with the archived originals (`docs/engineering/lot16_original_signed_eight_row_20261015/` for Lot16; hash-pinned, `* -text`). (b) An owner-authorized change that carries a source-verified promotion (an additional FIRM quantity) cannot be byte-identical, because the new aggregate run necessarily differs. There, every existing signed row, quantity, fingerprint, ID and lineage must stay immutable, and the authorised new rows must be explicitly appended, newly signed, verified and reconciled against the unchanged evaluator; no silent rewrite of an old row. Separate reviewer approval is not required. Do not edit the fixture, the benchmark files, the scorer or the source PDFs in a PR that changes production code (`scripts/check_v2_truth_separation.py` enforces it).
 7. Batches of production PRs are verified as one tree: build a throwaway integration branch, open it as a draft "do not merge" PR so the full path-triggered CI runs on the exact result, compare the signed outputs, then merge the PRs individually in the same order and check tree equality (`git rev-parse HEAD^{tree}`). The pattern and scripts are in `docs/engineering/claude_handoff_2026-10-15/` (`HANDOFF.md`; the `scripts/clean/` helpers arrive with `#2827`).
-8. Formal independent approval does not exist (one shared login). Post COMMENT reviews; never present a comment or a shared-account review as independent approval; merges need explicit owner authorisation.
+8. Independent human/AI review and GitHub review votes are optional. Do not present a comment as a formal approval or claim an unperformed review. Within work already authorized by the owner, merge after the applicable checks and evidence requirements pass; missing reviewer/account/approval is not a blocker and does not require another owner confirmation.
 
 **CI and repository etiquette**
 9. A workflow with a `pull_request:` block must reach `main` (`branches` containing `main` or no `branches`); `tests/test_signed_output_gate_path_coverage.py` fails any that does not. Stacked PRs must not leave the parent branch as the only entry.
@@ -50,7 +52,7 @@ Door heights. The 13-page Lot16 set has no door schedule and no door-height note
 ## 4. Decisions needed from the owner
 
 - **Door-height convention (lever 2).** Either keep abstaining on doors whose height the drawings do not state, or approve, per project and recorded as such, a documented standard door height under the existing `USER_APPROVED` authority type. It must be an explicit, reviewable record (source, scope, who approved), never an inferred or AI default. Until this is decided, agents must not implement a default.
-- **Reviewer identities (B1).** Distinct reviewer identities or a required-review ruleset so that independent approval can exist.
+- **Reviewer identities (B1), resolved 2026-10-24.** The owner removed independent-review restrictions. A distinct reviewer identity, additional account, paid reviewer service, or required-review ruleset is not needed.
 
 ## 5. Benchmark observations that must not influence implementation
 

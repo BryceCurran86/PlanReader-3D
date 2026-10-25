@@ -1,0 +1,670 @@
+"""Exact W4 wall-pair equivalence is not last-write-wins.
+
+Source-neutral original-record-shaped tuples only. A repeated wall pair that
+contradicts an earlier authenticated physical classification stays AMBIGUOUS
+for every ordering and can never unblock a physical opening host frame.
+"""
+from dataclasses import replace
+from itertools import permutations
+from types import SimpleNamespace
+
+import pytest
+
+from pb_opening_host_frame_authority import (
+    _pair_lookup, _source_equivalence_group_overlap_members,
+    _source_equivalence_group_unsafe_members,
+)
+from pb_physical_wall_identity import PhysicalEquivalenceClass as Class
+
+
+SAME = Class.SAME_PHYSICAL_WALLS if hasattr(Class, "SAME_PHYSICAL_WALLS") else Class.SAME_PHYSICAL_WALL
+DISTINCT = Class.DISTINCT_PHYSICAL_WALLS
+AMBIGUOUS = Class.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+
+
+def _lookup(rows, *, groups=()):
+    return _pair_lookup(SimpleNamespace(
+        pair_classifications=rows, equivalence_groups=groups,
+    ))
+
+
+@pytest.mark.parametrize("classes", [
+    (SAME.value, DISTINCT.value, SAME.value),
+    (DISTINCT.value, SAME.value, DISTINCT.value),
+    (AMBIGUOUS.value, SAME.value, SAME.value),
+    (AMBIGUOUS.value, DISTINCT.value, DISTINCT.value),
+    (SAME.value, "unknown_source_role", SAME.value),
+])
+def test_wall_pair_conflicts_stay_ambiguous_across_all_input_orders(classes):
+    for order in set(permutations(classes)):
+        rows = [("wall_a", "wall_b", label) for label in order]
+        result = _lookup(rows)
+        assert result == {("wall_a", "wall_b"): AMBIGUOUS}
+
+
+@pytest.mark.parametrize("classification", [SAME, DISTINCT, AMBIGUOUS])
+def test_repeated_identical_wall_pair_does_not_invent_an_opposite_class(classification):
+    rows = [
+        ("wall_b", "wall_a", classification.value),
+        ("wall_a", "wall_b", classification.value),
+        ("wall_b", "wall_a", classification.value),
+    ]
+    assert _lookup(rows) == {("wall_a", "wall_b"): classification}
+
+
+def test_unrelated_wall_pair_never_changes_when_first_pair_conflicts():
+    rows = [
+        ("wall_a", "wall_b", SAME.value),
+        ("wall_c", "wall_d", DISTINCT.value),
+        ("wall_b", "wall_a", DISTINCT.value),
+        ("wall_a", "wall_b", SAME.value),
+    ]
+    assert _lookup(rows) == {
+        ("wall_a", "wall_b"): AMBIGUOUS,
+        ("wall_c", "wall_d"): DISTINCT,
+    }
+
+
+def test_ambiguous_relation_is_retained_not_treated_as_positive_distinct():
+    contradiction = [
+        ("aligned_competitor", "host_component", DISTINCT.value),
+        ("host_component", "aligned_competitor", SAME.value),
+        ("aligned_competitor", "host_component", DISTINCT.value),
+    ]
+    classification = _lookup(contradiction)[
+        ("aligned_competitor", "host_component")
+    ]
+    assert classification is AMBIGUOUS
+    assert classification is not Class.DISTINCT_PHYSICAL_WALLS
+
+
+@pytest.mark.parametrize("order", [
+    (DISTINCT.value,),
+    (DISTINCT.value, DISTINCT.value),
+    (DISTINCT.value, SAME.value, DISTINCT.value),
+])
+def test_source_same_group_and_explicit_distinct_pair_never_grant_exclusion(order):
+    rows = tuple(("wall_a", "wall_b", value) for value in order)
+    for permuted in set(permutations(rows)):
+        assert _lookup(permuted, groups=(("wall_a", "wall_b"),)) == {
+            ("wall_a", "wall_b"): AMBIGUOUS,
+        }
+
+
+@pytest.mark.parametrize("unproved_class", (
+    AMBIGUOUS.value, "malformed_source_class", None, [],
+))
+def test_same_original_group_with_non_same_class_stays_ambiguous(unproved_class):
+    rows = (("wall_a", "wall_b", unproved_class),)
+    assert _lookup(rows, groups=(("wall_a", "wall_b"),)) == {
+        ("wall_a", "wall_b"): AMBIGUOUS,
+    }
+
+
+def test_distinct_wall_pair_without_shared_source_group_remains_distinct():
+    rows = (("wall_a", "wall_b", DISTINCT.value),)
+    assert _lookup(rows, groups=(("wall_a", "other"), ("wall_b",))) == {
+        ("wall_a", "wall_b"): DISTINCT,
+    }
+
+
+def test_pair_lookup_never_mutates_original_issuer_rows():
+    rows = [
+        ("left", "right", SAME.value),
+        ("right", "left", DISTINCT.value),
+        ("right", "left", SAME.value),
+    ]
+    original = list(rows)
+    assert _lookup(rows) == {("left", "right"): AMBIGUOUS}
+    assert rows == original
+
+
+def test_frame_cannot_recover_distinctness_after_four_source_receipts():
+    """A final apparently valid DISTINCT must not wash out earlier SAME."""
+    original = (
+        ("frame_left", "frame_right", DISTINCT.value),
+        ("frame_right", "frame_left", SAME.value),
+        ("frame_left", "frame_right", AMBIGUOUS.value),
+        ("frame_left", "frame_right", DISTINCT.value),
+    )
+    for permutation in set(permutations(original)):
+        observed = _lookup(permutation)
+        assert observed[("frame_left", "frame_right")] is AMBIGUOUS
+        assert observed[("frame_left", "frame_right")] is not DISTINCT
+    assert len(original) == 4
+
+
+
+def test_original_shaped_conflict_blocks_actual_whole_wall_frame(monkeypatch):
+    """A conflicting DISTINCT cannot exclude a real aligned competing wall.
+
+    Use the repository's producer-built two-opening sealed PDF fixture and add
+    one synthetic rival W4 wall. This controls only a source-neutral wall-pair
+    classification seam; it is not a new source authority or production grant.
+    """
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+    from test_gptmax_raster_split_frame_shadow import _aligned_wall_piece_records
+
+    _source, _composition, producer, bound = _fixture()
+    baseline = _publish(producer, bound)
+    assert all(row.status is Status.CORROBORATED for row in baseline)
+    scope = _scope(producer, bound)
+
+    # Independent aligned W4 support outside the actual connected host chain.
+    centerline = baseline[0].evidence.origin_pt[1]
+    rival_record = _aligned_wall_piece_records(
+        scope.records[0], centerline, count=1, pitch=80.0,
+    )[0]
+    rival_id = rival_record.wall_candidate_id
+    members = sorted({wall_id for row in bound
+                      for wall_id in row[3].member_wall_candidate_ids})
+    assert rival_id not in members
+    assert set(members) == set(baseline[0].evidence.whole_wall_candidate_ids)
+
+    original_pairs = tuple(scope.equivalence.pair_classifications)
+    positive_pairs = tuple((rival_id, member, DISTINCT.value) for member in members)
+    active = {"scope": scope}
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: active["scope"])
+
+    def issued(rows):
+        active["scope"] = replace(
+            scope,
+            records=(*scope.records, rival_record),
+            equivalence=replace(
+                scope.equivalence,
+                pair_classifications=(*original_pairs, *rows),
+            ),
+        )
+        return _publish(producer, bound)
+
+    # Control: an independent positive DISTINCT relation for every member
+    # may exclude this separately authenticated W4 rival.
+    distinct = issued(positive_pairs)
+    assert distinct == baseline
+
+    # An explicit contradictory original relation with ANY component member
+    # must keep the whole-wall publisher in ABSTAIN, in every issuer order.
+    target = members[0]
+    other_positive = tuple(p for p in positive_pairs if p[1] != target)
+    for classes in set(permutations((
+        DISTINCT.value, SAME.value, DISTINCT.value,
+    ))):
+        rows = (*other_positive, *((rival_id, target, label)
+                                   for label in classes))
+        withheld = issued(rows)
+        assert all(row.status is Status.ABSTAINED and row.evidence is None
+                   for row in withheld)
+        assert all(
+            "opening_host_frame_aligned_fragment_distinctness_unproven"
+            in row.reason_codes for row in withheld
+        )
+        # A newly obtained selector-only authority cannot return the prior
+        # positive from cache after a same-source W4 contradiction.
+        assert all(
+            producer.authority().resolve(prior.evidence.selector).status
+            is Status.ABSTAINED
+            for prior in baseline
+        )
+        # Conflict cannot amend source-bounded commercial opening areas.
+        assert _publish(producer, tuple(reversed(bound))) == tuple(reversed(withheld))
+
+    assert tuple(scope.equivalence.pair_classifications) == original_pairs
+
+
+def test_overlapping_original_w4_groups_unsafe_regardless_of_order():
+    groups = (("host", "first"), ("host", "second"))
+    for order in (groups, tuple(reversed(groups))):
+        source = SimpleNamespace(equivalence_groups=order)
+        assert _source_equivalence_group_overlap_members(source) == frozenset(
+            {"host", "first", "second"}
+        )
+
+
+def test_duplicate_w4_group_member_not_two_independent_witnesses():
+    source = SimpleNamespace(equivalence_groups=(("host", "host"),))
+    assert _source_equivalence_group_overlap_members(source) == frozenset(
+        {"host"}
+    )
+    positive = SimpleNamespace(
+        equivalence_groups=(("host", "first"), ("host", "first")),
+    )
+    assert not _source_equivalence_group_overlap_members(positive)
+
+
+def test_single_member_raster_frame_vetoes_source_group_overlap():
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(
+            ("wall:host", "other-source:a"),
+            ("wall:host", "other-source:b"),
+        ),
+    )
+    assert _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    ) is None
+
+
+def test_unrelated_source_group_overlap_does_not_veto_real_raster_frame():
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(
+            ("unrelated:a", "unrelated:b"),
+            ("unrelated:a", "unrelated:c"),
+        ),
+    )
+    accepted = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    )
+    assert accepted is not None
+    assert accepted.candidate_ids == ("wall:host",)
+
+
+@pytest.mark.parametrize("unproved_class", (
+    DISTINCT.value, AMBIGUOUS.value, "malformed_source_class", None,
+))
+def test_single_member_shortcut_rejects_same_group_vs_distinct_pair(
+    unproved_class,
+):
+    """A contradictory W4 issuer cannot mint frame via the raster shortcut."""
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    records = (_record("wall:host"), _record("wall:rival"))
+    scope = _scope(records)
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(("wall:host", "wall:rival"),),
+        pair_classifications=(("wall:host", "wall:rival", unproved_class),),
+        representative_wall_ids=("wall:host",),
+        same_wall_ids=("wall:host", "wall:rival"),
+    )
+    bound = _binding()
+    bound.member_equivalence_groups = (("wall:host", "wall:rival"),)
+    result = _producer(scope)._raster_whole_wall_frame(
+        binding=bound, opening=_opening(), geometry=GEOMETRY,
+    )
+    assert result is None
+
+
+@pytest.mark.parametrize("unproved_class", (
+    DISTINCT.value, AMBIGUOUS.value, "malformed_source_class", None,
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_three_member_source_group_revokes_cached_c_only_raster_frame(
+    unproved_class, reverse,
+):
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    group = ("wall:A", "wall:B", "wall:host")
+    pair = ("wall:A", "wall:B", unproved_class)
+    if reverse:
+        group = tuple(reversed(group))
+        pair = (pair[1], pair[0], pair[2])
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = replace(
+        scope.equivalence,
+        equivalence_groups=(group,),
+        pair_classifications=(),
+        representative_wall_ids=("wall:host",),
+        same_wall_ids=tuple(group),
+    )
+    bound = _binding()
+    bound.member_equivalence_groups = (tuple(sorted(group)),)
+    producer = _producer(scope)
+    accepted = producer._raster_whole_wall_frame(
+        binding=bound, opening=_opening(), geometry=GEOMETRY,
+    )
+    assert accepted is not None and accepted.candidate_ids == ("wall:host",)
+
+    scope.equivalence = replace(scope.equivalence, pair_classifications=(pair,))
+    assert _source_equivalence_group_unsafe_members(scope.equivalence) == frozenset(group)
+    blocked = producer._raster_whole_wall_frame(
+        binding=bound, opening=_opening(), geometry=GEOMETRY,
+    )
+    assert blocked is None
+
+
+def test_three_member_frame_conflict_preserves_unrelated_real_raster_frame():
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    scope = _scope((_record("wall:host"),))
+    scope.equivalence = replace(
+        scope.equivalence,
+        equivalence_groups=(("A", "B", "C"),),
+        pair_classifications=(("A", "B", DISTINCT.value),),
+    )
+    assert _source_equivalence_group_unsafe_members(scope.equivalence) == frozenset({"A", "B", "C"})
+    accepted = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    )
+    assert accepted is not None and accepted.candidate_ids == ("wall:host",)
+
+
+def test_single_member_shortcut_preserves_unrelated_w4_source_conflict():
+    """A conflict on remote unrelated pairs cannot revoke a valid host."""
+    from dataclasses import replace as dc_replace
+    from test_raster_opening_whole_wall_frame import (
+        GEOMETRY, _record, _scope, _binding, _opening, _producer,
+    )
+
+    records = (
+        _record("wall:host"),
+        _record("remote:a", offset=400.0),
+        _record("remote:b", offset=500.0),
+    )
+    scope = _scope(records)
+    scope.equivalence = dc_replace(
+        scope.equivalence,
+        equivalence_groups=(("remote:a", "remote:b"),),
+        pair_classifications=(("remote:a", "remote:b", DISTINCT.value),),
+        representative_wall_ids=("wall:host", "remote:a"),
+        same_wall_ids=("remote:a", "remote:b"),
+    )
+    result = _producer(scope)._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY,
+    )
+    assert result is not None
+    assert result.candidate_ids == ("wall:host",)
+
+
+def test_source_same_group_explicit_distinct_aligned_rival_blocks_frame(monkeypatch):
+    """Conflicting original W4 representations cannot become an issued frame."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+    from test_gptmax_raster_split_frame_shadow import _aligned_wall_piece_records
+
+    _source, _composition, producer, bound = _fixture()
+    accepted = _publish(producer, bound)
+    assert all(row.status is Status.CORROBORATED for row in accepted)
+    scope = _scope(producer, bound)
+    centerline = accepted[0].evidence.origin_pt[1]
+    rival_record = _aligned_wall_piece_records(
+        scope.records[0], centerline, count=1, pitch=80.0,
+    )[0]
+    rival_id = rival_record.wall_candidate_id
+    members = sorted({wall_id for row in bound
+                      for wall_id in row[3].member_wall_candidate_ids})
+    assert rival_id not in members
+    target = members[0]
+
+    original_groups = tuple(tuple(group) for group in scope.equivalence.equivalence_groups)
+    if any(target in group for group in original_groups):
+        changed_groups = tuple(
+            tuple(sorted({*group, rival_id})) if target in group else group
+            for group in original_groups
+        )
+    else:
+        changed_groups = (*original_groups, (target, rival_id))
+    distinct_rows = tuple((rival_id, member, DISTINCT.value) for member in members)
+    conflicting = replace(
+        scope,
+        records=(*scope.records, rival_record),
+        equivalence=replace(
+            scope.equivalence,
+            equivalence_groups=changed_groups,
+            pair_classifications=(
+                *scope.equivalence.pair_classifications, *distinct_rows
+            ),
+        ),
+    )
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: conflicting)
+    blocked = _publish(producer, bound)
+    assert all(row.status is Status.ABSTAINED and row.evidence is None
+               for row in blocked)
+    # The first independent source gate may reject these inconsistent W4
+    # groups before the frame-specific contradiction guard runs. In either
+    # case the producer must fail closed, never return a positive frame.
+    assert all(
+        "opening_host_frame_whole_wall_unproven" in row.reason_codes
+        for row in blocked
+    )
+    assert all(
+        producer.authority().resolve(prior.evidence.selector).status
+        is Status.ABSTAINED for prior in accepted
+    )
+
+
+@pytest.mark.parametrize("bad_source_class", (None, {}, ["not_a_source_class"], 1))
+def test_malformed_source_pair_class_cannot_restore_distinctness(bad_source_class):
+    """A malformed issuer value remains ambiguous even after replay DISTINCT."""
+    rows = (
+        ("wall_a", "wall_b", DISTINCT.value),
+        ("wall_b", "wall_a", bad_source_class),
+        ("wall_a", "wall_b", DISTINCT.value),
+    )
+    for order in (rows, tuple(reversed(rows))):
+        assert _lookup(order) == {("wall_a", "wall_b"): AMBIGUOUS}
+
+
+def test_issuer_class_that_raises_type_error_is_not_a_positive_relation():
+    class BadOriginalClass:
+        def __hash__(self):
+            raise TypeError("unhashable original classification")
+        def __eq__(self, other):
+            raise TypeError("malformed original classification")
+
+    rows = (
+        ("wall_a", "wall_b", DISTINCT.value),
+        ("wall_b", "wall_a", BadOriginalClass()),
+        ("wall_a", "wall_b", DISTINCT.value),
+    )
+    assert _lookup(rows) == {("wall_a", "wall_b"): AMBIGUOUS}
+
+
+def test_conflicting_same_selector_source_frame_revokes_cached_positive(monkeypatch):
+    """A failed equivocation must not keep the old positive selector live."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    originals = _publish(producer, bound)
+    assert all(r.status is Status.CORROBORATED for r in originals)
+    prior_authority = producer.authority()
+    target = bound[0][3].opening_identity_id
+    original_shared = producer._shared_host_frame
+
+    def contradictory_source_frame(**kwargs):
+        existing = original_shared(**kwargs)
+        if (existing is not None
+                and kwargs["binding"].opening_identity_id == target):
+            return replace(existing, frame_id="contradictory:" + existing.frame_id)
+        return existing
+
+    monkeypatch.setattr(producer, "_shared_host_frame",
+                        contradictory_source_frame)
+    with pytest.raises(RuntimeError, match="producer equivocation"):
+        producer.publish(opening_selector=bound[0][0],
+                         host_binding_selector=bound[0][2])
+
+    fresh = producer.authority()
+    assert fresh.resolve(originals[0].evidence.selector).status is Status.ABSTAINED
+    assert fresh.resolve(originals[1].evidence.selector) == originals[1]
+    assert prior_authority.resolve(originals[0].evidence.selector) == originals[0]
+
+    monkeypatch.undo()
+    assert _publish(producer, bound) == originals
+
+
+def test_failed_source_reproof_revokes_previously_positive_frame_authority(monkeypatch):
+    """A current frame authority must never return a stale cached positive."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+
+    _source, _composition, producer, bound = _fixture()
+    published = _publish(producer, bound)
+    assert all(result.status is Status.CORROBORATED for result in published)
+    selectors = tuple(result.evidence.selector for result in published)
+    assert all(producer.authority().resolve(s).status is Status.CORROBORATED
+               for s in selectors)
+
+    wall_scope = _scope(producer, bound)
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: replace(wall_scope, scope_complete=False))
+    blocked = _publish(producer, bound)
+    assert all(result.status is Status.ABSTAINED and result.evidence is None
+               for result in blocked)
+    assert all("opening_host_frame_complete_wall_scope_unavailable" in result.reason_codes
+               for result in blocked)
+
+    # Returning ABSTAIN without revoking _results is a source-laundering bug:
+    # consumers of a freshly issued frame authority would still see the old
+    # CORROBORATED proof under the SAME immutable source/decision selector.
+    latest = tuple(producer.authority().resolve(s) for s in selectors)
+    assert all(result.status is Status.ABSTAINED and result.evidence is None
+               for result in latest)
+
+    # Restored producer-owned original input yields the same physical frame
+    # record IDs/body, without inventing an additional host or metric.
+    monkeypatch.setattr(producer._walls, "resolve_scope", lambda _selector: wall_scope)
+    restored = _publish(producer, bound)
+    assert restored == published
+    assert all(producer.authority().resolve(s).status is Status.CORROBORATED
+               for s in selectors)
+
+
+def test_reproof_revocation_is_per_opening_not_global(monkeypatch):
+    """Failure of one frame selector cannot destroy an independent row."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish, _scope
+
+    _source, _composition, producer, bound = _fixture()
+    accepted = _publish(producer, bound)
+    selectors = tuple(result.evidence.selector for result in accepted)
+    scope = _scope(producer, bound)
+    monkeypatch.setattr(producer._walls, "resolve_scope",
+                        lambda _selector: replace(scope, scope_complete=False))
+
+    failed = _publish(producer, bound[:1])
+    assert len(failed) == 1 and failed[0].status is Status.ABSTAINED
+    refreshed = producer.authority()
+    assert refreshed.resolve(selectors[0]).status is Status.ABSTAINED
+    assert refreshed.resolve(selectors[1]) == accepted[1]
+
+
+def test_withdrawn_original_opening_reproof_revokes_only_its_cached_frame(monkeypatch):
+    """The same previously proven observation is not a stale positive after withdrawal."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    initial = _publish(producer, bound)
+    assert all(row.status is Status.CORROBORATED for row in initial)
+    prior_snapshot = producer.authority()
+    selected = bound[0][0]
+    original_prove = type(producer._opening).prove_existence
+
+    def withdrawn_existence(authority, selector):
+        result = original_prove(authority, selector)
+        if authority is producer._opening and selector == selected:
+            return replace(result, status=Status.ABSTAINED,
+                           proposition=None, existence_record=None)
+        return result
+
+    monkeypatch.setattr(type(producer._opening), "prove_existence", withdrawn_existence)
+    result = producer.publish(opening_selector=selected,
+                              host_binding_selector=bound[0][2])
+    assert result.status is Status.ABSTAINED and result.evidence is None
+    assert "opening_host_frame_opening_unavailable" in result.reason_codes
+
+    # This is a newly constructed authority, not the historical immutable one.
+    fresh = producer.authority()
+    assert fresh.resolve(initial[0].evidence.selector).status is Status.ABSTAINED
+    assert fresh.resolve(initial[1].evidence.selector) == initial[1]
+    assert prior_snapshot.resolve(initial[0].evidence.selector) == initial[0]
+
+    # Restoration does not change the earlier provenance, ID or accepted body.
+    monkeypatch.undo()
+    assert _publish(producer, bound) == initial
+
+
+def test_unproven_foreign_sibling_reproof_does_not_revoke_first_frame(monkeypatch):
+    """A caller-selected sibling with failed source proof is not first opening."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    accepted = _publish(producer, bound)
+    foreign = bound[1][0]
+    original_prove = type(producer._opening).prove_existence
+
+    def withdrawn_sibling(authority, selector):
+        result = original_prove(authority, selector)
+        if authority is producer._opening and selector == foreign:
+            return replace(result, status=Status.CONFLICT,
+                           proposition=None, existence_record=None)
+        return result
+
+    monkeypatch.setattr(type(producer._opening), "prove_existence", withdrawn_sibling)
+    failed = producer.publish(opening_selector=foreign,
+                              host_binding_selector=bound[0][2])
+    assert failed.status is Status.CONFLICT and failed.evidence is None
+    # Exact canonical prior publication is not revoked by wrong caller identity.
+    assert producer.authority().resolve(accepted[0].evidence.selector) == accepted[0]
+
+
+def test_foreign_opening_selector_must_not_revoke_valid_frame():
+    """A caller's wrong but real sibling source opening is not revocation."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    originals = _publish(producer, bound)
+    assert all(x.status is Status.CORROBORATED for x in originals)
+
+    # Wrong source OBSERVATION against another binding is not source withdrawal.
+    bad = producer.publish(
+        opening_selector=bound[1][0],
+        host_binding_selector=bound[0][2],
+    )
+    assert bad.status is Status.CONFLICT
+    assert bad.evidence is None
+    assert producer.authority().resolve(originals[0].evidence.selector) == originals[0]
+    assert producer.authority().resolve(originals[1].evidence.selector) == originals[1]
+
+
+def test_real_opening_withdrawn_host_reproof_revokes_cached_frame(monkeypatch):
+    """Original opening still exists, but verified host reader is unavailable."""
+    from pb_migration_contracts import EvidenceResolutionStatus as Status
+    from test_raster_connected_host_frame import _fixture, _publish
+
+    _source, _composition, producer, bound = _fixture()
+    baseline = _publish(producer, bound)
+    selected = bound[0]
+    host = producer._host
+    original_resolve = host.resolve
+
+    def blocked_host(selector):
+        result = original_resolve(selector)
+        if selector == selected[2]:
+            return replace(result, status=Status.ABSTAINED, record=None)
+        return result
+
+    monkeypatch.setattr(host, "resolve", blocked_host)
+    blocked = producer.publish(opening_selector=selected[0],
+                               host_binding_selector=selected[2])
+    assert blocked.status is Status.ABSTAINED and blocked.evidence is None
+    assert "opening_host_frame_host_unavailable" in blocked.reason_codes
+    latest = producer.authority()
+    assert latest.resolve(baseline[0].evidence.selector).status is Status.ABSTAINED
+    assert latest.resolve(baseline[1].evidence.selector) == baseline[1]
