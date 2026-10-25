@@ -301,4 +301,10 @@ def test_owner_original_area_replay_is_trusted_main_only():
     assert "github.event.pull_request.head.sha" not in original_job
     assert "actions/upload-artifact" not in original_job
     assert "rm -rf documents/sources artifacts" in original_job
-    assert "secrets.ORIGINAL_SOURCES_TOKEN" not in workflow
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" in original_job
+    assert original_job.count("secrets.ORIGINAL_SOURCES_TOKEN") == 1
+    assert "allow-missing: \"false\"" in original_job
+    assert "actions/provision-original-sources" in original_job
+    assert original_job.index("ref: ${{ github.sha }}") < original_job.index("actions/provision-original-sources")
+    assert original_job.index("actions/provision-original-sources") < original_job.index("sha256sum -c")
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" not in workflow.split("  owner-original-lot16-source-replay:", 1)[0]
