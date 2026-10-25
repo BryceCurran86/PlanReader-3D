@@ -1006,3 +1006,41 @@ def test_original_inventory_preserves_distinct_source_page_and_abstained_sibling
     )
     assert len(sealed.quantities) == 2
     assert all(quantity.lineage_ok for quantity in sealed.quantities)
+
+
+def test_all_original_physical_source_witnesses_reach_real_quantity_evidence():
+    original = _opening()
+    assert _opening_quantity(original) is not None
+    # The old issuer accepted this forged extra original observation because
+    # only the representative was required in the commercial evidence set.
+    tampered = replace(
+        original,
+        source_observation_ids=original.source_observation_ids + (
+            "unreviewed-second-original-ink",
+        ),
+    )
+    assert _opening_quantity(tampered) is None
+    assert publish_live_opening_area_quantities(_composition(tampered)) == ()
+
+
+def test_complete_original_source_witness_roster_preserves_valid_issuer():
+    original = _opening()
+    complete = replace(
+        original,
+        source_observation_ids=original.source_observation_ids + (
+            "authenticated-second-original-ink",
+        ),
+        evidence_ids=original.evidence_ids + (
+            "authenticated-second-original-ink",
+        ),
+    )
+    published = publish_live_opening_area_quantities(_composition(complete))
+    assert len(published) == 1
+    assert "authenticated-second-original-ink" in published[0].evidence_ids
+    assert published[0].value == pytest.approx(2.172)
+    # Reordering the producer-owned physical source set is not new geometry
+    # or a second quantity, and cannot alter the signed quantity identity.
+    reordered = replace(
+        complete, source_observation_ids=tuple(reversed(complete.source_observation_ids)),
+    )
+    assert publish_live_opening_area_quantities(_composition(reordered)) == published

@@ -115,6 +115,11 @@ def _opening_quantity(
         or len(set(source_observation_ids)) != len(source_observation_ids)
         or opening.representative_observation_id not in source_observation_ids
         or opening.representative_observation_id not in evidence_ids
+        # The physical existence producer may own several original ink
+        # observations. Every one must survive into the actual commercial
+        # quantity evidence roster, not just the representative witness.
+        or any(observation_id not in evidence_ids
+               for observation_id in source_observation_ids)
     ):
         return None
     # A caller-replayed host string alone cannot certify the physical opening
