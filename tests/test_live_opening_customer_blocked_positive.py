@@ -49,8 +49,8 @@ def test_publishable_positive_area_with_blocker_is_not_silently_omitted(claim, p
     assert original.blocking_reasons == ()
 
 
-@pytest.mark.parametrize("position", ["only", "before_good", "after_good"])
-def test_publishable_firm_count_with_blocker_is_not_silently_omitted(claim, position):
+@pytest.mark.parametrize("include_good_area", [False, True])
+def test_publishable_firm_count_with_blocker_is_not_silently_omitted(claim, include_good_area):
     original = claim.opening_quantity_evidence[0]
     count = replace(
         original,
@@ -67,19 +67,10 @@ def test_publishable_firm_count_with_blocker_is_not_silently_omitted(claim, posi
             "commercial_projection_allowed": True,
         },
     )
-    if position == "only":
-        area = ()
-        counts = (count,)
-    elif position == "before_good":
-        area = (original,)
-        counts = (count,)
-    else:
-        area = (original,)
-        counts = (count,)
     mutated = replace(
         claim,
-        opening_quantity_evidence=area,
-        opening_count_quantity_evidence=counts,
+        opening_quantity_evidence=(original,) if include_good_area else (),
+        opening_count_quantity_evidence=(count,),
     )
     with pytest.raises(ValueError, match="positive source quantity retains blocking"):
         project(mutated)
