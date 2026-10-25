@@ -365,6 +365,7 @@ def test_original_private_source_publisher_table_census_if_provisioned():
     producer=SourceVisibilityProducer(
         producer_method="gpt2-private-original-schedule-review",
         producer_version="1",
+        source_native_finish_text_shadow=True,
     )
     publication=producer.ingest_native_pdf_bytes(
         document_id="maryborough-original-a600",
@@ -713,6 +714,7 @@ def test_private_original_a110_plan_to_a600_schedule_same_snapshot_if_provisione
     producer=SourceVisibilityProducer(
         producer_method="gpt2-private-original-cross-sheet-lexical-review",
         producer_version="1",
+        source_native_finish_text_shadow=True,
     )
     publication=producer.ingest_native_pdf_bytes(
         document_id="maryborough-original-a110-a600",
