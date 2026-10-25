@@ -19,6 +19,22 @@ OWNER_GUARD = SECURITY["OWNER_GUARD"]
 TRUSTED_SHA = SECURITY["TRUSTED_SHA"]
 TOKEN = "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
 
+# GitHub Actions permits both dot and quoted bracket secret expressions.
+# A fixed text search would miss a newly authored bracket-style credential
+# consumer and permit it to bypass the owner/manual/main CI trust boundary.
+TOKEN_PATTERNS = (
+    # A source secret can appear inside format/fallback/function expressions;
+    # never require it to be the first token or the only expression member.
+    re.compile(r"\$\{\{[^}]*\bsecrets\s*\.\s*ORIGINAL_SOURCES_TOKEN\b[^}]*\}\}"),
+    re.compile(r"""\$\{\{[^}]*\bsecrets\s*\[\s*['"]ORIGINAL_SOURCES_TOKEN['"]\s*\][^}]*\}\}"""),
+)
+
+
+def _contains_source_token(value: object) -> bool:
+    text = str(value)
+    return any(pattern.search(text) is not None for pattern in TOKEN_PATTERNS)
+
+
 
 def _token_jobs(raw: str):
     document = yaml.load(raw, Loader=Loader)
@@ -29,7 +45,7 @@ def _token_jobs(raw: str):
     matching = [
         (name, job)
         for name, job in jobs.items()
-        if type(job) is dict and TOKEN in str(job)
+        if type(job) is dict and _contains_source_token(job)
     ]
     return document, matching
 
@@ -55,7 +71,7 @@ def check_original_token_boundary(raw: str) -> int:
         # sha. An explicit ref must be that same SHA, never a PR/head variable.
         assert args.get("ref") in (None, TRUSTED_SHA)
         assert args.get("persist-credentials") == "false"
-        provision = [s for s in steps if TOKEN in str(s)]
+        provision = [s for s in steps if _contains_source_token(s)]
         assert len(provision) == 1
         assert steps.index(checkout) < steps.index(provision[0])
         assert "github.event.pull_request.head.sha" not in str(job)
@@ -76,7 +92,7 @@ def _discovered():
         raw = path.read_text(encoding="utf-8")
         # Look for an actual GitHub secret reference, not a comment or
         # a variable named ORIGINAL_SOURCES_TOKEN in a harmless test step.
-        if TOKEN in raw:
+        if _contains_source_token(raw):
             sources.append((path.name, raw))
     return sources
 
@@ -144,3 +160,21 @@ def test_newly_added_unsafe_source_job_is_rejected_without_static_allowlist(unsa
 
 def test_safe_new_credentialed_workflow_is_discovered_without_filename():
     assert check_original_token_boundary(_new_workflow()) == 1
+
+
+@pytest.mark.parametrize("secret_reference", (
+    "${{ secrets['ORIGINAL_SOURCES_TOKEN'] }}",
+    '${{ secrets["ORIGINAL_SOURCES_TOKEN"] }}',
+    "${{ secrets . ORIGINAL_SOURCES_TOKEN }}",
+    "${{ secrets[ 'ORIGINAL_SOURCES_TOKEN' ] }}",
+    "${{ secrets.ORIGINAL_SOURCES_TOKEN || '' }}",
+    "${{ toJSON(secrets.ORIGINAL_SOURCES_TOKEN) }}",
+    "${{ secrets['ORIGINAL_SOURCES_TOKEN'] || '' }}",
+))
+def test_alternative_token_expression_cannot_escape_dynamic_security_census(secret_reference):
+    raw = _new_workflow().replace(TOKEN, secret_reference)
+    assert _contains_source_token(raw)
+    assert check_original_token_boundary(raw) == 1
+    unsafe = raw.replace(OWNER_GUARD, "${{ github.event_name == 'pull_request' }}")
+    with pytest.raises(AssertionError):
+        check_original_token_boundary(unsafe)
