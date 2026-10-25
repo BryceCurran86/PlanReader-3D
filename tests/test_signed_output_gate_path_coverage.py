@@ -233,14 +233,14 @@ def replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow_text: str) -> N
     current_job = None
     for number, line in enumerate(workflow_text.splitlines(), 1):
         stripped = line.strip()
-        job_match = re.fullmatch(r"  ([a-z][\\w-]*):", line)
+        job_match = re.fullmatch(r"  ([a-z][\w-]*):", line)
         if job_match:
             current_job = job_match.group(1)
         if re.match(r"^    (if|continue-on-error):", line):
             if (
                 line == _OWNER_TRUSTED_MAIN_SOURCE_IF
                 and current_job in _OWNER_ORIGINAL_JOB_NAMES
-                and re.search(r"^  workflow_dispatch:\\s*$", workflow_text, re.M)
+                and re.search(r"^  workflow_dispatch:\s*$", workflow_text, re.M)
             ):
                 continue
             raise ValueError(f"line {number}: job-level {stripped.split(':')[0]} can disable or neutralise the replay")
@@ -446,9 +446,9 @@ def test_trigger_that_never_reaches_main_pull_requests_is_rejected():
 
 
 def test_only_exact_manual_owner_main_original_job_guard_is_permitted():
-    base = ("name: Owner original only\\non:\\n  pull_request:\\n"
-            "  workflow_dispatch:\\njobs:\\n  original-lot16:\\n")
-    permitted = base + _OWNER_TRUSTED_MAIN_SOURCE_IF + "\\n    runs-on: ubuntu-latest\\n"
+    base = ("name: Owner original only\non:\n  pull_request:\n"
+            "  workflow_dispatch:\njobs:\n  original-lot16:\n")
+    permitted = base + _OWNER_TRUSTED_MAIN_SOURCE_IF + "\n    runs-on: ubuntu-latest\n"
     replay_jobs_cannot_be_disabled_or_made_non_blocking(permitted)
     for unsafe in (
         "    if: ${{ github.event_name == 'workflow_dispatch' }}",
