@@ -13,7 +13,7 @@ HEADS = {
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
     "cache": "d5cdf829c135389d58a668dfdd55ccbd5834e707",
-    "vertical": "f934aebc6c6241df4dee784f00a7d3606971fe70",
+    "vertical": "d993bac877fb1c5afc2327fae1ff1995274aea6a",
     "horizontal": "8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0",
 }
 PATHS = {
@@ -140,8 +140,8 @@ def test_vertical_original_source_target_cannot_be_satisfied_by_synthetic_passes
     steps = _load()["jobs"]["verify"]["steps"]
     guard = next(step["run"] for step in steps if step.get("name", "").startswith("Authenticate immutable"))
     assert "vertical)" in guard
-    assert "approved_base=e405d5da857eadac9a842811fdcab3082df021e6" in guard
-    assert "approved_head=f934aebc6c6241df4dee784f00a7d3606971fe70" in guard
+    assert "approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed" in guard
+    assert "approved_head=d993bac877fb1c5afc2327fae1ff1995274aea6a" in guard
     assert "focused_test=tests/test_gptmax_raster_tile_seam_source.py" in guard
     assert 'echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"' in guard
     focused = next(step for step in steps if step.get("name", "").startswith("Verify original-provisioned"))
