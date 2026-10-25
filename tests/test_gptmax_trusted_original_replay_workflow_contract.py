@@ -14,6 +14,7 @@ HEADS = {
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
     "cache": "d5cdf829c135389d58a668dfdd55ccbd5834e707",
     "vertical": "f934aebc6c6241df4dee784f00a7d3606971fe70",
+    "horizontal": "8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0",
 }
 PATHS = {
     "host": (
@@ -40,6 +41,10 @@ PATHS = {
     "vertical": (
         "pb_gptmax_raster_tile_seam_shadow.py",
         "tests/test_gptmax_raster_tile_seam_source.py",
+    ),
+    "horizontal": (
+        "pb_gptmax_horizontal_raster_tile_seam_shadow.py",
+        "tests/test_gptmax_horizontal_raster_tile_seam_shadow.py",
     ),
 }
 
@@ -146,6 +151,33 @@ def test_vertical_original_source_target_cannot_be_satisfied_by_synthetic_passes
     assert "test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots" in script
     assert "1 passed" in script
     assert "source ink test skipped or missing" in script
+    assert "github.event.pull_request" not in source
+
+
+def test_horizontal_original_source_gap_guard_cannot_be_satisfied_by_synthetic_passes():
+    source = WORKFLOW.read_text(encoding="utf-8")
+    steps = _load()["jobs"]["verify"]["steps"]
+    guard = next(
+        step["run"] for step in steps
+        if step.get("name", "").startswith("Authenticate immutable")
+    )
+    assert "horizontal)" in guard
+    assert "approved_base=96d6c737167c8dcc94e006488c86f47bf573274a" in guard
+    assert "approved_head=8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0" in guard
+    assert "focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py" in guard
+    assert "git diff --name-only" in guard
+    focused = next(
+        step for step in steps
+        if step.get("name", "").startswith("Verify original-provisioned")
+    )
+    assert focused["env"]["PLANREADER_LOT16_ORIGINAL_PDF"].endswith(
+        "1. Construction Plans - Lot 16 Power (REV E).pdf"
+    )
+    script = focused["run"]
+    assert '[[ "$GPTMAX_TARGET" == "horizontal" ]]' in script
+    assert "test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles" in script
+    assert "1 passed" in script
+    assert "Original p5 horizontal rail test skipped or missing" in script
     assert "github.event.pull_request" not in source
 
 
