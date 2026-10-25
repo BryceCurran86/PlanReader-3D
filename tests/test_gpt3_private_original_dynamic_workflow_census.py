@@ -23,8 +23,10 @@ TOKEN = "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
 # A fixed text search would miss a newly authored bracket-style credential
 # consumer and permit it to bypass the owner/manual/main CI trust boundary.
 TOKEN_PATTERNS = (
-    re.compile(r"\$\{\{\s*secrets\s*\.\s*ORIGINAL_SOURCES_TOKEN\s*\}\}"),
-    re.compile(r"""\$\{\{\s*secrets\s*\[\s*['"]ORIGINAL_SOURCES_TOKEN['"]\s*\]\s*\}\}"""),
+    # A source secret can appear inside format/fallback/function expressions;
+    # never require it to be the first token or the only expression member.
+    re.compile(r"\$\{\{[^}]*\bsecrets\s*\.\s*ORIGINAL_SOURCES_TOKEN\b[^}]*\}\}"),
+    re.compile(r"""\$\{\{[^}]*\bsecrets\s*\[\s*['"]ORIGINAL_SOURCES_TOKEN['"]\s*\][^}]*\}\}"""),
 )
 
 
@@ -165,6 +167,9 @@ def test_safe_new_credentialed_workflow_is_discovered_without_filename():
     '${{ secrets["ORIGINAL_SOURCES_TOKEN"] }}',
     "${{ secrets . ORIGINAL_SOURCES_TOKEN }}",
     "${{ secrets[ 'ORIGINAL_SOURCES_TOKEN' ] }}",
+    "${{ secrets.ORIGINAL_SOURCES_TOKEN || '' }}",
+    "${{ toJSON(secrets.ORIGINAL_SOURCES_TOKEN) }}",
+    "${{ secrets['ORIGINAL_SOURCES_TOKEN'] || '' }}",
 ))
 def test_alternative_token_expression_cannot_escape_dynamic_security_census(secret_reference):
     raw = _new_workflow().replace(TOKEN, secret_reference)
