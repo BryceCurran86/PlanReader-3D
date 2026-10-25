@@ -263,10 +263,10 @@ def test_offline_image_dependencies_are_copied_from_approved_snapshot_not_main(t
     for directory in (main, approved, deps):
         directory.mkdir()
     for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
-        (main / filename).write_text("main-only==99\\n", encoding="utf-8")
-        (approved / filename).write_text("approved-only==1\\n", encoding="utf-8")
+        (main / filename).write_text("main-only==99\n", encoding="utf-8")
+        (approved / filename).write_text("approved-only==1\n", encoding="utf-8")
     (main / "private-original.pdf").write_bytes(b"DO NOT COPY")
-    (approved / "candidate-code.py").write_text("pass\\n", encoding="utf-8")
+    (approved / "candidate-code.py").write_text("pass\n", encoding="utf-8")
 
     steps = _load()["jobs"]["original"]["steps"]
     build = next(step["run"] for step in steps if step["name"].startswith("Build offline"))
@@ -274,7 +274,7 @@ def test_offline_image_dependencies_are_copied_from_approved_snapshot_not_main(t
                   if line.strip().startswith("cp -- "))
     env = os.environ.copy()
     env.update(GPT3_APPROVED_TREE=str(approved), deps_dir=str(deps))
-    subprocess.run(["bash", "-c", "set -euo pipefail\\n" + copy_line],
+    subprocess.run(["bash", "-c", "set -euo pipefail\n" + copy_line],
                    cwd=main, env=env, check=True, capture_output=True, text=True)
     assert sorted(path.name for path in deps.iterdir()) == [
         "requirements-ci-v1228.txt", "requirements.txt",
