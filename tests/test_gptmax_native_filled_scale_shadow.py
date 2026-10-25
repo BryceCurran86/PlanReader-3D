@@ -12,7 +12,8 @@ from pb_gptmax_native_filled_scale_shadow import find_native_filled_scale_bar_sh
 def _synthetic(*, count=5, x=40, y=50, width=20, height=3, missing=None,
                colour=(0, 0, 0), opacity=1, wrong_label=None,
                extra_bar=False, stroked=False, uniform_row=False,
-               overpaint=False, overpaint_label=False):
+               overpaint=False, overpaint_label=False,
+               invisible_labels_with_black_strokes=False):
     doc = fitz.open()
     page = doc.new_page(width=500, height=250)
 
@@ -29,8 +30,19 @@ def _synthetic(*, count=5, x=40, y=50, width=20, height=3, missing=None,
             if i == wrong_label:
                 label = 'unknown'
             bx = x0 + i * width
-            page.insert_text((bx - len(label) * 2.4, y0 + 2 * height + 10), label,
-                             fontsize=8, fontname='helv')
+            baseline = y0 + 2 * height + 10
+            if invisible_labels_with_black_strokes:
+                # Unrelated earlier black ink within the native glyph bbox
+                # must never authenticate a WHITE-on-white invisible label.
+                page.draw_line(
+                    fitz.Point(bx - len(label) * 2.4, baseline - 3),
+                    fitz.Point(bx + len(label) * 2.1, baseline - 3),
+                    color=(0, 0, 0), width=0.4,
+                )
+            page.insert_text((bx - len(label) * 2.4, baseline), label,
+                             fontsize=8, fontname='helv',
+                             color=(1, 1, 1) if invisible_labels_with_black_strokes
+                             else (0, 0, 0))
 
     add_bar(x, y)
     if extra_bar:
@@ -111,6 +123,20 @@ def test_later_opaque_overpaint_of_scale_tick_vetoes_decoded_native_word():
     assert any(word[4] == '3' for word in page.get_text('words'))
     assert len(page.get_drawings()) >= 6
     doc.close()
+    assert _scan(data) == ()
+
+
+def test_invisible_white_tick_glyphs_cannot_borrow_unrelated_black_ink():
+    data = _synthetic(invisible_labels_with_black_strokes=True)
+    doc = fitz.open(stream=data, filetype='pdf')
+    page = doc[0]
+    assert len([w for w in page.get_text('words')
+                if w[4] in {'0', '1', '2', '3', '4', '5m'}]) == 6
+    assert all(span['color'] == (1.0, 1.0, 1.0)
+               for span in page.get_texttrace() if span['type'] == 0)
+    doc.close()
+    # All source words exist and unrelated black hairlines are rendered in
+    # their bboxes, but no native black tick glyph exists. ABSTAIN.
     assert _scan(data) == ()
 
 

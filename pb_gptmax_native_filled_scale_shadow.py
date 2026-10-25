@@ -229,6 +229,9 @@ def _source_word_visible(
         if (
             span.get("type") != 0
             or span.get("opacity") != 1.0
+            # Rendered dark ink may belong to an unrelated earlier stroke:
+            # require the native tick GLYPH itself to be opaque black.
+            or tuple(span.get("color") or ()) != (0.0, 0.0, 0.0)
             or not isinstance(seq, int)
             or not 0 <= seq < len(bboxlog)
             or bboxlog[seq][0] != "fill-text"
