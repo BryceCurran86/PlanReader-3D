@@ -614,3 +614,32 @@ def test_without_the_duplicate_the_narrow_pattern_reports_only_its_marks_and_the
     add_window(sheet, 2, "W03", panels=5, length=120.0)
     got = by_mark(run(sheet, callout_mark_pattern=r"W\d{2}"))
     assert {m: c.status for m, c in got.items()} == {"W01": CAND, "W02": CAND, "W03": CAND}
+
+
+# ------------------------------------------------------------------------------------
+# fourth review: the shared-ratio proof is over the whole decision scope, not the reported subset
+# ------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pattern", [r"[WD]\d+", r"W[12]", r"W1", r"W[34]"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_the_report_pattern_cannot_hide_a_contrary_ratio_group(pattern, reverse):
+    sheet = _four_strips_two_incompatible_groups()
+    pdf = sheet.pdf()
+    ink, words, types = ink_of(pdf), words_of(pdf), types_of(sheet)
+    if reverse:
+        ink, words, types = list(reversed(ink)), list(reversed(words)), list(reversed(types))
+    result = run(sheet, ink=ink, words=words, types=types, callout_mark_pattern=pattern)
+    reported = {m for m in ("W1", "W2", "W3", "W4") if shadow._tag_key(m) and __import__("re").fullmatch(pattern, m)}
+    assert {c.tag_mark for c in result.correspondences} == reported
+    for c in result.correspondences:
+        assert c.status is CONF and "competing_ratio_groups" in c.reason_codes
+        assert dict(c.conditions)["one_common_ratio_group"] == shadow.FAILED
+
+
+def test_reported_rows_are_a_projection_of_one_decision_over_the_whole_scope():
+    sheet = three_windows()
+    broad = {c.tag_mark: (c.status, c.reason_codes, c.conditions) for c in run(sheet).correspondences}
+    narrow = {c.tag_mark: (c.status, c.reason_codes, c.conditions)
+              for c in run(sheet, callout_mark_pattern=r"W[12]").correspondences}
+    assert set(narrow) == {"W1", "W2"}
+    assert all(narrow[m] == broad[m] for m in narrow)

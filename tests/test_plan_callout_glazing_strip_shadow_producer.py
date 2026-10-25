@@ -60,10 +60,10 @@ def _publish(sheet: Sheet, *, native_finish_text_shadow=False):
     return source, published
 
 
-def _audit(source, published, **kw):
+def _audit(source, published, pattern=r"[WD]\d+", **kw):
     return shadow.audit_plan_callout_to_glazing_strip_from_source(
         source, revision_id=published.revision.revision_id, plan_page_id=1, elevation_page_id=2,
-        callout_mark_pattern=r"[WD]\d+", panel_token="FG", coordinate_quantum_pt=0.24,
+        callout_mark_pattern=pattern, panel_token="FG", coordinate_quantum_pt=0.24,
         dimension_quantum_mm=5.0, **kw)
 
 
@@ -159,3 +159,15 @@ def test_the_adapter_refuses_foreign_inputs():
         shadow.audit_plan_callout_to_glazing_strip_from_source(
             source, revision_id=published.revision.revision_id, plan_page_id="1", elevation_page_id=2,
             callout_mark_pattern="W.", panel_token="FG", coordinate_quantum_pt=0.24, dimension_quantum_mm=5.0)
+
+
+def test_a_narrow_report_pattern_through_the_producer_path_is_a_projection_of_the_same_decision(monkeypatch):
+    _resolved_viewport(monkeypatch)
+    source, published = _publish(_plan_sheet())
+    broad = {c.tag_mark: c for c in _audit(source, published).correspondences}
+    narrow = {c.tag_mark: c for c in _audit(source, published, pattern=r"W[12]").correspondences}
+    assert set(narrow) == {"W1", "W2"}
+    for m in narrow:
+        assert (narrow[m].status, narrow[m].reason_codes, narrow[m].conditions) == \
+               (broad[m].status, broad[m].reason_codes, broad[m].conditions)
+    assert {c.status for c in narrow.values()} == {CAND}

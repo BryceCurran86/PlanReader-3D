@@ -43,7 +43,7 @@ from typing import Callable, Iterable, Optional, Sequence
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
 
-PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.3.0"
+PLAN_CALLOUT_STRIP_SHADOW_SCHEMA_VERSION = "2.4.0"
 PRODUCER_INPUT_PROVENANCE = "source_visibility_producer"
 WHOLE_PAGE_UNSEGMENTED = "whole_page_unsegmented"
 
@@ -768,7 +768,9 @@ def audit_plan_callout_to_glazing_strip_shadow(
         key = _tag_key(t.type_mark)
         if key is not None:
             types_by_key[key].append(t)
-    plan_keys = {k for k in (_tag_key(w.text) for w in callouts) if k is not None}
+    # The type / ratio universe is every trusted opening tag of the page, whatever the report pattern:
+    # the shared-ratio proof must not be able to hide contrary evidence by changing only the output rows.
+    plan_keys = {k for k in (_tag_key(w.text) for w in words) if k is not None}
 
     facts: list[_TypeFact] = []
     for key in sorted(plan_keys):
@@ -1141,8 +1143,8 @@ def audit_plan_callout_to_glazing_strip_from_source(
                                   bool(stroke) and max(stroke) <= 0.1))
 
     # elevation type records, one resolve per plan mark; display width from the page rotation
-    pattern = re.compile(callout_mark_pattern)
-    marks = sorted({w.text for w in plan_words if pattern.fullmatch(w.text)})
+    # every trusted opening tag of the plan page is resolved (the pattern only selects reported rows downstream)
+    marks = sorted({w.text for w in plan_words if _tag_key(w.text) is not None})
     producer = OpeningElevationFrameAreaProducer.from_source_visibility_producer(source)
     authority = producer.authority()
     types: list[ElevationTypeObservation] = []
