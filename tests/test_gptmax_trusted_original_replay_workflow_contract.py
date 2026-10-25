@@ -241,3 +241,33 @@ def test_trigger_aliases_and_duplicates_cannot_bypass_manual_only_gate():
 
 def test_strict_loader_does_not_mutate_global_safe_loader():
     assert yaml.safe_load("on: true") == {True: True}
+
+
+def test_private_original_never_enters_networked_pr_head_execution_or_raw_logs():
+    """Immutable SHA/path pinning alone is not a sandbox for executable PR-head tests."""
+    steps = _load()["jobs"]["verify"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    build_index = next(i for i, name in enumerate(names) if name.startswith("Build no-network"))
+    provision_index = next(i for i, name in enumerate(names) if name.startswith("Provision original"))
+    replay_index = next(i for i, name in enumerate(names) if name.startswith("Verify real original"))
+    focused_index = next(i for i, name in enumerate(names) if name.startswith("Verify original-provisioned"))
+    assert build_index < provision_index < replay_index < focused_index
+    build = steps[build_index]["run"]
+    assert "docker build" in build
+    assert "COPY requirements.txt requirements-ci-v1228.txt /deps/" in build
+    assert "documents/sources" not in build
+    for index in (replay_index, focused_index):
+        script = steps[index]["run"]
+        assert "docker run --rm --network none --read-only --cap-drop ALL" in script
+        assert "--security-opt no-new-privileges" in script
+        assert '--volume "$GITHUB_WORKSPACE:/repo:ro"' in script
+        assert "--tmpfs /tmp:" in script
+        assert '--env PYTHONPATH=/repo' in script
+        assert "run_isolated python -m pytest" in script
+        assert "grep -E '^(FAILED |ERROR )'" not in script
+        assert "curl " not in script and "wget " not in script
+        assert "--volume /var/run/docker.sock" not in script
+        assert "--network host" not in script
+        assert "secrets.ORIGINAL_SOURCES_TOKEN" not in script
+    assert steps[focused_index]["run"].count("run_isolated python -m pytest") == 3
+    assert steps[replay_index]["run"].count("run_isolated python -m pytest") == 1
