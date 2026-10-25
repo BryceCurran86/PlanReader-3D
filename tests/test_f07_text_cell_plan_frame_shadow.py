@@ -257,7 +257,7 @@ def test_connectivity_that_cannot_be_measured_never_demotes_a_table(monkeypatch)
     page = doc[0]
     assert v._frame_source_edge_mesh(FRAME, page) == frozenset()
     monkeypatch.setattr(v, "_TABLE_EDGE_MESH_MAX_RECTANGLES", 10)
-    assert len(v._frame_source_edge_mesh(FRAME, page)) == 48
+    assert v._frame_source_edge_mesh(FRAME, page) is None
     assert _vector_resolved(_segment(doc, **{FLAG: True})) == []
     doc.close()
 
@@ -357,13 +357,13 @@ def test_near_nested_band_collapse_unit_cases():
     assert v._collapse_near_nested_band_frames(kept) == (kept, [])
 
 
-def test_near_nested_receipt_names_the_smallest_container_regardless_of_order():
-    """Three frames hold the band; only the band is dropped, and the receipt names the tightest one."""
+def test_near_nested_receipt_retains_all_containers_regardless_of_order():
+    """Three frames hold the band; all three containment rivals stay explicit."""
     mid = (35.0, 25.0, 765.0, 525.0)  # holds the band too, but OUTER is not a band inside it
     huge = (0.0, 0.0, 799.0, 599.0)
     for order in ([OUTER, BAND, mid, huge], [huge, mid, BAND, OUTER], [mid, OUTER, huge, BAND]):
         kept, dropped = v._collapse_near_nested_band_frames(order)
-        assert dropped == [(BAND, OUTER)]  # the smallest frame that still holds it
+        assert dropped == sorted((BAND, frame) for frame in (OUTER, mid, huge))
         assert sorted(kept) == sorted([OUTER, mid, huge])  # near-equal rivals keep competing
 
 

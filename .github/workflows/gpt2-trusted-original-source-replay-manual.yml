@@ -1,0 +1,249 @@
+name: GPT2 trusted original replay (manual)
+
+# Owner-run only. No push / PR / pull_request_target source-secret exposure.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt2-trusted-original-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  original:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    name: ${{ matrix.target }} original (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+        target: [a600, freezer, d15, rcp]
+
+    steps:
+      - name: Checkout the trusted workflow context
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate immutable target and full tree diff before provisioning
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          approved_base=ce322d69bbc9f47b5b2aed001684e01cbe04f48b
+          case "$TARGET" in
+            a600)
+              approved_head=91cc96a445d6441a640547ce089cd756b56873b3
+              expected_paths='pb_gpt2_original_a600_table_row_scope_shadow.py|pb_source_door_schedule_authority.py|pb_source_plan_door_correspondence_authority.py|tests/test_gpt2_original_a600_table_row_scope_shadow.py'
+              original_test=test_original_private_source_publisher_table_census_if_provisioned
+              test_path=tests/test_gpt2_original_a600_table_row_scope_shadow.py
+              ;;
+            freezer)
+              approved_head=f424c6c16fca7c83d4b7a8425faaa1172afd5045
+              expected_paths='pb_gpt2_original_native_freezer_paint_gap_shadow.py|tests/test_gpt2_original_native_freezer_paint_gap_shadow.py'
+              original_test=test_original_freezer_d17_private_pdf_if_provisioned
+              test_path=tests/test_gpt2_original_native_freezer_paint_gap_shadow.py
+              ;;
+            d15)
+              approved_head=37ed51dd024db1979bf4a114c656c6985519aa8b
+              expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|tests/test_gpt2_mary_original_figured_door_leader_shadow.py'
+              original_test=test_private_original_maryborough_native_leader_source_if_provisioned
+              test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py
+              ;;
+            rcp)
+              approved_head=bf26820aa89d0c911448dd67d1f4bb2ef226eaf0
+              expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
+              original_test=test_real_original_page9_native_source_rivals_if_available
+              test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
+              ;;
+            *)
+              echo "::error::Unapproved original-source code selection"
+              exit 1
+              ;;
+          esac
+          # Compare immutable Git tree objects, never a mutable branch or an
+          # arbitrary caller-provided commit SHA. Any changed workflow,
+          # provisioner, dependency, manifest or unreviewed file is a veto.
+          git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
+          observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
+          allowed="$(printf '%s\n' "$expected_paths" | tr '|' '\n' | LC_ALL=C sort)"
+          if [[ "$observed" != "$allowed" ]]; then
+            echo "::error::Pinned code tree differs from reviewed GPT2 allowlist"
+            exit 1
+          fi
+          # Preserve trusted main as the local-action execution root.
+          # Export the immutable reviewed PR tree as inert test data only.
+          target_tree="$RUNNER_TEMP/gpt2-approved-target"
+          mkdir -p "$target_tree"
+          git archive "$approved_head" | tar -x -C "$target_tree"
+          # Nested source mount must exist even when the Git archive omits
+          # untracked/private documents/sources entirely.
+          mkdir -p "$target_tree/documents/sources"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          [[ -f "$target_tree/$test_path" ]]
+          echo "GPT2_APPROVED_TREE=$target_tree" >> "$GITHUB_ENV"
+          echo "GPT2_TEST_PATH=$test_path" >> "$GITHUB_ENV"
+          echo "GPT2_ORIGINAL_TEST=$original_test" >> "$GITHUB_ENV"
+          echo "GPT2_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
+          echo "Verified pinned $TARGET source/test diff against trusted main."
+
+      - name: Build sealed Python dependency image before private source exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          dockerfile="$RUNNER_TEMP/gpt2-offline.Dockerfile"
+          cat > "$dockerfile" <<'DOCKER'
+          FROM python:${{ matrix.python-version }}-slim
+          WORKDIR /workspace
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt && python -m pip install --no-cache-dir fonttools==4.60.2
+          DOCKER
+          docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" .
+
+      - name: Preflight offline pinned test collection before private source exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          preflight_original="$RUNNER_TEMP/gpt2-empty-original-preflight"
+          mkdir -p "$preflight_original"
+          printf "synthetic mount only\\n" > "$preflight_original/NO_REAL_SOURCE.txt"
+          output="$RUNNER_TEMP/gpt2-private-preflight.log"
+          preflight_rc=0
+          docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$preflight_original,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+              "gpt2-offline:${{ matrix.python-version }}" \
+              python -m pytest --collect-only -q -p no:cacheprovider --tb=no \
+              "$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST" > "$output" 2>&1 || preflight_rc=$?
+          if (( preflight_rc != 0 )); then
+            echo "::error::Offline preflight failed BEFORE original provisioning (status $preflight_rc); no private source accessed"
+            exit 1
+          fi
+          if ! grep -Eq '1 test collected' "$output"; then
+            echo "::error::Offline original-test collection missing; no private source accessed"
+            exit 1
+          fi
+          echo "Offline test environment/collection PASS before original provisioning"
+
+      - name: Provision only SHA-verified Maryborough original
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
+
+      - name: Verify original PDF SHA inside isolated read-only source mount
+        shell: bash
+        env:
+          EXPECTED_SHA256: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+        run: |
+          set -euo pipefail
+          # Trusted stdlib-only isolated interpreter, -I ignores PR PYTHONPATH.
+          # Only a fixed success/failure bit leaves the sandbox; no bytes,
+          # filenames from PR code or raw logs reach the public Actions log.
+          result="$RUNNER_TEMP/gpt2-private-mount-integrity.log"
+          status=0
+          docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+              --workdir /tmp -e EXPECTED_SHA256 \
+              "gpt2-offline:${{ matrix.python-version }}" \
+              python -I -c 'import hashlib,os,pathlib,sys; p=pathlib.Path("/workspace/documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"); sys.exit(0 if hashlib.sha256(p.read_bytes()).hexdigest()==os.environ["EXPECTED_SHA256"] else 2)' \
+              > "$result" 2>&1 || status=$?
+          if (( status != 0 )); then
+            echo "::error::Isolated original mount/read/SHA verification FAILED (exit $status); private output withheld"
+            exit 1
+          fi
+          echo "Isolated original mount and full SHA verification PASS"
+
+      - name: Run private original checks inside no-network read-only container
+        shell: bash
+        env:
+          PLANREADER_MARYBOROUGH_SOURCE_SHA256: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+        run: |
+          set -euo pipefail
+          # No PR-owned Python executes on the token-bearing host with the PDF.
+          # No private test stdout/stderr is ever printed into public logs.
+          # Host has a network, isolated test container has none.
+          output="$RUNNER_TEMP/gpt2-private-isolated.log"
+          run_test() {
+            local label="$1"; shift
+            : > "$output"
+            local docker_rc=0
+            docker run --rm --network none --read-only --cap-drop ALL \
+                --security-opt no-new-privileges --pids-limit 128 \
+                --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+                --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+                --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+                --workdir /workspace \
+                -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+                -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+                -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+                -e PLANREADER_MARYBOROUGH_ORIGINAL_PDF="documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+                -e PLANREADER_MARYBOROUGH_SOURCE_SHA256 \
+                "gpt2-offline:${{ matrix.python-version }}" \
+                python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings "$@" \
+                > "$output" 2>&1 || docker_rc=$?
+            if (( docker_rc != 0 )); then
+              # Strictly fixed vocabulary: NEVER print, upload or quote PR-owned
+              # stdout/stderr, filenames, arbitrary exception text or PDF content.
+              local reason=private_test_failure
+              case "$docker_rc" in
+                125|126|127) reason=container_launch_failure ;;
+                2|3|4|5) reason=pytest_collection_or_runtime_failure ;;
+              esac
+              if grep -Fq 'ModuleNotFoundError' "$output"; then
+                reason=missing_python_module
+              elif grep -Fq 'ImportError' "$output"; then
+                reason=python_import_error
+              elif grep -Fq 'FileNotFoundError' "$output"; then
+                reason=missing_file_in_container
+              elif grep -Fq 'PermissionError' "$output"; then
+                reason=container_permission_error
+              elif grep -Fq 'Read-only file system' "$output"; then
+                reason=container_readonly_filesystem
+              elif grep -Fq 'ERROR: found no collectors for' "$output"; then
+                reason=pytest_no_collector
+              fi
+              echo "::error::Offline GPT2 $label FAIL (exit $docker_rc; class $reason); private log withheld"
+              exit 1
+            fi
+            if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
+              echo "::error::Isolated GPT2 $label skipped/missing tests"
+              exit 1
+            fi
+            echo "Isolated $label PASS for immutable $GPT2_APPROVED_HEAD"
+          }
+          run_test source-positive "$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST"
+          run_test full-module "$GPT2_TEST_PATH"
+          {
+            echo "### GPT2 private original offline replay"
+            echo "- Immutable target: $GPT2_APPROVED_HEAD"
+            echo "- Offline source-positive + full module: PASS"
+            echo "- No FIRM quantity / frozen score implied"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove ephemeral originals and unpublished test logs
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log" "$RUNNER_TEMP/gpt2-private-mount-integrity.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
+          rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" documents/sources

@@ -19,10 +19,14 @@ concurrency:
 
 jobs:
   original-lot16-real-seal:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -140,9 +144,8 @@ jobs:
           PY
         env:
           PYTHONPATH: .
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-lot16-original-sealed-score-input
-          path: artifacts/gpt3-lot16-original-source-score-input
-          retention-days: 4
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts

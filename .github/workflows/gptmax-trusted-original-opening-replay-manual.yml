@@ -1,0 +1,241 @@
+name: GPT MAX trusted original opening replay (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gptmax-trusted-original-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    name: ${{ matrix.target }} original (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+        target: [host, frame, receipt, cache, vertical, horizontal]
+    steps:
+      - name: Checkout trusted workflow context
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Authenticate immutable exact source code tree before secrets
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          approved_base=041ea388fc0501e20594d110f46992fe8a6c7042
+          case "$TARGET" in
+            host)
+              approved_head=b58d435efa65e003ba55754c2bdc152df5c91e8b
+              expected_paths='pb_opening_host_binding_authority.py|tests/test_gptmax_host_equivalence_conflict_monotonic.py'
+              focused_test=tests/test_gptmax_host_equivalence_conflict_monotonic.py
+              ;;
+            frame)
+              approved_head=fd33915001c32c0b715013e72a6823fbddc1eb89
+              expected_paths='pb_opening_host_frame_authority.py|tests/test_gptmax_independent_axes_figured_pair_handoff.py|tests/test_gptmax_opening_frame_equivalence_conflict_monotonic.py|tools/diag_gptmax_producer_owned_g17_wall_shadow.py'
+              focused_test=tests/test_gptmax_opening_frame_equivalence_conflict_monotonic.py
+              ;;
+            receipt)
+              approved_head=cef7e07d1df950c654fe8d8bd25d93184d3733c3
+              expected_paths='docs/engineering/gptmax_g17_source_receipt_registration_20261020.md|pb_source_visibility_authority.py|tests/test_raster_opening_receipt_registration.py'
+              focused_test=tests/test_raster_opening_receipt_registration.py
+              ;;
+            cache)
+              # Source-cache integrity #3405 is a separate immutable child of
+              # the already merged G17 receipt registration; pin its exact
+              # reviewed main parent, never an arbitrary PR branch or input.
+              approved_base=c491c5fb2a155a54825d639ef277218707b76327
+              approved_head=d5cdf829c135389d58a668dfdd55ccbd5834e707
+              expected_paths='.github/workflows/gptmax-g17-source-receipt-integrity.yml|docs/engineering/gptmax_g17_cached_source_integrity_20261020.md|pb_physical_opening_authority.py|tests/test_raster_opening_cached_source_integrity.py'
+              focused_test=tests/test_raster_opening_cached_source_integrity.py
+              ;;
+            vertical)
+              # Only the two reviewed source/test paths differ from the
+              # exact trusted main base; no secret workflow or PDF changes.
+              approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed
+              approved_head=d993bac877fb1c5afc2327fae1ff1995274aea6a
+              expected_paths='pb_gptmax_raster_tile_seam_shadow.py|tests/test_gptmax_raster_tile_seam_source.py'
+              focused_test=tests/test_gptmax_raster_tile_seam_source.py
+              ;;
+            horizontal)
+              # Source-only horizontal p5 elevation rail: reviewed two-file
+              # subpixel source-placement-gap veto, never a kind/quantity grant.
+              approved_base=96d6c737167c8dcc94e006488c86f47bf573274a
+              approved_head=8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0
+              expected_paths='pb_gptmax_horizontal_raster_tile_seam_shadow.py|tests/test_gptmax_horizontal_raster_tile_seam_shadow.py'
+              focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py
+              ;;
+            *)
+              echo "::error::Unknown source replay target"
+              exit 1
+              ;;
+          esac
+          git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
+          observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
+          expected="$(printf '%s\n' "$expected_paths" | tr '|' '\n' | LC_ALL=C sort)"
+          if [[ "$observed" != "$expected" ]]; then
+            echo "::error::Exact reviewed source/test path allowlist mismatch"
+            exit 1
+          fi
+          # Keep trusted main as the local-action execution root.
+          # Export reviewed PR code as inert data; never check it out on the
+          # token-bearing host before private original-source provisioning.
+          approved_tree="$RUNNER_TEMP/gptmax-approved-target"
+          mkdir -p "$approved_tree"
+          git archive "$approved_head" | tar -x -C "$approved_tree"
+          mkdir -p "$approved_tree/documents/sources"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          [[ -f "$approved_tree/$focused_test" ]]
+          echo "GPTMAX_APPROVED_TREE=$approved_tree" >> "$GITHUB_ENV"
+          echo "GPTMAX_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
+          echo "GPTMAX_FOCUSED_TEST=$focused_test" >> "$GITHUB_ENV"
+          echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"
+          echo "Authenticated exact immutable MAX source/test tree."
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install unchanged protected dependency set
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Build no-network original-test sandbox before private source provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This image contains dependencies only. The client original is not yet present.
+          docker build --pull --build-arg PYTHON_VERSION="${{ matrix.python-version }}" \
+            --tag "gptmax-original-sandbox:${{ matrix.python-version }}" -f - . <<'DOCKERFILE'
+          ARG PYTHON_VERSION
+          FROM python:${PYTHON_VERSION}-slim
+          ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
+          RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 libgomp1 tesseract-ocr && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          DOCKERFILE
+      - name: Provision original Lot16 authenticated SHA and size
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
+      - name: Verify real original source nine rows and all eight predecessors
+        shell: bash
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+          PLANREADER_LOT16_ORIGINAL_PDF: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+        run: |
+          set -euo pipefail
+          run_isolated() {
+            # PR-head code can read the original only inside this sealed, no-egress container.
+            # No runner token, GitHub env, writable workspace, host socket or network is mounted.
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+              --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly" \
+              --workdir /repo \
+              --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
+              --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
+              --env "LOT16_ARCH_ORIGINAL=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --env "PLANREADER_LOT16_ORIGINAL_PDF=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              "gptmax-original-sandbox:${{ matrix.python-version }}" "$@"
+          }
+          output="$RUNNER_TEMP/gptmax-original-positive.log"
+          if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
+              tests/test_live_append_only_opening_area_original.py::test_original_source_appends_one_area_and_preserves_all_eight_signed_customer_bodies \
+              > "$output" 2>&1; then
+            echo "::error::Actual original source signed/customer replay FAILED"
+            exit 1
+          fi
+          if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
+            echo "::error::Original source-positive replay skipped or missing"
+            exit 1
+          fi
+          echo "Original Lot16 nine-source-quantity/customer complete-body parity PASS"
+      - name: Verify original-provisioned branch source-authority regression suite
+        shell: bash
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+          LOT16_ARCH_ORIGINAL: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+          PLANREADER_LOT16_ORIGINAL_PDF: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+        run: |
+          set -euo pipefail
+          run_isolated() {
+            # PR-head code can read the original only inside this sealed, no-egress container.
+            # No runner token, GitHub env, writable workspace, host socket or network is mounted.
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+              --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+              --mount "type=bind,src=$GPTMAX_APPROVED_TREE,dst=/repo,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/repo/documents/sources,readonly" \
+              --workdir /repo \
+              --env PYTHONPATH=/repo --env PYTHONDONTWRITEBYTECODE=1 \
+              --env HOME=/tmp --env XDG_CACHE_HOME=/tmp \
+              --env "LOT16_ARCH_ORIGINAL=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --env "PLANREADER_LOT16_ORIGINAL_PDF=documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              "gptmax-original-sandbox:${{ matrix.python-version }}" "$@"
+          }
+          output="$RUNNER_TEMP/gptmax-source-regressions.log"
+          if ! run_isolated python -m pytest -q --tb=no --disable-warnings "$GPTMAX_FOCUSED_TEST" > "$output" 2>&1; then
+            echo "::error::Original-provisioned MAX source guard FAILED"
+            exit 1
+          fi
+          if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
+            echo "::error::Source guard did not successfully execute"
+            exit 1
+          fi
+          if [[ "$GPTMAX_TARGET" == "vertical" ]]; then
+            # A synthetic passing suite cannot conceal a skipped original.
+            # Require this exact original-only positive to report 1 passed.
+            if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
+              tests/test_gptmax_raster_tile_seam_source.py::test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots \
+              > "$output" 2>&1; then
+              echo "::error::Original 2124 two-root source ink test FAILED"
+              exit 1
+            fi
+            if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
+              echo "::error::Original 2124 source ink test skipped or missing"
+              exit 1
+            fi
+          fi
+          if [[ "$GPTMAX_TARGET" == "horizontal" ]]; then
+            # The focused suite may pass synthetics with the original skipped.
+            # Require the immutable source p5 xref116/115 positive explicitly.
+            if ! run_isolated python -m pytest -q --tb=no --disable-warnings \
+              tests/test_gptmax_horizontal_raster_tile_seam_shadow.py::test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles \
+              > "$output" 2>&1; then
+              echo "::error::Original p5 horizontal source rail test FAILED"
+              exit 1
+            fi
+            if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
+              echo "::error::Original p5 horizontal rail test skipped or missing"
+              exit 1
+            fi
+          fi
+          {
+            echo "### Owner-trusted GPT MAX original source replay"
+            echo "- Code SHA: $GPTMAX_APPROVED_HEAD"
+            echo "- Original SHA and size: frozen manifest verified"
+            echo "- 9 sealed/customer rows and immutable 8 predecessor bodies: PASS"
+            echo "- Exact source guard suite: PASS"
+            echo "- New benchmark score: NOT CLAIMED"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove private originals and unpublished logs
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/gptmax-original-positive.log" "$RUNNER_TEMP/gptmax-source-regressions.log"
+          rm -rf "$RUNNER_TEMP/gptmax-approved-target" documents/sources

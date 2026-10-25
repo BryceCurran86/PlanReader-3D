@@ -530,6 +530,22 @@ class OpeningHostBindingProducer:
         if not _selector_matches_opening(host_universe_selector, opening):
             return _blocked_binding("opening_host_scope_mismatch")
 
+        # The identity and host selector now match the SAME original root.
+        # A later blocked W4 reproof must invalidate any prior positive on
+        # this exact physical opening; never evict a foreign-source entry.
+        key = _binding_key(
+            opening.document_id, opening.revision_id,
+            opening.source_sha256, opening.snapshot_id, opening.page_id,
+            host_universe_selector.decision_scope_id, opening.record_id,
+        )
+
+        def _blocked_original_host_reproof(
+            *reasons: str,
+            status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED,
+        ) -> OpeningHostBindingResult:
+            self._results.pop(key, None)
+            return _blocked_binding(*reasons, status=status)
+
         universe = self._universe.resolve_scope(host_universe_selector)
         host_records: tuple[PhysicalWallCandidateRecord, ...]
         host_equivalence: PhysicalWallEquivalenceResolution
@@ -553,7 +569,7 @@ class OpeningHostBindingProducer:
                     if universe.status is EvidenceResolutionStatus.CONFLICT
                     else EvidenceResolutionStatus.ABSTAINED
                 )
-                return _blocked_binding(
+                return _blocked_original_host_reproof(
                     "complete_authenticated_host_wall_universe_required",
                     *universe.reason_codes,
                     "authenticated_opening_geometry_unavailable",
@@ -603,7 +619,7 @@ class OpeningHostBindingProducer:
                     )
                     else EvidenceResolutionStatus.ABSTAINED
                 )
-                return _blocked_binding(
+                return _blocked_original_host_reproof(
                     "complete_authenticated_host_wall_universe_required",
                     *universe.reason_codes,
                     *local_reasons,
@@ -643,7 +659,7 @@ class OpeningHostBindingProducer:
             if geometry is None:
                 geometry = _opening_geometry(self._opening, opening)
             if geometry is None:
-                return _blocked_binding("authenticated_opening_geometry_unavailable")
+                return _blocked_original_host_reproof("authenticated_opening_geometry_unavailable")
             band_resolution = _resolve_host_bands(
                 host_records,
                 geometry,
@@ -778,15 +794,15 @@ class OpeningHostBindingProducer:
                                             OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
                                         )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
-            return _blocked_binding(
+            return _blocked_original_host_reproof(
                 *band_resolution.reason_codes,
                 status=band_resolution.status,
             )
         bands = band_resolution.bands
         if not bands:
-            return _blocked_binding("no_authenticated_host_wall_band", *band_resolution.reason_codes)
+            return _blocked_original_host_reproof("no_authenticated_host_wall_band", *band_resolution.reason_codes)
         if len(bands) != 1:
-            return _blocked_binding(
+            return _blocked_original_host_reproof(
                 "multiple_authenticated_host_wall_bands",
                 status=EvidenceResolutionStatus.CONFLICT,
             )
@@ -848,17 +864,12 @@ class OpeningHostBindingProducer:
             ),
             record=record,
         )
-        key = _binding_key(
-            opening.document_id,
-            opening.revision_id,
-            opening.source_sha256,
-            opening.snapshot_id,
-            opening.page_id,
-            host_universe_selector.decision_scope_id,
-            opening.record_id,
-        )
         existing = self._results.get(key)
         if existing is not None and existing != result:
+            # Reproof returned a contradictory original positive for this
+            # exact immutable source/opening selector. A newly issued
+            # authority must not retain the earlier host as CORROBORATED.
+            self._results.pop(key, None)
             raise RuntimeError("opening host-binding producer equivocation")
         self._results[key] = result
         return result
@@ -1252,6 +1263,7 @@ def _resolve_gap_lineage_host_from_records(
         )
 
     ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
     group_lookup = _equivalence_group_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
     for raw_id in (left_raw, right_raw):
@@ -1462,6 +1474,7 @@ def _resolve_two_face_lineage_host_from_records(
         )
 
     ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    ambiguous_ids.update(_unsafe_original_lineage_group_members(equivalence))
     group_lookup = _equivalence_group_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
 
@@ -2301,17 +2314,88 @@ def _local_boundary_clean_host_scope(
     )
 
 
+def _source_same_group_distinct_pair_conflicts(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> frozenset[tuple[str, str]]:
+    """Non-SAME original pair cannot override source SAME group membership."""
+    groups_by_member: dict[str, set[int]] = {}
+    for group_index, group in enumerate(equivalence.equivalence_groups):
+        for wall_id in group:
+            groups_by_member.setdefault(str(wall_id), set()).add(group_index)
+    result: set[tuple[str, str]] = set()
+    for left, right, raw in equivalence.pair_classifications:
+        try:
+            classification = PhysicalEquivalenceClass(raw)
+        except (TypeError, ValueError):
+            # Bad original class is an explicit, contradictory source
+            # receipt, never permission to trust an issued SAME group.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
+            continue
+        a, b = str(left), str(right)
+        if groups_by_member.get(a, set()) & groups_by_member.get(b, set()):
+            result.add(tuple(sorted((a, b))))
+    return frozenset(result)
+
+
 def _pair_lookup(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    group_conflicts = _source_same_group_distinct_pair_conflicts(equivalence)
     result: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for left, right, raw in equivalence.pair_classifications:
         key = tuple(sorted((str(left), str(right))))
         try:
-            result[key] = PhysicalEquivalenceClass(raw)
-        except ValueError:
-            continue
+            classification = PhysicalEquivalenceClass(raw)
+        except (TypeError, ValueError):
+            # A malformed issued relationship is source conflict, not
+            # permission to pretend the producer never issued the pair.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        if key in group_conflicts:
+            # One original issuer cannot simultaneously say SAME and DISTINCT.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        prior = result.get(key)
+        if (prior is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+                or (prior is not None and prior is not classification)):
+            # Never re-enable SAME or DISTINCT by replaying a later
+            # positive record after an original contradictory receipt.
+            classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+        result[key] = classification
     return result
+
+
+def _inconsistent_source_group_members(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> frozenset[str]:
+    """Original W4 groups must partition their members, not choose first."""
+    first_group_by_member: dict[str, tuple[str, ...]] = {}
+    unsafe_members: set[str] = set()
+    for raw_group in equivalence.equivalence_groups:
+        group = tuple(sorted(str(member) for member in raw_group))
+        for member in group:
+            prior = first_group_by_member.get(member)
+            if prior is not None and prior != group:
+                unsafe_members.update(prior)
+                unsafe_members.update(group)
+            else:
+                first_group_by_member.setdefault(member, group)
+    return frozenset(unsafe_members)
+
+
+def _unsafe_original_lineage_group_members(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> frozenset[str]:
+    """Physical source W4 contradictions cannot be resolved by first owner."""
+    rejected = set(_inconsistent_source_group_members(equivalence))
+    conflicting_pairs = _source_same_group_distinct_pair_conflicts(equivalence)
+    for raw_group in equivalence.equivalence_groups:
+        group = {str(member) for member in raw_group}
+        if any(left in group and right in group
+               for left, right in conflicting_pairs):
+            # The SAME assertion is one whole-wall identity. Once any two
+            # members disagree, a third member cannot inherit that identity.
+            rejected.update(group)
+    return frozenset(rejected)
 
 
 def _equivalence_group_lookup(
@@ -2379,6 +2463,19 @@ def _normalize_role_candidates(
         if group_lookup is None
         else group_lookup
     )
+    unsafe_group_members = _unsafe_original_lineage_group_members(equivalence)
+    if any(
+        str(record.wall_candidate_id) in unsafe_group_members
+        for _offset, record in candidates
+    ):
+        # Contradicted SAME groups and overlapping original partitions are
+        # unsafe in every role, even when only one sibling is locally present
+        # or a caller-provided cached lookup selects a different member.
+        return (
+            EvidenceResolutionStatus.CONFLICT,
+            (),
+            (HOST_EQUIVALENCE_AMBIGUOUS,),
+        )
     normalized: list[_RoleCandidate] = []
 
     for cluster in _clusters_by_offset(candidates, axis_tol):
@@ -2394,6 +2491,24 @@ def _normalize_role_candidates(
                             (HOST_EQUIVALENCE_UNAVAILABLE,),
                         )
                     if classification is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE:
+                        return (
+                            EvidenceResolutionStatus.CONFLICT,
+                            (),
+                            (HOST_EQUIVALENCE_AMBIGUOUS,),
+                        )
+                    left_group = _equivalence_group_for(
+                        equivalence, left.wall_candidate_id,
+                        group_lookup=group_lookup,
+                    )
+                    right_group = _equivalence_group_for(
+                        equivalence, right.wall_candidate_id,
+                        group_lookup=group_lookup,
+                    )
+                    if (left.wall_candidate_id != right.wall_candidate_id
+                            and left_group == right_group
+                            and classification is not PhysicalEquivalenceClass.SAME_PHYSICAL_WALL):
+                        # Even a supplied pair lookup cannot collapse an
+                        # explicitly DISTINCT same-group wall pair to one host.
                         return (
                             EvidenceResolutionStatus.CONFLICT,
                             (),

@@ -116,6 +116,35 @@ def test_two_disagreeing_bars_conflict_and_retain_both():
     assert result.payload["candidate_count"] == 2
 
 
+def test_distinct_original_bars_with_same_ppm_conflict_not_first_wins():
+    first_edges, first_words = _horizontal_bar(x0=100.0, y=100.0)
+    second_edges = []
+    second_words = []
+    for k in range(6):
+        text = str(k) if k < 5 else "5m"
+        x = 600.0 + k * STEP_PT
+        second_words.append(_word(f"second:{k}", text, x, 400.0))
+        second_edges.append(_edge(f"second-edge:{k}", x, 388.0, 394.0))
+
+    original_edges = first_edges + second_edges
+    original_words = first_words + second_words
+    for edges, words in (
+        (original_edges, original_words),
+        (list(reversed(original_edges)), list(reversed(original_words))),
+    ):
+        result = resolve_graphic_block_bar_scale(edges, words)
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert GRAPHIC_SCALE_CONFLICT in result.reason_codes
+        assert result.payload["candidate_count"] == 2
+        assert len(result.payload["source_candidate_ids"]) == 2
+        assert not result.commercial_projection_allowed
+        assert not result.takeoff_eligible
+        assert "record_id" not in result.payload
+
+    assert original_words == first_words + second_words
+    assert original_edges == first_edges + second_edges
+
+
 def test_title_block_ratio_alone_is_not_a_scale():
     words = [_word("r", "1:100", 600.0, 790.0, method=METHOD_TRUSTED_PDF_TEXT, w=24.0)]
     result = resolve_graphic_block_bar_scale((), words)

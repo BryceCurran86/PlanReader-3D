@@ -197,6 +197,8 @@ _NEAR_NESTED_BAND_CONTAINMENT_FRACTION = 0.90
 # edge-meshed and its connectivity is UNKNOWN, which never demotes a table
 # (same bound as the existing source-connected cell gate's rectangle inventory).
 _TABLE_EDGE_MESH_MAX_RECTANGLES = 20000
+# Runtime budget only: aligned edge buckets can still have quadratic fanout.
+_TABLE_EDGE_MESH_MAX_PAIR_CHECKS = 100000
 _SEMANTIC_TABLE_VIEW_TYPES = frozenset(
     {
         DrawingViewType.SCHEDULE.value,
@@ -478,8 +480,8 @@ def _collapse_near_nested_band_frames(
     frame. Only the band test (span <= ``_NESTED_BAND_SPAN_FRACTION`` of the
     container in either axis) decides which frame is dropped; two near-equal,
     partially overlapping or disjoint rivals are never ordered by size and keep
-    competing. Returns the kept frames and ``(dropped, container)`` receipts
-    (smallest container, so the receipt does not depend on input order).
+    competing. Returns the kept frames and every ``(dropped, container)``
+    relation; multiple source containers are never reduced to the smallest.
     """
     kept: list[tuple[float, float, float, float]] = []
     dropped: list[tuple[tuple[float, float, float, float], tuple[float, float, float, float]]] = []
@@ -501,10 +503,10 @@ def _collapse_near_nested_band_frames(
             if height <= _NESTED_BAND_SPAN_FRACTION * other_h or width <= _NESTED_BAND_SPAN_FRACTION * other_w:
                 containers.append(other)
         if containers:
-            dropped.append((frame, min(containers, key=lambda box: (_bbox_area(box), box))))
+            dropped.extend((frame, container) for container in containers)
         else:
             kept.append(frame)
-    return kept, dropped
+    return kept, sorted(dropped)
 
 
 def _collapse_equivalent_nested_frames(
@@ -1010,7 +1012,7 @@ def _frame_looks_like_table(
 
 def _source_edge_connected_rects(
     rects: Sequence[tuple[float, float, float, float]],
-) -> frozenset[tuple[float, float, float, float]]:
+) -> Optional[frozenset[tuple[float, float, float, float]]]:
     """Rectangles inside a source-edge-connected block of >= ``_TABLE_CELL_COUNT`` rectangles.
 
     Two rectangles are connected when they share a vertical or horizontal
@@ -1026,6 +1028,8 @@ def _source_edge_connected_rects(
     """
     tol = _TABLE_CELL_SHARED_EDGE_TOLERANCE_PT
     n = len(rects)
+    if n > _TABLE_EDGE_MESH_MAX_RECTANGLES:
+        return None
     if n < _TABLE_CELL_COUNT:
         return frozenset()
     parent = list(range(n))
@@ -1043,10 +1047,14 @@ def _source_edge_connected_rects(
         by_top.setdefault(round(rect[1] / tol), []).append(index)
 
     shared: list[tuple[int, int, str]] = []
+    pair_checks = 0
     for i, rect in enumerate(rects):
         right_key = round(rect[2] / tol)
         for key in (right_key - 1, right_key, right_key + 1):
             for j in by_left.get(key, ()):
+                pair_checks += 1
+                if pair_checks > _TABLE_EDGE_MESH_MAX_PAIR_CHECKS:
+                    return None
                 other = rects[j]
                 if (
                     j != i
@@ -1057,6 +1065,9 @@ def _source_edge_connected_rects(
         bottom_key = round(rect[3] / tol)
         for key in (bottom_key - 1, bottom_key, bottom_key + 1):
             for j in by_top.get(key, ()):
+                pair_checks += 1
+                if pair_checks > _TABLE_EDGE_MESH_MAX_PAIR_CHECKS:
+                    return None
                 other = rects[j]
                 if (
                     j != i
@@ -1086,11 +1097,11 @@ def _source_edge_connected_rects(
 def _frame_source_edge_mesh(
     frame: Sequence[float],
     page: Any,
-) -> frozenset[tuple[float, float, float, float]]:
+) -> Optional[frozenset[tuple[float, float, float, float]]]:
     """Source-edge-connected rectangles among the same cell universe the legacy table test uses.
 
-    Above ``_TABLE_EDGE_MESH_MAX_RECTANGLES`` the connectivity is unknown, and
-    every rectangle is returned so that unknown evidence cannot demote a table.
+    Rectangle or bucket-pair budget exhaustion returns None for UNKNOWN;
+    unknown evidence cannot demote the legacy table answer.
     """
     frame_area = _bbox_area(frame)
     universe = [
@@ -1099,7 +1110,7 @@ def _frame_source_edge_mesh(
         and 4.0 < _bbox_area(rect) < 0.15 * frame_area
     ]
     if len(universe) > _TABLE_EDGE_MESH_MAX_RECTANGLES:
-        return frozenset(universe)
+        return None
     return _source_edge_connected_rects(universe)
 
 
@@ -1199,31 +1210,31 @@ def _frame_looks_like_source_connected_text_cell_table(
     cells inside a source-edge-connected block of rectangles and (2) text in at
     least that fraction of its cells. A regular lattice of separate, labelled
     fixtures fails (1); a contiguous grid of blank tiles fails (2); a real
-    schedule passes both. If the frame holds no live text fragment at all the
-    text evidence is unknown and cannot demote a connected family. The answer
+    schedule passes both. If a qualified cell family holds no text fragment,
+    its text evidence is unknown, even if unrelated frame notes exist, and
+    cannot demote that connected family. The answer
     is never True where the legacy predicate is False, and line-grid-only
     tables are left exactly as the legacy predicate has them.
     """
     centres = sorted(_bbox_center(bbox) for bbox, _text in fragments)
     centre_xs = [centre[0] for centre in centres]
-    live_text = any(_point_in_bbox(centre, frame) for centre in centres)
     mesh: Optional[frozenset[tuple[float, float, float, float]]] = None
+    mesh_evaluated = False
 
     def connected_and_text_bearing(
         family: Sequence[tuple[float, float, float, float]],
     ) -> bool:
-        nonlocal mesh
-        if mesh is None:
+        nonlocal mesh, mesh_evaluated
+        if not mesh_evaluated:
             mesh = _frame_source_edge_mesh(frame, page)
+            mesh_evaluated = True
+        if mesh is None:
+            return True  # UNKNOWN cannot lift an existing source-table veto.
         connected = sum(1 for cell in family if cell in mesh) / len(family)
         if connected < _TABLE_FAMILY_MAJORITY_FRACTION:
             return False
-        if not live_text:
-            return True
-        return (
-            _cells_text_bearing_fraction(family, centres, centre_xs)
-            >= _TABLE_FAMILY_MAJORITY_FRACTION
-        )
+        fraction = _cells_text_bearing_fraction(family, centres, centre_xs)
+        return fraction == 0.0 or fraction >= _TABLE_FAMILY_MAJORITY_FRACTION
 
     return _frame_looks_like_table(
         frame,
