@@ -19,10 +19,15 @@ concurrency:
 
 jobs:
   original-lot16-real-seal:
+    # Only owner-dispatched trusted main code may provision private originals.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
