@@ -731,3 +731,79 @@ def test_different_abstained_original_material_mark_keeps_signed_floor():
     assert len(project_live_floor_finish_customer_rows(
         claim,workspace_id=1,project_id="project-1"
     ))==1
+
+
+@pytest.mark.parametrize("bad_root", (
+    {"source_sha256": None},
+    {"source_sha256": "not-a-sha"},
+    {"revision_id": None},
+    {"revision_id": " unresolved-revision "},
+))
+@pytest.mark.parametrize("stolen_identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_unresolved_source_root_must_not_hide_abstained_original_finish_rival(
+    bad_root, stolen_identity, reverse,
+):
+    """Unknown PDF/revision is not proof a reused native mark is foreign."""
+    firm = _quantity()
+    metadata = dict(firm.metadata)
+    metadata.update(bad_root)
+    other = (
+        "finish_occurrence_evidence_id"
+        if stolen_identity == "finish_occurrence_record_id"
+        else "finish_occurrence_record_id"
+    )
+    metadata[other] = "independently-owned-other-source-identity"
+    rival = replace(
+        firm,
+        quantity_id="unresolved-original-floor-finish-rival",
+        value=None,
+        abstained=True,
+        blocking_reasons=("source_original_root_unavailable",),
+        metadata=metadata,
+    )
+    original = (rival, firm) if reverse else (firm, rival)
+    claim = replace(_claim(), floor_finish_quantity_evidence=original)
+    for output in (seal_live_floor_finish_area_run,
+                   project_live_floor_finish_customer_rows):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original material source owner contested by an abstained quantity",
+        ):
+            output(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("unresolved_root", (
+    {"source_sha256": None},
+    {"revision_id": None},
+))
+def test_unresolved_root_unrelated_original_mark_does_not_veto_firm(
+    unresolved_root,
+):
+    firm = _quantity()
+    unrelated = replace(
+        firm,
+        quantity_id="unresolved-but-distinct-mark",
+        value=None,
+        abstained=True,
+        blocking_reasons=("source_root_not_verified",),
+        metadata={
+            **dict(firm.metadata),
+            **unresolved_root,
+            "finish_occurrence_record_id": "independent-occurrence",
+            "finish_occurrence_evidence_id": "independent-evidence",
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(unrelated, firm)
+    )
+    signed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == firm.quantity_id
