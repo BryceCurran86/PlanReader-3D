@@ -18,7 +18,10 @@ def _pdf(*, displaced=False, thick_bridge=False, same_width=False,
          unrelated_thick_rect=False, invisible_thick_rect=False,
          dashed_thick_rect=False, filled_black_rect=False,
          filled_rect_invisible=False, filled_rect_white=False,
-         filled_rect_unrelated=False, filled_rect_partial=False):
+         filled_rect_unrelated=False, filled_rect_partial=False,
+         filled_polygon=False, polygon_partial=False,
+         polygon_white=False, polygon_invisible=False,
+         polygon_unrelated=False):
     p=fitz.open()
     for index,dx in enumerate((0.,77.76)):
         if displaced and index:dx+=10
@@ -71,6 +74,24 @@ def _pdf(*, displaced=False, thick_bridge=False, same_width=False,
                 color=None,
                 fill=(1,1,1) if filled_rect_white else (0,0,0),
                 fill_opacity=0.0 if filled_rect_invisible else 1.0,
+            )
+            d.commit()
+        if filled_polygon and index:
+            # Native opaque fill-only closed polyline: PyMuPDF emits "l"
+            # path items rather than "re" and no stroked outline.
+            left=(260. if polygon_unrelated else 100.)+dx
+            right=(300. if polygon_unrelated else
+                   112. if polygon_partial else 160.)+dx
+            d=page.new_shape()
+            d.draw_polyline([
+                fitz.Point(left,99.),fitz.Point(right,99.),
+                fitz.Point(right,105.),fitz.Point(left,105.),
+                fitz.Point(left,99.),
+            ])
+            d.finish(
+                color=None,
+                fill=(1,1,1) if polygon_white else (0,0,0),
+                fill_opacity=0.0 if polygon_invisible else 1.0,
             )
             d.commit()
     b=p.tobytes();p.close();return b
@@ -276,3 +297,45 @@ def test_filled_native_rectangle_original_source_bytes_unchanged():
     original=sha256(source).hexdigest()
     assert _run(source).status is EvidenceResolutionStatus.CANDIDATE
     assert sha256(source).hexdigest()==original
+
+
+
+def test_source_visible_fill_only_closed_polygon_blocks_freezer_gap():
+    raw=_pdf(filled_polygon=True)
+    with fitz.open(stream=raw,filetype="pdf") as doc:
+        rival=doc[1].get_drawings()[-1]
+        assert rival["fill"]==(0.0,0.0,0.0)
+        assert rival["fill_opacity"]==1.0
+        assert rival["color"] is None
+        assert any(item[0]=="l" for item in rival["items"])
+        assert not any(item[0]=="re" for item in rival["items"])
+    with pytest.raises(ValueError,match="opaque black fill"):
+        _run(raw)
+
+
+def test_source_visible_partial_polygon_fill_still_vetoes_gap():
+    with pytest.raises(ValueError,match="opaque black fill"):
+        _run(_pdf(filled_polygon=True,polygon_partial=True))
+
+
+@pytest.mark.parametrize("control",(
+    {"filled_polygon":True,"polygon_white":True},
+    {"filled_polygon":True,"polygon_invisible":True},
+    {"filled_polygon":True,"polygon_unrelated":True},
+))
+def test_nonblack_invisible_or_unrelated_polygon_fill_not_a_rival(control):
+    source=_pdf(**control)
+    result=_run(source)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.matching_translation==(77.76,0.)
+    assert not result.structural_wall_owned
+    assert not result.physical_door_owned
+    assert not result.firm_quantity_issued
+
+
+def test_polygon_source_bytes_immutable_even_when_negative():
+    source=_pdf(filled_polygon=True)
+    before=sha256(source).hexdigest()
+    with pytest.raises(ValueError,match="opaque black fill"):
+        _run(source)
+    assert sha256(source).hexdigest()==before
