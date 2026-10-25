@@ -52,9 +52,15 @@ def census(
             "scale_consistent_strips": len(c.scale_consistent_strip_ids),
             "position_strips": len(c.position_strip_ids),
             "other_callout_claimants": len(c.rival_callout_ids),
+            "rival_callout_ids": list(c.rival_callout_ids),
+            "plan_viewport_id": c.plan_viewport_id,
             "numbers": {k: round(v, 6) for k, v in c.numbers},
         })
     return {
+        "schema_version": result.schema_version,
+        "document_id": result.ownership.document_id,
+        "revision_id": result.ownership.revision_id,
+        "snapshot_id": result.ownership.snapshot_id,
         "source_sha256": result.ownership.source_sha256,
         "plan_page": plan_page, "elevation_page": elevation_page,
         "native_finish_text_shadow": bool(native_finish_text_shadow),
@@ -65,6 +71,12 @@ def census(
         "callouts": len(rows),
         "status_counts": dict(sorted(collections.Counter(r["status"] for r in rows).items())),
         "grants": {name: getattr(result, name) for name in shadow._GRANT_FLAGS},
+        "callout_exclusions": [{
+            "record_id": e.record_id, "word_observation_id": e.word_observation_id,
+            "bbox_pt": list(e.bbox), "reason_codes": list(e.reason_codes),
+            "label_trusted": e.label_trusted, "visible_ink_ids": list(e.visible_ink_ids),
+            "unverified_native_primitive_refs": list(e.native_primitive_refs),
+        } for e in result.callout_exclusions],
         "rows": rows,
     }
 
