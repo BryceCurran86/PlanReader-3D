@@ -217,3 +217,87 @@ def inspect_original_door_figure_leader_shadow(original_pdf_bytes:bytes, *,
         tuple(round(float(x),5) for x in expected_cap_x_pdf_pt),round(float(y),5),
         round(float(expected_cap_x_pdf_pt[1]-expected_cap_x_pdf_pt[0]),5),
         rivals,tuple(sorted(paths)),('original_door_figured_leader_source_only_no_w4_physical_owner',))
+
+
+def audit_original_crosssheet_door_caps_shadow(original_pdf_bytes: bytes, *,
+    source_sha256: str, floor_page: int, finish_page: int,
+    cap_path_pairs: tuple[tuple[int, int], ...],
+    translation_hypotheses: tuple[tuple[float, float], ...],
+    tolerance_pdf_pt: float = .06,
+) -> dict:
+    """Strict original two-sheet D15 cap comparison, NEVER doorway authority.
+
+    Even four matching perimeter sides or a strong source registration cannot
+    imply a real threshold if one independently drawn jamb cap disagrees.
+    All provided rival translations survive as diagnostic rows; the caller's
+    hypothesis list is not an exhaustive transform search.
+    """
+    if (type(original_pdf_bytes) is not bytes or not original_pdf_bytes
+            or sha256(original_pdf_bytes).hexdigest() != source_sha256):
+        raise ValueError("original source SHA mismatch")
+    if (type(floor_page) is not int or type(finish_page) is not int
+            or floor_page == finish_page or min(floor_page, finish_page) < 1):
+        raise ValueError("two distinct positive original pages required")
+    if (type(tolerance_pdf_pt) not in (int, float)
+            or not isfinite(tolerance_pdf_pt)
+            or not .001 <= tolerance_pdf_pt <= .1):
+        raise ValueError("strict original ink tolerance required")
+    if (type(cap_path_pairs) is not tuple or len(cap_path_pairs) < 2
+            or any(type(pair) is not tuple or len(pair) != 2
+                   or any(type(n) is not int or n < 0 for n in pair)
+                   for pair in cap_path_pairs)
+            or len({p[0] for p in cap_path_pairs}) != len(cap_path_pairs)
+            or len({p[1] for p in cap_path_pairs}) != len(cap_path_pairs)):
+        raise ValueError("distinct original paired wall caps required")
+    if (type(translation_hypotheses) is not tuple or not translation_hypotheses
+            or any(type(p) is not tuple or len(p) != 2
+                   or any(type(v) not in (int, float) or not isfinite(v)
+                          for v in p) for p in translation_hypotheses)
+            or len(set(translation_hypotheses)) != len(translation_hypotheses)):
+        raise ValueError("all distinct source translation hypotheses required")
+    with fitz.open(stream=original_pdf_bytes, filetype="pdf") as doc:
+        if max(floor_page, finish_page) > len(doc):
+            raise ValueError("original source page unavailable")
+        floor, finish = doc[floor_page - 1], doc[finish_page - 1]
+        first, second = floor.get_drawings(), finish.get_drawings()
+        pairs = tuple(
+            (_native_line(floor, first, a), _native_line(finish, second, b))
+            for a, b in cap_path_pairs
+        )
+    if any(abs(a[0] - a[2]) > tolerance_pdf_pt
+           or abs(b[0] - b[2]) > tolerance_pdf_pt
+           or abs(a[4] - b[4]) > tolerance_pdf_pt for a, b in pairs):
+        return {
+            "status": "ABSTAINED", "reason": "wall_cap_role_or_width_conflict",
+            "all_tested_hypotheses": (), "matches": (),
+            "physical_opening_authority": False,
+            "doorway_threshold_issued": False, "firm_quantity_issued": False,
+        }
+    if max(a[0] for a, _ in pairs) - min(a[0] for a, _ in pairs) < 20:
+        raise ValueError("source cap pairs do not bound a separated aperture")
+    reports = []
+    for dx, dy in translation_hypotheses:
+        residuals = []
+        for a, b in pairs:
+            shifted = (a[0] + dx, a[1] + dy, a[2] + dx, a[3] + dy)
+            direct = max(abs(shifted[k] - b[k]) for k in range(4))
+            reverse = max(abs(shifted[k] - b[(k + 2) % 4]) for k in range(4))
+            residuals.append(min(direct, reverse))
+        reports.append({
+            "translation_pdf_pt": (dx, dy),
+            "max_cap_residual_pdf_pt": round(max(residuals), 6),
+            "all_caps_exact": all(v <= tolerance_pdf_pt for v in residuals),
+        })
+    matches = tuple(row for row in reports if row["all_caps_exact"])
+    return {
+        "status": "SOURCE_CAP_PAIR_CANDIDATE" if len(matches) == 1 else "ABSTAINED",
+        "reason": ("cap_pair_geometry_hypothesis_only" if len(matches) == 1
+                   else "no_unique_exact_wall_cap_correspondence"),
+        "all_tested_hypotheses": tuple(reports),
+        "matches": matches,
+        "unexamined_transforms_remain": True,
+        "physical_opening_authority": False,
+        "doorway_threshold_issued": False,
+        "floor_finish_area_issued": False,
+        "firm_quantity_issued": False,
+    }
