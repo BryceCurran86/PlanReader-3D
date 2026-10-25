@@ -103,7 +103,7 @@ jobs:
           FROM python:${{ matrix.python-version }}-slim
           WORKDIR /workspace
           COPY requirements.txt requirements-ci-v1228.txt /deps/
-          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt && python -m pip install --no-cache-dir fonttools==4.60.2
           DOCKER
           docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" .
 
