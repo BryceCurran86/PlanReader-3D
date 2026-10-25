@@ -26,7 +26,6 @@ concurrency:
 
 jobs:
   original-paired-source-customer:
-    # Only owner-dispatched trusted main code may provision private originals.
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 70
@@ -265,20 +264,9 @@ jobs:
           )
           print(json.dumps(evidence,sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-1215-fresh-paired-customer-retention
-          path: |
-            artifacts/base_sha.txt
-            artifacts/head_sha.txt
-            artifacts/baseline/source-report.json
-            artifacts/baseline/production/source_sealed_run.json
-            artifacts/baseline/production/source_production_openings.json
-            artifacts/baseline/production/verified_customer_rows.json
-            artifacts/candidate/source-report.json
-            artifacts/candidate/production/source_sealed_run.json
-            artifacts/candidate/production/source_production_openings.json
-            artifacts/candidate/production/verified_customer_rows.json
-            artifacts/gpt3-1215-fresh-customer-retention.json
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -rf /tmp/gpt3-1215-base

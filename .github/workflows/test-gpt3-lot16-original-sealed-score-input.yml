@@ -19,7 +19,6 @@ concurrency:
 
 jobs:
   original-lot16-real-seal:
-    # Only owner-dispatched trusted main code may provision private originals.
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -145,9 +144,8 @@ jobs:
           PY
         env:
           PYTHONPATH: .
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-lot16-original-sealed-score-input
-          path: artifacts/gpt3-lot16-original-source-score-input
-          retention-days: 4
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts

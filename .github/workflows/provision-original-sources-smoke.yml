@@ -15,10 +15,14 @@ permissions:
 
 jobs:
   provision:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Provision every frozen original
         id: provision
@@ -58,3 +62,7 @@ jobs:
           test ! -e "${RUNNER_TEMP}/empty-sources" || test -z "$(ls -A "${RUNNER_TEMP}/empty-sources")"
           rm -f "${denial_log}"
           echo "Verified expected no-token refusal; no files downloaded."
+
+      - name: Destroy verified private PDFs
+        if: always()
+        run: rm -rf documents/sources
