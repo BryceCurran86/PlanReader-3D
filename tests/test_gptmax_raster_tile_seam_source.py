@@ -222,18 +222,27 @@ def test_image_transform_mirror_shear_and_duplicate_boxes_all_fail_closed():
     assert not _canonical_source_image_placement(rect, fitz.Matrix(100, 0, 0, 100, 0.1, 0))
 
 
-@pytest.mark.parametrize("gap", [0.0005, -0.0005, 0.01])
-def test_subpixel_source_image_gap_or_overlap_is_not_interpolated(gap):
-    """A dark render cannot replace independently abutting original placements."""
+@pytest.mark.parametrize("gap", [0.0005, -0.0005, 0.01, -0.01])
+def test_paired_and_contiguous_subpixel_gap_or_overlap_fail_closed(gap):
+    """Neither entrypoint may mint source authority from dark flank pixels."""
     from pb_gptmax_raster_tile_seam_shadow import prove_contiguous_source_ink_across_tile_seam
     pdf = _source(gap=gap)
-    report = prove_contiguous_source_ink_across_tile_seam(
-        pdf, expected_sha256=hashlib.sha256(pdf).hexdigest(),
+    digest = hashlib.sha256(pdf).hexdigest()
+    paired = prove_tile_seam_source_pixels(
+        pdf, expected_sha256=digest,
         page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,
     )
-    assert report["status"] == ABSTAIN
-    assert "source_tile_boundary_gap_unproven" in report["reason_codes"]
-    assert not report["quantity_granted"]
+    contiguous = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=digest,
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=7,
+    )
+    for report in (paired, contiguous):
+        assert report["status"] == ABSTAIN
+        assert "source_tile_boundary_gap_unproven" in report["reason_codes"]
+        assert not any(report[key] for key in (
+            "structural_host_granted", "whole_wall_frame_granted",
+            "opening_count_granted", "quantity_granted",
+        ))
 
 
 def test_numerical_seam_cannot_hide_white_original_edge_pixel():

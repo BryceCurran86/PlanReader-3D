@@ -106,6 +106,11 @@ def prove_tile_seam_source_pixels(
             or abs(left_rect.x1 - seam_x) > 0.03 or abs(right_rect.x0 - seam_x) > 0.03
             or abs(left_rect.x1 - right_rect.x0) > 0.03):
             return _abstain(digest, page_no, "distinct_abutting_unmasked_image_roots_unproven")
+        # Dark flank pixels alone cannot authenticate a real subpixel source
+        # placement gap or overlap, even when the rendered page looks joined.
+        # Match the strict contiguous proof's original-root tolerance.
+        if abs(left_rect.x1 - right_rect.x0) > 0.0001:
+            return _abstain(digest, page_no, "source_tile_boundary_gap_unproven")
         scale = dpi / 72.0
         clip = fitz.Rect(xs[0] - 1, source_y - 1, xs[1] + 1, source_y + 1)
         composite = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
