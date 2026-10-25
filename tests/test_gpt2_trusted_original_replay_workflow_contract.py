@@ -10,8 +10,8 @@ SOURCE = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 HEADS = {
     "a600": "91cc96a445d6441a640547ce089cd756b56873b3",
     "freezer": "f424c6c16fca7c83d4b7a8425faaa1172afd5045",
-    "d15": "49e3914e3da581d9cf8ac4a7d1d5186cbc4f67d1",
-    "rcp": "753415e2e0aedde27dc4e8d0acd1bc3c22a73af8",
+    "d15": "37ed51dd024db1979bf4a114c656c6985519aa8b",
+    "rcp": "bf26820aa89d0c911448dd67d1f4bb2ef226eaf0",
 }
 
 
