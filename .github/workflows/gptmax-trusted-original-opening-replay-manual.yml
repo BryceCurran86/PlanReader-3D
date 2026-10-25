@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [host, frame, receipt, cache, vertical]
+        target: [host, frame, receipt, cache, vertical, horizontal]
     steps:
       - name: Checkout trusted workflow context
         uses: actions/checkout@v4
@@ -56,12 +56,20 @@ jobs:
               focused_test=tests/test_raster_opening_cached_source_integrity.py
               ;;
             vertical)
-              # The source-only 2124 vertical seam hypothesis is pinned to
-              # its exact original two-file head and current-main parent.
-              approved_base=e405d5da857eadac9a842811fdcab3082df021e6
-              approved_head=f934aebc6c6241df4dee784f00a7d3606971fe70
+              # Only the two reviewed source/test paths differ from the
+              # exact trusted main base; no secret workflow or PDF changes.
+              approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed
+              approved_head=d993bac877fb1c5afc2327fae1ff1995274aea6a
               expected_paths='pb_gptmax_raster_tile_seam_shadow.py|tests/test_gptmax_raster_tile_seam_source.py'
               focused_test=tests/test_gptmax_raster_tile_seam_source.py
+              ;;
+            horizontal)
+              # Source-only horizontal p5 elevation rail: reviewed two-file
+              # subpixel source-placement-gap veto, never a kind/quantity grant.
+              approved_base=96d6c737167c8dcc94e006488c86f47bf573274a
+              approved_head=8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0
+              expected_paths='pb_gptmax_horizontal_raster_tile_seam_shadow.py|tests/test_gptmax_horizontal_raster_tile_seam_shadow.py'
+              focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py
               ;;
             *)
               echo "::error::Unknown source replay target"
@@ -127,6 +135,7 @@ jobs:
           PYTHONPATH: .
           PYTHONDONTWRITEBYTECODE: "1"
           LOT16_ARCH_ORIGINAL: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+          PLANREADER_LOT16_ORIGINAL_PDF: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
         run: |
           set -euo pipefail
           output="$RUNNER_TEMP/gptmax-source-regressions.log"
@@ -151,6 +160,21 @@ jobs:
             fi
             if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
               echo "::error::Original 2124 source ink test skipped or missing"
+              exit 1
+            fi
+          fi
+          if [[ "$GPTMAX_TARGET" == "horizontal" ]]; then
+            # The focused suite may pass synthetics with the original skipped.
+            # Require the immutable source p5 xref116/115 positive explicitly.
+            if ! python -m pytest -q --tb=no --disable-warnings \
+              tests/test_gptmax_horizontal_raster_tile_seam_shadow.py::test_original_elevation_panel_rail_is_continuous_across_horizontal_source_tiles \
+              > "$output" 2>&1; then
+              echo "::error::Original p5 horizontal source rail test FAILED"
+              grep -E '^(FAILED |ERROR )' "$output" | head -5 || true
+              exit 1
+            fi
+            if ! grep -Eq '(^|[ ,])1 passed' "$output"; then
+              echo "::error::Original p5 horizontal rail test skipped or missing"
               exit 1
             fi
           fi
