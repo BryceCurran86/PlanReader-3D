@@ -552,6 +552,11 @@ def test_original_wxx_source_type_mark_and_schedule_identity_cannot_be_rekeyed(
 ):
     rows, canonical = _original_case()
     canonical[2][field] = original
+    if field == "tag_observation_id":
+        # The positive control is a source-owned tag, so the *original*
+        # canonical evidence must retain its witness before the real issuer.
+        # The forged replacement separately retains its foreign witness below.
+        canonical[2]["evidence_ids"].append(original)
     source = run(rows, canonical)
     real = _typed(canonical)
     opening = real.canonical_openings[2]
