@@ -70,7 +70,9 @@ def inspect_original_mary_rcp_word_scope_shadow(
     block.sort(key=lambda w:(w[6],w[7]));line.sort(key=lambda w:w[7])
     block_words=tuple(str(w[4]) for w in block)
     line_words=tuple(str(w[4]) for w in line)
-    bounds=tuple(round(float(selected[i]),5) for i in range(4))
+    # Rounded display coordinates can move a native word across the proposed
+    # source boundary. Containment and its receipt retain the original values.
+    bounds=tuple(float(selected[i]) for i in range(4))
     token=str(selected[4]).upper()
     within=_inside(bounds,candidate_plan_bbox_pdf_pt)
     if not within:

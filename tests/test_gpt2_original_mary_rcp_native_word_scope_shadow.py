@@ -72,6 +72,34 @@ def test_original_source_candidate_rect_has_no_material_grant():
     assert not r.original_plan_viewport_authorized
 
 
+@pytest.mark.parametrize('edge',range(4))
+@pytest.mark.parametrize('offset',((0.,0.),(13.,27.)))
+def test_exact_native_word_edges_own_containment_before_display_rounding(edge,offset):
+    doc=fitz.open()
+    page=doc.new_page()
+    page.insert_text((180.1234567+offset[0],200.7654321+offset[1]),'GRID',fontsize=10)
+    raw=doc.tobytes();doc.close()
+    with fitz.open(stream=raw,filetype='pdf') as original:
+        word=original[0].get_text('words')[0]
+    native=tuple(float(v) for v in word[:4])
+    rounded=round(native[edge],5)
+    assert rounded != native[edge]
+    boundary=(native[edge]+rounded)/2
+    outer=[native[0]-1,native[1]-1,native[2]+1,native[3]+1]
+    outer[edge]=boundary
+    contained=native[edge]>=boundary if edge<2 else native[edge]<=boundary
+    result=inspect_original_mary_rcp_word_scope_shadow(
+        raw,expected_source_sha256=sha256(raw).hexdigest(),page_number=1,
+        native_word_address=tuple(word[5:8]),candidate_plan_bbox_pdf_pt=tuple(outer))
+    assert result.original_source_role == (
+        'SOURCE_CEILING_CODE_WORD_CANDIDATE' if contained
+        else 'SOURCE_OUTSIDE_PROPOSED_PLAN_VIEWPORT')
+    assert result.native_bbox_pdf_pt == native
+    assert not result.original_plan_viewport_authorized
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+
+
 def _unique_original_source_word_address(words, text, source_region):
     """Resolve one SHA-owned original glyph by text and its bounded source box.
 
