@@ -281,3 +281,24 @@ def test_original_observer_uses_final_derived_snapshot_not_initial_native_words(
     assert replayed["original_producer_snapshot_id"] == "derived-original"
     assert replayed["original_source_customer_retention_unchanged"]
     assert not replayed["new_firm_or_benchmark_score_granted"]
+
+
+def test_owner_original_area_replay_is_trusted_main_only():
+    """Never give original-source replay authority to pull-request code."""
+    from pathlib import Path
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github/workflows/test-gpt3-max-area-review-source-issuer.yml"
+    ).read_text(encoding="utf-8")
+    assert "  workflow_dispatch:\n" in workflow
+    original_job = workflow.split("  owner-original-lot16-source-replay:\n", 1)[1]
+    assert (
+        "if: ${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
+    ) in original_job
+    assert "ref: ${{ github.sha }}" in original_job
+    assert "persist-credentials: false" in original_job
+    assert "github.event.pull_request.head.sha" not in original_job
+    assert "actions/upload-artifact" not in original_job
+    assert "rm -rf documents/sources artifacts" in original_job
+    assert "secrets.ORIGINAL_SOURCES_TOKEN" not in workflow
