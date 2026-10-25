@@ -1,6 +1,7 @@
 name: TEST ONLY GPT2 Maryborough Grid Component Completion
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [ main ]
     paths:
@@ -23,14 +24,38 @@ concurrency:
   group: gpt2-maryborough-grid-component-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: pip
+    - name: Install dependencies
+      run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+    - name: Verify floor finish receipt publication invariants
+      run: PYTHONPATH=. python -m pytest -q tests/test_cross_view_floor_finish_authority_v1.py
+    - name: Original source edge aliases retain all owners and fail closed on incomplete ancestry
+      run: PYTHONPATH=. python -m pytest -q tests/test_source_room_face_same_source_aliases.py
   maryborough-grid-component:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -43,18 +68,30 @@ jobs:
         run: PYTHONPATH=. python -m pytest -q tests/test_cross_view_floor_finish_authority_v1.py
       - name: Original source edge aliases retain all owners and fail closed on incomplete ancestry
         run: PYTHONPATH=. python -m pytest -q tests/test_source_room_face_same_source_aliases.py
+      - name: Provision exact private original from trusted main
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
       - name: Run exact Maryborough room-component proof
         env:
-          SOURCE_GATE_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          SOURCE_GATE_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SOURCE_GATE_MAIN_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-6.sh"
+          private_output="$RUNNER_TEMP/guarded-original-6.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           set -o pipefail
+          export SOURCE_GATE_MAIN_PARENT_SHA="$(git rev-parse HEAD^)"
           OUT=artifacts/gpt2-maryborough-grid-component
           mkdir -p "$OUT"
-          # Never accept a synthetic merge checkout as an exact PR-head proof.
+          # Never accept a synthetic merge checkout as trusted-main source proof.
           ACTUAL_HEAD="$(git rev-parse HEAD)"
-          if [ "$ACTUAL_HEAD" != "$SOURCE_GATE_PR_HEAD_SHA" ]; then
-            echo "ERROR: original Maryborough gate checked out $ACTUAL_HEAD, expected PR head $SOURCE_GATE_PR_HEAD_SHA" >&2
+          if [ "$ACTUAL_HEAD" != "$SOURCE_GATE_MAIN_SHA" ]; then
+            echo "ERROR: trusted Maryborough gate checked out $ACTUAL_HEAD, expected trusted main $SOURCE_GATE_MAIN_SHA" >&2
             exit 1
           fi
           printf '%s\n' "$ACTUAL_HEAD" > "$OUT/head_sha.txt"
@@ -99,8 +136,8 @@ jobs:
               "tested_checkout_sha":subprocess.check_output(
                   ["git","rev-parse","HEAD"],text=True
               ).strip(),
-              "event_pr_head_sha":os.environ.get("SOURCE_GATE_PR_HEAD_SHA"),
-              "event_pr_base_sha":os.environ.get("SOURCE_GATE_PR_BASE_SHA"),
+              "trusted_main_sha":os.environ.get("SOURCE_GATE_MAIN_SHA"),
+              "trusted_main_parent_sha":os.environ.get("SOURCE_GATE_MAIN_PARENT_SHA"),
               "original_source_sha256_verified":source_sha,
               "elapsed_seconds":elapsed,
               "canonical_room_count":len(claim.canonical_rooms),
@@ -266,9 +303,16 @@ jobs:
               "reason_codes":list(claim.reason_codes),
           },indent=2,sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished diagnostics
         if: always()
-        with:
-          name: gpt2-maryborough-grid-component
-          path: artifacts/gpt2-maryborough-grid-component
-          retention-days: 1
+        run: |
+          rm -rf documents/sources artifacts q5446-original-positive-floor laurel-original-floor-produced laurel-source-positive-core
+          rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
+          rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log
