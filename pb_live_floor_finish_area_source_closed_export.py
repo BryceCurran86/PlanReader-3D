@@ -135,6 +135,29 @@ def build_live_floor_finish_area_source_traces(
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
     seen_original_quantity_ids: set[str] = set()
+    # Whole-family producer ID uniqueness wins FIRST, even if a later
+    # material-owner rivalry is also present. Preserve the established
+    # duplicate/invalid-source first-failure contracts for blocked siblings.
+    for original in claim.floor_finish_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            raise TypeError(
+                "floor_finish_quantity_evidence must contain QuantityEvidence"
+            )
+        if original.family != "floor_finish_area":
+            raise SourceClosedRunConflictError(
+                f"non-floor-finish quantity reached exporter: {original.quantity_id}"
+            )
+        original_id = original.quantity_id
+        if (type(original_id) is not str or not original_id
+                or original_id != original_id.strip()):
+            raise SourceClosedRunConflictError(
+                "invalid original floor-finish quantity id"
+            )
+        if original_id in seen_original_quantity_ids:
+            raise SourceClosedRunConflictError(
+                f"duplicate original floor-finish quantity id: {original_id}"
+            )
+        seen_original_quantity_ids.add(original_id)
     # Keep an explicit negative-claimant census BEFORE the FIRM-only path.
     # Original material records can remain attached to an ABSTAINED quantity
     # even when its physical floor cannot yet be published. A positive floor
@@ -171,25 +194,7 @@ def build_live_floor_finish_area_source_traces(
                     digest.lower(), revision, field, source_identity,
                 ))
     for quantity in claim.floor_finish_quantity_evidence:
-        if not isinstance(quantity, QuantityEvidence):
-            raise TypeError(
-                "floor_finish_quantity_evidence must contain QuantityEvidence"
-            )
-        if quantity.family != "floor_finish_area":
-            raise SourceClosedRunConflictError(
-                f"non-floor-finish quantity reached exporter: {quantity.quantity_id}"
-            )
-        original_id = quantity.quantity_id
-        if (type(original_id) is not str or not original_id
-                or original_id != original_id.strip()):
-            raise SourceClosedRunConflictError(
-                "invalid original floor-finish quantity id"
-            )
-        if original_id in seen_original_quantity_ids:
-            raise SourceClosedRunConflictError(
-                f"duplicate original floor-finish quantity id: {original_id}"
-            )
-        seen_original_quantity_ids.add(original_id)
+        # Every original family/source ID has already been validated above.
         if quantity.abstained or quantity.value is None:
             continue
         if quantity.unit != "m2" or quantity.status != AuthorityStatus.FIRM.value:
