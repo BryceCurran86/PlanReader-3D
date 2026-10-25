@@ -111,12 +111,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          preflight_original="$RUNNER_TEMP/gpt2-empty-original-preflight"
+          mkdir -p "$preflight_original"
+          printf "synthetic mount only\\n" > "$preflight_original/NO_REAL_SOURCE.txt"
           output="$RUNNER_TEMP/gpt2-private-preflight.log"
           preflight_rc=0
           docker run --rm --network none --read-only --cap-drop ALL \
               --security-opt no-new-privileges --pids-limit 128 \
               --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
               --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$preflight_original,dst=/workspace/documents/sources,readonly" \
               --workdir /workspace \
               -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
               -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
@@ -216,4 +220,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
-          rm -rf "$RUNNER_TEMP/gpt2-approved-target" documents/sources
+          rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" documents/sources
