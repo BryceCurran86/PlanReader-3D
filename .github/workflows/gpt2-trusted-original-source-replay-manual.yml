@@ -103,9 +103,40 @@ jobs:
           FROM python:${{ matrix.python-version }}-slim
           WORKDIR /workspace
           COPY requirements.txt requirements-ci-v1228.txt /deps/
-          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt && python -m pip install --no-cache-dir fonttools==4.60.2
           DOCKER
           docker build -q -f "$dockerfile" -t "gpt2-offline:${{ matrix.python-version }}" .
+
+      - name: Preflight offline pinned test collection before private source exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          preflight_original="$RUNNER_TEMP/gpt2-empty-original-preflight"
+          mkdir -p "$preflight_original"
+          printf "synthetic mount only\\n" > "$preflight_original/NO_REAL_SOURCE.txt"
+          output="$RUNNER_TEMP/gpt2-private-preflight.log"
+          preflight_rc=0
+          docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$preflight_original,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+              "gpt2-offline:${{ matrix.python-version }}" \
+              python -m pytest --collect-only -q -p no:cacheprovider --tb=no \
+              "$GPT2_TEST_PATH::$GPT2_ORIGINAL_TEST" > "$output" 2>&1 || preflight_rc=$?
+          if (( preflight_rc != 0 )); then
+            echo "::error::Offline preflight failed BEFORE original provisioning (status $preflight_rc); no private source accessed"
+            exit 1
+          fi
+          if ! grep -Eq '1 test collected' "$output"; then
+            echo "::error::Offline original-test collection missing; no private source accessed"
+            exit 1
+          fi
+          echo "Offline test environment/collection PASS before original provisioning"
 
       - name: Provision only SHA-verified Maryborough original
         uses: ./.github/actions/provision-original-sources
@@ -116,6 +147,32 @@ jobs:
           names: |
             Arch_Combined_Maryborough_Service_Station.pdf
           allow-missing: "false"
+
+      - name: Verify original PDF SHA inside isolated read-only source mount
+        shell: bash
+        env:
+          EXPECTED_SHA256: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+        run: |
+          set -euo pipefail
+          # Trusted stdlib-only isolated interpreter, -I ignores PR PYTHONPATH.
+          # Only a fixed success/failure bit leaves the sandbox; no bytes,
+          # filenames from PR code or raw logs reach the public Actions log.
+          result="$RUNNER_TEMP/gpt2-private-mount-integrity.log"
+          status=0
+          docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+              --workdir /tmp -e EXPECTED_SHA256 \
+              "gpt2-offline:${{ matrix.python-version }}" \
+              python -I -c 'import hashlib,os,pathlib,sys; p=pathlib.Path("/workspace/documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"); sys.exit(0 if hashlib.sha256(p.read_bytes()).hexdigest()==os.environ["EXPECTED_SHA256"] else 2)' \
+              > "$result" 2>&1 || status=$?
+          if (( status != 0 )); then
+            echo "::error::Isolated original mount/read/SHA verification FAILED (exit $status); private output withheld"
+            exit 1
+          fi
+          echo "Isolated original mount and full SHA verification PASS"
 
       - name: Run private original checks inside no-network read-only container
         shell: bash
@@ -130,20 +187,43 @@ jobs:
           run_test() {
             local label="$1"; shift
             : > "$output"
-            if ! docker run --rm --network none --read-only --cap-drop ALL \
+            local docker_rc=0
+            docker run --rm --network none --read-only --cap-drop ALL \
                 --security-opt no-new-privileges --pids-limit 128 \
                 --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
                 --mount "type=bind,src=$GPT2_APPROVED_TREE,dst=/workspace,readonly" \
                 --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
                 --workdir /workspace \
+                -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
                 -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
                 -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
                 -e PLANREADER_MARYBOROUGH_ORIGINAL_PDF="documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
                 -e PLANREADER_MARYBOROUGH_SOURCE_SHA256 \
                 "gpt2-offline:${{ matrix.python-version }}" \
                 python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings "$@" \
-                > "$output" 2>&1; then
-              echo "::error::Isolated GPT2 $label failed (details withheld to protect source)"
+                > "$output" 2>&1 || docker_rc=$?
+            if (( docker_rc != 0 )); then
+              # Strictly fixed vocabulary: NEVER print, upload or quote PR-owned
+              # stdout/stderr, filenames, arbitrary exception text or PDF content.
+              local reason=private_test_failure
+              case "$docker_rc" in
+                125|126|127) reason=container_launch_failure ;;
+                2|3|4|5) reason=pytest_collection_or_runtime_failure ;;
+              esac
+              if grep -Fq 'ModuleNotFoundError' "$output"; then
+                reason=missing_python_module
+              elif grep -Fq 'ImportError' "$output"; then
+                reason=python_import_error
+              elif grep -Fq 'FileNotFoundError' "$output"; then
+                reason=missing_file_in_container
+              elif grep -Fq 'PermissionError' "$output"; then
+                reason=container_permission_error
+              elif grep -Fq 'Read-only file system' "$output"; then
+                reason=container_readonly_filesystem
+              elif grep -Fq 'ERROR: found no collectors for' "$output"; then
+                reason=pytest_no_collector
+              fi
+              echo "::error::Offline GPT2 $label FAIL (exit $docker_rc; class $reason); private log withheld"
               exit 1
             fi
             if ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$output"; then
@@ -165,5 +245,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
-          rm -rf "$RUNNER_TEMP/gpt2-approved-target" documents/sources
+          rm -f "$RUNNER_TEMP/gpt2-private-isolated.log" "$RUNNER_TEMP/gpt2-private-preflight.log" "$RUNNER_TEMP/gpt2-private-mount-integrity.log" "$RUNNER_TEMP/gpt2-offline.Dockerfile"
+          rm -rf "$RUNNER_TEMP/gpt2-empty-original-preflight" "$RUNNER_TEMP/gpt2-approved-target" documents/sources
