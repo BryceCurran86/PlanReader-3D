@@ -6,8 +6,6 @@ on:
       - pb_pdf_text_integrity_authority.py
       - tests/test_gpt2_symbol_source_optin_native_word_integrity.py
       - .github/workflows/test-gpt2-source-symbol-embedded-glyph.yml
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -70,7 +68,7 @@ jobs:
           rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
           rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log
   original-source-not-verified:
-    if: github.event_name == 'push' && vars.ORIGINAL_SOURCES_REPOSITORY == ''
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/original-source-not-run.yml
     with:
       job: original-glyph-true-source

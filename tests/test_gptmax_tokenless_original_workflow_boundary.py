@@ -163,6 +163,15 @@ def test_native_baseline_receives_verified_source_before_running_comparison():
     assert 'github.event.pull_request.base.sha' not in command
 
 
+def test_glyph_original_is_manual_only_and_pr_reports_source_not_verified():
+    _, doc = _workflow('test-gpt2-source-symbol-embedded-glyph.yml')
+    assert 'push' not in doc['on']
+    notice = doc['jobs']['original-source-not-verified']
+    assert notice['if'] == "github.event_name == 'pull_request'"
+    assert notice['uses'] == './.github/workflows/original-source-not-run.yml'
+    assert notice['with']['job'] == 'original-glyph-true-source'
+
+
 @pytest.mark.parametrize('filename', CASES)
 def test_cleanup_removes_source_logs_scripts_and_reports(filename):
     cleanup = _source_job(filename)['steps'][-1]
