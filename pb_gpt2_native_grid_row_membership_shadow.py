@@ -87,6 +87,50 @@ def _original_vertical_chain(drawings, indices, *, tolerance):
     return x, lines[0][1], lines[-1][2], width
 
 
+
+def _assert_final_visible_grid_ink(page, drawings, indices):
+    """Reject historical grid strokes erased by later painting.
+
+    The original schedule may be page-rotated: drawing coordinates are
+    unrotated, whereas pixmap pixels use page.rotation_matrix. The raster
+    check is negative evidence only; dark pixels never grant a door.
+    """
+    scale = 2.0
+    if page.rect.width * page.rect.height * scale * scale > 24_000_000:
+        raise ValueError("source grid visible-ink audit exceeds bounded page")
+    pix = page.get_pixmap(
+        matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB,
+        alpha=False, annots=False,
+    )
+    for index in indices:
+        a, b = drawings[index]["items"][0][1:3]
+        x = (a.x + b.x) / 2.0
+        low, high = sorted((float(a.y), float(b.y)))
+        # A later opaque painted object can conceal a perfectly authentic
+        # earlier vector path. Its bounding box is a conservative veto.
+        for later in drawings[index + 1:]:
+            if later.get("fill") is None or later.get("fill_opacity") != 1:
+                continue
+            box = later.get("rect")
+            if (box is not None and box.x0 <= x <= box.x1
+                    and box.y0 < high and box.y1 > low):
+                raise ValueError("original grid boundary overpainted by opaque fill")
+        for fraction in (.2, .5, .8):
+            y = low + (high - low) * fraction
+            visible = False
+            # Antialiasing can place a 0.48pt stroke in a neighbouring pixel.
+            # Search only the narrow source-stroke normal, not nearby words.
+            for offset in (-.5, -.25, 0.0, .25, .5):
+                rendered = fitz.Point(x + offset, y) * page.rotation_matrix
+                px, py = round(rendered.x * scale), round(rendered.y * scale)
+                if (0 <= px < pix.width and 0 <= py < pix.height
+                        and max(pix.pixel(px, py)) <= 190):
+                    visible = True
+                    break
+            if not visible:
+                raise ValueError("original grid boundary lacks final visible ink")
+
+
 def inspect_original_native_grid_row_shadow(
     original_pdf_bytes: bytes, *, source_sha256: str,
     words: tuple[SourceDoorScheduleWord, ...],
@@ -114,6 +158,9 @@ def inspect_original_native_grid_row_shadow(
             drawings, scope.left_boundary_paths, tolerance=tolerance_pdf_pt)
         right = _original_vertical_chain(
             drawings, scope.right_boundary_paths, tolerance=tolerance_pdf_pt)
+        _assert_final_visible_grid_ink(
+            pdf[scope.page_number-1], drawings,
+            (*scope.left_boundary_paths, *scope.right_boundary_paths))
     if left[0] + tolerance_pdf_pt >= right[0] or abs(left[3]-right[3]) > tolerance_pdf_pt:
         raise ValueError("source grid row boundaries not distinct")
     if (abs(left[1]-right[1]) > tolerance_pdf_pt
