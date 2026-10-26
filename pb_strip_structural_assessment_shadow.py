@@ -477,6 +477,15 @@ class StripStructuralAssessmentShadow:
             if (result.status is not EvidenceResolutionStatus.CORROBORATED
                     or result.proposition != VISIBLE_SOURCE_OBSERVATION_EXISTS or observation is None):
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
+            # A positive wrapper is not authority to substitute a foreign
+            # same-geometry source observation into the terminal/rival census.
+            # Check immutable identity before filtering by page.
+            if (observation.observation_id != observation_id
+                    or observation.document_id != document_id
+                    or observation.revision_id != revision_id
+                    or observation.source_sha256 != ownership.source_sha256
+                    or observation.snapshot_id != ownership.snapshot_id):
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             if str(observation.page_id) != str(page_id):
                 continue
             # A malformed same-page published observation is a source negative,
@@ -542,7 +551,15 @@ class StripStructuralAssessmentShadow:
             # without its source geometry, disjointness is unprovable.
             for candidate in structures.candidates:
                 members = tuple(candidate.source_observation_ids)
-                if (not members or len(members) != len(set(members))
+                # The candidate census is a source-owned record, not merely a
+                # collection of geometrically plausible member ids. A stale
+                # or foreign candidate cannot be discarded as disjoint ink.
+                if (candidate.document_id != document_id
+                        or candidate.revision_id != revision_id
+                        or candidate.source_sha256 != ownership.source_sha256
+                        or candidate.snapshot_id != ownership.snapshot_id
+                        or candidate.page_id != str(page_id)
+                        or not members or len(members) != len(set(members))
                         or any(member not in by_id for member in members)):
                     return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             nominated_set = set(nominated)
