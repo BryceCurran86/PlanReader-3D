@@ -70,6 +70,7 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
                     (receipt.sequence_number, receipt.bbox), []
                 ).append(receipt)
         selected = []
+        selected_seq = []
         for trace in traces:
             seq = trace.get('seqno')
             raw_box = trace.get('bbox')
@@ -102,10 +103,26 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
                         or possible[0].render_state != PROVEN_RENDERED):
                     return False
                 selected.append((chr(codepoint), glyph_box))
+                selected_seq.append(seq)
         if len(selected) != len(text):
             return False
         if Counter(char for char, _ in selected) != Counter(text):
             return False
+        # The shared render receipt conservatively checks later filled paths,
+        # images and shades, but an opaque later STROKED path can also erase
+        # the original glyph (even when the final raster remains dark).
+        # Inspect the nominated glyph boxes and source paint order; an
+        # intersecting later stroke is unresolved, never visible-ink proof.
+        for (_, glyph_box), text_seq in zip(selected, selected_seq):
+            for paint in bboxlog[text_seq + 1:]:
+                if paint[0] != 'stroke-path':
+                    continue
+                stroke_box = tuple(float(v) for v in paint[1])
+                if len(stroke_box) != 4 or not all(isfinite(v) for v in stroke_box):
+                    return False
+                if (min(glyph_box[2], stroke_box[2]) > max(glyph_box[0], stroke_box[0])
+                        and min(glyph_box[3], stroke_box[3]) > max(glyph_box[1], stroke_box[1])):
+                    return False
         # Extracted word boxes include font advance/bearing margins. Source
         # ink need not TOUCH those edges: require complete matching glyph
         # coverage INSIDE the original word box, never infer global snap.
