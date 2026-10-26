@@ -39,6 +39,11 @@ _ROOT_RUNTIME_MANIFESTS = frozenset({
     "Pipfile.lock",
     "poetry.lock",
     "uv.lock",
+    # The deployed Render service selects this root Dockerfile to install
+    # dependencies and launch the commercial application. Both files control
+    # production execution, even though neither has a Python/JS suffix.
+    "Dockerfile",
+    "render.yaml",
 })
 
 
