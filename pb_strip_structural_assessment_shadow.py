@@ -394,22 +394,23 @@ class StripStructuralAssessmentShadow:
         # Authority calls run on an INDEPENDENT replay of the immutable original bytes (the producer's own fork
         # mechanism), so neither the producer's cached opening authority nor any producer-level memo the existing
         # consumers fill (paint, dimension, viewport proofs) is touched by an assessment.
-        self._forks: dict = {}
+        self._forks: dict = {}  # compatibility: never stores a fork; all enabled calls re-authenticate
 
     def _fork_for(self, revision_id: str, published):
         """An independent replay whose revision, snapshot and visible observation ids equal the original's."""
-        if revision_id not in self._forks:
-            try:
-                fork, _ = self._source.fork_native_source_shadow(revision_id)
-                replayed = fork.published_snapshot_for_revision(revision_id)
-                same = (replayed is not None
-                        and replayed.revision.source_sha256 == published.revision.source_sha256
-                        and replayed.snapshot.snapshot_id == published.snapshot.snapshot_id
-                        and tuple(replayed.visible_observation_ids) == tuple(published.visible_observation_ids))
-                self._forks[revision_id] = fork if same else None
-            except (ValueError, RuntimeError):
-                self._forks[revision_id] = None
-        return self._forks[revision_id]
+        # A prior fork cannot authenticate a later call: even the same revision id may
+        # have a revoked, replaced or transiently unavailable source inventory.
+        # Re-fork on EVERY enabled assessment, without retaining an authority cache.
+        try:
+            fork, _ = self._source.fork_native_source_shadow(revision_id)
+            replayed = fork.published_snapshot_for_revision(revision_id)
+            same = (replayed is not None
+                    and replayed.revision.source_sha256 == published.revision.source_sha256
+                    and replayed.snapshot.snapshot_id == published.snapshot.snapshot_id
+                    and tuple(replayed.visible_observation_ids) == tuple(published.visible_observation_ids))
+            return fork if same else None
+        except (ValueError, RuntimeError):
+            return None
 
     def _disabled(self) -> StripStructuralAssessment:
         return StripStructuralAssessment(
