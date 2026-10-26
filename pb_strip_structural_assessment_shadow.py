@@ -480,9 +480,12 @@ class StripStructuralAssessmentShadow:
                 continue
             # A malformed same-page published observation is a source negative,
             # not an absent rival. Never omit it from the terminal census.
-            if len(observation.geometry) != 4:
+            raw_geometry = observation.geometry
+            if (type(raw_geometry) not in (tuple, list) or len(raw_geometry) != 4
+                    or any(type(value) not in (int, float) or not math.isfinite(value)
+                           for value in raw_geometry)):
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
-            geometry = tuple(float(v) for v in observation.geometry)
+            geometry = tuple(float(value) for value in raw_geometry)
             primitive = primitives.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
             verified = (primitive is not None
                         and geometry == (float(primitive["x1"]), float(primitive["y1"]),
