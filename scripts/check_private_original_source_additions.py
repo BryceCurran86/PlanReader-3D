@@ -42,10 +42,12 @@ class PinnedOriginals(NamedTuple):
     sha256_by_size: dict[int, frozenset[str]]
 
 
-def _normalized_git_path(raw: str) -> str:
+def _normalized_git_path(raw: str, *, git_path: bool = False) -> str:
     if type(raw) is not str or not raw or "\x00" in raw:
         raise ValueError("Invalid changed-path record")
-    path = raw.replace("\\", "/")
+    # Git diff -z emits POSIX paths: a backslash is a literal filename byte.
+    # Keep Windows separator normalization for non-Git helper callers only.
+    path = raw if git_path else raw.replace("\\", "/")
     if (
         path.startswith("/")
         or ":" in path.split("/", 1)[0]
@@ -121,6 +123,7 @@ def source_addition_findings(
     *,
     pinned: PinnedOriginals | None = None,
     root: Path | None = None,
+    git_path: bool = False,
 ) -> tuple[tuple[str, str], ...]:
     """Return sorted (changed path, reason) pairs for protected payloads.
 
@@ -129,7 +132,7 @@ def source_addition_findings(
     """
     found: dict[str, str] = {}
     for raw in paths:
-        normalized = _normalized_git_path(raw)
+        normalized = _normalized_git_path(raw, git_path=git_path)
         path = normalized.casefold()
         name = path.rsplit("/", 1)[-1]
         parts = path.split("/")
@@ -161,9 +164,12 @@ def blocked_source_additions(
     *,
     pinned: PinnedOriginals | None = None,
     root: Path | None = None,
+    git_path: bool = False,
 ) -> tuple[str, ...]:
     """Report changed protected source payloads, never delete files."""
-    return tuple(raw for raw, _ in source_addition_findings(paths, pinned=pinned, root=root))
+    return tuple(raw for raw, _ in source_addition_findings(
+        paths, pinned=pinned, root=root, git_path=git_path,
+    ))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # -z is used by our caller to retain spaces and original Git paths. A
     # newline-stream fallback supports manual audits, not CI's source proof.
-    if b"\x00" in payload:
+    git_path = b"\x00" in payload
+    if git_path:
         paths = [
             item.decode("utf-8", errors="strict")
             for item in payload.split(b"\x00") if item
@@ -191,7 +198,9 @@ def main(argv: list[str] | None = None) -> int:
         ]
     try:
         pinned = load_pinned_originals(args.root)
-        findings = source_addition_findings(paths, pinned=pinned, root=args.root)
+        findings = source_addition_findings(
+            paths, pinned=pinned, root=args.root, git_path=git_path,
+        )
     except ValueError as exc:
         print(f"Private original-source addition gate failed: {exc}", file=sys.stderr)
         return 1
