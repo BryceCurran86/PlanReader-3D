@@ -263,3 +263,99 @@ def test_missing_original_receipt_refuses_race_with_new_source(
               "--output", str(output)])
     assert not output.exists()
     assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink", "dangling_symlink"])
+def test_nonregular_original_path_is_not_misreported_as_missing(
+    tmp_path: Path, kind: str,
+) -> None:
+    original = tmp_path / "original.pdf"
+    if kind == "directory":
+        original.mkdir()
+    else:
+        target = tmp_path / "other.pdf"
+        if kind == "symlink":
+            target.write_bytes(b"%PDF-unrelated")
+        original.symlink_to(target)
+    with pytest.raises(ValueError, match="not a regular file"):
+        classify_original_source_preflight(original, EXPECTED)
+    assert original.is_symlink() or original.is_dir()
+
+
+@pytest.mark.parametrize("failure", [PermissionError, OSError])
+@pytest.mark.parametrize("initially_present", [False, True])
+def test_uninspectable_original_cannot_become_source_blocked(
+    tmp_path: Path, monkeypatch, failure, initially_present: bool,
+) -> None:
+    from tools import gpt3_original_source_preflight as preflight
+    original = tmp_path / "private-original.pdf"
+    if initially_present:
+        original.write_bytes(b"%PDF-unchanged")
+    real_lstat = Path.lstat
+
+    def deny_source(self, *args, **kwargs):
+        if self == original:
+            raise failure("inaccessible original or parent")
+        return real_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", deny_source)
+    with pytest.raises(ValueError, match="original source path cannot be inspected"):
+        classify_original_source_preflight(original, EXPECTED)
+    receipt = {
+        "status": SOURCE_PRESENT if initially_present else SOURCE_BLOCKED,
+        "actual_sha256": sha256(b"%PDF-unchanged").hexdigest(),
+    }
+    with pytest.raises(ValueError, match="original source path cannot be inspected"):
+        preflight._assert_receipt_source_unchanged(original, receipt)
+
+
+@pytest.mark.parametrize("replacement", ["directory", "dangling_symlink"])
+def test_missing_source_nonregular_race_rolls_back_diagnostic(
+    tmp_path: Path, monkeypatch, replacement: str,
+) -> None:
+    from tools import gpt3_safe_original_report_output as publish
+    original = tmp_path / "missing-original.pdf"
+    output = tmp_path / "report.json"
+    actual_link = publish.os.link
+
+    def replace_source_after_link(staged, destination):
+        actual_link(staged, destination)
+        if replacement == "directory":
+            original.mkdir()
+        else:
+            original.symlink_to(tmp_path / "absent-target.pdf")
+
+    monkeypatch.setattr(publish.os, "link", replace_source_after_link)
+    with pytest.raises(ValueError, match="not a regular file"):
+        main(["--pdf", str(original), "--expected-sha256", EXPECTED,
+              "--output", str(output)])
+    assert not output.exists()
+    assert original.is_dir() if replacement == "directory" else original.is_symlink()
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_present_source_replaced_with_same_digest_symlink_cannot_publish(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_safe_original_report_output as publish
+    original = tmp_path / "original.pdf"
+    identical = tmp_path / "identical.pdf"
+    payload = b"%PDF-original-unchanged"
+    original.write_bytes(payload)
+    identical.write_bytes(payload)
+    output = tmp_path / "report.json"
+    actual_link = publish.os.link
+
+    def replace_source_after_link(staged, destination):
+        actual_link(staged, destination)
+        original.unlink()
+        original.symlink_to(identical)
+
+    monkeypatch.setattr(publish.os, "link", replace_source_after_link)
+    with pytest.raises(ValueError, match="not a regular file"):
+        main(["--pdf", str(original),
+              "--expected-sha256", sha256(payload).hexdigest(),
+              "--output", str(output)])
+    assert not output.exists()
+    assert identical.read_bytes() == payload
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
