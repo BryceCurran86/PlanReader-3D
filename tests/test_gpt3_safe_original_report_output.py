@@ -179,7 +179,7 @@ def test_same_byte_report_replacement_between_identity_and_read_is_rejected(
     output = tmp_path / "report.json"
     replacement = tmp_path / "other-report.json"
     source = tmp_path / "original.pdf"
-    payload = '{"verified":true}\\n'
+    payload = '{"verified":true}\n'
     source.write_bytes(b"%PDF-private-source-unchanged")
     replacement.write_text(payload, encoding="utf-8")
     real_samefile = Path.samefile
@@ -229,7 +229,7 @@ def test_same_byte_report_replacement_after_descriptor_read_is_rejected(
     """Rechecking the published path catches a post-read inode swap."""
     output = tmp_path / "report.json"
     replacement = tmp_path / "replacement.json"
-    payload = '{"verified":"same-bytes"}\\n'
+    payload = '{"verified":"same-bytes"}\n'
     replacement.write_text(payload, encoding="utf-8")
     real_fstat = pub.os.fstat
     reads = 0
