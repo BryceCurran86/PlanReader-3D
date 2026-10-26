@@ -158,6 +158,15 @@ def _assert_final_visible_grid_ink(page, drawings, indices):
                 for glyph in glyphs:
                     if not isinstance(glyph, (tuple, list)) or len(glyph) < 4:
                         raise ValueError("invalid later source text glyph")
+                    codepoint = glyph[0]
+                    if (type(codepoint) is not int
+                            or not 0 <= codepoint <= 0x10ffff):
+                        raise ValueError("invalid later source text glyph")
+                    # Spaces have advance boxes but no painted glyph ink.
+                    # A CAD-wide text span crossing the ruled grid is not
+                    # proof that any visible character overpainted that grid.
+                    if chr(codepoint).isspace():
+                        continue
                     try:
                         glyph_box = tuple(float(v) for v in glyph[3])
                     except (TypeError, ValueError, OverflowError):
