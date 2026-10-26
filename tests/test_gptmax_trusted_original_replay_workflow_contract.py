@@ -12,7 +12,7 @@ HEADS = {
     "host": "b58d435efa65e003ba55754c2bdc152df5c91e8b",
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
-    "cache": "9f1a56b3380bee8bb9bd68d7d1e3a5e4af3aebcb",
+    "cache": "6a937ad7d44da2c63e2fae04492c332a03b3b623",
     "vertical": "d43de44b05b70944588c611b02da44a69b4aa533",
     "horizontal": "8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0",
 }
@@ -129,8 +129,8 @@ def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
         if step.get("name", "").startswith("Authenticate immutable")
     )
     assert "cache)" in guard
-    assert "approved_base=e2a5dc6afa728adfd1886fc592421c6bd9eec1e9" in guard
-    assert "approved_head=9f1a56b3380bee8bb9bd68d7d1e3a5e4af3aebcb" in guard
+    assert "approved_base=f480fc84d2e7486319e9b52a3a72790bb7435e69" in guard
+    assert "approved_head=6a937ad7d44da2c63e2fae04492c332a03b3b623" in guard
     assert "focused_test=tests/test_raster_opening_cached_source_integrity.py" in guard
     assert 'git checkout --detach "$approved_head"' not in guard
     assert "github.event.pull_request" not in source
