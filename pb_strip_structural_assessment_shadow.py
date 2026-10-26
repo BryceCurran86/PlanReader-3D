@@ -470,9 +470,13 @@ class StripStructuralAssessmentShadow:
         for observation_id in published.visible_observation_ids:
             result = visibility.resolve_visible(selector(observation_id))
             observation = result.observation
+            # A failed published source observation is evidence against the
+            # completeness of the terminal/rival census. Never silently drop
+            # it and then promote a strip using only the surviving ink.
             if (result.status is not EvidenceResolutionStatus.CORROBORATED
-                    or result.proposition != VISIBLE_SOURCE_OBSERVATION_EXISTS or observation is None
-                    or str(observation.page_id) != str(page_id) or len(observation.geometry) != 4):
+                    or result.proposition != VISIBLE_SOURCE_OBSERVATION_EXISTS or observation is None):
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
+            if str(observation.page_id) != str(page_id) or len(observation.geometry) != 4:
                 continue
             geometry = tuple(float(v) for v in observation.geometry)
             primitive = primitives.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
@@ -490,7 +494,7 @@ class StripStructuralAssessmentShadow:
         floor_plans = [v for v in segmented if v.status == ViewportSegmentationStatus.RESOLVED.value
                        and v.bounding_box is not None and v.view_type == "floor_plan"]
         by_id = {r.observation_id: r for r in page_segments}
-        nominated = tuple(sorted(set(nominated_observation_ids)))
+        nominated = tuple(sorted(nominated_observation_ids))
         viewport: Optional[ViewportRef] = None
         if nominated and all(i in by_id for i in nominated):
             xs = [v for i in nominated for v in (by_id[i].geometry[0], by_id[i].geometry[2])]
