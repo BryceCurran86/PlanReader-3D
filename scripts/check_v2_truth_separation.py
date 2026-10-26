@@ -45,6 +45,10 @@ _ROOT_RUNTIME_MANIFESTS = frozenset({
     # production execution, even though neither has a Python/JS suffix.
     "Dockerfile",
     "render.yaml",
+    # The shipped Windows entrypoint installs runtime dependencies and starts
+    # the same commercial Streamlit app. It is executable release control,
+    # not a documentation-only batch file.
+    "RUN_PLANREADER_WINDOWS.bat",
 })
 
 
