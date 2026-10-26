@@ -85,3 +85,72 @@ def test_input_read_error_fails_closed(tmp_path: Path, monkeypatch):
     with pytest.raises(ValueError, match="four-project input changed"):
         report._assert_four_project_publication_inputs_stable(((original, digest),))
     assert original.read_bytes() == b"%PDF-protected"
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, OSError])
+@pytest.mark.parametrize("was_present", [False, True])
+def test_uninspectable_input_fails_closed_before_and_after_publication(
+    tmp_path: Path, monkeypatch, error_type, was_present: bool,
+):
+    """Python 3.14 pathlib predicates can hide these lstat errors."""
+    input_path = tmp_path / "private-source.pdf"
+    if was_present:
+        input_path.write_bytes(b"%PDF-original-unchanged")
+    digest = sha256(input_path.read_bytes()).hexdigest() if was_present else None
+    receipt = ((input_path, digest),)
+    assert_unchanged(receipt)
+    original_lstat = Path.lstat
+
+    def unavailable(self, *args, **kwargs):
+        if self == input_path:
+            raise error_type("inaccessible parent or filesystem")
+        return original_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", unavailable)
+    # This assertion is the exact callback invoked both before publication
+    # and by write_new_diagnostic after its exclusive output link.
+    for _ in range(2):
+        with pytest.raises(ValueError, match="four-project input changed"):
+            assert_unchanged(receipt)
+    if was_present:
+        assert input_path.read_bytes() == b"%PDF-original-unchanged"
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, OSError])
+@pytest.mark.parametrize("was_present", [False, True])
+def test_snapshot_rejects_uninspectable_original_or_signed_path(
+    tmp_path: Path, monkeypatch, error_type, was_present: bool,
+):
+    from tools import report_gpt3_four_project_evidence as report
+
+    frozen_root = tmp_path / "frozen"
+    frozen_root.mkdir()
+    manifest = frozen_root / "manifest.json"
+    if was_present:
+        manifest.write_bytes(b"existing-frozen-input-unchanged")
+    monkeypatch.setattr(report, "FROZEN_ROOT", frozen_root)
+    monkeypatch.setattr(report, "load_suite_manifests", lambda _root: [])
+    original_lstat = Path.lstat
+
+    def unavailable(self, *args, **kwargs):
+        if self == manifest:
+            raise error_type("inaccessible parent or filesystem")
+        return original_lstat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", unavailable)
+    with pytest.raises(ValueError, match="publication input path cannot be inspected"):
+        report._snapshot_four_project_publication_inputs(
+            source_dir=tmp_path / "originals", sealed_dir=tmp_path / "sealed",
+            identity_map_dir=tmp_path / "maps", customer_dir=tmp_path / "customer",
+        )
+    if was_present:
+        assert manifest.read_bytes() == b"existing-frozen-input-unchanged"
+
+
+def test_dangling_symlink_is_not_a_missing_input(tmp_path: Path):
+    from tools import report_gpt3_four_project_evidence as report
+    missing = tmp_path / "original.pdf"
+    missing.symlink_to(tmp_path / "never-existed.pdf")
+    with pytest.raises(ValueError, match="four-project input changed"):
+        assert_unchanged(((missing, None),))
+    assert report._publication_input_path_kind(missing) == "symlink"
