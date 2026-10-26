@@ -127,6 +127,25 @@ def _assert_final_visible_grid_ink(page, drawings, indices):
             x0, y0, x1, y1 = bounds
             if x0 <= x <= x1 and y0 < high and y1 > low:
                 raise ValueError("original grid boundary overpainted by later image")
+        # A later stroke can repaint the same grid path (even black-on-black)
+        # without producing a fill-path or image. The final dark raster then
+        # cannot prove which source stroke owns the boundary. Use the original
+        # paint-order log, not get_drawings() indices or nearest ink. Ignore
+        # ordinary thin transverse grid intersections: their bbox overlap
+        # along this vertical source segment is no greater than two original
+        # stroke widths. Longer overlap is ambiguous and must fail closed.
+        source_width = float(drawings[index]["width"])
+        for kind, bounds in paint_log[source_seq + 1:]:
+            if kind != "stroke-path":
+                continue
+            if (len(bounds) != 4 or
+                    any(type(v) not in (int, float) or not isfinite(v)
+                        for v in bounds)):
+                raise ValueError("unverifiable later source stroke bbox")
+            x0, y0, x1, y1 = bounds
+            if (x0 <= x <= x1 and
+                    min(y1, high) - max(y0, low) > 2 * source_width):
+                raise ValueError("original grid boundary overpainted by later stroke")
         # A later opaque painted object can conceal a perfectly authentic
         # earlier vector path. Its bounding box is a conservative veto.
         for later in drawings[index + 1:]:
