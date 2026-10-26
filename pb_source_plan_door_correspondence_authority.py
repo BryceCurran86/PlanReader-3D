@@ -125,11 +125,14 @@ def pair_trusted_original_door_codes(
         if len(owners) > 1:
             shared_schedule_observation_codes.update(owners)
 
-    # The schedule's complete native census also contains drawing DETAIL
-    # codes. A foreign-only code must remain in its original source receipt,
-    # but cannot create a phantom schedule/plan pair unless it independently
-    # occurs on the plan. Real unparsed TABLE codes remain explicit blockers.
-    universe = sorted(set(plan_by_code) | set(schedule_by_code) | unparsed_codes)
+    # Keep the FULL native source code census in the pairing audit, including
+    # foreign-only DETAIL codes as explicit unresolved negatives. A source
+    # receipt is never an installed door; no code may disappear merely because
+    # no authenticated TABLE row or plan tag exists.
+    universe = sorted(
+        set(plan_by_code) | original_census_codes | set(schedule_by_code)
+        | unparsed_codes
+    )
     rows: list[SourcePlanDoorCodePair] = []
     unresolved: list[str] = []
     for code in universe:
