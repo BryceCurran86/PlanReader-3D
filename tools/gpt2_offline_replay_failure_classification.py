@@ -31,7 +31,7 @@ PUBLIC_REASON_CODES = frozenset({
 # Patterns are only classification hints. A malicious test can deliberately
 # print matching text, so no pattern ever grants source/FIRM/score authority.
 _SOURCE_ACCESS = re.compile(
-    r"(?:FileNotFoundError|PermissionError|Errno\\s*(?:2|13))"
+    r"(?:FileNotFoundError|PermissionError|Errno\s*(?:2|13))"
     r".{0,320}(?:documents/sources|PLANREADER_MARYBOROUGH_ORIGINAL_PDF)",
     re.IGNORECASE | re.DOTALL,
 )
@@ -46,8 +46,8 @@ _PYTEST_USAGE = re.compile(
     re.IGNORECASE,
 )
 _ASSERTION = re.compile(
-    r"(?:^FAILED\\s+|^E\\s+AssertionError|"
-    r"\\b[1-9][0-9]* failed\\b|\\bAssertionError\\b)",
+    r"(?:^FAILED\s+|^E\s+AssertionError|"
+    r"\b[1-9][0-9]* failed\b|\bAssertionError\b)",
     re.IGNORECASE | re.MULTILINE,
 )
 
