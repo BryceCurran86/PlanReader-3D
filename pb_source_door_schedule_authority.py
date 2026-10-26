@@ -19,9 +19,10 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-# Printed schedule identities require at least two numeric digits; an unpadded
-# drawing detail (e.g. D3) is retained in source receipts, not a door row.
-_DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]+)$")
+# A positive one-digit D1/D3 can be a genuine printed table code. Whether a
+# glyph is a TABLE row or a foreign DETAIL comes from source-owned geometry,
+# never digit padding. D0/D00 remain invalid.
+_DOOR_CODE = re.compile(r"^D(?:0[1-9]|[1-9][0-9]*)$")
 # Wider D-digit tokens are negative SOURCE evidence only, never schedule codes.
 _DOOR_LIKE_TOKEN = re.compile(r"^D[0-9]+$")
 _NUMERIC = re.compile(r"^[1-9][0-9]*$")
@@ -478,7 +479,7 @@ def inspect_published_door_schedule(
     for block, members in source_blocks.items():
         if members and _DOOR_CODE.fullmatch(members[0].literal):
             code_blocks[members[0].literal].append(block)
-    # A native source Dxx drawing/detail remains in the source universe and
+    # A native source D-code drawing/detail remains in the source universe and
     # its exact observation ID stays audit-visible. Only authenticated TABLE
     # membership may count towards uniqueness or an incomplete table census.
     scoped_code_blocks=defaultdict(list)
@@ -499,9 +500,9 @@ def inspect_published_door_schedule(
         for member in members[1:]:
             if _DOOR_LIKE_TOKEN.fullmatch(member.literal):
                 secondary_table_codes[block].add(member.literal)
-    # An unpadded/otherwise invalid D-digit glyph INSIDE a genuine table
-    # cannot disappear from the printed-table completeness proof. Foreign
-    # drawing DETAIL words such as the original D3 are retained but harmless.
+    # A malformed D-digit glyph (e.g. D0/D00) INSIDE a genuine table
+    # cannot disappear from the printed-table completeness proof. Genuine
+    # single-digit TABLE codes are valid; foreign DETAIL D3 remains a receipt.
     noncanonical_table_codes={
         word.literal for block,members in source_blocks.items()
         if block in table_member_blocks for word in members
