@@ -23,8 +23,9 @@ from pb_source_door_schedule_authority import (
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-# Share the exact canonical table lexeme policy: foreign unpadded D3
-# remains in raw producer receipts but cannot become a plan-door code.
+# Share the source schedule's positive-code syntax, not a digit-padding
+# shortcut for physical role. A foreign D3 remains source-visible; without
+# an authenticated table row its plan mention is unresolved, never a door.
 
 @dataclass(frozen=True)
 class SourcePlanDoorCodePair:
@@ -124,10 +125,11 @@ def pair_trusted_original_door_codes(
         if len(owners) > 1:
             shared_schedule_observation_codes.update(owners)
 
-    universe = sorted(
-        set(plan_by_code) | original_census_codes | set(schedule_by_code)
-        | unparsed_codes
-    )
+    # The schedule's complete native census also contains drawing DETAIL
+    # codes. A foreign-only code must remain in its original source receipt,
+    # but cannot create a phantom schedule/plan pair unless it independently
+    # occurs on the plan. Real unparsed TABLE codes remain explicit blockers.
+    universe = sorted(set(plan_by_code) | set(schedule_by_code) | unparsed_codes)
     rows: list[SourcePlanDoorCodePair] = []
     unresolved: list[str] = []
     for code in universe:
