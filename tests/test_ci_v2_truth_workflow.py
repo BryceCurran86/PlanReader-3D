@@ -14,10 +14,11 @@ def test_v2_truth_separation_runs_for_pull_requests_and_pushes() -> None:
     assert "${{ github.event.before }}" in WORKFLOW
     assert "${{ github.event.after }}" in WORKFLOW
     command = (
-        'git diff --name-only "$BASE_SHA" "$HEAD_SHA" '
+        'git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" '
         '| python scripts/check_v2_truth_separation.py'
     )
     assert WORKFLOW.count(command) == 2
+    assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' not in WORKFLOW
 
 
 def test_push_v2_truth_separation_fails_closed_on_invalid_range() -> None:
