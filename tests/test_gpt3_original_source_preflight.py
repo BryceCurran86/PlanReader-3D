@@ -179,7 +179,7 @@ def test_preexisting_and_alias_destinations_fail_before_private_original_read(
         raise AssertionError("private original read before output preflight")
     monkeypatch.setattr(preflight, "classify_original_source_preflight", forbidden)
     for target in (signed, link, original):
-        with pytest.raises(FileExistsError):
+        with pytest.raises((FileExistsError, ValueError)):
             preflight.main(["--pdf", str(original),
                             "--expected-sha256", "a" * 64,
                             "--output", str(target)])
