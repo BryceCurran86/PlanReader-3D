@@ -106,8 +106,13 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
             return False
         if Counter(char for char, _ in selected) != Counter(text):
             return False
-        return (abs(min(b[0] for _, b in selected) - box[0]) <= .5
-                and abs(max(b[2] for _, b in selected) - box[2]) <= .5)
+        # Extracted word boxes include font advance/bearing margins. Source
+        # ink need not TOUCH those edges: require complete matching glyph
+        # coverage INSIDE the original word box, never infer global snap.
+        return (min(b[0] for _, b in selected) >= box[0] - .1
+                and max(b[2] for _, b in selected) <= box[2] + .1
+                and min(b[1] for _, b in selected) >= box[1] - .1
+                and max(b[3] for _, b in selected) <= box[3] + .1)
     except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError):
         return False
 

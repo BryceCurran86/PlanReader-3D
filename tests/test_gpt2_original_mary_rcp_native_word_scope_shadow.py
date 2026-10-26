@@ -166,6 +166,10 @@ def test_real_original_page9_native_source_rivals_if_available():
         'SOURCE_NON_CEILING_CODE_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
     assert grid.original_text == 'GRID'
     assert grid.original_source_role == _expected_ceiling_lexical_role(grid, 'GRID')
+    # Actual p9 CAD fonts include native advance/bearing margins. The
+    # original painted mark must survive the ink veto without being promoted
+    # to a physical ceiling zone or a measured quantity.
+    assert grid.original_ceiling_code_visible_ink_verified
     assert height.original_text == '2400'
     assert height.original_source_role in (
         'SOURCE_NUMERIC_CALLOUT_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
@@ -180,6 +184,7 @@ def test_real_original_page9_native_source_rivals_if_available():
         mixed_ipf1, 'IPF1')
     assert isolated_ipf1.original_source_role == _expected_ceiling_lexical_role(
         isolated_ipf1, 'IPF1')
+    assert isolated_ipf1.original_ceiling_code_visible_ink_verified
     assert grid.original_word_address != legend_grid.original_word_address
     assert mixed_ipf1.original_word_address != isolated_ipf1.original_word_address
 
@@ -319,3 +324,17 @@ def test_original_visible_grid_glyph_survives_translation_and_unrelated_paint(tr
     assert not result.physical_ceiling_zone_authorized
     assert not result.metric_area_authorized
     assert not result.firm_ceiling_quantity_authorized
+
+
+
+def test_native_font_advance_margin_does_not_hide_complete_visible_source_ink():
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    original, _ = _native_code_paint_case()
+    with fitz.open(stream=original, filetype="pdf") as pdf:
+        word = list(pdf[0].get_text("words")[0])
+        # A source word may include a bearing margin larger than the
+        # painted glyph's left edge; the glyph remains fully source-owned.
+        word[0] -= .75
+        assert _visible_native_ceiling_code_ink(pdf[0], tuple(word))
