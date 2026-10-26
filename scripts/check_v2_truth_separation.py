@@ -1,6 +1,7 @@
 """Fail CI when active Full Plan V2 truth and production code change together."""
 from __future__ import annotations
 
+import argparse
 from pathlib import PurePosixPath
 import sys
 from typing import Iterable, Sequence
@@ -132,10 +133,39 @@ def _stdin_paths(lines: Iterable[str]) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def main() -> int:
-    changed_paths = _stdin_paths(sys.stdin)
+def _stdin_paths_from_bytes(payload: bytes, *, require_nul: bool = False) -> list[str]:
+    """Parse Git -z paths losslessly; preserve the legacy newline CLI for audits.
+
+    Git's ordinary --name-only output C-quotes non-ASCII, tab and newline
+    filenames, so splitting its text output can conceal a frozen V2 path.
+    CI MUST pass --nul and git diff -z; reject malformed nonempty streams.
+    """
+    if not payload:
+        return []
+    if b"\x00" not in payload:
+        if require_nul:
+            raise ValueError("V2 separation requires NUL-delimited git diff -z paths")
+        return _stdin_paths(payload.decode("utf-8").splitlines())
+    if not payload.endswith(b"\x00"):
+        raise ValueError("Incomplete NUL-delimited V2 changed-path stream")
+    return [part.decode("utf-8") for part in payload.split(b"\x00")[:-1] if part]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--nul", action="store_true",
+        help="require lossless NUL-delimited git diff -z input (mandatory in CI)",
+    )
+    args = parser.parse_args(argv)
     try:
+        changed_paths = _stdin_paths_from_bytes(
+            sys.stdin.buffer.read(), require_nul=args.nul,
+        )
         check_paths(changed_paths)
+    except (ValueError, UnicodeError) as exc:
+        print(f"Full Plan V2 truth / production separation input invalid: {exc}", file=sys.stderr)
+        return 1
     except SystemExit as exc:
         print(str(exc), file=sys.stderr)
         return 1
