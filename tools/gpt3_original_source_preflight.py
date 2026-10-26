@@ -45,8 +45,8 @@ def _original_source_path_kind(pdf_path: Path) -> str:
     return "regular"
 
 
-def _stable_original_digest(pdf_path: Path) -> str:
-    """Hash only the same regular source inode that was inspected.
+def _stable_original_digest(pdf_path: Path) -> tuple[str, tuple[int, ...]]:
+    """Hash one regular inode and retain its private identity for publication.
 
     A second Path.read_bytes() after lstat can follow a replaced symlink or
     hash an unrelated same-byte file. Open a descriptor without following the
@@ -80,12 +80,16 @@ def _stable_original_digest(pdf_path: Path) -> str:
         )
     ):
         raise ValueError("original source changed during preflight")
-    return digest.hexdigest()
+    return digest.hexdigest(), tuple(
+        getattr(before, field) for field in identity_and_content
+    )
 
 
 def classify_original_source_preflight(
     pdf_path: Path,
     expected_sha256: str,
+    *,
+    _capture_source_identity: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(pdf_path, Path):
         raise TypeError("pdf_path must be a Path")
@@ -104,7 +108,10 @@ def classify_original_source_preflight(
             reason=ORIGINAL_PDF_ABSENT,
         )
         return receipt
-    actual = _stable_original_digest(pdf_path)
+    actual, identity = _stable_original_digest(pdf_path)
+    # Private in-memory publication witness, never a persisted receipt field.
+    if _capture_source_identity:
+        receipt["_source_identity"] = identity
     receipt["actual_sha256"] = actual
     if actual != expected:
         receipt.update(
@@ -131,7 +138,10 @@ def _protected_report_roots(pdf: Path) -> tuple[Path, ...]:
     )
 
 
-def _assert_receipt_source_unchanged(pdf: Path, receipt: dict[str, Any]) -> None:
+def _assert_receipt_source_unchanged(
+    pdf: Path, receipt: dict[str, Any], *,
+    expected_source_identity: tuple[int, ...] | None = None,
+) -> None:
     """A stale source status must never survive exclusive diagnostic publication."""
     kind = _original_source_path_kind(pdf)
     if receipt["status"] == SOURCE_BLOCKED:
@@ -140,7 +150,12 @@ def _assert_receipt_source_unchanged(pdf: Path, receipt: dict[str, Any]) -> None
         return
     if kind != "regular":
         raise ValueError("original source disappeared during preflight")
-    if _stable_original_digest(pdf) != receipt["actual_sha256"]:
+    actual, identity = _stable_original_digest(pdf)
+    if (
+        expected_source_identity is None
+        or identity != expected_source_identity
+        or actual != receipt["actual_sha256"]
+    ):
         raise ValueError("original source changed during preflight")
 
 
@@ -154,12 +169,19 @@ def main(argv: list[str] | None = None) -> int:
     # Refuse an occupied/aliased destination before reading private PDF bytes.
     if args.output is not None:
         preflight_new_diagnostic(args.output, protected_roots=protected)
-    receipt = classify_original_source_preflight(args.pdf, args.expected_sha256)
+    receipt = classify_original_source_preflight(
+        args.pdf, args.expected_sha256, _capture_source_identity=True,
+    )
+    # A SOURCE_PRESENT/MISMATCH report must prove the *same inode* across
+    # both authenticated reads; do not leak filesystem identity to JSON/stdout.
+    source_identity = receipt.pop("_source_identity", None)
     text = json.dumps(receipt, sort_keys=True) + "\n"
     if args.output is not None:
         write_new_diagnostic(
             args.output, text, protected_roots=protected,
-            verify_inputs=lambda: _assert_receipt_source_unchanged(args.pdf, receipt),
+            verify_inputs=lambda: _assert_receipt_source_unchanged(
+                args.pdf, receipt, expected_source_identity=source_identity,
+            ),
         )
     sys.stdout.write(text)
     status = receipt["status"]
