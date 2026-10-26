@@ -256,3 +256,66 @@ def test_one_source_code_with_one_height_word_remains_lexical_only():
     assert result.original_source_role=="SOURCE_CEILING_CODE_WORD_CANDIDATE"
     assert not result.metric_area_authorized
     assert not result.firm_ceiling_quantity_authorized
+
+
+def _native_code_paint_case(*, render_mode=0, colour=(0, 0, 0),
+                            full_cover=False, partial_cover=False,
+                            unrelated_cover=False, double_paint=False,
+                            translate=(0., 0.)):
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    x, y = 180. + translate[0], 250. + translate[1]
+    page.insert_text((x, y), "GRID", fontsize=10, color=colour,
+                     render_mode=render_mode)
+    if double_paint:
+        page.insert_text((x, y), "GRID", fontsize=10)
+    if full_cover:
+        page.draw_rect(fitz.Rect(x - 12, y - 22, x + 66, y + 9),
+                       color=None, fill=(1, 1, 1))
+    if partial_cover:
+        page.draw_rect(fitz.Rect(x + 6, y - 10, x + 12, y - 1),
+                       color=None, fill=(1, 1, 1))
+    if unrelated_cover:
+        page.draw_rect(fitz.Rect(410, 400, 490, 490),
+                       color=None, fill=(1, 1, 1))
+    data = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=data, filetype="pdf") as original:
+        candidates = [w for w in original[0].get_text("words") if w[4] == "GRID"]
+    assert len(candidates) == (2 if double_paint else 1)
+    return data, tuple(candidates[0][5:8])
+
+
+@pytest.mark.parametrize("style", [
+    {"render_mode": 3},
+    {"colour": (1, 1, 1)},
+    {"full_cover": True},
+    {"partial_cover": True},
+    {"double_paint": True},
+])
+def test_unpainted_occluded_or_duplicate_native_grid_never_lexically_wins(style):
+    source, address = _native_code_paint_case(**style)
+    unchanged = sha256(source).hexdigest()
+    result = _go(source, address)
+    assert sha256(source).hexdigest() == unchanged
+    assert result.original_text == "GRID"
+    assert result.original_source_role == "SOURCE_CEILING_CODE_INK_UNRESOLVED"
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.original_material_definition_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("translation", [(0.,0.), (25.,13.), (48.,-8.)])
+def test_original_visible_grid_glyph_survives_translation_and_unrelated_paint(translation):
+    source, address = _native_code_paint_case(
+        translate=translation, unrelated_cover=True,
+    )
+    result = _go(source, address)
+    assert result.original_source_role == "SOURCE_CEILING_CODE_WORD_CANDIDATE"
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
