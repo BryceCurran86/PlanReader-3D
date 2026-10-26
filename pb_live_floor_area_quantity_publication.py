@@ -467,12 +467,28 @@ def publish_live_canonical_room_area_quantities(
             )
         ):
             continue
+        # The original floor producer derives both floor identities from
+        # the document and PHYSICAL room, not from a copied canonical label.
+        # A well-formed foreign physical_room_id must never become the
+        # commercial room owner merely by sharing the same canonical face.
+        expected_floor_id = stable_contract_id(
+            "physical_room_floor_surface",
+            {
+                "document_id": room.document_id,
+                "physical_room_id": room.physical_room_id,
+                "surface_role": "floor",
+            },
+            digest_chars=32,
+        )
         if (
             room.canonical_room_id != original_floor.room_entity_id
             or room.document_id != original_floor.document_id
             or room.snapshot_id != original_floor.snapshot_id
             or room.source_room_face_record_id
             != original_floor.source_room_face_record_id
+            or original_floor.canonical_floor_id != expected_floor_id
+            or original_floor.physical_floor_surface_id != expected_floor_id
+            or metadata.get("physical_floor_surface_id") != expected_floor_id
         ):
             continue
         # Reuse the *same* valid upstream room-area evidence that was promoted
