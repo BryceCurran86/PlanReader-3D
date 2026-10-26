@@ -23,6 +23,7 @@ from pb_physical_opening_authority import (
     AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
     OPENING_CANDIDATE_VIEWPORT_SCOPE_UNRESOLVED,
+    PHYSICAL_OPENING_EXISTS,
     SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,
     VISIBLE_SOURCE_AUTHORITY_REQUIRED,
     VISIBLE_WALL_CONTINUATION_REQUIRED,
@@ -563,7 +564,24 @@ class StripStructuralAssessmentShadow:
                     return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
                 member_status[member] = outcome.status.value
                 record = outcome.existence_record
-                if record is not None and outcome.status is EvidenceResolutionStatus.CORROBORATED:
+                # An existence result is not permission to borrow a positive
+                # record from another document, revision, snapshot or page.
+                # Authenticate the *record* independently of its wrapper
+                # before it can upgrade any whole-strip shadow hypothesis.
+                if outcome.status is EvidenceResolutionStatus.CORROBORATED:
+                    if (record is None
+                            or record.status is not EvidenceResolutionStatus.CORROBORATED
+                            or record.proposition != PHYSICAL_OPENING_EXISTS
+                            or record.document_id != document_id
+                            or record.revision_id != revision_id
+                            or record.source_sha256 != ownership.source_sha256
+                            or record.snapshot_id != ownership.snapshot_id
+                            or record.page_id != str(page_id)
+                            or not record.source_observation_ids
+                            or member not in record.source_observation_ids
+                            or len(record.source_observation_ids) != len(set(record.source_observation_ids))
+                            or any(i not in by_id for i in record.source_observation_ids)):
+                        return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
                     corroborated_sets.add(frozenset(record.source_observation_ids))
         return assess_strip_hypothesis(
             ownership=ownership, viewport=viewport, nominated_ids=nominated, page_segments=page_segments,
