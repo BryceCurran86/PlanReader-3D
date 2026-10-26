@@ -12,6 +12,7 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+from stat import S_ISLNK, S_ISREG
 from typing import Any
 
 import importlib
@@ -476,6 +477,24 @@ def build_four_project_evidence_ledger(
     return result
 
 
+def _publication_input_path_kind(path: Path) -> str:
+    """Classify without pathlib status predicates that can suppress OSError.
+
+    Only FileNotFoundError means missing. Permission errors, invalid parent
+    components and other I/O failures must never become missing receipts.
+    lstat also exposes dangling symlinks rather than following them.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return "missing"
+    if S_ISLNK(mode):
+        return "symlink"
+    if S_ISREG(mode):
+        return "file"
+    return "other"
+
+
 def _snapshot_four_project_publication_inputs(
     *, source_dir: Path, sealed_dir: Path,
     identity_map_dir: Path, customer_dir: Path,
@@ -523,11 +542,15 @@ def _snapshot_four_project_publication_inputs(
         if source in seen:
             continue
         seen.add(source)
-        if source.is_symlink():
+        try:
+            kind = _publication_input_path_kind(source)
+        except OSError as exc:
+            raise ValueError("publication input path cannot be inspected") from exc
+        if kind == "symlink":
             raise ValueError("original or signed publication source is a symlink")
-        if source.is_file():
+        if kind == "file":
             receipts.append((source, _sha256(source)))
-        elif not source.exists():
+        elif kind == "missing":
             receipts.append((source, None))
         else:
             raise ValueError("publication input path is not a regular file")
@@ -538,16 +561,15 @@ def _assert_four_project_publication_inputs_stable(
     expected: tuple[tuple[Path, str | None], ...],
 ) -> None:
     for path, expected_hash in expected:
-        if path.is_symlink():
-            raise ValueError("four-project input changed during report publication")
         try:
+            kind = _publication_input_path_kind(path)
             if expected_hash is None:
-                # Missing source/signed input is a distinct source receipt. An
-                # arriving directory/special file is NOT the same missing file.
-                if path.exists():
+                # Missing remains missing only if lstat proves it absent.
+                # Python 3.14 status predicates can hide permission errors.
+                if kind != "missing":
                     raise ValueError("four-project input changed during report publication")
                 continue
-            if not path.is_file():
+            if kind != "file":
                 raise ValueError("four-project input changed during report publication")
             actual = _sha256(path)
         except OSError as exc:
