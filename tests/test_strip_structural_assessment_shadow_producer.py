@@ -406,3 +406,40 @@ def test_malformed_same_page_visible_rival_geometry_vetoes_positive_strip(monkey
     assert blocked.fragments == () and blocked.terminals == ()
     assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
     assert _assess(source, published, ids) == baseline
+
+
+@pytest.mark.parametrize("corrupt_field", ["source_primitive_ref", "geometry"])
+def test_unverified_same_page_published_rival_cannot_leave_a_positive_strip(monkeypatch, corrupt_field):
+    """A valid-length rival with a broken original primitive join is a source negative."""
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    other = next(oid for oid in published.visible_observation_ids if oid not in ids)
+    visibility = source.authority()
+    original_resolve = visibility.resolve_visible
+    before = _shape(source)
+
+    def corrupt_rival(selector):
+        result = original_resolve(selector)
+        if selector.observation_id == other:
+            assert result.observation is not None
+            observation = result.observation
+            if corrupt_field == "source_primitive_ref":
+                observation = replace(observation, source_primitive_ref="visible:segment:missing-original")
+            else:
+                geometry = observation.geometry
+                observation = replace(observation, geometry=(geometry[0] + 0.125, *geometry[1:]))
+            return replace(result, observation=observation)
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(visibility, "resolve_visible", corrupt_rival)
+        patch.setattr(source, "authority", lambda: visibility)
+        blocked = _assess(source, published, ids)
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _shape(source) == before
+    assert _assess(source, published, ids) == baseline
