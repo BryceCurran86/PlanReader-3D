@@ -297,3 +297,107 @@ def test_later_wide_text_span_whitespace_is_not_painted_grid_occlusion():
     result = _audit(source, words, scope)
     assert result.status is EvidenceResolutionStatus.CANDIDATE
     assert not result.firm_quantity_issued
+
+
+def test_private_original_d02_grid_membership_from_published_source_if_provisioned():
+    """Original p28 source-positive gate, not a door count or synthetic pass.
+
+    The paired printed grid is source evidence, not a prediction or an
+    authority shortcut. All words must come from SourceVisibilityProducer.
+    This intentionally FAILS on private replay if the pinned native parser,
+    glyph trust, or exact source stroke correspondence changes.
+    """
+    import os
+    from pathlib import Path
+
+    from pb_gpt2_native_grid_row_membership_shadow import (
+        audit_published_native_grid_row_shadow,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    loc = os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not loc:
+        pytest.skip("SHA-authenticated private original not provisioned on public CI")
+    original = Path(loc).read_bytes()
+    original_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert sha256(original).hexdigest() == original_sha
+
+    # These eleven exact endpoints are an original p28 printed ruled-row
+    # witness, independently inspected at source SHA above. Find unique native
+    # path addresses afresh: get_drawings() indices may differ by MuPDF version.
+    ends = (
+        (1196.24, 1300.40), (1300.40, 1425.20), (1425.20, 1524.08),
+        (1524.08, 1702.16), (1702.16, 1931.36), (1931.36, 1986.32),
+        (1986.32, 2031.44), (2031.44, 2072.72), (2072.72, 2193.20),
+        (2193.20, 2265.20), (2265.20, 2296.64),
+    )
+    with fitz.open(stream=original, filetype="pdf") as pdf:
+        assert len(pdf) >= 28
+        page = pdf[27]
+        drawings = page.get_drawings()
+        d02 = [w for w in page.get_text("words") if w[4] == "D02"]
+        assert len(d02) == 1, "unique original D02 native word required"
+        code_address = tuple(int(x) for x in d02[0][5:8])
+
+        def exact_original_chain(x):
+            indices = []
+            for y0, y1 in ends:
+                matching = []
+                for index, drawing in enumerate(drawings):
+                    items = drawing.get("items", ())
+                    if drawing.get("type") != "s" or len(items) != 1:
+                        continue
+                    if items[0][0] != "l":
+                        continue
+                    a, b = items[0][1:3]
+                    if (abs(a.x - x) <= .06 and abs(b.x - x) <= .06
+                            and abs(min(a.y, b.y) - y0) <= .06
+                            and abs(max(a.y, b.y) - y1) <= .06):
+                        matching.append(index)
+                assert len(matching) == 1, (
+                    "original D02 grid source path absent or ambiguous"
+                )
+                indices.append(matching[0])
+            return tuple(indices)
+
+        scope = NativeGridRowScope(
+            page_number=28,
+            left_boundary_paths=exact_original_chain(1001.28),
+            right_boundary_paths=exact_original_chain(1036.32),
+            code_address=code_address,
+        )
+
+    producer = SourceVisibilityProducer(
+        producer_method="gpt2-private-original-grid-row-review",
+        producer_version="1",
+        source_native_finish_text_shadow=True,
+    )
+    publication = producer.ingest_native_pdf_bytes(
+        document_id="maryborough-original-a600-grid",
+        source_bytes=original,
+        source_locator="memory://private-original.pdf",
+        page_ids=("28",),
+    )
+    result = audit_published_native_grid_row_shadow(
+        producer,
+        revision_id=publication.revision.revision_id,
+        page_id="28",
+        original_pdf_bytes=original,
+        scope=scope,
+    )
+    assert result.source_sha256 == original_sha
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.member_observation_ids) == 21
+    assert not result.competing_same_code_observation_ids
+    assert result.first_unclosed_gate == (
+        "source_grid_membership_only_no_kind_host_count_or_dimensions"
+    )
+    assert result.shadow_only
+    assert not any((
+        result.source_dimension_authorized,
+        result.physical_door_identity_proven,
+        result.opening_count_granted,
+        result.firm_quantity_issued,
+        result.commercial_projection_allowed,
+    ))
+    assert sha256(Path(loc).read_bytes()).hexdigest() == original_sha
