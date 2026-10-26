@@ -51,7 +51,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git diff --diff-filter=AMRC --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py
+          git diff --diff-filter=AMRCT --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py
 
       - name: Reject newly committed private original-source files (push)
         if: github.event_name == 'push'
@@ -65,7 +65,7 @@ jobs:
             echo "Cannot audit an empty source-change comparison range." >&2
             exit 1
           fi
-          git diff --diff-filter=AMRC --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py
+          git diff --diff-filter=AMRCT --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py
 
       - uses: actions/setup-python@v5
         with:
