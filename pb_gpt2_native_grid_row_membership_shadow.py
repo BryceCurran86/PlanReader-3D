@@ -102,10 +102,31 @@ def _assert_final_visible_grid_ink(page, drawings, indices):
         matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB,
         alpha=False, annots=False,
     )
+    # get_drawings() omits raster-image paint commands. Bind each selected
+    # historical vector path to its paint sequence before accepting dark
+    # final pixels, which could belong to a later black raster overlay.
+    paint_log = page.get_bboxlog()
     for index in indices:
+        source_seq = drawings[index].get("seqno")
+        if (type(source_seq) is not int or not 0 <= source_seq < len(paint_log)
+                or paint_log[source_seq][0] != "stroke-path"):
+            raise ValueError("original grid stroke paint-order receipt unavailable")
         a, b = drawings[index]["items"][0][1:3]
         x = (a.x + b.x) / 2.0
         low, high = sorted((float(a.y), float(b.y)))
+        # Later image/shading paint does not appear in get_drawings().
+        # Its source paint-order bbox is negative evidence even when the
+        # image is black and the final raster looks like valid grid ink.
+        for kind, bounds in paint_log[source_seq + 1:]:
+            if kind not in ("fill-image", "fill-shade"):
+                continue
+            if (len(bounds) != 4 or
+                    any(type(v) not in (int, float) or not isfinite(v)
+                        for v in bounds)):
+                raise ValueError("unverifiable later source paint bbox")
+            x0, y0, x1, y1 = bounds
+            if x0 <= x <= x1 and y0 < high and y1 > low:
+                raise ValueError("original grid boundary overpainted by later image")
         # A later opaque painted object can conceal a perfectly authentic
         # earlier vector path. Its bounding box is a conservative veto.
         for later in drawings[index + 1:]:
