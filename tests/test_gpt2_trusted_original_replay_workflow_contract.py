@@ -139,8 +139,8 @@ def test_new_source_positive_targets_have_fixed_base_tree_and_exact_two_paths():
     }
     for target, (paths, original_test, test_path) in expected.items():
         matches = re.findall(
-            r"(?m)^            " + target +
-            r"\)\n(?P<body>.*?)(?=^              ;;)",
+            r"(?m)^  " + re.escape(target) +
+            r"\)\n(?P<body>.*?)(?=^    ;;)",
             script, flags=re.DOTALL | re.MULTILINE,
         )
         assert len(matches) == 1
