@@ -476,8 +476,12 @@ class StripStructuralAssessmentShadow:
             if (result.status is not EvidenceResolutionStatus.CORROBORATED
                     or result.proposition != VISIBLE_SOURCE_OBSERVATION_EXISTS or observation is None):
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
-            if str(observation.page_id) != str(page_id) or len(observation.geometry) != 4:
+            if str(observation.page_id) != str(page_id):
                 continue
+            # A malformed same-page published observation is a source negative,
+            # not an absent rival. Never omit it from the terminal census.
+            if len(observation.geometry) != 4:
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             geometry = tuple(float(v) for v in observation.geometry)
             primitive = primitives.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
             verified = (primitive is not None
