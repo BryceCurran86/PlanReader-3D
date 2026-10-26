@@ -5,7 +5,8 @@ reflected ceiling plans (e.g. A120 p9):
 
 - Proves bounded 2D ceiling polygon zones from authenticated RCP linework.
 - Segregates internal ceiling linings (IPF1, GRID) from external overhead cladding
-  (CL03/CLD3, STP, SOFFIT). External cladding is never misclassified as an internal ceiling.
+  (CL03, STP, SOFFIT) and contractor signage cladding (CLD3).
+  Neither category can masquerade as an internal ceiling or as each other.
 - Fails closed on conflicting/competing finish marks within a single unpartitioned zone.
 - Derives scale-calibrated metric area (m2) when physical scale is corroborated.
 - Retains distinct candidate identities without nearest/first elections.
@@ -25,7 +26,7 @@ from shapely.geometry import Point, Polygon
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 
 # Public Reason Codes
 SOURCE_RCP_CEILING_REGION_RESOLVED = "source_rcp_ceiling_region_resolved"
@@ -42,10 +43,12 @@ EXTERNAL_CLADDING_VETOES_INTERNAL_CEILING = "external_cladding_vetoes_internal_c
 # Role definitions
 ROLE_INTERNAL_CEILING_LINING = "internal_ceiling_lining"
 ROLE_EXTERNAL_OVERHEAD_CLADDING = "external_overhead_cladding"
+ROLE_EXTERNAL_SIGNAGE_CLADDING = "external_signage_cladding"
 ROLE_ANY = "any"
 
 _INTERNAL_CODES = frozenset({"IPF1", "GRID", "PLASTERBOARD", "ACOUSTIC_TILE"})
-_EXTERNAL_CODES = frozenset({"CL03", "CLD3", "STP", "SOFFIT", "COLORBOND", "CANOPY_CLADDING"})
+_EXTERNAL_CODES = frozenset({"CL03", "STP", "SOFFIT", "COLORBOND", "CANOPY_CLADDING"})
+_SIGNAGE_CODES = frozenset({"CLD3"})
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -64,6 +67,8 @@ def classify_material_role(code: str) -> str:
         return ROLE_INTERNAL_CEILING_LINING
     if norm in _EXTERNAL_CODES:
         return ROLE_EXTERNAL_OVERHEAD_CLADDING
+    if norm in _SIGNAGE_CODES:
+        return ROLE_EXTERNAL_SIGNAGE_CLADDING
     return "unclassified"
 
 
@@ -285,7 +290,10 @@ class SourceRcpCeilingRegionProducer:
                 # The code matches. Check role consistency:
                 # External cladding cannot be an internal ceiling lining
                 if (
-                    queried_role == ROLE_EXTERNAL_OVERHEAD_CLADDING
+                    queried_role in (
+                        ROLE_EXTERNAL_OVERHEAD_CLADDING,
+                        ROLE_EXTERNAL_SIGNAGE_CLADDING,
+                    )
                     and selector.expected_role == ROLE_INTERNAL_CEILING_LINING
                 ):
                     record_status = EvidenceResolutionStatus.ABSTAINED
