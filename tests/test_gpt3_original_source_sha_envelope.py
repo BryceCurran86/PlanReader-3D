@@ -153,6 +153,7 @@ def _sealed_cli_args(tmp_path):
 def test_raced_original_symlink_during_descriptor_open_abstains(tmp_path, monkeypatch):
     """The old is_file then path.open could follow a substituted symlink."""
     pdf, sealed = _synthetic_source(tmp_path)
+    original_bytes = pdf.read_bytes()
     moved = tmp_path / "real-original.pdf"
     real_open = source_preflight.os.open
     swapped = False
@@ -169,7 +170,7 @@ def test_raced_original_symlink_during_descriptor_open_abstains(tmp_path, monkey
     with pytest.raises(ValueError, match="source changed|not a regular"):
         verify_original_source_sha_envelope(sealed, [pdf])
     assert swapped
-    assert moved.read_bytes() == b"%PDF-1.7\\n%synthetic non-original test only\\n"
+    assert moved.read_bytes() == original_bytes
 
 
 def test_same_byte_original_swap_before_publication_refuses_audit(tmp_path, monkeypatch):
