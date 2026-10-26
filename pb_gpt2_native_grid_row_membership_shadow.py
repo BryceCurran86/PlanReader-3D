@@ -106,6 +106,13 @@ def _assert_final_visible_grid_ink(page, drawings, indices):
     # historical vector path to its paint sequence before accepting dark
     # final pixels, which could belong to a later black raster overlay.
     paint_log = page.get_bboxlog()
+    # Native text can be painted AFTER source grid strokes. A whole texttrace
+    # bbox is too broad (CAD may paint an entire table in one span); inspect
+    # exact later glyph boxes, not a spanning text bbox or dark final pixels.
+    text_traces_by_seq = {}
+    for trace in page.get_texttrace():
+        if isinstance(trace, dict) and type(trace.get("seqno")) is int:
+            text_traces_by_seq.setdefault(trace["seqno"], []).append(trace)
     for index in indices:
         source_seq = drawings[index].get("seqno")
         if (type(source_seq) is not int or not 0 <= source_seq < len(paint_log)
@@ -127,6 +134,44 @@ def _assert_final_visible_grid_ink(page, drawings, indices):
             x0, y0, x1, y1 = bounds
             if x0 <= x <= x1 and y0 < high and y1 > low:
                 raise ValueError("original grid boundary overpainted by later image")
+        # Later source text glyphs can conceal one portion of a stroke
+        # between our raster sample points. Whole-span text bboxes are NOT
+        # proof of overlap: verify each later source glyph's own ink box.
+        for text_seq, (kind, bounds) in enumerate(
+                paint_log[source_seq + 1:], start=source_seq + 1):
+            if kind not in ("fill-text", "stroke-text"):
+                continue
+            if (len(bounds) != 4 or
+                    any(type(v) not in (int, float) or not isfinite(v)
+                        for v in bounds)):
+                raise ValueError("unverifiable later source text paint bbox")
+            x0, y0, x1, y1 = bounds
+            if not (x0 <= x <= x1 and y0 < high and y1 > low):
+                continue
+            traces = text_traces_by_seq.get(text_seq, ())
+            if not traces:
+                raise ValueError("later text glyph source provenance unavailable")
+            for trace in traces:
+                glyphs = trace.get("chars")
+                if not isinstance(glyphs, (tuple, list)) or not glyphs:
+                    raise ValueError("later text glyph source provenance unavailable")
+                for glyph in glyphs:
+                    if not isinstance(glyph, (tuple, list)) or len(glyph) < 4:
+                        raise ValueError("invalid later source text glyph")
+                    try:
+                        glyph_box = tuple(float(v) for v in glyph[3])
+                    except (TypeError, ValueError, OverflowError):
+                        raise ValueError("invalid later source text glyph") from None
+                    if (len(glyph_box) != 4
+                            or any(not isfinite(v) for v in glyph_box)
+                            or glyph_box[0] >= glyph_box[2]
+                            or glyph_box[1] >= glyph_box[3]):
+                        raise ValueError("invalid later source text glyph")
+                    if (glyph_box[0] <= x <= glyph_box[2]
+                            and glyph_box[1] < high and glyph_box[3] > low):
+                        raise ValueError(
+                            "original grid boundary overpainted by later text glyph"
+                        )
         # A later stroke can repaint the same grid path (even black-on-black)
         # without producing a fill-path or image. The final dark raster then
         # cannot prove which source stroke owns the boundary. Use the original
