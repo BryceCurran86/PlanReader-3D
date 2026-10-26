@@ -21,10 +21,20 @@ _PRODUCTION_EXCLUDED_PREFIXES = (
     "benchmarks/",
     "docs/",
 )
+# Workflow YAML and every local composite/Docker action input can change how
+# source-positive and signed/customer acceptance is executed. They are
+# production release controls, not benchmark truth, and must be kept in a
+# separate PR from any frozen V2 source/evaluator change.
+_WORKFLOW_ROOT = ".github/workflows/"
+_WORKFLOW_SUFFIXES = {".yml", ".yaml"}
+_LOCAL_ACTION_ROOT = ".github/actions/"
 
 
 def _normalize(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
 
 
 def is_v2_truth_file(path: str) -> bool:
@@ -52,6 +62,10 @@ def is_production_code_file(path: str) -> bool:
     normalized = _normalize(path)
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False
+    if normalized.startswith(_LOCAL_ACTION_ROOT):
+        return True
+    if normalized.startswith(_WORKFLOW_ROOT) and PurePosixPath(normalized).suffix.lower() in _WORKFLOW_SUFFIXES:
+        return True
     return PurePosixPath(normalized).suffix.lower() in _PRODUCTION_SUFFIXES
 
 
