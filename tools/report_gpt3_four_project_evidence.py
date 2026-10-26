@@ -541,7 +541,15 @@ def _assert_four_project_publication_inputs_stable(
         if path.is_symlink():
             raise ValueError("four-project input changed during report publication")
         try:
-            actual = _sha256(path) if path.is_file() else None
+            if expected_hash is None:
+                # Missing source/signed input is a distinct source receipt. An
+                # arriving directory/special file is NOT the same missing file.
+                if path.exists():
+                    raise ValueError("four-project input changed during report publication")
+                continue
+            if not path.is_file():
+                raise ValueError("four-project input changed during report publication")
+            actual = _sha256(path)
         except OSError as exc:
             raise ValueError(
                 "four-project input changed during report publication"
