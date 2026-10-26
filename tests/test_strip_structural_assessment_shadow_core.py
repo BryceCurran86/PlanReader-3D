@@ -282,3 +282,15 @@ def test_unrelated_content_far_from_the_strip_changes_nothing():
 def test_replay_is_deterministic():
     page, ids = base()
     assert run(page, ids) == run(page, ids)
+
+
+def test_the_signed_offset_between_an_opening_and_the_strip_terminals_is_reported_as_data_never_decided():
+    page, ids = base()
+    near = fragment(page, "near", 100.0, 304.72)               # jambs 0.72 pt past the strip's hi terminal
+    got = run(page, ids, [("near", STRONG, near)], corroborated=[near], status={m: "corroborated" for m in near})
+    f = got.fragments[0]
+    assert f.gap_offsets == pytest.approx((0.0, 0.72), abs=1e-6)
+    assert not f.spans_whole_extent and f.gap_crosses_hi_terminal and got.status is not CAND     # no tolerance is invented here
+    exact = fragment(page, "exact", 100.0, 304.0)
+    assert run(page, ids, [("exact", STRONG, exact)], corroborated=[exact],
+               status={m: "corroborated" for m in exact}).fragments[0].gap_offsets == pytest.approx((0.0, 0.0), abs=1e-6)

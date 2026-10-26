@@ -110,6 +110,7 @@ class FragmentObservation:
     member_span: Optional[tuple[float, float]]    # along-axis extent of ALL member lines (faces included)
     across_span: Optional[tuple[float, float]]
     gap_span: Optional[tuple[float, float]]       # the opening itself: between the two jamb members
+    gap_offsets: Optional[tuple[float, float]]    # signed (gap - strip) at the lo and hi terminals, as data only
     shares_nominated_members: int
     overlaps_strip: bool
     members_cross_lo_terminal: bool               # a member line runs past the strip's terminal
@@ -334,6 +335,7 @@ def assess_strip_hypothesis(
             continue
         members_lo = bool(member_span and member_span[0] < along[0] - eq)
         members_hi = bool(member_span and member_span[1] > along[1] + eq)
+        gap_offsets = (gap_span[0] - along[0], gap_span[1] - along[1]) if gap_span else None
         gap_lo = bool(gap_span and gap_span[0] < along[0] - eq)
         gap_hi = bool(gap_span and gap_span[1] > along[1] + eq)
         spans_whole = bool(gap_span and abs(gap_span[0] - along[0]) <= eq and abs(gap_span[1] - along[1]) <= eq)
@@ -347,7 +349,8 @@ def assess_strip_hypothesis(
         fragments.append(FragmentObservation(
             candidate_id=candidate_id, structural_pattern=pattern, member_observation_ids=tuple(sorted(members)),
             member_span=member_span, across_span=across_span, gap_span=gap_span, shares_nominated_members=shared,
-            overlaps_strip=True, members_cross_lo_terminal=members_lo, members_cross_hi_terminal=members_hi,
+            gap_offsets=gap_offsets, overlaps_strip=True, members_cross_lo_terminal=members_lo,
+            members_cross_hi_terminal=members_hi,
             gap_crosses_lo_terminal=gap_lo, gap_crosses_hi_terminal=gap_hi, spans_whole_extent=spans_whole,
             strong_pattern=strong, existence=existence, rival_evidence_only=not strong))
     fragments.sort(key=lambda f: f.candidate_id)
