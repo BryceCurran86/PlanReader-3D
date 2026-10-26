@@ -334,3 +334,41 @@ def test_the_schedule_binder_gives_the_same_typed_result_for_every_fragment_befo
     assert binder_results() == before
     assert all(status != "corroborated" for status, _ in before)        # nothing here was ever a bound opening
     assert any(BINDING_OPENING_UNRESOLVED in reasons for _, reasons in before)
+
+
+def test_duplicate_source_nomination_is_not_silently_deduplicated(monkeypatch):
+    """Producer adapter must preserve malformed source IDs for the core ABSTAIN gate."""
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    assert ids and _assess(source, published, ids).status is CAND
+    duplicated = ids + (ids[0],)
+    got = _assess(source, published, duplicated)
+    assert got.status is ABST
+    assert A.NOMINATION_NOT_VISIBLE_ON_PAGE in got.reason_codes
+    assert not got.takeoff_eligible and not got.customer_publication_granted
+
+
+def test_failed_nonnominated_visible_source_cannot_vanish_from_terminal_census(monkeypatch):
+    """A bad original observation is a negative, not an invitation to omit rival ink."""
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    other = next(oid for oid in published.visible_observation_ids if oid not in ids)
+    visibility = source.authority()
+    original_resolve = visibility.resolve_visible
+
+    def with_corrupt_rival(selector):
+        if selector.observation_id == other:
+            return visibility._conflict("synthetic_visible_source_integrity_failure")
+        return original_resolve(selector)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(visibility, "resolve_visible", with_corrupt_rival)
+        patch.setattr(source, "authority", lambda: visibility)
+        blocked = _assess(source, published, ids)
+    assert blocked.status is ABST
+    assert A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE in blocked.reason_codes
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _assess(source, published, ids) == baseline
