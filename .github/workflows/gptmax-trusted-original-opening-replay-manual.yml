@@ -50,8 +50,8 @@ jobs:
               # Source-cache integrity #3405 is a separate immutable child of
               # the already merged G17 receipt registration; pin its exact
               # reviewed main parent, never an arbitrary PR branch or input.
-              approved_base=e2a5dc6afa728adfd1886fc592421c6bd9eec1e9
-              approved_head=9f1a56b3380bee8bb9bd68d7d1e3a5e4af3aebcb
+              approved_base=f480fc84d2e7486319e9b52a3a72790bb7435e69
+              approved_head=6a937ad7d44da2c63e2fae04492c332a03b3b623
               expected_paths='.github/workflows/gptmax-g17-source-receipt-integrity.yml|docs/engineering/gptmax_g17_cached_source_integrity_20261020.md|pb_physical_opening_authority.py|tests/test_raster_opening_cached_source_integrity.py'
               focused_test=tests/test_raster_opening_cached_source_integrity.py
               ;;
