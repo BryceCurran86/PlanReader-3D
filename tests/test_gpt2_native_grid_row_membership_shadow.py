@@ -238,3 +238,62 @@ def test_source_ink_and_word_universe_not_modified_by_shadow():
     second=_audit(b,w,s)
     assert first==second
     assert (b,w,s)==before
+
+
+def _source_grid_with_later_native_text(*, color=(1, 1, 1),
+                                        rotation=0, text="M", x=96):
+    source, words, scope = _case(rotation=rotation)
+    with fitz.open(stream=source, filetype="pdf") as pdf:
+        # Draw AFTER the authenticated grid strokes. Text glyphs do not
+        # appear in get_drawings(), and the final raster samples can miss
+        # a narrow painted character between the 20/50/80% sample points.
+        pdf[0].insert_text((x, 126), text, fontsize=10, color=color)
+        changed = pdf.tobytes()
+    return changed, words, scope
+
+
+@pytest.mark.parametrize("color", ((1, 1, 1), (0, 0, 0)))
+@pytest.mark.parametrize("rotation", (0, 90))
+def test_later_native_text_glyph_over_grid_abstains_even_if_samples_stay_dark(
+    color, rotation,
+):
+    source, words, scope = _source_grid_with_later_native_text(
+        color=color, rotation=rotation,
+    )
+    with fitz.open(stream=source, filetype="pdf") as pdf:
+        assert len(pdf[0].get_drawings()) == 6
+        assert pdf[0].get_bboxlog()[-1][0] == "fill-text"
+    with pytest.raises(ValueError, match="overpainted by later text glyph"):
+        _audit(source, words, scope)
+
+
+@pytest.mark.parametrize("rotation", (0, 90))
+def test_later_native_text_outside_original_grid_keeps_source_candidate(rotation):
+    source, words, scope = _source_grid_with_later_native_text(
+        color=(1, 1, 1), rotation=rotation, x=310,
+    )
+    result = _audit(source, words, scope)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert not result.physical_door_identity_proven
+    assert not result.opening_count_granted
+    assert not result.firm_quantity_issued
+
+
+def test_later_wide_text_span_whitespace_is_not_painted_grid_occlusion():
+    # A single native texttrace bbox spans the grid at x=100, but the
+    # source glyph at that x is a SPACE (advance only), not painted ink.
+    # Rejecting the entire texttrace bbox would falsely veto real CAD tables.
+    source, words, scope = _source_grid_with_later_native_text(
+        text="M" + " " * 14 + "M", x=55,
+    )
+    with fitz.open(stream=source, filetype="pdf") as pdf:
+        trace = pdf[0].get_texttrace()[-1]
+        assert trace["bbox"][0] < 100 < trace["bbox"][2]
+        assert any(
+            chr(glyph[0]).isspace()
+            and glyph[3][0] <= 100 <= glyph[3][2]
+            for glyph in trace["chars"]
+        )
+    result = _audit(source, words, scope)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert not result.firm_quantity_issued
