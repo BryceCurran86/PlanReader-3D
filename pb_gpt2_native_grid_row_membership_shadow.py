@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from math import isfinite
+import re
 
 import fitz
 
@@ -16,10 +17,14 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_door_schedule_authority import (
     SourceDoorScheduleWord,
     _DOOR_CODE,
-    _DOOR_LIKE_TOKEN,
     _producer_owned_native_words,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+
+
+# Negative-only D-digit competitors must not depend on the unmerged A600
+# parser changes in #3762. Canonical positive codes still use _DOOR_CODE.
+_DOOR_LIKE_TOKEN = re.compile(r"^D[0-9]+$")
 
 
 @dataclass(frozen=True)
