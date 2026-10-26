@@ -192,15 +192,17 @@ def test_valid_case_folded_sha_keeps_original_producer_firm_floor_and_room():
     same = replace(
         src, metadata={**src.metadata, "source_sha256":upper_sha},
     )
-    floor = replace(_floor(), source_sha256=upper_sha)
+    # Keep the original producer-derived canonical/physical floor IDs.
+    # Replacing this floor with the source-neutral _floor() fixture would
+    # erase the physical room-to-floor identity now required by the issuer.
+    producer_claim = _claim_with_canonical_room(same)
     claim = replace(
-        _claim_with_canonical_room(same),
-        canonical_floors=(floor,),
+        producer_claim,
+        canonical_floors=(
+            replace(producer_claim.canonical_floors[0], source_sha256=upper_sha),
+        ),
         canonical_rooms=(
-            replace(
-                _claim_with_canonical_room(same).canonical_rooms[0],
-                source_sha256=upper_sha,
-            ),
+            replace(producer_claim.canonical_rooms[0], source_sha256=upper_sha),
         ),
     )
     assert len(publish_live_floor_area_quantities(claim)) == 1
