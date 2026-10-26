@@ -6,9 +6,8 @@ text block and competing word is preserved; no nearest room-word election.
 """
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from collections import Counter
 from hashlib import sha256
-from math import isfinite
+from math import isfinite, hypot
 import fitz
 from pb_native_text_render_authority import (
     PROVEN_RENDERED, extract_native_text_render_evidence,
@@ -71,6 +70,7 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
                 ).append(receipt)
         selected = []
         selected_seq = []
+        selected_directions = []
         for trace in traces:
             seq = trace.get('seqno')
             raw_box = trace.get('bbox')
@@ -79,6 +79,14 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
                 return False
             trace_box = tuple(float(v) for v in raw_box)
             if not all(isfinite(v) for v in trace_box):
+                return False
+            direction = trace.get('dir')
+            if (not isinstance(direction, (tuple, list))
+                    or len(direction) != 2):
+                return False
+            dx, dy = (float(v) for v in direction)
+            if (not isfinite(dx) or not isfinite(dy)
+                    or abs(hypot(dx, dy) - 1.0) > .001):
                 return False
             for glyph in trace.get('chars') or ():
                 codepoint, glyph_id, _origin, raw_glyph_box = glyph
@@ -104,9 +112,29 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
                     return False
                 selected.append((chr(codepoint), glyph_box))
                 selected_seq.append(seq)
+                selected_directions.append((dx, dy))
         if len(selected) != len(text):
             return False
-        if Counter(char for char, _ in selected) != Counter(text):
+        # Multiset equality is not source glyph identity: DIRG and GRID
+        # contain the same letters but represent different painted words.
+        # Preserve original texttrace character order; the caller has already
+        # resolved one exact native (block, line, word) source address.
+        if ''.join(char for char, _ in selected) != text:
+            return False
+        # Source glyphs must also progress along the original paint direction.
+        # A reordered/spliced trace can retain the same Unicode sequence
+        # while moving its glyph boxes into a different visual word.
+        dx, dy = selected_directions[0]
+        if any(abs(x - dx) > .001 or abs(y - dy) > .001
+               for x, y in selected_directions[1:]):
+            return False
+        projected_centres = [
+            ((glyph_box[0] + glyph_box[2]) * dx
+             + (glyph_box[1] + glyph_box[3]) * dy) / 2
+            for _, glyph_box in selected
+        ]
+        if any(right - left <= .001 for left, right in zip(
+                projected_centres, projected_centres[1:])):
             return False
         # The shared render receipt conservatively checks later filled paths,
         # images and shades, but an opaque later STROKED path can also erase
