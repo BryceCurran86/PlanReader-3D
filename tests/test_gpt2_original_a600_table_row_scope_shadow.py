@@ -380,10 +380,13 @@ def test_original_private_source_publisher_table_census_if_provisioned():
     )
     assert result.source_sha256==SHA
     assert result.snapshot_id==publication.snapshot.snapshot_id
-    assert set(result.all_original_source_codes)=={
-        f"D{i:02d}" for i in range(1,29)
-    }
+    # The producer census includes ALL original native D-code words, not
+    # only schedule rows. Original p28 has a separate unpadded D3 DETAIL.
+    canonical={f"D{i:02d}" for i in range(1,29)}
+    assert set(result.all_original_source_codes)==canonical | {"D3"}
     assert len(result.rows)==28
+    assert {row.code for row in result.rows}==canonical
+    assert "D3" not in result.unparsed_original_door_codes
     assert result.new_opening_counts==result.new_opening_areas_m2==0
     # A private-original positive must prove table membership and the
     # COMPLETE source census, not merely a plausible 28-row lexical parse.
