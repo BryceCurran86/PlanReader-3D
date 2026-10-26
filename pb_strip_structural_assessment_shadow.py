@@ -523,6 +523,11 @@ class StripStructuralAssessmentShadow:
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             authority = fork.physical_opening_authority()
             structures = authority.visible_candidate_structures(selector(nominated[0]))
+            # A failed page census is a source-integrity negative, even if an
+            # accessor returns stale candidate objects alongside that failure.
+            if (structures.status is not EvidenceResolutionStatus.CANDIDATE
+                    or structures.page_id != str(page_id)):
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             nominated_set = set(nominated)
             wanted = []
             for c in structures.candidates:
@@ -533,6 +538,13 @@ class StripStructuralAssessmentShadow:
                 candidates.append((c.candidate_id, c.structural_pattern, tuple(sorted(c.source_observation_ids))))
             for member in sorted({m for c in wanted for m in c.source_observation_ids}):
                 outcome = authority.prove_existence(selector(member))
+                # A source-negative member cannot be overridden by a different
+                # member's corroborated record for the same whole-strip candidate.
+                if (outcome.source_observation is None
+                        or outcome.source_observation.status is not EvidenceResolutionStatus.CORROBORATED
+                        or SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE in outcome.reason_codes
+                        or VISIBLE_SOURCE_AUTHORITY_REQUIRED in outcome.reason_codes):
+                    return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
                 member_status[member] = outcome.status.value
                 record = outcome.existence_record
                 if record is not None and outcome.status is EvidenceResolutionStatus.CORROBORATED:
