@@ -18,14 +18,14 @@ Status: **proposal for review; no code is written or proposed to merge from this
 
 **Existing negative vocabulary.** Ten kinds, three polarities, free-string methods, status CANDIDATE only from U2. Negatives reach `prove_existence` only for the strong pattern with a producer and only BLOCK (ABSTAINED, candidate attached, atoms in `opposing_evidence_atoms`); they never flip the proposition negative or erase the candidate. `EvidenceAtom` enforces only non-empty document and page ids; revision, snapshot, SHA and source observation ids are metadata by convention (the strongest convention is the native opposition producers' `revision_id`, `source_sha256`, `snapshot_id`, `source_observation_ids`, `polarity`, explicit False grant flags). Atom ids are snapshot-bound while `PhysicalOpeningExistenceRecord.record_id` is geometry-bound and snapshot-free.
 
-**Real-page regime (W01/W02/W05, original SHA `b1be5353…e007`, p7).** Measured read-only through the real producer: the existing authority does not represent any of the three strips; it issues overlapping CORROBORATED openings that are two-panel spans of the glass pair, two of which run past the strip's outer terminals. Section 6 has the numbers.
+**Real-page regime (W01/W02/W05, original SHA `b1be5353…e007`, p7).** Measured read-only through the real producer. CORRECTION (2026-10-26): an earlier version of this paragraph called the already-corroborated fragments "overlapping two-panel spans running past the strip". That measured the extent of each candidate's member lines. The opening of a candidate is the gap between its two jambs, and the corroborated openings inside W01, W02 and W05 are the 2.6 to 2.9 pt POST gaps between panels (plus junction gaps at the strip ends). The existing authority therefore names the posts, never the strip. Section 6 has the corrected numbers.
 
 ## 2. Inference (labelled)
 
 1. A glazing strip is evidence of a drawn filling, not yet a whole structural opening: a mullion, end post, wall pier, return and neighbouring door are different roles. The existing stack cannot say which role a stroke has, because it never sees width, colour or role.
 2. Reusing the elevation-width fingerprint both to choose the strip (the nominator) and to establish its physical existence would be circular. Existence is page-coordinate evidence and needs none of the elevation facts.
 3. The only safe entry is a nomination by immutable observation ids that the stack re-derives itself; a caller-supplied object (including the #3869 dataclass, which is unsealed) cannot certify provenance.
-4. The measured regime (section 6) is the per-bay one: the existing strong path produces overlapping two-panel candidates, not the void between the end piers. So the assessment is the only place the whole strip can be named, and the already-CORROBORATED fragments must be carried as members and rivals, never trusted as the strip.
+4. The measured regime (section 6) is the per-bay one for W01, W02 and W05: the existing strong path proves the interior post gaps, not a void bounded at the strip's own terminals. One strip on the page behaves differently (the neighbouring 3-panel strip of 206.88 pt, whose wall faces break once and whose jambs sit at its lo terminal and 0.72 pt beyond its hi terminal), so the assessment must report each opening's signed offset from the terminals as data and decide nothing by tolerance. The already-CORROBORATED fragments are carried as members and rivals, never trusted as the strip.
 
 ## 3. Proposed change (shadow only; nothing below is built)
 
@@ -70,27 +70,28 @@ Synthetic: a full-strip structural positive; post-gap, pane, furniture, dimensio
 
 Maryborough 0/24 is historical context. No target quantity, expected count, tolerance, match map or desired score enters selection, grouping, thresholds or tests. No evaluator was executed and no gain is claimed.
 
-## 6. Real-page regime and terminal ink (W01/W02/W05)
+## 6. Real-page regime and terminal ink (corrected)
 
-Method: read-only, through the real `SourceVisibilityProducer` and `physical_opening_authority()` on the original (SHA-256 `b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`, plan page 7, native /Rotate 90 coordinates, #3859 opt-in only for the callout words). The strips and their visible observation ids are the ones #3869 nominates; nothing else is taken from #3869. Counts and coordinates only, no images.
+Method: read-only, through the real `SourceVisibilityProducer` and the assessment shadow of the build PR (#3912, which keeps each candidate's OPENING, the gap between its two jambs, apart from its MEMBER extent), on the original (SHA-256 `b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`, plan page 7, native /Rotate 90 coordinates, one RESOLVED floor-plan viewport `view_p7_2`). The strips and their visible observation ids are those the callout shadow nominates; counts and coordinates only, no images.
 
-Page 7 has 1,345 structural candidates, all `jamb_bounded_two_face_interruption`.
+Page 7 has 1,345 strong candidates (all `jamb_bounded_two_face_interruption`). Fragments are candidates that share a member with the nominated strip or whose member box meets it.
 
-| Strip | Outer extent along the axis (pt) | Strip visible observations | Candidates touching it | Per-observation `prove_existence` | Distinct CORROBORATED openings |
-|---|---|---|---|---|---|
-| W01 (3 panels, H) | 843.60 to 1047.60 = 204.00 | 38 | 11 (1 to 5 members each in the strip) | 6 CORROBORATED, 11 CONFLICT `ambiguous_physical_opening_candidates`, 21 ABSTAINED `visible_wall_continuation_required` | 2 |
-| W02 (3 panels, V) | 1557.44 to 1789.76 = 232.32 | 38 | 14 | 3 / 14 / 21 | 3 |
-| W05 (7 panels, V) | 646.40 to 1076.48 = 430.08 | 114 | 41 | 4 / 35 / 75 | 4 |
+| Strip (native axis) | Outer extent along the axis (pt) | Fragments | Corroborated | Openings that start or end outside the strip |
+|---|---|---|---|---|
+| W01, 3 panels (H) | 843.60 to 1047.60 = 204.00 | 11 | 2 | 0 |
+| W02, 3 panels (V) | 1557.44 to 1789.76 = 232.32 | 16 | 3 | 5 |
+| W03's strip, 3 panels (V) | 1343.12 to 1550.00 = 206.88 | 30 | 6 | 16 |
+| W05, 7 panels (V) | 646.40 to 1076.48 = 430.08 | 44 | 8 | 10 |
 
-No candidate contains the whole strip. The already-CORROBORATED openings are overlapping two-panel spans of the glass pair (the 0.72 pt pair at the across coordinates below), each with six members:
+What the corroborated openings are (opening = jamb to jamb gap):
+- **W01:** 910.08 to 912.96 (2.88 pt) and 978.24 to 980.88 (2.64 pt): the two interior posts. Nothing spans the strip.
+- **W02:** 1633.52 to 1636.16 and 1711.04 to 1713.68 (2.64 pt each): the interior posts; plus 1547.12 to 1560.08 (12.96 pt), a junction gap that starts about 10 pt before the strip's lo terminal.
+- **W05:** five interior posts of about 2.88 pt at 706.40, 767.84, 829.28, 890.72 and 952.16; plus gaps at the hi terminal (1076.48 to 1082.24, 5.76 pt, and two wider ones that start inside and end past the terminal).
+- **W03's strip:** one corroborated opening from 1343.12 to 1550.72 (207.60 pt) with no member shared with the strip's own ink: its jambs sit at the strip's lo terminal and 0.72 pt beyond its hi terminal, i.e. the wall faces break once across the whole window region. This is the only strip of the four with such an opening; it is reported as a signed offset (0.00, +0.72 pt), not decided by a tolerance. Five other corroborated junction or post openings surround it.
 
-- W01: along 846.24 to 978.24 (132.00 pt) and 912.96 to 1044.72 (131.76 pt), i.e. panels 1+2 and panels 2+3 with the middle post between; they overlap by one panel. Across 1955.36 to 1956.08.
-- W02: along 1482.32 to 1633.52 (151.20), 1560.08 to 1711.04 (150.96), 1636.16 to 1787.12 (150.96). The first begins about 75 pt before the strip's lower terminal. Across 1119.84 to 1120.56.
-- W05: along 770.72 to 890.72, 832.16 to 952.16, 893.60 to 1013.60 (120.00 each) and 1016.48 to 1151.12 (134.64). The last runs about 75 pt past the strip's outer terminal at 1076.48.
+What this establishes (source-only): for W01, W02 and W05 the existing authority proves the interior posts as physical openings and never the strip, and no candidate has its jambs at the strip's terminals; the host face line running continuously through the glazing (GPT1, hub 6398246162) is a consistent explanation but is not tested here. What it does NOT establish: that any post opening is wrong as a wall interruption, how any opening is bounded by wall ink, or what a downstream consumer does with posts or with the one W03 opening. Two consequences for the design: a nomination must carry posts and junction gaps as members and rivals, and the W03 case shows the assessment must report offsets from the terminals as data. The question of which downstream reader (the binder's `_aperture_contains_bbox`, the W4 SAME_PHYSICAL_WALL override, the count seal) sees a post opening today belongs to their owners; I have not traced it past the accessor.
 
-What this establishes (observed, source-only): the existing authority already mints physical-opening existence for fragments of these strips, they overlap each other and in two cases cross the strip's outer terminals, and none of them is the strip. What it does NOT establish: that any of them is wrong as a wall interruption, how each is bounded by wall ink, or what any downstream consumer does with them. Two consequences for the design: a nomination must carry these fragments as members and rivals (never trust them as the strip), and a downstream reader that binds a tag to the contained aperture (`_aperture_contains_bbox`) or lets the wall override see them is looking at a fragment today. That second point is a question for the owners of the binder, the wall candidate authority and the count seal; I have not traced it past the accessor.
-
-Terminals. The ink at the strips' ends is reported by GPT1 (hub 6392451369: W01 has a 0.96 pt black pier endpoint stroke at both ends, W02 and W05 one each within an 8 pt line census) and by GPT MAX (hub 6392868820, with the 0.48 pt returns). My own end-ink reader had not finished when this was written; if it adds anything it will be appended as a comment. The report does not use any of those widths as a threshold. Independent facts needed by the assessment: a continuous black line at x 1110.72 runs through the W02/W05 glazing regions and the intervening wall spans (GPT1, hub 6398246162), so a wall-interruption heuristic can see either solid wall or only individual post gaps; this is exactly the per-bay regime above.
+Terminals. For W01 the terminal inventory at each end contains exactly one perpendicular 0.96 pt stroke spanning the band and running past it, one 0.48 pt perpendicular stroke spanning the band, the strip's own two nominated parallel lines, and 7 further 0.48 pt parallel lines passing through (GPT1's pier observation, hub 6392451369, reproduced from the producer's own widths). The assessment applies no width threshold and claims no terminal role (`original_terminal_paint_structural_role_unproven` stays on every verdict).
 
 ## 7. Open questions for review
 
