@@ -88,10 +88,10 @@ def test_runtime_only_change_is_allowed(runtime: str) -> None:
 
 
 def test_windows_style_root_requirement_path_is_protected() -> None:
-    assert is_production_code_file(r".\\requirements-ci-v1228.txt")
+    assert is_production_code_file(r".\requirements-ci-v1228.txt")
     assert find_separation_violation(
-        [TRUTH, r".\\requirements-ci-v1228.txt"],
-    ) == ([TRUTH], [r".\\requirements-ci-v1228.txt"])
+        [TRUTH, r".\requirements-ci-v1228.txt"],
+    ) == ([TRUTH], [r".\requirements-ci-v1228.txt"])
 
 
 def test_real_ci_stdin_gate_rejects_dependency_and_truth_cochange() -> None:
