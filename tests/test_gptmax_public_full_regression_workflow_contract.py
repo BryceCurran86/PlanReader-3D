@@ -1,6 +1,9 @@
 """Duplicate public CI must preserve indexed receipts and declare source omissions."""
 from copy import deepcopy
 from pathlib import Path
+import os
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -9,6 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = (
     "test-gptmax-raster-connected-frame-source.yml",
     "test-gptmax-raster-aperture-identity.yml",
+    "test-gptmax-opening-wall-face-preservation.yml",
+    "test-gptmax-native-description-source.yml",
+    "test-gptmax-raster-measurement-source.yml",
+    "test-gptmax-source-band-host-current.yml",
 )
 POLICY = "PLANREADER_PRIVATE_ORIGINAL_POLICY"
 
@@ -36,7 +43,8 @@ def _contract(document):
     # source jobs must still actually run and fail when originals are missing.
     assert POLICY not in document.get("env", {})
     assert "source-proof" in jobs
-    assert "tools/diag_opening_wall_face_preservation.py" in str(jobs["source-proof"])
+    assert any("tools/diag_" in step.get("run", "")
+               for step in jobs["source-proof"]["steps"])
     for name, job in jobs.items():
         if name == "full-regressions":
             continue
@@ -49,6 +57,36 @@ def _contract(document):
 def test_public_regressions_match_required_ci_without_skipping_source_jobs(workflow):
     document = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())
     _contract(document)
+
+
+def test_every_duplicate_full_regression_job_is_discovered_without_a_stale_allowlist():
+    discovered=set()
+    for path in sorted((ROOT / '.github/workflows').glob('*.y*ml')):
+        document=yaml.safe_load(path.read_text())
+        if isinstance(document,dict) and 'full-regressions' in (document.get('jobs') or {}):
+            discovered.add(path.name)
+            _contract(document)
+    assert discovered == set(WORKFLOWS)
+
+
+def test_actual_compileall_keeps_indexed_source_tree_unchanged(tmp_path):
+    document=yaml.safe_load((ROOT / '.github/workflows' / WORKFLOWS[-1]).read_text())
+    public=document['jobs']['full-regressions']
+    step=next(s for s in public['steps'] if s.get('name')=='Integrity and provider isolation')
+    protected=tmp_path/'indexed-receipt-package'
+    protected.mkdir()
+    source=protected/'receipt_verifier.py'
+    source.write_text('RECEIPT = 7\n',encoding='utf-8')
+    before={p.relative_to(protected):p.read_bytes() for p in protected.rglob('*') if p.is_file()}
+    external_cache=tmp_path/'runner-cache'
+    env={**os.environ,'PYTHONDONTWRITEBYTECODE':public['env']['PYTHONDONTWRITEBYTECODE'],
+         'PYTHONPYCACHEPREFIX':step['env']['PYTHONPYCACHEPREFIX'].replace(
+             '${{ runner.temp }}',str(external_cache))}
+    subprocess.run([sys.executable,'-m','compileall','-q','.'],cwd=protected,
+                   env=env,check=True,capture_output=True,text=True)
+    after={p.relative_to(protected):p.read_bytes() for p in protected.rglob('*') if p.is_file()}
+    assert after == before
+    assert list(external_cache.rglob('receipt_verifier.*.pyc'))
 
 
 @pytest.mark.parametrize("damage", ("local_cache", "bytecode", "source_policy", "narrow_tests", "job_runner_context", "missing_test_cache"))

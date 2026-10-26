@@ -111,65 +111,98 @@ def build_bound_wall_finish_rows(
     workspace_id: int,
     pages: Sequence[Dict[str, Any]],
 ) -> Tuple[List[Tuple[Any, ...]], List[Dict[str, Any]]]:
-    """Discover, resolve, and publish source-bound wall finish rows for the workspace.
+    """Project a COMPLETE validated source-bound finish batch or none.
 
-    Checks:
-    1. Callable `app.resolve_bound_wall_finishes(workspace_id)` if provided by workspace.
-    2. Attached `app.source_bound_wall_finish_authority` or `app.source_bound_wall_finish_records`.
-    3. Returns canonical 21-field takeoff rows and report dictionaries.
+    Source producer records are individually authenticated, but a commercial
+    batch must also reject a later invalid member, a replayed record, or the
+    same original physical finish surface published twice. Do not expose rows
+    accumulated before a failure; the auto-geometry caller treats an empty
+    result as an explicit nonpublication.
     """
     rows: List[Tuple[Any, ...]] = []
     finish_records: List[Dict[str, Any]] = []
+    seen_record_ids: set[tuple[str, str, str, str]] = set()
+    seen_surfaces: set[tuple[str, str, str, str]] = set()
+    seen_scopes: set[tuple[str, ...]] = set()
 
-    # 1. Check direct resolver method on app
-    if hasattr(app, "resolve_bound_wall_finishes") and callable(getattr(app, "resolve_bound_wall_finishes")):
-        try:
-            results = app.resolve_bound_wall_finishes(int(workspace_id))
+    def add_record(rec: SourceBoundWallFinishQuantityRecord) -> None:
+        if type(rec) is not SourceBoundWallFinishQuantityRecord:
+            raise ValueError("source-bound wall finish record required")
+        # This real issuer re-proves the producer seal, source roots, physical
+        # face identities, and positive metric quantity. No caller row can
+        # supply or bypass the authority.
+        quantity = publish_bound_wall_finish_quantity(rec)
+        root = (rec.document_id, rec.revision_id, rec.source_sha256)
+        record_key = (*root, rec.record_id)
+        scope_key = (
+            *root, rec.snapshot_id, rec.page_id, rec.viewport_id,
+            rec.decision_scope_id, rec.trade_scope_id, rec.finish_material,
+        )
+        surfaces = {(*root, surface) for surface in rec.physical_surface_ids}
+        if (
+            record_key in seen_record_ids
+            or scope_key in seen_scopes
+            or not surfaces.isdisjoint(seen_surfaces)
+        ):
+            raise ValueError("duplicate original wall finish quantity or physical surface")
+        row = bound_wall_finish_record_to_takeoff_row(workspace_id, rec)
+        # Commit to local staging only after all source and customer checks.
+        seen_record_ids.add(record_key)
+        seen_scopes.add(scope_key)
+        seen_surfaces.update(surfaces)
+        rows.append(row)
+        finish_records.append({
+            "record_id": rec.record_id,
+            "trade_scope_id": rec.trade_scope_id,
+            "finish_material": rec.finish_material,
+            "quantity_m2": float(rec.quantity_m2),
+            "physical_wall_ids": list(rec.physical_wall_ids),
+            "physical_face_ids": list(rec.physical_face_ids),
+            "physical_surface_ids": list(rec.physical_surface_ids),
+            "quantity_id": quantity.quantity_id,
+            "page_id": rec.page_id,
+        })
+
+    def add_result(result: Any) -> None:
+        rec = getattr(result, "record", result)
+        if rec is None and getattr(result, "status", None) in (
+            EvidenceResolutionStatus.ABSTAINED,
+            EvidenceResolutionStatus.CONFLICT,
+            EvidenceResolutionStatus.CANDIDATE,
+        ):
+            return
+        if rec is None or (
+            getattr(result, "record", result) is not result
+            and getattr(result, "status", None) is not EvidenceResolutionStatus.CORROBORATED
+        ):
+            raise ValueError("contradictory original wall finish result")
+        add_record(rec)
+
+    try:
+        resolver = getattr(app, "resolve_bound_wall_finishes", None)
+        if callable(resolver):
+            results = resolver(int(workspace_id))
             if results:
-                for res in results:
-                    rec = getattr(res, "record", res)
-                    if isinstance(rec, SourceBoundWallFinishQuantityRecord):
-                        row = bound_wall_finish_record_to_takeoff_row(workspace_id, rec)
-                        rows.append(row)
-                        finish_records.append({
-                            "record_id": rec.record_id,
-                            "trade_scope_id": rec.trade_scope_id,
-                            "finish_material": rec.finish_material,
-                            "quantity_m2": float(rec.quantity_m2),
-                            "physical_wall_ids": list(rec.physical_wall_ids),
-                            "physical_face_ids": list(rec.physical_face_ids),
-                            "physical_surface_ids": list(rec.physical_surface_ids),
-                            "quantity_id": publish_bound_wall_finish_quantity(rec).quantity_id,
-                            "page_id": rec.page_id,
-                        })
-        except Exception:
-            pass
+                saw_original_result = False
+                for result in results:
+                    saw_original_result = True
+                    add_result(result)
+                # A producer-owned ABSTAIN/CONFLICT is evidence against
+                # publication, not permission to borrow a different source
+                # authority. Only a genuinely empty resolver may fall back.
+                if saw_original_result:
+                    return rows, finish_records
 
-    # 2. Check attached authority on app
-    if not rows and hasattr(app, "source_bound_wall_finish_authority"):
-        authority = getattr(app, "source_bound_wall_finish_authority")
-        if isinstance(authority, SourceBoundWallFinishQuantityAuthority):
-            try:
-                # Query registered selectors
-                selectors = getattr(app, "source_bound_wall_finish_selectors", ())
-                for sel in selectors:
-                    if isinstance(sel, SourceBoundWallFinishQuantitySelector):
-                        res = authority.resolve(sel)
-                        if res.status is EvidenceResolutionStatus.CORROBORATED and res.record is not None:
-                            rec = res.record
-                            row = bound_wall_finish_record_to_takeoff_row(workspace_id, rec)
-                            rows.append(row)
-                            finish_records.append({
-                                "record_id": rec.record_id,
-                                "trade_scope_id": rec.trade_scope_id,
-                                "finish_material": rec.finish_material,
-                                "quantity_m2": float(rec.quantity_m2),
-                                "physical_wall_ids": list(rec.physical_wall_ids),
-                                "physical_face_ids": list(rec.physical_face_ids),
-                                "page_id": rec.page_id,
-                            })
-            except Exception:
-                pass
+        authority = getattr(app, "source_bound_wall_finish_authority", None)
+        if type(authority) is SourceBoundWallFinishQuantityAuthority:
+            for selector in getattr(app, "source_bound_wall_finish_selectors", ()):
+                if type(selector) is not SourceBoundWallFinishQuantitySelector:
+                    raise ValueError("original wall finish selector required")
+                add_result(authority.resolve(selector))
+    except Exception:
+        # Deliberately discard ALL staged positive rows, not just the invalid
+        # member. The upstream auto-geometry wrapper is likewise fail-closed.
+        return [], []
 
     return rows, finish_records
 

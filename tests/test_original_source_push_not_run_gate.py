@@ -95,7 +95,11 @@ def test_every_push_reachable_original_source_job_has_the_push_gate_and_notice_j
         covered += len(gated)
         if violations(workflow):
             offenders[name] = violations(workflow)
-    assert covered >= 30
+    # The glyph workflow moved from push to owner/manual-only source replay;
+    # its PR notice and stricter source boundary are checked separately in
+    # test_gptmax_tokenless_original_workflow_boundary.py. Every remaining
+    # push-reachable original job still receives the exact legacy checks.
+    assert covered >= 29
     assert offenders == {}, (
         "A workflow that sha-checks an original on a push to main must add to that job "
         f"`if: {PUSH_GATE}` and a sibling job `{NOTICE_JOB}` (`if: {NOTICE_IF}`, `uses: {REUSABLE_USES}`, "

@@ -88,6 +88,44 @@ def _eligible_count_quantities(
     return tuple(quantities)
 
 
+def _reject_blocked_publishable_originals(
+    claim: LivePhysicalNetWallClaim,
+) -> None:
+    """A positive commercially eligible original cannot vanish from customer rows.
+
+    Source-owned ABSTAINED or genuinely unpublished shadow rows are preserved;
+    this guard only rejects contradictory positive records that would otherwise
+    be silently filtered before the signed/customer bijection is constructed.
+    """
+    for quantity in (
+        *claim.opening_quantity_evidence,
+        *claim.opening_count_quantity_evidence,
+    ):
+        if quantity.abstained or not quantity.blocking_reasons:
+            continue
+        metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        if metadata.get("commercial_projection_allowed") is not True:
+            continue
+        area_positive = (
+            quantity.family == "opening_area"
+            and quantity.status == "corroborated"
+            and quantity.unit in {"m2", "m²"}
+            and _authentic_positive_quantity_value(quantity.value)
+        )
+        count_positive = (
+            quantity.family == "opening_count"
+            and quantity.status == "firm"
+            and quantity.unit == "ea"
+            and _authentic_positive_quantity_value(quantity.value, integer=True)
+            and metadata.get("schedule_corroborated") is True
+            and bool(_clean(metadata.get("opening_mark")))
+        )
+        if area_positive or count_positive:
+            raise ValueError(
+                "opening customer positive source quantity retains blocking reasons"
+            )
+
+
 def project_live_opening_customer_rows(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -133,6 +171,9 @@ def project_live_opening_customer_rows(
                     "opening customer quantity identities collide before commercial filtering"
                 )
             source_ids.add(original_id)
+
+    # Whole-inventory contradictions must fail before eligibility can drop a positive.
+    _reject_blocked_publishable_originals(claim)
 
     area_quantities = _eligible_area_quantities(claim)
     count_quantities = _eligible_count_quantities(claim)

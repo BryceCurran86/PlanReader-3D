@@ -296,6 +296,7 @@ def _generate_project_handoff_locked(
     output_dir: Path,
     family_group: str = "all",
     source_plan_page_index: Optional[int] = None,
+    source_native_finish_text_shadow: bool = False,
 ) -> dict[str, Any]:
     clean_family_group = _validate_source_handoff_inputs(
         pdf_path, project_id, workspace_id, family_group,
@@ -452,6 +453,8 @@ def _generate_project_handoff_locked(
         "claim_status": None,
         "claim_reason_codes": [],
     }
+    if source_native_finish_text_shadow:
+        summary["source_native_finish_text_shadow"] = True
 
     output_dir.mkdir(parents=True, exist_ok=True)
     # The extractor may be terminated by an external memory/time limit rather
@@ -482,6 +485,8 @@ def _generate_project_handoff_locked(
             # support-page contract.
             room_area_support_pages=execution_room_support_pages,
             surface_semantic_pages=semantic_execution_pages,
+            **({"source_native_finish_text_shadow": True}
+               if source_native_finish_text_shadow else {}),
         )
         _gc_stage_boundary()
     except Exception as exc:
@@ -1164,6 +1169,7 @@ def generate_project_handoff(
     output_dir: Path,
     family_group: str = "all",
     source_plan_page_index: Optional[int] = None,
+    source_native_finish_text_shadow: bool = False,
 ) -> dict[str, Any]:
     """Serialize one source run per output directory without trusting stale seals.
 
@@ -1173,6 +1179,8 @@ def generate_project_handoff(
     """
     # Bad source inputs never create directories or lock files.
     _validate_source_handoff_inputs(pdf_path, project_id, workspace_id, family_group)
+    if type(source_native_finish_text_shadow) is not bool:
+        raise ValueError("source_native_finish_text_shadow must be an explicit boolean")
     if output_dir.is_symlink():
         raise FileExistsError("output directory cannot be a symlink")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1190,6 +1198,8 @@ def generate_project_handoff(
                 output_dir=output_dir,
                 family_group=family_group,
                 source_plan_page_index=source_plan_page_index,
+                **({"source_native_finish_text_shadow": True}
+                   if source_native_finish_text_shadow else {}),
             )
     finally:
         os.close(descriptor)
@@ -1215,6 +1225,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--source-plan-page-index", type=int, default=None,
                         help="0-based original page; source-positive FLOOR_PLAN required")
+    parser.add_argument(
+        "--source-native-finish-text-shadow", action="store_true",
+        help=(
+            "Opt in to the merged original-PDF source-byte/ToUnicode/symbol-GID "
+            "text proof (needs fontTools; default off, grants no quantity)"
+        ),
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -1228,6 +1245,8 @@ def main() -> int:
         output_dir=args.output_dir,
         family_group=args.family_group,
         source_plan_page_index=args.source_plan_page_index,
+        **({"source_native_finish_text_shadow": True}
+           if args.source_native_finish_text_shadow else {}),
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

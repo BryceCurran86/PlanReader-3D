@@ -18,6 +18,15 @@ pytesseract==0.3.13
 reportlab==5.0.0
 shapely==2.1.2
 
+# Original-PDF source-byte -> ToUnicode -> embedded-glyph proof used by the
+# opt-in SourceVisibilityProducer(source_native_finish_text_shadow=True) in
+# pb_pdf_text_integrity_authority. It is imported lazily and ONLY when that
+# opt-in is on; without it the proof abstains (fonttools_unavailable) and the
+# subset-font CAD text on the original sheets stays untrusted. Pure Python
+# wheel, no effect on default behaviour or import time. Same pin as the GPT2
+# source-symbol workflows.
+fonttools==4.60.2
+
 # Windows.Media.Ocr bridge for the portable raster OCR authority
 # (pb_portable_raster_ocr_authority.WinOCRBackend). Windows-only (MIT
 # licensed, github.com/pywinrt/pywinrt); markers keep pip from even

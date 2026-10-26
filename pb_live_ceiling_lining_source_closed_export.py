@@ -12,6 +12,7 @@ from typing import Mapping
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
@@ -165,30 +166,66 @@ def build_live_ceiling_lining_source_traces(
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     seen_source_ids: set[str] = set()
-    source_area_ceiling_owners: dict[str, str] = {}
-    original_mark_ceiling_owners: dict[str, str] = {}
-    original_occurrence_ceiling_owners: dict[str, str] = {}
-    for quantity in claim.ceiling_lining_quantity_evidence:
-        if not isinstance(quantity, QuantityEvidence):
+    # Exact original quantity IDs are the earliest family gate. Preserve
+    # existing duplicate/invalid-source failures before any new RCP mark
+    # rivalry, including an ABSTAINED clone preceding a positive record.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
             raise TypeError(
                 "ceiling_lining_quantity_evidence must contain QuantityEvidence"
             )
-        if quantity.family != "ceiling_lining":
+        if original.family != "ceiling_lining":
             raise SourceClosedRunConflictError(
-                f"non-ceiling quantity reached ceiling exporter: {quantity.quantity_id}"
+                f"non-ceiling quantity reached ceiling exporter: {original.quantity_id}"
             )
-        # Source quantity identity belongs to the full producer family,
-        # including blocked/abstained items. A conflicting rejected replay
-        # cannot be filtered away to let another candidate retain FIRM status.
-        raw_id = quantity.quantity_id
+        original_id = original.quantity_id
         if (
-            type(raw_id) is not str or not raw_id or raw_id != raw_id.strip()
-            or raw_id in seen_source_ids
+            type(original_id) is not str or not original_id
+            or original_id != original_id.strip()
+            or original_id in seen_source_ids
         ):
             raise SourceClosedRunConflictError(
-                f"duplicate or invalid original ceiling-lining quantity id: {raw_id}"
+                f"duplicate or invalid original ceiling-lining quantity id: {original_id}"
             )
-        seen_source_ids.add(raw_id)
+        seen_source_ids.add(original_id)
+    source_area_ceiling_owners: dict[str, str] = {}
+    original_mark_ceiling_owners: dict[str, str] = {}
+    original_occurrence_ceiling_owners: dict[str, str] = {}
+    # Preserve source-owned rivals rejected by geometry/measurement authority.
+    # The FIRM-only loop below cannot independently see such claimants.
+    abstained_original_marks: set[tuple[str, str, str, str]] = set()
+    unresolved_root_original_marks: set[tuple[str, str]] = set()
+    for prior in claim.ceiling_lining_quantity_evidence:
+        if not isinstance(prior, QuantityEvidence):
+            continue  # Existing complete inventory validation below raises.
+        if not (prior.abstained or prior.value is None):
+            continue
+        prior_meta = prior.metadata if isinstance(prior.metadata, Mapping) else {}
+        digest = prior_meta.get("source_sha256")
+        revision = prior_meta.get("revision_id")
+        root_proved = (
+            _valid_original_source_sha(digest)
+            and type(revision) is str
+            and bool(revision)
+            and revision == revision.strip()
+        )
+        for key in (
+            "finish_occurrence_record_id",
+            "finish_occurrence_evidence_id",
+        ):
+            original_id = prior_meta.get(key)
+            if (type(original_id) is str and original_id
+                    and original_id == original_id.strip()):
+                if root_proved:
+                    abstained_original_marks.add((
+                        digest.lower(), revision, key, original_id,
+                    ))
+                else:
+                    # Missing source ownership cannot prove that a known
+                    # competing original mark belongs to another document.
+                    unresolved_root_original_marks.add((key, original_id))
+    for quantity in claim.ceiling_lining_quantity_evidence:
+        # Complete original source identity was prevalidated above.
         if quantity.abstained or quantity.value is None:
             continue
         if len(quantity.input_entity_ids) != 1:
@@ -365,6 +402,21 @@ def build_live_ceiling_lining_source_traces(
         if mark_id not in quantity.evidence_ids or mark_id not in evidence_ids:
             raise SourceClosedRunConflictError(
                 f"ceiling material occurrence source receipt mismatch: {quantity.quantity_id}"
+            )
+        # An unmeasurable rival does not relinquish the original RCP mark.
+        # Compare source roots to distinguish unrelated PDF/revision-local IDs.
+        root = (ceiling.source_sha256.lower(), ceiling.revision_id)
+        if any(
+            ((*root, field, original_id) in abstained_original_marks
+             or (field, original_id) in unresolved_root_original_marks)
+            for field, original_id in (
+                ("finish_occurrence_record_id", occurrence_id),
+                ("finish_occurrence_evidence_id", mark_id),
+            )
+        ):
+            raise SourceClosedRunConflictError(
+                "original RCP material mark contested by abstained source "
+                "quantity: " + quantity.quantity_id
             )
 
         points = ceiling.polygon_pdf_pts

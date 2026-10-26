@@ -1,0 +1,185 @@
+name: GPT3 trusted original 8-to-9 customer replay (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gpt3-trusted-original-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  original:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
+    name: Original Lot16 8+9 sealed customer (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - name: Checkout trusted main workflow context
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Authenticate immutable GPT3 candidate diff before receiving source secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          approved_base=c491c5fb2a155a54825d639ef277218707b76327
+          approved_head=31439c9e4137d7f210488877cc0ab868ed7ffecb
+          git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
+          observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
+          expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
+          .github/workflows/test-gpt3-append-only-opening-members.yml
+          .github/workflows/test-gpt3-atomic-pending-activation-pair.yml
+          .github/workflows/test-gpt3-customer-floor-finish-material.yml
+          .github/workflows/test-gpt3-floor-area-physical-uniqueness.yml
+          .github/workflows/test-gpt3-integrated-activation-release.yml
+          .github/workflows/test-gpt3-new-seal-snapshot-conflicts.yml
+          .github/workflows/test-gpt3-opening-cross-semantic-seal.yml
+          .github/workflows/test-gpt3-v1-unsigned-scope-wire.yml
+          .github/workflows/test-gpt3-v2-opening-kind-consistency.yml
+          .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
+          pb_customer_output_verification.py
+          pb_live_opening_customer_projection.py
+          pb_live_opening_source_closed_export.py
+          pb_quantity_takeoff_adapter.py
+          pb_source_closed_run_export.py
+          tests/test_gpt3_activation_portability_and_duplicate_keys.py
+          tests/test_gpt3_append_only_opening_member_overlap.py
+          tests/test_gpt3_atomic_pending_activation_pair.py
+          tests/test_gpt3_cross_semantic_physical_claims_shadow.py
+          tests/test_gpt3_customer_original_floor_finish_material_parity.py
+          tests/test_gpt3_floor_area_physical_double_issue_veto.py
+          tests/test_gpt3_floor_surface_activation_signed_material_trade.py
+          tests/test_gpt3_four_project_evidence.py
+          tests/test_gpt3_guarded_activation_signed_trade_veto.py
+          tests/test_gpt3_guarded_input_byte_retention.py
+          tests/test_gpt3_guarded_pending_owned_rollback.py
+          tests/test_gpt3_guarded_pending_reconciliation.py
+          tests/test_gpt3_lot16_original_nine_whole_retention.py
+          tests/test_gpt3_new_seal_snapshot_conflicts.py
+          tests/test_gpt3_opening_cross_semantic_source_seal.py
+          tests/test_gpt3_opening_kind_complete_semantics.py
+          tests/test_gpt3_original_byte_gated_exact_project.py
+          tests/test_gpt3_original_opening_activation_signed_trade.py
+          tests/test_gpt3_pending_floor_surface_identity_activation.py
+          tests/test_gpt3_pending_identity_activation.py
+          tests/test_gpt3_signed_v2_family_unit_dimension_veto.py
+          tests/test_gpt3_source_append_only_batch_gate.py
+          tests/test_gpt3_ten_customer_release_gates.py
+          tests/test_gpt3_v1_signed_wire_unsigned_authority_extensions.py
+          tests/test_gpt3_v2_legacy_floor_area_uniqueness.py
+          tests/test_gpt3_v2_opening_physical_kind_consistency.py
+          tests/test_gpt3_v2_original_floor_finish_tile_trade_semantics.py
+          tests/test_live_append_only_opening_area_composition.py
+          tools/diag_lot16_room_face_scope.py
+          tools/gpt3_atomic_pending_activation_pair.py
+          tools/gpt3_signed_v2_family_trade_integrity.py
+          tools/gpt3_source_append_only_batch_gate.py
+          tools/prepare_gpt3_pending_floor_surface_identity_activation.py
+          tools/prepare_gpt3_pending_identity_activation.py
+          tools/run_gpt3_guarded_pending_reconciliation.py
+          tools/run_gpt3_lot16_original_sealed_score_input.py
+          APPROVED_SOURCE_TEST_PATHS
+          )"
+          [[ "$observed" == "$expected" ]] || { echo "::error::Unreviewed GPT3 source/test diff"; exit 1; }
+          # Before seeing any private source, reject an approved PR file that
+          # has independently changed on trusted main since the candidate base.
+          # A safe post-replay restack must keep BOTH code ancestries intact.
+          # Disable rename similarity detection: a move must expose BOTH its old approved path and new destination.
+          main_changed="$(git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA" | LC_ALL=C sort)"
+          conflicting="$(comm -12 <(printf '%s\n' "$observed") <(printf '%s\n' "$main_changed"))"
+          if [[ -n "$conflicting" ]]; then
+            echo "::error::Trusted main modified an immutable GPT3 release path"
+            exit 1
+          fi
+          # Keep trusted main checked out: the subsequent local provisioner
+          # MUST be resolved from main, not from the candidate PR tree.
+          target_tree="$RUNNER_TEMP/gpt3-approved-candidate"
+          mkdir -p "$target_tree"
+          git archive "$approved_head" | tar -x -C "$target_tree"
+          mkdir -p "$target_tree/documents/sources"
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          test -f "$target_tree/tests/test_gpt3_lot16_original_nine_whole_retention.py"
+          test -f "$target_tree/tools/run_gpt3_lot16_original_sealed_score_input.py"
+          test -f .github/actions/provision-original-sources/action.yml
+          echo "GPT3_APPROVED_TREE=$target_tree" >> "$GITHUB_ENV"
+          echo "GPT3_APPROVED_HEAD=$approved_head" >> "$GITHUB_ENV"
+          echo "Validated immutable PR tree while retaining trusted-main provisioner."
+      - name: Build offline exact-version test image before private source exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          dockerfile="$RUNNER_TEMP/gpt3-offline.Dockerfile"
+          cat > "$dockerfile" <<'DOCKER'
+          FROM python:${{ matrix.python-version }}-slim
+          ENV PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+          WORKDIR /workspace
+          RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 libgomp1 tesseract-ocr && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          DOCKER
+          # Build from ONLY the two immutable approved-candidate dependency files,
+          # not the moving trusted-main checkout or a networked candidate code context.
+          deps_dir="$RUNNER_TEMP/gpt3-approved-deps"
+          mkdir -p "$deps_dir"
+          cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"
+          docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" "$deps_dir"
+      - name: Provision SHA-verified original Lot16 source
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            1. Construction Plans - Lot 16 Power (REV E).pdf
+          allow-missing: "false"
+      - name: Require two original production runs and complete eight-body plus ninth customer verification
+        shell: bash
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          test -s 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          output="$RUNNER_TEMP/gpt3-owner-original-positive.log"
+          # Private original never reaches candidate Python on the networked
+          # runner. Only trusted main resolved the token-bearing local action.
+          # Candidate code and the original are independent read-only mounts.
+          if ! docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 256 \
+              --memory 6g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+              --mount "type=bind,src=$GPT3_APPROVED_TREE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/documents/sources,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e HOME=/tmp \
+              "gpt3-offline:${{ matrix.python-version }}" \
+              python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings \
+              tests/test_gpt3_lot16_original_nine_whole_retention.py \
+              > "$output" 2>&1; then
+            echo "::error::Isolated GPT3 Lot16 8+9 replay FAILED (private details withheld)"
+            exit 1
+          fi
+          if ! grep -Eq '(^|[ ,])1 passed([, ]|$)' "$output" || grep -Eq '(^|[ ,])[1-9][0-9]* skipped([, ]|$)' "$output"; then
+            echo "::error::Original producer was skipped or did not pass"
+            exit 1
+          fi
+          {
+            echo '### GPT3 source-positive release acceptance'
+            echo "- Immutable exact code SHA: $GPT3_APPROVED_HEAD"
+            echo '- Original Lot16: source SHA/size verified by manifest provisioner and preflight'
+            echo '- Both original 8/default and 9/explicit real source production runs: PASS'
+            echo '- Full sealed and customer row bodies unchanged for old 8: PASS'
+            echo '- New ninth distinct physical/snapshot and verified customer: PASS'
+            echo '- Frozen V2 score promotion: NOT GRANTED by this test'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Destroy original PDF, untrusted code archive and unpublished logs
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log" "$RUNNER_TEMP/gpt3-offline.Dockerfile"
+          rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" "$RUNNER_TEMP/gpt3-approved-deps" documents/sources
