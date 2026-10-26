@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 
 from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from types import MappingProxyType
 from typing import Mapping
 
@@ -46,7 +47,7 @@ def _firm_room_area_quantities(
 
     out: list[QuantityEvidence] = []
     seen_ids: set[str] = set()
-    figured_pair_owner: dict[tuple[str, str], tuple[str, str]] = {}
+    figured_pair_owner: dict[tuple[str, str, tuple[str, str]], tuple[str, str]] = {}
     for quantity in claim.room_area_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -142,8 +143,24 @@ def _firm_room_area_quantities(
                     raise SourceClosedRunConflictError(
                         f"room-area original figured pair invalid: {quantity_id}"
                     )
+                # Native figured IDs are local to an original PDF revision.
+                # Independent source documents may reuse the same IDs.
+                # Missing or malformed source roots never grant independence.
+                metadata = _quantity_metadata(quantity)
+                source_sha = metadata.get("source_sha256")
+                revision_id = metadata.get("revision_id")
+                if (
+                    not _valid_original_source_sha(source_sha)
+                    or type(revision_id) is not str
+                    or not revision_id
+                    or revision_id != revision_id.strip()
+                ):
+                    raise SourceClosedRunConflictError(
+                        f"room-area original figured pair lacks valid source root: {quantity_id}"
+                    )
                 pair = tuple(sorted(axes))
-                prior = figured_pair_owner.get(pair)
+                owner_key = (source_sha.lower(), revision_id, pair)
+                prior = figured_pair_owner.get(owner_key)
                 if prior is not None:
                     reason = (
                         "one original figured pair claimed by competing rooms"
@@ -151,7 +168,7 @@ def _firm_room_area_quantities(
                         else "one original figured pair reissued as a second room-area quantity"
                     )
                     raise SourceClosedRunConflictError(f"{reason}: {pair}")
-                figured_pair_owner[pair] = (quantity.input_entity_ids[0], quantity_id)
+                figured_pair_owner[owner_key] = (quantity.input_entity_ids[0], quantity_id)
         out.append(quantity)
 
     return tuple(sorted(out, key=lambda item: item.quantity_id))
