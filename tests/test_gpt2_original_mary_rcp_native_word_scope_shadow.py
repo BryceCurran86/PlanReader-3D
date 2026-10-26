@@ -453,7 +453,9 @@ def test_unrelated_or_earlier_native_text_does_not_erase_grid_ink(later):
     pdf = fitz.open()
     page = pdf.new_page(width=700, height=700)
     if not later:
-        page.insert_text((173, 250), "M", fontsize=10, color=(1, 1, 1))
+        # A distinct earlier source line overlaps the future G ink, but
+        # cannot erase later GRID; offset baseline avoids lexical merging.
+        page.insert_text((173, 239), "M", fontsize=10, color=(1, 1, 1))
     page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
     if later:
         page.insert_text((310, 250), "M", fontsize=10, color=(1, 1, 1))
