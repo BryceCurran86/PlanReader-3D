@@ -18,6 +18,7 @@ from pb_live_ceiling_area_quantity_publication import (
     publish_live_ceiling_area_quantities,
 )
 from pb_live_ceiling_area_source_closed_export import (
+    _reject_original_numeric_firm_ceiling_scale_conflicts,
     build_live_ceiling_area_source_traces,
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
@@ -161,6 +162,10 @@ def project_live_ceiling_area_customer_rows(
                 "legacy numeric firm ceiling source retains unresolved blockers: "
                 f"{source_id}"
             )
+
+    # This must execute even when the issuer returns zero quantities and the
+    # legacy customer path would otherwise return an empty inventory early.
+    _reject_original_numeric_firm_ceiling_scale_conflicts(result)
 
     original = tuple(
         quantity

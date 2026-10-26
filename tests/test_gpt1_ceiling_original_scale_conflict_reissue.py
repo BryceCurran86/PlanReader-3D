@@ -7,7 +7,8 @@ from dataclasses import replace
 
 import pytest
 
-from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+from pb_source_closed_run_export import SourceClosedRunConflictError
 from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
 from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
 from pb_live_ceiling_area_customer_projection import project_live_ceiling_area_customer_rows
@@ -93,3 +94,92 @@ def test_legacy_unannotated_scale_positive_remains_unchanged():
     )
     assert len(rows) == 1
     assert rows[0]["measurement_method"] == "scaled_geometry"
+
+
+@pytest.mark.parametrize("source_negative", [
+    {"scale_status": "conflicted"},
+    {"scale_status": "provisional"},
+    {"scale_status": "resolved "},
+    {"scale_status": True},
+    {"scale_status": None},
+    {"scale_conflicts": ("original-viewport-rival",)},
+    {"scale_conflicts": ["foreign-scale"]},
+    {"scale_conflicts": "hidden-original-conflict"},
+    {"scale_conflicts": None},
+    {"resolved_scale_id": "foreign-scale"},
+    {"resolved_scale_id": " physical-scale-1"},
+    {"resolved_scale_id": True},
+    {"physical_scale_record_id": "foreign-scale"},
+    {"physical_scale_record_id": True},
+])
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_original_numeric_firm_scale_conflict_cannot_vanish_from_mixed_customer(
+    source_negative, reverse_order,
+):
+    clean = _shadow_quantity()
+    blocked = replace(
+        clean,
+        quantity_id="qty-shadow-ceiling-rival",
+        status=AuthorityStatus.FIRM.value,
+        metadata={**dict(clean.metadata), **source_negative},
+    )
+    original = (blocked, clean) if reverse_order else (clean, blocked)
+    result = replace(_scaled_case({}), quantity_evidence=original)
+    snapshot = tuple(quantity.to_dict() for quantity in original)
+    # A clean canonical ceiling is still independently issuer-eligible. The
+    # negative original FIRM cannot disappear from the *complete* inventory.
+    assert len(publish_live_ceiling_area_quantities(result)) == 1
+    with pytest.raises(SourceClosedRunConflictError, match="original numeric firm ceiling scale conflict"):
+        seal_live_ceiling_area_run(
+            result, workspace_id=7, project_id="source-project",
+        )
+    with pytest.raises(SourceClosedRunConflictError, match="original numeric firm ceiling scale conflict"):
+        project_live_ceiling_area_customer_rows(
+            result, workspace_id=7, project_id="source-project",
+        )
+    assert tuple(quantity.to_dict() for quantity in result.quantity_evidence) == snapshot
+
+
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_valid_extra_original_firm_scale_receipt_does_not_block_clean_ceiling(reverse_order):
+    clean = _shadow_quantity()
+    extra = replace(
+        clean,
+        quantity_id="qty-shadow-ceiling-rival",
+        status=AuthorityStatus.FIRM.value,
+        metadata={
+            **dict(clean.metadata),
+            "scale_status": "verified",
+            "scale_conflicts": (),
+            # This unbound original has no canonical physical scale owner.
+            # Do not assert one or infer a FIRM from its source-only status.
+        },
+    )
+    originals = (extra, clean) if reverse_order else (clean, extra)
+    result = replace(_scaled_case({}), quantity_evidence=originals)
+    assert len(publish_live_ceiling_area_quantities(result)) == 1
+    assert len(seal_live_ceiling_area_run(
+        result, workspace_id=7, project_id="source-project",
+    ).quantities) == 1
+    assert len(project_live_ceiling_area_customer_rows(
+        result, workspace_id=7, project_id="source-project",
+    )) == 1
+
+
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_original_provisional_scale_negative_stays_nonpublishing_not_firm_veto(reverse_order):
+    clean = _shadow_quantity()
+    provisional = replace(
+        clean,
+        quantity_id="qty-shadow-ceiling-rival",
+        metadata={**dict(clean.metadata), "scale_status": "conflicted"},
+    )
+    originals = (provisional, clean) if reverse_order else (clean, provisional)
+    result = replace(_scaled_case({}), quantity_evidence=originals)
+    assert len(publish_live_ceiling_area_quantities(result)) == 1
+    assert len(seal_live_ceiling_area_run(
+        result, workspace_id=7, project_id="source-project",
+    ).quantities) == 1
+    assert len(project_live_ceiling_area_customer_rows(
+        result, workspace_id=7, project_id="source-project",
+    )) == 1

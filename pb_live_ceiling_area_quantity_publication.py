@@ -29,6 +29,34 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+
+def _original_scale_receipt_conflicts(
+    meta: Mapping, physical_scale_record_id: str | None,
+) -> bool:
+    """Shared source→issuer/seal veto; absence never fabricates scale proof.
+
+    Only explicit original scale fields are considered. A missing canonical
+    physical-scale owner cannot validate an explicitly claimed scale ID.
+    """
+    if "scale_status" in meta and (
+        type(meta["scale_status"]) is not str
+        or meta["scale_status"] not in ("resolved", "verified")
+    ):
+        return True
+    if "scale_conflicts" in meta and (
+        type(meta["scale_conflicts"]) not in (tuple, list)
+        or bool(meta["scale_conflicts"])
+    ):
+        return True
+    for field in ("resolved_scale_id", "physical_scale_record_id"):
+        if field in meta and (
+            type(meta[field]) is not str
+            or not physical_scale_record_id
+            or meta[field] != physical_scale_record_id
+        ):
+            return True
+    return False
+
 def _source_quantities(
     result: LiveCeilingLiningResult,
 ) -> dict[str, QuantityEvidence]:
@@ -240,24 +268,7 @@ def _publish_one(
         # conflict/status/identity evidence must survive the source→issuer
         # boundary; absence retains the older producer contract, not a new
         # claim that the original was independently replayed here.
-        if (
-            ("scale_status" in meta and (
-                type(meta["scale_status"]) is not str
-                or meta["scale_status"] not in ("resolved", "verified")
-            ))
-            or ("scale_conflicts" in meta and (
-                type(meta["scale_conflicts"]) not in (tuple, list)
-                or bool(meta["scale_conflicts"])
-            ))
-            or ("resolved_scale_id" in meta and (
-                type(meta["resolved_scale_id"]) is not str
-                or meta["resolved_scale_id"] != resolved_scale_id
-            ))
-            or ("physical_scale_record_id" in meta and (
-                type(meta["physical_scale_record_id"]) is not str
-                or meta["physical_scale_record_id"] != resolved_scale_id
-            ))
-        ):
+        if _original_scale_receipt_conflicts(meta, resolved_scale_id):
             return None
     else:
         return None

@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from pb_live_ceiling_area_quantity_publication import (
+    _original_scale_receipt_conflicts,
     publish_live_ceiling_area_quantities,
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
@@ -26,6 +27,37 @@ from pb_source_closed_run_export import (
 def _clean(value: object) -> str:
     return str(value or "").strip()
 
+
+
+def _reject_original_numeric_firm_ceiling_scale_conflicts(
+    result: LiveCeilingLiningResult,
+) -> None:
+    """Refuse source FIRM scale contradictions before commercial filtering.
+
+    Genuine provisional and abstained originals keep their existing
+    nonpublishing semantics; this is a negative-only original inventory gate.
+    """
+    canonical_scales = {
+        ceiling.ceiling_quantity_id: (
+            _clean(ceiling.physical_scale_record_id) or None
+        )
+        for ceiling in result.canonical_ceilings
+    }
+    for original in result.quantity_evidence:
+        if (
+            original.abstained
+            or original.value is None
+            or _clean(original.status).casefold() != "firm"
+        ):
+            continue
+        meta = original.metadata if isinstance(original.metadata, Mapping) else {}
+        if _original_scale_receipt_conflicts(
+            meta, canonical_scales.get(original.quantity_id),
+        ):
+            raise SourceClosedRunConflictError(
+                "original numeric firm ceiling scale conflict cannot disappear "
+                f"before seal/customer: {original.quantity_id}"
+            )
 
 def build_live_ceiling_area_source_traces(
     result: LiveCeilingLiningResult,
@@ -82,6 +114,13 @@ def build_live_ceiling_area_source_traces(
                 "legacy numeric firm ceiling source retains unresolved blockers: "
                 f"{original.quantity_id}"
             )
+
+
+    # Source FIRM numeric scale contradictions are stronger than the canonical
+    # issuer's negative filter: losing the conflicted original before sealing
+    # would let a clean sibling appear to be the complete customer inventory.
+    # Audit the complete original family, not just surviving FIRM projections.
+    _reject_original_numeric_firm_ceiling_scale_conflicts(result)
 
     ceilings = {}
     for ceiling in result.canonical_ceilings:
