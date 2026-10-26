@@ -66,6 +66,23 @@ def build_live_ceiling_area_source_traces(
             )
         seen_original_source_ids.add(original_id)
 
+    # The provisional canonical publisher can filter contradictory original
+    # numeric FIRM claims before the source-closed trace is constructed. Audit
+    # the COMPLETE typed original inventory after duplicate/family validation:
+    # a blocked positive original may not vanish from a direct sealed run.
+    # Genuine abstained/provisional sources remain nonpublishing as before.
+    for original in result.quantity_evidence:
+        if (
+            not original.abstained
+            and original.value is not None
+            and _clean(original.status).casefold() == "firm"
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "legacy numeric firm ceiling source retains unresolved blockers: "
+                f"{original.quantity_id}"
+            )
+
     ceilings = {}
     for ceiling in result.canonical_ceilings:
         canonical_id = _clean(ceiling.canonical_ceiling_id)

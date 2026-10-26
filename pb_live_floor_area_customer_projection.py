@@ -144,6 +144,21 @@ def project_live_floor_area_customer_rows(
             )
         original_room_area_ids.add(source_id)
 
+        # This customer boundary returns early when no FIRM floor survives.
+        # Retain contradictory original numeric FIRM source blockers instead
+        # of misrepresenting a filtered partial/empty inventory as clean.
+        # Ordinary provisional/ABSTAINED original sources stay unpublished.
+        if (
+            not source.abstained
+            and source.value is not None
+            and _clean(source.status).casefold() == "firm"
+            and source.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "original numeric firm room-area source retains unresolved blockers: "
+                f"{source_id}"
+            )
+
     quantities = tuple(
         quantity
         for quantity in publish_live_floor_area_quantities(claim)

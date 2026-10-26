@@ -12,8 +12,8 @@ HEADS = {
     "host": "b58d435efa65e003ba55754c2bdc152df5c91e8b",
     "frame": "fd33915001c32c0b715013e72a6823fbddc1eb89",
     "receipt": "cef7e07d1df950c654fe8d8bd25d93184d3733c3",
-    "cache": "d5cdf829c135389d58a668dfdd55ccbd5834e707",
-    "vertical": "d993bac877fb1c5afc2327fae1ff1995274aea6a",
+    "cache": "6a937ad7d44da2c63e2fae04492c332a03b3b623",
+    "vertical": "d43de44b05b70944588c611b02da44a69b4aa533",
     "horizontal": "8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0",
 }
 PATHS = {
@@ -129,8 +129,8 @@ def test_cache_target_has_distinct_immutable_base_and_no_dynamic_checkout():
         if step.get("name", "").startswith("Authenticate immutable")
     )
     assert "cache)" in guard
-    assert "approved_base=c491c5fb2a155a54825d639ef277218707b76327" in guard
-    assert "approved_head=d5cdf829c135389d58a668dfdd55ccbd5834e707" in guard
+    assert "approved_base=f480fc84d2e7486319e9b52a3a72790bb7435e69" in guard
+    assert "approved_head=6a937ad7d44da2c63e2fae04492c332a03b3b623" in guard
     assert "focused_test=tests/test_raster_opening_cached_source_integrity.py" in guard
     assert 'git checkout --detach "$approved_head"' not in guard
     assert "github.event.pull_request" not in source
@@ -143,7 +143,7 @@ def test_vertical_original_source_target_cannot_be_satisfied_by_synthetic_passes
     guard = next(step["run"] for step in steps if step.get("name", "").startswith("Authenticate immutable"))
     assert "vertical)" in guard
     assert "approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed" in guard
-    assert "approved_head=d993bac877fb1c5afc2327fae1ff1995274aea6a" in guard
+    assert "approved_head=d43de44b05b70944588c611b02da44a69b4aa533" in guard
     assert "focused_test=tests/test_gptmax_raster_tile_seam_source.py" in guard
     assert 'echo "GPTMAX_TARGET=$TARGET" >> "$GITHUB_ENV"' in guard
     focused = next(step for step in steps if step.get("name", "").startswith("Verify original-provisioned"))

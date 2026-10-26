@@ -16,6 +16,7 @@ from pb_source_rcp_ceiling_region_shadow import (
     NO_CEILING_MARK_IN_ZONE,
     ROLE_ANY,
     ROLE_EXTERNAL_OVERHEAD_CLADDING,
+    ROLE_EXTERNAL_SIGNAGE_CLADDING,
     ROLE_INTERNAL_CEILING_LINING,
     SOURCE_RCP_CEILING_REGION_CANDIDATE,
     SOURCE_RCP_CEILING_REGION_UNAVAILABLE,
@@ -239,7 +240,7 @@ def test_classify_material_role_helper():
     assert classify_material_role("IPF1") == ROLE_INTERNAL_CEILING_LINING
     assert classify_material_role("GRID") == ROLE_INTERNAL_CEILING_LINING
     assert classify_material_role("CL03") == ROLE_EXTERNAL_OVERHEAD_CLADDING
-    assert classify_material_role("CLD3") == ROLE_EXTERNAL_OVERHEAD_CLADDING
+    assert classify_material_role("CLD3") == ROLE_EXTERNAL_SIGNAGE_CLADDING
     assert classify_material_role("STP") == ROLE_EXTERNAL_OVERHEAD_CLADDING
     assert classify_material_role("SOFFIT") == ROLE_EXTERNAL_OVERHEAD_CLADDING
     assert classify_material_role("UNKNOWN") == "unclassified"
@@ -312,3 +313,44 @@ def test_rcp_authority_lookup_and_sealed_construction():
 
     with pytest.raises(TypeError, match="producer-owned"):
         SourceRcpCeilingRegionAuthority({})
+
+
+def test_original_a120_cld3_signage_is_not_overhead_cl03_or_internal_lining():
+    """Original CLD3 signage scope must not be imported into an RCP ceiling."""
+    prod = SourceRcpCeilingRegionProducer.create()
+    zone = [{"zone_id":"signage-cladding", "polygon_pdf_pts":sample_poly()}]
+    marks = [{"id":"cld3-original", "x":175.0, "y":175.0, "code":"CLD3"}]
+    for wrong_role in (ROLE_INTERNAL_CEILING_LINING,
+                       ROLE_EXTERNAL_OVERHEAD_CLADDING):
+        result=prod.evaluate_synthetic(
+            selector=sample_selector("CLD3",wrong_role),
+            zone_polygons=zone,marks=marks,scale_px_per_m=100.0)
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.reason_codes == (CEILING_ROLE_MISMATCH,)
+        assert result.records == ()
+        assert result.candidate_zone_count == 0
+    signage=prod.evaluate_synthetic(
+        selector=sample_selector("CLD3",ROLE_EXTERNAL_SIGNAGE_CLADDING),
+        zone_polygons=zone,marks=marks)
+    assert signage.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(signage.records)==1
+    record=signage.records[0]
+    assert record.ceiling_role==ROLE_EXTERNAL_SIGNAGE_CLADDING
+    assert record.material_code=="CLD3"
+    assert record.area_m2 is None
+    assert not record.commercial_projection_allowed
+    assert not record.takeoff_eligible
+
+
+def test_cld3_and_cl03_are_competing_original_material_codes_not_one_sku():
+    result=SourceRcpCeilingRegionProducer.create().evaluate_synthetic(
+        selector=sample_selector("CLD3",ROLE_ANY),
+        zone_polygons=[{"zone_id":"mixed", "polygon_pdf_pts":sample_poly()}],
+        marks=[
+            {"id":"signage","x":150.0,"y":175.0,"code":"CLD3"},
+            {"id":"overhead","x":250.0,"y":175.0,"code":"CL03"},
+        ])
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert COMPETING_CEILING_MARKS_IN_ZONE in result.records[0].reason_codes
+    assert not result.records[0].commercial_projection_allowed
+    assert not result.records[0].takeoff_eligible
