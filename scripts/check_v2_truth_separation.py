@@ -21,10 +21,42 @@ _PRODUCTION_EXCLUDED_PREFIXES = (
     "benchmarks/",
     "docs/",
 )
+# Workflow YAML and every local composite/Docker action input can change how
+# source-positive and signed/customer acceptance is executed. They are
+# production release controls, not benchmark truth, and must be kept in a
+# separate PR from any frozen V2 source/evaluator change.
+_WORKFLOW_ROOT = ".github/workflows/"
+_WORKFLOW_SUFFIXES = {".yml", ".yaml"}
+_LOCAL_ACTION_ROOT = ".github/actions/"
+# These root manifests select the interpreter's package/runtime environment for
+# both public CI and the trusted original-source replay. Changing one alongside
+# frozen benchmark inputs is a production-execution change even without a .py
+# diff; do not let a dependency-only edit bypass the separation gate.
+_ROOT_RUNTIME_MANIFESTS = frozenset({
+    "pyproject.toml",
+    "setup.cfg",
+    "Pipfile",
+    "Pipfile.lock",
+    "poetry.lock",
+    "uv.lock",
+})
+
+
+def _is_root_runtime_manifest(path: str) -> bool:
+    candidate = PurePosixPath(path)
+    if len(candidate.parts) != 1:
+        return False
+    name = candidate.name
+    return name in _ROOT_RUNTIME_MANIFESTS or (
+        name.startswith("requirements") and name.endswith(".txt")
+    )
 
 
 def _normalize(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
 
 
 def is_v2_truth_file(path: str) -> bool:
@@ -52,6 +84,12 @@ def is_production_code_file(path: str) -> bool:
     normalized = _normalize(path)
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False
+    if _is_root_runtime_manifest(normalized):
+        return True
+    if normalized.startswith(_LOCAL_ACTION_ROOT):
+        return True
+    if normalized.startswith(_WORKFLOW_ROOT) and PurePosixPath(normalized).suffix.lower() in _WORKFLOW_SUFFIXES:
+        return True
     return PurePosixPath(normalized).suffix.lower() in _PRODUCTION_SUFFIXES
 
 
