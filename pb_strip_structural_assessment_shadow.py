@@ -482,10 +482,14 @@ class StripStructuralAssessmentShadow:
             # not an absent rival. Never omit it from the terminal census.
             raw_geometry = observation.geometry
             if (type(raw_geometry) not in (tuple, list) or len(raw_geometry) != 4
-                    or any(type(value) not in (int, float) or not math.isfinite(value)
-                           for value in raw_geometry)):
+                    or any(type(value) not in (int, float) for value in raw_geometry)):
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
-            geometry = tuple(float(value) for value in raw_geometry)
+            try:
+                geometry = tuple(float(value) for value in raw_geometry)
+            except OverflowError:
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
+            if any(not math.isfinite(value) for value in geometry):
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             primitive = primitives.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
             verified = (primitive is not None
                         and geometry == (float(primitive["x1"]), float(primitive["y1"]),
