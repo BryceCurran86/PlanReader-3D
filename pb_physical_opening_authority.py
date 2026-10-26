@@ -1801,7 +1801,13 @@ class PhysicalOpeningAuthority:
                 failures.append(result)
         resolved = (tuple(records), tuple(failures))
         after = self._raster_inventory_inputs(published)
-        if inputs is not None and not self._same_raster_inventory_inputs(inputs, after):
+        # An absent pre-read token followed by a tracked post-read token is
+        # itself a changed source transaction. Do not bless the inventory
+        # merely because the original table was restored during enumeration.
+        if (inputs is None) != (after is None) or (
+            inputs is not None
+            and not self._same_raster_inventory_inputs(inputs, after)
+        ):
             self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
             return (), (visibility._conflict(PRODUCER_INTEGRITY_FAILURE),)
         self._raster_primitive_snapshot_cache[key] = resolved
