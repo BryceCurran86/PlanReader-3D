@@ -138,9 +138,9 @@ def test_required_ci_uses_nul_paths_on_pr_and_push() -> None:
 @pytest.mark.parametrize(
     "literal_root_code",
     [
-        r"tests\\synthetic_release.py",
-        r"docs\\synthetic_release.py",
-        r"benchmarks\\synthetic_release.py",
+        r"tests\synthetic_release.py",
+        r"docs\synthetic_release.py",
+        r"benchmarks\synthetic_release.py",
     ],
 )
 def test_real_git_literal_backslash_root_code_cannot_hide_with_frozen_truth(
@@ -149,8 +149,8 @@ def test_real_git_literal_backslash_root_code_cannot_hide_with_frozen_truth(
     """A Git backslash is part of a filename, not a POSIX directory boundary."""
     repo = _repo(tmp_path)
     frozen_path = TRUTH_ROOT + "manifest.json"
-    _write(repo, frozen_path, "synthetic frozen metadata\\n")
-    _write(repo, literal_root_code, "print('synthetic release')\\n")
+    _write(repo, frozen_path, "synthetic frozen metadata\n")
+    _write(repo, literal_root_code, "print('synthetic release')\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "synthetic mixed literal-backslash change")
 
@@ -170,9 +170,9 @@ def test_git_literal_backslashes_do_not_invent_a_frozen_directory(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path)
-    literal_root_file = r"benchmarks\\frozen_holdout\\full_plan_v2\\manifest.json"
-    _write(repo, literal_root_file, "synthetic unrelated root filename\\n")
-    _write(repo, PRODUCTION, "print('synthetic release')\\n")
+    literal_root_file = r"benchmarks\frozen_holdout\full_plan_v2\manifest.json"
+    _write(repo, literal_root_file, "synthetic unrelated root filename\n")
+    _write(repo, PRODUCTION, "print('synthetic release')\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "synthetic production plus unrelated root filename")
 
