@@ -488,6 +488,11 @@ class StripStructuralAssessmentShadow:
                         and geometry == (float(primitive["x1"]), float(primitive["y1"]),
                                          float(primitive["x2"]), float(primitive["y2"]))
                         and bool(primitive.get("width_present")) and bool(primitive.get("stroke_present")))
+            # A same-page published observation without matching original primitive
+            # geometry and paint is an integrity negative. Keeping an unverified
+            # nonnominated rival would let a clean nominated strip appear complete.
+            if not verified:
+                return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             page_segments.append(SourceRole(
                 observation_id=str(observation_id), geometry=geometry,
                 stroke_width=float(primitive["width"]) if verified else None,
