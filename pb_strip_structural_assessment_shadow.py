@@ -528,6 +528,15 @@ class StripStructuralAssessmentShadow:
             if (structures.status is not EvidenceResolutionStatus.CANDIDATE
                     or structures.page_id != str(page_id)):
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
+            # Every page-census candidate must refer to a complete, unique set of
+            # producer-published observations on this page. An unknown/duplicate
+            # member cannot be treated as a disjoint rival by the overlap filter:
+            # without its source geometry, disjointness is unprovable.
+            for candidate in structures.candidates:
+                members = tuple(candidate.source_observation_ids)
+                if (not members or len(members) != len(set(members))
+                        or any(member not in by_id for member in members)):
+                    return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             nominated_set = set(nominated)
             wanted = []
             for c in structures.candidates:

@@ -490,3 +490,38 @@ def test_downstream_source_integrity_negative_cannot_be_overridden_by_a_clean_st
     assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
     assert _shape(source) == before
     assert _assess(source, published, ids) == baseline
+
+
+@pytest.mark.parametrize("fault", ["unknown_member", "duplicate_member"])
+def test_corrupt_page_candidate_membership_cannot_vanish_before_rival_filter(monkeypatch, fault):
+    """A candidate with unowned or repeated members cannot prove it is disjoint from a nominated strip."""
+    from pb_physical_opening_authority import PhysicalOpeningAuthority
+
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    before = _shape(source)
+    original = PhysicalOpeningAuthority.visible_candidate_structures
+    seen = {"injected": False}
+
+    def corrupt_page_candidate(self, selector):
+        result = original(self, selector)
+        assert result.status is CAND and result.candidates
+        existing = result.candidates[0]
+        members = (("not-a-published-source-observation",) if fault == "unknown_member"
+                   else (existing.source_observation_ids[0],) * 2)
+        injected = replace(existing, candidate_id="shadow-corrupt-rival", source_observation_ids=members)
+        seen["injected"] = True
+        return replace(result, candidates=tuple(result.candidates) + (injected,))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(PhysicalOpeningAuthority, "visible_candidate_structures", corrupt_page_candidate)
+        blocked = _assess(source, published, ids)
+    assert seen["injected"]
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _shape(source) == before
+    assert _assess(source, published, ids) == baseline
