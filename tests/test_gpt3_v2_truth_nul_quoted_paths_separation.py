@@ -133,3 +133,53 @@ def test_required_ci_uses_nul_paths_on_pr_and_push() -> None:
     )
     assert workflow.count(command) == 2
     assert 'git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA"' not in workflow
+
+
+@pytest.mark.parametrize(
+    "literal_root_code",
+    [
+        r"tests\synthetic_release.py",
+        r"docs\synthetic_release.py",
+        r"benchmarks\synthetic_release.py",
+    ],
+)
+def test_real_git_literal_backslash_root_code_cannot_hide_with_frozen_truth(
+    tmp_path: Path, literal_root_code: str,
+) -> None:
+    """A Git backslash is part of a filename, not a POSIX directory boundary."""
+    repo = _repo(tmp_path)
+    frozen_path = TRUTH_ROOT + "manifest.json"
+    _write(repo, frozen_path, "synthetic frozen metadata\n")
+    _write(repo, literal_root_code, "print('synthetic release')\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "synthetic mixed literal-backslash change")
+
+    raw = _git(repo, "diff", "--no-renames", "--name-only", "-z", "HEAD^", "HEAD")
+    paths = _stdin_paths_from_bytes(raw, require_nul=True)
+    assert sorted(paths) == sorted([frozen_path, literal_root_code])
+    assert find_separation_violation(paths, git_path=True) == (
+        [frozen_path], [literal_root_code],
+    )
+    result = _gate(raw)
+    assert result.returncode == 1
+    assert b"separation gate failed" in result.stderr
+    assert b"separation gate passed" not in result.stdout
+
+
+def test_git_literal_backslashes_do_not_invent_a_frozen_directory(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    literal_root_file = r"benchmarks\frozen_holdout\full_plan_v2\manifest.json"
+    _write(repo, literal_root_file, "synthetic unrelated root filename\n")
+    _write(repo, PRODUCTION, "print('synthetic release')\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "synthetic production plus unrelated root filename")
+
+    raw = _git(repo, "diff", "--no-renames", "--name-only", "-z", "HEAD^", "HEAD")
+    paths = _stdin_paths_from_bytes(raw, require_nul=True)
+    assert sorted(paths) == sorted([literal_root_file, PRODUCTION])
+    assert find_separation_violation(paths, git_path=True) == ([], [])
+    result = _gate(raw)
+    assert result.returncode == 0, result.stderr.decode("utf-8")
+    assert b"separation gate passed" in result.stdout
