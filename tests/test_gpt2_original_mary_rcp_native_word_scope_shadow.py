@@ -412,6 +412,96 @@ def test_permuted_native_glyph_paint_never_authenticates_same_letter_multiset(
     assert not result.commercial_projection_allowed
 
 
+@pytest.mark.parametrize("rotation", (0, 90))
+@pytest.mark.parametrize("later_colour", ((1, 1, 1), (0, 0, 0)))
+def test_later_native_text_glyph_edge_overlap_vetoes_original_grid(
+    rotation, later_colour,
+):
+    # The later M has a painted bbox overlapping G, but its glyph CENTRE
+    # is outside GRID's source word. Word-centre selection alone missed it.
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
+    page.insert_text((173, 250), "M", fontsize=10, color=later_colour)
+    page.set_rotation(rotation)
+    source = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        page = original[0]
+        grid = next(w for w in page.get_text("words") if w[4] == "GRID")
+        later = next(t for t in page.get_texttrace()
+                     if ''.join(chr(c[0]) for c in t["chars"]) == "M")
+        painted = later["chars"][0][3]
+        assert (painted[0] + painted[2]) / 2 < grid[0] - .1
+        assert painted[2] > grid[0] and painted[0] < grid[2]
+        assert not _visible_native_ceiling_code_ink(page, grid)
+    result = _go(source, tuple(grid[5:8]))
+    assert result.original_source_role == "SOURCE_CEILING_CODE_INK_UNRESOLVED"
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("later", (False, True))
+def test_unrelated_or_earlier_native_text_does_not_erase_grid_ink(later):
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    if not later:
+        page.insert_text((173, 250), "M", fontsize=10, color=(1, 1, 1))
+    page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
+    if later:
+        page.insert_text((310, 250), "M", fontsize=10, color=(1, 1, 1))
+    source = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        page = original[0]
+        grid = next(w for w in page.get_text("words") if w[4] == "GRID")
+        assert _visible_native_ceiling_code_ink(page, grid)
+    result = _go(source, tuple(grid[5:8]))
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
+def test_later_native_text_whitespace_advance_is_not_painted_overprint():
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
+    page.insert_text((110, 250), "M" + " " * 35 + "M",
+                     fontsize=10, color=(1, 1, 1))
+    source = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        page = original[0]
+        grid = next(w for w in page.get_text("words") if w[4] == "GRID")
+        later = page.get_texttrace()[-1]
+        assert later["bbox"][0] < grid[0] < grid[2] < later["bbox"][2]
+        assert all(
+            glyph[3][2] <= grid[0] or glyph[3][0] >= grid[2]
+            for glyph in later["chars"] if not chr(glyph[0]).isspace()
+        )
+        assert any(
+            glyph[3][0] <= grid[0] <= glyph[3][2]
+            or grid[0] <= (glyph[3][0] + glyph[3][2]) / 2 <= grid[2]
+            for glyph in later["chars"] if chr(glyph[0]).isspace()
+        )
+        assert _visible_native_ceiling_code_ink(page, grid)
+    result = _go(source, tuple(grid[5:8]))
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.original_material_definition_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
 @pytest.mark.parametrize("rotation", (0, 90, 180, 270))
 def test_original_code_glyphs_follow_native_reading_direction(rotation):
     doc = fitz.open()
