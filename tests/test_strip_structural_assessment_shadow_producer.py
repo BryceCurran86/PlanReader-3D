@@ -608,3 +608,84 @@ def test_foreign_positive_existence_record_cannot_upgrade_strip_shadow(
     assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
     assert _shape(source) == before
     assert _assess(source, published, ids) == baseline
+
+
+@pytest.mark.parametrize("foreign_field, foreign_value", [
+    ("observation_id", "foreign-observation"),
+    ("document_id", "foreign-document"),
+    ("revision_id", "foreign-revision"),
+    ("source_sha256", "0" * 64),
+    ("snapshot_id", "foreign-snapshot"),
+])
+def test_foreign_published_source_observation_cannot_launder_positive_strip(
+        monkeypatch, foreign_field, foreign_value):
+    """A CORROBORATED wrapper does not authenticate an alien same-geometry observation."""
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    before = _shape(source)
+    other = next(oid for oid in published.visible_observation_ids if oid not in ids)
+    visibility = source.authority()
+    original_resolve = visibility.resolve_visible
+    seen = {"injected": False}
+
+    def foreign_observation(selector):
+        result = original_resolve(selector)
+        if selector.observation_id == other:
+            assert result.observation is not None
+            seen["injected"] = True
+            return replace(result, observation=replace(
+                result.observation, **{foreign_field: foreign_value}))
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(visibility, "resolve_visible", foreign_observation)
+        patch.setattr(source, "authority", lambda: visibility)
+        blocked = _assess(source, published, ids)
+    assert seen["injected"]
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _shape(source) == before
+    assert _assess(source, published, ids) == baseline
+
+
+@pytest.mark.parametrize("foreign_field, foreign_value", [
+    ("document_id", "foreign-document"),
+    ("revision_id", "foreign-revision"),
+    ("source_sha256", "0" * 64),
+    ("snapshot_id", "foreign-snapshot"),
+    ("page_id", "999"),
+])
+def test_foreign_page_candidate_cannot_launder_positive_strip(
+        monkeypatch, foreign_field, foreign_value):
+    """Every census candidate must belong to the same immutable source, even if disjoint."""
+    from pb_physical_opening_authority import PhysicalOpeningAuthority
+
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    before = _shape(source)
+    original_census = PhysicalOpeningAuthority.visible_candidate_structures
+    seen = {"injected": False}
+
+    def foreign_candidate(self, selector):
+        result = original_census(self, selector)
+        assert result.status is CAND and result.candidates
+        candidate = replace(result.candidates[0], **{foreign_field: foreign_value})
+        seen["injected"] = True
+        return replace(result, candidates=(candidate,) + tuple(result.candidates[1:]))
+
+    with monkeypatch.context() as patch:
+        patch.setattr(PhysicalOpeningAuthority, "visible_candidate_structures", foreign_candidate)
+        blocked = _assess(source, published, ids)
+    assert seen["injected"]
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _shape(source) == before
+    assert _assess(source, published, ids) == baseline
