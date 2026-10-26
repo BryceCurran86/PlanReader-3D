@@ -68,6 +68,21 @@ def write_new_diagnostic(
         our_output_created = True
         if verify_inputs is not None:
             verify_inputs()
+        # Exclusive creation alone cannot prevent another writer from
+        # replacing the destination before this function returns. An input
+        # recheck is not an output-identity check: fail closed if the linked
+        # report no longer refers to the staged bytes.
+        try:
+            still_ours = output.samefile(temp)
+            # In-place tampering preserves inode identity, so also verify the
+            # final UTF-8 bytes against the payload we actually staged.
+            original_bytes_retained = (
+                output.read_bytes() == encoded.encode("utf-8")
+            ) if still_ours else False
+        except OSError as exc:
+            raise ValueError("original-source diagnostic output changed during publication") from exc
+        if not still_ours or not original_bytes_retained:
+            raise ValueError("original-source diagnostic output changed during publication")
     except BaseException:
         if our_output_created and temp is not None:
             # Retain another writer's output if it replaced ours after link.

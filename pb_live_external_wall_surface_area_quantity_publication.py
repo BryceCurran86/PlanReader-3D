@@ -59,6 +59,10 @@ def publish_live_per_wall_surface_area_quantities(
     if (
         type(aggregate) is not QuantityEvidence
         or aggregate.abstained
+        # A non-abstained numeric source object can still carry unresolved
+        # original wall/opening conflicts. Never reissue its area as separate
+        # per-wall source-closed facts by dropping these blockers.
+        or bool(aggregate.blocking_reasons)
         or aggregate.status != "corroborated"
         or aggregate.family != "wall_net_area"
         or aggregate.semantic_key != "perimeter_walling"
