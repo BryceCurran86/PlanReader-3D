@@ -89,7 +89,7 @@ def test_actual_ci_nul_stdin_allows_launcher_only() -> None:
 
 
 def test_windows_path_spelling_keeps_exact_root_launcher_protection() -> None:
-    assert is_production_code_file(r".\\RUN_PLANREADER_WINDOWS.bat")
-    assert find_separation_violation([TRUTH, r".\\RUN_PLANREADER_WINDOWS.bat"]) == (
-        [TRUTH], [r".\\RUN_PLANREADER_WINDOWS.bat"],
+    assert is_production_code_file(r".\RUN_PLANREADER_WINDOWS.bat")
+    assert find_separation_violation([TRUTH, r".\RUN_PLANREADER_WINDOWS.bat"]) == (
+        [TRUTH], [r".\RUN_PLANREADER_WINDOWS.bat"],
     )
