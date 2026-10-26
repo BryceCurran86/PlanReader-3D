@@ -370,3 +370,61 @@ def test_unrelated_later_stroke_path_preserves_visible_grid_candidate():
     assert not result.physical_ceiling_zone_authorized
     assert not result.metric_area_authorized
     assert not result.firm_ceiling_quantity_authorized
+
+
+@pytest.mark.parametrize("tamper", ("character_paint_order", "glyph_spatial_order"))
+def test_permuted_native_glyph_paint_never_authenticates_same_letter_multiset(
+    monkeypatch, tamper,
+):
+    # The PDF extractor still reports the exact native word GRID, but the
+    # painted trace has DIRG or glyph boxes in an incompatible visual order.
+    # Both would have passed the previous Counter-based equality.
+    source, address = _native_code_paint_case()
+    original_get_texttrace = fitz.Page.get_texttrace
+
+    def altered_get_texttrace(page):
+        traces = list(original_get_texttrace(page))
+        changed = 0
+        for index, trace in enumerate(traces):
+            chars = list(trace.get("chars") or ())
+            if "".join(chr(char[0]) for char in chars) != "GRID":
+                continue
+            if tamper == "character_paint_order":
+                chars[0], chars[1] = chars[1], chars[0]
+            else:
+                first, second = chars[:2]
+                chars[0] = (first[0], first[1], second[2], second[3])
+                chars[1] = (second[0], second[1], first[2], first[3])
+            traces[index] = {**trace, "chars": tuple(chars)}
+            changed += 1
+        assert changed == 1
+        return traces
+
+    monkeypatch.setattr(fitz.Page, "get_texttrace", altered_get_texttrace)
+    result = _go(source, address)
+    assert result.original_text == "GRID"
+    assert result.original_source_role == "SOURCE_CEILING_CODE_INK_UNRESOLVED"
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.original_material_definition_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("rotation", (0, 90, 180, 270))
+def test_original_code_glyphs_follow_native_reading_direction(rotation):
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=700)
+    page.insert_text((250, 250), "GRID", fontsize=10, rotate=rotation)
+    source = doc.tobytes()
+    doc.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        words = [w for w in original[0].get_text("words") if w[4] == "GRID"]
+    assert len(words) == 1
+    result = _go(source, tuple(words[0][5:8]))
+    assert result.original_source_role == "SOURCE_CEILING_CODE_WORD_CANDIDATE"
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
