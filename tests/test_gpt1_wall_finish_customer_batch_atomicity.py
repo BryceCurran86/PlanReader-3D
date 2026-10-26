@@ -128,3 +128,24 @@ def test_input_original_source_batch_is_not_mutated():
     before = tuple(source)
     assert _direct(source) == ([], [])
     assert tuple(source) == before
+
+
+@pytest.mark.parametrize("status", [
+    EvidenceResolutionStatus.ABSTAINED,
+    EvidenceResolutionStatus.CONFLICT,
+])
+def test_explicit_original_source_negative_cannot_borrow_fallback_authority(status):
+    producer, _ = _real()
+    source_negative = SourceBoundWallFinishQuantityResult(
+        status=status,
+        reason_codes=("original_finish_scope_not_proven",),
+        record=None,
+    )
+    assert _direct([source_negative], fallback=producer.authority()) == ([], [])
+
+
+def test_truly_empty_resolver_can_use_authenticated_fallback():
+    producer, record = _real()
+    rows, reports = _direct([], fallback=producer.authority())
+    assert len(rows) == len(reports) == 1
+    assert reports[0]["record_id"] == record.record_id

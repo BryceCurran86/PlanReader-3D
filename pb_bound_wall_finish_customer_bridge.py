@@ -183,9 +183,14 @@ def build_bound_wall_finish_rows(
         if callable(resolver):
             results = resolver(int(workspace_id))
             if results:
+                saw_original_result = False
                 for result in results:
+                    saw_original_result = True
                     add_result(result)
-                if rows:
+                # A producer-owned ABSTAIN/CONFLICT is evidence against
+                # publication, not permission to borrow a different source
+                # authority. Only a genuinely empty resolver may fall back.
+                if saw_original_result:
                     return rows, finish_records
 
         authority = getattr(app, "source_bound_wall_finish_authority", None)
