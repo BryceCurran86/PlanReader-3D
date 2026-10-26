@@ -39,7 +39,7 @@ jobs:
           approved_base=ce322d69bbc9f47b5b2aed001684e01cbe04f48b
           case "$TARGET" in
             a600)
-              approved_head=6663e3415b483092525399536c2dc2f7c859d299
+              approved_head=14d50e0b58c62e624974e481e4805a72bebb1ba7
               expected_paths='pb_gpt2_original_a600_table_row_scope_shadow.py|pb_source_door_schedule_authority.py|pb_source_plan_door_correspondence_authority.py|tests/test_gpt2_original_a600_table_row_scope_shadow.py'
               original_test=test_original_private_source_publisher_table_census_if_provisioned
               test_path=tests/test_gpt2_original_a600_table_row_scope_shadow.py
