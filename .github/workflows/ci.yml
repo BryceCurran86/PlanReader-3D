@@ -84,7 +84,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" | python scripts/check_v2_truth_separation.py
+          git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_v2_truth_separation.py --nul
 
       - name: Enforce Full Plan V2 truth / production separation (push)
         if: github.event_name == 'push'
@@ -100,7 +100,7 @@ jobs:
           fi
           git cat-file -e "${BASE_SHA}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" | python scripts/check_v2_truth_separation.py
+          git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_v2_truth_separation.py --nul
 
       - name: Enforce production-provider isolation from retired benchmark truth
         run: PYTHONPATH=. python scripts/check_provider_gold_isolation.py

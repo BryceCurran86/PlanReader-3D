@@ -1,6 +1,7 @@
 """Fail CI when active Full Plan V2 truth and production code change together."""
 from __future__ import annotations
 
+import argparse
 from pathlib import PurePosixPath
 import sys
 from typing import Iterable, Sequence
@@ -28,6 +29,37 @@ _PRODUCTION_EXCLUDED_PREFIXES = (
 _WORKFLOW_ROOT = ".github/workflows/"
 _WORKFLOW_SUFFIXES = {".yml", ".yaml"}
 _LOCAL_ACTION_ROOT = ".github/actions/"
+# These root manifests select the interpreter's package/runtime environment for
+# both public CI and the trusted original-source replay. Changing one alongside
+# frozen benchmark inputs is a production-execution change even without a .py
+# diff; do not let a dependency-only edit bypass the separation gate.
+_ROOT_RUNTIME_MANIFESTS = frozenset({
+    "pyproject.toml",
+    "setup.cfg",
+    "Pipfile",
+    "Pipfile.lock",
+    "poetry.lock",
+    "uv.lock",
+    # The deployed Render service selects this root Dockerfile to install
+    # dependencies and launch the commercial application. Both files control
+    # production execution, even though neither has a Python/JS suffix.
+    "Dockerfile",
+    "render.yaml",
+    # The shipped Windows entrypoint installs runtime dependencies and starts
+    # the same commercial Streamlit app. It is executable release control,
+    # not a documentation-only batch file.
+    "RUN_PLANREADER_WINDOWS.bat",
+})
+
+
+def _is_root_runtime_manifest(path: str) -> bool:
+    candidate = PurePosixPath(path)
+    if len(candidate.parts) != 1:
+        return False
+    name = candidate.name
+    return name in _ROOT_RUNTIME_MANIFESTS or (
+        name.startswith("requirements") and name.endswith(".txt")
+    )
 
 
 def _normalize(path: str) -> str:
@@ -62,6 +94,8 @@ def is_production_code_file(path: str) -> bool:
     normalized = _normalize(path)
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False
+    if _is_root_runtime_manifest(normalized):
+        return True
     if normalized.startswith(_LOCAL_ACTION_ROOT):
         return True
     if normalized.startswith(_WORKFLOW_ROOT) and PurePosixPath(normalized).suffix.lower() in _WORKFLOW_SUFFIXES:
@@ -103,10 +137,39 @@ def _stdin_paths(lines: Iterable[str]) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def main() -> int:
-    changed_paths = _stdin_paths(sys.stdin)
+def _stdin_paths_from_bytes(payload: bytes, *, require_nul: bool = False) -> list[str]:
+    """Parse Git -z paths losslessly; preserve the legacy newline CLI for audits.
+
+    Git's ordinary --name-only output C-quotes non-ASCII, tab and newline
+    filenames, so splitting its text output can conceal a frozen V2 path.
+    CI MUST pass --nul and git diff -z; reject malformed nonempty streams.
+    """
+    if not payload:
+        return []
+    if b"\x00" not in payload:
+        if require_nul:
+            raise ValueError("V2 separation requires NUL-delimited git diff -z paths")
+        return _stdin_paths(payload.decode("utf-8").splitlines())
+    if not payload.endswith(b"\x00"):
+        raise ValueError("Incomplete NUL-delimited V2 changed-path stream")
+    return [part.decode("utf-8") for part in payload.split(b"\x00")[:-1] if part]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--nul", action="store_true",
+        help="require lossless NUL-delimited git diff -z input (mandatory in CI)",
+    )
+    args = parser.parse_args(argv)
     try:
+        changed_paths = _stdin_paths_from_bytes(
+            sys.stdin.buffer.read(), require_nul=args.nul,
+        )
         check_paths(changed_paths)
+    except (ValueError, UnicodeError) as exc:
+        print(f"Full Plan V2 truth / production separation input invalid: {exc}", file=sys.stderr)
+        return 1
     except SystemExit as exc:
         print(str(exc), file=sys.stderr)
         return 1
