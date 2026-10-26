@@ -15,6 +15,8 @@ HEADS = {
     "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
     "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
+    "grid": "2fddfb5746a9f066eee318daeb40214df1a6a103",
+    "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
 }
 
 
@@ -115,6 +117,45 @@ def test_pinned_sha_allowlist_and_no_arbitrary_input():
     assert "github.event.inputs" not in FILE.read_text(encoding="utf8")
 
 
+def test_new_source_positive_targets_have_fixed_base_tree_and_exact_two_paths():
+    """The owner-only replay may never select mutable PR code or extra files."""
+    guard = next(s for s in _load()["jobs"]["original"]["steps"]
+                 if s["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    approved_base = "d66087e6471c1bbdbf8c38617b8b85e646529417"
+    expected = {
+        "grid": (
+            "pb_gpt2_native_grid_row_membership_shadow.py|"
+            "tests/test_gpt2_native_grid_row_membership_shadow.py",
+            "test_private_original_d02_grid_membership_from_published_source_if_provisioned",
+            "tests/test_gpt2_native_grid_row_membership_shadow.py",
+        ),
+        "rcp_ink": (
+            "pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
+            "test_real_original_page9_native_source_rivals_if_available",
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
+        ),
+    }
+    for target, (paths, original_test, test_path) in expected.items():
+        matches = re.findall(
+            r"(?m)^            " + target +
+            r"\\)\\n(?P<body>.*?)(?=^            ;;)",
+            script, flags=re.DOTALL | re.MULTILINE,
+        )
+        assert len(matches) == 1
+        body = matches[0]
+        assert "approved_base=" + approved_base in body
+        assert "approved_head=" + HEADS[target] in body
+        assert "expected_paths='" + paths + "'" in body
+        assert "original_test=" + original_test in body
+        assert "test_path=" + test_path in body
+        assert "github.event.inputs" not in body
+    assert "git diff --name-only" in script
+    assert 'git archive "$approved_head"' in script
+    assert "git checkout --detach" not in script
+
+
 def test_token_only_present_in_frozen_manifest_provision_step():
     steps = _load()["jobs"]["original"]["steps"]
     matches = [s for s in steps if "ORIGINAL_SOURCES_TOKEN" in str(s)]
@@ -197,7 +238,7 @@ def test_original_source_smoke_test_negative_error_is_privately_captured():
 
 
 
-def test_all_four_originals_collect_without_private_source_before_token_step():
+def test_all_approved_originals_collect_without_private_source_before_token_step():
     steps = _load()["jobs"]["original"]["steps"]
     preflight = next(i for i, s in enumerate(steps)
                      if s.get("name", "").startswith("Preflight offline pinned"))
