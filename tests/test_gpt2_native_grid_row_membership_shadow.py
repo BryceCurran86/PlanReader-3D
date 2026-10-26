@@ -118,6 +118,31 @@ def test_competing_printed_code_stays_abstained():
     assert "competing_or_untrusted" in result.first_unclosed_gate
 
 
+@pytest.mark.parametrize("competing_code", ["D0", "D00", "D3"])
+def test_any_second_d_digit_glyph_inside_ruled_row_vetoes_unique_code(competing_code):
+    # A malformed D0/D00 is still an original printed D-code competitor.
+    # The clean D13 grid receipt must remain a candidate, but a second
+    # source word in the SAME ruled row must never disappear by regex.
+    original, words, scope = _case()
+    assert _audit(original, words, scope).status is EvidenceResolutionStatus.CANDIDATE
+    rival = replace(
+        words[-1], literal=competing_code,
+        bbox_pdf_pts=(106.0, 183.0, 124.0, 193.0),
+    )
+    result = _audit(original, words[:-1] + (rival,), scope)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.first_unclosed_gate == (
+        "original_grid_row_competing_or_untrusted_source_words"
+    )
+    assert not any((
+        result.source_dimension_authorized, result.physical_door_identity_proven,
+        result.opening_count_granted, result.firm_quantity_issued,
+        result.commercial_projection_allowed,
+    ))
+    assert words[-1].literal == "D14"
+    assert original == bytes(original)
+
+
 def test_untrusted_original_word_blocks_source_membership():
     b,w,s=_case(untrusted=True)
     assert _audit(b,w,s).status is EvidenceResolutionStatus.ABSTAINED
