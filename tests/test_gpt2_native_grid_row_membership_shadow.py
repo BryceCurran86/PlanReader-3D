@@ -13,7 +13,8 @@ from pb_gpt2_native_grid_row_membership_shadow import (
 
 
 def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,
-          overpaint=None, rotation=0):
+          overpaint=None, image_overpaint=None, image_overlay=True,
+          rotation=0):
     pdf = fitz.open()
     page = pdf.new_page(width=420, height=340)
     for x in (100+shifted, 142+shifted):
@@ -24,6 +25,15 @@ def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,
         for x in (100+shifted, 142+shifted):
             page.draw_rect(fitz.Rect(x-2,30,x+2,260),
                            color=None,fill=overpaint,overlay=True)
+    if image_overpaint is not None:
+        # Black images are essential: final dark pixels are NOT source ink.
+        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 4, 4), False)
+        pix.clear_with(image_overpaint)
+        for x in (100+shifted, 142+shifted):
+            page.insert_image(
+                fitz.Rect(x-2, 30, x+2, 260),
+                pixmap=pix, overlay=image_overlay,
+            )
     page.set_rotation(rotation)
     content = pdf.tobytes()
     pdf.close()
@@ -112,6 +122,29 @@ def test_later_opaque_overpaint_vetoes_historical_grid_paths(overpaint):
     b,w,s=_case(overpaint=overpaint)
     with pytest.raises(ValueError,match="overpainted"):
         _audit(b,w,s)
+
+
+@pytest.mark.parametrize("pixel", [0, 255])
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_later_raster_image_overpaint_vetoes_historical_grid(pixel, rotation):
+    # get_drawings() retains six old strokes while get_bboxlog() sees
+    # the later black/white raster. Darkness is not stroke provenance.
+    b, w, s = _case(image_overpaint=pixel, rotation=rotation)
+    with fitz.open(stream=b, filetype="pdf") as pdf:
+        assert len(pdf[0].get_drawings()) == 6
+        assert [entry[0] for entry in pdf[0].get_bboxlog()][-2:] == [
+            "fill-image", "fill-image",
+        ]
+    with pytest.raises(ValueError, match="overpainted by later image"):
+        _audit(b, w, s)
+
+
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_raster_painted_behind_visible_grid_does_not_false_veto(rotation):
+    b, w, s = _case(
+        image_overpaint=0, image_overlay=False, rotation=rotation,
+    )
+    assert _audit(b, w, s).status is EvidenceResolutionStatus.CANDIDATE
 
 
 def test_wrong_original_hash_cannot_use_source_ink():
