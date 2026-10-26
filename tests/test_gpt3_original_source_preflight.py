@@ -145,3 +145,121 @@ def test_four_project_fail_closed_inventory_is_not_provisioned() -> None:
     assert "provision-original-sources" not in text
     assert "original_source_not_supplied_in_this_execution" in text
     assert "python -m tools.gpt3_original_source_preflight" not in text
+
+
+def test_preflight_receipt_output_create_only_and_source_unchanged(tmp_path: Path) -> None:
+    """Source-backed status may create a new report, never overwrite one."""
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"%PDF-private-original")
+    digest = sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "reports" / "source-check.json"
+    assert main(["--pdf", str(source), "--expected-sha256", digest,
+                 "--output", str(destination)]) == 0
+    before = destination.read_bytes()
+    assert b'"status": "SOURCE_PRESENT"' in before
+    with pytest.raises(FileExistsError):
+        main(["--pdf", str(source), "--expected-sha256", digest,
+              "--output", str(destination)])
+    assert destination.read_bytes() == before
+    assert source.read_bytes() == b"%PDF-private-original"
+    assert not list(destination.parent.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_preexisting_and_alias_destinations_fail_before_private_original_read(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_original_source_preflight as preflight
+    original = tmp_path / "source.pdf"
+    original.write_bytes(b"%PDF-original-private-bytes")
+    signed = tmp_path / "signed.json"
+    signed.write_text('{"protected":"yes"}', encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(signed)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("private original read before output preflight")
+    monkeypatch.setattr(preflight, "classify_original_source_preflight", forbidden)
+    for target in (signed, link, original):
+        with pytest.raises(FileExistsError):
+            preflight.main(["--pdf", str(original),
+                            "--expected-sha256", "a" * 64,
+                            "--output", str(target)])
+    assert original.read_bytes() == b"%PDF-original-private-bytes"
+    assert signed.read_text(encoding="utf-8") == '{"protected":"yes"}'
+
+
+def test_frozen_and_approved_archive_roots_never_accept_new_preflight_report() -> None:
+    from tools import gpt3_original_source_preflight as preflight
+    repo = Path(preflight.__file__).resolve().parents[1]
+    for path in (
+        repo / "benchmarks/frozen_holdout/full_plan_v2/unsafe-preflight.json",
+        repo / "docs/engineering/unsafe-preflight.json",
+        repo / "documents/sources/unsafe-preflight.json",
+    ):
+        assert not path.exists()
+        with pytest.raises(ValueError, match="protected evidence"):
+            preflight.main([
+                "--pdf", str(repo / "documents/sources/private-missing.pdf"),
+                "--expected-sha256", "a" * 64,
+                "--output", str(path),
+            ])
+        assert not path.exists()
+
+
+def test_competing_writer_does_not_get_overwritten_by_source_preflight(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_safe_original_report_output as publish
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"%PDF-1.5")
+    output = tmp_path / "report.json"
+    actual_link = publish.os.link
+    def conflicting_link(source, dest):
+        Path(dest).write_text('{"someone_else":"owns_this"}', encoding="utf-8")
+        return actual_link(source, dest)
+    monkeypatch.setattr(publish.os, "link", conflicting_link)
+    with pytest.raises(FileExistsError):
+        main(["--pdf", str(original),
+              "--expected-sha256", sha256(original.read_bytes()).hexdigest(),
+              "--output", str(output)])
+    assert output.read_text(encoding="utf-8") == '{"someone_else":"owns_this"}'
+    assert original.read_bytes() == b"%PDF-1.5"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_original_mutation_while_staging_removes_unpublished_source_present(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_safe_original_report_output as publish
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"%PDF-original")
+    expected = sha256(original.read_bytes()).hexdigest()
+    output = tmp_path / "report.json"
+    actual_link = publish.os.link
+    def mutate_before_publish(source, dest):
+        original.write_bytes(b"%PDF-mutated")
+        return actual_link(source, dest)
+    monkeypatch.setattr(publish.os, "link", mutate_before_publish)
+    with pytest.raises(ValueError, match="original source changed"):
+        main(["--pdf", str(original), "--expected-sha256", expected,
+              "--output", str(output)])
+    assert not output.exists()
+    assert original.read_bytes() == b"%PDF-mutated"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_missing_original_receipt_refuses_race_with_new_source(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_safe_original_report_output as publish
+    original = tmp_path / "missing.pdf"
+    output = tmp_path / "report.json"
+    actual_link = publish.os.link
+    def create_source_before_publish(source, dest):
+        original.write_bytes(b"%PDF-new")
+        return actual_link(source, dest)
+    monkeypatch.setattr(publish.os, "link", create_source_before_publish)
+    with pytest.raises(ValueError, match="original source appeared"):
+        main(["--pdf", str(original), "--expected-sha256", "a" * 64,
+              "--output", str(output)])
+    assert not output.exists()
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
