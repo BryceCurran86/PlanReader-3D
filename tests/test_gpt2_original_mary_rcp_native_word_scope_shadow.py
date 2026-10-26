@@ -266,7 +266,8 @@ def test_one_source_code_with_one_height_word_remains_lexical_only():
 def _native_code_paint_case(*, render_mode=0, colour=(0, 0, 0),
                             full_cover=False, partial_cover=False,
                             unrelated_cover=False, double_paint=False,
-                            translate=(0., 0.)):
+                            translate=(0., 0.), stroke_cover_colour=None,
+                            unrelated_stroke=False):
     pdf = fitz.open()
     page = pdf.new_page(width=700, height=700)
     x, y = 180. + translate[0], 250. + translate[1]
@@ -283,6 +284,12 @@ def _native_code_paint_case(*, render_mode=0, colour=(0, 0, 0),
     if unrelated_cover:
         page.draw_rect(fitz.Rect(410, 400, 490, 490),
                        color=None, fill=(1, 1, 1))
+    if stroke_cover_colour is not None:
+        # Later opaque STROKE (not fill-path) can erase original text ink.
+        page.draw_line((x - 12, y - 6), (x + 65, y - 6),
+                       color=stroke_cover_colour, width=24)
+    if unrelated_stroke:
+        page.draw_line((410, 400), (490, 400), color=(1, 1, 1), width=24)
     data = pdf.tobytes()
     pdf.close()
     with fitz.open(stream=data, filetype="pdf") as original:
@@ -338,3 +345,28 @@ def test_native_font_advance_margin_does_not_hide_complete_visible_source_ink():
         # painted glyph's left edge; the glyph remains fully source-owned.
         word[0] -= .75
         assert _visible_native_ceiling_code_ink(pdf[0], tuple(word))
+
+
+@pytest.mark.parametrize('stroke_colour', [(1, 1, 1), (0, 0, 0)])
+def test_later_opaque_stroke_path_over_grid_glyph_abstains(stroke_colour):
+    source, address = _native_code_paint_case(stroke_cover_colour=stroke_colour)
+    digest = sha256(source).hexdigest()
+    result = _go(source, address)
+    assert sha256(source).hexdigest() == digest
+    assert result.original_text == 'GRID'
+    assert result.original_source_role == 'SOURCE_CEILING_CODE_INK_UNRESOLVED'
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+def test_unrelated_later_stroke_path_preserves_visible_grid_candidate():
+    source, address = _native_code_paint_case(unrelated_stroke=True)
+    result = _go(source, address)
+    assert result.original_source_role == 'SOURCE_CEILING_CODE_WORD_CANDIDATE'
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
