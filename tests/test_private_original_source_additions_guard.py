@@ -178,12 +178,19 @@ def test_renamed_original_bytes_are_blocked_at_any_path(tree):
 @pytest.mark.parametrize("path", [
     f"docs/engineering/x/{_PINNED_NAME}",
     f"docs/{_PINNED_NAME.upper()}",
-    "DOCS\\" + _PINNED_NAME.lower(),
 ])
 def test_pinned_original_name_is_blocked_even_when_not_in_the_tree(tree, path):
     pinned = load_pinned_originals(tree)
     assert blocked_source_additions([path], pinned=pinned, root=tree) == (path,)
     assert _run_cli(tree, path).returncode == 1
+
+
+def test_literal_backslash_git_path_does_not_invent_pinned_basename(tree):
+    # Manual helper accepts Windows separators, but Git -z uses literal names.
+    path = "DOCS\\" + _PINNED_NAME.lower()
+    pinned = load_pinned_originals(tree)
+    assert blocked_source_additions([path], pinned=pinned, root=tree) == (path,)
+    assert _run_cli(tree, path).returncode == 0
 
 
 def test_same_size_different_bytes_is_allowed(tree):
