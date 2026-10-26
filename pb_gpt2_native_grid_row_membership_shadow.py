@@ -16,6 +16,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_door_schedule_authority import (
     SourceDoorScheduleWord,
     _DOOR_CODE,
+    _DOOR_LIKE_TOKEN,
     _producer_owned_native_words,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -290,8 +291,12 @@ def inspect_original_native_grid_row_shadow(
             members.append(w)
     if codes[0] not in members:
         raise ValueError("source code not entirely within original ruled row")
-    member_code = [w for w in members if _DOOR_CODE.fullmatch(w.literal)]
+    # All D-digit source glyphs compete for one printed ruled-row code.
+    # A malformed D0/D00 is negative evidence, not a silent non-code that
+    # permits the otherwise trusted Dxx to become uniquely source-owned.
+    member_code = [w for w in members if _DOOR_LIKE_TOKEN.fullmatch(w.literal)]
     conflict = bool(touching or len(member_code) != 1 or
+                    member_code[0] is not codes[0] or
                     any(not w.trusted for w in members))
     rivals = tuple(sorted(w.observation_id for w in words
                           if w not in members and w.literal == codes[0].literal))
