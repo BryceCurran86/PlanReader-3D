@@ -136,21 +136,59 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
         if any(right - left <= .001 for left, right in zip(
                 projected_centres, projected_centres[1:])):
             return False
-        # The shared render receipt conservatively checks later filled paths,
-        # images and shades, but an opaque later STROKED path can also erase
-        # the original glyph (even when the final raster remains dark).
-        # Inspect the nominated glyph boxes and source paint order; an
-        # intersecting later stroke is unresolved, never visible-ink proof.
+        # The shared render receipt checks later fill-path/image/shade.
+        # A later opaque STROKE or native TEXT glyph can also conceal the
+        # selected code, including when its glyph CENTRE lies outside the
+        # original word box. Do not rely on the whole text-span bbox (CAD
+        # spans can cross a grid with no painted glyph at the crossing).
+        traces_by_seq = {}
+        for trace in traces:
+            seq = trace.get('seqno')
+            if type(seq) is int:
+                traces_by_seq.setdefault(seq, []).append(trace)
         for (_, glyph_box), text_seq in zip(selected, selected_seq):
-            for paint in bboxlog[text_seq + 1:]:
-                if paint[0] != 'stroke-path':
+            for later_seq, paint in enumerate(
+                    bboxlog[text_seq + 1:], start=text_seq + 1):
+                kind = paint[0]
+                if kind not in ('stroke-path', 'fill-text', 'stroke-text'):
                     continue
-                stroke_box = tuple(float(v) for v in paint[1])
-                if len(stroke_box) != 4 or not all(isfinite(v) for v in stroke_box):
+                paint_box = tuple(float(v) for v in paint[1])
+                if (len(paint_box) != 4
+                        or not all(isfinite(v) for v in paint_box)):
                     return False
-                if (min(glyph_box[2], stroke_box[2]) > max(glyph_box[0], stroke_box[0])
-                        and min(glyph_box[3], stroke_box[3]) > max(glyph_box[1], stroke_box[1])):
+                if not (
+                    min(glyph_box[2], paint_box[2]) > max(glyph_box[0], paint_box[0])
+                    and min(glyph_box[3], paint_box[3]) > max(glyph_box[1], paint_box[1])
+                ):
+                    continue
+                if kind == 'stroke-path':
                     return False
+                later_traces = traces_by_seq.get(later_seq, ())
+                if not later_traces:
+                    return False
+                for later_trace in later_traces:
+                    later_chars = later_trace.get('chars')
+                    if not isinstance(later_chars, (tuple, list)) or not later_chars:
+                        return False
+                    for later_char in later_chars:
+                        if (not isinstance(later_char, (tuple, list))
+                                or len(later_char) < 4
+                                or type(later_char[0]) is not int
+                                or not 0 <= later_char[0] <= 0x10ffff):
+                            return False
+                        if chr(later_char[0]).isspace():
+                            continue
+                        later_box = tuple(float(v) for v in later_char[3])
+                        if (len(later_box) != 4
+                                or not all(isfinite(v) for v in later_box)
+                                or later_box[0] >= later_box[2]
+                                or later_box[1] >= later_box[3]):
+                            return False
+                        if (
+                            min(glyph_box[2], later_box[2]) > max(glyph_box[0], later_box[0])
+                            and min(glyph_box[3], later_box[3]) > max(glyph_box[1], later_box[1])
+                        ):
+                            return False
         # Extracted word boxes include font advance/bearing margins. Source
         # ink need not TOUCH those edges: require complete matching glyph
         # coverage INSIDE the original word box, never infer global snap.
