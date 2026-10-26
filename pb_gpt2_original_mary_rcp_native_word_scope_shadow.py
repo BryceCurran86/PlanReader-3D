@@ -96,13 +96,19 @@ def _visible_native_ceiling_code_ink(page, word) -> bool:
                         or glyph_box[0] >= glyph_box[2]
                         or glyph_box[1] >= glyph_box[3]):
                     return False
+                if type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff:
+                    return False
+                # PDF texttrace SPACE has an advance box but no painted
+                # glyph. A later unrelated text span can cross a code using
+                # whitespace without concealing its original ink.
+                if chr(codepoint).isspace():
+                    continue
                 centre_x = (glyph_box[0] + glyph_box[2]) / 2
                 centre_y = (glyph_box[1] + glyph_box[3]) / 2
                 if not (box[0] - .1 <= centre_x <= box[2] + .1
                         and box[1] - .1 <= centre_y <= box[3] + .1):
                     continue
-                if (type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff
-                        or type(glyph_id) is not int or glyph_id < 0
+                if (type(glyph_id) is not int or glyph_id < 0
                         or not 0 <= seq < len(bboxlog)
                         or bboxlog[seq][0] not in ('fill-text','stroke-text')):
                     return False
