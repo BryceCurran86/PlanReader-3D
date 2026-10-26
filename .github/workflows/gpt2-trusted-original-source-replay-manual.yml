@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [a600, freezer, d15, rcp]
+        target: [a600, freezer, d15, rcp, grid, rcp_ink]
 
     steps:
       - name: Checkout the trusted workflow context
@@ -58,6 +58,22 @@ jobs:
               ;;
             rcp)
               approved_head=8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1
+              expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
+              original_test=test_real_original_page9_native_source_rivals_if_available
+              test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
+              ;;
+            grid)
+              # This immutable existing GPT2 source-shadow PR has a distinct
+              # approved base; never fetch code from a mutable PR head.
+              approved_base=d66087e6471c1bbdbf8c38617b8b85e646529417
+              approved_head=2fddfb5746a9f066eee318daeb40214df1a6a103
+              expected_paths='pb_gpt2_native_grid_row_membership_shadow.py|tests/test_gpt2_native_grid_row_membership_shadow.py'
+              original_test=test_private_original_d02_grid_membership_from_published_source_if_provisioned
+              test_path=tests/test_gpt2_native_grid_row_membership_shadow.py
+              ;;
+            rcp_ink)
+              approved_base=d66087e6471c1bbdbf8c38617b8b85e646529417
+              approved_head=794a114c3b422aa81f044f45d8f099b79b3454f1
               expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
               original_test=test_real_original_page9_native_source_rivals_if_available
               test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
