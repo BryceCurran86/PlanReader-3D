@@ -7,6 +7,10 @@ import json
 
 import pytest
 
+from tools import gpt3_original_source_preflight as source_preflight
+from tools import gpt3_safe_original_report_output as publication
+from tools import gpt3_verify_original_source_sha_envelope as envelope
+
 from pb_source_closed_run_export import seal_source_closed_run
 from test_customer_output_verification import quantity, trace
 from tools.gpt3_verify_original_source_sha_envelope import (
@@ -131,3 +135,103 @@ def test_multi_document_signed_sha_envelope_requires_exact_complete_set(tmp_path
         verify_original_source_sha_envelope(sealed, [pdf_a])
     with pytest.raises(ValueError, match="do not match|duplicate"):
         verify_original_source_sha_envelope(sealed, [pdf_a, pdf_a])
+
+
+def _sealed_cli_args(tmp_path):
+    pdf, sealed = _synthetic_source(tmp_path)
+    sealed_file = tmp_path / "sealed.json"
+    sealed_file.write_text(json.dumps(sealed.to_dict()), encoding="utf-8")
+    output = tmp_path / "verified-audit.json"
+    args = [
+        "--sealed-run", str(sealed_file),
+        "--original-source", str(pdf),
+        "--output", str(output),
+    ]
+    return pdf, sealed_file, output, args
+
+
+def test_raced_original_symlink_during_descriptor_open_abstains(tmp_path, monkeypatch):
+    """The old is_file then path.open could follow a substituted symlink."""
+    pdf, sealed = _synthetic_source(tmp_path)
+    original_bytes = pdf.read_bytes()
+    moved = tmp_path / "real-original.pdf"
+    real_open = source_preflight.os.open
+    swapped = False
+
+    def race(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if not swapped and str(path) == str(pdf):
+            swapped = True
+            pdf.replace(moved)
+            pdf.symlink_to(moved)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(source_preflight.os, "open", race)
+    with pytest.raises(ValueError, match="source changed|not a regular"):
+        verify_original_source_sha_envelope(sealed, [pdf])
+    assert swapped
+    assert moved.read_bytes() == original_bytes
+
+
+def test_same_byte_original_swap_before_publication_refuses_audit(tmp_path, monkeypatch):
+    """Source SHA equality does not grant authority after an inode swap."""
+    pdf, sealed_file, output, args = _sealed_cli_args(tmp_path)
+    original_bytes = pdf.read_bytes()
+    sealed_bytes = sealed_file.read_bytes()
+    real_write = envelope.write_new_diagnostic
+    called = False
+
+    def swap_before_publish(*a, **kw):
+        nonlocal called
+        called = True
+        replacement = tmp_path / "same-byte-other-inode.pdf"
+        replacement.write_bytes(original_bytes)
+        replacement.replace(pdf)
+        return real_write(*a, **kw)
+
+    monkeypatch.setattr(envelope, "write_new_diagnostic", swap_before_publish)
+    with pytest.raises(ValueError, match="original source changed during audit"):
+        main(args)
+    assert called
+    assert not output.exists()
+    assert pdf.read_bytes() == original_bytes
+    assert sealed_file.read_bytes() == sealed_bytes
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_same_byte_signed_seal_swap_after_link_rolls_back(tmp_path, monkeypatch):
+    """Revalidate the signed seal even after the report is exclusively linked."""
+    pdf, sealed_file, output, args = _sealed_cli_args(tmp_path)
+    original_bytes = pdf.read_bytes()
+    sealed_bytes = sealed_file.read_bytes()
+    real_link = publication.os.link
+    called = False
+
+    def swap_after_link(staged, destination):
+        nonlocal called
+        real_link(staged, destination)
+        called = True
+        replacement = tmp_path / "same-byte-other-seal.json"
+        replacement.write_bytes(sealed_bytes)
+        replacement.replace(sealed_file)
+
+    monkeypatch.setattr(publication.os, "link", swap_after_link)
+    with pytest.raises(ValueError, match="original source changed during audit"):
+        main(args)
+    assert called
+    assert not output.exists()
+    assert pdf.read_bytes() == original_bytes
+    assert sealed_file.read_bytes() == sealed_bytes
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_uncontested_sha_envelope_keeps_schema_without_inode_receipts(tmp_path):
+    pdf, sealed_file, output, args = _sealed_cli_args(tmp_path)
+    assert main(args) == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["original_source_bytes_sha_verified"] is True
+    assert report["sealed_v1_file_sha256"] == sha256(sealed_file.read_bytes()).hexdigest()
+    assert report["original_source_sha256s"] == [sha256(pdf.read_bytes()).hexdigest()]
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["official_v2_accuracy"] is None
+    assert not any("inode" in key or "identity" in key for key in report)
