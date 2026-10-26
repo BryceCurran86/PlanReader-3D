@@ -69,6 +69,102 @@ def test_matching_digest_is_present_only(tmp_path: Path) -> None:
     assert main(["--pdf", str(pdf), "--expected-sha256", digest]) == 0
 
 
+
+
+@pytest.mark.parametrize("swap_timing", ["before_open", "after_open"])
+def test_same_digest_regular_source_inode_swap_cannot_verify(
+    tmp_path: Path, monkeypatch, swap_timing: str,
+) -> None:
+    """A digest match cannot excuse a path switching to another physical file."""
+    from tools import gpt3_original_source_preflight as preflight
+    original = tmp_path / "original.pdf"
+    replacement = tmp_path / "replacement.pdf"
+    payload = b"%PDF-identical-original-content"
+    original.write_bytes(payload)
+    replacement.write_bytes(payload)
+    digest = sha256(payload).hexdigest()
+    real_open = preflight.os.open
+    swapped = False
+
+    def swap_during_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if Path(path) == original and not swapped:
+            swapped = True
+            if swap_timing == "before_open":
+                replacement.replace(original)
+            fd = real_open(path, flags, *args, **kwargs)
+            if swap_timing == "after_open":
+                replacement.replace(original)
+            return fd
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(preflight.os, "open", swap_during_open)
+    with pytest.raises(ValueError, match="original source changed"):
+        classify_original_source_preflight(original, digest)
+    assert swapped
+    assert original.read_bytes() == payload
+
+
+def test_symlink_swap_between_lstat_and_open_never_verifies(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_original_source_preflight as preflight
+    original = tmp_path / "original.pdf"
+    target = tmp_path / "target.pdf"
+    payload = b"%PDF-identical-but-other-source"
+    original.write_bytes(payload)
+    target.write_bytes(payload)
+    real_open = preflight.os.open
+    swapped = False
+
+    def replace_with_symlink(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if Path(path) == original and not swapped:
+            swapped = True
+            original.unlink()
+            original.symlink_to(target)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(preflight.os, "open", replace_with_symlink)
+    with pytest.raises(ValueError, match="original source changed"):
+        classify_original_source_preflight(original, sha256(payload).hexdigest())
+    assert swapped
+    assert original.is_symlink()
+
+
+def test_same_byte_original_swap_during_report_staging_aborts_publication(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tools import gpt3_original_source_preflight as preflight
+    original = tmp_path / "original.pdf"
+    replacement = tmp_path / "replacement.pdf"
+    report = tmp_path / "report.json"
+    payload = b"%PDF-unchanged-content-but-replaced-inode"
+    original.write_bytes(payload)
+    replacement.write_bytes(payload)
+    digest = sha256(payload).hexdigest()
+    real_open = preflight.os.open
+    source_opens = 0
+
+    def replace_on_second_source_open(path, flags, *args, **kwargs):
+        nonlocal source_opens
+        if Path(path) == original:
+            source_opens += 1
+            if source_opens == 2:
+                replacement.replace(original)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(preflight.os, "open", replace_on_second_source_open)
+    with pytest.raises(ValueError, match="original source changed"):
+        preflight.main([
+            "--pdf", str(original), "--expected-sha256", digest,
+            "--output", str(report),
+        ])
+    assert source_opens >= 2
+    assert not report.exists()
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+    assert original.read_bytes() == payload
+
 def test_invalid_expected_digest_is_rejected(tmp_path: Path) -> None:
     pdf = tmp_path / "plan.pdf"
     pdf.write_bytes(b"x")

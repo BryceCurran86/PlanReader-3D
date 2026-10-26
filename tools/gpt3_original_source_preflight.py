@@ -7,6 +7,7 @@ This tool never copies, uploads, or invents PDF bytes.
 from __future__ import annotations
 
 import argparse
+import os
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -43,6 +44,45 @@ def _original_source_path_kind(pdf_path: Path) -> str:
         raise ValueError("original source path is not a regular file")
     return "regular"
 
+
+def _stable_original_digest(pdf_path: Path) -> str:
+    """Hash only the same regular source inode that was inspected.
+
+    A second Path.read_bytes() after lstat can follow a replaced symlink or
+    hash an unrelated same-byte file. Open a descriptor without following the
+    final symlink, compare file identity before/during/after the read, and
+    reject even same-digest namespace swaps. O_NONBLOCK prevents a raced FIFO
+    from blocking before fstat can reject it.
+    """
+    try:
+        before = pdf_path.lstat()
+        if not S_ISREG(before.st_mode):
+            raise ValueError("original source path is not a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(pdf_path, flags), "rb") as source:
+            opened = os.fstat(source.fileno())
+            if not S_ISREG(opened.st_mode):
+                raise ValueError("original source changed during preflight")
+            digest = sha256()
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+            completed = os.fstat(source.fileno())
+        after = pdf_path.lstat()
+    except OSError as exc:
+        raise ValueError("original source changed or inaccessible during preflight") from exc
+    identity_and_content = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if (
+        not S_ISREG(after.st_mode)
+        or any(
+            getattr(snapshot, field) != getattr(before, field)
+            for snapshot in (opened, completed, after)
+            for field in identity_and_content
+        )
+    ):
+        raise ValueError("original source changed during preflight")
+    return digest.hexdigest()
+
+
 def classify_original_source_preflight(
     pdf_path: Path,
     expected_sha256: str,
@@ -64,7 +104,7 @@ def classify_original_source_preflight(
             reason=ORIGINAL_PDF_ABSENT,
         )
         return receipt
-    actual = sha256(pdf_path.read_bytes()).hexdigest()
+    actual = _stable_original_digest(pdf_path)
     receipt["actual_sha256"] = actual
     if actual != expected:
         receipt.update(
@@ -100,7 +140,7 @@ def _assert_receipt_source_unchanged(pdf: Path, receipt: dict[str, Any]) -> None
         return
     if kind != "regular":
         raise ValueError("original source disappeared during preflight")
-    if sha256(pdf.read_bytes()).hexdigest() != receipt["actual_sha256"]:
+    if _stable_original_digest(pdf) != receipt["actual_sha256"]:
         raise ValueError("original source changed during preflight")
 
 
