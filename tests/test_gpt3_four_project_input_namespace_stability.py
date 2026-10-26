@@ -6,7 +6,6 @@ snapshot assertion used both before and after exclusive diagnostic output.
 """
 from __future__ import annotations
 
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -196,7 +195,7 @@ def test_same_byte_source_replacement_after_exclusive_link_rolls_back_report(
     monkeypatch.setattr(publish.os, "link", substitute_after_link)
     with pytest.raises(ValueError, match="four-project input changed"):
         publish.write_new_diagnostic(
-            output, '{"publication_status":"UNPUBLISHED"}\\n',
+            output, '{"publication_status":"UNPUBLISHED"}\n',
             protected_roots=(original,),
             verify_inputs=lambda: assert_unchanged(receipt),
         )
