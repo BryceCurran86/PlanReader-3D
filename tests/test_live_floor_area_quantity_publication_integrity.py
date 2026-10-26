@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import replace
 from copy import copy
 
+import pytest
+
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
@@ -722,3 +724,58 @@ def test_unmapped_source_alternative_cannot_poison_one_authentic_floor_owner():
     published = publish_live_floor_area_quantities(claim)
     assert len(published) == 1
     assert published[0].metadata["upstream_room_area_quantity_id"] == source.quantity_id
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    (
+        ("canonical_room_id", " room-1 "),
+        ("canonical_room_id", True),
+        ("physical_room_id", " physical-room-1 "),
+        ("physical_room_id", True),
+        ("document_id", "foreign-document"),
+        ("document_id", True),
+        ("snapshot_id", "foreign-room-snapshot"),
+        ("snapshot_id", True),
+        ("source_room_face_record_id", " face-1 "),
+        ("source_room_face_record_id", True),
+        ("revision_id", " rev-1 "),
+        ("page_id", " 1"),
+    ),
+)
+def test_canonical_room_firm_issuer_requires_exact_original_floor_identity(
+    field, bad,
+) -> None:
+    """A source floor cannot lend its FIRM area to a forged room owner."""
+    original = _claim_with_canonical_room(_source_area())
+    firm_floor = publish_live_floor_area_quantities(original)
+    firm_room = publish_live_canonical_room_area_quantities(original)
+    assert len(firm_floor) == len(firm_room) == 1
+
+    altered_room = replace(original.canonical_rooms[0], **{field: bad})
+    altered = replace(original, canonical_rooms=(altered_room,))
+    assert publish_live_floor_area_quantities(altered) == firm_floor
+    assert publish_live_canonical_room_area_quantities(altered) == ()
+    assert publish_live_canonical_room_area_quantities(original) == firm_room
+    assert altered.canonical_rooms == (altered_room,)
+
+
+def test_canonical_room_keeps_authentic_source_floor_and_independent_support() -> None:
+    """Independent figured dimension support does not change the room face."""
+    source = _source_area()
+    owned = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "room_snapshot_id": _floor().snapshot_id,
+            "source_dimension_snapshot_id": "independent-figured-support",
+        },
+    )
+    claim = _claim_with_canonical_room(owned)
+    rooms = publish_live_canonical_room_area_quantities(claim)
+    assert len(rooms) == 1
+    assert rooms[0].value == owned.value
+    assert rooms[0].input_entity_ids == ("physical-room-1",)
+    assert rooms[0].metadata["source_dimension_snapshot_id"] == (
+        "independent-figured-support"
+    )

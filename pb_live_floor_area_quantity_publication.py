@@ -381,6 +381,16 @@ def publish_live_canonical_room_area_quantities(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
 
     rooms = _canonical_rooms_by_id(claim)
+    # Bind each room FIRM reissue to exactly one original canonical floor;
+    # never choose a first/nearest owner from competing physical floor IDs.
+    floors_by_canonical_id: dict[str, list[LiveCanonicalFloorSurfaceObject]] = {}
+    for candidate_floor in claim.canonical_floors:
+        if type(candidate_floor) is not LiveCanonicalFloorSurfaceObject:
+            raise TypeError("canonical_floors must contain LiveCanonicalFloorSurfaceObject")
+        if type(candidate_floor.canonical_floor_id) is str:
+            floors_by_canonical_id.setdefault(
+                candidate_floor.canonical_floor_id, []
+            ).append(candidate_floor)
     # Full canonical universe identity must be checked *before* filtering to
     # the conveniently measured room. Competing physical/source-face owners
     # cannot be resolved by first/last-writer-wins selection.
@@ -432,6 +442,38 @@ def publish_live_canonical_room_area_quantities(
         room = rooms.get(room_id)
         source = source_by_id.get(source_id)
         if room is None or source is None:
+            continue
+        floor_id = metadata.get("canonical_floor_id")
+        if type(floor_id) is not str:
+            continue
+        original_floors = floors_by_canonical_id.get(floor_id, ())
+        if len(original_floors) != 1:
+            continue
+        original_floor = original_floors[0]
+        # _clean() is a lookup convenience, not original source authority.
+        # Do not reissue a measured floor onto padded/coerced/foreign room IDs.
+        if any(
+            type(identity) is not str
+            or not identity
+            or identity != identity.strip()
+            for identity in (
+                room.canonical_room_id,
+                room.physical_room_id,
+                room.document_id,
+                room.snapshot_id,
+                room.source_room_face_record_id,
+                room.revision_id,
+                room.page_id,
+            )
+        ):
+            continue
+        if (
+            room.canonical_room_id != original_floor.room_entity_id
+            or room.document_id != original_floor.document_id
+            or room.snapshot_id != original_floor.snapshot_id
+            or room.source_room_face_record_id
+            != original_floor.source_room_face_record_id
+        ):
             continue
         # Reuse the *same* valid upstream room-area evidence that was promoted
         # to the canonical floor. Never create a different FIRM claim by
