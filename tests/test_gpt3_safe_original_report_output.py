@@ -169,3 +169,82 @@ def test_uncontested_new_report_still_keeps_exact_original_utf8_bytes(tmp_path):
     payload = '{"state":"verified","note":"café"}\n'
     pub.write_new_diagnostic(output, payload, protected_roots=(None,))
     assert output.read_bytes() == payload.encode("utf-8")
+
+
+@pytest.mark.parametrize("replacement_kind", ["same_bytes_regular", "same_bytes_symlink"])
+def test_same_byte_report_replacement_between_identity_and_read_is_rejected(
+    tmp_path, monkeypatch, replacement_kind,
+):
+    """The two old path reads accepted a different inode with identical bytes."""
+    output = tmp_path / "report.json"
+    replacement = tmp_path / "other-report.json"
+    source = tmp_path / "original.pdf"
+    payload = '{"verified":true}\\n'
+    source.write_bytes(b"%PDF-private-source-unchanged")
+    replacement.write_text(payload, encoding="utf-8")
+    real_samefile = Path.samefile
+    real_open = pub.os.open
+    swapped = False
+
+    def swap():
+        nonlocal swapped
+        if swapped:
+            return
+        swapped = True
+        if replacement_kind == "same_bytes_regular":
+            replacement.replace(output)
+        else:
+            output.unlink()
+            output.symlink_to(replacement)
+
+    # Old implementation calls samefile() then read_bytes() on two separate
+    # path opens. Inject just after its successful identity comparison.
+    def swap_after_old_identity(self, other):
+        result = real_samefile(self, other)
+        if self == output and result:
+            swap()
+        return result
+
+    # New implementation checks the same identity on a no-follow descriptor.
+    # Inject between its lstat and descriptor open instead.
+    def swap_before_descriptor_open(path, flags, *args, **kwargs):
+        if Path(path) == output:
+            swap()
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "samefile", swap_after_old_identity)
+    monkeypatch.setattr(pub.os, "open", swap_before_descriptor_open)
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, payload, protected_roots=(source,))
+    assert swapped
+    assert output.read_bytes() == payload.encode("utf-8")
+    assert output.is_symlink() == (replacement_kind == "same_bytes_symlink")
+    assert source.read_bytes() == b"%PDF-private-source-unchanged"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_same_byte_report_replacement_after_descriptor_read_is_rejected(
+    tmp_path, monkeypatch,
+):
+    """Rechecking the published path catches a post-read inode swap."""
+    output = tmp_path / "report.json"
+    replacement = tmp_path / "replacement.json"
+    payload = '{"verified":"same-bytes"}\\n'
+    replacement.write_text(payload, encoding="utf-8")
+    real_fstat = pub.os.fstat
+    reads = 0
+
+    def replace_on_completed_descriptor_stat(fd):
+        nonlocal reads
+        result = real_fstat(fd)
+        reads += 1
+        if reads == 2:
+            replacement.replace(output)
+        return result
+
+    monkeypatch.setattr(pub.os, "fstat", replace_on_completed_descriptor_stat)
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, payload, protected_roots=(None,))
+    assert reads >= 2
+    assert output.read_bytes() == payload.encode("utf-8")
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
