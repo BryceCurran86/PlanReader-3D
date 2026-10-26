@@ -74,9 +74,14 @@ def write_new_diagnostic(
         # report no longer refers to the staged bytes.
         try:
             still_ours = output.samefile(temp)
+            # In-place tampering preserves inode identity, so also verify the
+            # final UTF-8 bytes against the payload we actually staged.
+            original_bytes_retained = (
+                output.read_bytes() == encoded.encode("utf-8")
+            ) if still_ours else False
         except OSError as exc:
             raise ValueError("original-source diagnostic output changed during publication") from exc
-        if not still_ours:
+        if not still_ours or not original_bytes_retained:
             raise ValueError("original-source diagnostic output changed during publication")
     except BaseException:
         if our_output_created and temp is not None:
