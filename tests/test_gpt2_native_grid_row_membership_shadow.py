@@ -14,13 +14,34 @@ from pb_gpt2_native_grid_row_membership_shadow import (
 
 def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,
           overpaint=None, image_overpaint=None, image_overlay=True,
-          rotation=0):
+          rotation=0, stroke_overpaint=None, stroke_shift=0.0,
+          stroke_horizontal=False, stroke_before=False):
     pdf = fitz.open()
     page = pdf.new_page(width=420, height=340)
+
+    def _paint_strokes():
+        if stroke_overpaint is None:
+            return
+        for x in (100+shifted, 142+shifted):
+            if stroke_horizontal:
+                start, end, width = (x-5, 60), (x+5, 60), .48
+            else:
+                start, end, width = (
+                    (x+stroke_shift, 45), (x+stroke_shift, 85), 2.0
+                )
+            page.draw_line(
+                fitz.Point(*start), fitz.Point(*end),
+                color=stroke_overpaint, width=width,
+            )
+
+    if stroke_before:
+        _paint_strokes()
     for x in (100+shifted, 142+shifted):
         for a,b in ((30,100),(100,170),(170,260)):
             page.draw_line(fitz.Point(x,a),fitz.Point(x,b),
                            color=(0,0,0),width=.48)
+    if not stroke_before:
+        _paint_strokes()
     if overpaint is not None:
         for x in (100+shifted, 142+shifted):
             page.draw_rect(fitz.Rect(x-2,30,x+2,260),
@@ -51,8 +72,12 @@ def _case(*, duplicate_code=False, untrusted=False, shifted=0.0,
         ))
     ]
     return content,tuple(words),NativeGridRowScope(
-        page_number=1,left_boundary_paths=(0,1,2),
-        right_boundary_paths=(3,4,5),code_address=(0,0,0))
+        page_number=1,
+        left_boundary_paths=(2,3,4) if stroke_before and stroke_overpaint is not None
+            else (0,1,2),
+        right_boundary_paths=(5,6,7) if stroke_before and stroke_overpaint is not None
+            else (3,4,5),
+        code_address=(0,0,0))
 
 
 def _audit(b=None, words=None, scope=None, **kwargs):
@@ -144,6 +169,32 @@ def test_raster_painted_behind_visible_grid_does_not_false_veto(rotation):
     b, w, s = _case(
         image_overpaint=0, image_overlay=False, rotation=rotation,
     )
+    assert _audit(b, w, s).status is EvidenceResolutionStatus.CANDIDATE
+
+
+@pytest.mark.parametrize("color", [(1,1,1), (0,0,0)])
+def test_later_source_stroke_overpaint_vetoes_even_dark_final_pixels(color):
+    b, w, s = _case(stroke_overpaint=color)
+    with fitz.open(stream=b, filetype="pdf") as pdf:
+        assert [kind for kind, _ in pdf[0].get_bboxlog()][-2:] == [
+            "stroke-path", "stroke-path",
+        ]
+    with pytest.raises(ValueError, match="overpainted by later stroke"):
+        _audit(b, w, s)
+
+
+def test_later_unrelated_source_strokes_preserve_clean_grid():
+    b, w, s = _case(stroke_overpaint=(1,1,1), stroke_shift=30.0)
+    assert _audit(b, w, s).status is EvidenceResolutionStatus.CANDIDATE
+
+
+def test_later_thin_transverse_grid_crossings_are_not_erasure():
+    b, w, s = _case(stroke_overpaint=(0,0,0), stroke_horizontal=True)
+    assert _audit(b, w, s).status is EvidenceResolutionStatus.CANDIDATE
+
+
+def test_earlier_stroke_is_not_later_source_overpaint():
+    b, w, s = _case(stroke_overpaint=(1,1,1), stroke_before=True)
     assert _audit(b, w, s).status is EvidenceResolutionStatus.CANDIDATE
 
 
