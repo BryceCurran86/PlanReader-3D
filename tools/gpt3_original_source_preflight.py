@@ -10,6 +10,10 @@ import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
+from tools.gpt3_safe_original_report_output import (
+    preflight_new_diagnostic,
+    write_new_diagnostic,
+)
 import sys
 from typing import Any
 
@@ -57,18 +61,47 @@ def classify_original_source_preflight(
     return receipt
 
 
+def _protected_report_roots(pdf: Path) -> tuple[Path, ...]:
+    """Source originals, historical signed/customer and frozen evaluator are not outputs."""
+    repo = Path(__file__).resolve().parents[1]
+    return (
+        pdf,
+        repo / "documents/sources",
+        repo / "benchmarks/frozen_holdout/full_plan_v2",
+        repo / "docs/engineering",
+    )
+
+
+def _assert_receipt_source_unchanged(pdf: Path, receipt: dict[str, Any]) -> None:
+    """A stale source status must never survive exclusive diagnostic publication."""
+    if receipt["status"] == SOURCE_BLOCKED:
+        if pdf.is_file():
+            raise ValueError("original source appeared during preflight")
+        return
+    if not pdf.is_file():
+        raise ValueError("original source disappeared during preflight")
+    if sha256(pdf.read_bytes()).hexdigest() != receipt["actual_sha256"]:
+        raise ValueError("original source changed during preflight")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pdf", type=Path, required=True)
     parser.add_argument("--expected-sha256", required=True)
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)
+    protected = _protected_report_roots(args.pdf)
+    # Refuse an occupied/aliased destination before reading private PDF bytes.
+    if args.output is not None:
+        preflight_new_diagnostic(args.output, protected_roots=protected)
     receipt = classify_original_source_preflight(args.pdf, args.expected_sha256)
     text = json.dumps(receipt, sort_keys=True) + "\n"
-    sys.stdout.write(text)
     if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text, encoding="utf-8")
+        write_new_diagnostic(
+            args.output, text, protected_roots=protected,
+            verify_inputs=lambda: _assert_receipt_source_unchanged(args.pdf, receipt),
+        )
+    sys.stdout.write(text)
     status = receipt["status"]
     if status == SOURCE_PRESENT:
         return 0
