@@ -156,6 +156,38 @@ def test_new_source_positive_targets_have_fixed_base_tree_and_exact_two_paths():
     assert "git checkout --detach" not in script
 
 
+def test_new_immutable_targets_are_collected_source_free_before_private_replay():
+    """Source-free public CI must test both newly allowlisted immutable trees."""
+    workflow = ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+    raw = workflow.read_text(encoding="utf8")
+    document = _parse_workflow(FILE.read_text(encoding="utf8"))
+    assert document["on"] == {"workflow_dispatch": None}
+    expected = {
+        "grid": (
+            "tests/test_gpt2_native_grid_row_membership_shadow.py",
+            "test_private_original_d02_grid_membership_from_published_source_if_provisioned",
+            "test_original_ruled_row_connects_multiple_native_blocks_without_grants",
+        ),
+        "rcp_ink": (
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
+            "test_real_original_page9_native_source_rivals_if_available",
+            "test_later_native_text_whitespace_advance_is_not_painted_overprint",
+        ),
+    }
+    for label, (path, original, synthetic) in expected.items():
+        row = (
+            label + "|" + HEADS[label] + "|" + path + "::" + original
+            + "|" + path + "::" + synthetic
+        )
+        assert raw.count(row + "\n") == 1
+    assert "--network none --read-only --cap-drop ALL" in raw
+    assert "python -m pytest --collect-only" in raw
+    assert "python -m pytest -q" in raw
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in raw
+    assert "ORIGINAL_SOURCES_TOKEN" not in raw
+    assert "secrets." not in raw
+
+
 def test_token_only_present_in_frozen_manifest_provision_step():
     steps = _load()["jobs"]["original"]["steps"]
     matches = [s for s in steps if "ORIGINAL_SOURCES_TOKEN" in str(s)]
