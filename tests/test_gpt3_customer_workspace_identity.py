@@ -39,6 +39,14 @@ def test_positive_original_workspace_identity_reaches_only_supported_empty_path(
     module_name,function_name,claim_type_name,monkeypatch,
 ):
     module=importlib.import_module(module_name)
+    if module_name=="pb_live_room_area_customer_projection":
+        # The source issuer checks a real typed claim, even for empty source
+        # inventory. Reuse its authenticated shape rather than a fake class.
+        from test_live_floor_finish_area_source_closed_export import _claim
+        assert getattr(module,function_name)(
+            _claim(),workspace_id=7,project_id="project-1",
+        )==()
+        return
     class EmptyClaim:
         opening_quantity_evidence=()
         opening_count_quantity_evidence=()
