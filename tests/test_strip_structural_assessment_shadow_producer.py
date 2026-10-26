@@ -268,8 +268,13 @@ def test_replay_is_deterministic_and_ids_are_stable(monkeypatch):
 
 
 def _shape(obj):
-    return {k: (len(v) if isinstance(v, (dict, set, list, tuple)) else None) for k, v in sorted(vars(obj).items())
-            if isinstance(v, (dict, set, list, tuple)) or hasattr(v, "keys")}
+    shape = {k: (len(v) if isinstance(v, (dict, set, list, tuple)) else None)
+             for k, v in sorted(vars(obj).items())
+             if isinstance(v, (dict, set, list, tuple)) or hasattr(v, "keys")}
+    # Opening authority creation is a consumer-owned memo even when it does not
+    # populate any producer dict/list. Include this object cache in the sentinel.
+    shape["_physical_opening_authority_cache_present"] = obj._physical_opening_authority_cache is not None
+    return shape
 
 
 def test_the_assessment_changes_no_output_and_no_state_of_the_producer_or_its_opening_authority(monkeypatch):
