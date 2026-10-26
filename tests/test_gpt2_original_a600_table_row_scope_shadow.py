@@ -710,7 +710,9 @@ def test_foreign_d3_outside_table_remains_source_receipt_not_phantom_pair(monkey
         source,revision_id=pub.revision.revision_id,
         plan_page_id="2",schedule_page_id="1",
     )
-    assert "D3" not in {row.code for row in paired.pairs}
+    d3=next(row for row in paired.pairs if row.code=="D3")
+    assert not d3.source_code_correspondence_proven
+    assert d3.first_unclosed_gate=="original_plan_door_tag_missing"
     assert paired.source_schedule_observation_universe_complete
     assert result.new_opening_counts==result.new_opening_areas_m2==0
     assert paired.new_opening_counts==paired.new_opening_area_quantities==0
@@ -804,7 +806,9 @@ def test_private_original_a110_plan_to_a600_schedule_same_snapshot_if_provisione
     assert result.source_schedule_observation_universe_complete
     assert result.eligible_printed_code_pair_count > 0
     assert canonical <= {row.code for row in result.pairs}
-    assert "D3" not in {row.code for row in result.pairs}
+    assert any(row.code=="D3" and not row.source_code_correspondence_proven
+               and row.first_unclosed_gate=="original_plan_door_tag_missing"
+               for row in result.pairs)
     assert all(row.opening_count is None and
                row.installed_opening_area_m2 is None and
                not row.customer_quantity_authorized for row in result.pairs)
