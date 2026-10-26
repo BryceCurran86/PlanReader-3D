@@ -567,8 +567,6 @@ def test_generic_door_code_lexeme_preserves_real_one_digit_rows():
 
 
 @pytest.mark.parametrize("code", ("D1", "D3"))
-
-
 def test_genuine_single_digit_table_row_retained_with_foreign_same_code_detail(monkeypatch, code):
     """A source-authenticated TABLE D1/D3 cannot be erased by a DETAIL D1/D3."""
     from pb_source_door_schedule_authority import inspect_published_door_schedule
@@ -612,6 +610,42 @@ def test_genuine_single_digit_table_row_retained_with_foreign_same_code_detail(m
     assert missing.first_unclosed_gate=="original_plan_door_tag_missing"
     assert result.new_opening_counts==result.new_opening_areas_m2==0
     assert paired.new_opening_counts==paired.new_opening_area_quantities==0
+
+
+@pytest.mark.parametrize("code", ("D1", "D3"))
+def test_genuine_single_digit_plan_and_table_code_correspond_without_count(monkeypatch, code):
+    """The real source-published plan consumer accepts syntax, not door existence."""
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    in_table=(
+        _w(70,0,0,code,735,302),_w(70,1,0,"FOYER",735,270),
+        _w(70,2,0,"SWING",735,210),_w(70,3,0,"920",735,160),
+        _w(70,4,0,"2040",735,120),
+    )
+    foreign=(_w(71,0,0,code,80,1000),_w(71,1,0,"DETAIL",80,950))
+    plan=(W(
+        observation_id="source-plan:"+code,page_id="2",partition_id="page:2",
+        block_no=100,line_no=0,word_no=0,literal=code,trusted=True,
+        bbox_pdf_pts=(20.0,20.0,32.0,32.0),
+    ),)
+    source,pub=_published_synthetic_original_source(
+        monkeypatch,_original_like_words()+in_table+foreign,plan_words=plan,
+    )
+    result=inspect_published_plan_and_schedule_door_codes(
+        source,revision_id=pub.revision.revision_id,
+        plan_page_id="2",schedule_page_id="1",
+    )
+    pair=next(row for row in result.pairs if row.code==code)
+    assert pair.source_code_correspondence_proven
+    assert pair.first_unclosed_gate=="physical_door_symbol_host_and_customer_scope_unproven"
+    assert not pair.physical_door_symbol_bound
+    assert not pair.structural_host_bound
+    assert pair.opening_count is None
+    assert pair.installed_opening_area_m2 is None
+    assert not pair.customer_quantity_authorized
+    assert result.eligible_printed_code_pair_count==1
+    assert result.new_opening_counts==result.new_opening_area_quantities==0
 
 
 @pytest.mark.parametrize("bad", ("D0", "D00"))
