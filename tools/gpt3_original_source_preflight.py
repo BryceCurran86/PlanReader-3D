@@ -10,6 +10,7 @@ import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
+from stat import S_ISREG
 from tools.gpt3_safe_original_report_output import (
     preflight_new_diagnostic,
     write_new_diagnostic,
@@ -23,6 +24,24 @@ SOURCE_MISMATCH = "SOURCE_MISMATCH"
 ORIGINAL_PDF_ABSENT = "original_pdf_absent"
 ORIGINAL_PDF_DIGEST_MISMATCH = "original_pdf_digest_mismatch"
 
+
+
+def _original_source_path_kind(pdf_path: Path) -> str:
+    """Only a genuinely absent regular-file path is SOURCE_BLOCKED.
+
+    Python 3.14 pathlib is_file() can suppress filesystem errors and treat
+    inaccessible inputs as absent. lstat preserves those errors and refuses
+    symlink/nonregular namespace substitutions, including dangling links.
+    """
+    try:
+        mode = pdf_path.lstat().st_mode
+    except FileNotFoundError:
+        return "missing"
+    except OSError as exc:
+        raise ValueError("original source path cannot be inspected") from exc
+    if not S_ISREG(mode):
+        raise ValueError("original source path is not a regular file")
+    return "regular"
 
 def classify_original_source_preflight(
     pdf_path: Path,
@@ -39,7 +58,7 @@ def classify_original_source_preflight(
         "benchmark_score_granted": False,
         "original_source_verified": False,
     }
-    if not pdf_path.is_file():
+    if _original_source_path_kind(pdf_path) == "missing":
         receipt.update(
             status=SOURCE_BLOCKED,
             reason=ORIGINAL_PDF_ABSENT,
@@ -74,11 +93,12 @@ def _protected_report_roots(pdf: Path) -> tuple[Path, ...]:
 
 def _assert_receipt_source_unchanged(pdf: Path, receipt: dict[str, Any]) -> None:
     """A stale source status must never survive exclusive diagnostic publication."""
+    kind = _original_source_path_kind(pdf)
     if receipt["status"] == SOURCE_BLOCKED:
-        if pdf.is_file():
+        if kind != "missing":
             raise ValueError("original source appeared during preflight")
         return
-    if not pdf.is_file():
+    if kind != "regular":
         raise ValueError("original source disappeared during preflight")
     if sha256(pdf.read_bytes()).hexdigest() != receipt["actual_sha256"]:
         raise ValueError("original source changed during preflight")
