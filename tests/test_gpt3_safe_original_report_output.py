@@ -101,3 +101,71 @@ def test_original_replay_cli_preflights_existing_destination_before_source_reade
             "--output", str(output),
         ])
     assert output.read_text() == '{"signed":"unchanged"}'
+
+
+def test_original_report_replaced_after_exclusive_link_cannot_claim_success(
+    tmp_path, monkeypatch,
+):
+    output = tmp_path / "report.json"
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"%PDF-source-unchanged")
+    actual_link = pub.os.link
+    def replace_after_link(staged, destination):
+        actual_link(staged, destination)
+        Path(destination).unlink()
+        Path(destination).write_text("racing-writer-report", encoding="utf-8")
+    monkeypatch.setattr(pub.os, "link", replace_after_link)
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, '{"source":"verified"}\n',
+                                 protected_roots=(source,))
+    assert output.read_text(encoding="utf-8") == "racing-writer-report"
+    assert source.read_bytes() == b"%PDF-source-unchanged"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_original_report_in_place_mutation_is_not_accepted_as_same_inode(
+    tmp_path, monkeypatch,
+):
+    output = tmp_path / "report.json"
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"%PDF-source-unchanged")
+    actual_link = pub.os.link
+    def tamper_after_link(staged, destination):
+        actual_link(staged, destination)
+        # Changes BOTH destination and staging via their shared inode.
+        Path(destination).write_text("mutated-but-still-same-inode", encoding="utf-8")
+    monkeypatch.setattr(pub.os, "link", tamper_after_link)
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, '{"source":"verified"}\n',
+                                 protected_roots=(source,))
+    assert not output.exists()
+    assert source.read_bytes() == b"%PDF-source-unchanged"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_competing_report_after_second_input_verification_keeps_other_writer(
+    tmp_path,
+):
+    output = tmp_path / "report.json"
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"%PDF-untouched")
+    callbacks = []
+    def verifier():
+        callbacks.append("checked")
+        if len(callbacks) == 2:
+            output.unlink()
+            output.write_text("replacement-after-input-check", encoding="utf-8")
+    with pytest.raises(ValueError, match="output changed"):
+        pub.write_new_diagnostic(output, '{"source":"verified"}\n',
+                                 protected_roots=(original,), verify_inputs=verifier)
+    assert callbacks == ["checked", "checked"]
+    assert output.read_text(encoding="utf-8") == "replacement-after-input-check"
+    assert original.read_bytes() == b"%PDF-untouched"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_uncontested_new_report_still_keeps_exact_original_utf8_bytes(tmp_path):
+    output = tmp_path / "new.json"
+    payload = '{"state":"verified","note":"café"}\n'
+    pub.write_new_diagnostic(output, payload, protected_roots=(None,))
+    assert output.read_bytes() == payload.encode("utf-8")
