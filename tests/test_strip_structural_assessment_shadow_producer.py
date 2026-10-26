@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import pytest
 
@@ -374,6 +374,35 @@ def test_failed_nonnominated_visible_source_cannot_vanish_from_terminal_census(m
         blocked = _assess(source, published, ids)
     assert blocked.status is ABST
     assert A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE in blocked.reason_codes
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _assess(source, published, ids) == baseline
+
+
+
+def test_malformed_same_page_visible_rival_geometry_vetoes_positive_strip(monkeypatch):
+    """A CORROBORATED but malformed published rival cannot disappear from the page census."""
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    other = next(oid for oid in published.visible_observation_ids if oid not in ids)
+    visibility = source.authority()
+    original_resolve = visibility.resolve_visible
+
+    def malformed_visible_rival(selector):
+        result = original_resolve(selector)
+        if selector.observation_id == other:
+            assert result.observation is not None
+            return replace(result, observation=replace(result.observation, geometry=(1.0, 2.0, 3.0)))
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(visibility, "resolve_visible", malformed_visible_rival)
+        patch.setattr(source, "authority", lambda: visibility)
+        blocked = _assess(source, published, ids)
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
     assert blocked.fragments == () and blocked.terminals == ()
     assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
     assert _assess(source, published, ids) == baseline
