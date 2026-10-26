@@ -126,6 +126,38 @@ def test_there_is_no_caller_channel_for_widths_roles_or_provenance():
             coordinate_quantum_pt=Q, stroke_width=0.96)
 
 
+def test_a_warmed_shadow_reauthenticates_each_call_and_never_reuses_a_revoked_fork(monkeypatch):
+    """A cache hit must not turn a later unavailable original into an opening candidate."""
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _per_bay_strip()
+    shadow = A.StripStructuralAssessmentShadow(source, enabled=True)
+    revision = published.revision.revision_id
+    args = dict(revision_id=revision, page_id=1, nominated_observation_ids=ids, coordinate_quantum_pt=Q)
+    original_fork = source.fork_native_source_shadow
+    fork_calls = []
+
+    def independently_replay(revision_id):
+        fork_calls.append(revision_id)
+        if len(fork_calls) == 3:
+            raise RuntimeError("source fork unavailable on the later assessment")
+        return original_fork(revision_id)
+
+    monkeypatch.setattr(source, "fork_native_source_shadow", independently_replay)
+    first = shadow.assess(**args)
+    second = shadow.assess(**args)
+    assert first.status is CONF and second == first
+    assert fork_calls == [revision, revision]
+    assert shadow._forks == {}  # no stale replay retained after either positive observation
+
+    revoked = shadow.assess(**args)
+    assert fork_calls == [revision, revision, revision]
+    assert revoked.status is ABST
+    assert revoked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert revoked.fragments == () and revoked.terminals == ()
+    assert revoked.ownership is None
+    assert shadow._forks == {}
+
+
 # --- the two regimes ---------------------------------------------------------------------------------
 
 
