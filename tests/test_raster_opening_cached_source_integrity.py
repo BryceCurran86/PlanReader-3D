@@ -105,6 +105,42 @@ def test_mid_inventory_read_receipt_change_cannot_issue_positive(monkeypatch):
     assert authority.prove_existence(selector).status is EvidenceResolutionStatus.CORROBORATED
 
 
+def test_mid_inventory_read_flat_table_restoration_is_conflict(monkeypatch):
+    """A missing BEFORE token and restored AFTER token are not one transaction."""
+    source, published = _prepare(frame_lines=2)
+    record = _corroborated_records(source, published)[0]
+    selector = _selector(published, record.source_observation_ids[0])
+    authority = source.physical_opening_authority()
+    baseline = authority.prove_existence(selector)
+    assert baseline.status is EvidenceResolutionStatus.CORROBORATED
+
+    store = source._producer._store
+    tracked_observations = store.observations
+    store.observations = dict(tracked_observations)
+    assert authority._raster_inventory_inputs(published) is None
+
+    visibility = authority.source_visibility_authority()
+    original_resolve = visibility.resolve_raster_opening_primitive
+    last = published.raster_opening_primitive_observation_ids[-1]
+    restored = []
+
+    def restore_at_last_record(address):
+        result = original_resolve(address)
+        if address.observation_id == last:
+            store.observations = tracked_observations
+            restored.append(True)
+        return result
+
+    monkeypatch.setattr(visibility, "resolve_raster_opening_primitive", restore_at_last_record)
+    broken = authority.prove_existence(selector)
+    assert restored and authority._raster_inventory_inputs(published) is not None
+    assert broken.status is EvidenceResolutionStatus.CONFLICT
+    assert broken.existence_record is None
+
+    monkeypatch.setattr(visibility, "resolve_raster_opening_primitive", original_resolve)
+    assert authority.prove_existence(selector) == baseline
+
+
 def test_replaced_source_table_uses_fresh_scalar_authentication():
     source, published = _prepare(frame_lines=2)
     record = _corroborated_records(source, published)[0]
