@@ -278,7 +278,7 @@ def test_real_git_nul_path_blocks_pinned_bytes_in_literal_backslash_filename(tre
     subprocess.run(["git", "config", "user.email", "guard@example.invalid"], cwd=repo, check=True)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "synthetic baseline"], cwd=repo, check=True)
-    changed_name = r"docs\\renamed-original.pdf"
+    changed_name = r"docs\renamed-original.pdf"
     (repo / changed_name).write_bytes(_PINNED_BYTES)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "synthetic original under literal backslash"], cwd=repo, check=True)
@@ -286,7 +286,7 @@ def test_real_git_nul_path_blocks_pinned_bytes_in_literal_backslash_filename(tre
         ["git", "diff", "--diff-filter=AMRC", "--name-only", "-z", "HEAD^", "HEAD"],
         cwd=repo, check=True, capture_output=True,
     ).stdout
-    assert changed == changed_name.encode("utf-8") + b"\\x00"
+    assert changed == changed_name.encode("utf-8") + b"\x00"
     result = subprocess.run(
         [sys.executable, str(GUARD), "--root", str(repo)],
         input=changed, capture_output=True,
@@ -299,7 +299,7 @@ def test_real_git_nul_path_blocks_pinned_bytes_in_literal_backslash_filename(tre
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows does not support literal backslash filenames")
 def test_git_nul_literal_backslash_does_not_invent_protected_directory(tree):
     """Do not classify an unrelated literal-root filename as documents/sources."""
-    changed_name = r"documents\\sources\\synthetic.txt"
+    changed_name = r"documents\sources\synthetic.txt"
     (tree / changed_name).write_text("harmless synthetic fixture", encoding="utf-8")
     assert _run_cli(tree, changed_name).returncode == 0
     # The historical manual helper still supports Windows-style separators.
