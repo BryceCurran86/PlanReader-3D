@@ -386,6 +386,7 @@ def test_failed_nonnominated_visible_source_cannot_vanish_from_terminal_census(m
     ("bad-number", 2.0, 3.0, 4.0),
     (float("nan"), 2.0, 3.0, 4.0),
     (float("inf"), 2.0, 3.0, 4.0),
+    (10 ** 1000, 2.0, 3.0, 4.0),
     (True, 2.0, 3.0, 4.0),
 ])
 def test_nonfinite_or_nonnumeric_published_rival_abstains_instead_of_crashing(monkeypatch, malformed):
