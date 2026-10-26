@@ -564,3 +564,47 @@ def test_corrupt_page_candidate_membership_cannot_vanish_before_rival_filter(mon
     assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
     assert _shape(source) == before
     assert _assess(source, published, ids) == baseline
+
+
+@pytest.mark.parametrize("corrupt_field, foreign_value", [
+    ("document_id", "foreign-document"),
+    ("revision_id", "foreign-revision"),
+    ("source_sha256", "0" * 64),
+    ("snapshot_id", "foreign-snapshot"),
+    ("page_id", "999"),
+    ("status", ABST),
+    ("proposition", "foreign-proposition"),
+    ("source_observation_ids", ("not-published-on-page",)),
+    ("source_observation_ids", ()),
+])
+def test_foreign_positive_existence_record_cannot_upgrade_strip_shadow(
+        monkeypatch, corrupt_field, foreign_value):
+    """The wrapper's CORROBORATED status cannot launder an alien source record."""
+    from pb_physical_opening_authority import PhysicalOpeningAuthority
+
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    before = _shape(source)
+    original = PhysicalOpeningAuthority.prove_existence
+    seen = {"injected": False}
+
+    def foreign_positive(self, selector):
+        result = original(self, selector)
+        record = result.existence_record
+        if not seen["injected"] and record is not None and result.status is EvidenceResolutionStatus.CORROBORATED:
+            seen["injected"] = True
+            return replace(result, existence_record=replace(record, **{corrupt_field: foreign_value}))
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(PhysicalOpeningAuthority, "prove_existence", foreign_positive)
+        blocked = _assess(source, published, ids)
+    assert seen["injected"]
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _shape(source) == before
+    assert _assess(source, published, ids) == baseline
