@@ -557,57 +557,86 @@ def test_real_published_consumer_cannot_claim_complete_table_if_another_code_is_
     assert paired.new_opening_counts==paired.new_opening_area_quantities==0
 
 
-def test_schedule_code_lexeme_excludes_unpadded_native_drawing_detail():
-    # Source-integrity still retains the original D3 observation; this only
-    # prevents an unpadded detail label from acquiring schedule-row identity.
+def test_generic_door_code_lexeme_preserves_real_one_digit_rows():
+    # Native source role, not digit padding, decides TABLE versus DETAIL.
     from pb_source_door_schedule_authority import _DOOR_CODE
-    assert not _DOOR_CODE.fullmatch("D3")
-    assert not _DOOR_CODE.fullmatch("D0")
-    assert _DOOR_CODE.fullmatch("D03")
-    assert _DOOR_CODE.fullmatch("D28")
-    assert _DOOR_CODE.fullmatch("D100")
+    for code in ("D1", "D3", "D03", "D28", "D100"):
+        assert _DOOR_CODE.fullmatch(code)
+    for malformed in ("D0", "D00", "D000", "D03A"):
+        assert not _DOOR_CODE.fullmatch(malformed)
 
 
+@pytest.mark.parametrize("code", ("D1", "D3"))
 
-def test_unpadded_d3_inside_authenticated_schedule_table_blocks_completeness(monkeypatch):
-    """Foreign D3 DETAIL is harmless; a source-visible D3 TABLE row must ABSTAIN."""
+
+def test_genuine_single_digit_table_row_retained_with_foreign_same_code_detail(monkeypatch, code):
+    """A source-authenticated TABLE D1/D3 cannot be erased by a DETAIL D1/D3."""
     from pb_source_door_schedule_authority import inspect_published_door_schedule
     from pb_source_plan_door_correspondence_authority import (
         inspect_published_plan_and_schedule_door_codes,
     )
     in_table=(
-        _w(70,0,0,"D3",735,302),
+        _w(70,0,0,code,735,302),
         _w(70,1,0,"FOYER",735,270),
         _w(70,2,0,"SWING",735,210),
         _w(70,3,0,"920",735,160),
         _w(70,4,0,"2040",735,120),
     )
-    foreign=(_w(71,0,0,"D3",80,1000),_w(71,1,0,"DETAIL",80,950))
-    source,pub=_published_synthetic_original_source(
-        monkeypatch,_original_like_words()+in_table+foreign,
-    )
+    foreign=(_w(71,0,0,code,80,1000),_w(71,1,0,"DETAIL",80,950))
+    original=_original_like_words()+in_table+foreign
+    source,pub=_published_synthetic_original_source(monkeypatch,original)
     result=inspect_published_door_schedule(
         source,revision_id=pub.revision.revision_id,page_id="1",
     )
     assert result.original_table_row_scope_authenticated
-    assert "D3" in result.unparsed_original_door_codes
-    assert "D3" not in result.all_original_source_codes
-    assert not result.complete_source_word_universe
-    assert not any(row.code=="D3" for row in result.rows)
-    shadow=_run(_original_like_words()+in_table+foreign)
-    d3=next(d for d in shadow.decisions if d.code=="D3")
-    assert d3.original_table_native_blocks==(70,)
-    assert d3.original_other_native_blocks==(71,)
-    assert not d3.source_table_row_candidate_only
-    assert d3.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.new_opening_counts==result.new_opening_areas_m2==0
+    assert result.complete_source_word_universe
+    assert code in result.all_original_source_codes
+    assert code not in result.unparsed_original_door_codes
+    assert "sha-owned-native:71:0:0" in result.original_detail_code_observation_ids
+    assert next(row for row in result.rows if row.code==code).status==(
+        "source_schedule_row_text_authenticated"
+    )
+    shadow=_run(original)
+    decision=next(d for d in shadow.decisions if d.code==code)
+    assert decision.original_table_native_blocks==(70,)
+    assert decision.original_other_native_blocks==(71,)
+    assert decision.status is EvidenceResolutionStatus.CANDIDATE
+    assert decision.source_table_row_candidate_only
     paired=inspect_published_plan_and_schedule_door_codes(
         source,revision_id=pub.revision.revision_id,
         plan_page_id="2",schedule_page_id="1",
     )
-    assert not paired.source_schedule_observation_universe_complete
-    assert paired.eligible_printed_code_pair_count==0
+    assert paired.source_schedule_observation_universe_complete
+    missing=next(p for p in paired.pairs if p.code==code)
+    assert not missing.source_code_correspondence_proven
+    assert missing.first_unclosed_gate=="original_plan_door_tag_missing"
+    assert result.new_opening_counts==result.new_opening_areas_m2==0
     assert paired.new_opening_counts==paired.new_opening_area_quantities==0
+
+
+@pytest.mark.parametrize("bad", ("D0", "D00"))
+def test_malformed_zero_door_code_inside_table_still_blocks_census(monkeypatch,bad):
+    from pb_source_door_schedule_authority import inspect_published_door_schedule
+    malformed=(
+        _w(70,0,0,bad,735,302),_w(70,1,0,"FOYER",735,270),
+        _w(70,2,0,"SWING",735,210),_w(70,3,0,"920",735,160),
+        _w(70,4,0,"2040",735,120),
+    )
+    source,pub=_published_synthetic_original_source(
+        monkeypatch,_original_like_words()+malformed,
+    )
+    schedule=inspect_published_door_schedule(
+        source,revision_id=pub.revision.revision_id,page_id="1",
+    )
+    assert bad in schedule.unparsed_original_door_codes
+    assert bad not in schedule.all_original_source_codes
+    assert not schedule.complete_source_word_universe
+    assert not any(row.code==bad for row in schedule.rows)
+    shadow=_run(_original_like_words()+malformed)
+    decision=next(d for d in shadow.decisions if d.code==bad)
+    assert decision.status is EvidenceResolutionStatus.ABSTAINED
+    assert decision.first_unclosed_gate=="noncanonical_door_code_inside_printed_table"
+    assert schedule.new_opening_counts==schedule.new_opening_areas_m2==0
 
 
 def test_unpadded_d3_secondary_word_in_real_table_row_blocks_completeness(monkeypatch):
@@ -624,9 +653,12 @@ def test_unpadded_d3_secondary_word_in_real_table_row_blocks_completeness(monkey
     assert schedule.new_opening_counts==schedule.new_opening_areas_m2==0
 
 
-def test_unpadded_d3_outside_table_does_not_hide_authentic_rows(monkeypatch):
-    """Original D3 drawing note stays raw source evidence, never a new door."""
+def test_foreign_d3_outside_table_remains_source_receipt_not_phantom_pair(monkeypatch):
+    """Foreign D3 stays in the full native census, not an installed door."""
     from pb_source_door_schedule_authority import inspect_published_door_schedule
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
     original=_original_like_words()+(
         _w(71,0,0,"D3",80,1000),
         _w(71,1,0,"CONTRAST",80,950),
@@ -638,18 +670,20 @@ def test_unpadded_d3_outside_table_does_not_hide_authentic_rows(monkeypatch):
     assert result.original_table_row_scope_authenticated
     assert result.complete_source_word_universe
     assert "D3" not in result.unparsed_original_door_codes
-    assert "D3" not in result.all_original_source_codes
+    assert "D3" in result.all_original_source_codes
+    assert "sha-owned-native:71:0:0" in result.original_detail_code_observation_ids
+    paired=inspect_published_plan_and_schedule_door_codes(
+        source,revision_id=pub.revision.revision_id,
+        plan_page_id="2",schedule_page_id="1",
+    )
+    assert "D3" not in {row.code for row in paired.pairs}
+    assert paired.source_schedule_observation_universe_complete
     assert result.new_opening_counts==result.new_opening_areas_m2==0
+    assert paired.new_opening_counts==paired.new_opening_area_quantities==0
 
 
-
-def test_noncanonical_d3_on_original_plan_remains_source_word_not_door(monkeypatch):
-    """Plan and A600 must share the canonical door code policy.
-
-    A foreign D3 detail on the plan must not create an unresolved phantom
-    schedule row or suppress valid D13/D17 source correspondence.
-    The full raw source word universe remains unchanged.
-    """
+def test_plan_d3_without_authenticated_schedule_row_remains_unresolved(monkeypatch):
+    """A plan D3 is not silently deleted, nor upgraded from a foreign detail."""
     from pb_source_plan_door_correspondence_authority import (
         inspect_published_plan_and_schedule_door_codes,
     )
@@ -673,8 +707,10 @@ def test_noncanonical_d3_on_original_plan_remains_source_word_not_door(monkeypat
         plan_page_id="2",schedule_page_id="1",
     )
     codes={item.code:item for item in result.pairs}
-    assert "D3" not in codes
-    assert "D3" not in result.unresolved_codes
+    assert "D3" in codes
+    assert "D3" in result.unresolved_codes
+    assert not codes["D3"].source_code_correspondence_proven
+    assert codes["D3"].first_unclosed_gate=="original_schedule_row_missing_or_competing"
     assert codes["D17"].source_code_correspondence_proven
     assert codes["D17"].first_unclosed_gate=="physical_door_symbol_host_and_customer_scope_unproven"
     assert result.source_plan_observation_universe_complete
@@ -682,7 +718,6 @@ def test_noncanonical_d3_on_original_plan_remains_source_word_not_door(monkeypat
     assert result.eligible_printed_code_pair_count==1
     assert result.new_opening_counts==result.new_opening_area_quantities==0
     assert not codes["D17"].customer_quantity_authorized
-
 
 
 def test_private_original_a110_plan_to_a600_schedule_same_snapshot_if_provisioned():
