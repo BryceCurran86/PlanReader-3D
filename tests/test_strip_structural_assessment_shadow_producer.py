@@ -443,3 +443,50 @@ def test_unverified_same_page_published_rival_cannot_leave_a_positive_strip(monk
     assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
     assert _shape(source) == before
     assert _assess(source, published, ids) == baseline
+
+
+@pytest.mark.parametrize("fault", ["page_census", "member_proof"])
+def test_downstream_source_integrity_negative_cannot_be_overridden_by_a_clean_strip(monkeypatch, fault):
+    """A failed authority read must not become absence or be masked by another member's signed proof."""
+    from pb_physical_opening_authority import PhysicalOpeningAuthority
+
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    before = _shape(source)
+    reason = A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE
+    seen = {"faulted": False}
+
+    with monkeypatch.context() as patch:
+        if fault == "page_census":
+            original = PhysicalOpeningAuthority.visible_candidate_structures
+
+            def corrupt_page_census(self, selector):
+                result = original(self, selector)
+                assert result.status is CAND and result.candidates
+                seen["faulted"] = True
+                # Preserve stale positive candidates to prove status is checked.
+                return replace(result, status=ABST, reason_codes=(reason,))
+
+            patch.setattr(PhysicalOpeningAuthority, "visible_candidate_structures", corrupt_page_census)
+        else:
+            original = PhysicalOpeningAuthority.prove_existence
+
+            def corrupt_one_member_proof(self, selector):
+                result = original(self, selector)
+                if not seen["faulted"] and result.existence_record is not None:
+                    seen["faulted"] = True
+                    return replace(result, status=ABST, reason_codes=(reason,), existence_record=None)
+                return result
+
+            patch.setattr(PhysicalOpeningAuthority, "prove_existence", corrupt_one_member_proof)
+        blocked = _assess(source, published, ids)
+
+    assert seen["faulted"]
+    assert blocked.status is ABST
+    assert blocked.reason_codes == (reason,)
+    assert blocked.fragments == () and blocked.terminals == ()
+    assert not blocked.takeoff_eligible and not blocked.customer_publication_granted
+    assert _shape(source) == before
+    assert _assess(source, published, ids) == baseline
