@@ -11,8 +11,13 @@ import pytest
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/gpt3-trusted-original-nine-replay-manual.yml"
-APPROVED = "31439c9e4137d7f210488877cc0ab868ed7ffecb"
-BASE = "c491c5fb2a155a54825d639ef277218707b76327"
+APPROVED = "f2e7c7492f151be6c34880f81025ffc2c204a364"
+BASE = "db5dd0a6182dfd83d889303be7de6a107ae08b42"
+OWNER_REPOSITORY_GUARD = (
+    "${{ github.event_name == 'workflow_dispatch' && "
+    "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && "
+    "github.repository == 'BryceCurran86/PlanReader-3D' }}"
+)
 
 
 class StrictWorkflowLoader(yaml.SafeLoader):
@@ -62,8 +67,10 @@ def test_main_owner_only_immutable_source_positive_workflow():
     assert doc["permissions"] == {"contents": "read"}
     assert tuple(doc["jobs"]) == ("original",)
     job = doc["jobs"]["original"]
+    assert job["if"] == OWNER_REPOSITORY_GUARD
     for fragment in ("github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'",
-                     "github.actor == 'BryceCurran86'"):
+                     "github.actor == 'BryceCurran86'",
+                     "github.repository == 'BryceCurran86/PlanReader-3D'"):
         assert fragment in job["if"]
     assert job["strategy"]["fail-fast"] is False
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
@@ -147,10 +154,7 @@ def _isolated_private_source_contract(raw: str) -> bool:
         doc = _parse(raw)
         job = doc["jobs"]["original"]
         steps = job["steps"]
-        assert job["if"] == (
-            "${{ github.event_name == 'workflow_dispatch' && "
-            "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
-        )
+        assert job["if"] == OWNER_REPOSITORY_GUARD
         checkout, guard, build, provision, execute, cleanup = steps
         assert checkout["uses"] == "actions/checkout@v4"
         assert checkout["with"]["persist-credentials"] is False
@@ -192,6 +196,12 @@ def test_private_source_token_never_reaches_candidate_tree_on_host():
     ('dst=/workspace,readonly', 'dst=/workspace'),
     ('dst=/workspace/documents/sources,readonly', 'dst=/workspace/documents/sources'),
     ('github.actor == \'BryceCurran86\'', "github.actor == 'attacker'"),
+    ("github.repository == 'BryceCurran86/PlanReader-3D'",
+     "github.repository == 'attacker/PlanReader-3D'"),
+    ("github.repository == 'BryceCurran86/PlanReader-3D'",
+     "github.repository != 'attacker/PlanReader-3D'"),
+    ("&& github.repository ==", "|| github.repository =="),
+    (" && github.repository == 'BryceCurran86/PlanReader-3D'", ""),
     ('persist-credentials: false', 'persist-credentials: true'),
     ('git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA"',
      'git diff --name-only "$approved_base" "$GITHUB_SHA"'),

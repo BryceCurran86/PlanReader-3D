@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_live_room_area_source_closed_export import (
     build_live_room_area_source_traces,
+    _firm_room_area_quantities as _source_firm_room_area_quantities,
 )
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import (
@@ -186,6 +187,11 @@ def project_live_room_area_customer_rows(
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
 
+    # The original source-closed issuer audits the COMPLETE room quantity
+    # inventory, including rejected/ABSTAINED siblings, before FIRM selection.
+    # Without this check an all-abstained duplicate or foreign source family
+    # could appear to be an authenticated empty customer inventory.
+    _source_firm_room_area_quantities(claim)
     quantities = _firm_room_area_quantities(claim)
     if not quantities:
         return ()
