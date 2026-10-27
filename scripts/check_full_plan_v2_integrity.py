@@ -19,11 +19,38 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
+from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
+    SCHEMA_VERSION, load_project_manifest, load_suite_manifests,
+)
 
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 DEFAULT_SOURCE_DIR = REPO_ROOT / "documents" / "sources"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WIN_DEVICE_NAMES = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"})
+_WIN_PORT_DEVICE_RE = re.compile(r"^(?:COM|LPT)[1-9¹²³]$")
+
+
+def _safe_path_component(value: Any) -> bool:
+    """Require a portable single filename component before joining trusted roots.
+
+    Frozen suite project IDs and pinned document names are untrusted JSON
+    strings until validated. Reject POSIX/Windows traversal, drive/ADS names,
+    illegal Win32 characters, device basenames and trailing-dot/space aliases.
+    """
+    if (
+        not isinstance(value, str)
+        or not value
+        or value in (".", "..")
+        or value != value.strip()
+        or value.endswith(".")
+        or any(char in value for char in '/\\:<>"|?*')
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        return False
+    # Win32 reserves device basenames even with extensions. Treat spaces
+    # before an extension as an alias, e.g. "CON .pdf" must also fail.
+    stem = value.split(".", 1)[0].rstrip(" ").upper()
+    return stem not in _WIN_DEVICE_NAMES and _WIN_PORT_DEVICE_RE.fullmatch(stem) is None
 
 
 def _json(path: Path) -> Any:
@@ -99,6 +126,9 @@ def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_D
     failures: list[str] = []
     for manifest in manifests:
         for source in manifest.source_documents:
+            if not _safe_path_component(source.name):
+                failures.append(f"{manifest.project_id}: unsafe source document name")
+                continue
             try:
                 checked = _present_source_digest(source_dir / source.name)
             except ValueError as exc:
@@ -131,6 +161,9 @@ def reference_document_failures(manifest: Any, project: Path) -> list[str]:
     """
     failures: list[str] = []
     for reference in manifest.reference_takeoff_documents:
+        if not _safe_path_component(reference.name):
+            failures.append(f"{manifest.project_id}: unsafe reference document name")
+            continue
         path = project / reference.name
         try:
             checked = _present_source_digest(path)
@@ -160,12 +193,34 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
     failures: list[str] = []
 
     try:
-        manifests = load_suite_manifests(root)
+        suite = _json(root / "manifest.json")
+        if str(suite.get("schema_version")) != SCHEMA_VERSION:
+            raise ValueError("suite manifest has unsupported schema_version")
+        raw_project_ids = suite.get("projects", ())
+        if not isinstance(raw_project_ids, list) or any(
+            not _safe_path_component(project_id) for project_id in raw_project_ids
+        ):
+            raise ValueError("unsafe project id in suite manifest")
+        required = int(suite.get("required_project_count", 0))
+        if required <= 0 or len(raw_project_ids) != required:
+            raise ValueError("suite project list must exactly equal required_project_count")
+        if len(set(raw_project_ids)) != len(raw_project_ids):
+            raise ValueError("suite project ids must be unique")
+        # Do not ask load_suite_manifests to re-read an untrusted suite path:
+        # it would join a second, potentially changed project-id list.
+        # Use the existing project parser on only our validated components.
+        manifests = []
+        for project_id in raw_project_ids:
+            manifest = load_project_manifest(
+                root / "projects" / project_id / "source_manifest.json"
+            )
+            if manifest.project_id != project_id:
+                raise ValueError(f"project manifest identity mismatch: {project_id}")
+            manifests.append(manifest)
     except Exception as exc:
         return [f"suite/manifest validation failed: {exc}"]
 
-    suite = _json(root / "manifest.json")
-    project_ids = tuple(str(v) for v in suite.get("projects", ()))
+    project_ids = tuple(raw_project_ids)
     required = int(suite.get("required_project_count", 0))
     if required != len(project_ids) or required <= 0:
         failures.append("required_project_count must exactly match configured V2 projects")
@@ -185,6 +240,9 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
                 failures.append(f"{manifest.project_id}: missing {required_name}")
 
         for source in manifest.source_documents:
+            if not _safe_path_component(source.name):
+                # source_document_failures reports this without opening the path.
+                continue
             if not _SHA256_RE.fullmatch(source.sha256):
                 failures.append(f"{manifest.project_id}: invalid source SHA-256 for {source.name}")
             if source.size_bytes <= 0:
