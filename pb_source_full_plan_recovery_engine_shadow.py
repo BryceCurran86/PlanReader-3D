@@ -193,7 +193,7 @@ def execute_source_full_plan_recovery_engine_shadow(
 
         # Failure isolation check
         if page.is_blocked:
-            reason = page.block_reason.strip() or PAGE_COMPLEXITY_BLOCKED
+            reason = (page.block_reason.strip() if isinstance(page.block_reason, str) else "") or PAGE_COMPLEXITY_BLOCKED
             verdicts.append(
                 SourcePageExecutionVerdict(
                     page_id=page.page_id,
