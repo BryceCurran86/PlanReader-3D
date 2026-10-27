@@ -36,6 +36,7 @@ def _private_log_contract(raw: str) -> bool:
         assert "python -m pytest -q" in focused_run
         assert "tests/test_gpt3_original_opening_inventory_log_privacy.py" in focused_run
         assert "ruff check --select F821,F823" in focused_run
+        assert focused_run.count("python scripts/check_full_plan_v2_integrity.py") == 1
         source = jobs["original-source"]
         gate = source["if"]
         assert "github.event_name == 'workflow_dispatch'" in gate
@@ -78,7 +79,7 @@ def _private_log_contract(raw: str) -> bool:
         assert "receipt.valid_quantity_count==8 and receipt.customer_row_count==8" in replay
         assert "receipt.verified_quantity_ids==tuple(sorted(q.quantity_id for q in sealed.quantities))" in replay
         assert 'q.family=="opening_area" and q.lineage_ok and not q.abstained' in replay
-        assert "python scripts/check_full_plan_v2_integrity.py" in replay
+        assert replay.count("python scripts/check_full_plan_v2_integrity.py") == 1
         assert "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844" in replay
         assert "tee " not in replay
         assert "cat \"$PRIVATE_LOG\"" not in replay
@@ -134,3 +135,12 @@ def test_raw_original_logs_cannot_be_reintroduced() -> None:
         1,
     )
     assert not _private_log_contract(modified)
+
+
+def test_original_replay_frozen_integrity_cannot_be_skipped() -> None:
+    original = WORKFLOW.read_text(encoding="utf-8")
+    needle = "python scripts/check_full_plan_v2_integrity.py"
+    assert original.count(needle) == 2  # focused and owner-only original replay
+    prefix, suffix = original.rsplit(needle, 1)
+    changed = prefix + "echo skipped_frozen_integrity" + suffix
+    assert not _private_log_contract(changed)
