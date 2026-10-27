@@ -82,6 +82,7 @@ class SourceRole:
     stroke_rgb: Optional[tuple[float, ...]]
     kind: str
     role_verified: bool
+    fill_rgb: Optional[tuple[float, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,7 @@ class TerminalInk:
     spans_band: bool              # a perpendicular stroke covering the band from edge to edge
     extends_beyond_band: bool
     role_verified: bool
+    fill_rgb: Optional[tuple[float, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -247,7 +249,7 @@ def _terminal_inventory(page: Sequence[SourceRole], nominated: frozenset, axis: 
                 nominated=role.observation_id in nominated,
                 spans_band=bool(orientation == "perpendicular" and c0 <= band[0] + eq and c1 >= band[1] - eq),
                 extends_beyond_band=bool(c0 < band[0] - eq or c1 > band[1] + eq),
-                role_verified=role.role_verified))
+                role_verified=role.role_verified, fill_rgb=role.fill_rgb))
             if len(items) > _MAX_TERMINAL_ITEMS:
                 return None
     items.sort(key=lambda t: (t.end, t.observation_id))
@@ -298,8 +300,10 @@ def assess_strip_hypothesis(
     ABSTAIN, CONFLICT = EvidenceResolutionStatus.ABSTAINED, EvidenceResolutionStatus.CONFLICT
     if not nominated or len(set(nominated)) != len(nominated) or any(i not in by_id for i in nominated):
         return done(ABSTAIN, (NOMINATION_NOT_VISIBLE_ON_PAGE,))
-    if any(not r.role_verified or r.stroke_width is None for r in roles):
+    if any(not r.role_verified for r in roles):
         return done(ABSTAIN, (SOURCE_ROLE_UNPROVEN, SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE))
+    if any(r.stroke_width is None for r in roles):
+        return done(ABSTAIN, (SOURCE_ROLE_UNPROVEN,))
     hypothesis, failure = _hypothesis(roles, eq)
     if hypothesis is None:
         return done(ABSTAIN, (failure,))
@@ -362,6 +366,8 @@ def assess_strip_hypothesis(
     if not fragments:
         return done(ABSTAIN, (VISIBLE_WALL_CONTINUATION_REQUIRED, TERMINAL_ROLE_UNPROVEN), **common)
     if len(fragments) == 1 and len(whole) == 1:
+        if any(by_id[m].stroke_width is None for m in whole[0].member_observation_ids):
+            return done(ABSTAIN, (SOURCE_ROLE_UNPROVEN, TERMINAL_ROLE_UNPROVEN), **common)
         if whole[0].existence == "corroborated":
             return done(EvidenceResolutionStatus.CANDIDATE, (WHOLE_EXTENT_CANDIDATE_PRESENT, TERMINAL_ROLE_UNPROVEN),
                         **common)
@@ -501,10 +507,26 @@ class StripStructuralAssessmentShadow:
             if any(not math.isfinite(value) for value in geometry):
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             primitive = primitives.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
-            verified = (primitive is not None
+            geometry_verified = (primitive is not None
                         and geometry == (float(primitive["x1"]), float(primitive["y1"]),
-                                         float(primitive["x2"]), float(primitive["y2"]))
-                        and bool(primitive.get("width_present")) and bool(primitive.get("stroke_present")))
+                                         float(primitive["x2"]), float(primitive["y2"])))
+            stroked = (geometry_verified and bool(primitive.get("width_present"))
+                       and bool(primitive.get("stroke_present")))
+            # Native visibility also publishes the perimeter of fill-only paths.
+            # Exact original geometry with known fill and known absent stroke is
+            # an authenticated paint role, not corrupted source or a stroked jamb.
+            # Keep it in the rival/terminal census with no invented stroke width.
+            fill = primitive.get("fill") if primitive is not None else None
+            try:
+                fill_verified = (type(fill) in (tuple, list) and bool(fill)
+                                 and all(type(c) in (int, float) and math.isfinite(c)
+                                         and 0 <= c <= 1 for c in fill))
+            except OverflowError:
+                fill_verified = False
+            fill_only = (geometry_verified and primitive.get("fill_present") is True and fill_verified
+                         and primitive.get("stroke_present") is False and primitive.get("stroke") is None
+                         and primitive.get("width_present") is False)
+            verified = stroked or fill_only
             # A same-page published observation without matching original primitive
             # geometry and paint is an integrity negative. Keeping an unverified
             # nonnominated rival would let a clean nominated strip appear complete.
@@ -512,9 +534,10 @@ class StripStructuralAssessmentShadow:
                 return failure(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE)
             page_segments.append(SourceRole(
                 observation_id=str(observation_id), geometry=geometry,
-                stroke_width=float(primitive["width"]) if verified else None,
-                stroke_rgb=tuple(float(c) for c in primitive["stroke"]) if verified else None,
-                kind=str(primitive["kind"]) if primitive is not None else "unknown", role_verified=verified))
+                stroke_width=float(primitive["width"]) if stroked else None,
+                stroke_rgb=tuple(float(c) for c in primitive["stroke"]) if stroked else None,
+                kind=str(primitive["kind"]) if primitive is not None else "unknown", role_verified=verified,
+                fill_rgb=tuple(float(c) for c in fill) if fill_verified else None))
 
         # one positively authenticated RESOLVED floor-plan viewport containing the strip, or no verdict
         floor_plans = [v for v in segmented if v.status == ViewportSegmentationStatus.RESOLVED.value

@@ -71,7 +71,7 @@ def _per_bay_strip():
     return source, published, _ids_in(source, published, (200.0, 300.0, 404.0, 305.52))
 
 
-def _whole_strip():
+def _whole_strip(*, fill_box=None, fill_color=(1.0, 1.0, 1.0)):
     """The positive regime: wall faces broken once, jambs at both ends, glazing inside the gap on other offsets."""
     sheet = Sheet(size=(900.0, 700.0))
     for y in (300.0, 305.52):
@@ -83,6 +83,8 @@ def _whole_strip():
         sheet.line((150.0, y), (354.0, y))
     for x in (150.0, 250.0, 354.0):
         sheet.line((x, 301.5), (x, 304.0))
+    if fill_box is not None:
+        sheet.plan.draw_rect(fill_box, color=None, fill=fill_color)
     source, published = _publish(sheet)
     return source, published, _ids_in(source, published, (150.0, 301.4, 354.0, 304.1))
 
@@ -200,6 +202,123 @@ def test_a_whole_strip_with_jambs_at_both_terminals_is_the_only_way_to_a_candida
     assert got.evidence_atoms[0].status is CAND and got.evidence_atoms[0].metadata["physical_opening_granted"] is False
     for flag in A._GRANT_FLAGS:
         assert getattr(got, flag) is False
+
+
+@pytest.mark.parametrize("color", [(1.0, 1.0, 1.0), (0.3, 0.5, 0.7)])
+def test_known_fill_only_original_paths_remain_in_terminal_census_without_invented_strokes(monkeypatch, color):
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip(fill_box=(149.0, 301.75, 149.95, 303.75), fill_color=color)
+    before = _shape(source)
+    got = _assess(source, published, ids)
+    assert A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE not in got.reason_codes
+    assert got.ownership.snapshot_id == published.snapshot.snapshot_id
+    fills = [t for t in got.terminals if t.fill_rgb is not None]
+    assert fills, "the source fill boundary must be retained, not silently discarded"
+    assert all(t.role_verified and t.stroke_width is None and t.stroke_rgb is None for t in fills)
+    assert all(t.fill_rgb == pytest.approx(color) for t in fills)
+    assert _shape(source) == before
+    assert _assess(source, published, tuple(reversed(ids))) == got
+    assert all(getattr(got, flag) is False for flag in A._GRANT_FLAGS)
+
+
+def test_nominated_fill_only_original_boundary_cannot_become_stroked_strip_evidence(monkeypatch):
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip(fill_box=(600.0, 500.0, 680.0, 510.0))
+    assert _assess(source, published, ids).status is CAND
+    fills = _ids_in(source, published, (600.0, 500.0, 680.0, 510.0))
+    assert len(fills) == 4 and not set(fills) & set(ids)
+    got = _assess(source, published, fills)
+    assert got.status is ABST and A.SOURCE_ROLE_UNPROVEN in got.reason_codes
+    assert all(r.role_verified and r.fill_rgb == (1.0, 1.0, 1.0) and r.stroke_width is None for r in got.roles)
+    assert all(getattr(got, flag) is False for flag in A._GRANT_FLAGS)
+
+
+@pytest.mark.parametrize("present, fill", [
+    (False, None), (True, []), (True, [True, 0.0, 0.0]),
+    (True, [float("nan"), 0.0, 0.0]), (True, [float("inf"), 0.0, 0.0]),
+    (True, [10 ** 1000, 0.0, 0.0]), (True, [1.01, 0.0, 0.0]),
+])
+def test_absent_stroke_without_original_fill_proof_still_fails_integrity(monkeypatch, present, fill):
+    import pb_vector_geometry_v130 as native
+
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip(fill_box=(600.0, 500.0, 680.0, 510.0))
+    original = native.extract_native_page
+
+    def without_fill_proof(page):
+        extracted = original(page)
+        for primitive in extracted["segments"]:
+            if not primitive.get("stroke_present"):
+                primitive["fill_present"] = present
+                primitive["fill"] = fill
+        return extracted
+
+    with monkeypatch.context() as patch:
+        patch.setattr(native, "extract_native_page", without_fill_proof)
+        got = _assess(source, published, ids)
+    assert got.status is ABST and got.reason_codes == (A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,)
+    assert all(getattr(got, flag) is False for flag in A._GRANT_FLAGS)
+
+
+def test_optional_original_fill_roles_preserve_full_strip_conflicts_and_source_state():
+    # Reuse the existing private-original parameter loader: no customer PDF,
+    # project identity, source constants or expected quantities enter this test.
+    from test_plan_callout_glazing_strip_original_source import _parameters
+    from pb_source_plan_glazing_strip_callout_shadow import audit_plan_callout_to_glazing_strip_from_source
+
+    params, data = _parameters()
+    source = SourceVisibilityProducer(
+        producer_method="strip-assessment-original-test", producer_version="1",
+        source_native_finish_text_shadow=bool(params.get("native_finish_text_shadow", True)))
+    published = source.ingest_native_pdf_bytes(
+        document_id=f"original:{params['sha256'][:32]}", source_bytes=data, source_locator="memory://original.pdf",
+        page_ids=(params["plan_page"], params["elevation_page"]))
+    result = audit_plan_callout_to_glazing_strip_from_source(
+        source, revision_id=published.revision.revision_id, plan_page_id=params["plan_page"],
+        elevation_page_id=params["elevation_page"], callout_mark_pattern=params["callout_mark_pattern"],
+        panel_token=params["panel_token"], coordinate_quantum_pt=params["coordinate_quantum_pt"],
+        dimension_quantum_mm=params["dimension_quantum_mm"])
+    assert result.strips, "original source acceptance must exercise a real strip, not an empty census"
+    for strip in result.strips:
+        before = _shape(source)
+        got = A.StripStructuralAssessmentShadow(source, enabled=True).assess(
+            revision_id=published.revision.revision_id, page_id=params["plan_page"],
+            nominated_observation_ids=strip.ink_ids, coordinate_quantum_pt=params["coordinate_quantum_pt"])
+        assert A.SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE not in got.reason_codes
+        assert got.ownership.snapshot_id == published.snapshot.snapshot_id
+        assert _shape(source) == before
+        assert all(getattr(got, flag) is False for flag in A._GRANT_FLAGS)
+        if any(f.existence == "corroborated" and not f.spans_whole_extent for f in got.fragments):
+            assert got.status is CONF
+
+
+def test_fill_boundary_in_corroborated_whole_extent_cannot_supply_a_stroked_jamb(monkeypatch):
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _whole_strip()
+    baseline = _assess(source, published, ids)
+    assert baseline.status is CAND
+    fragment = baseline.fragments[0]
+    changed = next(i for i in fragment.member_observation_ids if i not in ids)
+    visibility = source.authority()
+    page = []
+    for oid in published.visible_observation_ids:
+        observation = visibility.resolve_visible(_selector(published, oid)).observation
+        if observation.page_id != "1":
+            continue
+        # Exercise the pure core with a source-role negative even when the
+        # independent existing opening authority supplies positive membership.
+        page.append(A.SourceRole(oid, observation.geometry, None if oid == changed else 0.48,
+                                 None if oid == changed else (0.0, 0.0, 0.0), "line", True,
+                                 (1.0, 1.0, 1.0) if oid == changed else None))
+    got = A.assess_strip_hypothesis(
+        ownership=baseline.ownership, viewport=A.ViewportRef("vp-0", (10.0, 10.0, 890.0, 690.0)),
+        nominated_ids=ids, page_segments=page,
+        candidates=[(fragment.candidate_id, fragment.structural_pattern, fragment.member_observation_ids)],
+        corroborated_member_sets=frozenset([frozenset(fragment.member_observation_ids)]),
+        member_status={i: "corroborated" for i in fragment.member_observation_ids}, coordinate_quantum_pt=Q)
+    assert got.status is ABST and A.SOURCE_ROLE_UNPROVEN in got.reason_codes
+    assert got.fragments[0].existence == "corroborated"  # retain, never silently rewrite, the upstream verdict
+    assert all(getattr(got, flag) is False for flag in A._GRANT_FLAGS)
 
 
 # --- viewport ------------------------------------------------------------------------------------------
