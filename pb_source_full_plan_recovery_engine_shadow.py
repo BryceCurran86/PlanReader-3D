@@ -226,26 +226,6 @@ def execute_source_full_plan_recovery_engine_shadow(
             quarantined_pages += 1
             continue
 
-        # A repeated room identity on one source page cannot denote two
-        # independently owned physical room faces. Quarantine the entire
-        # page rather than choosing a polygon or attributing its finish marks
-        # to a surviving competing room. Other source pages remain usable.
-        room_id_counts = Counter(room_id for room_id, _ in page.room_polygon_candidates)
-        if any(count > 1 for count in room_id_counts.values()):
-            verdicts.append(
-                SourcePageExecutionVerdict(
-                    page_id=page.page_id,
-                    page_type=page.page_type,
-                    status=EvidenceResolutionStatus.ABSTAINED,
-                    reason_codes=(DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY),
-                    recovered_room_ids=(),
-                    recovered_finish_ids=(),
-                    is_quarantined=True,
-                )
-            )
-            quarantined_pages += 1
-            continue
-
         # Five source-universe integrity requirements: well-formed room IDs,
         # finite room vertices, owned wall/opening candidates, and typed marks.
         # Do not let malformed candidates erase a rival or crash downstream
@@ -283,6 +263,26 @@ def execute_source_full_plan_recovery_engine_shadow(
                     page_type=page.page_type,
                     status=EvidenceResolutionStatus.ABSTAINED,
                     reason_codes=(SOURCE_LINEAGE_MISMATCH, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # A repeated room identity on one source page cannot denote two
+        # independently owned physical room faces. Quarantine the entire
+        # page rather than choosing a polygon or attributing its finish marks
+        # to a surviving competing room. Other source pages remain usable.
+        room_id_counts = Counter(room_id for room_id, _ in page.room_polygon_candidates)
+        if any(count > 1 for count in room_id_counts.values()):
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY),
                     recovered_room_ids=(),
                     recovered_finish_ids=(),
                     is_quarantined=True,
