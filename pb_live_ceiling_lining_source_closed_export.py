@@ -397,15 +397,23 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling original source root is malformed: {quantity.quantity_id}"
             )
 
-        if (
-            not _clean(metadata.get("support_snapshot_id"))
-            or not _clean(metadata.get("support_page_id"))
-            or not _clean(metadata.get("support_viewport_id"))
+        # RCP support IDs are independent original semantic-source receipts.
+        # Stringifying or stripping an imported value here would allow a
+        # reconstructed FIRM row to borrow an unproved page, viewport or
+        # snapshot before the actual seal/customer source trace is built.
+        for support_field in (
+            "support_snapshot_id", "support_page_id", "support_viewport_id",
         ):
-            raise SourceClosedRunConflictError(
-                f"ceiling quantity lacks semantic support lineage: "
-                f"{quantity.quantity_id}"
-            )
+            receipt = metadata.get(support_field)
+            if (
+                type(receipt) is not str
+                or not receipt
+                or receipt != receipt.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling quantity lacks exact semantic support lineage: "
+                    f"{quantity.quantity_id} ({support_field})"
+                )
 
         if _clean(metadata.get("row_role")) != "ceiling_area":
             raise SourceClosedRunConflictError(
