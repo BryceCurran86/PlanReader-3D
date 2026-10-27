@@ -462,3 +462,64 @@ def test_blank_page_and_invalid_competitor_fail_closed():
     assert result.status == EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
     assert result.record is None
+
+
+def test_private_original_ft3_mark_cannot_claim_unregistered_floor_page():
+    """Original page-11 FT3 glyph is never a page-7 floor owner by equal XY.
+
+    Source-private negative only: it does not authenticate a cross-page transform,
+    physical wall faces, doorway threshold, finish definition, or FIRM quantities.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+    from dataclasses import replace
+
+    source = Path(os.getenv(
+        "PLANREADER_MARYBOROUGH_ORIGINAL_PDF",
+        "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf",
+    ))
+    if not source.is_file():
+        pytest.skip("private original not provisioned: source check NOT VERIFIED")
+    content = source.read_bytes()
+    original_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert len(content) == 5709675
+    assert hashlib.sha256(content).hexdigest() == original_sha
+    fitz = pytest.importorskip("fitz")
+    with fitz.open(stream=content, filetype="pdf") as pdf:
+        assert len(pdf) == 31
+        page_7_ft3 = [
+            w for w in pdf[6].get_text("words")
+            if w[4].strip().upper() == "FT3"
+        ]
+        page_11_ft3 = [
+            w for w in pdf[10].get_text("words")
+            if w[4].strip().upper() == "FT3"
+        ]
+    assert not page_7_ft3
+    assert page_11_ft3  # Genuine source glyph, not a synthetic FT3 label.
+    source_word = page_11_ft3[0]
+    mark = SourceFloorFinishMark(
+        occurrence_id="original_private_p11_ft3",
+        page_id="page_11",
+        material_code="FT3",
+        mark_center_pt=(
+            (source_word[0] + source_word[2]) / 2,
+            (source_word[1] + source_word[3]) / 2,
+        ),
+        source_word_address=tuple(int(v) for v in source_word[5:8]),
+    )
+    floor_selector = replace(
+        _selector(material_code="FT3", source_sha256=original_sha),
+        page_id="page_07",
+    )
+    result = evaluate_source_floor_finish_ownership_shadow(
+        floor_selector,
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=(),  # No cross-page registration supplied.
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,
+    )
+    assert result.record is None
