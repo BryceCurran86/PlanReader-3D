@@ -19,7 +19,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
+from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
+    SCHEMA_VERSION, load_project_manifest, load_suite_manifests,
+)
 
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 DEFAULT_SOURCE_DIR = REPO_ROOT / "documents" / "sources"
@@ -185,12 +187,29 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
 
     try:
         suite = _json(root / "manifest.json")
+        if str(suite.get("schema_version")) != SCHEMA_VERSION:
+            raise ValueError("suite manifest has unsupported schema_version")
         raw_project_ids = suite.get("projects", ())
         if not isinstance(raw_project_ids, list) or any(
             not _safe_path_component(project_id) for project_id in raw_project_ids
         ):
             raise ValueError("unsafe project id in suite manifest")
-        manifests = load_suite_manifests(root)
+        required = int(suite.get("required_project_count", 0))
+        if required <= 0 or len(raw_project_ids) != required:
+            raise ValueError("suite project list must exactly equal required_project_count")
+        if len(set(raw_project_ids)) != len(raw_project_ids):
+            raise ValueError("suite project ids must be unique")
+        # Do not ask load_suite_manifests to re-read an untrusted suite path:
+        # it would join a second, potentially changed project-id list.
+        # Use the existing project parser on only our validated components.
+        manifests = []
+        for project_id in raw_project_ids:
+            manifest = load_project_manifest(
+                root / "projects" / project_id / "source_manifest.json"
+            )
+            if manifest.project_id != project_id:
+                raise ValueError(f"project manifest identity mismatch: {project_id}")
+            manifests.append(manifest)
     except Exception as exc:
         return [f"suite/manifest validation failed: {exc}"]
 
