@@ -120,6 +120,14 @@ def _valid_room_area_quantity(
     if (
         entity.status is not EvidenceResolutionStatus.CORROBORATED
         or quantity.family != "room_area"
+        # The original room-area semantic is a producer-owned physical source
+        # identity. Matching only the input entity allows a rekeyed floor or
+        # unrelated room-area receipt to be borrowed for a FIRM ceiling.
+        or type(entity.candidate_entity_id) is not str
+        or not entity.candidate_entity_id
+        or entity.candidate_entity_id != entity.candidate_entity_id.strip()
+        or type(quantity.semantic_key) is not str
+        or quantity.semantic_key != f"room_area:{entity.candidate_entity_id}"
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
@@ -128,6 +136,15 @@ def _valid_room_area_quantity(
         or any(type(item) is not str or not item or item != item.strip()
                for item in quantity.evidence_ids)
         or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
+        # Every area receipt must be in the independently corroborated source
+        # room's original evidence inventory, as in the real floor issuer.
+        # A foreign dimension/face receipt cannot inherit this room's identity.
+        or not isinstance(entity.evidence_ids, (tuple, list))
+        or not entity.evidence_ids
+        or any(type(item) is not str or not item or item != item.strip()
+               for item in entity.evidence_ids)
+        or len(set(entity.evidence_ids)) != len(entity.evidence_ids)
+        or not set(quantity.evidence_ids).issubset(set(entity.evidence_ids))
         or not _valid_source_area_confidence(quantity.confidence)
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
