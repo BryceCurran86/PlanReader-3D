@@ -23,7 +23,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 def census(
     pdf_path: Path, *, plan_page: int, elevation_page: int, callout_mark_pattern: str, panel_token: str,
     coordinate_quantum_pt: float, dimension_quantum_mm: float, native_finish_text_shadow: bool,
-    claimant_occupancy: bool = False,
+    claimant_occupancy: bool = False, assess_corresponded_strips: bool = False,
 ) -> dict:
     raw = Path(pdf_path).read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
@@ -39,10 +39,16 @@ def census(
         coordinate_quantum_pt=coordinate_quantum_pt, dimension_quantum_mm=dimension_quantum_mm,
         claimant_occupancy=bool(claimant_occupancy))
     strips = {s.strip_id: s for s in result.strips}
+    assessor = None
+    if assess_corresponded_strips:
+        # the existing receiving consumer of a strip nomination: it re-derives everything from the producer itself
+        import pb_strip_structural_assessment_shadow as assessment
+
+        assessor = assessment.StripStructuralAssessmentShadow(source, enabled=True)
     rows = []
     for c in result.correspondences:
         strip = strips.get(c.strip_id)
-        rows.append({
+        row = {
             "mark": c.tag_mark,
             "status": c.status.value,
             "reason_codes": list(c.reason_codes),
@@ -61,7 +67,32 @@ def census(
                 "occupied_observation_ids": list(x.occupied_observation_ids)} for x in c.separated_claimants],
             "plan_viewport_id": c.plan_viewport_id,
             "numbers": {k: round(v, 6) for k, v in c.numbers},
-        })
+            # the source-owned hand-off a structural consumer needs: the corresponded strip's own observations
+            "correspondence_record_id": c.record_id,
+            "strip_id": c.strip_id,
+            "strip_ink_ids": [] if strip is None else list(strip.ink_ids),
+            "strip_frame_along": None if strip is None else list(strip.frame_along),
+            "strip_band": None if strip is None else list(strip.band),
+        }
+        if assessor is not None and strip is not None and c.status is shadow.EvidenceResolutionStatus.CANDIDATE:
+            a = assessor.assess(revision_id=published.revision.revision_id, page_id=plan_page,
+                                nominated_observation_ids=tuple(strip.ink_ids),
+                                coordinate_quantum_pt=coordinate_quantum_pt)
+            row["structural_assessment"] = {
+                "status": a.status.value, "reason_codes": list(a.reason_codes), "viewport_id": a.viewport_id,
+                "nomination_id": a.nomination_id, "record_id": a.record_id,
+                "axis": a.axis, "along_extent": None if a.along_extent is None else list(a.along_extent),
+                "band_extent": None if a.band_extent is None else list(a.band_extent),
+                "terminal_count": len(a.terminals),
+                "fragments": [{
+                    "existence": f.existence, "structural_pattern": f.structural_pattern,
+                    "gap_span": None if f.gap_span is None else list(f.gap_span),
+                    "member_span": None if f.member_span is None else list(f.member_span),
+                    "spans_whole_extent": f.spans_whole_extent, "strong_pattern": f.strong_pattern,
+                    "shares_nominated_members": f.shares_nominated_members,
+                    "rival_evidence_only": f.rival_evidence_only} for f in a.fragments],
+            }
+        rows.append(row)
     return {
         "schema_version": result.schema_version,
         "document_id": result.ownership.document_id,
@@ -71,6 +102,7 @@ def census(
         "plan_page": plan_page, "elevation_page": elevation_page,
         "native_finish_text_shadow": bool(native_finish_text_shadow),
         "claimant_occupancy": bool(claimant_occupancy),
+        "assess_corresponded_strips": bool(assess_corresponded_strips),
         "page_reason_codes": list(result.page_reason_codes),
         "untrusted_plan_words": result.untrusted_plan_word_count,
         "strips": len(result.strips),
@@ -103,13 +135,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="enable the producer's opt-in native-text proofs")
     parser.add_argument("--claimant-occupancy", action="store_true",
                         help="also separate claimants anchored in another corroborated opening (retained, never dropped)")
+    parser.add_argument("--assess-corresponded-strips", action="store_true",
+                        help="hand each CANDIDATE correspondence's strip to the structural assessment shadow")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args(argv)
     report = census(
         args.pdf, plan_page=args.plan_page, elevation_page=args.elevation_page,
         callout_mark_pattern=args.callout_mark_pattern, panel_token=args.panel_token,
         coordinate_quantum_pt=args.coordinate_quantum_pt, dimension_quantum_mm=args.dimension_quantum_mm,
-        native_finish_text_shadow=args.native_finish_text_shadow, claimant_occupancy=args.claimant_occupancy)
+        native_finish_text_shadow=args.native_finish_text_shadow, claimant_occupancy=args.claimant_occupancy,
+        assess_corresponded_strips=args.assess_corresponded_strips)
     text = json.dumps(report, indent=1, sort_keys=True)
     if args.out is not None:
         args.out.write_text(text + "\n", encoding="utf-8")

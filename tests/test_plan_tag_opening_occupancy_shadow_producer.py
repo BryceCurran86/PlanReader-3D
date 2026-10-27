@@ -510,3 +510,48 @@ def test_a_failed_page_candidate_census_abstains(monkeypatch):
                         lambda self, selector: dc_replace(real(self, selector), status=S.ABSTAINED))
     inv = _inventory(source, published, [_anchor("w", 120.0, 105.0)])
     assert inv.status is S.ABSTAINED and inv.reason_codes == (M.PAGE_CANDIDATE_CENSUS_UNAVAILABLE,)
+
+
+def _floor_plan_viewport(monkeypatch, bbox=(10.0, 10.0, 1490.0, 690.0)):
+    """The structural assessment needs the nominated strip inside a positively authenticated floor-plan view."""
+    _resolved_viewport(monkeypatch, bbox)
+
+
+def test_the_census_tool_hands_the_corresponded_strip_to_the_structural_assessment_only_when_asked(monkeypatch, tmp_path):
+    _floor_plan_viewport(monkeypatch)
+    path = tmp_path / "generated.pdf"
+    path.write_bytes(_plan_with_door().pdf())
+    from tools.diag_plan_callout_strip_census import census
+
+    args = dict(plan_page=1, elevation_page=2, callout_mark_pattern=r"W1", panel_token="FG",
+                coordinate_quantum_pt=0.24, dimension_quantum_mm=5.0, native_finish_text_shadow=False,
+                claimant_occupancy=True)
+    plain = census(path, **args)
+    asked = census(path, assess_corresponded_strips=True, **args)
+    p_row, a_row = plain["rows"][0], asked["rows"][0]
+    assert plain["assess_corresponded_strips"] is False and "structural_assessment" not in p_row
+    assert asked["assess_corresponded_strips"] is True
+    # the hand-off is the correspondence's own source-owned strip, identical with and without the assessment
+    for key in ("correspondence_record_id", "strip_id", "strip_ink_ids", "strip_frame_along", "strip_band", "status"):
+        assert p_row[key] == a_row[key]
+    assert a_row["status"] == S.CANDIDATE.value and a_row["strip_ink_ids"] and a_row["strip_id"]
+    assess = a_row["structural_assessment"]
+    assert assess["status"] in {S.CANDIDATE.value, S.ABSTAINED.value, S.CONFLICT.value} and assess["nomination_id"]
+    if assess["status"] != S.ABSTAINED.value:
+        assert assess["axis"] == "H" and assess["along_extent"] == a_row["strip_frame_along"]
+        assert assess["band_extent"] == a_row["strip_band"]
+    assert all(value is False for value in asked["grants"].values())
+
+
+def test_a_row_without_a_candidate_correspondence_has_no_structural_assessment(monkeypatch, tmp_path):
+    _floor_plan_viewport(monkeypatch)
+    path = tmp_path / "generated.pdf"
+    path.write_bytes(_plan_with_door().pdf())
+    from tools.diag_plan_callout_strip_census import census
+
+    report = census(path, plan_page=1, elevation_page=2, callout_mark_pattern=r"W1", panel_token="FG",
+                    coordinate_quantum_pt=0.24, dimension_quantum_mm=5.0, native_finish_text_shadow=False,
+                    claimant_occupancy=False, assess_corresponded_strips=True)
+    row = report["rows"][0]
+    assert row["status"] == S.CONFLICT.value and "structural_assessment" not in row
+    assert row["strip_id"] is None and row["strip_ink_ids"] == []
