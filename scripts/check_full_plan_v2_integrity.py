@@ -53,8 +53,20 @@ def _safe_path_component(value: Any) -> bool:
     return stem not in _WIN_DEVICE_NAMES and _WIN_PORT_DEVICE_RE.fullmatch(stem) is None
 
 
+def _unique_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous JSON objects instead of silently taking the last key."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object member")
+        result[key] = value
+    return result
+
+
 def _json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_members,
+    )
 
 
 def _collect_object_refs(value: Any) -> set[str]:
@@ -211,9 +223,12 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
         # Use the existing project parser on only our validated components.
         manifests = []
         for project_id in raw_project_ids:
-            manifest = load_project_manifest(
-                root / "projects" / project_id / "source_manifest.json"
-            )
+            manifest_path = root / "projects" / project_id / "source_manifest.json"
+            # The canonical loader accepts duplicate JSON keys (last-wins).
+            # Reject ambiguous members, including nested source/verified-item
+            # records, before allowing that loader to mint manifest authority.
+            _json(manifest_path)
+            manifest = load_project_manifest(manifest_path)
             if manifest.project_id != project_id:
                 raise ValueError(f"project manifest identity mismatch: {project_id}")
             manifests.append(manifest)
