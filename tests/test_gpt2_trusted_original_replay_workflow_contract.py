@@ -19,6 +19,7 @@ HEADS = {
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
     "d15_ink": "c52f45f3365b74f3b4070ea051e338329f09de76",
     "finish_page": "d281fa15c29dc7e9717953355e9ddf42c040215c",
+    "office_caps": "80ab45ddb082f3364cd9c7f429814f921e8b889d",
 }
 
 
@@ -526,3 +527,46 @@ def test_finish_page_source_positive_is_exact_tree_and_never_public_secret():
     assert "\n  pull_request:" not in trusted
     assert "\n  pull_request_target:" not in trusted
     assert "actions/upload-artifact" not in trusted
+
+
+def test_office_caps_original_replay_pin_is_immutable_and_source_free():
+    """Only the reviewed OFFICE cap source/test tree can meet private PDF."""
+    guard = next(step for step in _load()["jobs"]["original"]["steps"]
+                 if step["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    matches = re.findall(
+        r"(?m)^  office_caps\)\n(?P<body>.*?)(?=^    ;;)",
+        script, flags=re.DOTALL | re.MULTILINE,
+    )
+    assert len(matches) == 1
+    body = matches[0]
+    assert "approved_base=6be737582400c739c41420c19962e9b30b9c7d37" in body
+    assert "approved_head=" + HEADS["office_caps"] in body
+    assert (
+        "expected_paths='pb_gpt2_original_native_crossview_wall_caps_shadow.py|"
+        "tests/test_gpt2_original_native_crossview_wall_caps_shadow.py'"
+    ) in body
+    assert "original_test=test_original_maryborough_p7_p11_when_owner_pdf_provisioned" in body
+    assert "test_path=tests/test_gpt2_original_native_crossview_wall_caps_shadow.py" in body
+    assert "github.event.inputs" not in body
+    assert 'git diff --name-only "$approved_base" "$approved_head"' in script
+    assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in script
+    assert 'git ls-tree --format=' in script
+    assert 'entry" != "100644 blob $expected_path"' in script
+
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    row = (
+        "office_caps|" + HEADS["office_caps"]
+        + "|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py::"
+        "test_original_maryborough_p7_p11_when_owner_pdf_provisioned"
+        "|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py::"
+        "test_exact_original_two_cap_ink_selects_one_candidate_not_physical_wall"
+    )
+    assert public.count(row + "\n") == 1
+    assert "--network none --read-only --cap-drop ALL" in public
+    assert "python -m pytest --collect-only" in public
+    assert "python -m pytest -q" in public
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
+    assert "ORIGINAL_SOURCES_TOKEN" not in public
+    assert "secrets." not in public
