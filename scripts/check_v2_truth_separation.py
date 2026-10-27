@@ -95,6 +95,11 @@ def is_benchmark_defining_file(path: str, *, git_path: bool = False) -> bool:
 
 def is_production_code_file(path: str, *, git_path: bool = False) -> bool:
     normalized = _normalize(path, git_path=git_path)
+    # Pytest loads every tests/**/conftest.py as executable collection policy.
+    # Unlike ordinary test modules, it can skip or xfail source/signed checks,
+    # so it is a release acceptance control when frozen truth also changes.
+    if normalized.startswith("tests/") and PurePosixPath(normalized).name == "conftest.py":
+        return True
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False
     if _is_root_runtime_manifest(normalized):
