@@ -1206,6 +1206,10 @@ class OpeningElevationFrameAreaProducer:
                 continue
 
             records_by_mark: dict[str, list[OpeningElevationFrameAreaRecord]] = {}
+            # Marks with at least one frame candidate whose support is not source-painted. Such a mark publishes
+            # nothing (an unproved rival is never dropped to elect another frame of the SAME mark), but it does not
+            # invalidate the frames of any other mark on the page or the revision.
+            unproved_marks: set[str] = set()
             try:
                 for page_id, claim_words in sorted(
                     claim_words_by_page.items(),
@@ -1341,12 +1345,10 @@ class OpeningElevationFrameAreaProducer:
                         except (ValueError, TypeError, RuntimeError, KeyError, IndexError):
                             invalid_revision = True
                             break
-                        if any(not set((*record.frame_geometry_ids, *record.dimension_line_ids,
-                                        *record.witness_line_ids)).issubset(painted_ids)
-                               for record in records):
-                            # Do not drop an unproved rival and elect another frame.
-                            invalid_revision = True
-                            break
+                        for record in records:
+                            if not set((*record.frame_geometry_ids, *record.dimension_line_ids,
+                                        *record.witness_line_ids)).issubset(painted_ids):
+                                unproved_marks.add(record.type_mark)
                     for record in records:
                         records_by_mark.setdefault(record.type_mark, []).append(record)
             finally:
@@ -1355,6 +1357,8 @@ class OpeningElevationFrameAreaProducer:
             if invalid_revision:
                 continue
 
+            for mark in sorted(unproved_marks):
+                records_by_mark.pop(mark, None)
             for mark, records in sorted(records_by_mark.items()):
                 key = (
                     published.revision.document_id,
