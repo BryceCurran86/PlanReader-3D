@@ -57,13 +57,32 @@ _WorkflowLoader.add_constructor(
 )
 
 
+
+def _target_matrix_expression():
+    # Never interpolate caller-provided text into the JSON matrix or shell.
+    # Only two immutable approved targets may be individually selected;
+    # the default preserves the full historical matrix.
+    all_targets = "[" + ",".join('"' + target + '"' for target in HEADS) + "]"
+    return (
+        "${{ fromJSON(inputs.target == 'finish_page' && '[\"finish_page\"]' "
+        "|| inputs.target == 'office_caps' && '[\"office_caps\"]' "
+        "|| '" + all_targets + "') }}"
+    )
+
+
 def _parse_workflow(raw):
     document = yaml.load(raw, Loader=_WorkflowLoader)
     assert type(document) is dict
     # A second trigger alias must not be silently discarded by YAML1.1
     # coercion, and unreviewed top-level workflow controls must not pass.
     assert set(document) == {"name", "on", "permissions", "concurrency", "jobs"}
-    assert document["on"] == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "Select one immutable original replay or all approved targets",
+        "required": True,
+        "type": "choice",
+        "default": "all",
+        "options": ["all", "finish_page", "office_caps"],
+    }}}}
     return document
 
 
@@ -73,14 +92,20 @@ def _load():
 
 def test_owner_only_manual_source_triggers():
     document = _load()
-    assert document["on"] == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "Select one immutable original replay or all approved targets",
+        "required": True,
+        "type": "choice",
+        "default": "all",
+        "options": ["all", "finish_page", "office_caps"],
+    }}}}
     assert document["permissions"] == {"contents": "read"}
     assert tuple(document["jobs"]) == ("original",)
     job = document["jobs"]["original"]
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "github.actor == 'BryceCurran86'" in job["if"]
     assert job["strategy"]["fail-fast"] is False
-    assert job["strategy"]["matrix"]["target"] == list(HEADS)
+    assert job["strategy"]["matrix"]["target"] == _target_matrix_expression()
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
 
 
@@ -164,7 +189,13 @@ def test_new_immutable_targets_are_collected_source_free_before_private_replay()
     workflow = ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
     raw = workflow.read_text(encoding="utf8")
     document = _parse_workflow(FILE.read_text(encoding="utf8"))
-    assert document["on"] == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "Select one immutable original replay or all approved targets",
+        "required": True,
+        "type": "choice",
+        "default": "all",
+        "options": ["all", "finish_page", "office_caps"],
+    }}}}
     expected = {
         "grid": (
             "tests/test_gpt2_native_grid_row_membership_shadow.py",
@@ -570,3 +601,26 @@ def test_office_caps_original_replay_pin_is_immutable_and_source_free():
     assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
     assert "ORIGINAL_SOURCES_TOKEN" not in public
     assert "secrets." not in public
+
+def test_manual_replay_selects_only_static_reviewed_targets():
+    """A selected original-positive replay must not run eight unrelated targets."""
+    document = _load()
+    assert document["on"]["workflow_dispatch"]["inputs"]["target"]["options"] == [
+        "all", "finish_page", "office_caps",
+    ]
+    job = document["jobs"]["original"]
+    matrix = job["strategy"]["matrix"]
+    assert matrix["python-version"] == ["3.13", "3.14"]
+    assert matrix["target"] == _target_matrix_expression()
+    assert 'format(' not in matrix["target"]
+    assert 'github.event.inputs' not in matrix["target"]
+    assert "github.actor == 'BryceCurran86'" in job["if"]
+    assert "github.ref == 'refs/heads/main'" in job["if"]
+    guard = next(s for s in job["steps"] if s["name"].startswith("Validate immutable"))
+    for label, sha in HEADS.items():
+        assert label + ")" in guard["run"]
+        assert "approved_head=" + sha in guard["run"]
+    assert "ORIGINAL_SOURCES_TOKEN" not in matrix["target"]
+    assert "--network none --read-only --cap-drop ALL" in next(
+        s["run"] for s in job["steps"] if s["name"].startswith("Run private original")
+    )
