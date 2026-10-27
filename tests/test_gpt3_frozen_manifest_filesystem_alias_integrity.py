@@ -136,9 +136,14 @@ def test_required_project_metadata_symlink_fails_closed(
     target.unlink()
     _symlink(target, external)
     failures = guard.validate_suite(root, tmp_path / "absent_private")
-    assert any(
-        f"missing {name} or unsafe file type" in failure for failure in failures
-    ), failures
+    if name == "source_manifest.json":
+        # Project manifests are read and vetoed by the strict preflight
+        # before the later required-file census is reached.
+        assert any("frozen JSON is not a regular file" in failure for failure in failures), failures
+    else:
+        assert any(
+            f"missing {name} or unsafe file type" in failure for failure in failures
+        ), failures
     assert external.read_bytes() == b"{}"
 
 
