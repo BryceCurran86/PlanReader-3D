@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from stat import S_ISREG
 from pathlib import Path
 import re
 import sys
@@ -46,29 +48,80 @@ def _collect_object_refs(value: Any) -> set[str]:
     return refs
 
 
-def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_DIR) -> list[str]:
-    """A pinned source document that IS in the repository must have exactly the pinned SHA-256 and size.
+_SOURCE_IDENTITY_FIELDS = (
+    "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
+    "st_mtime_ns", "st_ctime_ns",
+)
 
-    Some pinned documents are not distributed with the repository; those are skipped (nothing to compare). A present file whose
-    bytes differ from the frozen manifest is a changed source and fails closed, so a source PDF cannot be replaced unnoticed.
+
+def _present_source_digest(path: Path) -> tuple[str, int] | None:
+    """Hash a present regular original through one stable no-follow descriptor.
+
+    Only a genuinely absent original may be omitted from a public checkout.
+    An unreadable path, symlink, nonregular file or changed inode must fail the
+    integrity gate rather than being reported as an absent private source.
+    """
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError("cannot be inspected") from exc
+    if not S_ISREG(before.st_mode):
+        raise ValueError("is not a regular file")
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not S_ISREG(opened.st_mode):
+                raise ValueError("changed during integrity verification")
+            digest = hashlib.sha256()
+            size = 0
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+                size += len(chunk)
+            completed = os.fstat(stream.fileno())
+        after = path.lstat()
+    except OSError as exc:
+        raise ValueError("changed or became inaccessible during integrity verification") from exc
+    if size != before.st_size or any(
+        getattr(snapshot, field) != getattr(before, field)
+        for snapshot in (opened, completed, after)
+        for field in _SOURCE_IDENTITY_FIELDS
+    ):
+        raise ValueError("changed during integrity verification")
+    return digest.hexdigest(), size
+
+
+def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_DIR) -> list[str]:
+    """Verify pinned originals that are present; skip only genuinely absent ones.
+
+    Private originals intentionally absent from the public checkout are not a
+    successful source-positive replay. Present but inaccessible/nonregular
+    originals cannot be silently treated as absent on Python 3.13 or 3.14.
     """
     failures: list[str] = []
     for manifest in manifests:
         for source in manifest.source_documents:
-            path = source_dir / source.name
-            if not path.is_file():
+            try:
+                checked = _present_source_digest(source_dir / source.name)
+            except ValueError as exc:
+                failures.append(
+                    f"{manifest.project_id}: source document {source.name} {exc}"
+                )
                 continue
-            data = path.read_bytes()
-            actual_sha = hashlib.sha256(data).hexdigest()
+            if checked is None:
+                continue
+            actual_sha, actual_size = checked
             if actual_sha != source.sha256:
                 failures.append(
                     f"{manifest.project_id}: source document {source.name} SHA mismatch "
                     f"(manifest={source.sha256}, actual={actual_sha})"
                 )
-            if len(data) != source.size_bytes:
+            if actual_size != source.size_bytes:
                 failures.append(
                     f"{manifest.project_id}: source document {source.name} size mismatch "
-                    f"(manifest={source.size_bytes}, actual={len(data)})"
+                    f"(manifest={source.size_bytes}, actual={actual_size})"
                 )
     return failures
 
