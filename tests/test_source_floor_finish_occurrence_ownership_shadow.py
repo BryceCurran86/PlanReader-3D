@@ -574,3 +574,50 @@ def test_native_floor_finish_word_address_and_glyph_location_are_in_receipt_iden
 def test_invalid_native_word_address_rejected_before_receipt_hash(address):
     with pytest.raises(ValueError, match="source_word_address"):
         SourceFloorFinishMark("OCC", "page_11", "FT3", (10.0, 10.0), address)
+
+
+@pytest.mark.parametrize("conflict_code,other_center,other_word", [
+    ("FT2", (145.0, 145.0), (12, 0, 2)),
+    ("FT3", (145.0, 145.0), (12, 0, 2)),
+    ("FT2", (250.0, 250.0), (12, 0, 2)),
+    ("FT2", (100.0, 100.0), (12, 0, 1)),
+])
+def test_direct_finish_evaluator_does_not_skip_distinct_reused_occurrence(
+    conflict_code, other_center, other_word,
+):
+    """One repeated source occurrence cannot masquerade as an identical mark."""
+    from dataclasses import replace
+
+    poly = ((0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0))
+    mark = SourceFloorFinishMark(
+        "NATIVE_O1", "page_11", "FT2", (100.0, 100.0), (12, 0, 0)
+    )
+    rival = replace(
+        mark, material_code=conflict_code, mark_center_pt=other_center,
+        source_word_address=other_word,
+    )
+    assert rival is not mark and rival.occurrence_id == mark.occurrence_id
+    before = copy.deepcopy((mark, rival, poly))
+    for others in ((mark, rival), (rival, mark)):
+        result = evaluate_source_floor_finish_ownership_shadow(
+            _selector(material_code="FT2"),
+            finish_mark=mark,
+            internal_face_polygon_pdf_pts=poly,
+            other_finish_marks=others,
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+        assert result.record is None
+    assert (mark, rival, poly) == before
+    # The single exact observation is allowed as "self" in the complete
+    # source candidate list; it remains diagnostic, never a FIRM quantity.
+    control = evaluate_source_floor_finish_ownership_shadow(
+        _selector(material_code="FT2"),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        other_finish_marks=(mark,),
+    )
+    assert control.status == EvidenceResolutionStatus.CANDIDATE
+    assert control.record is not None
+    assert control.record.takeoff_eligible is False
+    assert control.record.commercial_projection_allowed is False
