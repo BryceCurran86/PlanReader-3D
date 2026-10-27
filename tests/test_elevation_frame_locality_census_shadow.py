@@ -198,6 +198,43 @@ def test_foreign_or_stale_inputs_abstain():
         shadow.census(revision_id=published.revision.revision_id, page_id="1")
 
 
+@pytest.mark.parametrize("change", [
+    {"document_id": "foreign"}, {"revision_id": "foreign"}, {"source_sha256": "0" * 64},
+    {"parent_observation_id": "another-word"}, {"trusted": False}, {"raw_text": "another-word"},
+    {"geometry": None}, {"geometry": (1.0, 2.0, 3.0)}, {"geometry": (True, 2.0, 3.0, 4.0)},
+    {"geometry": (float("nan"), 2.0, 3.0, 4.0)}, {"geometry": (float("inf"), 2.0, 3.0, 4.0)},
+    {"geometry": (10 ** 1000, 2.0, 3.0, 4.0)}, {"geometry": (1.0, 2.0, 1.0, 4.0)},
+])
+def test_foreign_or_malformed_positive_receipt_cannot_lend_trust_to_locality(monkeypatch, change):
+    source, published = _source(_elevation_pdf())
+    shadow = C.ElevationFrameLocalityCensusShadow(source, enabled=True)
+    baseline = shadow.census(revision_id=published.revision.revision_id, page_id=1)
+    assert baseline.status is CAND and baseline.pairs
+    text_authority = source.text_integrity_authority()
+    original = text_authority.resolve_text
+    touched = []
+
+    def tamper(selector):
+        result = original(selector)
+        if result.status is CAND:  # trusted source results use CORROBORATED, never CANDIDATE
+            raise AssertionError("unexpected text status")
+        if result.receipt is not None and result.status is EvidenceResolutionStatus.CORROBORATED:
+            touched.append(selector.observation_id)
+            return replace(result, receipt=replace(result.receipt, **change))
+        return result
+
+    before = {k: len(v) for k, v in vars(source).items() if isinstance(v, (dict, set, list, tuple))}
+    with monkeypatch.context() as patch:
+        patch.setattr(text_authority, "resolve_text", tamper)
+        patch.setattr(source, "text_integrity_authority", lambda: text_authority)
+        got = shadow.census(revision_id=published.revision.revision_id, page_id=1)
+    assert touched and got.status is ABST and got.reason_codes == (C.SOURCE_UNPROVEN,)
+    assert got.tags == () and got.dimensions == () and got.pairs == ()
+    assert all(getattr(got, flag) is False for flag in C._GRANT_FLAGS)
+    assert {k: len(v) for k, v in vars(source).items() if isinstance(v, (dict, set, list, tuple))} == before
+    assert shadow.census(revision_id=published.revision.revision_id, page_id=1) == baseline
+
+
 # --- hygiene --------------------------------------------------------------------------------------------------
 
 

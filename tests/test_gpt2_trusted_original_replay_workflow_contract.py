@@ -11,10 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / ".github/workflows/gpt2-trusted-original-source-replay-manual.yml"
 SOURCE = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 HEADS = {
-    "a600": "91cc96a445d6441a640547ce089cd756b56873b3",
+    "a600": "14d50e0b58c62e624974e481e4805a72bebb1ba7",
     "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
     "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
+    "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
+    "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
 }
 
 
@@ -115,6 +117,77 @@ def test_pinned_sha_allowlist_and_no_arbitrary_input():
     assert "github.event.inputs" not in FILE.read_text(encoding="utf8")
 
 
+def test_new_source_positive_targets_have_fixed_base_tree_and_exact_two_paths():
+    """The owner-only replay may never select mutable PR code or extra files."""
+    guard = next(s for s in _load()["jobs"]["original"]["steps"]
+                 if s["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    approved_base = "d66087e6471c1bbdbf8c38617b8b85e646529417"
+    expected = {
+        "grid": (
+            "pb_gpt2_native_grid_row_membership_shadow.py|"
+            "tests/test_gpt2_native_grid_row_membership_shadow.py",
+            "test_private_original_d02_grid_membership_from_published_source_if_provisioned",
+            "tests/test_gpt2_native_grid_row_membership_shadow.py",
+        ),
+        "rcp_ink": (
+            "pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
+            "test_real_original_page9_native_source_rivals_if_available",
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
+        ),
+    }
+    for target, (paths, original_test, test_path) in expected.items():
+        matches = re.findall(
+            r"(?m)^  " + re.escape(target) +
+            r"\)\n(?P<body>.*?)(?=^    ;;)",
+            script, flags=re.DOTALL | re.MULTILINE,
+        )
+        assert len(matches) == 1
+        body = matches[0]
+        assert "approved_base=" + approved_base in body
+        assert "approved_head=" + HEADS[target] in body
+        assert "expected_paths='" + paths + "'" in body
+        assert "original_test=" + original_test in body
+        assert "test_path=" + test_path in body
+        assert "github.event.inputs" not in body
+    assert "git diff --name-only" in script
+    assert 'git archive "$approved_head"' in script
+    assert "git checkout --detach" not in script
+
+
+def test_new_immutable_targets_are_collected_source_free_before_private_replay():
+    """Source-free public CI must test both newly allowlisted immutable trees."""
+    workflow = ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+    raw = workflow.read_text(encoding="utf8")
+    document = _parse_workflow(FILE.read_text(encoding="utf8"))
+    assert document["on"] == {"workflow_dispatch": None}
+    expected = {
+        "grid": (
+            "tests/test_gpt2_native_grid_row_membership_shadow.py",
+            "test_private_original_d02_grid_membership_from_published_source_if_provisioned",
+            "test_original_ruled_row_connects_multiple_native_blocks_without_grants",
+        ),
+        "rcp_ink": (
+            "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
+            "test_real_original_page9_native_source_rivals_if_available",
+            "test_later_native_text_whitespace_advance_is_not_painted_overprint",
+        ),
+    }
+    for label, (path, original, synthetic) in expected.items():
+        row = (
+            label + "|" + HEADS[label] + "|" + path + "::" + original
+            + "|" + path + "::" + synthetic
+        )
+        assert raw.count(row + "\n") == 1
+    assert "--network none --read-only --cap-drop ALL" in raw
+    assert "python -m pytest --collect-only" in raw
+    assert "python -m pytest -q" in raw
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in raw
+    assert "ORIGINAL_SOURCES_TOKEN" not in raw
+    assert "secrets." not in raw
+
+
 def test_token_only_present_in_frozen_manifest_provision_step():
     steps = _load()["jobs"]["original"]["steps"]
     matches = [s for s in steps if "ORIGINAL_SOURCES_TOKEN" in str(s)]
@@ -197,7 +270,7 @@ def test_original_source_smoke_test_negative_error_is_privately_captured():
 
 
 
-def test_all_four_originals_collect_without_private_source_before_token_step():
+def test_all_approved_originals_collect_without_private_source_before_token_step():
     steps = _load()["jobs"]["original"]["steps"]
     preflight = next(i for i, s in enumerate(steps)
                      if s.get("name", "").startswith("Preflight offline pinned"))
@@ -301,3 +374,62 @@ def test_offline_image_copies_only_approved_dependency_bytes(tmp_path):
     for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
         assert (deps / filename).read_bytes() == (approved / filename).read_bytes()
         assert (deps / filename).read_bytes() != (main / filename).read_bytes()
+
+
+def test_immutable_allowlist_requires_normal_git_blobs_before_any_private_source():
+    """Reject symlinks, gitlinks, exec bits and missing entries before archive."""
+    steps = _load()["jobs"]["original"]["steps"]
+    guard_idx = next(i for i, s in enumerate(steps)
+                     if s.get("name", "").startswith("Validate immutable"))
+    provision_idx = next(i for i, s in enumerate(steps)
+                         if s.get("name", "").startswith("Provision only"))
+    assert guard_idx < provision_idx
+    script = steps[guard_idx]["run"]
+    name_check = script.index('git diff --name-only')
+    type_check = script.index('git ls-tree --format=')
+    archive = script.index('git archive "$approved_head"')
+    assert name_check < type_check < archive
+    assert 'while IFS= read -r expected_path' in script
+    assert 'done <<< "$allowed"' in script
+    assert 'entry="$(git ls-tree --format=' in script
+    assert '[[ "$entry" != "100644 blob $expected_path" ]]' in script
+    assert 'Approved GPT2 source/test path has unreviewed Git object type or mode' in script
+    assert 'github.event.inputs' not in script
+
+
+@pytest.mark.parametrize("git_mode", ("100644", "100755", "120000", "160000"))
+def test_real_git_tree_mode_gate_fail_closed(tmp_path, git_mode):
+    """Exercise Git's actual ls-tree mode/type output, without a private PDF."""
+    repo = tmp_path / "git-object-modes"
+    repo.mkdir()
+
+    def git(*args, input_text=None):
+        proc = subprocess.run(
+            ["git", "-C", str(repo), *args], input=input_text,
+            encoding="utf-8", capture_output=True, check=True,
+        )
+        return proc.stdout.strip()
+
+    git("init", "-q")
+    blob_sha = git("hash-object", "-w", "--stdin", input_text="dummy\n")
+    if git_mode == "160000":
+        # A gitlink refers to a commit, never to an ordinary Python blob.
+        tree_sha = git("mktree", input_text="")
+        item_sha = git(
+            "-c", "user.name=GPT2", "-c", "user.email=gpt2@example.invalid",
+            "commit-tree", tree_sha, "-m", "synthetic-submodule",
+        )
+    else:
+        item_sha = blob_sha
+    git("update-index", "--add", "--cacheinfo",
+        f"{git_mode},{item_sha},reviewed.py")
+    candidate = git("write-tree")
+    entry = git(
+        "ls-tree", "--format=%(objectmode) %(objecttype) %(path)",
+        candidate, "--", "reviewed.py",
+    )
+    assert (entry == "100644 blob reviewed.py") is (git_mode == "100644")
+    assert git(
+        "ls-tree", "--format=%(objectmode) %(objecttype) %(path)",
+        candidate, "--", "missing.py",
+    ) == ""

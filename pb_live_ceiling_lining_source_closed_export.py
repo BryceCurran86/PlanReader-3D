@@ -101,8 +101,9 @@ def _require_exact_ceiling_finish_semantic(
 
 
 def _require_one_ceiling_per_original_area(
-    owners: dict[str, str],
+    owners: dict[tuple[str, str, str], str],
     *,
+    source_root: tuple[str, str],
     upstream_area_id: object,
     canonical_ceiling_id: str,
 ) -> None:
@@ -116,12 +117,15 @@ def _require_one_ceiling_per_original_area(
         raise SourceClosedRunConflictError(
             "ceiling original upstream room-area issuer is invalid"
         )
-    previous = owners.get(upstream_area_id)
+    # PDF producer IDs are document/revision-local. Two independent
+    # originals can reuse an area receipt without sharing physical ownership.
+    original_key = (*source_root, upstream_area_id)
+    previous = owners.get(original_key)
     if previous is not None and previous != canonical_ceiling_id:
         raise SourceClosedRunConflictError(
             "one original room-area source reissued as competing ceiling surfaces"
         )
-    owners[upstream_area_id] = canonical_ceiling_id
+    owners[original_key] = canonical_ceiling_id
 
 
 def build_live_ceiling_lining_source_traces(
@@ -188,9 +192,9 @@ def build_live_ceiling_lining_source_traces(
                 f"duplicate or invalid original ceiling-lining quantity id: {original_id}"
             )
         seen_source_ids.add(original_id)
-    source_area_ceiling_owners: dict[str, str] = {}
-    original_mark_ceiling_owners: dict[str, str] = {}
-    original_occurrence_ceiling_owners: dict[str, str] = {}
+    source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
+    original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
+    original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
     # Preserve source-owned rivals rejected by geometry/measurement authority.
     # The FIRM-only loop below cannot independently see such claimants.
     abstained_original_marks: set[tuple[str, str, str, str]] = set()
@@ -343,6 +347,22 @@ def build_live_ceiling_lining_source_traces(
             raise SourceClosedRunConflictError(
                 f"ceiling quantity canonical lineage mismatch: "
                 f"{quantity.quantity_id}"
+            )
+
+        # Do not accept an invented, padded or missing original root simply
+        # because a caller has made the metadata and canonical object agree.
+        # This is a negative check, not original-PDF authentication.
+        if (
+            not _valid_original_source_sha(ceiling.source_sha256)
+            or not _valid_original_source_sha(metadata.get("source_sha256"))
+            or type(ceiling.revision_id) is not str
+            or not ceiling.revision_id
+            or ceiling.revision_id != ceiling.revision_id.strip()
+            or type(metadata.get("revision_id")) is not str
+            or metadata["revision_id"] != ceiling.revision_id
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling original source root is malformed: {quantity.quantity_id}"
             )
 
         if (
@@ -501,6 +521,7 @@ def build_live_ceiling_lining_source_traces(
             )
         _require_one_ceiling_per_original_area(
             source_area_ceiling_owners,
+            source_root=root,
             upstream_area_id=metadata.get("upstream_room_area_quantity_id"),
             canonical_ceiling_id=canonical_ceiling_id,
         )
@@ -512,12 +533,13 @@ def build_live_ceiling_lining_source_traces(
             (mark_id, original_mark_ceiling_owners),
             (occurrence_id, original_occurrence_ceiling_owners),
         ):
-            earlier = owners.get(original_id)
+            original_key = (*root, original_id)
+            earlier = owners.get(original_key)
             if earlier is not None and earlier != canonical_ceiling_id:
                 raise SourceClosedRunConflictError(
                     f"original RCP material mark has competing ceilings: {original_id}"
                 )
-            owners[original_id] = canonical_ceiling_id
+            owners[original_key] = canonical_ceiling_id
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
