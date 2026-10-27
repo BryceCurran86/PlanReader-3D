@@ -13,6 +13,7 @@ from typing import Mapping
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_live_floor_area_quantity_publication import _valid_original_source_sha
+from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
@@ -516,6 +517,46 @@ def build_live_ceiling_lining_source_traces(
         source_bbox = _original_ceiling_simple_bbox(
             checked, quantity_id=quantity.quantity_id
         )
+
+        # The cross-view FIRM producer copies the exact original PDF room
+        # ring to its whole-room ceiling. A reconstructed ceiling must not
+        # borrow that room's documented area with a different physical ring
+        # or source root. This is a negative source veto, not a new m² grant.
+        room_root = (
+            room.document_id, room.revision_id, room.snapshot_id, room.page_id,
+        )
+        ceiling_root = (
+            ceiling.document_id, ceiling.revision_id, ceiling.snapshot_id,
+            str(ceiling.source_page),
+        )
+        if (
+            type(ceiling.source_page) is not int
+            or any(
+                type(receipt) is not str
+                or not receipt or receipt != receipt.strip()
+                for receipt in (*room_root, *ceiling_root)
+            )
+            or room_root != ceiling_root
+            or not _valid_original_source_sha(room.source_sha256)
+            or room.source_sha256.lower() != ceiling.source_sha256.lower()
+            or (
+                room.viewport_id is not None
+                and (
+                    type(room.viewport_id) is not str
+                    or not room.viewport_id
+                    or room.viewport_id != room.viewport_id.strip()
+                    or room.viewport_id != ceiling.viewport_id
+                )
+            )
+            or not _same_original_floor_room_ring(
+                checked, room.polygon_pdf_pts,
+                quantity_id=quantity.quantity_id,
+            )
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original canonical room polygon/source ownership mismatch: "
+                f"{quantity.quantity_id}"
+            )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,

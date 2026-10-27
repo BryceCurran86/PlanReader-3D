@@ -364,7 +364,7 @@ def test_glyph_unverified_elevation_words_use_strict_raster_corroboration() -> N
     assert sorted((result.record.axis_x_mm, result.record.axis_y_mm)) == [2400.0, 3000.0]
 
 
-def test_glyph_and_clip_unverified_elevation_words_use_post_clip_raster_proof() -> None:
+def test_raster_text_proof_does_not_authorize_irregularly_clipped_frame_geometry() -> None:
     source = SourceVisibilityProducer(
         producer_method="opening-elevation-raster-clip-test",
         producer_version="1",
@@ -391,13 +391,13 @@ def test_glyph_and_clip_unverified_elevation_words_use_post_clip_raster_proof() 
     )
     result = producer.authority().resolve(_selector(published, "W1"))
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
-    assert result.record is not None
-    assert result.record.area_m2 == pytest.approx(7.2)
-    assert sorted((result.record.axis_x_mm, result.record.axis_y_mm)) == [
-        2400.0,
-        3000.0,
-    ]
+    # Two raster readings can prove the words without proving that the native
+    # frame and dimension supports survive this unresolved triangular clip.
+    assert any(r.status is EvidenceResolutionStatus.CORROBORATED
+               for r in producer._raster._results.values())
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert result.reason_codes == (OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE,)
 
 
 def test_marked_window_elevation_proves_closed_gross_frame_area() -> None:
