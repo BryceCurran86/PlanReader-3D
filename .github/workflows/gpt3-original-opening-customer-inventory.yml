@@ -88,7 +88,7 @@ jobs:
             status=$?
             rm -f "$PRIVATE_LOG"
             if [ "$status" -ne 0 ]; then
-              printf '%s\\n' "ORIGINAL_LOT16_EIGHT_REPLAY_BLOCKED" >&4
+              printf '%s\n' "ORIGINAL_LOT16_EIGHT_REPLAY_BLOCKED" >&4
             fi
           }
           trap cleanup_private_log EXIT
@@ -123,7 +123,7 @@ jobs:
           print("ORIGINAL_LOT16_EIGHT_RETAINED")
           PY
           python scripts/check_full_plan_v2_integrity.py
-          printf '%s\\n' "ORIGINAL_LOT16_EIGHT_RETAINED" >&3
+          printf '%s\n' "ORIGINAL_LOT16_EIGHT_RETAINED" >&3
       - name: Destroy private originals and unpublished source reports
         if: always()
         shell: bash
