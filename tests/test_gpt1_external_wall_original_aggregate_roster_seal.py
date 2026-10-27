@@ -76,6 +76,43 @@ def test_joint_publication_and_metadata_replay_cannot_inherit_old_source_id():
     _assert_unsealable(changed)
 
 
+def test_original_aggregate_evidence_census_cannot_drop_universe_receipt():
+    produced = _produced()
+    aggregate = produced.quantity_evidence
+    assert aggregate is not None
+    assert aggregate.evidence_ids
+    changed = replace(
+        aggregate, evidence_ids=aggregate.evidence_ids[:-1],
+    )
+    _assert_unsealable(replace(produced, quantity_evidence=changed))
+
+
+def test_original_aggregate_evidence_census_cannot_reorder_receipts():
+    produced = _produced()
+    aggregate = produced.quantity_evidence
+    assert aggregate is not None
+    assert len(aggregate.evidence_ids) > 1
+    changed = replace(
+        aggregate, evidence_ids=tuple(reversed(aggregate.evidence_ids)),
+    )
+    _assert_unsealable(replace(produced, quantity_evidence=changed))
+
+
+def test_original_opening_universe_cannot_be_missing_even_without_voids():
+    produced = _produced()
+    aggregate = produced.quantity_evidence
+    assert aggregate is not None
+    assert produced.opening_universe_record_ids
+    _assert_unsealable(replace(
+        produced,
+        opening_universe_record_ids=(),
+        quantity_evidence=replace(
+            aggregate,
+            metadata={**aggregate.metadata, "opening_universe_record_ids": ()},
+        ),
+    ))
+
+
 def test_aggregate_id_must_equal_original_producer_contract():
     produced = _produced()
     aggregate = produced.quantity_evidence
