@@ -6,8 +6,8 @@ logs or downloadable artifacts. These tests need no private original PDF.
 """
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 WORKFLOW = (
     Path(__file__).resolve().parents[1]
