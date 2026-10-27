@@ -131,12 +131,12 @@ def test_single_authority_class_rename_remains_permitted(
 def test_required_ci_uses_no_rename_detection_in_both_v2_diff_pipelines() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     fixed = (
-        'git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" '
-        '| python scripts/check_v2_truth_separation.py'
+        'git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" '
+        '| python scripts/check_v2_truth_separation.py --nul'
     )
     unsafe = (
         'git diff --name-only "$BASE_SHA" "$HEAD_SHA" '
-        '| python scripts/check_v2_truth_separation.py'
+        '| python scripts/check_v2_truth_separation.py --nul'
     )
     assert workflow.count(fixed) == 2
     assert unsafe not in workflow

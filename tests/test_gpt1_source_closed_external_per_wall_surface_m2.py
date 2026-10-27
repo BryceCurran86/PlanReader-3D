@@ -102,3 +102,33 @@ def test_original_one_wall_source_quantity_seals_full_physical_m2_lineage():
     assert row.object_identity_refs==(original.canonical_walls[0].canonical_wall_id,)
     assert row.source_page==original.canonical_walls[0].page_id
     assert row.source_sha256==original.canonical_walls[0].source_sha256
+
+
+@pytest.mark.parametrize("original_blockers", (
+    ("original_wall_identity_conflict",),
+    ("opening_host_unresolved", "original_wall_identity_conflict"),
+    ("stale_original_revision",),
+))
+def test_blocked_original_aggregate_cannot_launder_per_wall_net_m2(
+    original_blockers,
+):
+    """A numeric corroborated aggregate with conflicts is NOT publication."""
+    produced=_produced()
+    original=produced.quantity_evidence
+    assert original is not None
+    assert not original.abstained
+    assert publish_live_per_wall_surface_area_quantities(produced)
+    blocked=replace(original,blocking_reasons=original_blockers)
+    assert blocked.value==original.value
+    assert blocked.status==original.status=="corroborated"
+    rival=replace(produced,quantity_evidence=blocked)
+    assert publish_live_per_wall_surface_area_quantities(rival)==()
+    with pytest.raises(
+        ValueError,match="no source-complete original external wall surfaces",
+    ):
+        seal_live_per_wall_surface_area_run(
+            rival,workspace_id=7,project_id="synthetic-source-wall-project",
+        )
+    # An invalid retrospective claim cannot mutate the actual source result.
+    assert produced.quantity_evidence.blocking_reasons==()
+    assert len(publish_live_per_wall_surface_area_quantities(produced))==1

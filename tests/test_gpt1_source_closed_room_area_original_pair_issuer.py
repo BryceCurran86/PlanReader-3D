@@ -14,7 +14,13 @@ def _original(n,pair):
         semantic_key=f"room_area:physical-room-{n}",value=15.25,unit="m2",
         input_entity_ids=(f"physical-room-{n}",),evidence_ids=(f"area-source-{n}",),
         authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-        status="firm",confidence=1.0,metadata={"figured_dimension_ids":list(pair)},
+        status="firm",confidence=1.0,metadata={
+            "figured_dimension_ids": list(pair),
+            # These tests intentionally describe one original source revision;
+            # the producer now requires that source root before comparing axes.
+            "source_sha256": "a" * 64,
+            "revision_id": "rev-1",
+        },
     )
 
 

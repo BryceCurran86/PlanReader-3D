@@ -6,10 +6,12 @@ from pathlib import Path
 import copy
 import hashlib
 import json
+import os
 
 import pytest
 
 from pb_source_closed_run_export import seal_source_closed_run
+from tools import gpt3_signed_v1_physical_drift as drift
 from test_customer_output_verification import quantity, trace
 from tools.gpt3_signed_v1_physical_drift import (
     compare_signed_v1_physical_runs,
@@ -165,3 +167,109 @@ def test_malformed_signed_replay_cannot_be_drift_laundered(tmp_path):
         build_signed_v1_physical_drift_report(
             baseline_path=paths[0], candidate_path=paths[1],
         )
+
+
+def test_same_byte_baseline_inode_replacement_during_signed_parse_is_rejected(
+    tmp_path, monkeypatch,
+):
+    q, t = _pair()
+    paths = _files(tmp_path, _run((q, t)), _run((q, t)))
+    original_parse = drift._json_object
+    changed = False
+
+    def swap_before_parse(path):
+        nonlocal changed
+        if path == paths[0] and not changed:
+            changed = True
+            replacement = tmp_path / "same-byte-other-inode.json"
+            replacement.write_bytes(paths[0].read_bytes())
+            os.replace(replacement, paths[0])
+        return original_parse(path)
+
+    monkeypatch.setattr(drift, "_json_object", swap_before_parse)
+    with pytest.raises(ValueError, match="changed during drift comparison"):
+        build_signed_v1_physical_drift_report(
+            baseline_path=paths[0], candidate_path=paths[1],
+        )
+    assert changed
+
+
+def test_symlink_replacement_during_signed_parse_never_authenticates_epoch(
+    tmp_path, monkeypatch,
+):
+    q, t = _pair()
+    paths = _files(tmp_path, _run((q, t)), _run((q, t)))
+    replacement = tmp_path / "different-epoch.json"
+    replacement.write_bytes(paths[0].read_bytes())
+    original_parse = drift._json_object
+
+    def swap_to_link(path):
+        if path == paths[0] and not paths[0].is_symlink():
+            paths[0].unlink()
+            try:
+                paths[0].symlink_to(replacement)
+            except (OSError, NotImplementedError):
+                pytest.skip("symlink unavailable on test runner")
+        return original_parse(path)
+
+    monkeypatch.setattr(drift, "_json_object", swap_to_link)
+    with pytest.raises(ValueError, match="changed during drift comparison"):
+        build_signed_v1_physical_drift_report(
+            baseline_path=paths[0], candidate_path=paths[1],
+        )
+
+
+def test_same_byte_input_epoch_swap_before_create_only_publication_rolls_back(
+    tmp_path, monkeypatch,
+):
+    q, t = _pair()
+    paths = _files(tmp_path, _run((q, t)), _run((q, t)))
+    output = tmp_path / "would-be-drift-report.json"
+    original_writer = drift.write_new_diagnostic
+
+    def swap_then_publish(path, encoded, *, protected_roots, verify_inputs=None):
+        replacement = tmp_path / "new-inode.json"
+        replacement.write_bytes(paths[0].read_bytes())
+        os.replace(replacement, paths[0])
+        return original_writer(
+            path, encoded, protected_roots=protected_roots, verify_inputs=verify_inputs,
+        )
+
+    monkeypatch.setattr(drift, "write_new_diagnostic", swap_then_publish)
+    with pytest.raises(ValueError, match="changed during drift comparison"):
+        drift.main([
+            "--baseline-sealed", str(paths[0]),
+            "--candidate-sealed", str(paths[1]),
+            "--output", str(output),
+        ])
+    assert not output.exists()
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_same_byte_swap_after_publication_link_unlinks_our_report(
+    tmp_path, monkeypatch,
+):
+    q, t = _pair()
+    paths = _files(tmp_path, _run((q, t)), _run((q, t)))
+    output = tmp_path / "would-be-drift-report.json"
+    original_verify = drift._assert_source_witnesses
+    invocations = 0
+
+    def swap_on_postlink_verify(actual_paths, witnesses):
+        nonlocal invocations
+        invocations += 1
+        if invocations == 3:
+            replacement = tmp_path / "post-link-swap.json"
+            replacement.write_bytes(paths[1].read_bytes())
+            os.replace(replacement, paths[1])
+        return original_verify(actual_paths, witnesses)
+
+    monkeypatch.setattr(drift, "_assert_source_witnesses", swap_on_postlink_verify)
+    with pytest.raises(ValueError, match="changed during drift comparison"):
+        drift.main([
+            "--baseline-sealed", str(paths[0]),
+            "--candidate-sealed", str(paths[1]),
+            "--output", str(output),
+        ])
+    assert invocations == 3
+    assert not output.exists()

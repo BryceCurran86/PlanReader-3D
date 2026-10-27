@@ -14,8 +14,8 @@ def test_v2_truth_separation_runs_for_pull_requests_and_pushes() -> None:
     assert "${{ github.event.before }}" in WORKFLOW
     assert "${{ github.event.after }}" in WORKFLOW
     command = (
-        'git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" '
-        '| python scripts/check_v2_truth_separation.py'
+        'git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" '
+        '| python scripts/check_v2_truth_separation.py --nul'
     )
     assert WORKFLOW.count(command) == 2
     assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' not in WORKFLOW

@@ -1251,6 +1251,22 @@ def display_horizontal_width_mm(
     return (native_x_mm if rotation in (0, 180) else native_y_mm), ""
 
 
+def _source_geometry(value, *, bbox: bool = False):
+    """Read exact finite source coordinates without coercing malformed receipts."""
+    if (type(value) not in (tuple, list) or len(value) != 4
+            or any(type(v) not in (int, float) for v in value)):
+        return None
+    try:
+        geometry = tuple(float(v) for v in value)
+    except OverflowError:
+        return None
+    if not all(math.isfinite(v) for v in geometry):
+        return None
+    if bbox and (geometry[0] >= geometry[2] or geometry[1] >= geometry[3]):
+        return None
+    return geometry
+
+
 def audit_plan_callout_to_glazing_strip_from_source(
     source, *, revision_id: str, plan_page_id: int, elevation_page_id: int,
     callout_mark_pattern: str, panel_token: str, coordinate_quantum_pt: float,
@@ -1265,7 +1281,7 @@ def audit_plan_callout_to_glazing_strip_from_source(
         OpeningElevationFrameAreaSelector,
     )
     from pb_pdf_text_integrity_authority import TRUSTED_PDF_TEXT
-    from pb_source_observation_authority import ObservationSelector
+    from pb_source_observation_authority import SOURCE_OBSERVATION_EXISTS, ObservationSelector
     from pb_source_visibility_authority import (
         VISIBLE_SOURCE_OBSERVATION_EXISTS,
         SourceVisibilityProducer,
@@ -1281,7 +1297,9 @@ def audit_plan_callout_to_glazing_strip_from_source(
     if published is None:
         raise ValueError("source revision unavailable")
     decoded = tuple(int(v) for v in published.coverage.decoded_pages)
+    failed = tuple(int(v) for v in published.coverage.failed_pages)
     if (plan_page_id not in decoded or elevation_page_id not in decoded
+            or plan_page_id in failed or elevation_page_id in failed
             or source._producer.current_revision_id(published.revision.document_id) != revision_id):
         raise ValueError("source pages unavailable for the current revision")
     source_bytes = source._producer._store.source_bytes_by_revision.get(revision_id)
@@ -1300,31 +1318,50 @@ def audit_plan_callout_to_glazing_strip_from_source(
 
     # trusted words, through the producer's own text-integrity authority
     text_authority = source.text_integrity_authority()
+    original_authority = source._producer.authority()
     plan_words: list[PlanTextObservation] = []
     elevation_words: list[PlanTextObservation] = []
     untrusted_plan: list[PlanTextObservation] = []
     untrusted_elevation: list[PlanTextObservation] = []
     text_inventory_complete = True
+    seen_text: set[str] = set()
     for observation_id in published.text_observation_ids:
+        if type(observation_id) is not str or not observation_id or observation_id in seen_text:
+            text_inventory_complete = False
+            continue
+        seen_text.add(observation_id)
         result = text_authority.resolve_text(selector(observation_id))
         receipt = result.receipt
-        if receipt is None:
+        if (receipt is None or receipt.parent_observation_id != observation_id
+                or receipt.document_id != ownership.document_id or receipt.revision_id != revision_id
+                or receipt.source_sha256 != ownership.source_sha256):
+            text_inventory_complete = False
+            continue
+        parent_result = original_authority.resolve(selector(observation_id))
+        parent = parent_result.observation
+        if (parent_result.status is not EvidenceResolutionStatus.CORROBORATED
+                or parent_result.proposition != SOURCE_OBSERVATION_EXISTS or parent is None
+                or str(parent.page_id) != str(receipt.page_id)
+                or parent.source_partition_id != receipt.source_partition_id
+                or parent.raw_text != receipt.raw_text or parent.geometry != receipt.geometry):
             text_inventory_complete = False
             continue
         if str(receipt.page_id) not in (str(plan_page_id), str(elevation_page_id)):
             continue
-        if (len(receipt.geometry) < 4 or not all(math.isfinite(float(v)) for v in receipt.geometry[:4])
-                or receipt.geometry[0] >= receipt.geometry[2] or receipt.geometry[1] >= receipt.geometry[3]):
+        geometry = _source_geometry(receipt.geometry, bbox=True)
+        if geometry is None:
             text_inventory_complete = False
             continue
-        if (result.status is EvidenceResolutionStatus.CORROBORATED and result.proposition == TRUSTED_PDF_TEXT
-                and result.trusted_text is not None and len(receipt.geometry) >= 4):
-            word = PlanTextObservation(
-                str(observation_id), str(result.trusted_text), tuple(float(v) for v in receipt.geometry[:4]))
+        if result.status is EvidenceResolutionStatus.CORROBORATED and result.proposition == TRUSTED_PDF_TEXT:
+            if (receipt.trusted is not True or type(result.trusted_text) is not str
+                    or receipt.raw_text != result.trusted_text):
+                text_inventory_complete = False
+                continue
+            word = PlanTextObservation(observation_id, result.trusted_text, geometry)
             (plan_words if str(receipt.page_id) == str(plan_page_id) else elevation_words).append(word)
-        elif len(receipt.geometry) >= 4:
+        else:
             # only the box is used: an untrusted word's text is never an identity
-            unknown = PlanTextObservation(str(observation_id), "", tuple(float(v) for v in receipt.geometry[:4]))
+            unknown = PlanTextObservation(observation_id, "", geometry)
             (untrusted_plan if str(receipt.page_id) == str(plan_page_id) else untrusted_elevation).append(unknown)
 
     with fitz.open(stream=bytes(source_bytes), filetype="pdf") as document:
@@ -1357,20 +1394,31 @@ def audit_plan_callout_to_glazing_strip_from_source(
     visibility = source.authority()
     ink: list[PlanInkSegment] = []
     ink_inventory_complete = True
+    seen_ink: set[str] = set()
     for observation_id in published.visible_observation_ids:
+        if type(observation_id) is not str or not observation_id or observation_id in seen_ink:
+            ink_inventory_complete = False
+            continue
+        seen_ink.add(observation_id)
         result = visibility.resolve_visible(selector(observation_id))
         observation = result.observation
         if (result.status is not EvidenceResolutionStatus.CORROBORATED
                 or result.proposition != VISIBLE_SOURCE_OBSERVATION_EXISTS or observation is None):
             ink_inventory_complete = False
             continue
+        if (observation.observation_id != observation_id or observation.document_id != ownership.document_id
+                or observation.revision_id != revision_id or observation.source_sha256 != ownership.source_sha256
+                or observation.snapshot_id != ownership.snapshot_id):
+            ink_inventory_complete = False
+            continue
         if str(observation.page_id) != str(plan_page_id):
             continue
-        if len(observation.geometry) != 4:
+        geometry = _source_geometry(observation.geometry)
+        if geometry is None:
             ink_inventory_complete = False
             continue
         primitive = segments.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
-        if primitive is None or tuple(float(v) for v in observation.geometry) != (
+        if primitive is None or geometry != (
                 float(primitive["x1"]), float(primitive["y1"]), float(primitive["x2"]), float(primitive["y2"])):
             ink_inventory_complete = False
             continue
@@ -1378,7 +1426,7 @@ def audit_plan_callout_to_glazing_strip_from_source(
         width = primitive.get("width")
         if not primitive.get("stroke_present") or not primitive.get("width_present") or width is None:
             continue
-        x0, y0, x1, y1 = (float(v) for v in observation.geometry)
+        x0, y0, x1, y1 = geometry
         path_index = primitive.get("path_index")
         if type(path_index) is not int or not (0 <= path_index < len(native_drawings)):
             ink_inventory_complete = False
@@ -1397,9 +1445,10 @@ def audit_plan_callout_to_glazing_strip_from_source(
 
     # elevation type records, one resolve per plan mark; display width from the page rotation
     # every trusted opening tag of the plan page is resolved (the pattern only selects reported rows downstream)
-    marks = sorted({w.text for w in plan_words if _tag_key(w.text) is not None})
-    producer = OpeningElevationFrameAreaProducer.from_source_visibility_producer(source)
-    authority = producer.authority()
+    marks = sorted({w.text for w in plan_words if _tag_key(w.text) is not None}) if text_inventory_complete else []
+    # Do not feed a known-invalid receipt channel into another positive source producer.
+    authority = (OpeningElevationFrameAreaProducer.from_source_visibility_producer(source).authority()
+                 if marks else None)
     types: list[ElevationTypeObservation] = []
     for mark in marks:
         result = authority.resolve(OpeningElevationFrameAreaSelector(
@@ -1407,16 +1456,24 @@ def audit_plan_callout_to_glazing_strip_from_source(
         record = result.record
         if record is None or type(record) is not OpeningElevationFrameAreaRecord:
             continue
-        if str(record.page_id) != str(elevation_page_id) or result.status is not EvidenceResolutionStatus.CORROBORATED:
+        if (record.document_id != ownership.document_id or record.revision_id != revision_id
+                or record.source_sha256 != ownership.source_sha256 or record.snapshot_id != ownership.snapshot_id
+                or type(record.type_mark) is not str or _tag_key(record.type_mark) != _tag_key(mark)
+                or record.status is not EvidenceResolutionStatus.CORROBORATED
+                or str(record.page_id) != str(elevation_page_id)
+                or result.status is not EvidenceResolutionStatus.CORROBORATED):
             continue
-        x0, y0, x1, y1 = record.frame_bbox
+        frame_bbox = _source_geometry(record.frame_bbox, bbox=True)
+        if frame_bbox is None:
+            continue
+        x0, y0, x1, y1 = frame_bbox
         panels = [w for w in elevation_words if w.text == panel_token
                   and x0 <= (w.bbox[0] + w.bbox[2]) / 2.0 <= x1 and y0 <= (w.bbox[1] + w.bbox[3]) / 2.0 <= y1]
         unverified_panels = tuple(sorted(w.observation_id for w in untrusted_elevation
                                  if x0 <= (w.bbox[0] + w.bbox[2]) / 2.0 <= x1
                                  and y0 <= (w.bbox[1] + w.bbox[3]) / 2.0 <= y1))
         width_mm, reason = display_horizontal_width_mm(
-            elevation_rotation, record.frame_bbox, float(record.axis_x_mm), float(record.axis_y_mm))
+            elevation_rotation, frame_bbox, float(record.axis_x_mm), float(record.axis_y_mm))
         # the same mark printed elsewhere on the elevation page (a title, a stray tag) is carried as a caveat
         mark_key = _tag_key(str(record.type_mark))
         outside = sum(

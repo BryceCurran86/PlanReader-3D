@@ -79,6 +79,39 @@ def _source_floor_area_simple_bbox(
     return polygon.bounds
 
 
+def _same_original_floor_room_ring(
+    floor_points: object,
+    room_points: object,
+    *,
+    quantity_id: str,
+) -> bool:
+    """Exact original PDF vertices, modulo cycle start, winding and closure.
+
+    This is a negative source-ownership test, never a source of metric area.
+    Both rings must independently be simple; no tolerance or snap can turn
+    a different physical boundary into the same original room.
+    """
+    _source_floor_area_simple_bbox(floor_points, quantity_id=quantity_id)
+    _source_floor_area_simple_bbox(room_points, quantity_id=quantity_id)
+    floor_ring = tuple((float(x), float(y)) for x, y in floor_points)
+    room_ring = tuple((float(x), float(y)) for x, y in room_points)
+    if floor_ring[0] == floor_ring[-1]:
+        floor_ring = floor_ring[:-1]
+    if room_ring[0] == room_ring[-1]:
+        room_ring = room_ring[:-1]
+    if len(floor_ring) != len(room_ring):
+        return False
+    try:
+        start = room_ring.index(floor_ring[0])
+    except ValueError:
+        return False
+    n = len(floor_ring)
+    return (
+        all(floor_ring[i] == room_ring[(start + i) % n] for i in range(n))
+        or all(floor_ring[i] == room_ring[(start - i) % n] for i in range(n))
+    )
+
+
 def build_live_floor_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -144,6 +177,16 @@ def build_live_floor_area_source_traces(
                 f"duplicate physical floor surface identity: {physical_id}"
             )
         floors_by_physical_id[physical_id] = floor
+
+    # A source-derived canonical floor normally copies the physical ROOM's
+    # original PDF ring. Keep the legacy room-less floor seal unchanged, but
+    # when the producer supplies canonical rooms, do not allow a mismatched
+    # room or two rival room owners to lend their original face to a FIRM floor.
+    room_owners_by_id: dict[str, list[object]] = {}
+    for room in claim.canonical_rooms:
+        room_id = _clean(getattr(room, "canonical_room_id", None))
+        if room_id:
+            room_owners_by_id.setdefault(room_id, []).append(room)
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     for quantity in publish_live_floor_area_quantities(claim):
@@ -286,6 +329,40 @@ def build_live_floor_area_source_traces(
         source_bbox = _source_floor_area_simple_bbox(
             checked, quantity_id=quantity.quantity_id
         )
+
+        if claim.canonical_rooms:
+            room_owners = room_owners_by_id.get(_clean(floor.room_entity_id), ())
+            if len(room_owners) != 1:
+                raise SourceClosedRunConflictError(
+                    f"floor original canonical room owner missing or contested: {quantity.quantity_id}"
+                )
+            room = room_owners[0]
+            # The original floor-surface producer copies its room's source
+            # document/snapshot/face and PDF ring before metric enrichment.
+            # A well-formed but foreign room ring must not be sealed under
+            # the numeric area and original source receipts of this floor.
+            exact_ids = (
+                room.canonical_room_id, room.document_id, room.revision_id,
+                room.source_sha256, room.snapshot_id, room.page_id,
+                room.source_room_face_record_id,
+            )
+            if (
+                any(type(value) is not str or not value
+                    or value != value.strip() for value in exact_ids)
+                or room.canonical_room_id != floor.room_entity_id
+                or room.document_id != floor.document_id
+                or room.revision_id != floor.revision_id
+                or room.source_sha256.lower() != floor.source_sha256.lower()
+                or room.snapshot_id != floor.snapshot_id
+                or room.page_id != floor.page_id
+                or room.source_room_face_record_id != floor.source_room_face_record_id
+                or not _same_original_floor_room_ring(
+                    points, room.polygon_pdf_pts, quantity_id=quantity.quantity_id,
+                )
+            ):
+                raise SourceClosedRunConflictError(
+                    f"floor original canonical room geometry/source mismatch: {quantity.quantity_id}"
+                )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,

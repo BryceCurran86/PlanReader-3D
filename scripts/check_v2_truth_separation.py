@@ -1,6 +1,7 @@
 """Fail CI when active Full Plan V2 truth and production code change together."""
 from __future__ import annotations
 
+import argparse
 from pathlib import PurePosixPath
 import sys
 from typing import Iterable, Sequence
@@ -44,6 +45,10 @@ _ROOT_RUNTIME_MANIFESTS = frozenset({
     # production execution, even though neither has a Python/JS suffix.
     "Dockerfile",
     "render.yaml",
+    # The shipped Windows entrypoint installs runtime dependencies and starts
+    # the same commercial Streamlit app. It is executable release control,
+    # not a documentation-only batch file.
+    "RUN_PLANREADER_WINDOWS.bat",
 })
 
 
@@ -57,36 +62,39 @@ def _is_root_runtime_manifest(path: str) -> bool:
     )
 
 
-def _normalize(path: str) -> str:
-    normalized = path.replace("\\", "/")
+def _normalize(path: str, *, git_path: bool = False) -> str:
+    # Git -z emits repository-relative POSIX paths. A backslash in one of
+    # those paths is a literal filename character, NOT a directory separator.
+    # Retain historical Windows-path support for non-Git helper callers.
+    normalized = path if git_path else path.replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized
 
 
-def is_v2_truth_file(path: str) -> bool:
-    normalized = _normalize(path)
+def is_v2_truth_file(path: str, *, git_path: bool = False) -> bool:
+    normalized = _normalize(path, git_path=git_path)
     if not normalized.startswith(_V2_ROOT):
         return False
     return PurePosixPath(normalized).name in _V2_TRUTH_FILENAMES
 
 
-def is_benchmark_defining_file(path: str) -> bool:
+def is_benchmark_defining_file(path: str, *, git_path: bool = False) -> bool:
     """Everything that defines or feeds the frozen benchmark: the named truth files, ANY other file in the V2 tree
     (evaluators, reconcilers, identity maps, runners) and the original source PDFs.
 
     ``is_v2_truth_file`` stays the narrow predicate for the six truth filenames; this wider one is what the separation gate uses, so
     scorer code, tolerances or a source PDF cannot change in the same PR as production code.
     """
-    normalized = _normalize(path)
-    if is_v2_truth_file(normalized) or normalized.startswith(_V2_ROOT):
+    normalized = _normalize(path, git_path=git_path)
+    if is_v2_truth_file(normalized, git_path=git_path) or normalized.startswith(_V2_ROOT):
         return True
     lowered = normalized.lower()
     return lowered.startswith(_SOURCE_PDF_ROOT) and PurePosixPath(lowered).suffix == ".pdf"
 
 
-def is_production_code_file(path: str) -> bool:
-    normalized = _normalize(path)
+def is_production_code_file(path: str, *, git_path: bool = False) -> bool:
+    normalized = _normalize(path, git_path=git_path)
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False
     if _is_root_runtime_manifest(normalized):
@@ -98,16 +106,24 @@ def is_production_code_file(path: str) -> bool:
     return PurePosixPath(normalized).suffix.lower() in _PRODUCTION_SUFFIXES
 
 
-def find_separation_violation(changed_paths: Sequence[str]) -> tuple[list[str], list[str]]:
-    truth_files = sorted({p for p in changed_paths if is_benchmark_defining_file(p)})
-    production_files = sorted({p for p in changed_paths if is_production_code_file(p)})
+def find_separation_violation(
+    changed_paths: Sequence[str], *, git_path: bool = False,
+) -> tuple[list[str], list[str]]:
+    truth_files = sorted({
+        p for p in changed_paths if is_benchmark_defining_file(p, git_path=git_path)
+    })
+    production_files = sorted({
+        p for p in changed_paths if is_production_code_file(p, git_path=git_path)
+    })
     if truth_files and production_files:
         return truth_files, production_files
     return [], []
 
 
-def check_paths(changed_paths: Sequence[str]) -> None:
-    truth_files, production_files = find_separation_violation(changed_paths)
+def check_paths(changed_paths: Sequence[str], *, git_path: bool = False) -> None:
+    truth_files, production_files = find_separation_violation(
+        changed_paths, git_path=git_path,
+    )
     if not truth_files:
         return
     raise SystemExit(
@@ -132,10 +148,39 @@ def _stdin_paths(lines: Iterable[str]) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def main() -> int:
-    changed_paths = _stdin_paths(sys.stdin)
+def _stdin_paths_from_bytes(payload: bytes, *, require_nul: bool = False) -> list[str]:
+    """Parse Git -z paths losslessly; preserve the legacy newline CLI for audits.
+
+    Git's ordinary --name-only output C-quotes non-ASCII, tab and newline
+    filenames, so splitting its text output can conceal a frozen V2 path.
+    CI MUST pass --nul and git diff -z; reject malformed nonempty streams.
+    """
+    if not payload:
+        return []
+    if b"\x00" not in payload:
+        if require_nul:
+            raise ValueError("V2 separation requires NUL-delimited git diff -z paths")
+        return _stdin_paths(payload.decode("utf-8").splitlines())
+    if not payload.endswith(b"\x00"):
+        raise ValueError("Incomplete NUL-delimited V2 changed-path stream")
+    return [part.decode("utf-8") for part in payload.split(b"\x00")[:-1] if part]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--nul", action="store_true",
+        help="require lossless NUL-delimited git diff -z input (mandatory in CI)",
+    )
+    args = parser.parse_args(argv)
     try:
-        check_paths(changed_paths)
+        changed_paths = _stdin_paths_from_bytes(
+            sys.stdin.buffer.read(), require_nul=args.nul,
+        )
+        check_paths(changed_paths, git_path=args.nul)
+    except (ValueError, UnicodeError) as exc:
+        print(f"Full Plan V2 truth / production separation input invalid: {exc}", file=sys.stderr)
+        return 1
     except SystemExit as exc:
         print(str(exc), file=sys.stderr)
         return 1

@@ -578,15 +578,29 @@ def _generate_project_handoff_locked(
             )
 
     if clean_family_group in {"all", "surfaces"}:
-        floor_finish_quantities = _non_abstained(
+        original_floor_finishes = tuple(
             getattr(claim, "floor_finish_quantity_evidence", ())
+        )
+        floor_finish_quantities = _non_abstained(original_floor_finishes)
+        # The project handoff must not filter a contradictory ORIGINAL FIRM
+        # quantity before the family source sealer gets to reject it.  Direct
+        # floor-finish sealing already vets numeric source blockers, but that
+        # check used to be skipped when every such quantity was filtered here.
+        disputed_numeric_floor_finish = any(
+            isinstance(quantity, QuantityEvidence)
+            and quantity.family == "floor_finish_area"
+            and not quantity.abstained
+            and quantity.value is not None
+            and bool(quantity.blocking_reasons)
+            for quantity in original_floor_finishes
         )
     else:
         floor_finish_quantities = ()
+        disputed_numeric_floor_finish = False
     summary["family_counts"]["floor_finish_area"] = len(
         floor_finish_quantities
     )
-    if floor_finish_quantities:
+    if floor_finish_quantities or disputed_numeric_floor_finish:
         family_runs.append(
             (
                 "floor_finish_area",

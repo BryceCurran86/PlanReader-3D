@@ -101,8 +101,9 @@ def _require_exact_ceiling_finish_semantic(
 
 
 def _require_one_ceiling_per_original_area(
-    owners: dict[str, str],
+    owners: dict[tuple[str, str, str], str],
     *,
+    source_root: tuple[str, str],
     upstream_area_id: object,
     canonical_ceiling_id: str,
 ) -> None:
@@ -116,12 +117,15 @@ def _require_one_ceiling_per_original_area(
         raise SourceClosedRunConflictError(
             "ceiling original upstream room-area issuer is invalid"
         )
-    previous = owners.get(upstream_area_id)
+    # PDF producer IDs are document/revision-local. Two independent
+    # originals can reuse an area receipt without sharing physical ownership.
+    original_key = (*source_root, upstream_area_id)
+    previous = owners.get(original_key)
     if previous is not None and previous != canonical_ceiling_id:
         raise SourceClosedRunConflictError(
             "one original room-area source reissued as competing ceiling surfaces"
         )
-    owners[upstream_area_id] = canonical_ceiling_id
+    owners[original_key] = canonical_ceiling_id
 
 
 def build_live_ceiling_lining_source_traces(
@@ -188,9 +192,25 @@ def build_live_ceiling_lining_source_traces(
                 f"duplicate or invalid original ceiling-lining quantity id: {original_id}"
             )
         seen_source_ids.add(original_id)
-    source_area_ceiling_owners: dict[str, str] = {}
-    original_mark_ceiling_owners: dict[str, str] = {}
-    original_occurrence_ceiling_owners: dict[str, str] = {}
+    # A numeric original with unresolved producer blockers cannot become a
+    # source-closed ceiling simply because the direct seal caller bypasses the
+    # customer projection's separate inventory veto. Keep this AFTER the
+    # complete original family/ID census so duplicate source IDs retain their
+    # established first-failure classification. True ABSTAINED rivals remain
+    # in the original material-mark census below.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if (
+            not original.abstained
+            and original.value is not None
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "numeric ceiling-lining source quantity retains unresolved blockers: "
+                f"{original.quantity_id}"
+            )
+    source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
+    original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
+    original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
     # Preserve source-owned rivals rejected by geometry/measurement authority.
     # The FIRM-only loop below cannot independently see such claimants.
     abstained_original_marks: set[tuple[str, str, str, str]] = set()
@@ -292,11 +312,27 @@ def build_live_ceiling_lining_source_traces(
             room is None
             or rooms_by_physical_id.get(physical_room_id) is not room
             or _clean(ceiling.room_entity_id) != canonical_room_id
-            or _clean(room.source_room_face_record_id)
-            != _clean(metadata.get("source_room_face_record_id"))
         ):
             raise SourceClosedRunConflictError(
                 f"ceiling quantity references unknown room identity: "
+                f"{quantity.quantity_id}"
+            )
+
+        # A source room-face is a producer-owned physical geometry receipt.
+        # Normalizing both sides allowed two missing, padded or type-coerced
+        # receipts to agree and inherit the original room's ceiling m².
+        # Preserve the exact original source identity before any FIRM seal.
+        original_face_id = metadata.get("source_room_face_record_id")
+        producer_face_id = room.source_room_face_record_id
+        if (
+            type(producer_face_id) is not str
+            or not producer_face_id
+            or producer_face_id != producer_face_id.strip()
+            or type(original_face_id) is not str
+            or original_face_id != producer_face_id
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity original room-face receipt mismatch: "
                 f"{quantity.quantity_id}"
             )
 
@@ -345,15 +381,39 @@ def build_live_ceiling_lining_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        # Do not accept an invented, padded or missing original root simply
+        # because a caller has made the metadata and canonical object agree.
+        # This is a negative check, not original-PDF authentication.
         if (
-            not _clean(metadata.get("support_snapshot_id"))
-            or not _clean(metadata.get("support_page_id"))
-            or not _clean(metadata.get("support_viewport_id"))
+            not _valid_original_source_sha(ceiling.source_sha256)
+            or not _valid_original_source_sha(metadata.get("source_sha256"))
+            or type(ceiling.revision_id) is not str
+            or not ceiling.revision_id
+            or ceiling.revision_id != ceiling.revision_id.strip()
+            or type(metadata.get("revision_id")) is not str
+            or metadata["revision_id"] != ceiling.revision_id
         ):
             raise SourceClosedRunConflictError(
-                f"ceiling quantity lacks semantic support lineage: "
-                f"{quantity.quantity_id}"
+                f"ceiling original source root is malformed: {quantity.quantity_id}"
             )
+
+        # RCP support IDs are independent original semantic-source receipts.
+        # Stringifying or stripping an imported value here would allow a
+        # reconstructed FIRM row to borrow an unproved page, viewport or
+        # snapshot before the actual seal/customer source trace is built.
+        for support_field in (
+            "support_snapshot_id", "support_page_id", "support_viewport_id",
+        ):
+            receipt = metadata.get(support_field)
+            if (
+                type(receipt) is not str
+                or not receipt
+                or receipt != receipt.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling quantity lacks exact semantic support lineage: "
+                    f"{quantity.quantity_id} ({support_field})"
+                )
 
         if _clean(metadata.get("row_role")) != "ceiling_area":
             raise SourceClosedRunConflictError(
@@ -501,6 +561,7 @@ def build_live_ceiling_lining_source_traces(
             )
         _require_one_ceiling_per_original_area(
             source_area_ceiling_owners,
+            source_root=root,
             upstream_area_id=metadata.get("upstream_room_area_quantity_id"),
             canonical_ceiling_id=canonical_ceiling_id,
         )
@@ -512,12 +573,13 @@ def build_live_ceiling_lining_source_traces(
             (mark_id, original_mark_ceiling_owners),
             (occurrence_id, original_occurrence_ceiling_owners),
         ):
-            earlier = owners.get(original_id)
+            original_key = (*root, original_id)
+            earlier = owners.get(original_key)
             if earlier is not None and earlier != canonical_ceiling_id:
                 raise SourceClosedRunConflictError(
                     f"original RCP material mark has competing ceilings: {original_id}"
                 )
-            owners[original_id] = canonical_ceiling_id
+            owners[original_key] = canonical_ceiling_id
         traces[quantity.quantity_id] = trace
 
     return MappingProxyType(traces)
