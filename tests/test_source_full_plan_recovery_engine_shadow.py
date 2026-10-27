@@ -665,3 +665,29 @@ def test_untyped_page_input_abstains_without_partial_source_recovery():
     assert result.status == EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
     assert result.record is None
+
+
+@pytest.mark.parametrize("invalid_reason", (None, 123, object()))
+def test_blocked_page_invalid_reason_preserves_healthy_sibling(invalid_reason):
+    """Bad caller-owned reason cannot crash or poison a distinct source page."""
+    blocked = replace(
+        _healthy_page("blocked_source_page"),
+        is_blocked=True,
+        block_reason=invalid_reason,
+    )
+    healthy = _healthy_page("healthy_source_page")
+    for pages in ((blocked, healthy), (healthy, blocked)):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages,
+        )
+        assert result.record is not None
+        assert result.record.successful_pages_count == 1
+        assert result.record.quarantined_pages_count == 1
+        assert result.record.total_finish_zones_recovered == 1
+        quarantined = [v for v in result.record.page_verdicts if v.is_quarantined]
+        assert len(quarantined) == 1
+        assert quarantined[0].reason_codes == (
+            PAGE_COMPLEXITY_BLOCKED, PAGE_QUARANTINED_SAFELY
+        )
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
