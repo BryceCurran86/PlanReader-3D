@@ -225,9 +225,38 @@ def bind_source_finish_mark_to_corresponded_floor_shadow(
         or (measured.source_sha256,measured.revision_id)
           != (correspondence.source_sha256,correspondence.revision_id)
         or measured.physical_room_id != correspondence.physical_room_id
+        # A matching room name, source SHA and revision cannot carry a figured
+        # area between different original physical room pages.
+        or type(measured.page_id) is not str
+        or measured.page_id != correspondence.original_room_page_id
+        # Reconstructed shadow records are not source authority: even as
+        # candidates, they must retain the physical wall/room receipt chain.
+        or not _ids(correspondence.wall_equivalence_receipts)
+        or any(
+            type(value) is not str or not value or value != value.strip()
+            for value in (
+                correspondence.canonical_floor_id,
+                correspondence.source_room_face_record_id,
+                correspondence.producer_snapshot_id,
+                correspondence.decision_scope_id,
+                correspondence.original_finish_page_id,
+            )
+        )
+        or correspondence.original_finish_page_id == correspondence.original_room_page_id
+        or measured.diagnostic_only is not True
+        or correspondence.diagnostic_only is not True
         or type(marks) not in (list,tuple)
     ):
         return block("original_floor_finish_correspondence_unavailable")
+    # No copied or malformed candidate number, including a bool, NaN or inf,
+    # can survive the original source-to-physical-floor diagnostic handoff.
+    # This remains CANDIDATE: the metric publisher is a separate authority.
+    if (
+        type(measured.candidate_area_m2) not in (int, float)
+        or not math.isfinite(float(measured.candidate_area_m2))
+        or measured.candidate_area_m2 <= 0
+    ):
+        return block("original_floor_finish_metric_area_unavailable")
     shape=_safe_polygon(correspondence.finish_support_polygon_pts)
     if shape is None:
         return block("original_floor_finish_support_polygon_invalid")
