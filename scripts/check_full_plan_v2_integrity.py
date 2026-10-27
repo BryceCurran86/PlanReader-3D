@@ -270,6 +270,12 @@ def reference_document_failures(manifest: Any, project: Path) -> list[str]:
 def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_DIR) -> list[str]:
     failures: list[str] = []
 
+    # Checking only final JSON files and child directories is insufficient:
+    # a symlinked suite root can redirect every otherwise-regular child into
+    # an external frozen-truth namespace. Reject that alias before any read.
+    if not _regular_entry(root, directory=True):
+        return ["suite/manifest validation failed: frozen suite root is missing or aliased"]
+
     try:
         suite = _json(root / "manifest.json")
         if str(suite.get("schema_version")) != SCHEMA_VERSION:
