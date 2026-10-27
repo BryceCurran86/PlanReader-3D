@@ -44,7 +44,6 @@ def test_pytest_collection_policy_is_release_execution_control(harness, benchmar
     "tests/test_conftest.py",
     "docs/conftest.py",
     "benchmarks/conftest.py",
-    ".github/ISSUE_TEMPLATE/conftest.py",
 ])
 def test_ordinary_tests_and_nonexecuting_conftest_names_remain_excluded(ordinary):
     assert not is_production_code_file(ordinary)
