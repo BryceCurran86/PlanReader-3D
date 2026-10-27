@@ -60,8 +60,9 @@ def test_windows_helper_path_is_detected_without_reinterpreting_git_backslashes(
     windows = r"tests\unit\conftest.py"
     assert is_production_code_file(windows)
     assert find_separation_violation([TRUTH, windows]) == ([TRUTH], [windows])
-    # Git -z uses POSIX separators: a literal backslash is not a directory.
-    assert not is_production_code_file(windows, git_path=True)
+    # Git -z uses POSIX separators. A literal backslash does not create a
+    # tests/ subdirectory; the root-level .py suffix is independently code.
+    assert is_production_code_file(windows, git_path=True)
 
 
 def test_cli_nul_delimited_git_paths_fail_closed_on_frozen_truth_cochange():
