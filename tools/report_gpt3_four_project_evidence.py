@@ -198,27 +198,44 @@ def _enforce_mapped_production_family_trade(
 def _resolve_original_paths(
     source_dir: Path, project_id: str, source_documents: tuple,
 ) -> tuple[list[Path], list[str]]:
-    """Allow SHA-checked flat or project-scoped original packages.
+    """Select genuine flat/scoped sources without silently hiding unsafe files.
 
-    If both contain distinct source bytes for one manifest document, refuse
-    to select either. No candidate is preferred by file order or filename.
+    Only a proven FileNotFoundError permits an absent alternative. Do not use
+    Path.is_file(), Path.resolve() or ordinary stat/open on source candidates:
+    those may suppress an I/O failure or follow a source symlink. Two separate
+    regular paths are interchangeable ONLY when stable no-follow source bytes
+    match. This early ledger guard also protects direct Python callers; the
+    CLI's later publication snapshot remains an independent final guard.
     """
     selected: list[Path] = []
     conflicts: list[str] = []
     for doc in source_documents:
         scoped = source_dir / project_id / doc.name
         flat = source_dir / doc.name
-        if scoped.is_file() and flat.is_file() and scoped.resolve() != flat.resolve():
+        try:
+            scoped_kind = _publication_input_path_kind(scoped)
+            flat_kind = _publication_input_path_kind(flat)
+        except OSError:
+            conflicts.append("unsafe_original_source_path:" + doc.name)
+            selected.append(flat)
+            continue
+        if scoped_kind not in {"file", "missing"} or flat_kind not in {"file", "missing"}:
+            conflicts.append("unsafe_original_source_path:" + doc.name)
+            selected.append(flat)
+            continue
+        if scoped_kind == "file" and flat_kind == "file":
             try:
                 same = (
-                    scoped.stat().st_size == flat.stat().st_size
-                    and _sha256(scoped) == _sha256(flat)
+                    _stable_original_digest(scoped)[0]
+                    == _stable_original_digest(flat)[0]
                 )
-            except OSError:
-                same = False
+            except (OSError, ValueError):
+                conflicts.append("unsafe_original_source_path:" + doc.name)
+                selected.append(flat)
+                continue
             if not same:
                 conflicts.append("conflicting_flat_and_scoped_original:" + doc.name)
-        selected.append(scoped if scoped.is_file() else flat)
+        selected.append(scoped if scoped_kind == "file" else flat)
     return selected, conflicts
 
 
