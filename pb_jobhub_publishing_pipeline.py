@@ -301,20 +301,25 @@ def execute_jobhub_publishing(
         f"Payload: {package.payload_hash} | Published by {user_name}"
     )
 
-    # Reserve the SQLite writer before reading the destination identity.
-    # A previous bridge.query() used a different read/connection and could
-    # approve job_no A, then publish into the same numeric id after another
-    # writer changed it to job_no B. Keep identity, duplicate check and both
-    # inserts in one transaction; a pre-existing caller transaction already
-    # owns its SQLite read/write isolation and is not restarted.
+    # A previous bridge.query() checked job_no on a separate connection,
+    # allowing another writer to change the destination before package INSERT.
+    # Reserve a SQLite writer or lock the PostgreSQL job row before checking
+    # its identity. Keep that lock through duplicate detection and BOTH writes.
+    # A pre-existing SQLite caller transaction is not restarted.
+    is_postgres = getattr(bridge, "kind", "sqlite") == "postgres"
+    placeholder = "%s" if is_postgres else "?"
     with bridge.connect() as conn:
         cur = conn.cursor()
-        if not conn.in_transaction:
-            cur.execute("BEGIN IMMEDIATE")
+        if is_postgres:
+            # psycopg2 starts a transaction on first statement; FOR UPDATE
+            # prevents a competing job_no change until this transaction ends.
+            cur.execute("SELECT job_no FROM jobs WHERE id=%s FOR UPDATE", (target_job_id,))
+        else:
+            if not conn.in_transaction:
+                cur.execute("BEGIN IMMEDIATE")
+            cur.execute("SELECT job_no FROM jobs WHERE id=?", (target_job_id,))
 
         # The numeric JobHub id alone is never physical project identity.
-        # Re-read job_no under the reserved transaction, not via bridge.query.
-        cur.execute("SELECT job_no FROM jobs WHERE id=?", (target_job_id,))
         target_row = cur.fetchone()
         if target_row is None:
             raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
@@ -331,7 +336,7 @@ def execute_jobhub_publishing(
 
         # Check existing package duplicate
         cur.execute(
-            "SELECT id FROM painting_takeoff_packages WHERE job_id=? AND notes LIKE ?",
+            f"SELECT id FROM painting_takeoff_packages WHERE job_id={placeholder} AND notes LIKE {placeholder}",
             (target_job_id, f"%{package.payload_hash}%"),
         )
         dup = cur.fetchone()
@@ -346,7 +351,8 @@ def execute_jobhub_publishing(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cur.execute(
-            insert_pkg_sql,
+            (insert_pkg_sql.replace("?", "%s") + " RETURNING id")
+            if is_postgres else insert_pkg_sql,
             (
                 target_job_id,
                 takeoff_no,
@@ -359,7 +365,7 @@ def execute_jobhub_publishing(
                 notes_str,
             ),
         )
-        pkg_id = cur.lastrowid
+        pkg_id = cur.fetchone()[0] if is_postgres else cur.lastrowid
 
         # Insert lines
         insert_line_sql = """
@@ -369,7 +375,7 @@ def execute_jobhub_publishing(
         """
         for q in package.quantities:
             cur.execute(
-                insert_line_sql,
+                insert_line_sql.replace("?", "%s") if is_postgres else insert_line_sql,
                 (
                     pkg_id,
                     q.section,
