@@ -278,24 +278,6 @@ def execute_jobhub_publishing(
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
 
-    # Verify target job exists in JobHub
-    # The numeric row ID is not an authoritative cross-system project ID.
-    job_rows = bridge.query(
-        "SELECT id, status, job_no FROM jobs WHERE id=?", (target_job_id,)
-    )
-    if not job_rows:
-        raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
-    target_no = job_rows[0].get("job_no")
-    original_no = package.project_identity.job_no
-    if (
-        type(target_no) is not str
-        or not target_no.strip()
-        or target_no.strip() != original_no.strip()
-    ):
-        raise RuntimeError(
-            "JobHub target job number conflicts with PlanReader project identity"
-        )
-
     # Calculate aggregates
     total_qty_m2 = 0.0
     interior_m2 = 0.0
@@ -319,13 +301,42 @@ def execute_jobhub_publishing(
         f"Payload: {package.payload_hash} | Published by {user_name}"
     )
 
-    # Insert package header and line items into JobHub
+    # A previous bridge.query() checked job_no on a separate connection,
+    # allowing another writer to change the destination before package INSERT.
+    # Reserve a SQLite writer or lock the PostgreSQL job row before checking
+    # its identity. Keep that lock through duplicate detection and BOTH writes.
+    # A pre-existing SQLite caller transaction is not restarted.
+    is_postgres = getattr(bridge, "kind", "sqlite") == "postgres"
+    placeholder = "%s" if is_postgres else "?"
     with bridge.connect() as conn:
         cur = conn.cursor()
+        if is_postgres:
+            # psycopg2 starts a transaction on first statement; FOR UPDATE
+            # prevents a competing job_no change until this transaction ends.
+            cur.execute("SELECT job_no FROM jobs WHERE id=%s FOR UPDATE", (target_job_id,))
+        else:
+            if not conn.in_transaction:
+                cur.execute("BEGIN IMMEDIATE")
+            cur.execute("SELECT job_no FROM jobs WHERE id=?", (target_job_id,))
+
+        # The numeric JobHub id alone is never physical project identity.
+        target_row = cur.fetchone()
+        if target_row is None:
+            raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
+        target_no = target_row[0]
+        original_no = package.project_identity.job_no
+        if (
+            type(target_no) is not str
+            or not target_no.strip()
+            or target_no.strip() != original_no.strip()
+        ):
+            raise RuntimeError(
+                "JobHub target job number conflicts with PlanReader project identity"
+            )
 
         # Check existing package duplicate
         cur.execute(
-            "SELECT id FROM painting_takeoff_packages WHERE job_id=? AND notes LIKE ?",
+            f"SELECT id FROM painting_takeoff_packages WHERE job_id={placeholder} AND notes LIKE {placeholder}",
             (target_job_id, f"%{package.payload_hash}%"),
         )
         dup = cur.fetchone()
@@ -340,7 +351,8 @@ def execute_jobhub_publishing(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cur.execute(
-            insert_pkg_sql,
+            (insert_pkg_sql.replace("?", "%s") + " RETURNING id")
+            if is_postgres else insert_pkg_sql,
             (
                 target_job_id,
                 takeoff_no,
@@ -353,7 +365,7 @@ def execute_jobhub_publishing(
                 notes_str,
             ),
         )
-        pkg_id = cur.lastrowid
+        pkg_id = cur.fetchone()[0] if is_postgres else cur.lastrowid
 
         # Insert lines
         insert_line_sql = """
@@ -363,7 +375,7 @@ def execute_jobhub_publishing(
         """
         for q in package.quantities:
             cur.execute(
-                insert_line_sql,
+                insert_line_sql.replace("?", "%s") if is_postgres else insert_line_sql,
                 (
                     pkg_id,
                     q.section,
