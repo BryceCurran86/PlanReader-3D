@@ -223,12 +223,21 @@ def measure_figured_wall_lining_shadow(
            for k in side_lengths):
         return block("source_figured_wall_openings_exceed_physical_host")
     net = gross - math.fsum(area for _, area in deductions)
-    skirting = perimeter - math.fsum(side_opening_widths.values()) / 1000.0
-    if not all(math.isfinite(x) for x in (gross, net, skirting)) or net <= 0 or skirting < 0:
+    if not all(math.isfinite(x) for x in (gross, net, perimeter)) or net <= 0:
         return block("source_figured_wall_net_surface_unavailable")
+    # A source-signed frame/host/area proves a wall-lining void, NOT that the
+    # opening interrupts skirting at the finished floor. The opening contract
+    # has no original sill/threshold/floor-contact receipt. Even a door label
+    # is insufficient: preserve the independent lining calculation but do not
+    # subtract any unclassified opening width from the skirting candidate.
+    # The no-opening perimeter remains a valid shadow candidate.
+    skirting = perimeter if not openings else None
+    reasons = ("source_figured_wall_surface_shadow_only",)
+    if openings:
+        reasons += ("source_figured_skirting_opening_floor_contact_unproven",)
     return FiguredWallTakeoffShadow(
         EvidenceResolutionStatus.CANDIDATE,
-        ("source_figured_wall_surface_shadow_only",),
+        reasons,
         perimeter, gross, net, tuple(sorted(deductions)), skirting,
         tuple(sorted(all_receipts)),
     )

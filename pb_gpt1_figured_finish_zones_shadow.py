@@ -154,6 +154,25 @@ def measure_figured_finish_zones_shadow(
         return block("figured_finish_total_exceeds_source_room")
     if require_complete_finish_coverage and abs(residual) > 1e-8 * max(1., total):
         return block("figured_finish_physical_zone_coverage_incomplete")
+    # A sum of figured m² is not proof that the ORIGINAL drawn finish zones
+    # physically cover the entire room. A gap at a doorway/finish transition
+    # must not disappear merely because inconsistent figure totals add to the
+    # parent area. Keep ordinary partial-zone candidates explicitly partial.
+    if (
+        require_complete_finish_coverage
+        or abs(residual) <= 1e-8 * max(1., enclosing_room.candidate_area_m2)
+    ):
+        try:
+            from shapely.ops import unary_union
+
+            uncovered = parent.difference(unary_union(shapes)).area
+        except Exception:
+            return block("figured_finish_original_source_coverage_unavailable")
+        if (
+            not math.isfinite(uncovered)
+            or uncovered > 1e-9 * max(1., parent.area)
+        ):
+            return block("figured_finish_original_source_coverage_incomplete")
     return FiguredFinishZoneTakeoffShadow(
         EvidenceResolutionStatus.CANDIDATE,
         ("figured_source_finish_zones_shadow_only",),
