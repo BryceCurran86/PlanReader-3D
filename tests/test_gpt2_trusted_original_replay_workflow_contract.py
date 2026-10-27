@@ -17,6 +17,7 @@ HEADS = {
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
     "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
+    "d15_ink": "c52f45f3365b74f3b4070ea051e338329f09de76",
 }
 
 
@@ -186,6 +187,43 @@ def test_new_immutable_targets_are_collected_source_free_before_private_replay()
     assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in raw
     assert "ORIGINAL_SOURCES_TOKEN" not in raw
     assert "secrets." not in raw
+
+
+def test_d15_ink_immutable_source_positive_target_is_exact_and_source_free():
+    """New D15 glyph-order head must pass only owner/main offline private replay."""
+    guard = next(step for step in _load()["jobs"]["original"]["steps"]
+                 if step["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    matches = re.findall(
+        r"(?m)^  d15_ink\\)\\n(?P<body>.*?)(?=^    ;;)",
+        script, flags=re.DOTALL | re.MULTILINE,
+    )
+    assert len(matches) == 1
+    body = matches[0]
+    assert "approved_base=b4a9994a98d3d2d8463c490469176f0724b780cc" in body
+    assert "approved_head=" + HEADS["d15_ink"] in body
+    assert (
+        "expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|"
+        "tests/test_gpt2_mary_original_figured_door_leader_shadow.py'"
+    ) in body
+    assert (
+        "original_test=test_private_original_maryborough_native_leader_source_if_provisioned"
+    ) in body
+    assert "test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py" in body
+    assert "github.event.inputs" not in body
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    row = (
+        "d15_ink|" + HEADS["d15_ink"]
+        + "|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::"
+        "test_private_original_maryborough_native_leader_source_if_provisioned"
+        "|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::"
+        "test_genuine_horizontal_figured_word_remains_source_only_not_a_door"
+    )
+    assert public.count(row + "\\n") == 1
+    assert "ORIGINAL_SOURCES_TOKEN" not in public
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
+    assert "--network none --read-only --cap-drop ALL" in public
 
 
 def test_token_only_present_in_frozen_manifest_provision_step():
