@@ -101,9 +101,14 @@ jobs:
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
           PYTHONPATH=. python -m tools.gpt3_original_source_preflight --pdf "$PDF" --expected-sha256 "$SHA"
-          /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_maryborough_original_floor_score_input \
+          # Producer may print original page geometry / signed quantities.
+          # Keep its full log private to this ephemeral job; never stream it.
+          if ! /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_maryborough_original_floor_score_input \
             --pdf "$PDF" \
-            --output-dir "$OUT/production" 2>&1 | tee "$OUT/producer_console.log"
+            --output-dir "$OUT/production" > "$OUT/producer_console.log" 2>&1; then
+            echo "::error::Original Maryborough producer FAILED (private details withheld)"
+            exit 1
+          fi
           python - <<'PY'
           import json
           from pathlib import Path
@@ -156,7 +161,7 @@ jobs:
               "source_sha_verified": True,
               "signed_quantity_count": 3,
               "customer_verified_count": 3,
-              "sealed_run_fingerprint": sealed.fingerprint,
+              "sealed_run_integrity_verified": True,
               "benchmark_status": "IDENTITY_MAP_REQUIRED_UNPUBLISHED",
           },sort_keys=True))
           PY
@@ -210,7 +215,9 @@ jobs:
                   for ref in item["object_refs"])
               for item in d["produced_items"]
           )
-          print("MARYBOROUGH_CURRENT_SOURCE_EXACT24",json.dumps(d,sort_keys=True))
+          # Scored per-object payload carries private source-owned identities.
+          # Assertions above are the gate; stdout is status-only and unpublished.
+          print("MARYBOROUGH_CURRENT_SOURCE_EXACT24_VERIFIED_UNPUBLISHED")
           PY
 
       - name: Destroy private originals and unpublished source reports
