@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from stat import S_ISREG
+from stat import S_ISDIR, S_ISREG
 from pathlib import Path
 import re
 import sys
@@ -63,10 +63,45 @@ def _unique_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _regular_entry(path: Path, *, directory: bool = False) -> bool:
+    """Reject symlinked or nonregular frozen metadata entries without following them."""
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return False
+    return S_ISDIR(mode) if directory else S_ISREG(mode)
+
+
 def _json(path: Path) -> Any:
-    return json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_members,
-    )
+    """Read one stable, regular frozen JSON inode without following final symlinks.
+
+    The canonical manifest parser is unchanged; this strict integrity preflight
+    never grants source or customer authority to an aliased JSON file.
+    """
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise ValueError("frozen JSON cannot be inspected") from exc
+    if not S_ISREG(before.st_mode):
+        raise ValueError("frozen JSON is not a regular file")
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not S_ISREG(opened.st_mode):
+                raise ValueError("frozen JSON changed during verification")
+            raw = stream.read()
+            completed = os.fstat(stream.fileno())
+        after = path.lstat()
+    except OSError as exc:
+        raise ValueError("frozen JSON changed or became inaccessible") from exc
+    if len(raw) != before.st_size or any(
+        getattr(snapshot, field) != getattr(before, field)
+        for snapshot in (opened, completed, after)
+        for field in _SOURCE_IDENTITY_FIELDS
+    ):
+        raise ValueError("frozen JSON changed during verification")
+    return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_members)
 
 
 def _collect_object_refs(value: Any) -> set[str]:
@@ -222,8 +257,12 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
         # it would join a second, potentially changed project-id list.
         # Use the existing project parser on only our validated components.
         manifests = []
+        if not _regular_entry(root / "projects", directory=True):
+            raise ValueError("frozen projects directory is missing or aliased")
         for project_id in raw_project_ids:
             manifest_path = root / "projects" / project_id / "source_manifest.json"
+            if not _regular_entry(manifest_path.parent, directory=True):
+                raise ValueError(f"project directory is missing or aliased: {project_id}")
             # The canonical loader accepts duplicate JSON keys (last-wins).
             # Reject ambiguous members, including nested source/verified-item
             # records, before allowing that loader to mint manifest authority.
@@ -251,8 +290,8 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
             "verification_report.json",
             "unresolved_items.json",
         ):
-            if not (project / required_name).is_file():
-                failures.append(f"{manifest.project_id}: missing {required_name}")
+            if not _regular_entry(project / required_name):
+                failures.append(f"{manifest.project_id}: missing {required_name} or unsafe file type")
 
         for source in manifest.source_documents:
             if not _safe_path_component(source.name):
