@@ -34,6 +34,7 @@ COMPETING_FINISH_CODES_IN_ROOM = "competing_finish_codes_in_room"
 COMPETING_FINISH_MARKS_IN_ROOM = "competing_finish_marks_in_room"
 INVALID_ROOM_POLYGON = "invalid_room_polygon"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
+SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED = "source_finish_page_correspondence_unverified"
 DOORWAY_TRANSITION_MISALIGNED = "doorway_transition_misaligned"
 DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED = (
     "doorway_threshold_geometry_aligned_unauthenticated"
@@ -104,6 +105,8 @@ class SourceFloorFinishMark:
     def __post_init__(self) -> None:
         if not isinstance(self.occurrence_id, str) or not self.occurrence_id.strip():
             raise ValueError("occurrence_id must be non-empty string")
+        if not isinstance(self.page_id, str) or not self.page_id.strip():
+            raise ValueError("page_id must be non-empty string")
         if not isinstance(self.material_code, str) or not self.material_code.strip():
             raise ValueError("material_code must be non-empty string")
         p = _point(self.mark_center_pt)
@@ -299,6 +302,15 @@ def evaluate_source_floor_finish_ownership_shadow(
             selector=selector,
         )
 
+    # This shadow API has no authenticated cross-view registration receipt.
+    # Equal native x/y coordinates on distinct pages are not physical identity.
+    if finish_mark.page_id != selector.page_id:
+        return SourceFloorFinishOwnershipResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,),
+            selector=selector,
+        )
+
     # 2. Polygon verification
     clean_poly: list[tuple[float, float]] = []
     for raw_pt in internal_face_polygon_pdf_pts:
@@ -345,6 +357,19 @@ def evaluate_source_floor_finish_ownership_shadow(
 
     # 4. Check competing finish marks inside the same polygon
     for other in other_finish_marks:
+        if not isinstance(other, SourceFloorFinishMark):
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
+        # A foreign-page rival is not a comparable source-mark universe.
+        if other.page_id != selector.page_id:
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,),
+                selector=selector,
+            )
         if other.occurrence_id == finish_mark.occurrence_id:
             continue
         if _point_in_polygon(other.mark_center_pt, clean_poly):
