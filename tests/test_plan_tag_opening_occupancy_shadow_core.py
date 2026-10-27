@@ -313,3 +313,5 @@ def test_the_record_id_binds_the_outcomes_and_is_stable():
 def test_the_standing_limits_say_what_an_occupancy_is_not():
     assert M.TAG_TYPE_VS_INSTANCE_UNPROVED in M.STANDING_LIMITS
     assert M.OCCUPANCY_IS_LOCATION_NOT_KIND_OR_HOST in M.STANDING_LIMITS
+    assert M.OCCUPANCY_INHERITS_EXISTENCE_AUTHORITY_ERRORS in M.STANDING_LIMITS
+    assert len(M.STANDING_LIMITS) == len(set(M.STANDING_LIMITS)) == 3

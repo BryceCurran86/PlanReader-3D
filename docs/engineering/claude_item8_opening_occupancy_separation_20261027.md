@@ -32,6 +32,10 @@ competing claim. This is a drafting-convention inference, not proof: a type mark
 instances (standing limit `tag_type_vs_instance_unproved`) and the occupancy is a location fact, not kind, host or
 identity (`occupancy_is_location_not_kind_host_or_identity`). It can only move a claimant from "rival" to "separated,
 retained with its witness", so it is the non-conservative direction and is kept opt-in and shadow-only.
+An occupancy also inherits every error of the producer's existence proof (standing limit
+`occupancy_inherits_physical_opening_existence_authority_errors`): a corroborated aperture that is not a real opening,
+for example an internal glazing subdivision gap, would be a false witness until that authority vetoes it, at which
+point the witness disappears with it because it is re-derived from the producer's own proofs on every run.
 
 ## 3. Proposed change (as built)
 

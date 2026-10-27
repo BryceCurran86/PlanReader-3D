@@ -63,7 +63,11 @@ OUTCOME_RECORD_MISMATCH = "occupying_record_differs_from_its_candidate"
 
 TAG_TYPE_VS_INSTANCE_UNPROVED = "tag_type_vs_instance_unproved"
 OCCUPANCY_IS_LOCATION_NOT_KIND_OR_HOST = "occupancy_is_location_not_kind_host_or_identity"
-STANDING_LIMITS = (TAG_TYPE_VS_INSTANCE_UNPROVED, OCCUPANCY_IS_LOCATION_NOT_KIND_OR_HOST)
+# An occupancy is only as sound as the producer's own existence proof: a corroborated aperture that is not a real
+# opening (for example an internal glazing subdivision gap) would be a false witness until that authority vetoes it.
+OCCUPANCY_INHERITS_EXISTENCE_AUTHORITY_ERRORS = "occupancy_inherits_physical_opening_existence_authority_errors"
+STANDING_LIMITS = (TAG_TYPE_VS_INSTANCE_UNPROVED, OCCUPANCY_IS_LOCATION_NOT_KIND_OR_HOST,
+                   OCCUPANCY_INHERITS_EXISTENCE_AUTHORITY_ERRORS)
 
 # Work bounds only: they stop a pathological page from being analysed, they decide nothing.
 _MAX_CANDIDATES = 50_000
