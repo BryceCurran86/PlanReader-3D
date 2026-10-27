@@ -164,7 +164,7 @@ jobs:
           public=Path("artifacts/maryborough-exact-24/public")
           public.mkdir(parents=True,exist_ok=True)
           (public/"reconciliation_integrity_receipt.json").write_text(
-              json.dumps(receipt,indent=2,sort_keys=True)+"\\n"
+              json.dumps(receipt,indent=2,sort_keys=True)+"\n"
           )
           print("MARYBOROUGH_EXACT_24",json.dumps({
               "denominator":receipt["denominator"],
