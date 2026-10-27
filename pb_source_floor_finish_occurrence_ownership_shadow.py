@@ -112,6 +112,14 @@ class SourceFloorFinishMark:
         p = _point(self.mark_center_pt)
         if p is None:
             raise ValueError("mark_center_pt must be a valid 2D coordinate")
+        # PyMuPDF native word address is block/line/word (nonnegative ints).
+        # Malformed or mutable source addresses must never enter sealed receipts.
+        if (
+            type(self.source_word_address) is not tuple
+            or len(self.source_word_address) != 3
+            or any(type(v) is not int or v < 0 for v in self.source_word_address)
+        ):
+            raise ValueError("source_word_address must be a three-int native word address")
 
 
 @dataclass(frozen=True)
@@ -414,7 +422,13 @@ def evaluate_source_floor_finish_ownership_shadow(
             "room_id": selector.room_id,
             "material_code": selector.material_code.strip().upper(),
             "occurrence_id": finish_mark.occurrence_id,
+            # Two different native glyph observations must never alias one
+            # producer receipt merely because the textual occurrence ID agrees.
+            "native_word_address": finish_mark.source_word_address,
+            "native_mark_center_pt": mark_pt,
             "polygon": poly_tuple,
+            # The record's diagnostic doorway verdict is a source observation.
+            "doorway_reasons": doorway_reasons,
         },
         digest_chars=32,
     )
