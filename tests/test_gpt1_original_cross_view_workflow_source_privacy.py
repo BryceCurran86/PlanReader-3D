@@ -52,7 +52,9 @@ def test_both_diagnostics_keep_original_derived_json_in_private_runner_temp() ->
         assert "> /dev/null 2>&1" in job
         assert "| tee " not in job
         assert "console.log" not in job
-        assert "if: always()" not in job
+        upload_only = job.split("      - uses: actions/upload-artifact@v4", 1)[1].split("      - name: Remove private original", 1)[0]
+        assert "if: success()" in upload_only
+        assert "if: always()" not in upload_only
     assert "--output /private-output/native_grid_candidate.json" in first
     assert 'Path(os.environ["PRIVATE_OUT"])/"native_grid_candidate.json"' in first
     assert "--output /private-output/original_room_mark_registration.json" in second
