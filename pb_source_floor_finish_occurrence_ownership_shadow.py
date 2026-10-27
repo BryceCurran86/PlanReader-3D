@@ -378,8 +378,19 @@ def evaluate_source_floor_finish_ownership_shadow(
                 reason_codes=(SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,),
                 selector=selector,
             )
-        if other.occurrence_id == finish_mark.occurrence_id:
+        # Only the very same producer observation is "self". Reusing an
+        # occurrence ID for another observation is a conflicting source claim,
+        # even when its glyph lies outside this room or carries the same code.
+        # The full-plan engine also checks duplicate IDs, but direct callers
+        # must never silently bypass the same identity conflict.
+        if other is finish_mark:
             continue
+        if other.occurrence_id == finish_mark.occurrence_id:
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
         if _point_in_polygon(other.mark_center_pt, clean_poly):
             if other.material_code.strip().upper() != selector.material_code.strip().upper():
                 # Different material code competing for the same room!
