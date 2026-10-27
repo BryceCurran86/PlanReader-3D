@@ -26,6 +26,24 @@ DEFAULT_SOURCE_DIR = REPO_ROOT / "documents" / "sources"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _safe_path_component(value: Any) -> bool:
+    """Require a portable single filename component before joining trusted roots.
+
+    Frozen suite project IDs and pinned document names are untrusted JSON
+    strings until validated. Reject POSIX/Windows traversal, drive/ADS names,
+    control characters and Windows trailing-dot/space aliases.
+    """
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value not in (".", "..")
+        and value == value.strip()
+        and not value.endswith(".")
+        and not any(char in value for char in ("/", "\\", ":", "\x00"))
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+    )
+
+
 def _json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -99,6 +117,9 @@ def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_D
     failures: list[str] = []
     for manifest in manifests:
         for source in manifest.source_documents:
+            if not _safe_path_component(source.name):
+                failures.append(f"{manifest.project_id}: unsafe source document name")
+                continue
             try:
                 checked = _present_source_digest(source_dir / source.name)
             except ValueError as exc:
@@ -131,6 +152,9 @@ def reference_document_failures(manifest: Any, project: Path) -> list[str]:
     """
     failures: list[str] = []
     for reference in manifest.reference_takeoff_documents:
+        if not _safe_path_component(reference.name):
+            failures.append(f"{manifest.project_id}: unsafe reference document name")
+            continue
         path = project / reference.name
         try:
             checked = _present_source_digest(path)
@@ -160,12 +184,17 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
     failures: list[str] = []
 
     try:
+        suite = _json(root / "manifest.json")
+        raw_project_ids = suite.get("projects", ())
+        if not isinstance(raw_project_ids, list) or any(
+            not _safe_path_component(project_id) for project_id in raw_project_ids
+        ):
+            raise ValueError("unsafe project id in suite manifest")
         manifests = load_suite_manifests(root)
     except Exception as exc:
         return [f"suite/manifest validation failed: {exc}"]
 
-    suite = _json(root / "manifest.json")
-    project_ids = tuple(str(v) for v in suite.get("projects", ()))
+    project_ids = tuple(raw_project_ids)
     required = int(suite.get("required_project_count", 0))
     if required != len(project_ids) or required <= 0:
         failures.append("required_project_count must exactly match configured V2 projects")
@@ -185,6 +214,9 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
                 failures.append(f"{manifest.project_id}: missing {required_name}")
 
         for source in manifest.source_documents:
+            if not _safe_path_component(source.name):
+                # source_document_failures reports this without opening the path.
+                continue
             if not _SHA256_RE.fullmatch(source.sha256):
                 failures.append(f"{manifest.project_id}: invalid source SHA-256 for {source.name}")
             if source.size_bytes <= 0:
