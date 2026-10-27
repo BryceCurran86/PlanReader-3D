@@ -625,3 +625,43 @@ def test_unclosed_distant_room_does_not_veto_unique_finish_owner():
         assert verdict.recovered_finish_ids == ("OCC_FT2",)
         assert result.record.total_finish_zones_recovered == 1
         assert result.record.commercial_projection_allowed is False
+
+
+@pytest.mark.parametrize(
+    "bad_field,bad_value",
+    [
+        ("room_polygon_candidates", (("", ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))),)),
+        ("room_polygon_candidates", (("ROOM_BAD", ((0.0, 0.0), (float("nan"), 0.0), (0.0, 1.0))),)),
+        ("wall_edges", ("not-a-wall-edge",)),
+        ("opening_candidates", ("not-an-opening",)),
+        ("finish_mark_candidates", ("not-a-mark",)),
+    ],
+)
+def test_malformed_source_candidates_quarantine_only_their_page(bad_field, bad_value):
+    """Five malformed original candidate universes never mint partial recovery."""
+    malformed = replace(_healthy_page("bad_page"), **{bad_field: bad_value})
+    good = _healthy_page("good_page")
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(malformed, good)
+    )
+    assert result.record is not None
+    assert result.record.quarantined_pages_count == 1
+    assert result.record.successful_pages_count == 1
+    assert result.record.total_rooms_recovered == 1
+    assert result.record.total_finish_zones_recovered == 1
+    assert result.record.page_verdicts[0].reason_codes == (
+        SOURCE_LINEAGE_MISMATCH, PAGE_QUARANTINED_SAFELY
+    )
+    assert result.record.page_verdicts[0].recovered_finish_ids == ()
+    assert result.record.page_verdicts[1].recovered_finish_ids == ("OCC_FT2",)
+    assert result.record.takeoff_eligible is False
+    assert result.record.commercial_projection_allowed is False
+
+
+def test_untyped_page_input_abstains_without_partial_source_recovery():
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(_healthy_page("good_page"), object())
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert result.record is None
