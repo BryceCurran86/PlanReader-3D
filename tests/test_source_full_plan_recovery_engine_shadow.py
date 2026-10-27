@@ -261,3 +261,60 @@ def test_outside_room_rival_does_not_poison_local_finish():
     assert result.record.total_finish_zones_recovered == 1
     assert result.record.takeoff_eligible is False
     assert result.record.commercial_projection_allowed is False
+
+
+def test_one_finish_occurrence_cannot_own_two_overlapping_room_candidates():
+    """Ambiguous overlapping room ownership must not double-count a mark."""
+    page = _healthy_page("page_11")
+    _, polygon = page.room_polygon_candidates[0]
+    rooms = (("ROOM_A", polygon), ("ROOM_B", polygon))
+    for ordered_rooms in (rooms, rooms[::-1]):
+        source_page = replace(page, room_polygon_candidates=ordered_rooms)
+        before = copy.deepcopy(source_page)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(source_page,)
+        )
+        verdict = result.record.page_verdicts[0]
+        assert verdict.recovered_room_ids == ("ROOM_A", "ROOM_B")
+        assert verdict.recovered_finish_ids == ()
+        assert result.record.total_rooms_recovered == 2
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert source_page == before
+
+
+def test_reused_finish_occurrence_id_cannot_create_multiple_zones():
+    """Two source marks with the same ID cannot evade the rival-mark veto."""
+    page = _healthy_page("page_11")
+    original = page.finish_mark_candidates[0]
+    repeated_id = replace(original, mark_center_pt=(160.0, 160.0))
+    for marks in ((original, repeated_id), (repeated_id, original)):
+        source_page = replace(page, finish_mark_candidates=marks)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(source_page,)
+        )
+        assert result.record.page_verdicts[0].recovered_room_ids == ("ROOM_A",)
+        assert result.record.page_verdicts[0].recovered_finish_ids == ()
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.commercial_projection_allowed is False
+
+
+def test_unrelated_room_candidate_preserves_single_finish_owner():
+    """A distant, nonrecovered room does not poison the valid local candidate."""
+    page = _healthy_page("page_11")
+    _, polygon = page.room_polygon_candidates[0]
+    distant = tuple((x + 400.0, y + 400.0) for x, y in polygon)
+    for rooms in (
+        (("ROOM_A", polygon), ("ROOM_DISTANT", distant)),
+        (("ROOM_DISTANT", distant), ("ROOM_A", polygon)),
+    ):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(),
+            pages=(replace(page, room_polygon_candidates=rooms),),
+        )
+        assert result.record.page_verdicts[0].recovered_room_ids == ("ROOM_A",)
+        assert result.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
