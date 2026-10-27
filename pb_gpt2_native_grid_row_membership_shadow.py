@@ -324,6 +324,62 @@ def inspect_original_native_grid_row_shadow(
     )
 
 
+
+def _assert_original_grid_word_inventory(page, scope, words):
+    """Veto missing/altered producer words in the original ruled strip.
+
+    Published observation IDs alone cannot prove completeness: a missing
+    native word, competing code or boundary-touching word must not leave a
+    falsely unique row CANDIDATE. Compare native addresses, literals and PDF
+    boxes from the SAME original bytes/runtime; this grants no authority.
+    """
+    drawings = page.get_drawings()
+    left = _original_vertical_chain(
+        drawings, scope.left_boundary_paths, tolerance=.06)
+    right = _original_vertical_chain(
+        drawings, scope.right_boundary_paths, tolerance=.06)
+
+    def intersects(box):
+        x0, y0, x1, y1 = box
+        return not (y1 <= left[1] or y0 >= left[2]
+                    or x1 <= left[0] or x0 >= right[0])
+
+    raw_words = page.get_text("words") or ()
+    if len(raw_words) > 25000:
+        raise ValueError("original grid native word universe exceeds bound")
+    original = {}
+    for raw in raw_words:
+        if len(raw) < 8:
+            raise ValueError("incomplete original grid native word address")
+        try:
+            box = tuple(float(value) for value in raw[:4])
+            address = tuple(int(value) for value in raw[5:8])
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("malformed original grid native word") from None
+        if (len(box) != 4 or any(not isfinite(value) for value in box)
+                or box[0] >= box[2] or box[1] >= box[3]
+                or any(value < 0 for value in address)):
+            raise ValueError("invalid original grid native word geometry/address")
+        if not intersects(box):
+            continue
+        literal = str(raw[4]).strip()
+        if not literal or address in original:
+            raise ValueError("ambiguous original grid native word inventory")
+        original[address] = (literal, box)
+
+    published = {}
+    for word in words:
+        box = word.bbox_pdf_pts
+        if not intersects(box):
+            continue
+        address = (word.block_no, word.line_no, word.word_no)
+        if address in published:
+            raise ValueError("duplicate published grid native word address")
+        published[address] = (word.literal, tuple(box))
+    if original != published:
+        raise ValueError("original grid native word inventory differs from producer")
+
+
 def audit_published_native_grid_row_shadow(
     producer: SourceVisibilityProducer, *, revision_id: str, page_id: str,
     original_pdf_bytes: bytes, scope: NativeGridRowScope,
@@ -337,6 +393,17 @@ def audit_published_native_grid_row_shadow(
             or scope.page_number not in published.coverage.decoded_pages):
         raise ValueError("foreign original source revision/page")
     words = _producer_owned_native_words(producer, published, page_id)
+    # Audit only: synthetic direct-inspector tests may supply invented words.
+    # Original and producer use the same pinned native extraction runtime.
+    if (type(original_pdf_bytes) is not bytes
+            or sha256(original_pdf_bytes).hexdigest()
+                != published.revision.source_sha256):
+        raise ValueError("original grid PDF SHA differs from published producer")
+    with fitz.open(stream=original_pdf_bytes, filetype="pdf") as pdf:
+        if not 1 <= scope.page_number <= len(pdf):
+            raise ValueError("original grid page outside source")
+        _assert_original_grid_word_inventory(
+            pdf[scope.page_number - 1], scope, words)
     return inspect_original_native_grid_row_shadow(
         original_pdf_bytes, source_sha256=published.revision.source_sha256,
         words=words, scope=scope)
