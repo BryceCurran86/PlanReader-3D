@@ -10,6 +10,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_floor_finish_occurrence_ownership_shadow import SourceFloorFinishMark
 from pb_source_full_plan_recovery_engine_shadow import (
     DUPLICATE_SOURCE_PAGE_ID,
+    DUPLICATE_SOURCE_ROOM_ID,
     UNSUPPORTED_SOURCE_PAGE_TYPE,
     EMPTY_PAGE_PAYLOADS,
     PAGE_COMPLEXITY_BLOCKED,
@@ -472,3 +473,96 @@ def test_source_page_type_must_be_explicit_nonempty_string():
     for invalid in ("", "  ", None, 42):
         with pytest.raises(ValueError, match="page_type"):
             SourcePageInputPayload(page_id="page_09", page_type=invalid)
+
+
+def test_duplicate_room_id_quarantines_page_without_poisoning_healthy_sibling():
+    """Repeated physical room identity is not two diagnostic rooms or finish owners."""
+    duplicate = _healthy_page("page_11")
+    room = duplicate.room_polygon_candidates[0]
+    collision = replace(duplicate, room_polygon_candidates=(room, room))
+    healthy = _healthy_page("page_07")
+    baseline = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(healthy,)
+    )
+    ids = set()
+    for pages in ((collision, healthy), (healthy, collision)):
+        before = copy.deepcopy(pages)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages
+        )
+        record = result.record
+        ids.add(record.record_id)
+        assert record.status == EvidenceResolutionStatus.CANDIDATE
+        assert SOURCE_FULL_PLAN_PARTIAL_RECOVERY in record.reason_codes
+        assert record.total_pages_evaluated == 2
+        assert record.successful_pages_count == 1
+        assert record.quarantined_pages_count == 1
+        assert record.total_rooms_recovered == baseline.record.total_rooms_recovered == 1
+        assert record.total_finish_zones_recovered == baseline.record.total_finish_zones_recovered == 1
+        verdict = next(v for v in record.page_verdicts if v.page_id == "page_11")
+        assert verdict.status == EvidenceResolutionStatus.ABSTAINED
+        assert verdict.reason_codes == (DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY)
+        assert verdict.recovered_room_ids == ()
+        assert verdict.recovered_finish_ids == ()
+        assert verdict.is_quarantined is True
+        assert record.commercial_projection_allowed is False
+        assert record.takeoff_eligible is False
+        assert record.diagnostic_only is True
+        assert pages == before
+    assert len(ids) == 1
+
+
+def test_conflicting_duplicate_room_polygons_also_quarantine_source_page():
+    """Distinct geometries cannot silently reuse one physical room ID."""
+    original = _healthy_page("page_11")
+    room_id, polygon = original.room_polygon_candidates[0]
+    displaced = tuple((x + 400.0, y + 400.0) for x, y in polygon)
+    for rooms in (
+        ((room_id, polygon), (room_id, displaced)),
+        ((room_id, displaced), (room_id, polygon)),
+    ):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(replace(original, room_polygon_candidates=rooms),)
+        )
+        record = result.record
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert record.quarantined_pages_count == 1
+        assert record.total_rooms_recovered == 0
+        assert record.total_finish_zones_recovered == 0
+        assert record.page_verdicts[0].reason_codes == (
+            DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY
+        )
+        assert record.takeoff_eligible is False
+
+
+def test_room_identity_is_scoped_to_source_page_not_entire_document():
+    """Identical room IDs on independently identified pages are not a collision."""
+    first = _healthy_page("page_07")
+    second = _healthy_page("page_11")
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(first, second)
+    )
+    assert result.status == EvidenceResolutionStatus.CANDIDATE
+    assert result.record.quarantined_pages_count == 0
+    assert result.record.total_rooms_recovered == 2
+    assert result.record.total_finish_zones_recovered == 2
+    assert result.record.takeoff_eligible is False
+
+
+def test_blocked_page_reason_precedes_duplicate_room_diagnostic():
+    """Existing explicit source block cannot be overwritten by downstream room logic."""
+    original = _healthy_page("page_11")
+    room = original.room_polygon_candidates[0]
+    page = replace(
+        original, room_polygon_candidates=(room, room),
+        is_blocked=True, block_reason="source_complexity_exceeded"
+    )
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(page,)
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.record.page_verdicts[0].reason_codes == (
+        "source_complexity_exceeded", PAGE_QUARANTINED_SAFELY
+    )
+    assert result.record.total_rooms_recovered == 0
+    assert result.record.total_finish_zones_recovered == 0

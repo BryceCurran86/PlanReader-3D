@@ -44,6 +44,7 @@ SOURCE_FULL_PLAN_ENGINE_ABSTAINED = "source_full_plan_engine_abstained"
 PAGE_COMPLEXITY_BLOCKED = "page_complexity_blocked"
 PAGE_QUARANTINED_SAFELY = "page_quarantined_safely"
 DUPLICATE_SOURCE_PAGE_ID = "duplicate_source_page_id"
+DUPLICATE_SOURCE_ROOM_ID = "duplicate_source_room_id"
 UNSUPPORTED_SOURCE_PAGE_TYPE = "unsupported_source_page_type"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 EMPTY_PAGE_PAYLOADS = "empty_page_payloads"
@@ -208,6 +209,26 @@ def execute_source_full_plan_recovery_engine_shadow(
                     page_type=page.page_type,
                     status=EvidenceResolutionStatus.ABSTAINED,
                     reason_codes=(UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # A repeated room identity on one source page cannot denote two
+        # independently owned physical room faces. Quarantine the entire
+        # page rather than choosing a polygon or attributing its finish marks
+        # to a surviving competing room. Other source pages remain usable.
+        room_id_counts = Counter(room_id for room_id, _ in page.room_polygon_candidates)
+        if any(count > 1 for count in room_id_counts.values()):
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY),
                     recovered_room_ids=(),
                     recovered_finish_ids=(),
                     is_quarantined=True,
