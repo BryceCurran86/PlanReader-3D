@@ -3,7 +3,6 @@ from pathlib import Path
 import os
 import subprocess
 import re
-import subprocess
 import shlex
 import pytest
 import yaml
