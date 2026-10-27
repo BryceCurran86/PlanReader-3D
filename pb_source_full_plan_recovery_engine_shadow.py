@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -195,10 +196,20 @@ def execute_source_full_plan_recovery_engine_shadow(
             if res.status == EvidenceResolutionStatus.CANDIDATE:
                 recovered_rooms.append(room_id)
 
-        # Evaluate floor finish occurrences on this page
+        # Evaluate each original finish occurrence against the *complete*
+        # room universe. A single mark cannot own two overlapping room faces,
+        # and two distinct source marks cannot reuse one occurrence identity.
+        # Neither ambiguity is a recovered diagnostic finish zone.
         recovered_finishes: list[str] = []
+        occurrence_counts = Counter(
+            mark.occurrence_id for mark in page.finish_mark_candidates
+        )
         for finish in page.finish_mark_candidates:
-            # Match against each recovered room polygon
+            if occurrence_counts[finish.occurrence_id] != 1:
+                continue
+            candidate_owners = 0
+            # Match against each recovered room polygon without selecting the
+            # first/nearest candidate; every plausible room must be evaluated.
             for room_id, poly in page.room_polygon_candidates:
                 if room_id not in recovered_rooms:
                     continue
@@ -221,7 +232,9 @@ def execute_source_full_plan_recovery_engine_shadow(
                     other_finish_marks=page.finish_mark_candidates,
                 )
                 if f_res.status == EvidenceResolutionStatus.CANDIDATE:
-                    recovered_finishes.append(finish.occurrence_id)
+                    candidate_owners += 1
+            if candidate_owners == 1:
+                recovered_finishes.append(finish.occurrence_id)
 
         page_rooms_tuple = tuple(sorted(recovered_rooms))
         page_finishes_tuple = tuple(sorted(recovered_finishes))
