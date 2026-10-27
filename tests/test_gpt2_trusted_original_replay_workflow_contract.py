@@ -18,6 +18,7 @@ HEADS = {
     "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
     "d15_ink": "c52f45f3365b74f3b4070ea051e338329f09de76",
+    "finish_page": "d281fa15c29dc7e9717953355e9ddf42c040215c",
 }
 
 
@@ -471,3 +472,57 @@ def test_real_git_tree_mode_gate_fail_closed(tmp_path, git_mode):
         "ls-tree", "--format=%(objectmode) %(objecttype) %(path)",
         candidate, "--", "missing.py",
     ) == ""
+
+
+def test_finish_page_source_positive_is_exact_tree_and_never_public_secret():
+    """A140/A110 source negative is owner/main-only; no PR-run private source."""
+    guard = next(s for s in _load()["jobs"]["original"]["steps"]
+                 if s["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    match = re.search(
+        r"(?m)^  finish_page\)\n(?P<body>.*?)(?=^    ;;)",
+        script, flags=re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None
+    body = match.group("body")
+    assert "approved_base=f4fd0f786411b45784f77c784546df0ae5f67d6b" in body
+    assert "approved_head=" + HEADS["finish_page"] in body
+    assert (
+        "expected_paths='pb_source_floor_finish_occurrence_ownership_shadow.py|"
+        "pb_source_full_plan_recovery_engine_shadow.py|"
+        "tests/test_source_floor_finish_occurrence_ownership_shadow.py|"
+        "tests/test_source_full_plan_recovery_engine_shadow.py'"
+    ) in body
+    original_test = (
+        "test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned"
+    )
+    assert "original_test=" + original_test in body
+    assert "test_path=tests/test_source_full_plan_recovery_engine_shadow.py" in body
+    assert "github.event.inputs" not in body
+    assert "git diff --name-only" in script
+    assert "git ls-tree" in script
+    assert "100644 blob $expected_path" in script
+    assert 'git archive "$approved_head"' in script
+    assert "git checkout --detach" not in script
+
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    row = (
+        "finish_page|" + HEADS["finish_page"]
+        + "|tests/test_source_full_plan_recovery_engine_shadow.py::"
+        + original_test
+        + "|tests/test_source_full_plan_recovery_engine_shadow.py::"
+        + "test_foreign_page_finish_not_recovered_by_full_plan_shadow_engine"
+    )
+    assert public.count(row + "\n") == 1
+    assert "--network none --read-only --cap-drop ALL" in public
+    assert "python -m pytest --collect-only" in public
+    assert "python -m pytest -q" in public
+    assert "ORIGINAL_SOURCES_TOKEN" not in public
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
+    assert "secrets." not in public
+    trusted = FILE.read_text(encoding="utf8")
+    assert trusted.count("on:\n  workflow_dispatch:") == 1
+    assert "\n  pull_request:" not in trusted
+    assert "\n  pull_request_target:" not in trusted
+    assert "actions/upload-artifact" not in trusted
