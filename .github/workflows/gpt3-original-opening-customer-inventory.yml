@@ -6,6 +6,7 @@ on:
     paths:
       - "pb_live_opening_customer_projection.py"
       - "tests/test_live_opening_customer_projection.py"
+      - "tests/test_gpt3_original_opening_inventory_log_privacy.py"
       - ".github/workflows/gpt3-original-opening-customer-inventory.yml"
       - "tools/gpt3_original_source_preflight.py"
       - "tests/test_gpt3_original_source_preflight.py"
