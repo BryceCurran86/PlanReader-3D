@@ -60,7 +60,8 @@ def _manifest(*, source_names=(), reference_names=()):
 
 @pytest.mark.parametrize("name", [
     "au_qld_synthetic", "Original Plan.pdf", "reference_takeoff.json",
-    "file-with_underscores.2026.pdf",
+    "file-with_underscores.2026.pdf", "COM10.pdf", "LPT0.pdf",
+    "company.txt", "file[1].pdf",
 ])
 def test_portable_single_components_are_accepted(name):
     assert _guard()._safe_path_component(name)
@@ -71,6 +72,10 @@ def test_portable_single_components_are_accepted(name):
     r"..\\external.pdf", r"C:\\private\\original.pdf", "C:original.pdf",
     "/tmp/other.pdf", "original.pdf.", "original.pdf ",
     "file\nname.pdf", "file\x00name.pdf", "file\x7fname.pdf",
+    "CON", "con.pdf", "NUL.txt", "PrN.pdf", "AUX", "COM1.pdf",
+    "LPT9.pdf", "COM¹.pdf", "lpt³.pdf", "CONIN$.txt", "CONOUT$.txt",
+    "CON .pdf", "bad?.pdf", "bad*.pdf", "bad<.pdf", "bad>.pdf",
+    'bad"quote.pdf', "bad|pipe.pdf",
 ])
 def test_unsafe_components_are_rejected(name):
     assert not _guard()._safe_path_component(name)
@@ -79,6 +84,8 @@ def test_unsafe_components_are_rejected(name):
 @pytest.mark.parametrize("name", [
     "../outside.pdf", r"..\\outside.pdf", "C:outside.pdf",
     "/tmp/outside.pdf", "source.pdf.", "source.pdf\nother",
+    "CON.pdf", "nul.txt", "COM1.pdf", "LPT².pdf", "CON .pdf",
+    "bad?.pdf", "bad|name.pdf",
 ])
 def test_source_path_escape_is_vetoed_before_digest(tmp_path, monkeypatch, name):
     guard = _guard()
@@ -96,6 +103,8 @@ def test_source_path_escape_is_vetoed_before_digest(tmp_path, monkeypatch, name)
 @pytest.mark.parametrize("name", [
     "../outside.json", r"..\\outside.json", "C:outside.json",
     "/tmp/outside.json", "reference_takeoff.json.", "ref\x00name.json",
+    "PRN.json", "AUX.json", "LPT9.json", "COM¹.json",
+    "CONIN$.json", "bad*.json", "bad<name.json",
 ])
 def test_reference_path_escape_is_vetoed_before_digest(tmp_path, monkeypatch, name):
     guard = _guard()
@@ -113,6 +122,8 @@ def test_reference_path_escape_is_vetoed_before_digest(tmp_path, monkeypatch, na
 @pytest.mark.parametrize("project_id", [
     "../outside", r"..\\outside", "/tmp/elsewhere", "C:outside",
     "project.", "project ", "project\nother", 123, None,
+    "CON", "con.txt", "NUL", "LPT3", "COM³", "CONOUT$.json",
+    "bad?", 'bad"quote', "bad|name",
 ])
 def test_unsafe_project_id_fails_before_manifest_loader(
     tmp_path, monkeypatch, project_id,
