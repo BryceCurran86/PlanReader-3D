@@ -174,3 +174,89 @@ def test_existing_caller_transaction_still_checks_current_identity(test_dbs):
     assert hub.execute(
         "SELECT COUNT(*) FROM painting_takeoff_packages"
     ).fetchone()[0] == 0
+
+
+class _PostgresDialectCursor:
+    """Translate only parameter syntax for an offline PostgreSQL-path smoke."""
+
+    def __init__(self, conn, statements):
+        self.cursor = conn.cursor()
+        self.statements = statements
+
+    def execute(self, sql, params=()):
+        self.statements.append(sql.strip())
+        # This adapter does NOT prove a live PostgreSQL server or row locking.
+        # It verifies the actual downstream SQL uses PostgreSQL placeholders,
+        # SELECT FOR UPDATE and INSERT RETURNING rather than SQLite lastrowid.
+        assert "?" not in sql
+        translated = sql.replace("%s", "?").replace(" FOR UPDATE", "")
+        self.cursor.execute(translated, params)
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+
+class _PostgresDialectConnection:
+    def __init__(self, sqlite_conn, statements):
+        self.sqlite_conn = sqlite_conn
+        self.statements = statements
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            self.sqlite_conn.rollback()
+        return False
+
+    def cursor(self):
+        return _PostgresDialectCursor(self.sqlite_conn, self.statements)
+
+    def commit(self):
+        self.sqlite_conn.commit()
+
+
+class _PostgresDialectBridge:
+    kind = "postgres"
+
+    def __init__(self, sqlite_conn):
+        self.sqlite_conn = sqlite_conn
+        self.statements = []
+
+    def connect(self):
+        return _PostgresDialectConnection(
+            self.sqlite_conn, self.statements
+        )
+
+
+def test_postgres_dialect_uses_locked_identity_and_returning_id(test_dbs):
+    _, hub, _ = test_dbs
+    bridge = _PostgresDialectBridge(hub)
+    receipt = execute_jobhub_publishing(
+        _approved_package(), bridge, user_name="Source Estimator"
+    )
+    assert receipt["status"] == "Published"
+    assert bridge.statements[0] == (
+        "SELECT job_no FROM jobs WHERE id=%s FOR UPDATE"
+    )
+    assert any(
+        "RETURNING id" in sql and "INSERT INTO painting_takeoff_packages" in sql
+        for sql in bridge.statements
+    )
+    assert hub.execute(
+        "SELECT COUNT(*) FROM painting_takeoff_package_lines"
+    ).fetchone()[0] == 1
+
+
+def test_postgres_dialect_rejects_changed_target_before_insert(test_dbs):
+    _, hub, _ = test_dbs
+    hub.execute("UPDATE jobs SET job_no='WRONG' WHERE id=501")
+    hub.commit()
+    bridge = _PostgresDialectBridge(hub)
+    with pytest.raises(RuntimeError, match="target job number conflicts"):
+        execute_jobhub_publishing(
+            _approved_package(), bridge, user_name="Source Estimator"
+        )
+    assert hub.execute(
+        "SELECT COUNT(*) FROM painting_takeoff_packages"
+    ).fetchone()[0] == 0
