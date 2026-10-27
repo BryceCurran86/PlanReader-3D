@@ -151,10 +151,14 @@ def _assert_source_witnesses(
     paths: tuple[Path, ...],
     expected: tuple[tuple[str, tuple[int, ...]], ...],
 ) -> None:
-    if len(paths) != len(expected) or any(
-        _source_witness(path) != witness
-        for path, witness in zip(paths, expected)
-    ):
+    try:
+        changed = len(paths) != len(expected) or any(
+            _source_witness(path) != witness
+            for path, witness in zip(paths, expected)
+        )
+    except ValueError as exc:
+        raise ValueError("signed source/customer artifact changed during drift comparison") from exc
+    if changed:
         raise ValueError("signed source/customer artifact changed during drift comparison")
 
 
