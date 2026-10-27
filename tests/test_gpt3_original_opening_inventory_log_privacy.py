@@ -22,6 +22,10 @@ def _private_log_contract(raw: str) -> bool:
     try:
         doc = yaml.safe_load(raw)
         assert isinstance(doc, dict)
+        triggers = doc.get("on", doc.get(True))  # PyYAML 1.1 may parse 'on' as bool
+        assert "tests/test_gpt3_original_opening_inventory_log_privacy.py" in (
+            triggers["pull_request"]["paths"]
+        )
         jobs = doc["jobs"]
         source = jobs["original-source"]
         gate = source["if"]
@@ -85,6 +89,8 @@ def test_original_opening_customer_replay_is_private_and_fail_closed() -> None:
     ('github.event_name == \'workflow_dispatch\'', 'github.event_name == \'pull_request\''),
     ("github.ref == 'refs/heads/main'", "github.ref != 'refs/heads/main'"),
     ("github.actor == 'BryceCurran86'", "github.actor != 'BryceCurran86'"),
+    ('      - "tests/test_gpt3_original_opening_inventory_log_privacy.py"',
+     '      - "tests/test_gpt3_original_opening_inventory_log_privacy.disabled"'),
     ("persist-credentials: false", "persist-credentials: true"),
     ("umask 077", "umask 022"),
     ("trap cleanup_private_log EXIT", "true # cleanup disabled"),
