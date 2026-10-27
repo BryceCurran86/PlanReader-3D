@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -34,14 +35,18 @@ from pb_figured_dimension_evidence import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
-from pb_pdf_text_integrity_authority import TRUSTED_PDF_TEXT
+from pb_pdf_text_integrity_authority import (
+    TRUSTED_PDF_TEXT, _exact_fill_path_coverage,
+    _fill_text_char_bbox_coverage_upper_bound, _later_paint_spatial_candidates,
+)
 from pb_portable_raster_ocr_authority import MockOCRBackend
 from pb_raster_text_corroboration_authority import (
     RasterTextCorroborationProducer,
     RasterTextCorroborationSelector,
 )
 from pb_source_observation_authority import SOURCE_OBSERVATION_EXISTS, ObservationSelector
-from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_visibility_authority import SourceVisibilityProducer, classify_native_segment_visibility
+from pb_vector_geometry_v130 import extract_native_page
 
 
 OPENING_ELEVATION_FRAME_AREA_SCHEMA_VERSION = "1.0.0"
@@ -968,6 +973,81 @@ def _raster_matches_source(result, receipt, published, observation_id) -> bool:
     )
 
 
+def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
+    """Negative-only gate for the original native frame and dimension supports.
+
+    Raw extraction includes invisible fill boundaries. Only a source-owned,
+    opaque solid stroke with independently proven clip state may support a
+    closed frame here. Unknown later paint cannot preserve that proof.
+    """
+    drawings = page.get_drawings()
+    bboxlog = page.get_bboxlog()
+    native = extract_native_page(page)
+    painted = set()
+    strokes_by_seq = {d.get("seqno"): d for d in drawings}
+    text_by_seq = {}
+    for trace in page.get_texttrace():
+        text_by_seq.setdefault(trace.get("seqno"), []).append(trace)
+    for segment in native["segments"]:
+        path_index = segment.get("path_index")
+        if type(path_index) is not int or not 0 <= path_index < len(drawings):
+            continue
+        drawing = drawings[path_index]
+        seqno = drawing.get("seqno")
+        width = segment.get("width")
+        color = drawing.get("color")
+        if (
+            drawing.get("type") not in {"s", "fs"}
+            or drawing.get("stroke_opacity") != 1.0
+            or not segment.get("stroke_present")
+            or type(width) not in (int, float) or not math.isfinite(width) or width <= 0
+            or type(color) not in (tuple, list) or len(color) != 3
+            or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in color)
+            or tuple(color) == (1.0, 1.0, 1.0)
+            or not re.fullmatch(r"\s*\[\s*\]\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*", str(segment.get("dashes", "")))
+            or type(seqno) is not int or not 0 <= seqno < len(bboxlog)
+            or segment.get("sequence_number") != seqno
+            or bboxlog[seqno][0] != "stroke-path"
+            or not classify_native_segment_visibility(segment).visible
+        ):
+            continue
+        x0, y0, x1, y1 = (float(segment[k]) for k in ("x1", "y1", "x2", "y2"))
+        half = width / 2
+        subject = (min(x0, x1) - half, min(y0, y1) - half,
+                   max(x0, x1) + half, max(y0, y1) + half)
+        candidates = _later_paint_spatial_candidates(page, subject, seqno, bboxlog)
+        clear = True
+        for later in candidates if candidates is not None else range(seqno + 1, len(bboxlog)):
+            kind, box = bboxlog[later][:2]
+            if (min(subject[2], box[2]) <= max(subject[0], box[0])
+                    or min(subject[3], box[3]) <= max(subject[1], box[1])):
+                continue
+            if kind == "stroke-path":
+                stroke = strokes_by_seq.get(later)
+                if (stroke is not None and stroke.get("stroke_opacity") == 1.0
+                        and stroke.get("color") == color):
+                    continue
+            coverage = None
+            if kind == "fill-path":
+                coverage = _exact_fill_path_coverage(page, subject, later)
+            elif kind == "fill-text":
+                traces = text_by_seq.get(later, ())
+                # A same-colour opaque glyph cannot erase the existing stroke;
+                # figured labels commonly sit directly on dimension linework.
+                if traces and all(t.get("color") == color and t.get("opacity") == 1.0
+                                  and t.get("type") == 0 for t in traces):
+                    continue
+                coverage = _fill_text_char_bbox_coverage_upper_bound(page, subject, later)
+            if coverage == 0 or kind.startswith("ignore-"):
+                continue
+            clear = False
+            break
+        if clear:
+            edge = f"_e{segment['edge_index']}" if "edge_index" in segment else ""
+            painted.add(f"vec_p{page_id}_{path_index}_{segment['item_index']}{edge}")
+    return frozenset(painted)
+
+
 class OpeningElevationFrameAreaProducer:
     def __init__(
         self,
@@ -1255,6 +1335,18 @@ class OpeningElevationFrameAreaProducer:
                         )
                     except Exception:
                         continue
+                    if records:
+                        try:
+                            painted_ids = _source_painted_geometry_ids(page, page_id)
+                        except (ValueError, TypeError, RuntimeError, KeyError, IndexError):
+                            invalid_revision = True
+                            break
+                        if any(not set((*record.frame_geometry_ids, *record.dimension_line_ids,
+                                        *record.witness_line_ids)).issubset(painted_ids)
+                               for record in records):
+                            # Do not drop an unproved rival and elect another frame.
+                            invalid_revision = True
+                            break
                     for record in records:
                         records_by_mark.setdefault(record.type_mark, []).append(record)
             finally:
