@@ -128,6 +128,14 @@ def verify_v2_preview_scope_sidecar(
 ) -> bool:
     """Check tamper-evident v2-preview linkage; NOT original-source authority."""
     sealed = sealed_source_closed_run_from_dict(sealed.to_dict())
+    # Building a scope preview already refuses an invalid V1 source lineage.
+    # Import must enforce the same gate: the sidecar hash is not an upstream
+    # producer signature and must never launder a blocked signed row into a
+    # plausible snapshot/decision-scope receipt.
+    if any(not row.lineage_ok for row in sealed.quantities):
+        raise SourceClosedRunConflictError(
+            "scope sidecar cannot verify blocked V1 source lineage"
+        )
     if not isinstance(payload, Mapping):
         raise TypeError("scope sidecar must be a mapping")
     expected_envelope_keys = {
@@ -153,6 +161,16 @@ def verify_v2_preview_scope_sidecar(
     records = payload.get("scope_records")
     if not isinstance(records,list) or len(records)!=len(sealed.quantities):
         raise SourceClosedRunConflictError("scope sidecar quantity universe incomplete")
+    # The producer writes records in signed-quantity ID order. A different
+    # ordering is a distinct wire receipt, not the canonical producer output,
+    # even when its unsigned integrity checksum is recomputed.
+    if [
+        record.get("quantity_id") if isinstance(record, Mapping) else None
+        for record in records
+    ] != [row.quantity_id for row in sealed.quantities]:
+        raise SourceClosedRunConflictError(
+            "scope sidecar records are not in canonical sealed quantity order"
+        )
     by_id = {row.quantity_id:row for row in sealed.quantities}
     seen: set[str] = set()
     source_ids: set[str] = set()
