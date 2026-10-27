@@ -18,6 +18,7 @@ from pb_source_floor_finish_occurrence_ownership_shadow import (
     SOURCE_FLOOR_FINISH_OWNERSHIP_CANDIDATE,
     SOURCE_FLOOR_FINISH_OWNERSHIP_RESOLVED,
     SOURCE_LINEAGE_MISMATCH,
+    SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,
     SourceDoorwayThreshold,
     SourceFloorFinishMark,
     SourceFloorFinishOwnershipRecord,
@@ -39,7 +40,7 @@ def _selector(
         revision_id="rev_01",
         source_sha256=source_sha256,
         snapshot_id="snap_01",
-        page_id="page_07",
+        page_id="page_11",
         room_id=room_id,
         material_code=material_code,
     )
@@ -238,7 +239,7 @@ def test_negative_material_code_mismatch():
 def test_negative_invalid_polygon():
     """Degenerate polygon fails closed."""
     sel = _selector()
-    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (5.0, 5.0))
+    mark = SourceFloorFinishMark("OCC_1", "page_11", "FT2", (5.0, 5.0))
 
     res = evaluate_source_floor_finish_ownership_shadow(
         sel,
@@ -254,7 +255,7 @@ def test_negative_lineage_mismatch():
     with pytest.raises(ValueError):
         _selector(source_sha256="invalid")
 
-    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (5.0, 5.0))
+    mark = SourceFloorFinishMark("OCC_1", "page_11", "FT2", (5.0, 5.0))
     res = evaluate_source_floor_finish_ownership_shadow(
         None,  # type: ignore
         finish_mark=mark,
@@ -313,7 +314,7 @@ def test_metamorphic_translation_invariance():
 def test_input_no_mutation():
     """Verify input collections and objects are never mutated."""
     poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
-    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    mark = SourceFloorFinishMark("OCC_1", "page_11", "FT2", (150.0, 200.0))
     doorway = SourceDoorwayThreshold("D1", (100.0, 300.0), (150.0, 300.0))
 
     poly_copy = copy.deepcopy(poly)
@@ -409,3 +410,55 @@ def test_forged_threshold_id_cannot_authenticate_doorway_or_faces():
     assert res.record.doorway_transition_authenticated is False
     assert res.record.terminates_at_internal_faces is False
     assert res.record.under_wall_finish_excluded is False
+
+def test_cross_sheet_mark_same_coordinates_abstains_without_registration():
+    polygon = [(100.,100.),(200.,100.),(200.,300.),(100.,300.)]
+    selector = SourceFloorFinishOwnershipSelector(
+        "doc", "rev", VALID_SHA, "snap", "page_07", "OFFICE", "FT3"
+    )
+    foreign = SourceFloorFinishMark("OCC_FT3_P11","page_11","FT3",(150.,200.))
+    blocked = evaluate_source_floor_finish_ownership_shadow(
+        selector, finish_mark=foreign, internal_face_polygon_pdf_pts=polygon,
+    )
+    assert blocked.status == EvidenceResolutionStatus.ABSTAINED
+    assert blocked.reason_codes == (SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,)
+    assert blocked.record is None
+    local = evaluate_source_floor_finish_ownership_shadow(
+        selector, finish_mark=SourceFloorFinishMark(
+            "OCC_FT3_P7","page_07","FT3",(150.,200.)
+        ), internal_face_polygon_pdf_pts=polygon,
+    )
+    assert local.status == EvidenceResolutionStatus.CANDIDATE
+    assert local.record.page_id == "page_07"
+    assert local.record.takeoff_eligible is False
+    assert local.record.commercial_projection_allowed is False
+    assert local.record.terminates_at_internal_faces is False
+
+
+def test_foreign_page_competitor_abstains_in_all_orders():
+    polygon = [(100.,100.),(200.,100.),(200.,300.),(100.,300.)]
+    primary = SourceFloorFinishMark("FT2_PRIMARY","page_11","FT2",(150.,200.))
+    foreign = SourceFloorFinishMark("FT3_FOREIGN","page_07","FT3",(160.,210.))
+    for rivals in ((foreign,), (foreign, primary), (primary, foreign)):
+        result = evaluate_source_floor_finish_ownership_shadow(
+            _selector(), finish_mark=primary,
+            internal_face_polygon_pdf_pts=polygon, other_finish_marks=rivals,
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.reason_codes == (SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,)
+        assert result.record is None
+
+
+def test_blank_page_and_invalid_competitor_fail_closed():
+    with pytest.raises(ValueError, match="page_id"):
+        SourceFloorFinishMark("FT2","","FT2",(150.,200.))
+    result = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=SourceFloorFinishMark(
+            "FT2","page_11","FT2",(150.,200.)
+        ), internal_face_polygon_pdf_pts=[
+            (100.,100.),(200.,100.),(200.,300.),(100.,300.)
+        ], other_finish_marks=(None,),
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert result.record is None
