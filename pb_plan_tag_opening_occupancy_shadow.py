@@ -401,7 +401,12 @@ class PlanTagOpeningOccupancyShadow:
                         or record.document_id != document_id or record.revision_id != revision_id
                         or record.source_sha256 != ownership.source_sha256
                         or record.snapshot_id != ownership.snapshot_id or str(record.page_id) != str(page_id)):
-                    statuses.append(outcome.status)
+                    # A positive wrapper with a missing/foreign/invalid record
+                    # is an abstention, not a positive candidate member. Keeping
+                    # CORROBORATED here also left no negative for the final
+                    # reduction and raised StopIteration instead of failing closed.
+                    statuses.append(EvidenceResolutionStatus.ABSTAINED
+                                    if outcome.status is EvidenceResolutionStatus.CORROBORATED else outcome.status)
                     continue
                 statuses.append(EvidenceResolutionStatus.CORROBORATED)
                 records.append((str(record.record_id), tuple(record.source_observation_ids)))
