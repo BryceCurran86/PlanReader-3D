@@ -76,7 +76,9 @@ class SourceFullPlanEngineSelector:
 @dataclass(frozen=True)
 class SourcePageInputPayload:
     page_id: str
-    page_type: str = "floor_plan"
+    # No omitted type can silently nominate a floor-plan sheet. Source-backed
+    # page classification is a separate upstream authority not supplied here.
+    page_type: str = "unverified"
     room_polygon_candidates: tuple[tuple[str, tuple[tuple[float, float], ...]], ...] = ()
     wall_edges: tuple[SourceRoomWallEdge, ...] = ()
     opening_candidates: tuple[SourceRoomOpeningCandidate, ...] = ()
