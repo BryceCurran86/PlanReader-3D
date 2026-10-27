@@ -161,6 +161,15 @@ def execute_source_full_plan_recovery_engine_shadow(
     total_finishes = 0
     successful_pages = 0
     quarantined_pages = 0
+    # The page universe itself must be typed before any partial recovery.
+    # Invalid objects cannot supply a trustworthy page identity or owner.
+    if any(not isinstance(page, SourcePageInputPayload) for page in pages):
+        return SourceFullPlanEngineResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+            selector=selector,
+        )
+
     # A PDF page identity is one source scope, never two independent rooms or
     # finish universes. Quarantine *every* colliding payload, regardless of
     # order or whether one copy was already marked blocked.
@@ -229,6 +238,51 @@ def execute_source_full_plan_recovery_engine_shadow(
                     page_type=page.page_type,
                     status=EvidenceResolutionStatus.ABSTAINED,
                     reason_codes=(DUPLICATE_SOURCE_ROOM_ID, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # Five source-universe integrity requirements: well-formed room IDs,
+        # finite room vertices, owned wall/opening candidates, and typed marks.
+        # Do not let malformed candidates erase a rival or crash downstream
+        # geometry during otherwise successful page recovery.
+        valid_rooms = (
+            isinstance(page.room_polygon_candidates, (tuple, list))
+            and all(
+                isinstance(entry, (tuple, list)) and len(entry) == 2
+                and isinstance(entry[0], str) and bool(entry[0].strip())
+                and isinstance(entry[1], (tuple, list))
+                and len(entry[1]) >= 3
+                and all(
+                    isinstance(pt, (tuple, list)) and len(pt) == 2
+                    and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                            and math.isfinite(v) for v in pt)
+                    for pt in entry[1]
+                )
+                for entry in page.room_polygon_candidates
+            )
+        )
+        valid_other_candidates = (
+            isinstance(page.wall_edges, (tuple, list))
+            and all(isinstance(edge, SourceRoomWallEdge) for edge in page.wall_edges)
+            and isinstance(page.opening_candidates, (tuple, list))
+            and all(isinstance(opening, SourceRoomOpeningCandidate)
+                    for opening in page.opening_candidates)
+            and isinstance(page.finish_mark_candidates, (tuple, list))
+            and all(isinstance(mark, SourceFloorFinishMark)
+                    for mark in page.finish_mark_candidates)
+        )
+        if not (valid_rooms and valid_other_candidates):
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(SOURCE_LINEAGE_MISMATCH, PAGE_QUARANTINED_SAFELY),
                     recovered_room_ids=(),
                     recovered_finish_ids=(),
                     is_quarantined=True,
