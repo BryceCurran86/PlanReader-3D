@@ -535,7 +535,7 @@ def test_office_caps_original_replay_pin_is_immutable_and_source_free():
                  if step["name"].startswith("Validate immutable"))
     script = guard["run"]
     matches = re.findall(
-        r"(?m)^  office_caps\\)\\n(?P<body>.*?)(?=^    ;;)",
+        r"(?m)^  office_caps\)\n(?P<body>.*?)(?=^    ;;)",
         script, flags=re.DOTALL | re.MULTILINE,
     )
     assert len(matches) == 1
@@ -563,7 +563,7 @@ def test_office_caps_original_replay_pin_is_immutable_and_source_free():
         "|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py::"
         "test_exact_original_two_cap_ink_selects_one_candidate_not_physical_wall"
     )
-    assert public.count(row + "\\n") == 1
+    assert public.count(row + "\n") == 1
     assert "--network none --read-only --cap-drop ALL" in public
     assert "python -m pytest --collect-only" in public
     assert "python -m pytest -q" in public
