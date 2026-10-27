@@ -426,3 +426,124 @@ def test_private_original_d02_grid_membership_from_published_source_if_provision
         result.commercial_projection_allowed,
     ))
     assert sha256(Path(loc).read_bytes()).hexdigest() == original_sha
+
+
+def _native_grid_inventory_case(*, touching=False):
+    """Real native PDF words, not hand-authored producer receipt addresses."""
+    pdf = fitz.open()
+    page = pdf.new_page(width=420, height=340)
+    for x in (100, 142):
+        for lo, hi in ((30, 100), (100, 170), (170, 260)):
+            page.draw_line(
+                fitz.Point(x, lo), fitz.Point(x, hi),
+                color=(0, 0, 0), width=.48,
+            )
+    for text, x, y in (
+        ("D13", 106, 75), ("SWING", 106, 145),
+        ("920", 106, 215), ("D14", 165, 75),
+    ):
+        page.insert_text(fitz.Point(x, y), text, fontsize=8)
+    if touching:
+        # This glyph intersects the original left boundary. Even though it
+        # is not a fully contained member, losing it must fail closed.
+        page.insert_text(fitz.Point(99, 250), "X", fontsize=8)
+    original = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=original, filetype="pdf") as opened:
+        raw = opened[0].get_text("words")
+    words = tuple(SourceDoorScheduleWord(
+        observation_id=f"source:{i}",
+        page_id="1", partition_id="page:1",
+        block_no=int(word[5]), line_no=int(word[6]),
+        word_no=int(word[7]), literal=str(word[4]).strip(),
+        trusted=True, bbox_pdf_pts=tuple(float(v) for v in word[:4]),
+    ) for i, word in enumerate(raw))
+    code = next(w for w in words if w.literal == "D13")
+    scope = NativeGridRowScope(
+        page_number=1, left_boundary_paths=(0, 1, 2),
+        right_boundary_paths=(3, 4, 5),
+        code_address=(code.block_no, code.line_no, code.word_no),
+    )
+    return original, words, scope
+
+
+def _check_native_inventory(original, words, scope):
+    from pb_gpt2_native_grid_row_membership_shadow import (
+        _assert_original_grid_word_inventory,
+    )
+    with fitz.open(stream=original, filetype="pdf") as pdf:
+        _assert_original_grid_word_inventory(pdf[0], scope, words)
+
+
+def test_original_grid_inventory_parity_preserves_native_words_and_outside_notes():
+    original, words, scope = _native_grid_inventory_case()
+    _check_native_inventory(original, words, scope)
+    outside = next(w for w in words if w.literal == "D14")
+    _check_native_inventory(
+        original,
+        tuple(replace(w, literal="FOREIGN") if w is outside else w
+              for w in words),
+        scope,
+    )
+    assert sha256(original).hexdigest() == sha256(bytes(original)).hexdigest()
+
+
+@pytest.mark.parametrize("failure", ["missing", "literal", "geometry", "duplicate"])
+def test_original_grid_inventory_parity_rejects_missing_published_native_word(failure):
+    original, words, scope = _native_grid_inventory_case()
+    selected = next(w for w in words if w.literal == "920")
+    if failure == "missing":
+        modified = tuple(w for w in words if w is not selected)
+    elif failure == "literal":
+        modified = tuple(replace(w, literal="921") if w is selected else w
+                         for w in words)
+    elif failure == "geometry":
+        modified = tuple(replace(w, bbox_pdf_pts=(
+            w.bbox_pdf_pts[0] + .2, *w.bbox_pdf_pts[1:],
+        )) if w is selected else w for w in words)
+    else:
+        modified = words + (replace(selected, observation_id="duplicate"),)
+    with pytest.raises(ValueError, match="inventory|duplicate"):
+        _check_native_inventory(original, modified, scope)
+
+
+def test_original_grid_inventory_parity_rejects_missing_touching_glyph():
+    original, words, scope = _native_grid_inventory_case(touching=True)
+    _check_native_inventory(original, words, scope)
+    assert any(w.literal == "X" for w in words)
+    with pytest.raises(ValueError, match="inventory differs"):
+        _check_native_inventory(
+            original, tuple(w for w in words if w.literal != "X"), scope)
+
+
+def test_producer_grid_audit_vetoes_original_native_word_omission(monkeypatch):
+    import pb_gpt2_native_grid_row_membership_shadow as grid
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    original, _, scope = _native_grid_inventory_case()
+    producer = SourceVisibilityProducer(
+        producer_method="gpt2-native-grid-parity-test",
+        producer_version="1",
+        source_native_finish_text_shadow=True,
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="native-grid-parity",
+        source_bytes=original,
+        source_locator="memory://native-grid-parity.pdf",
+        page_ids=("1",),
+    )
+    actual = grid._producer_owned_native_words(
+        producer, published, "1")
+    assert any(w.literal == "920" for w in actual)
+    omitted = tuple(w for w in actual if w.literal != "920")
+    monkeypatch.setattr(
+        grid, "_producer_owned_native_words",
+        lambda *args, **kwargs: omitted,
+    )
+    with pytest.raises(ValueError, match="inventory differs"):
+        grid.audit_published_native_grid_row_shadow(
+            producer,
+            revision_id=published.revision.revision_id,
+            page_id="1", original_pdf_bytes=original, scope=scope,
+        )
+    assert sha256(original).hexdigest() == published.revision.source_sha256
