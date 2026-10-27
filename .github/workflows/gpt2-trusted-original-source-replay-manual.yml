@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [a600, freezer, d15, rcp, grid, rcp_ink]
+        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink]
 
     steps:
       - name: Checkout the trusted workflow context
@@ -77,6 +77,15 @@ jobs:
               expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
               original_test=test_real_original_page9_native_source_rivals_if_available
               test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
+              ;;
+            d15_ink)
+              # Source-only D15 glyph-order fix: immutable original-head
+              # candidate, never an arbitrary PR head or mutable branch.
+              approved_base=b4a9994a98d3d2d8463c490469176f0724b780cc
+              approved_head=c52f45f3365b74f3b4070ea051e338329f09de76
+              expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|tests/test_gpt2_mary_original_figured_door_leader_shadow.py'
+              original_test=test_private_original_maryborough_native_leader_source_if_provisioned
+              test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py
               ;;
             *)
               echo "::error::Unapproved original-source code selection"
