@@ -44,6 +44,7 @@ SOURCE_FULL_PLAN_ENGINE_ABSTAINED = "source_full_plan_engine_abstained"
 PAGE_COMPLEXITY_BLOCKED = "page_complexity_blocked"
 PAGE_QUARANTINED_SAFELY = "page_quarantined_safely"
 DUPLICATE_SOURCE_PAGE_ID = "duplicate_source_page_id"
+UNSUPPORTED_SOURCE_PAGE_TYPE = "unsupported_source_page_type"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 EMPTY_PAGE_PAYLOADS = "empty_page_payloads"
 
@@ -85,6 +86,8 @@ class SourcePageInputPayload:
     def __post_init__(self) -> None:
         if not isinstance(self.page_id, str) or not self.page_id.strip():
             raise ValueError("page_id must be non-empty string")
+        if not isinstance(self.page_type, str) or not self.page_type.strip():
+            raise ValueError("page_type must be non-empty string")
 
 
 @dataclass(frozen=True)
@@ -187,6 +190,24 @@ def execute_source_full_plan_recovery_engine_shadow(
                     page_type=page.page_type,
                     status=EvidenceResolutionStatus.ABSTAINED,
                     reason_codes=(reason, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
+        # A non-floor-plan sheet can contain room-like rectangles and FT marks,
+        # but those shapes are not an authenticated floor-plan room universe.
+        # This engine has no registered cross-sheet ownership receipt.
+        if page.page_type != "floor_plan":
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY),
                     recovered_room_ids=(),
                     recovered_finish_ids=(),
                     is_quarantined=True,

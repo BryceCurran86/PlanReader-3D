@@ -10,6 +10,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_floor_finish_occurrence_ownership_shadow import SourceFloorFinishMark
 from pb_source_full_plan_recovery_engine_shadow import (
     DUPLICATE_SOURCE_PAGE_ID,
+    UNSUPPORTED_SOURCE_PAGE_TYPE,
     EMPTY_PAGE_PAYLOADS,
     PAGE_COMPLEXITY_BLOCKED,
     PAGE_QUARANTINED_SAFELY,
@@ -416,3 +417,58 @@ def test_shadow_receipt_id_binds_page_room_finish_membership_not_just_counts():
     assert first.record_id == reversed_order.record_id
     assert first.takeoff_eligible is False
     assert first.commercial_projection_allowed is False
+
+
+def test_non_floor_plan_sheet_lookalikes_are_quarantined_before_recovery():
+    """A room-like shape on RCP/elevation/finish sheets is not a floor-plan room."""
+    floor = _healthy_page("page_07")
+    for page_type in ("elevation", "reflected_ceiling_plan", "floor_finish_plan"):
+        lookalike = replace(_healthy_page("page_09"), page_type=page_type)
+        receipt_ids = set()
+        for pages in ((floor, lookalike), (lookalike, floor)):
+            before = copy.deepcopy(pages)
+            result = execute_source_full_plan_recovery_engine_shadow(
+                _selector(), pages=pages
+            )
+            record = result.record
+            receipt_ids.add(record.record_id)
+            assert record.successful_pages_count == 1
+            assert record.quarantined_pages_count == 1
+            assert record.total_rooms_recovered == 1
+            assert record.total_finish_zones_recovered == 1
+            assert result.status == EvidenceResolutionStatus.CANDIDATE
+            assert SOURCE_FULL_PLAN_PARTIAL_RECOVERY in record.reason_codes
+            blocked = next(v for v in record.page_verdicts if v.page_id == "page_09")
+            assert blocked.page_type == page_type
+            assert blocked.status == EvidenceResolutionStatus.ABSTAINED
+            assert blocked.reason_codes == (
+                UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+            )
+            assert blocked.recovered_room_ids == ()
+            assert blocked.recovered_finish_ids == ()
+            assert blocked.is_quarantined is True
+            assert record.takeoff_eligible is False
+            assert record.commercial_projection_allowed is False
+            assert pages == before
+        assert len(receipt_ids) == 1
+
+
+def test_unblocked_non_floor_plan_alone_never_recovers_room_or_finish():
+    for page_type in ("elevation", "reflected_ceiling_plan", "floor_finish_plan"):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(),
+            pages=(replace(_healthy_page("page_09"), page_type=page_type),),
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.record.total_rooms_recovered == 0
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.quarantined_pages_count == 1
+        assert result.record.page_verdicts[0].reason_codes == (
+            UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+        )
+
+
+def test_source_page_type_must_be_explicit_nonempty_string():
+    for invalid in ("", "  ", None, 42):
+        with pytest.raises(ValueError, match="page_type"):
+            SourcePageInputPayload(page_id="page_09", page_type=invalid)
