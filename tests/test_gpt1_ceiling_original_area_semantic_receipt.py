@@ -125,3 +125,56 @@ def test_foreign_receipt_cannot_be_rescued_by_valid_second_bridge() -> None:
             "foreign-dimension" not in quantity.evidence_ids
             for quantity in result.quantities
         )
+
+
+@pytest.mark.parametrize(
+    "foreign_figured_ids",
+    (["foreign-dim-h", "foreign-dim-v"], ["dim-h", "foreign-dim-v"]),
+)
+def test_figured_metadata_must_match_authenticated_original_area_atom(
+    foreign_figured_ids: list[str],
+) -> None:
+    bridge = _bridge()
+    quantity = bridge.quantities[0]
+    forged = replace(
+        bridge,
+        quantities=(replace(quantity, metadata={
+            **quantity.metadata, "figured_dimension_ids": foreign_figured_ids,
+        }),),
+    )
+    result = _publish(forged)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.quantities == ()
+
+
+def test_replayed_original_area_fingerprint_cannot_borrow_other_atom() -> None:
+    bridge = _bridge()
+    quantity = bridge.quantities[0]
+    forged = replace(
+        bridge,
+        quantities=(replace(quantity, metadata={
+            **quantity.metadata,
+            "explicit_area_evidence_fingerprint": "f" * 64,
+        }),),
+    )
+    assert _publish(forged).records == ()
+
+
+def test_valid_and_foreign_figured_replay_with_same_quantity_id_conflict_in_any_order() -> None:
+    bridge = _bridge()
+    quantity = bridge.quantities[0]
+    forged = replace(
+        bridge,
+        quantities=(replace(quantity, metadata={
+            **quantity.metadata,
+            "figured_dimension_ids": ["foreign-dim-h", "foreign-dim-v"],
+        }),),
+    )
+    for ordered in ((bridge, forged), (forged, bridge)):
+        result = publish_cross_view_ceiling_quantities(
+            rooms=_rooms(), room_area_bridges=ordered, finishes=_finish()
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert result.records == ()
+        assert result.quantities == ()
