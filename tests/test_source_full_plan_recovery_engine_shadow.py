@@ -721,3 +721,87 @@ def test_omitted_source_page_type_never_claims_floor_plan_authority():
         assert result.record.takeoff_eligible is False
         assert result.record.commercial_projection_allowed is False
     assert len(ids) == 1
+
+
+def test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned():
+    """SHA-verified A140 native FT3 word must not own a same-coordinate A110 room.
+
+    This is an adversarial source-to-shadow negative, NOT a physical p7 room
+    reconstruction or an authenticated p11-to-p7 registration. It never issues
+    a floor area, a finish quantity, or customer authority. Owner/main-only
+    offline replay supplies the original; public PR CI skips without it.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+
+    source = os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not source:
+        pytest.skip("owner-private original not provisioned")
+    import fitz
+
+    expected_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert os.environ.get("PLANREADER_MARYBOROUGH_SOURCE_SHA256") == expected_sha
+    original = Path(source)
+    assert original.is_file()
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == expected_sha
+
+    with fitz.open(original) as pdf:
+        assert len(pdf) >= 11
+        p11_words = pdf[10].get_text("words", sort=False)
+        p7_words = pdf[6].get_text("words", sort=False)
+        # A140 source mark exists; A110 has no native FT3 drawing word.
+        # This asserts a source lexical fact, not an expected BOQ value.
+        ft3_words = [w for w in p11_words if w[4].strip().upper() == "FT3"]
+        assert ft3_words
+        assert not any(w[4].strip().upper() == "FT3" for w in p7_words)
+        w = ft3_words[0]
+        center = ((w[0] + w[2]) / 2.0, (w[1] + w[3]) / 2.0)
+        address = tuple(int(v) for v in w[5:8])
+
+    # Adversarial geometric coordinate collision: this is deliberately a
+    # synthetic A110 polygon centred on the actual A140 word position.
+    # It must never be interpreted as a source-authenticated physical room.
+    x, y = center
+    corners = ((x - 50, y - 50), (x + 50, y - 50),
+               (x + 50, y + 50), (x - 50, y + 50))
+    edges = (
+        SourceRoomWallEdge("W_TOP", corners[0], corners[1]),
+        SourceRoomWallEdge("W_RIGHT", corners[1], corners[2]),
+        SourceRoomWallEdge("W_LEFT", corners[3], corners[0]),
+    )
+    opening = (SourceRoomOpeningCandidate("OPEN", corners[2], corners[3]),)
+    mark = SourceFloorFinishMark(
+        "ORIGINAL_A140_FT3", "mary-p11", "FT3", center,
+        source_word_address=address,
+    )
+    source_page = SourcePageInputPayload(
+        page_id="mary-p07",
+        page_type="floor_plan",
+        room_polygon_candidates=(("ADVERSARIAL_NOT_PHYSICAL_ROOM", corners),),
+        wall_edges=edges,
+        opening_candidates=opening,
+        finish_mark_candidates=(mark,),
+    )
+    selector = SourceFullPlanEngineSelector(
+        document_id="mary-original", revision_id="source-verified",
+        source_sha256=expected_sha, snapshot_id="original-native-word-negative",
+    )
+    negative = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=(source_page,),
+    )
+    assert negative.record.total_rooms_recovered == 1
+    assert negative.record.total_finish_zones_recovered == 0
+    assert negative.record.page_verdicts[0].recovered_finish_ids == ()
+    assert negative.record.takeoff_eligible is False
+    assert negative.record.commercial_projection_allowed is False
+
+    # Geometry-only synthetic control: without the page-identity veto the
+    # very same coordinate would be misattributed to the A110 polygon.
+    forged = replace(mark, page_id="mary-p07")
+    control = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=(replace(source_page, finish_mark_candidates=(forged,)),),
+    )
+    assert control.record.total_finish_zones_recovered == 1
+    assert control.record.takeoff_eligible is False
+    assert control.record.commercial_projection_allowed is False
