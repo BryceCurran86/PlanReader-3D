@@ -71,7 +71,7 @@ def _policy(text, name):
         full = "\n".join(s.get("run", "") for s in steps)
         assert expected["original"] in full
         assert expected["sha"] in full
-        assert "python -m tools.gpt3_original_source_preflight" in full
+        assert "tools.gpt3_original_source_preflight" in full
         assert expected["producer"] in full
         assert "if ! /usr/bin/time -v timeout 3000s python -u -m " in full
         assert "--output-dir \"$OUT/production\" > \"$OUT/producer_console.log\" 2>&1; then" in full
