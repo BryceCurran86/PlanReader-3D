@@ -523,3 +523,54 @@ def test_private_original_ft3_mark_cannot_claim_unregistered_floor_page():
         SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,
     )
     assert result.record is None
+
+
+def test_native_floor_finish_word_address_and_glyph_location_are_in_receipt_identity():
+    """Distinct native observations must not hash into the same source receipt."""
+    from dataclasses import replace
+
+    polygon = ((100.0, 100.0), (300.0, 100.0),
+               (300.0, 300.0), (100.0, 300.0))
+    mark = SourceFloorFinishMark(
+        "OCC_FT3", "page_11", "FT3", (150.0, 150.0), (113, 0, 0)
+    )
+    selector = _selector(material_code="FT3")
+
+    def record_for(candidate, transitions=()):
+        result = evaluate_source_floor_finish_ownership_shadow(
+            selector,
+            finish_mark=candidate,
+            internal_face_polygon_pdf_pts=polygon,
+            doorway_transitions=transitions,
+        )
+        assert result.status == EvidenceResolutionStatus.CANDIDATE
+        assert result.record is not None
+        assert result.record.commercial_projection_allowed is False
+        assert result.record.takeoff_eligible is False
+        return result.record
+
+    baseline = record_for(mark)
+    replay = record_for(mark)
+    new_address = record_for(replace(mark, source_word_address=(113, 1, 0)))
+    new_position = record_for(replace(mark, mark_center_pt=(155.0, 155.0)))
+    assert baseline.record_id == replay.record_id
+    assert len({baseline.record_id, new_address.record_id, new_position.record_id}) == 3
+    assert baseline.internal_floor_area_sq_pt == new_address.internal_floor_area_sq_pt
+    assert baseline.internal_floor_area_sq_pt == new_position.internal_floor_area_sq_pt
+
+    aligned = SourceDoorwayThreshold("D13", (100.0, 100.0), (200.0, 100.0))
+    misaligned = SourceDoorwayThreshold("D13", (20.0, 20.0), (50.0, 20.0))
+    aligned_record = record_for(mark, (aligned,))
+    misaligned_record = record_for(mark, (misaligned,))
+    assert aligned_record.record_id != misaligned_record.record_id
+    assert aligned_record.record_id != baseline.record_id
+    assert misaligned_record.record_id != baseline.record_id
+
+
+@pytest.mark.parametrize("address", [
+    None, (), (0, 0), (0, 0, -1), (True, 0, 0), (0.0, 0, 0),
+    [0, 0, 0], "113,0,0", (0, 0, 0, 0),
+])
+def test_invalid_native_word_address_rejected_before_receipt_hash(address):
+    with pytest.raises(ValueError, match="source_word_address"):
+        SourceFloorFinishMark("OCC", "page_11", "FT3", (10.0, 10.0), address)
