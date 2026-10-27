@@ -251,11 +251,13 @@ def bind_source_finish_mark_to_corresponded_floor_shadow(
     # No copied or malformed candidate number, including a bool, NaN or inf,
     # can survive the original source-to-physical-floor diagnostic handoff.
     # This remains CANDIDATE: the metric publisher is a separate authority.
-    if (
-        type(measured.candidate_area_m2) not in (int, float)
-        or not math.isfinite(float(measured.candidate_area_m2))
-        or measured.candidate_area_m2 <= 0
-    ):
+    if type(measured.candidate_area_m2) not in (int, float):
+        return block("original_floor_finish_metric_area_unavailable")
+    try:
+        metric_area = float(measured.candidate_area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return block("original_floor_finish_metric_area_unavailable")
+    if not math.isfinite(metric_area) or metric_area <= 0.0:
         return block("original_floor_finish_metric_area_unavailable")
     shape=_safe_polygon(correspondence.finish_support_polygon_pts)
     if shape is None:
