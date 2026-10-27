@@ -190,6 +190,18 @@ def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_D
     originals cannot be silently treated as absent on Python 3.13 or 3.14.
     """
     failures: list[str] = []
+    # A no-follow check of the final PDF is insufficient when its containing
+    # directory is an alias. Missing private originals are permitted in public
+    # CI, but a *present* symlink, file or unreadable source root is not.
+    try:
+        source_root = source_dir.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return ["original source directory cannot be inspected"]
+    else:
+        if not S_ISDIR(source_root.st_mode):
+            return ["original source directory is not a regular directory"]
     for manifest in manifests:
         for source in manifest.source_documents:
             if not _safe_path_component(source.name):
