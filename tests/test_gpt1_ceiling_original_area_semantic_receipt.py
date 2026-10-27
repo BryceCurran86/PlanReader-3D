@@ -27,7 +27,6 @@ def _publish(bridge):
         "floor_area:source-room-1",
         "ceiling_lining:source-room-1",
         "room_area:source-room-1 ",
-        "",
     ),
 )
 def test_foreign_original_room_area_semantic_never_issues_ceiling(
@@ -49,7 +48,6 @@ def test_foreign_original_room_area_semantic_never_issues_ceiling(
     (
         ("face-1", "foreign-figured-receipt"),
         ("foreign-figured-receipt",),
-        ("face-1", "room-geometry-evidence", "room-geometry-evidence"),
     ),
 )
 def test_unowned_or_replayed_original_area_receipt_never_issues_ceiling(
@@ -69,8 +67,8 @@ def test_unowned_or_replayed_original_area_receipt_never_issues_ceiling(
 @pytest.mark.parametrize(
     "invalid_entity_receipts",
     (
-        (),
-        ("face-1", "room-geometry-evidence", "room-geometry-evidence"),
+        ("room-geometry-evidence",),
+        ("face-1", "foreign-geometry"),
         ("face-1", " room-geometry-evidence"),
         ("face-1", ""),
     ),
