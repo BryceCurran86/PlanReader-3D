@@ -126,7 +126,6 @@ def test_current_workflow_keeps_positive_checks_without_private_log_contents(nam
     ('"sealed_run_integrity_verified"', '"sealed_run_fingerprint"'),
     ("github.actor == 'BryceCurran86'", "github.actor == 'anyone'"),
     ("github.ref == 'refs/heads/main'", "github.ref != 'refs/heads/main'"),
-    ('if: always()', 'if: success()'),
     ('rm -rf documents/sources artifacts', 'echo retained originals'),
 ])
 def test_producer_log_and_source_trust_mutations_fail_closed(name, old, new):
@@ -163,3 +162,18 @@ def test_score_payload_is_accepted_only_as_internal_assertion():
     assert "assert d[\"coverage_accuracy\"]==0.0" in text
     assert 'print("MARYBOROUGH_CURRENT_SOURCE_EXACT24_VERIFIED_UNPUBLISHED")' in text
     assert 'print("MARYBOROUGH_CURRENT_SOURCE_EXACT24",json.dumps(d,sort_keys=True))' not in text
+
+
+@pytest.mark.parametrize("name", sorted(WORKFLOWS))
+def test_original_cleanup_cannot_be_conditioned_on_success(name):
+    raw = (ROOT / WORKFLOWS[name]["file"]).read_text(encoding="utf-8")
+    assert _policy(raw, name)
+    original = (
+        "      - name: Destroy private originals and unpublished source reports\n"
+        "        if: always()"
+    )
+    assert original in raw
+    assert not _policy(
+        raw.replace(original, original.replace("always()", "success()"), 1),
+        name,
+    )
