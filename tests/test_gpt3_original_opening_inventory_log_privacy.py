@@ -27,6 +27,15 @@ def _private_log_contract(raw: str) -> bool:
             triggers["pull_request"]["paths"]
         )
         jobs = doc["jobs"]
+        focused = jobs["focused"]
+        assert sorted(focused["strategy"]["matrix"]["python-version"]) == ["3.13", "3.14"]
+        focused_run = next(
+            step["run"] for step in focused["steps"]
+            if step.get("name") == "Customer inventory original typed quantity negatives and positive"
+        )
+        assert "python -m pytest -q" in focused_run
+        assert "tests/test_gpt3_original_opening_inventory_log_privacy.py" in focused_run
+        assert "ruff check --select F821,F823" in focused_run
         source = jobs["original-source"]
         gate = source["if"]
         assert "github.event_name == 'workflow_dispatch'" in gate
