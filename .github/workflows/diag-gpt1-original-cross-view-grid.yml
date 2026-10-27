@@ -11,6 +11,9 @@ on:
       - ".github/workflows/diag-gpt1-original-cross-view-grid.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   original-grid-evidence:
     runs-on: ubuntu-latest
@@ -38,17 +41,26 @@ jobs:
           set -euo pipefail
           OUT=artifacts/gpt1-original-cross-view-grid
           mkdir -p "$OUT"
+          PRIVATE_OUT="$(mktemp -d "${RUNNER_TEMP}/gpt1-original-grid-XXXXXX")"
+          export PRIVATE_OUT
+          trap 'rm -rf "$PRIVATE_OUT"' EXIT
           git rev-parse HEAD > "$OUT/producer_head_sha.txt"
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
           echo "$SHA  $PDF" | sha256sum --check
-          timeout 600s env PYTHONPATH=. python -u -m tools.diag_gpt1_original_cross_view_grid \
+          # Original-derived coordinates, text and tool exceptions are private.
+          # A failure reports a constant message, never raw source output.
+          if ! timeout 600s env PYTHONPATH=. python -u -m tools.diag_gpt1_original_cross_view_grid \
             --pdf "$PDF" --sha256 "$SHA" --first-page 7 --second-page 11 \
-            --output "$OUT/native_grid_candidate.json" | tee "$OUT/console.log"
+            --output "$PRIVATE_OUT/native_grid_candidate.json" > /dev/null 2>&1; then
+            echo "ORIGINAL_GRID_PRIVATE_DIAGNOSTIC_FAILED" >&2
+            exit 1
+          fi
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
-          data=json.loads(Path("artifacts/gpt1-original-cross-view-grid/native_grid_candidate.json").read_text())
+          data=json.loads((Path(os.environ["PRIVATE_OUT"])/"native_grid_candidate.json").read_text())
           assert data["original_source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
           assert data["source_pages_1_based"]==[7,11]
           assert data["diagnostic_only"] is True
@@ -57,10 +69,10 @@ jobs:
                       "source_finish_occurrence_owned","source_floor_area_quantity_created",
                       "commercial_projection_allowed"):
               assert data[key] is False, key
-          assert data["source_native_text_grid_candidate"] is True, data["first_unclosed_gate"]
+          assert data["source_native_text_grid_candidate"] is True
           assert data["letter_grid_control_count"]>=3
           assert data["number_grid_control_count"]>=4
-          assert data["source_native_vector_grid_candidate"] is True, data.get("first_grid_vector_gate")
+          assert data["source_native_vector_grid_candidate"] is True
           assert len(data["native_vector_grid_letter_lineage"])>=3
           assert len(data["native_vector_grid_number_lineage"])>=4
           assert data["first_unclosed_gate"]=="source_grid_producer_and_room_physical_equivalence_unverified"
@@ -68,14 +80,27 @@ jobs:
           for row in data["native_vector_grid_letter_lineage"]+data["native_vector_grid_number_lineage"]:
               assert len(row["first_original_path_item_addresses"])>=12
               assert len(row["second_original_path_item_addresses"])>=12
-          print("ORIGINAL_GRID_NATIVE_TEXT_AND_NATIVE_VECTOR_CANDIDATES_NO_PHYSICAL_OR_QUANTITY_AUTHORITY")
+          receipt={
+              "schema_version":"1.0.0",
+              "producer_head_sha":Path("artifacts/gpt1-original-cross-view-grid/producer_head_sha.txt").read_text().strip(),
+              "source_sha_verified":True,
+              "original_source_checks_passed":True,
+              "diagnostic_only":True,
+              "physical_correspondence_granted":False,
+              "floor_finish_quantity_issued":False,
+              "commercial_projection_allowed":False,
+          }
+          Path("artifacts/gpt1-original-cross-view-grid/receipt.json").write_text(
+              json.dumps(receipt,sort_keys=True)+"\\n"
+          )
+          print("ORIGINAL_GRID_SOURCE_VALIDATED_CANDIDATE_ONLY")
           PY
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
-          name: gpt1-original-cross-view-grid-native-evidence
-          path: artifacts/gpt1-original-cross-view-grid/
-          retention-days: 30
+          name: gpt1-original-cross-view-grid-source-neutral-receipt
+          path: artifacts/gpt1-original-cross-view-grid/receipt.json
+          retention-days: 14
 
   original-room-mark-registration:
     runs-on: ubuntu-latest
@@ -102,18 +127,26 @@ jobs:
           set -euo pipefail
           OUT=artifacts/gpt1-original-crossview-room-mark
           mkdir -p "$OUT"
+          PRIVATE_OUT="$(mktemp -d "${RUNNER_TEMP}/gpt1-original-room-mark-XXXXXX")"
+          export PRIVATE_OUT
+          trap 'rm -rf "$PRIVATE_OUT"' EXIT
           git rev-parse HEAD > "$OUT/head.txt"
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
           SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
           echo "$SHA  $PDF" | sha256sum --check
-          timeout 3500s env PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 python -u -m tools.diag_gpt1_source_grid_room_mark_candidates \
+          # Retain source geometry only in private runner temp; never in logs.
+          if ! timeout 3500s env PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 python -u -m tools.diag_gpt1_source_grid_room_mark_candidates \
             --pdf "$PDF" --sha256 "$SHA" --room-page 7 --material-page 11 \
-            --code FT3 --output "$OUT/original_room_mark_registration.json" \
-            2>&1 | tee "$OUT/console.log"
+            --code FT3 --output "$PRIVATE_OUT/original_room_mark_registration.json" \
+            > /dev/null 2>&1; then
+            echo "ORIGINAL_ROOM_MARK_PRIVATE_DIAGNOSTIC_FAILED" >&2
+            exit 1
+          fi
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
-          r=json.loads(Path("artifacts/gpt1-original-crossview-room-mark/original_room_mark_registration.json").read_text())
+          r=json.loads((Path(os.environ["PRIVATE_OUT"])/"original_room_mark_registration.json").read_text())
           assert r["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
           assert r["diagnostic_only"] is True
           assert r["original_grid_native_vector_candidate"] is True
@@ -132,11 +165,25 @@ jobs:
               and not x["customer_quantity_issued"]
               for x in r["source_region_geometric_candidates"]
           )
+          receipt={
+              "schema_version":"1.0.0",
+              "producer_head_sha":Path("artifacts/gpt1-original-crossview-room-mark/head.txt").read_text().strip(),
+              "source_sha_verified":True,
+              "original_source_checks_passed":True,
+              "diagnostic_only":True,
+              "physical_room_crossview_equivalence_proven":False,
+              "material_occurrence_source_trusted":False,
+              "floor_finish_quantity_issued":False,
+              "commercial_projection_allowed":False,
+          }
+          Path("artifacts/gpt1-original-crossview-room-mark/receipt.json").write_text(
+              json.dumps(receipt,sort_keys=True)+"\\n"
+          )
           print("ORIGINAL_CROSSVIEW_ROOM_FT3_CANDIDATES_ONLY_NO_CONSTRUCTION_QUANTITY")
           PY
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
-          name: gpt1-original-crossview-room-ft3-shadow
-          path: artifacts/gpt1-original-crossview-room-mark/
-          retention-days: 30
+          name: gpt1-original-crossview-room-ft3-source-neutral-receipt
+          path: artifacts/gpt1-original-crossview-room-mark/receipt.json
+          retention-days: 14
