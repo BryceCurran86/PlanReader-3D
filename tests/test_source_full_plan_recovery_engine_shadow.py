@@ -566,3 +566,62 @@ def test_blocked_page_reason_precedes_duplicate_room_diagnostic():
     )
     assert result.record.total_rooms_recovered == 0
     assert result.record.total_finish_zones_recovered == 0
+
+
+def test_unclosed_overlapping_room_still_vetoes_finish_owner():
+    """A failed wall closure is not evidence that a competing room does not exist."""
+    original = _healthy_page("page_11")
+    room_id, polygon = original.room_polygon_candidates[0]
+    rival_polygon = tuple((x + 20.0, y + 20.0) for x, y in polygon)
+    rival = ("ROOM_UNCLOSED", rival_polygon)
+    # Rival geometry contains the FT2 mark, but its shifted edges do not
+    # match the original source walls/opening; boundary closure must abstain.
+    rival_only = execute_source_full_plan_recovery_engine_shadow(
+        _selector(),
+        pages=(replace(original, room_polygon_candidates=(rival,)),),
+    )
+    assert rival_only.record.total_rooms_recovered == 0
+    assert rival_only.record.total_finish_zones_recovered == 0
+
+    baseline = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(original,)
+    )
+    assert baseline.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+    ids = set()
+    for rooms in (
+        ((room_id, polygon), rival),
+        (rival, (room_id, polygon)),
+    ):
+        page = replace(original, room_polygon_candidates=rooms)
+        before = copy.deepcopy(page)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(page,)
+        )
+        verdict = result.record.page_verdicts[0]
+        ids.add(result.record.record_id)
+        assert verdict.recovered_room_ids == ("ROOM_A",)
+        assert verdict.recovered_finish_ids == ()
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert result.record.diagnostic_only is True
+        assert page == before
+    assert len(ids) == 1
+
+
+def test_unclosed_distant_room_does_not_veto_unique_finish_owner():
+    """Only a spatially plausible rival can withhold a diagnostic finish."""
+    original = _healthy_page("page_11")
+    room_id, polygon = original.room_polygon_candidates[0]
+    distant = ("ROOM_UNCLOSED", tuple((x + 400.0, y + 400.0) for x, y in polygon))
+    for rooms in (((room_id, polygon), distant), (distant, (room_id, polygon))):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(),
+            pages=(replace(original, room_polygon_candidates=rooms),),
+        )
+        verdict = result.record.page_verdicts[0]
+        assert verdict.recovered_room_ids == ("ROOM_A",)
+        assert verdict.recovered_finish_ids == ("OCC_FT2",)
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.commercial_projection_allowed is False
