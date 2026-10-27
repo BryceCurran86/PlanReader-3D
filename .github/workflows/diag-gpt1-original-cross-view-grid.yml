@@ -1,14 +1,7 @@
 name: GPT1 Original Cross-View Plan Grid Source Controls
 
+# Original source must never be provisioned to PR-controlled code.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "pb_source_grid_registration_shadow.py"
-      - "tools/diag_gpt1_original_cross_view_grid.py"
-      - "tests/test_gpt1_source_grid_registration_shadow.py"
-      - "tools/diag_gpt1_source_grid_room_mark_candidates.py"
-      - ".github/workflows/diag-gpt1-original-cross-view-grid.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,15 +9,17 @@ permissions:
 
 jobs:
   original-grid-evidence:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Exact head identity
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - uses: actions/setup-python@v5
         with:
@@ -35,6 +30,31 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python -m pytest -q tests/test_gpt1_source_grid_registration_shadow.py
+      - name: Build sealed offline diagnostic image BEFORE original provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          deps_dir="$RUNNER_TEMP/gpt1-crossview-deps"
+          dockerfile="$RUNNER_TEMP/gpt1-crossview.Dockerfile"
+          mkdir -p "$deps_dir"
+          cp -- requirements.txt requirements-ci-v1228.txt "$deps_dir/"
+          cat > "$dockerfile" <<'DOCKER'
+          FROM python:3.13-slim
+          WORKDIR /workspace
+          RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          DOCKER
+          docker build --quiet -f "$dockerfile" -t gpt1-crossview-offline:3.13 "$deps_dir"
+      - name: Provision SHA-pinned original AFTER image build
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
       - name: Original two authentic plan pages source geometry
         shell: bash
         run: |
@@ -50,13 +70,23 @@ jobs:
           echo "$SHA  $PDF" | sha256sum --check
           # Original-derived coordinates, text and tool exceptions are private.
           # A failure reports a constant message, never raw source output.
-          if ! timeout 600s env PYTHONPATH=. python -u -m tools.diag_gpt1_original_cross_view_grid \
+          if ! timeout 600s docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --user "$(id -u):$(id -g)" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$PRIVATE_OUT,dst=/private-output" \
+              --workdir /workspace -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e ORT_DISABLE_TELEMETRY=1 \
+              gpt1-crossview-offline:3.13 \
+              python -u -m tools.diag_gpt1_original_cross_view_grid \
             --pdf "$PDF" --sha256 "$SHA" --first-page 7 --second-page 11 \
-            --output "$PRIVATE_OUT/native_grid_candidate.json" > /dev/null 2>&1; then
+            --output /private-output/native_grid_candidate.json > /dev/null 2>&1; then
             echo "ORIGINAL_GRID_PRIVATE_DIAGNOSTIC_FAILED" >&2
             exit 1
           fi
-          python - <<'PY'
+          python -I - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -101,17 +131,25 @@ jobs:
           name: gpt1-original-cross-view-grid-source-neutral-receipt
           path: artifacts/gpt1-original-cross-view-grid/receipt.json
           retention-days: 14
+      - name: Remove private original and unpublished diagnostic data
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- documents/sources "$RUNNER_TEMP/gpt1-crossview-deps"
+          rm -f -- "$RUNNER_TEMP/gpt1-crossview.Dockerfile"
 
   original-room-mark-registration:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Exact producer head
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - uses: actions/setup-python@v5
         with:
@@ -121,6 +159,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr
           pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Build sealed offline diagnostic image BEFORE original provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+          deps_dir="$RUNNER_TEMP/gpt1-crossview-deps"
+          dockerfile="$RUNNER_TEMP/gpt1-crossview.Dockerfile"
+          mkdir -p "$deps_dir"
+          cp -- requirements.txt requirements-ci-v1228.txt "$deps_dir/"
+          cat > "$dockerfile" <<'DOCKER'
+          FROM python:3.13-slim
+          WORKDIR /workspace
+          RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
+          DOCKER
+          docker build --quiet -f "$dockerfile" -t gpt1-crossview-offline:3.13 "$deps_dir"
+      - name: Provision SHA-pinned original AFTER image build
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: |
+            Arch_Combined_Maryborough_Service_Station.pdf
+          allow-missing: "false"
       - name: Original SHA->native grid->actual W4 source room->FT3 mark geometry
         shell: bash
         run: |
@@ -135,14 +198,24 @@ jobs:
           SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
           echo "$SHA  $PDF" | sha256sum --check
           # Retain source geometry only in private runner temp; never in logs.
-          if ! timeout 3500s env PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 python -u -m tools.diag_gpt1_source_grid_room_mark_candidates \
+          if ! timeout 3500s docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+              --user "$(id -u):$(id -g)" \
+              --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/workspace,readonly" \
+              --mount "type=bind,src=$PRIVATE_OUT,dst=/private-output" \
+              --workdir /workspace -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e ORT_DISABLE_TELEMETRY=1 \
+              gpt1-crossview-offline:3.13 \
+              python -u -m tools.diag_gpt1_source_grid_room_mark_candidates \
             --pdf "$PDF" --sha256 "$SHA" --room-page 7 --material-page 11 \
-            --code FT3 --output "$PRIVATE_OUT/original_room_mark_registration.json" \
+            --code FT3 --output /private-output/original_room_mark_registration.json \
             > /dev/null 2>&1; then
             echo "ORIGINAL_ROOM_MARK_PRIVATE_DIAGNOSTIC_FAILED" >&2
             exit 1
           fi
-          python - <<'PY'
+          python -I - <<'PY'
           import json
           import os
           from pathlib import Path
@@ -187,3 +260,9 @@ jobs:
           name: gpt1-original-crossview-room-ft3-source-neutral-receipt
           path: artifacts/gpt1-original-crossview-room-mark/receipt.json
           retention-days: 14
+      - name: Remove private original and unpublished diagnostic data
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- documents/sources "$RUNNER_TEMP/gpt1-crossview-deps"
+          rm -f -- "$RUNNER_TEMP/gpt1-crossview.Dockerfile"

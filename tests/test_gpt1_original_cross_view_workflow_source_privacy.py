@@ -53,9 +53,9 @@ def test_both_diagnostics_keep_original_derived_json_in_private_runner_temp() ->
         assert "| tee " not in job
         assert "console.log" not in job
         assert "if: always()" not in job
-    assert '--output "$PRIVATE_OUT/native_grid_candidate.json"' in first
+    assert "--output /private-output/native_grid_candidate.json" in first
     assert 'Path(os.environ["PRIVATE_OUT"])/"native_grid_candidate.json"' in first
-    assert '--output "$PRIVATE_OUT/original_room_mark_registration.json"' in second
+    assert "--output /private-output/original_room_mark_registration.json" in second
     assert 'Path(os.environ["PRIVATE_OUT"])/"original_room_mark_registration.json"' in second
 
 
@@ -96,7 +96,64 @@ def test_diagnostic_errors_cannot_echo_original_source_payloads() -> None:
 def test_minimal_token_scope_and_exact_head_are_preserved() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "permissions:\n  contents: read\n" in text
-    assert "pull_request:\n    branches: [main]" in text
-    assert "github.event.pull_request.head.sha || github.sha" in text
+    assert "pull_request:" not in text
+    assert "workflow_dispatch:" in text
+    assert "github.event.pull_request.head.sha" not in text
+    assert text.count("persist-credentials: false") == 2
+    assert text.count("ref: ${{ github.sha }}") == 2
+    assert text.count("github.actor == 'BryceCurran86'") == 2
+    assert text.count("github.ref == 'refs/heads/main'") == 2
     assert "test \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"" in text
     assert text.count("actions/upload-artifact@v4") == 2
+
+
+def test_owner_main_only_source_execution_and_immutable_checkout() -> None:
+    first, second = _jobs()
+    for job in (first, second):
+        assert "github.event_name == 'workflow_dispatch'" in job
+        assert "github.ref == 'refs/heads/main'" in job
+        assert "github.actor == 'BryceCurran86'" in job
+        assert "ref: ${{ github.sha }}" in job
+        assert "persist-credentials: false" in job
+        assert "github.event.pull_request.head.sha" not in job
+
+
+def test_original_python_confined_to_no_network_readonly_container() -> None:
+    for job in _jobs():
+        assert "docker run --rm --network none --read-only --cap-drop ALL" in job
+        assert "--security-opt no-new-privileges" in job
+        assert '--user "$(id -u):$(id -g)"' in job
+        assert "src=$GITHUB_WORKSPACE,dst=/workspace,readonly" in job
+        assert "src=$PRIVATE_OUT,dst=/private-output" in job
+        assert "gpt1-crossview-offline:3.13" in job
+        assert "python -I - <<'PY'" in job
+        assert "env PYTHONPATH=. python -u -m tools.diag_" not in job
+
+
+def test_image_build_precedes_original_provision_and_sha_check() -> None:
+    for job in _jobs():
+        build = job.index("Build sealed offline diagnostic image BEFORE original provisioning")
+        provision = job.index("uses: ./.github/actions/provision-original-sources")
+        sha = job.index("sha256sum --check")
+        diagnostic = job.index("if ! timeout ")
+        assert build < provision < sha < diagnostic
+        assert 'allow-missing: "false"' in job
+        assert "secrets.ORIGINAL_SOURCES_TOKEN" in job
+        assert "vars.ORIGINAL_SOURCES_REPOSITORY" in job
+        assert "FROM python:3.13-slim" in job
+        assert "Remove private original and unpublished diagnostic data" in job
+
+
+def test_security_contract_rejects_trigger_and_network_mutations() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "pull_request:" not in text
+    assert "pull_request_target:" not in text
+    assert text.count("  workflow_dispatch:") == 1
+    assert text.count("--network none") == 2
+    assert text.count("github.actor == 'BryceCurran86'") == 2
+    unsafe_trigger = text.replace("  workflow_dispatch:", "  pull_request:\\n  workflow_dispatch:", 1)
+    unsafe_network = text.replace("--network none", "--network bridge", 1)
+    unsafe_actor = text.replace("github.actor == 'BryceCurran86'", "true", 1)
+    assert "pull_request:" in unsafe_trigger
+    assert unsafe_network.count("--network none") != 2
+    assert unsafe_actor.count("github.actor == 'BryceCurran86'") != 2
