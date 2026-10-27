@@ -20,12 +20,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
-    SCHEMA_VERSION, load_project_manifest, load_suite_manifests,
+    SCHEMA_VERSION, load_project_manifest,
 )
 
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 DEFAULT_SOURCE_DIR = REPO_ROOT / "documents" / "sources"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WIN_DEVICE_NAMES = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"})
+_WIN_PORT_DEVICE_RE = re.compile(r"^(?:COM|LPT)[1-9¹²³]$")
 
 
 def _safe_path_component(value: Any) -> bool:
@@ -33,17 +35,22 @@ def _safe_path_component(value: Any) -> bool:
 
     Frozen suite project IDs and pinned document names are untrusted JSON
     strings until validated. Reject POSIX/Windows traversal, drive/ADS names,
-    control characters and Windows trailing-dot/space aliases.
+    illegal Win32 characters, device basenames and trailing-dot/space aliases.
     """
-    return (
-        isinstance(value, str)
-        and bool(value)
-        and value not in (".", "..")
-        and value == value.strip()
-        and not value.endswith(".")
-        and not any(char in value for char in ("/", "\\", ":", "\x00"))
-        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
-    )
+    if (
+        not isinstance(value, str)
+        or not value
+        or value in (".", "..")
+        or value != value.strip()
+        or value.endswith(".")
+        or any(char in value for char in '/\\:<>"|?*')
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        return False
+    # Win32 reserves device basenames even with extensions. Treat spaces
+    # before an extension as an alias, e.g. "CON .pdf" must also fail.
+    stem = value.split(".", 1)[0].rstrip(" ").upper()
+    return stem not in _WIN_DEVICE_NAMES and _WIN_PORT_DEVICE_RE.fullmatch(stem) is None
 
 
 def _json(path: Path) -> Any:
