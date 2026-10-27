@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_quantity_takeoff_adapter import quantity_status_not_publishable
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     sealed_source_closed_run_from_dict,
@@ -123,7 +124,7 @@ def assess_append_only_signed_batch(
         if (
             row.abstained is not False
             or row.lineage_ok is not True
-            or row.status != "corroborated"
+            or quantity_status_not_publishable(row.status)
             or row.blocking_reasons
             or not row.object_identity_refs
         ):
