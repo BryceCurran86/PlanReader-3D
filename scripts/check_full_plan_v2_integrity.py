@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from stat import S_ISDIR, S_ISREG
 from pathlib import Path
@@ -63,6 +64,19 @@ def _unique_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _reject_nonfinite_json_constant(value: str) -> None:
+    """JSON permits finite numbers only; Python's decoder also accepts NaN/Inf."""
+    raise ValueError("non-finite JSON numeric value")
+
+
+def _finite_json_float(value: str) -> float:
+    """Reject finite-looking JSON exponents that overflow to infinity."""
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON numeric value")
+    return parsed
+
+
 def _regular_entry(path: Path, *, directory: bool = False) -> bool:
     """Reject symlinked or nonregular frozen metadata entries without following them."""
     try:
@@ -101,7 +115,12 @@ def _json(path: Path) -> Any:
         for field in _SOURCE_IDENTITY_FIELDS
     ):
         raise ValueError("frozen JSON changed during verification")
-    return json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_members)
+    return json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=_unique_json_members,
+        parse_constant=_reject_nonfinite_json_constant,
+        parse_float=_finite_json_float,
+    )
 
 
 def _collect_object_refs(value: Any) -> set[str]:
