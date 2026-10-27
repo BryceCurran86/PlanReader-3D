@@ -984,6 +984,7 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
     bboxlog = page.get_bboxlog()
     native = extract_native_page(page)
     painted = set()
+    inked: dict = {}
     strokes_by_seq = {d.get("seqno"): d for d in drawings}
     text_by_seq = {}
     for trace in page.get_texttrace():
@@ -1043,9 +1044,67 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
             clear = False
             break
         if clear:
-            edge = f"_e{segment['edge_index']}" if "edge_index" in segment else ""
-            painted.add(f"vec_p{page_id}_{path_index}_{segment['item_index']}{edge}")
+            painted.add(_native_segment_geometry_id(page_id, segment))
+            span = _axis_span(segment)
+            if span is not None:
+                inked.setdefault((span[0], round(span[1] / _COLLINEAR_IDENTITY_TOL)), []).append((span[2], span[3]))
+    # A fill-only boundary (or any extracted edge whose own path is not a proven stroke) is still DRAWN where
+    # source-painted strokes of the same line already ink its whole extent: the visible ink at exactly those
+    # coordinates is what the frame needs, and the stroke itself passed every check above (opaque, solid, visible,
+    # nothing later erases it). Exact coordinate identity only; a shorter stroke, a parallel stroke, a gap or an
+    # unpainted stroke never supports an edge.
+    merged = {key: _merge_spans(spans) for key, spans in inked.items()}
+    for segment in native["segments"]:
+        path_index = segment.get("path_index")
+        if type(path_index) is not int or not 0 <= path_index < len(drawings):
+            continue
+        span = _axis_span(segment)
+        if span is None:
+            continue
+        axis, offset, lo, hi = span
+        base = round(offset / _COLLINEAR_IDENTITY_TOL)
+        for neighbour in (base - 1, base, base + 1):
+            if any(a - _COLLINEAR_IDENTITY_TOL <= lo and hi <= b + _COLLINEAR_IDENTITY_TOL
+                   for a, b in merged.get((axis, neighbour), ())):
+                painted.add(_native_segment_geometry_id(page_id, segment))
+                break
     return frozenset(painted)
+
+
+# Coordinate identity of two extracted edges that were drawn from the same source numbers (sub-micro-point float
+# identity); it is not a measurement tolerance and nothing is fitted to a drawing.
+_COLLINEAR_IDENTITY_TOL = 1e-6
+
+
+def _native_segment_geometry_id(page_id: str, segment) -> str:
+    edge = f"_e{segment['edge_index']}" if "edge_index" in segment else ""
+    return f"vec_p{page_id}_{segment['path_index']}_{segment['item_index']}{edge}"
+
+
+def _axis_span(segment):
+    """(axis, offset, lo, hi) of an axis-aligned, finite, non-degenerate edge; None otherwise."""
+    try:
+        x0, y0, x1, y1 = (float(segment[k]) for k in ("x1", "y1", "x2", "y2"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+        return None
+    if abs(y1 - y0) <= _COLLINEAR_IDENTITY_TOL and abs(x1 - x0) > _COLLINEAR_IDENTITY_TOL:
+        return ("h", (y0 + y1) / 2.0, min(x0, x1), max(x0, x1))
+    if abs(x1 - x0) <= _COLLINEAR_IDENTITY_TOL and abs(y1 - y0) > _COLLINEAR_IDENTITY_TOL:
+        return ("v", (x0 + x1) / 2.0, min(y0, y1), max(y0, y1))
+    return None
+
+
+def _merge_spans(spans):
+    """Union of collinear spans that overlap or touch (exact identity), as sorted disjoint intervals."""
+    merged = []
+    for lo, hi in sorted(spans):
+        if merged and lo <= merged[-1][1] + _COLLINEAR_IDENTITY_TOL:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
 
 
 class OpeningElevationFrameAreaProducer:

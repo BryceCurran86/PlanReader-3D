@@ -1,0 +1,192 @@
+"""A fill-only frame edge is drawn where source-painted strokes already ink its whole extent.
+
+#3997 refuses a frame whose supports are not source-painted strokes, and identifies a support by the id of the
+extracted edge. A frame drawn as a white fill plus a coincident stroked outline therefore had its fill edges
+rejected although the outline inks exactly those coordinates. A support edge is accepted when source-painted strokes
+(opaque, solid, visible, never erased by later paint) of the same axis-aligned line already cover its whole extent,
+by exact coordinate identity. A shorter, parallel, gapped, dashed, translucent or later-erased stroke never supports it.
+Synthetic drawings only.
+"""
+from __future__ import annotations
+
+import fitz
+import pytest
+
+import pb_opening_elevation_frame_area_authority as module
+from pb_migration_contracts import EvidenceResolutionStatus as S
+from pb_opening_elevation_frame_area_authority import _source_painted_geometry_ids
+from test_opening_elevation_frame_painted_support import _payload, _resolve
+
+FRAME = (150.0, 120.0, 300.0, 240.0)
+
+
+def _with_outline(*, rotation=0, base="white-fill", draw=None):
+    """The painted-support fixture with extra strokes drawn on the unrotated page, then rotated."""
+    doc = fitz.open(stream=_payload(base), filetype="pdf")
+    page = doc[0]
+    (draw or _full_outline)(page)
+    page.set_rotation(rotation)
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def _full_outline(page, *, dx=0.0, dy=0.0, **kw):
+    x0, y0, x1, y1 = FRAME
+    page.draw_rect(fitz.Rect(x0 + dx, y0 + dy, x1 + dx, y1 + dy), color=(0, 0, 0), width=1.0, **kw)
+
+
+def _segments(page, segments, **kw):
+    for a, b in segments:
+        page.draw_line(fitz.Point(*a), fitz.Point(*b), color=(0, 0, 0), width=1.0, **kw)
+
+
+def _outline_edges(drop=None, split=None, gap=0.0):
+    x0, y0, x1, y1 = FRAME
+    edges = {"top": ((x0, y0), (x1, y0)), "right": ((x1, y0), (x1, y1)), "bottom": ((x1, y1), (x0, y1)),
+             "left": ((x0, y1), (x0, y0))}
+    out = []
+    for name, (a, b) in edges.items():
+        if name == drop:
+            continue
+        if split == name:
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            h = gap / 2.0
+            ux = (b[0] - a[0]) / max(abs(b[0] - a[0]) + abs(b[1] - a[1]), 1e-9)
+            uy = (b[1] - a[1]) / max(abs(b[0] - a[0]) + abs(b[1] - a[1]), 1e-9)
+            out += [(a, (mid[0] - h * ux, mid[1] - h * uy)), ((mid[0] + h * ux, mid[1] + h * uy), b)]
+        else:
+            out.append((a, b))
+    return out
+
+
+def _ok(result):
+    return result.status is S.CORROBORATED and abs(result.record.area_m2 - 7.2) < 1e-9
+
+
+# ------------------------------------------------------------------------------------------------ positives
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_a_white_fill_frame_with_a_coincident_painted_outline_is_supported(rotation):
+    _, _, result = _resolve(_with_outline(rotation=rotation))
+    assert _ok(result), result.reason_codes
+
+
+def test_the_same_fill_without_any_outline_stays_unproved():
+    _, _, result = _resolve(_payload("white-fill"))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+def test_an_outline_split_into_touching_collinear_pieces_still_supports_the_edge():
+    _, _, result = _resolve(_with_outline(draw=lambda page: _segments(page, _outline_edges(split="top", gap=0.0))))
+    assert _ok(result), result.reason_codes
+
+
+@pytest.mark.parametrize("offset,scale", [((40, 20), 1.0), ((0, 0), 1.2), ((30, 30), 0.75)])
+def test_translation_and_uniform_scale_preserve_the_supported_frame(offset, scale):
+    with fitz.open(stream=_with_outline(), filetype="pdf") as original:
+        doc = fitz.open()
+        page = doc.new_page(width=700, height=600)
+        dx, dy = offset
+        page.show_pdf_page(fitz.Rect(dx, dy, dx + 500 * scale, dy + 400 * scale), original, 0)
+        payload = doc.tobytes()
+        doc.close()
+    _, _, result = _resolve(payload)
+    assert _ok(result), result.reason_codes
+
+
+# ------------------------------------------------------------------------------------------------ negatives
+
+def test_a_parallel_but_not_coincident_outline_does_not_support_the_fill_edges():
+    _, _, result = _resolve(_with_outline(draw=lambda page: _full_outline(page, dx=0.5)))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+def test_an_outline_missing_one_edge_leaves_that_edge_unsupported():
+    for drop in ("top", "right", "bottom", "left"):
+        _, _, result = _resolve(_with_outline(draw=lambda page, d=drop: _segments(page, _outline_edges(drop=d))))
+        assert result.status is S.ABSTAINED and result.record is None, drop
+
+
+def test_an_outline_with_a_gap_does_not_support_the_edge_it_interrupts():
+    _, _, result = _resolve(_with_outline(draw=lambda page: _segments(page, _outline_edges(split="top", gap=2.0))))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+def test_a_dashed_outline_does_not_support_the_fill_edges():
+    _, _, result = _resolve(_with_outline(draw=lambda page: _full_outline(page, dashes="[4 4] 0")))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+def test_a_translucent_outline_does_not_support_the_fill_edges():
+    def draw(page):
+        _full_outline(page, stroke_opacity=0.5)
+    _, _, result = _resolve(_with_outline(draw=draw))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+def test_an_outline_that_a_later_white_mask_erases_does_not_support_the_fill_edges():
+    def draw(page):
+        _full_outline(page)
+        page.draw_rect(fitz.Rect(149.0, 119.0, 151.0, 241.0), color=None, fill=(1, 1, 1))
+    _, _, result = _resolve(_with_outline(draw=draw))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+def test_a_white_outline_does_not_support_the_fill_edges():
+    def draw(page):
+        page.draw_rect(fitz.Rect(*FRAME), color=(1, 1, 1), width=1.0)
+    _, _, result = _resolve(_with_outline(draw=draw))
+    assert result.status is S.ABSTAINED and result.record is None
+
+
+# ------------------------------------------------------------------------------------------------ helpers, ids
+
+def _page_of(payload):
+    doc = fitz.open(stream=payload, filetype="pdf")
+    return doc, doc[0]
+
+
+def test_only_edges_inked_in_full_by_painted_strokes_gain_support():
+    doc, page = _page_of(_with_outline())
+    with_outline = _source_painted_geometry_ids(page, "1")
+    doc.close()
+    doc, page = _page_of(_payload("white-fill"))
+    without = _source_painted_geometry_ids(page, "1")
+    fill_ids = {i for i in with_outline if i.startswith("vec_p1_0_")}
+    doc.close()
+    assert not any(i.startswith("vec_p1_0_0_e") for i in without)
+    assert fill_ids and fill_ids <= with_outline and len(with_outline) > len(without)
+
+
+def test_replay_is_identical_and_the_page_is_not_mutated():
+    doc, page = _page_of(_with_outline())
+    first = _source_painted_geometry_ids(page, "1")
+    again = _source_painted_geometry_ids(page, "1")
+    doc.close()
+    assert first == again
+
+
+@pytest.mark.parametrize("segment,expected", [
+    ({"x1": 0.0, "y1": 5.0, "x2": 10.0, "y2": 5.0}, ("h", 5.0, 0.0, 10.0)),
+    ({"x1": 10.0, "y1": 5.0, "x2": 0.0, "y2": 5.0}, ("h", 5.0, 0.0, 10.0)),
+    ({"x1": 3.0, "y1": 9.0, "x2": 3.0, "y2": 1.0}, ("v", 3.0, 1.0, 9.0)),
+    ({"x1": 0.0, "y1": 0.0, "x2": 5.0, "y2": 5.0}, None),
+    ({"x1": 1.0, "y1": 1.0, "x2": 1.0, "y2": 1.0}, None),
+    ({"x1": float("nan"), "y1": 0.0, "x2": 1.0, "y2": 0.0}, None),
+    ({"x1": 0.0, "y1": 0.0, "x2": float("inf"), "y2": 0.0}, None),
+    ({"x1": "a", "y1": 0.0, "x2": 1.0, "y2": 0.0}, None),
+    ({"y1": 0.0, "x2": 1.0, "y2": 0.0}, None),
+])
+def test_axis_span_reads_only_finite_axis_aligned_non_degenerate_edges(segment, expected):
+    assert module._axis_span(segment) == expected
+
+
+def test_merge_spans_joins_only_overlapping_or_touching_intervals():
+    assert module._merge_spans([(5.0, 8.0), (0.0, 5.0), (7.0, 9.0)]) == [(0.0, 9.0)]
+    assert module._merge_spans([(0.0, 4.0), (4.5, 9.0)]) == [(0.0, 4.0), (4.5, 9.0)]
+    assert module._merge_spans([]) == []
+
+
+def test_the_identity_tolerance_is_float_identity_not_a_measurement():
+    assert module._COLLINEAR_IDENTITY_TOL <= 1e-6
