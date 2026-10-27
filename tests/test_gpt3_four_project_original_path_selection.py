@@ -99,3 +99,33 @@ def test_source_inode_change_during_duplicate_hash_fails_closed(monkeypatch, tmp
     monkeypatch.setattr(report, "_stable_original_digest", unstable)
     _, conflicts = _resolve(tmp_path)
     assert conflicts == ["unsafe_original_source_path:original.pdf"]
+
+
+def test_real_four_project_ledger_marks_unsafe_original_as_conflict(tmp_path):
+    """Direct ledger consumers must not confuse a supplied symlink with omission."""
+    manifest = report.load_suite_manifests(report.FROZEN_ROOT)[0]
+    source_document = manifest.source_documents[0]
+    originals = tmp_path / "originals"
+    unsafe = originals / manifest.project_id / source_document.name
+    unsafe.parent.mkdir(parents=True)
+    try:
+        unsafe.symlink_to(tmp_path / "absent-original.pdf")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unsupported")
+    result = report.build_four_project_evidence_ledger(
+        source_dir=originals,
+        sealed_dir=tmp_path / "sealed",
+        identity_map_dir=tmp_path / "identity",
+        customer_dir=tmp_path / "customer",
+    )
+    project = next(
+        row for row in result["projects"]
+        if row["project_id"] == manifest.project_id
+    )
+    assert project["first_failing_authority_stage"] == "original_source_path_conflict"
+    assert project["publication_status"] == "CONFLICT"
+    assert "unsafe_original_source_path:" + source_document.name in project["reason_codes"]
+    assert project["missing_original_source_document_count"] == 0
+    assert project["source_sha_verified"] is False
+    assert result["publication_status"] == "UNPUBLISHED"
+    assert result["coverage_accuracy"] is None
