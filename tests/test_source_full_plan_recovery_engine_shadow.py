@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -191,3 +192,22 @@ def test_input_no_mutation():
 
     execute_source_full_plan_recovery_engine_shadow(sel, pages=pages)
     assert pages == pages_copy
+
+def test_foreign_page_finish_not_recovered_by_full_plan_shadow_engine():
+    page = _healthy_page("page_07")
+    foreign = SourceFloorFinishMark(
+        "OCC_FOREIGN_FT3","page_11","FT3",(150.,150.)
+    )
+    blocked = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=[replace(page,finish_mark_candidates=(foreign,))],
+    )
+    control = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=[page],
+    )
+    assert blocked.record.total_rooms_recovered == 1
+    assert blocked.record.total_finish_zones_recovered == 0
+    assert blocked.record.page_verdicts[0].recovered_finish_ids == ()
+    assert control.record.total_finish_zones_recovered == 1
+    assert control.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+    assert blocked.record.takeoff_eligible is False
+    assert blocked.record.commercial_projection_allowed is False
