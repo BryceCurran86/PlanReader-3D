@@ -165,6 +165,15 @@ def test_safe_project_id_reaches_existing_manifest_authority(
         json.dumps({"schema_version": "2.0", "projects": ["au_qld_synthetic"], "required_project_count": 1}),
         encoding="utf-8",
     )
+    # The strict duplicate-member preflight now reads the synthetic project
+    # manifest before invoking the unchanged canonical loader. Supply a
+    # valid, unique-key file so this test still isolates safe ID routing.
+    project = tmp_path / "projects" / "au_qld_synthetic"
+    project.mkdir(parents=True)
+    (project / "source_manifest.json").write_text(
+        json.dumps({"schema_version": "2.0", "project_id": "au_qld_synthetic"}),
+        encoding="utf-8",
+    )
     called = []
 
     def loader(path):
