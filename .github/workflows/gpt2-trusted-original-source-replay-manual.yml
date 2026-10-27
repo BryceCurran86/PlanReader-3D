@@ -97,6 +97,18 @@ jobs:
           # Export the immutable reviewed PR tree as inert test data only.
           target_tree="$RUNNER_TEMP/gpt2-approved-target"
           mkdir -p "$target_tree"
+          # Name-only diff allowlisting is insufficient: a reviewed .py/.md
+          # path may become a symlink, gitlink or executable without changing
+          # its name. Only normal nonexecutable blobs can be trusted as inputs
+          # to the sealed, offline source-positive test environment.
+          while IFS= read -r expected_path; do
+            [[ -n "$expected_path" ]] || continue
+            entry="$(git ls-tree --format='%(objectmode) %(objecttype) %(path)' "$approved_head" -- "$expected_path")"
+            if [[ "$entry" != "100644 blob $expected_path" ]]; then
+              echo "::error::Approved GPT2 source/test path has unreviewed Git object type or mode"
+              exit 1
+            fi
+          done <<< "$allowed"
           git archive "$approved_head" | tar -x -C "$target_tree"
           # Nested source mount must exist even when the Git archive omits
           # untracked/private documents/sources entirely.
