@@ -1,0 +1,97 @@
+name: GPT2 original replay offline container collection (no client source)
+on:
+  pull_request:
+    paths:
+      - .github/workflows/gpt2-trusted-original-source-replay-manual.yml
+      - tests/test_gpt2_trusted_original_replay_workflow_contract.py
+      - .github/workflows/test-gpt2-offline-collection-no-original.yml
+permissions:
+  contents: read
+jobs:
+  public-offline-collection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build dependency image without original drawings
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/gpt2-public.Dockerfile" <<'DOCKER'
+          FROM python:${{ matrix.python-version }}-slim
+          WORKDIR /workspace
+          COPY requirements.txt requirements-ci-v1228.txt /deps/
+          RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt && python -m pip install --no-cache-dir fonttools==4.60.2
+          DOCKER
+          docker build -q -f "$RUNNER_TEMP/gpt2-public.Dockerfile" -t "gpt2-collection:${{ matrix.python-version }}" .
+      - name: Collect all four source-positive tests in offline restricted container
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS='|' read -r label head test_id synthetic_id; do
+            [[ -n "$label" ]] || continue
+            tree="$RUNNER_TEMP/gpt2-public-$label"
+            mkdir -p "$tree/documents/sources"
+            git fetch --no-tags --depth=1 origin "$head"
+            git archive "$head" | tar -x -C "$tree"
+            mkdir -p "$RUNNER_TEMP/gpt2-dummy-source-$label"
+            printf "public synthetic nested bind\\n" > "$RUNNER_TEMP/gpt2-dummy-source-$label/NO_REAL_SOURCE.txt"
+            output="$RUNNER_TEMP/gpt2-no-original-$label.log"
+            rc=0
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$tree,dst=/workspace,readonly" \
+              --mount "type=bind,src=$RUNNER_TEMP/gpt2-dummy-source-$label,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+              "gpt2-collection:${{ matrix.python-version }}" \
+              python -m pytest --collect-only -q -p no:cacheprovider --tb=no "$test_id" \
+              > "$output" 2>&1 || rc=$?
+            if (( rc != 0 )) || ! grep -Eq '1 test collected' "$output"; then
+              echo "::error::Source-free $label test collection failed (exit $rc)"
+              cat "$output"
+              exit 1
+            fi
+            echo "$label source-free container test collection: PASS"
+            # Prove actual source-neutral original-like PDF logic executes,
+            # not just that pytest can import and collect its test.
+            smoke_output="$RUNNER_TEMP/gpt2-no-original-execution-$label.log"
+            smoke_rc=0
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --pids-limit 128 \
+              --memory 3g --cpus 2 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+              --mount "type=bind,src=$tree,dst=/workspace,readonly" \
+              --mount "type=bind,src=$RUNNER_TEMP/gpt2-dummy-source-$label,dst=/workspace/documents/sources,readonly" \
+              --workdir /workspace \
+              -e HOME=/tmp -e XDG_CACHE_HOME=/tmp \
+              -e PYTHONPATH=/workspace -e PYTHONDONTWRITEBYTECODE=1 \
+              -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+              "gpt2-collection:${{ matrix.python-version }}" \
+              python -m pytest -q -p no:cacheprovider --tb=no --disable-warnings "$synthetic_id" \
+              > "$smoke_output" 2>&1 || smoke_rc=$?
+            if (( smoke_rc != 0 )) || ! grep -Eq '(^|[ ,])[1-9][0-9]* passed' "$smoke_output"; then
+              echo "::error::Source-free $label synthetic execution failed (exit $smoke_rc)"
+              cat "$smoke_output"
+              exit 1
+            fi
+            echo "$label source-free synthetic execution: PASS"
+
+            rm -rf "$tree"
+          done <<'TARGETS'
+          a600|91cc96a445d6441a640547ce089cd756b56873b3|tests/test_gpt2_original_a600_table_row_scope_shadow.py::test_original_private_source_publisher_table_census_if_provisioned|tests/test_gpt2_original_a600_table_row_scope_shadow.py::test_true_schedule_row_remains_candidate_despite_an_original_detail_same_code
+          freezer|f424c6c16fca7c83d4b7a8425faaa1172afd5045|tests/test_gpt2_original_native_freezer_paint_gap_shadow.py::test_original_freezer_d17_private_pdf_if_provisioned|tests/test_gpt2_original_native_freezer_paint_gap_shadow.py::test_thick_walls_broken_thin_filling_present_is_not_an_authorized_door
+          d15|37ed51dd024db1979bf4a114c656c6985519aa8b|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::test_private_original_maryborough_native_leader_source_if_provisioned|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::test_source_figure_leader_positive_does_not_grant_physical_door_or_width
+          rcp|bf26820aa89d0c911448dd67d1f4bb2ef226eaf0|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py::test_real_original_page9_native_source_rivals_if_available|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py::test_original_grid_pair_retains_2400_competitor_separate
+          grid|c4595ce1191502e93decbd4d070924b81814c4a5|tests/test_gpt2_native_grid_row_membership_shadow.py::test_private_original_d02_grid_membership_from_published_source_if_provisioned|tests/test_gpt2_native_grid_row_membership_shadow.py::test_original_ruled_row_connects_multiple_native_blocks_without_grants
+          rcp_ink|794a114c3b422aa81f044f45d8f099b79b3454f1|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py::test_real_original_page9_native_source_rivals_if_available|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py::test_later_native_text_whitespace_advance_is_not_painted_overprint
+          d15_ink|c52f45f3365b74f3b4070ea051e338329f09de76|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::test_private_original_maryborough_native_leader_source_if_provisioned|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::test_genuine_horizontal_figured_word_remains_source_only_not_a_door
+          TARGETS

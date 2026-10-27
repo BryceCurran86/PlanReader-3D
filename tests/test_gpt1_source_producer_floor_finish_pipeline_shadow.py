@@ -237,3 +237,92 @@ def test_explicit_w4_opt_in_requires_a_real_canonical_room_composition():
     assert result.first_failure_code==(
         "gpt1_original_producer_w4_room_composition_unavailable"
     )
+
+
+def test_all_abstained_original_finish_records_never_claim_batch_candidate():
+    positive=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    blocked=replace(
+        positive,status=Status.ABSTAINED,
+        first_failure_code="original_w4_physical_room_not_unique",
+        existing_room_area_quantity_id=None,
+        existing_room_area_m2=None,
+        source_finish_occurrence_id=None,
+        source_finish_definition_id=None,
+        source_finish_code=None,
+        candidate_finish_area_m2=None,
+        source_crosssheet_wall_equivalence_ids=(),
+    )
+    batch=reconcile_source_producer_finish_batch_shadow((blocked,))
+    assert batch.status is Status.ABSTAINED
+    assert batch.reason_codes==("gpt1_original_finish_batch_no_source_candidates",)
+    assert batch.records==(blocked,)
+    assert batch.quarantined_physical_room_ids==()
+    assert batch.diagnostic_only
+
+
+def test_abstained_source_mark_rival_vetoes_positive_regardless_of_order():
+    positive=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    assert positive.status is Status.CANDIDATE
+    rival=replace(
+        positive,status=Status.ABSTAINED,
+        first_failure_code="original_room_perimeter_unclosed",
+        physical_room_id="unclosed-other-room",
+        source_room_face_record_id="unclosed-other-face",
+        canonical_floor_id="unclosed-other-floor",
+        existing_room_area_quantity_id="other-original-area",
+        candidate_finish_area_m2=None,
+    )
+    # Although the rival abstained, it still claims the SAME original FT
+    # paint observation. Dropping it before the census falsely published the
+    # positive record as an independently owned material candidate.
+    assert rival.source_finish_occurrence_id==positive.source_finish_occurrence_id
+    for items in ((positive,rival),(rival,positive)):
+        batch=reconcile_source_producer_finish_batch_shadow(items)
+        assert batch.status is Status.CONFLICT
+        by_room={row.physical_room_id:row for row in batch.records}
+        assert by_room["physical-room-one"].status is Status.ABSTAINED
+        assert by_room["physical-room-one"].candidate_finish_area_m2 is None
+        assert by_room["physical-room-one"].first_failure_code==(
+            "gpt1_original_finish_plan_mark_reused"
+        )
+        assert by_room["unclosed-other-room"].status is Status.ABSTAINED
+        assert batch.quarantined_physical_room_ids==("physical-room-one",)
+
+
+def test_abstained_source_area_rival_vetoes_positive_without_sharing_mark():
+    positive=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    rival=replace(
+        positive,status=Status.ABSTAINED,
+        first_failure_code="material_definition_untrusted",
+        physical_room_id="disputed-other-room",
+        source_room_face_record_id="disputed-other-face",
+        canonical_floor_id="disputed-other-floor",
+        source_finish_occurrence_id="different-original-ft-mark",
+        candidate_finish_area_m2=None,
+    )
+    batch=reconcile_source_producer_finish_batch_shadow((rival,positive))
+    assert batch.status is Status.CONFLICT
+    assert batch.quarantined_physical_room_ids==("physical-room-one",)
+    assert next(row for row in batch.records
+                if row.physical_room_id=="physical-room-one").first_failure_code==(
+        "gpt1_original_finish_area_issuer_reused"
+    )
+
+
+def test_unrelated_abstained_source_rival_does_not_suppress_valid_other_room():
+    positive=diagnose_source_producer_floor_finish_handoff_shadow(**valid_kwargs())
+    other=replace(
+        positive,status=Status.ABSTAINED,
+        first_failure_code="original_material_clip_unavailable",
+        physical_room_id="unrelated-other-room",
+        source_room_face_record_id="unrelated-other-face",
+        canonical_floor_id="unrelated-other-floor",
+        existing_room_area_quantity_id="unrelated-area",
+        source_finish_occurrence_id="unrelated-mark",
+        candidate_finish_area_m2=None,
+    )
+    batch=reconcile_source_producer_finish_batch_shadow((other,positive))
+    assert batch.status is Status.CANDIDATE
+    assert batch.quarantined_physical_room_ids==()
+    assert {r.status for r in batch.records}=={Status.ABSTAINED,Status.CANDIDATE}
+    assert batch.diagnostic_only

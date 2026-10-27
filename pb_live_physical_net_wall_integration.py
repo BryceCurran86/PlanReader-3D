@@ -410,6 +410,7 @@ def _collect_live_physical_net_wall_claim(
     topology_pages: Optional[Sequence[int]] = None,
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
+    source_native_finish_text_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -419,8 +420,20 @@ def _collect_live_physical_net_wall_claim(
     ``surface_semantic_pages`` is an optional independent source-only semantic
     scope for material/floor-finish/RCP binding. Those pages are never added to
     wall/opening topology or room-area support authority.
+
+    ``source_native_finish_text_shadow`` is an explicit, default-False opt-in
+    to the already-merged original-PDF source-byte -> ToUnicode -> symbol-GID
+    chain and raw no-active-clip proof in the text-integrity authority. It
+    only reaches the source producers; it grants no quantity, host or finish.
+    The proof needs the optional fontTools dependency and abstains without it.
     """
 
+    if type(source_native_finish_text_shadow) is not bool:
+        raise ValueError("native finish text shadow must be an explicit boolean")
+    native_text_kwargs = (
+        {"source_native_finish_text_shadow": True}
+        if source_native_finish_text_shadow else {}
+    )
     path = Path(pdf_path)
     payload = path.read_bytes()
     source_sha = hashlib.sha256(payload).hexdigest()
@@ -478,6 +491,7 @@ def _collect_live_physical_net_wall_claim(
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+        **native_text_kwargs,
     )
     published = source.ingest_native_pdf_bytes(
         document_id=document_id,
@@ -920,6 +934,7 @@ def _collect_live_physical_net_wall_claim(
             surface_semantic_source = SourceVisibilityProducer(
                 producer_method="live-surface-semantic",
                 producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+                **native_text_kwargs,
             )
             semantic_published = surface_semantic_source.ingest_native_pdf_bytes(
                 document_id=document_id,
@@ -1154,6 +1169,7 @@ def collect_live_physical_net_wall_claim(
     room_area_support_pages: Optional[Sequence[int]] = None,
     surface_semantic_pages: Optional[Sequence[int]] = None,
     recover_additional_opening_areas: bool = False,
+    source_native_finish_text_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1162,6 +1178,8 @@ def collect_live_physical_net_wall_claim(
     """
     if type(recover_additional_opening_areas) is not bool:
         raise ValueError("opening area recovery must be an explicit boolean")
+    if type(source_native_finish_text_shadow) is not bool:
+        raise ValueError("native finish text shadow must be an explicit boolean")
     if recover_additional_opening_areas:
         with fitz.open(pdf_path) as doc:
             for scope in (pages, topology_pages):
@@ -1181,6 +1199,8 @@ def collect_live_physical_net_wall_claim(
         pdf_path, pages=pages, topology_pages=topology_pages,
         room_area_support_pages=room_area_support_pages,
         surface_semantic_pages=surface_semantic_pages,
+        **({"source_native_finish_text_shadow": True}
+           if source_native_finish_text_shadow else {}),
     )
     if not recover_additional_opening_areas:
         return claim

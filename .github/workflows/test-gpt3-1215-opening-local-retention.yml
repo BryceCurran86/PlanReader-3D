@@ -67,13 +67,15 @@ jobs:
           python scripts/check_full_plan_v2_integrity.py
 
   original-source-retention:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -186,10 +188,9 @@ jobs:
             --candidate artifacts/gpt3-1215-opening-local-retention/candidate.json \
             --expected-new-host-id physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9 \
             --output artifacts/gpt3-1215-opening-local-retention/retention.json
-
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-1215-opening-local-retention
-          path: artifacts/gpt3-1215-opening-local-retention
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -f maryborough-*.json lot16-*.json

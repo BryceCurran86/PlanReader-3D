@@ -101,7 +101,28 @@ def measure_source_figured_ceiling_grid_shadow(
     ):
         return block("original_ceiling_grid_source_identity_conflict")
     try:
-        original = Polygon(ceiling.metric_vertices_mm)
+        # GEOS considers a closed polygon with a repeated INTERIOR vertex
+        # valid, even though that original physical source-edge chain has an
+        # unowned zero-length/backtracked segment. Only the optional explicit
+        # final closing coordinate may repeat the starting corner.
+        points = ceiling.metric_vertices_mm
+        if (
+            type(points) not in (tuple, list)
+            or len(points) < 3
+            or any(
+                type(point) not in (tuple, list)
+                or len(point) != 2
+                or any(_finite(value) is None for value in point)
+                for point in points
+            )
+        ):
+            return block("original_ceiling_grid_physical_polygon_invalid")
+        vertices = tuple((float(p[0]), float(p[1])) for p in points)
+        if vertices[0] == vertices[-1]:
+            vertices = vertices[:-1]
+        if len(vertices) < 3 or len(set(vertices)) != len(vertices):
+            return block("original_ceiling_grid_physical_polygon_invalid")
+        original = Polygon(vertices)
         if not original.is_valid or original.area <= 0:
             return block("original_ceiling_grid_physical_polygon_invalid")
         origin = tuple(map(float, layout.grid_origin_metric_mm))
