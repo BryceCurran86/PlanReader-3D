@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -34,13 +35,18 @@ from pb_figured_dimension_evidence import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
+from pb_pdf_text_integrity_authority import (
+    TRUSTED_PDF_TEXT, _exact_fill_path_coverage,
+    _fill_text_char_bbox_coverage_upper_bound, _later_paint_spatial_candidates,
+)
 from pb_portable_raster_ocr_authority import MockOCRBackend
 from pb_raster_text_corroboration_authority import (
     RasterTextCorroborationProducer,
     RasterTextCorroborationSelector,
 )
-from pb_source_observation_authority import ObservationSelector
-from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_observation_authority import SOURCE_OBSERVATION_EXISTS, ObservationSelector
+from pb_source_visibility_authority import SourceVisibilityProducer, classify_native_segment_visibility
+from pb_vector_geometry_v130 import extract_native_page
 
 
 OPENING_ELEVATION_FRAME_AREA_SCHEMA_VERSION = "1.0.0"
@@ -888,7 +894,158 @@ class OpeningElevationFrameAreaAuthority:
 def _receipt_ordinal(receipt: object, name: str) -> int | None:
     """Receipt ordinal as int, or None when the receipt left it unresolved."""
     value = getattr(receipt, name, None)
-    return None if value is None else int(value)
+    return value if type(value) is int and value >= 0 else None
+
+
+def _receipt_matches_source(authority, selector, result, published) -> bool:
+    """A wrapper status cannot substitute for the immutable native word."""
+    receipt = result.receipt
+    if receipt is None:
+        return False
+    parent_result = authority.resolve(selector)
+    parent = parent_result.observation
+    if (
+        parent_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or parent_result.proposition != SOURCE_OBSERVATION_EXISTS
+        or parent is None
+        or parent.observation_kind != "native_pdf_word"
+        or parent.origin_kind != "native"
+        or parent.viewport_id is not None
+        or parent.observation_id != selector.observation_id
+        or parent.document_id != selector.document_id
+        or parent.revision_id != selector.revision_id
+        or parent.source_sha256 != selector.source_sha256
+        or receipt.parent_observation_id != parent.observation_id
+        or receipt.document_id != parent.document_id
+        or receipt.revision_id != parent.revision_id
+        or receipt.source_sha256 != parent.source_sha256
+        or receipt.page_id != parent.page_id
+        or receipt.source_partition_id != parent.source_partition_id
+        or receipt.raw_text != parent.raw_text
+        or receipt.geometry != parent.geometry
+        or not str(parent.page_id).isdigit()
+        or int(parent.page_id) not in published.coverage.decoded_pages
+        or int(parent.page_id) in published.coverage.failed_pages
+    ):
+        return False
+    geometry = receipt.geometry
+    if (
+        type(geometry) not in (tuple, list)
+        or len(geometry) != 4
+        or any(type(v) not in (int, float) for v in geometry)
+        or any(
+            getattr(receipt, name, None) is not None
+            and _receipt_ordinal(receipt, name) is None
+            for name in ("block_no", "line_no", "word_no", "sequence_number")
+        )
+    ):
+        return False
+    try:
+        box = tuple(float(v) for v in geometry)
+    except OverflowError:
+        return False
+    if (not all(math.isfinite(v) for v in box)
+            or box[0] >= box[2] or box[1] >= box[3]):
+        return False
+    return result.status is not EvidenceResolutionStatus.CORROBORATED or (
+        result.proposition == TRUSTED_PDF_TEXT
+        and receipt.trusted is True
+        and type(result.trusted_text) is str
+        and result.trusted_text == parent.raw_text
+    )
+
+
+def _raster_matches_source(result, receipt, published, observation_id) -> bool:
+    record = result.record
+    return record is not None and (
+        record.document_id == published.revision.document_id
+        and record.revision_id == published.revision.revision_id
+        and record.source_sha256 == published.revision.source_sha256
+        and record.snapshot_id == published.snapshot.snapshot_id
+        and record.native_observation_id == observation_id
+        and record.page_id == receipt.page_id
+        and record.source_partition_id == receipt.source_partition_id
+        and record.text_integrity_receipt_id == receipt.receipt_id
+        and tuple(record.source_bbox) == tuple(receipt.geometry)
+        and type(result.corroborated_text) is str
+        and result.corroborated_text == record.corroborated_text
+        and _claim_norm(result.corroborated_text) == _claim_norm(receipt.raw_text)
+    )
+
+
+def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
+    """Negative-only gate for the original native frame and dimension supports.
+
+    Raw extraction includes invisible fill boundaries. Only a source-owned,
+    opaque solid stroke with independently proven clip state may support a
+    closed frame here. Unknown later paint cannot preserve that proof.
+    """
+    drawings = page.get_drawings()
+    bboxlog = page.get_bboxlog()
+    native = extract_native_page(page)
+    painted = set()
+    strokes_by_seq = {d.get("seqno"): d for d in drawings}
+    text_by_seq = {}
+    for trace in page.get_texttrace():
+        text_by_seq.setdefault(trace.get("seqno"), []).append(trace)
+    for segment in native["segments"]:
+        path_index = segment.get("path_index")
+        if type(path_index) is not int or not 0 <= path_index < len(drawings):
+            continue
+        drawing = drawings[path_index]
+        seqno = drawing.get("seqno")
+        width = segment.get("width")
+        color = drawing.get("color")
+        if (
+            drawing.get("type") not in {"s", "fs"}
+            or drawing.get("stroke_opacity") != 1.0
+            or not segment.get("stroke_present")
+            or type(width) not in (int, float) or not math.isfinite(width) or width <= 0
+            or type(color) not in (tuple, list) or len(color) != 3
+            or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in color)
+            or tuple(color) == (1.0, 1.0, 1.0)
+            or not re.fullmatch(r"\s*\[\s*\]\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*", str(segment.get("dashes", "")))
+            or type(seqno) is not int or not 0 <= seqno < len(bboxlog)
+            or segment.get("sequence_number") != seqno
+            or bboxlog[seqno][0] != "stroke-path"
+            or not classify_native_segment_visibility(segment).visible
+        ):
+            continue
+        x0, y0, x1, y1 = (float(segment[k]) for k in ("x1", "y1", "x2", "y2"))
+        half = width / 2
+        subject = (min(x0, x1) - half, min(y0, y1) - half,
+                   max(x0, x1) + half, max(y0, y1) + half)
+        candidates = _later_paint_spatial_candidates(page, subject, seqno, bboxlog)
+        clear = True
+        for later in candidates if candidates is not None else range(seqno + 1, len(bboxlog)):
+            kind, box = bboxlog[later][:2]
+            if (min(subject[2], box[2]) <= max(subject[0], box[0])
+                    or min(subject[3], box[3]) <= max(subject[1], box[1])):
+                continue
+            if kind == "stroke-path":
+                stroke = strokes_by_seq.get(later)
+                if (stroke is not None and stroke.get("stroke_opacity") == 1.0
+                        and stroke.get("color") == color):
+                    continue
+            coverage = None
+            if kind == "fill-path":
+                coverage = _exact_fill_path_coverage(page, subject, later)
+            elif kind == "fill-text":
+                traces = text_by_seq.get(later, ())
+                # A same-colour opaque glyph cannot erase the existing stroke;
+                # figured labels commonly sit directly on dimension linework.
+                if traces and all(t.get("color") == color and t.get("opacity") == 1.0
+                                  and t.get("type") == 0 for t in traces):
+                    continue
+                coverage = _fill_text_char_bbox_coverage_upper_bound(page, subject, later)
+            if coverage == 0 or kind.startswith("ignore-"):
+                continue
+            clear = False
+            break
+        if clear:
+            edge = f"_e{segment['edge_index']}" if "edge_index" in segment else ""
+            painted.add(f"vec_p{page_id}_{path_index}_{segment['item_index']}{edge}")
+    return frozenset(painted)
 
 
 class OpeningElevationFrameAreaProducer:
@@ -953,7 +1110,7 @@ class OpeningElevationFrameAreaProducer:
     ) -> _TrustedWord | None:
         try:
             geometry = tuple(float(v) for v in receipt.geometry)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         if (
             len(geometry) != 4
@@ -986,6 +1143,7 @@ class OpeningElevationFrameAreaProducer:
 
     def _build(self) -> None:
         text_authority = self._source.text_integrity_authority()
+        source_authority = self._source._producer.authority()
         for revision_id, published in sorted(self._source._published_by_revision.items()):
             if (
                 self._source._producer.current_revision_id(
@@ -1001,7 +1159,14 @@ class OpeningElevationFrameAreaProducer:
             # or the strict two-render raster corroboration authority.
             claim_words_by_page: dict[str, list[_TrustedWord]] = {}
             native_results: dict[str, object] = {}
+            invalid_revision = False
+            seen_ids: set[str] = set()
             for observation_id in published.text_observation_ids:
+                if (type(observation_id) is not str or not observation_id
+                        or observation_id in seen_ids):
+                    invalid_revision = True
+                    break
+                seen_ids.add(observation_id)
                 selector = ObservationSelector(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
@@ -1011,8 +1176,9 @@ class OpeningElevationFrameAreaProducer:
                 )
                 result = text_authority.resolve_text(selector)
                 receipt = result.receipt
-                if receipt is None:
-                    continue
+                if not _receipt_matches_source(source_authority, selector, result, published):
+                    invalid_revision = True
+                    break
                 claim = self._word_from_receipt(
                     str(observation_id),
                     receipt,
@@ -1022,6 +1188,10 @@ class OpeningElevationFrameAreaProducer:
                     continue
                 native_results[str(observation_id)] = result
                 claim_words_by_page.setdefault(str(receipt.page_id), []).append(claim)
+
+            # A corrupt or omitted rival must not make a remaining frame unique.
+            if invalid_revision:
+                continue
 
             payload = _source_bytes(
                 self._source,
@@ -1116,15 +1286,20 @@ class OpeningElevationFrameAreaProducer:
                                 trusted_words.append(trusted)
                             continue
 
-                        raster = self._raster.publish(
-                            RasterTextCorroborationSelector(
-                                document_id=published.revision.document_id,
-                                revision_id=published.revision.revision_id,
-                                source_sha256=published.revision.source_sha256,
-                                snapshot_id=published.snapshot.snapshot_id,
-                                observation_id=claim.observation_id,
-                            )
+                        raster_selector = RasterTextCorroborationSelector(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            observation_id=claim.observation_id,
                         )
+                        raster = self._raster.publish(raster_selector)
+                        if (raster.status is EvidenceResolutionStatus.CORROBORATED
+                                and (raster != self._raster.authority().resolve(raster_selector)
+                                     or not _raster_matches_source(
+                                         raster, native_receipt, published, claim.observation_id))):
+                            invalid_revision = True
+                            break
                         if (
                             raster.status is EvidenceResolutionStatus.CORROBORATED
                             and raster.record is not None
@@ -1140,6 +1315,9 @@ class OpeningElevationFrameAreaProducer:
                             )
                             if trusted is not None:
                                 trusted_words.append(trusted)
+
+                    if invalid_revision:
+                        break
 
                     # Raw claims never substitute for proof.
                     trusted_family, _trusted_title_ids = _page_family_and_title_ids(
@@ -1157,10 +1335,25 @@ class OpeningElevationFrameAreaProducer:
                         )
                     except Exception:
                         continue
+                    if records:
+                        try:
+                            painted_ids = _source_painted_geometry_ids(page, page_id)
+                        except (ValueError, TypeError, RuntimeError, KeyError, IndexError):
+                            invalid_revision = True
+                            break
+                        if any(not set((*record.frame_geometry_ids, *record.dimension_line_ids,
+                                        *record.witness_line_ids)).issubset(painted_ids)
+                               for record in records):
+                            # Do not drop an unproved rival and elect another frame.
+                            invalid_revision = True
+                            break
                     for record in records:
                         records_by_mark.setdefault(record.type_mark, []).append(record)
             finally:
                 document.close()
+
+            if invalid_revision:
+                continue
 
             for mark, records in sorted(records_by_mark.items()):
                 key = (
