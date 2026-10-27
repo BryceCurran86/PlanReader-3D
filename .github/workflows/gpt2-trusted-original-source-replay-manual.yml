@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink]
+        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink, finish_page]
 
     steps:
       - name: Checkout the trusted workflow context
@@ -86,6 +86,15 @@ jobs:
               expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|tests/test_gpt2_mary_original_figured_door_leader_shadow.py'
               original_test=test_private_original_maryborough_native_leader_source_if_provisioned
               test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py
+              ;;
+            finish_page)
+              # Exact immutable GPT2 source-to-shadow negative; this does NOT
+              # authenticate a physical room, a cross-sheet join or a quantity.
+              approved_base=f4fd0f786411b45784f77c784546df0ae5f67d6b
+              approved_head=d281fa15c29dc7e9717953355e9ddf42c040215c
+              expected_paths='pb_source_floor_finish_occurrence_ownership_shadow.py|pb_source_full_plan_recovery_engine_shadow.py|tests/test_source_floor_finish_occurrence_ownership_shadow.py|tests/test_source_full_plan_recovery_engine_shadow.py'
+              original_test=test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned
+              test_path=tests/test_source_full_plan_recovery_engine_shadow.py
               ;;
             *)
               echo "::error::Unapproved original-source code selection"
