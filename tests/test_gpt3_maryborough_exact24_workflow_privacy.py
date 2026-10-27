@@ -58,6 +58,13 @@ def _receipt_expr(raw: str):
     keys = [ast.literal_eval(key) for key in expr.keys]
     assert len(keys) == len(set(keys))
     assert frozenset(keys) == ALLOWED_KEYS
+    values = dict(zip(keys, expr.values))
+    assert isinstance(values["four_project_publication_allowed"], ast.Constant)
+    assert values["four_project_publication_allowed"].value is False
+    assert isinstance(values["no_unsupported_ft3_material_binding"], ast.Constant)
+    assert values["no_unsupported_ft3_material_binding"].value is True
+    assert isinstance(values["schema_version"], ast.Constant)
+    assert values["schema_version"].value == "gpt3-maryborough-exact24-public-summary-v1"
     assert {n.id for n in ast.walk(expr) if isinstance(n, ast.Name)} <= {"d"}
     return expr
 
