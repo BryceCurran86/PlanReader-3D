@@ -78,8 +78,6 @@ jobs:
               "sealed_quantity_count": 3,
               "customer_row_count": 3,
               "customer_row_parity": True,
-              "sealed_run_id": sealed.run_id,
-              "sealed_run_fingerprint": sealed.fingerprint,
           },sort_keys=True))
           PY
 
@@ -144,7 +142,11 @@ jobs:
               and item["object_refs"][0].startswith("production-unmapped:")
               for item in produced
           )
+          # Keep source-owned physical IDs, customer rows, sealed bytes and
+          # per-object reconciliation local to this ephemeral job only.
+          # Publish a deliberately bounded, non-authoritative baseline summary.
           receipt={
+              "schema_version":"gpt3-maryborough-exact24-public-summary-v1",
               "source_sha_verified":True,
               "reconciliation_complete":True,
               "denominator":d["denominator"],
@@ -156,19 +158,32 @@ jobs:
               "unsupported_extra":d["unsupported_extra"],
               "coverage_accuracy":d["coverage_accuracy"],
               "precision_adjusted_accuracy":d["precision_adjusted_accuracy"],
-              "produced_quantity_ids":sorted(expected_source_quantity_ids),
               "no_unsupported_ft3_material_binding":True,
               "four_project_publication_allowed":False,
           }
-          Path("artifacts/maryborough-exact-24/reconciliation_integrity_receipt.json").write_text(
-              json.dumps(receipt,indent=2,sort_keys=True)+"\n"
+          public=Path("artifacts/maryborough-exact-24/public")
+          public.mkdir(parents=True,exist_ok=True)
+          (public/"reconciliation_integrity_receipt.json").write_text(
+              json.dumps(receipt,indent=2,sort_keys=True)+"\\n"
           )
-          print("MARYBOROUGH_EXACT_24",json.dumps(d,sort_keys=True))
+          print("MARYBOROUGH_EXACT_24",json.dumps({
+              "denominator":receipt["denominator"],
+              "matched_within_tolerance":receipt["matched_within_tolerance"],
+              "four_project_publication_allowed":False,
+          },sort_keys=True))
           PY
 
+      # Never publish downloaded original-derived sealed/customer files or
+      # the per-object frozen reconciliation, including on a failed run.
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
-          name: gpt3-maryborough-exact-24-baseline
-          path: artifacts/maryborough-exact-24
+          name: gpt3-maryborough-exact-24-public-summary
+          path: artifacts/maryborough-exact-24/public/reconciliation_integrity_receipt.json
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Destroy original-derived sealed/customer and score inputs
+        if: always()
+        shell: bash
+        run: rm -rf artifacts/maryborough-exact-24
