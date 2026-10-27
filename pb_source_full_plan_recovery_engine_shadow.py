@@ -269,12 +269,11 @@ def execute_source_full_plan_recovery_engine_shadow(
         for finish in page.finish_mark_candidates:
             if occurrence_counts[finish.occurrence_id] != 1:
                 continue
-            candidate_owners = 0
-            # Match against each recovered room polygon without selecting the
-            # first/nearest candidate; every plausible room must be evaluated.
+            candidate_owners: list[str] = []
+            # Check *every* source room polygon, including a plausible rival
+            # whose doorway/wall closure abstained. An unclosed rival cannot
+            # disappear from the physical ownership ambiguity universe.
             for room_id, poly in page.room_polygon_candidates:
-                if room_id not in recovered_rooms:
-                    continue
                 finish_sel = SourceFloorFinishOwnershipSelector(
                     document_id=selector.document_id,
                     revision_id=selector.revision_id,
@@ -294,8 +293,10 @@ def execute_source_full_plan_recovery_engine_shadow(
                     other_finish_marks=page.finish_mark_candidates,
                 )
                 if f_res.status == EvidenceResolutionStatus.CANDIDATE:
-                    candidate_owners += 1
-            if candidate_owners == 1:
+                    candidate_owners.append(room_id)
+            # One spatial owner is necessary, and that same owner must have
+            # independently passed room-boundary recovery. No tie-breaking.
+            if len(candidate_owners) == 1 and candidate_owners[0] in recovered_rooms:
                 recovered_finishes.append(finish.occurrence_id)
 
         page_rooms_tuple = tuple(sorted(recovered_rooms))
