@@ -141,7 +141,7 @@ def test_rekeyed_original_physical_room_receipts_do_not_supply_finish(field, val
     assert result.candidate_area_m2 is None
 
 
-@pytest.mark.parametrize("bad", [None, 0, -0.1, float("nan"), float("inf"), -float("inf"), "10", True])
+@pytest.mark.parametrize("bad", [None, 0, -0.1, float("nan"), float("inf"), -float("inf"), 10 ** 1000, "10", True])
 def test_reconstructed_nonmetric_area_is_never_reexported_as_candidate(bad):
     measured, correspondence = _inputs()
     result = bind_source_finish_mark_to_corresponded_floor_shadow(
