@@ -91,7 +91,7 @@ jobs:
               "commercial_projection_allowed":False,
           }
           Path("artifacts/gpt1-original-cross-view-grid/receipt.json").write_text(
-              json.dumps(receipt,sort_keys=True)+"\\n"
+              json.dumps(receipt,sort_keys=True)+"\n"
           )
           print("ORIGINAL_GRID_SOURCE_VALIDATED_CANDIDATE_ONLY")
           PY
@@ -177,7 +177,7 @@ jobs:
               "commercial_projection_allowed":False,
           }
           Path("artifacts/gpt1-original-crossview-room-mark/receipt.json").write_text(
-              json.dumps(receipt,sort_keys=True)+"\\n"
+              json.dumps(receipt,sort_keys=True)+"\n"
           )
           print("ORIGINAL_CROSSVIEW_ROOM_FT3_CANDIDATES_ONLY_NO_CONSTRUCTION_QUANTITY")
           PY
