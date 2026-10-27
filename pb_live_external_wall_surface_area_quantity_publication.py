@@ -106,6 +106,20 @@ def publish_live_per_wall_surface_area_quantities(
         for name, roster in source_rosters
     ):
         return ()
+    # Every external wall requires an independently completed original
+    # opening-universe census, including when no physical openings exist.
+    # The producer's evidence roster is also exact and ordered; a copied
+    # aggregate may not omit a void or universe receipt while retaining its ID.
+    original_evidence_ids = tuple(dict.fromkeys(
+        receipt
+        for _, roster in source_rosters
+        for receipt in roster
+    ))
+    if (
+        not publication.opening_universe_record_ids
+        or _exact_ids(aggregate.evidence_ids) != original_evidence_ids
+    ):
+        return ()
     if (
         len(publication.gross_geometry_record_ids) != len(ids)
         or len(publication.whole_wall_role_record_ids) != len(ids)
