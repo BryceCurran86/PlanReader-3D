@@ -29,6 +29,12 @@ _PRODUCTION_EXCLUDED_PREFIXES = (
 _WORKFLOW_ROOT = ".github/workflows/"
 _WORKFLOW_SUFFIXES = {".yml", ".yaml"}
 _LOCAL_ACTION_ROOT = ".github/actions/"
+# Pytest discovers these configuration files from the repository root or the
+# explicitly targeted tests/ directory. addopts can silently omit signed or
+# original-source tests; config changes are release-execution controls.
+_PYTEST_CONFIG_PATHS = frozenset({
+    "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+})
 # These root manifests select the interpreter's package/runtime environment for
 # both public CI and the trusted original-source replay. Changing one alongside
 # frozen benchmark inputs is a production-execution change even without a .py
@@ -99,6 +105,8 @@ def is_production_code_file(path: str, *, git_path: bool = False) -> bool:
     # Unlike ordinary test modules, it can skip or xfail source/signed checks,
     # so it is a release acceptance control when frozen truth also changes.
     if normalized.startswith("tests/") and PurePosixPath(normalized).name == "conftest.py":
+        return True
+    if normalized in _PYTEST_CONFIG_PATHS:
         return True
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False

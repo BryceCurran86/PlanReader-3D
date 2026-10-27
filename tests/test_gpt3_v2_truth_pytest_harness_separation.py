@@ -37,6 +37,19 @@ def test_pytest_collection_policy_is_release_execution_control(harness, benchmar
         check_paths([harness, benchmark])
 
 
+@pytest.mark.parametrize("config", [
+    "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+])
+@pytest.mark.parametrize("benchmark", [TRUTH, SOURCE])
+def test_pytest_config_is_release_execution_control(config, benchmark):
+    assert is_production_code_file(config)
+    assert find_separation_violation([benchmark, config]) == (
+        [benchmark], [config],
+    )
+    with pytest.raises(SystemExit, match="Full Plan V2 truth / production separation"):
+        check_paths([config, benchmark])
+
+
 @pytest.mark.parametrize("ordinary", [
     "tests/test_quantity.py",
     "tests/unit/test_quantity.py",
@@ -44,6 +57,11 @@ def test_pytest_collection_policy_is_release_execution_control(harness, benchmar
     "tests/test_conftest.py",
     "docs/conftest.py",
     "benchmarks/conftest.py",
+    "docs/pytest.ini",
+    "docs/tox.ini",
+    "tests/unit/pytest.ini",
+    "tests/unit/tox.ini",
+    "tests/pytest.ini.bak",
 ])
 def test_ordinary_tests_and_nonexecuting_conftest_names_remain_excluded(ordinary):
     assert not is_production_code_file(ordinary)
@@ -76,6 +94,34 @@ def test_cli_nul_delimited_git_paths_fail_closed_on_frozen_truth_cochange():
     assert b"Full Plan V2 truth / production separation gate failed" in result.stderr
     assert b"tests/unit/conftest.py" in result.stderr
     assert b"separation gate passed" not in result.stdout
+
+
+@pytest.mark.parametrize("config", [
+    "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+])
+@pytest.mark.parametrize("benchmark", [TRUTH, SOURCE])
+def test_cli_nul_delimited_pytest_config_cochange_fails_closed(config, benchmark):
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_v2_truth_separation.py"), "--nul"],
+        input=(benchmark + "\0" + config + "\0").encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert b"Full Plan V2 truth / production separation gate failed" in result.stderr
+    assert config.encode("utf-8") in result.stderr
+
+
+def test_cli_nul_delimited_pytest_config_only_remains_allowed():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_v2_truth_separation.py"), "--nul"],
+        input=b"pytest.ini\0tests/tox.ini\0",
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert b"separation gate passed" in result.stdout
+    assert result.stderr == b""
 
 
 def test_cli_nul_delimited_ordinary_test_cochange_remains_allowed():
