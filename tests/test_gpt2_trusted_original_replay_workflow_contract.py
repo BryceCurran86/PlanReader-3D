@@ -15,7 +15,7 @@ HEADS = {
     "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
     "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
-    "grid": "2fddfb5746a9f066eee318daeb40214df1a6a103",
+    "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
 }
 
