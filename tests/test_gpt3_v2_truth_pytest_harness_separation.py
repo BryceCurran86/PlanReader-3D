@@ -39,6 +39,7 @@ def test_pytest_collection_policy_is_release_execution_control(harness, benchmar
 
 @pytest.mark.parametrize("config", [
     "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+    "tests/pyproject.toml", "tests/setup.cfg",
 ])
 @pytest.mark.parametrize("benchmark", [TRUTH, SOURCE])
 def test_pytest_config_is_release_execution_control(config, benchmark):
@@ -61,6 +62,8 @@ def test_pytest_config_is_release_execution_control(config, benchmark):
     "docs/tox.ini",
     "tests/unit/pytest.ini",
     "tests/unit/tox.ini",
+    "tests/unit/pyproject.toml",
+    "tests/unit/setup.cfg",
     "tests/pytest.ini.bak",
 ])
 def test_ordinary_tests_and_nonexecuting_conftest_names_remain_excluded(ordinary):
@@ -98,6 +101,7 @@ def test_cli_nul_delimited_git_paths_fail_closed_on_frozen_truth_cochange():
 
 @pytest.mark.parametrize("config", [
     "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+    "tests/pyproject.toml", "tests/setup.cfg",
 ])
 @pytest.mark.parametrize("benchmark", [TRUTH, SOURCE])
 def test_cli_nul_delimited_pytest_config_cochange_fails_closed(config, benchmark):

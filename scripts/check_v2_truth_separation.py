@@ -34,6 +34,7 @@ _LOCAL_ACTION_ROOT = ".github/actions/"
 # original-source tests; config changes are release-execution controls.
 _PYTEST_CONFIG_PATHS = frozenset({
     "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+    "tests/pyproject.toml", "tests/setup.cfg",
 })
 # These root manifests select the interpreter's package/runtime environment for
 # both public CI and the trusted original-source replay. Changing one alongside
