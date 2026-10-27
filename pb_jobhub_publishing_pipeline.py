@@ -278,24 +278,6 @@ def execute_jobhub_publishing(
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
 
-    # Verify target job exists in JobHub
-    # The numeric row ID is not an authoritative cross-system project ID.
-    job_rows = bridge.query(
-        "SELECT id, status, job_no FROM jobs WHERE id=?", (target_job_id,)
-    )
-    if not job_rows:
-        raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
-    target_no = job_rows[0].get("job_no")
-    original_no = package.project_identity.job_no
-    if (
-        type(target_no) is not str
-        or not target_no.strip()
-        or target_no.strip() != original_no.strip()
-    ):
-        raise RuntimeError(
-            "JobHub target job number conflicts with PlanReader project identity"
-        )
-
     # Calculate aggregates
     total_qty_m2 = 0.0
     interior_m2 = 0.0
@@ -319,9 +301,33 @@ def execute_jobhub_publishing(
         f"Payload: {package.payload_hash} | Published by {user_name}"
     )
 
-    # Insert package header and line items into JobHub
+    # Reserve the SQLite writer before reading the destination identity.
+    # A previous bridge.query() used a different read/connection and could
+    # approve job_no A, then publish into the same numeric id after another
+    # writer changed it to job_no B. Keep identity, duplicate check and both
+    # inserts in one transaction; a pre-existing caller transaction already
+    # owns its SQLite read/write isolation and is not restarted.
     with bridge.connect() as conn:
         cur = conn.cursor()
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+
+        # The numeric JobHub id alone is never physical project identity.
+        # Re-read job_no under the reserved transaction, not via bridge.query.
+        cur.execute("SELECT job_no FROM jobs WHERE id=?", (target_job_id,))
+        target_row = cur.fetchone()
+        if target_row is None:
+            raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
+        target_no = target_row[0]
+        original_no = package.project_identity.job_no
+        if (
+            type(target_no) is not str
+            or not target_no.strip()
+            or target_no.strip() != original_no.strip()
+        ):
+            raise RuntimeError(
+                "JobHub target job number conflicts with PlanReader project identity"
+            )
 
         # Check existing package duplicate
         cur.execute(
