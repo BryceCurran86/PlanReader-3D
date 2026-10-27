@@ -691,3 +691,33 @@ def test_blocked_page_invalid_reason_preserves_healthy_sibling(invalid_reason):
         )
         assert result.record.takeoff_eligible is False
         assert result.record.commercial_projection_allowed is False
+
+
+def test_omitted_source_page_type_never_claims_floor_plan_authority():
+    """A source sheet with look-alike rooms/marks must not default to floor plan."""
+    healthy = _healthy_page("actual_floor")
+    lookalike = replace(
+        _healthy_page("unverified_sheet"),
+        page_type=SourcePageInputPayload(page_id="placeholder").page_type,
+    )
+    assert lookalike.page_type == "unverified"
+    ids = set()
+    for pages in ((lookalike, healthy), (healthy, lookalike)):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages,
+        )
+        assert result.record is not None
+        ids.add(result.record.record_id)
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.successful_pages_count == 1
+        assert result.record.quarantined_pages_count == 1
+        quarantined = next(v for v in result.record.page_verdicts if v.page_id == "unverified_sheet")
+        assert quarantined.reason_codes == (
+            UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+        )
+        assert quarantined.recovered_room_ids == ()
+        assert quarantined.recovered_finish_ids == ()
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+    assert len(ids) == 1
