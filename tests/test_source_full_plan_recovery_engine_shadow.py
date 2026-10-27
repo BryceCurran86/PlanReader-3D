@@ -211,3 +211,53 @@ def test_foreign_page_finish_not_recovered_by_full_plan_shadow_engine():
     assert control.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
     assert blocked.record.takeoff_eligible is False
     assert blocked.record.commercial_projection_allowed is False
+
+
+def test_same_room_competing_finish_codes_abstain_through_real_engine():
+    """FT2/FT3 rivalry must not disappear at the recovery-engine call site."""
+    page = _healthy_page("page_11")
+    ft3 = SourceFloorFinishMark("OCC_FT3", "page_11", "FT3", (160., 160.))
+    original = page.finish_mark_candidates[0]
+    for marks in ((original, ft3), (ft3, original)):
+        source_page = replace(page, finish_mark_candidates=marks)
+        before = copy.deepcopy(source_page)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(source_page,)
+        )
+        verdict = result.record.page_verdicts[0]
+        assert verdict.recovered_room_ids == ("ROOM_A",)
+        assert verdict.recovered_finish_ids == ()
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert source_page == before
+
+
+def test_same_room_duplicate_finish_marks_abstain_through_real_engine():
+    """Two separately addressed FT2 marks are not one authenticated zone."""
+    page = _healthy_page("page_11")
+    duplicate = SourceFloorFinishMark("OCC_FT2_OTHER", "page_11", "FT2", (160., 160.))
+    for marks in (
+        page.finish_mark_candidates + (duplicate,),
+        (duplicate,) + page.finish_mark_candidates,
+    ):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=(replace(page, finish_mark_candidates=marks),)
+        )
+        assert result.record.total_finish_zones_recovered == 0
+        assert result.record.page_verdicts[0].recovered_finish_ids == ()
+
+
+def test_outside_room_rival_does_not_poison_local_finish():
+    """A same-page mark outside the room is not a same-room competitor."""
+    page = _healthy_page("page_11")
+    outside = SourceFloorFinishMark("OCC_OUTSIDE", "page_11", "FT3", (250., 250.))
+    result = execute_source_full_plan_recovery_engine_shadow(
+        _selector(),
+        pages=(replace(page, finish_mark_candidates=(outside,) + page.finish_mark_candidates),),
+    )
+    assert result.record.page_verdicts[0].recovered_finish_ids == ("OCC_FT2",)
+    assert result.record.total_finish_zones_recovered == 1
+    assert result.record.takeoff_eligible is False
+    assert result.record.commercial_projection_allowed is False
