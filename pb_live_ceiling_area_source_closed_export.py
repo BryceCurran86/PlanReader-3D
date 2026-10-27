@@ -14,6 +14,7 @@ from pb_live_ceiling_area_quantity_publication import (
     publish_live_ceiling_area_quantities,
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
+from pb_live_ceiling_lining_source_closed_export import _original_ceiling_simple_bbox
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
@@ -225,7 +226,19 @@ def build_live_ceiling_area_source_traces(
                 raise SourceClosedRunConflictError(
                     f"ceiling source polygon is invalid or degenerate: {quantity.quantity_id}"
                 )
-            source_bbox = (min(xs), min(ys), max(xs), max(ys))
+            # The legacy canonical ceiling seal must enforce the same source
+            # physical-zone simplicity gate as the cross-view ceiling seal.
+            # A nonzero shoelace area and bbox can still belong to a crossed
+            # or backtracked ring; neither grants FIRM commercial authority.
+            # Reuse the existing negative-only validator, never infer area.
+            try:
+                source_bbox = _original_ceiling_simple_bbox(
+                    points, quantity_id=quantity.quantity_id,
+                )
+            except SourceClosedRunConflictError as exc:
+                raise SourceClosedRunConflictError(
+                    f"ceiling source polygon is invalid or degenerate: {quantity.quantity_id}"
+                ) from exc
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,

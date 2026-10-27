@@ -341,8 +341,20 @@ def build_live_floor_finish_area_source_traces(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
             )
 
-        if _clean(metadata.get("source_room_face_record_id")) != _clean(
-            floor.source_room_face_record_id
+        # The physical room-face receipt is an original producer address,
+        # not an optional label. Two matching missing or coerced identifiers
+        # cannot authenticate a FIRM floor-finish area at the final seal.
+        # Do not strip/pad or stringify either source owner into agreement.
+        original_face = metadata.get("source_room_face_record_id")
+        canonical_face = floor.source_room_face_record_id
+        if (
+            type(original_face) is not str
+            or not original_face
+            or original_face != original_face.strip()
+            or type(canonical_face) is not str
+            or not canonical_face
+            or canonical_face != canonical_face.strip()
+            or original_face != canonical_face
         ):
             raise SourceClosedRunConflictError(
                 "floor-finish source room face mismatch: "
