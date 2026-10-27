@@ -9,6 +9,7 @@ import pytest
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_floor_finish_occurrence_ownership_shadow import SourceFloorFinishMark
 from pb_source_full_plan_recovery_engine_shadow import (
+    DUPLICATE_SOURCE_PAGE_ID,
     EMPTY_PAGE_PAYLOADS,
     PAGE_COMPLEXITY_BLOCKED,
     PAGE_QUARANTINED_SAFELY,
@@ -318,3 +319,100 @@ def test_unrelated_room_candidate_preserves_single_finish_owner():
         assert result.record.total_finish_zones_recovered == 1
         assert result.record.takeoff_eligible is False
         assert result.record.commercial_projection_allowed is False
+
+
+def test_duplicate_page_scope_quarantines_all_collisions_and_preserves_sibling():
+    """A repeated PDF page cannot multiply diagnostic rooms or finish zones."""
+    duplicate = _healthy_page("page_11")
+    sibling = _healthy_page("page_09")
+    baseline = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(sibling,)
+    )
+    ids = set()
+    for pages in (
+        (duplicate, sibling, duplicate),
+        (sibling, duplicate, duplicate),
+        (duplicate, duplicate, sibling),
+    ):
+        before = copy.deepcopy(pages)
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages
+        )
+        record = result.record
+        ids.add(record.record_id)
+        assert record.total_pages_evaluated == 3
+        assert record.successful_pages_count == 1
+        assert record.quarantined_pages_count == 2
+        assert record.total_rooms_recovered == 1
+        assert record.total_finish_zones_recovered == 1
+        assert record.reason_codes == (
+            SOURCE_FULL_PLAN_ENGINE_RESOLVED,
+            SOURCE_FULL_PLAN_PARTIAL_RECOVERY,
+            SOURCE_FULL_PLAN_ENGINE_CANDIDATE,
+        )
+        duplicate_verdicts = [
+            v for v in record.page_verdicts if v.page_id == "page_11"
+        ]
+        assert len(duplicate_verdicts) == 2
+        assert all(v.status == EvidenceResolutionStatus.ABSTAINED for v in duplicate_verdicts)
+        assert all(v.reason_codes == (
+            DUPLICATE_SOURCE_PAGE_ID, PAGE_QUARANTINED_SAFELY
+        ) for v in duplicate_verdicts)
+        assert all(v.recovered_room_ids == () and v.recovered_finish_ids == ()
+                   for v in duplicate_verdicts)
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+        assert pages == before
+    assert len(ids) == 1
+    assert baseline.record.total_rooms_recovered == 1
+    assert baseline.record.total_finish_zones_recovered == 1
+
+
+def test_duplicate_page_scope_abstains_even_if_one_copy_is_blocked():
+    page = _healthy_page("page_11")
+    blocked = SourcePageInputPayload(
+        page_id="page_11", is_blocked=True, block_reason=PAGE_COMPLEXITY_BLOCKED
+    )
+    for pages in ((page, blocked), (blocked, page)):
+        result = execute_source_full_plan_recovery_engine_shadow(
+            _selector(), pages=pages
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.record.successful_pages_count == 0
+        assert result.record.quarantined_pages_count == 2
+        assert result.record.total_rooms_recovered == 0
+        assert result.record.total_finish_zones_recovered == 0
+        assert all(DUPLICATE_SOURCE_PAGE_ID in v.reason_codes
+                   for v in result.record.page_verdicts)
+
+
+def test_shadow_receipt_id_binds_page_room_finish_membership_not_just_counts():
+    """Equal aggregate counts with different source scopes cannot share an ID."""
+    original = _healthy_page("page_11")
+    other_page = _healthy_page("page_09")
+    _, poly = original.room_polygon_candidates[0]
+    other_room = replace(
+        original, room_polygon_candidates=(("ROOM_B", poly),)
+    )
+    a = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(original,)
+    ).record
+    b = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(other_page,)
+    ).record
+    c = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(other_room,)
+    ).record
+    assert (a.total_rooms_recovered, a.total_finish_zones_recovered) == (1, 1)
+    assert (b.total_rooms_recovered, b.total_finish_zones_recovered) == (1, 1)
+    assert (c.total_rooms_recovered, c.total_finish_zones_recovered) == (1, 1)
+    assert len({a.record_id, b.record_id, c.record_id}) == 3
+    first = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(original, other_page)
+    ).record
+    reversed_order = execute_source_full_plan_recovery_engine_shadow(
+        _selector(), pages=(other_page, original)
+    ).record
+    assert first.record_id == reversed_order.record_id
+    assert first.takeoff_eligible is False
+    assert first.commercial_projection_allowed is False

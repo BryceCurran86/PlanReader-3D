@@ -43,6 +43,7 @@ SOURCE_FULL_PLAN_PARTIAL_RECOVERY = "source_full_plan_partial_recovery"
 SOURCE_FULL_PLAN_ENGINE_ABSTAINED = "source_full_plan_engine_abstained"
 PAGE_COMPLEXITY_BLOCKED = "page_complexity_blocked"
 PAGE_QUARANTINED_SAFELY = "page_quarantined_safely"
+DUPLICATE_SOURCE_PAGE_ID = "duplicate_source_page_id"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
 EMPTY_PAGE_PAYLOADS = "empty_page_payloads"
 
@@ -156,8 +157,27 @@ def execute_source_full_plan_recovery_engine_shadow(
     total_finishes = 0
     successful_pages = 0
     quarantined_pages = 0
+    # A PDF page identity is one source scope, never two independent rooms or
+    # finish universes. Quarantine *every* colliding payload, regardless of
+    # order or whether one copy was already marked blocked.
+    page_id_counts = Counter(page.page_id for page in pages)
 
     for page in pages:
+        if page_id_counts[page.page_id] != 1:
+            verdicts.append(
+                SourcePageExecutionVerdict(
+                    page_id=page.page_id,
+                    page_type=page.page_type,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(DUPLICATE_SOURCE_PAGE_ID, PAGE_QUARANTINED_SAFELY),
+                    recovered_room_ids=(),
+                    recovered_finish_ids=(),
+                    is_quarantined=True,
+                )
+            )
+            quarantined_pages += 1
+            continue
+
         # Failure isolation check
         if page.is_blocked:
             reason = page.block_reason.strip() or PAGE_COMPLEXITY_BLOCKED
@@ -285,6 +305,20 @@ def execute_source_full_plan_recovery_engine_shadow(
             "quarantined_pages": quarantined_pages,
             "total_rooms": total_rooms,
             "total_finishes": total_finishes,
+            # Counts alone alias distinct original-page/room/finish receipts.
+            # Canonical sorting makes the identity invariant to page order.
+            "page_verdicts": tuple(sorted(
+                (
+                    v.page_id,
+                    v.page_type,
+                    v.status.value,
+                    v.reason_codes,
+                    v.recovered_room_ids,
+                    v.recovered_finish_ids,
+                    v.is_quarantined,
+                )
+                for v in verdicts
+            )),
         },
         digest_chars=32,
     )
