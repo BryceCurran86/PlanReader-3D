@@ -12,6 +12,7 @@ from types import MappingProxyType
 
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_live_floor_area_quantity_publication import _valid_original_source_sha
+from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
@@ -623,6 +624,47 @@ def build_live_floor_finish_area_source_traces(
                         f"floor-finish source polygon self-intersects or is invalid: {quantity.quantity_id}"
                     )
                 source_bbox = (min(xs), min(ys), max(xs), max(ys))
+
+        # The canonical floor is projected from one original room face.
+        # A foreign simple room polygon cannot lend source ownership to a
+        # previously FIRM floor-finish area. Roomless legacy runs stay intact.
+        if claim.canonical_rooms:
+            owners = tuple(
+                room for room in claim.canonical_rooms
+                if getattr(room, "canonical_room_id", None) == floor.room_entity_id
+            )
+            if len(owners) != 1:
+                raise SourceClosedRunConflictError(
+                    "floor-finish original canonical room owner missing or contested: "
+                    f"{quantity.quantity_id}"
+                )
+            room = owners[0]
+            room_source = (
+                room.canonical_room_id, room.document_id, room.revision_id,
+                room.source_sha256, room.snapshot_id, room.page_id,
+                room.source_room_face_record_id, room.viewport_id,
+            )
+            floor_source = (
+                floor.room_entity_id, floor.document_id, floor.revision_id,
+                floor.source_sha256, floor.snapshot_id, floor.page_id,
+                floor.source_room_face_record_id, floor.viewport_id,
+            )
+            if (
+                any(
+                    type(value) is not str or not value or value != value.strip()
+                    for value in (*room_source, *floor_source)
+                )
+                or room_source[:3] != floor_source[:3]
+                or room.source_sha256.lower() != floor.source_sha256.lower()
+                or room_source[4:] != floor_source[4:]
+                or not _same_original_floor_room_ring(
+                    points, room.polygon_pdf_pts, quantity_id=quantity.quantity_id,
+                )
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original canonical room geometry/source mismatch: "
+                    f"{quantity.quantity_id}"
+                )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
