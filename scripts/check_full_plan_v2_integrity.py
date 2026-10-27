@@ -30,10 +30,6 @@ def _json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _collect_object_refs(value: Any) -> set[str]:
     refs: set[str] = set()
     if isinstance(value, dict):
@@ -126,6 +122,40 @@ def source_document_failures(manifests: Any, source_dir: Path = DEFAULT_SOURCE_D
     return failures
 
 
+def reference_document_failures(manifest: Any, project: Path) -> list[str]:
+    """Authenticate every required frozen reference through one stable inode.
+
+    Unlike private originals, a missing reference is ALWAYS a failure. A
+    symlink, nonregular file, inaccessible descriptor or raced replacement
+    must not be accepted on the strength of a separate path.stat size check.
+    """
+    failures: list[str] = []
+    for reference in manifest.reference_takeoff_documents:
+        path = project / reference.name
+        try:
+            checked = _present_source_digest(path)
+        except ValueError as exc:
+            failures.append(f"{manifest.project_id}: {reference.name} {exc}")
+            continue
+        if checked is None:
+            failures.append(
+                f"{manifest.project_id}: missing pinned reference document {reference.name}"
+            )
+            continue
+        actual_sha, actual_size = checked
+        if actual_sha != reference.sha256:
+            failures.append(
+                f"{manifest.project_id}: {reference.name} SHA mismatch "
+                f"(manifest={reference.sha256}, actual={actual_sha})"
+            )
+        if actual_size != reference.size_bytes:
+            failures.append(
+                f"{manifest.project_id}: {reference.name} size mismatch "
+                f"(manifest={reference.size_bytes}, actual={actual_size})"
+            )
+    return failures
+
+
 def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_DIR) -> list[str]:
     failures: list[str] = []
 
@@ -160,25 +190,7 @@ def validate_suite(root: Path = DEFAULT_ROOT, source_dir: Path = DEFAULT_SOURCE_
             if source.size_bytes <= 0:
                 failures.append(f"{manifest.project_id}: invalid source size for {source.name}")
 
-        for reference in manifest.reference_takeoff_documents:
-            path = project / reference.name
-            if not path.is_file():
-                failures.append(
-                    f"{manifest.project_id}: missing pinned reference document {reference.name}"
-                )
-                continue
-            actual_sha = _sha256(path)
-            actual_size = path.stat().st_size
-            if actual_sha != reference.sha256:
-                failures.append(
-                    f"{manifest.project_id}: {reference.name} SHA mismatch "
-                    f"(manifest={reference.sha256}, actual={actual_sha})"
-                )
-            if actual_size != reference.size_bytes:
-                failures.append(
-                    f"{manifest.project_id}: {reference.name} size mismatch "
-                    f"(manifest={reference.size_bytes}, actual={actual_size})"
-                )
+        failures.extend(reference_document_failures(manifest, project))
 
         object_path = project / "object_universe.json"
         if object_path.is_file():
