@@ -15,7 +15,7 @@ HEADS = {
     "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
     "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
-    "grid": "2fddfb5746a9f066eee318daeb40214df1a6a103",
+    "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
 }
 
@@ -374,3 +374,62 @@ def test_offline_image_copies_only_approved_dependency_bytes(tmp_path):
     for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
         assert (deps / filename).read_bytes() == (approved / filename).read_bytes()
         assert (deps / filename).read_bytes() != (main / filename).read_bytes()
+
+
+def test_immutable_allowlist_requires_normal_git_blobs_before_any_private_source():
+    """Reject symlinks, gitlinks, exec bits and missing entries before archive."""
+    steps = _load()["jobs"]["original"]["steps"]
+    guard_idx = next(i for i, s in enumerate(steps)
+                     if s.get("name", "").startswith("Validate immutable"))
+    provision_idx = next(i for i, s in enumerate(steps)
+                         if s.get("name", "").startswith("Provision only"))
+    assert guard_idx < provision_idx
+    script = steps[guard_idx]["run"]
+    name_check = script.index('git diff --name-only')
+    type_check = script.index('git ls-tree --format=')
+    archive = script.index('git archive "$approved_head"')
+    assert name_check < type_check < archive
+    assert 'while IFS= read -r expected_path' in script
+    assert 'done <<< "$allowed"' in script
+    assert 'entry="$(git ls-tree --format=' in script
+    assert '[[ "$entry" != "100644 blob $expected_path" ]]' in script
+    assert 'Approved GPT2 source/test path has unreviewed Git object type or mode' in script
+    assert 'github.event.inputs' not in script
+
+
+@pytest.mark.parametrize("git_mode", ("100644", "100755", "120000", "160000"))
+def test_real_git_tree_mode_gate_fail_closed(tmp_path, git_mode):
+    """Exercise Git's actual ls-tree mode/type output, without a private PDF."""
+    repo = tmp_path / "git-object-modes"
+    repo.mkdir()
+
+    def git(*args, input_text=None):
+        proc = subprocess.run(
+            ["git", "-C", str(repo), *args], input=input_text,
+            encoding="utf-8", capture_output=True, check=True,
+        )
+        return proc.stdout.strip()
+
+    git("init", "-q")
+    blob_sha = git("hash-object", "-w", "--stdin", input_text="dummy\n")
+    if git_mode == "160000":
+        # A gitlink refers to a commit, never to an ordinary Python blob.
+        tree_sha = git("mktree", input_text="")
+        item_sha = git(
+            "-c", "user.name=GPT2", "-c", "user.email=gpt2@example.invalid",
+            "commit-tree", tree_sha, "-m", "synthetic-submodule",
+        )
+    else:
+        item_sha = blob_sha
+    git("update-index", "--add", "--cacheinfo",
+        f"{git_mode},{item_sha},reviewed.py")
+    candidate = git("write-tree")
+    entry = git(
+        "ls-tree", "--format=%(objectmode) %(objecttype) %(path)",
+        candidate, "--", "reviewed.py",
+    )
+    assert (entry == "100644 blob reviewed.py") is (git_mode == "100644")
+    assert git(
+        "ls-tree", "--format=%(objectmode) %(objecttype) %(path)",
+        candidate, "--", "missing.py",
+    ) == ""

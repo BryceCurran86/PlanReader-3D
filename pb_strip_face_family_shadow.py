@@ -94,6 +94,7 @@ class SourceStroke:
     opaque: Optional[bool]                    # stroke opacity is exactly 1; None = the producer states none
     kind: str
     role_verified: bool
+    later_area_paint_clear: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,7 @@ class FaceLineGroup:
     stroke_rgb: Optional[tuple[float, ...]]
     solid: Optional[bool]
     opaque: Optional[bool]
+    later_area_paint_clear: Optional[bool]
     black: bool
     role_verified: bool
     member_observation_ids: tuple[str, ...]   # every member, duplicates (double ink) retained
@@ -256,7 +258,10 @@ def _is_black(rgb: Optional[tuple[float, ...]]) -> bool:
 
 
 def _finite(value) -> bool:
-    return type(value) in (int, float) and math.isfinite(value)
+    try:
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _well_formed(stroke: SourceStroke) -> bool:
@@ -265,14 +270,54 @@ def _well_formed(stroke: SourceStroke) -> bool:
     return (type(stroke.geometry) in (tuple, list) and len(stroke.geometry) == 4
             and all(_finite(v) for v in stroke.geometry)
             and (stroke.stroke_width is None or _finite(stroke.stroke_width))
-            and (stroke.stroke_rgb is None or all(_finite(v) for v in stroke.stroke_rgb)))
+            and (stroke.stroke_rgb is None or all(_finite(v) for v in stroke.stroke_rgb))
+            and (stroke.later_area_paint_clear is None or type(stroke.later_area_paint_clear) is bool))
 
 
 def _is_through(group: FaceLineGroup) -> bool:
     """A black, solid, fully opaque, producer-verified run that passes both terminals unbroken (the band is
     excluded by `_offset_classes`, which only ever sees groups outside it)."""
     return (group.through_both_terminals and group.black and group.solid is True and group.opaque is True
-            and group.role_verified)
+            and group.role_verified and group.later_area_paint_clear is True)
+
+
+def _later_area_paint_clear(page, geometry, width, seqno, bboxlog) -> Optional[bool]:
+    """Negative-only area-paint check; original stroke opacity/geometry stay unchanged.
+
+    Reuse the source authority's lossless index and exact fill/character coverage.
+    An intersecting image/shade or unsupported fill cannot certify an unbroken
+    historical stroke. No covered endpoints or replacement geometry are issued.
+    """
+    from pb_pdf_text_integrity_authority import (
+        _exact_fill_path_coverage, _fill_text_char_bbox_coverage_upper_bound,
+        _later_paint_spatial_candidates,
+    )
+
+    if (type(seqno) is not int or not _finite(width) or width <= 0
+            or not all(_finite(v) for v in geometry) or bboxlog is None):
+        return None
+    half = float(width) / 2
+    subject = (min(geometry[0], geometry[2]) - half, min(geometry[1], geometry[3]) - half,
+               max(geometry[0], geometry[2]) + half, max(geometry[1], geometry[3]) + half)
+    candidates = _later_paint_spatial_candidates(page, subject, seqno, bboxlog)
+    if candidates is None:
+        candidates = range(seqno + 1, len(bboxlog))
+    for index in candidates:
+        kind, box = bboxlog[index][:2]
+        if kind not in {"fill-path", "fill-image", "fill-shade", "fill-text"}:
+            continue
+        if (min(subject[2], box[2]) <= max(subject[0], box[0])
+                or min(subject[3], box[3]) <= max(subject[1], box[1])):
+            continue
+        coverage = None
+        if kind == "fill-path":
+            coverage = _exact_fill_path_coverage(page, subject, index)
+        elif kind == "fill-text":
+            coverage = _fill_text_char_bbox_coverage_upper_bound(page, subject, index)
+        if coverage == 0:
+            continue
+        return False if coverage is not None else None
+    return True
 
 
 def _offset_classes(groups: Sequence[FaceLineGroup], eq: float) -> list[list[FaceLineGroup]]:
@@ -339,7 +384,7 @@ def _paint_key(stroke: SourceStroke) -> tuple:
     them (an unproven attribute stays None and never merges with a proven one)."""
     return (None if stroke.stroke_width is None else round(stroke.stroke_width, 6),
             None if stroke.stroke_rgb is None else tuple(round(v, 6) for v in stroke.stroke_rgb),
-            stroke.solid, stroke.opaque)
+            stroke.solid, stroke.opaque, stroke.later_area_paint_clear)
 
 
 def _inventory(page: Sequence[SourceStroke], nominated: frozenset, axis: str, along: tuple[float, float],
@@ -389,7 +434,7 @@ def _inventory(page: Sequence[SourceStroke], nominated: frozenset, axis: str, al
 
     stroke_by_id = {s.observation_id: s for s in page}
     groups: list[FaceLineGroup] = []
-    for key in sorted(buckets, key=lambda k: (k[0], k[1] is not None, k[1] or 0.0, k[2] or (), repr(k[3]), repr(k[4]))):
+    for key in sorted(buckets, key=lambda k: (k[0], k[1] is not None, k[1] or 0.0, k[2] or (), *(repr(v) for v in k[3:]))):
         runs = [r for r in _merge_runs(buckets[key], eq) if r[1] >= lo - eq and r[0] <= hi + eq]
         if not runs:
             continue
@@ -404,13 +449,14 @@ def _inventory(page: Sequence[SourceStroke], nominated: frozenset, axis: str, al
         past_lo = any(a0 < lo - eq and a1 > lo + eq for a0, a1 in intervals)
         past_hi = any(a0 < hi - eq and a1 > hi + eq for a0, a1 in intervals)
         through = any(a0 < lo - eq and a1 > hi + eq for a0, a1 in intervals)
-        width, rgb, solid, opaque = key[1], key[2], key[3], key[4]
+        width, rgb, solid, opaque, area_clear = key[1:]
         groups.append(FaceLineGroup(
             group_id=stable_contract_id("shadow_strip_face_group", {
                 "root": root, "nomination": nomination_id, "members": ids, "width": width, "rgb": rgb, "solid": solid,
-                "opaque": opaque}),
+                "opaque": opaque, "later_area_paint_clear": area_clear}),
             across_pt=across_pt, across_span=(min(across), max(across)), offset_pt=offset,
             inside_band=offset == 0.0, stroke_width=width, stroke_rgb=rgb, solid=solid, opaque=opaque,
+            later_area_paint_clear=area_clear,
             black=_is_black(rgb), role_verified=verified, member_observation_ids=ids,
             nominated_member_ids=tuple(i for i in ids if i in nominated), along_intervals=intervals,
             covers_whole_extent=covers, extends_past_lo=past_lo, extends_past_hi=past_hi,
@@ -475,6 +521,8 @@ def audit_strip_face_family(
         return done(ABSTAIN, (NOMINATION_NOT_VISIBLE_ON_PAGE,))
     if any(not s.role_verified or s.stroke_width is None for s in strokes):
         return done(ABSTAIN, (SOURCE_ROLE_UNPROVEN, SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE))
+    if any(s.later_area_paint_clear is not True for s in strokes):
+        return done(ABSTAIN, (SOURCE_ROLE_UNPROVEN,))
     hypothesis, failure = _hypothesis(strokes, eq)
     if hypothesis is None:
         return done(ABSTAIN, (failure,))
@@ -567,6 +615,17 @@ class StripFaceFamilyShadow:
             segments = extract_native_page(page)["segments"]
             drawing_paint = {index: (drawing.get("seqno"), drawing.get("stroke_opacity"))
                              for index, drawing in enumerate(page.get_drawings())}
+            try:
+                bboxlog = page.get_bboxlog()
+            except Exception:
+                bboxlog = None
+            area_paint_clear = {}
+            for primitive in segments:
+                seqno, _ = drawing_paint.get(primitive.get("path_index"), (None, None))
+                if seqno is not None and seqno == primitive.get("sequence_number"):
+                    area_paint_clear[primitive["id"]] = _later_area_paint_clear(
+                        page, (primitive["x1"], primitive["y1"], primitive["x2"], primitive["y2"]),
+                        primitive.get("width"), seqno, bboxlog)
             segmented = segment_page_viewports(page, page_number=page_id)
         primitives = {s["id"]: s for s in segments}
         if len(primitives) != len(segments):
@@ -592,7 +651,7 @@ class StripFaceFamilyShadow:
             raw_geometry = observation.geometry
             if (observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
                     or type(raw_geometry) not in (tuple, list) or len(raw_geometry) != 4
-                    or any(type(v) not in (int, float) or not math.isfinite(v) for v in raw_geometry)):
+                    or any(not _finite(v) for v in raw_geometry)):
                 return integrity_failure
             geometry = tuple(float(v) for v in raw_geometry)
             primitive = primitives.get(str(observation.source_primitive_ref).removeprefix("visible:segment:"))
@@ -615,7 +674,8 @@ class StripFaceFamilyShadow:
                 observation_id=str(observation_id), geometry=geometry,
                 stroke_width=float(width) if verified else None,
                 stroke_rgb=tuple(float(c) for c in stroke) if verified else None,
-                solid=solid, opaque=opaque, kind=str(primitive.get("kind", "unknown")), role_verified=verified))
+                solid=solid, opaque=opaque, kind=str(primitive.get("kind", "unknown")), role_verified=verified,
+                later_area_paint_clear=area_paint_clear.get(primitive["id"]) if verified else None))
 
         # one positively authenticated RESOLVED floor-plan viewport containing the strip, or no verdict
         floor_plans = [v for v in segmented if v.status == ViewportSegmentationStatus.RESOLVED.value

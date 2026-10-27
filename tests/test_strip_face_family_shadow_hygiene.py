@@ -23,7 +23,7 @@ ALLOWED_IMPORTS = {
     "__future__", "bisect", "hashlib", "math", "re", "dataclasses", "typing", "fitz",
     "pb_migration_contracts", "pb_physical_opening_authority", "pb_wall_room_topology_typed_negative_evidence",
     "pb_source_visibility_authority", "pb_source_observation_authority", "pb_vector_geometry_v130",
-    "pb_viewport_segmentation",
+    "pb_viewport_segmentation", "pb_pdf_text_integrity_authority",
 }
 
 # a tiny synthetic audit in a clean interpreter, run through the adapter, listing what ended up loaded
@@ -48,7 +48,7 @@ _REPLAY_PROBE = "\n".join([
     "own = F.FaceFamilyOwnership('d', 'r', 's', 'a' * 64, '7')",
     "vp = F.ViewportRef('v', (0.0, 0.0, 3000.0, 3000.0))",
     "def st(i, x0, y0, x1, y1, w=0.48):",
-    "    return F.SourceStroke(i, (x0, y0, x1, y1), w, (0.0, 0.0, 0.0), True, True, 'line', True)",
+    "    return F.SourceStroke(i, (x0, y0, x1, y1), w, (0.0, 0.0, 0.0), True, True, 'line', True, later_area_paint_clear=True)",
     "page = [st('n1', 100, 300, 304, 300), st('n2', 100, 305.52, 304, 305.52), st('n3', 100, 300, 100, 305.52),",
     "        st('n4', 304, 300, 304, 305.52), st('a', 20, 296, 400, 296), st('b', 190, 296.05, 200, 296.05, 0.96),",
     "        st('c', 20, 310.52, 250, 310.52), st('d', 20, 290, 180, 290), st('e', 220, 290, 400, 290),",
@@ -127,8 +127,13 @@ def test_the_shadow_never_builds_an_existence_record_and_never_calls_the_opening
     text = SOURCE.read_text(encoding="utf-8")
     assert "PhysicalOpeningExistenceRecord(" not in text and "PhysicalOpeningExistenceResult(" not in text
     for needle in ("prove_existence", "visible_candidate_structures", "physical_opening_authority(",
-                   "fork_native_source_shadow", "text_integrity_authority", "_physical_opening_authority_cache"):
+                   "fork_native_source_shadow", ".text_integrity_authority(", "_physical_opening_authority_cache"):
         assert needle not in text, needle
+    neutral_geometry = {"_exact_fill_path_coverage", "_fill_text_char_bbox_coverage_upper_bound",
+                        "_later_paint_spatial_candidates"}
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.ImportFrom) and node.module == "pb_pdf_text_integrity_authority":
+            assert {alias.name for alias in node.names} == neutral_geometry
     assert "_cache[" not in text and "_cache.clear" not in text and "_cache =" not in text
     assert "capabilities" not in text and "publish_" not in text
     assert ".rect" not in text and "get_pixmap" not in text and "mediabox" not in text

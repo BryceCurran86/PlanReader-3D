@@ -27,7 +27,7 @@ LO, HI, B0, B1 = 100.0, 304.0, 300.0, 305.52
 def st(oid, x0, y0, x1, y1, width=0.48, rgb=BLACK, solid=True, verified=True, opaque=True):
     return F.SourceStroke(oid, (float(x0), float(y0), float(x1), float(y1)), width if verified else None,
                           tuple(rgb) if verified else None, solid if verified else None,
-                          opaque if verified else None, "line", verified)
+                          opaque if verified else None, "line", verified, later_area_paint_clear=True)
 
 
 def strip_segments(x=LO, y=B0, length=HI - LO, depth=B1 - B0, prefix="n"):

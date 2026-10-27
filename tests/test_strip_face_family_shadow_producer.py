@@ -307,6 +307,124 @@ def test_a_through_line_and_a_thicker_stub_at_one_offset_is_a_conflict_with_both
     assert len(got.conflicted_group_ids) == 2 and got.continuous_group_ids == ()
 
 
+@pytest.mark.parametrize("paint", ["fill", "image", "unsupported_fill"])
+def test_later_area_paint_cannot_leave_a_masked_historical_stroke_continuous(monkeypatch, paint):
+    _floor_plan_viewport(monkeypatch)
+
+    def build(s):
+        page = s.doc[0]
+        s.line((100.0, 296.0), (600.0, 296.0))
+        if paint == "image":
+            image = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10), False)
+            image.clear_with(255)
+            page.insert_image(fitz.Rect(300.0, 295.0, 310.0, 297.0), pixmap=image)
+        elif paint == "unsupported_fill":
+            shape = page.new_shape()
+            shape.draw_polyline([(300.0, 295.0), (310.0, 295.0), (310.0, 298.0)])
+            shape.finish(color=None, fill=(1, 1, 1), closePath=True)
+            shape.commit()
+        else:
+            page.draw_rect(fitz.Rect(300.0, 295.0, 310.0, 297.0), color=None, fill=(1, 1, 1))
+
+    source, published, ids = _scene(build)
+    before = _shape(source)
+    got = _audit(source, published, ids)
+    (historical,) = [g for g in got.groups if g.black and abs(g.offset_pt + 4.0) < 0.01]
+    assert historical.role_verified and historical.opaque is True
+    assert historical.through_both_terminals  # original geometry remains intact and is never fabricated into a gap
+    assert historical.later_area_paint_clear is not True
+    assert historical.group_id not in got.continuous_group_ids and got.status is ABST
+    assert _shape(source) == before and _audit(source, published, tuple(reversed(ids))) == got
+    assert all(getattr(got, name) is False for name in F._GRANT_FLAGS)
+    if paint == "fill":
+        raw = source._producer._store.source_bytes_by_revision[published.revision.revision_id]
+        with fitz.open(stream=raw, filetype="pdf") as document:
+            rendered = document[0].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            assert rendered.pixel(610, 592) == (255, 255, 255)
+
+
+@pytest.mark.parametrize("placement", ["earlier", "outside", "disjoint_rectangles"])
+def test_paint_order_and_exact_disjoint_area_preserve_a_clean_original_stroke(monkeypatch, placement):
+    _floor_plan_viewport(monkeypatch)
+
+    def build(s):
+        page = s.doc[0]
+        if placement == "earlier":
+            page.draw_rect(fitz.Rect(300.0, 295.0, 310.0, 297.0), color=None, fill=(1, 1, 1))
+        s.line((100.0, 296.0), (600.0, 296.0))
+        if placement == "outside":
+            page.draw_rect(fitz.Rect(620.0, 295.0, 630.0, 297.0), color=None, fill=(1, 1, 1))
+        elif placement == "disjoint_rectangles":
+            shape = page.new_shape()
+            shape.draw_rect(fitz.Rect(300.0, 290.0, 310.0, 292.0))
+            shape.draw_rect(fitz.Rect(300.0, 298.0, 310.0, 299.0))
+            shape.finish(color=None, fill=(1, 1, 1))
+            shape.commit()
+
+    source, published, ids = _scene(build)
+    got = _audit(source, published, ids)
+    assert got.status is CAND
+    (through,) = [g for g in got.groups if g.group_id in got.continuous_group_ids]
+    assert through.later_area_paint_clear is True
+
+
+def test_later_area_paint_on_nominated_strip_abstains_without_changing_source_identity(monkeypatch):
+    _floor_plan_viewport(monkeypatch)
+
+    def build(s):
+        s.line((100.0, 296.0), (600.0, 296.0))
+        s.doc[0].draw_rect(fitz.Rect(195.0, 299.0, 205.0, 301.0), color=None, fill=(1, 1, 1))
+
+    source, published, ids = _scene(build)
+    before = _shape(source)
+    got = _audit(source, published, ids)
+    assert got.status is ABST and got.reason_codes == (F.SOURCE_ROLE_UNPROVEN,)
+    assert got.ownership.snapshot_id == published.snapshot.snapshot_id
+    assert set(s.observation_id for s in got.nominated_strokes) == set(ids)
+    assert any(s.later_area_paint_clear is not True for s in got.nominated_strokes)
+    assert _shape(source) == before
+
+
+def test_unavailable_bboxlog_cannot_prove_area_paint_absence(monkeypatch):
+    _floor_plan_viewport(monkeypatch)
+    source, published, ids = _scene(lambda s: s.line((100.0, 296.0), (600.0, 296.0)))
+    assert _audit(source, published, ids).status is CAND
+    with monkeypatch.context() as patch:
+        patch.setattr(fitz.Page, "get_bboxlog", lambda *_a, **_k: None)
+        got = _audit(source, published, ids)
+    assert got.status is ABST and F.SOURCE_ROLE_UNPROVEN in got.reason_codes
+    assert _audit(source, published, ids).status is CAND
+
+
+def test_optional_original_face_inventory_retains_source_state_and_only_clear_continuity():
+    from test_plan_callout_glazing_strip_original_source import _parameters
+    from pb_source_plan_glazing_strip_callout_shadow import audit_plan_callout_to_glazing_strip_from_source
+
+    params, raw = _parameters()
+    source = SourceVisibilityProducer(
+        producer_method="face-family-original-test", producer_version="1",
+        source_native_finish_text_shadow=bool(params.get("native_finish_text_shadow", True)))
+    published = source.ingest_native_pdf_bytes(
+        document_id=f"original:{params['sha256'][:32]}", source_bytes=raw, source_locator="memory://original",
+        page_ids=(params["plan_page"], params["elevation_page"]))
+    census = audit_plan_callout_to_glazing_strip_from_source(
+        source, revision_id=published.revision.revision_id, plan_page_id=params["plan_page"],
+        elevation_page_id=params["elevation_page"], callout_mark_pattern=params["callout_mark_pattern"],
+        panel_token=params["panel_token"], coordinate_quantum_pt=params["coordinate_quantum_pt"],
+        dimension_quantum_mm=params["dimension_quantum_mm"])
+    assert census.strips, "private source acceptance must exercise a nonempty source inventory"
+    for strip in census.strips:
+        before = _shape(source)
+        got = F.StripFaceFamilyShadow(source, enabled=True).audit(
+            revision_id=published.revision.revision_id, page_id=params["plan_page"],
+            nominated_observation_ids=strip.ink_ids, coordinate_quantum_pt=params["coordinate_quantum_pt"])
+        assert got.ownership.snapshot_id == published.snapshot.snapshot_id
+        assert _shape(source) == before
+        assert all(getattr(got, name) is False for name in F._GRANT_FLAGS)
+        continuous = set(got.continuous_group_ids)
+        assert all(g.later_area_paint_clear is True for g in got.groups if g.group_id in continuous)
+
+
 def test_a_fill_only_shape_edge_is_grouped_without_an_invented_stroke_width(monkeypatch):
     _floor_plan_viewport(monkeypatch)
 
