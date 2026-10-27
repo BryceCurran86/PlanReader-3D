@@ -109,6 +109,66 @@ def _require_original_path_not_later_covered(page, drawings, index: int) -> None
     half = max(float(width) / 2, 0.05)
     x0, y0, x1, y1 = bounds
     ink = fitz.Rect(x0 - half, y0 - half, x1 + half, y1 + half)
+    if bboxlog[seq][0] != "stroke-path":
+        raise ValueError("original native wall cap has no stroke paint receipt")
+    # Later strokes and painted glyphs are separate from opaque fills. A
+    # long repaint can replace an earlier black cap without ever appearing
+    # as fill-path; a text span may overlap only through unpainted spaces.
+    traces_by_seq = {}
+    for trace in page.get_texttrace():
+        if not isinstance(trace, dict):
+            raise ValueError("original native later text trace unavailable")
+        trace_seq = trace.get("seqno")
+        if type(trace_seq) is int:
+            traces_by_seq.setdefault(trace_seq, []).append(trace)
+    line = selected["items"][0]
+    start, end = line[1:3]
+    vertical = abs(end.y - start.y) >= abs(end.x - start.x)
+    for later_seq in range(seq + 1, len(bboxlog)):
+        entry = bboxlog[later_seq]
+        if len(entry) < 2 or entry[0] not in (
+                "stroke-path", "fill-text", "stroke-text"):
+            continue
+        try:
+            paint_box = fitz.Rect(entry[1])
+            if not all(isfinite(v) for v in paint_box):
+                raise ValueError("nonfinite paint box")
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("original native later paint geometry unresolved") from None
+        if not ink.intersects(paint_box):
+            continue
+        if entry[0] == "stroke-path":
+            # Ordinary thin perpendicular drafting intersections must not
+            # erase a genuine wall cap; a longer overlap is ambiguous.
+            span = (min(ink.y1, paint_box.y1) - max(ink.y0, paint_box.y0)
+                    if vertical else
+                    min(ink.x1, paint_box.x1) - max(ink.x0, paint_box.x0))
+            if span > 2 * float(width):
+                raise ValueError("original native wall cap or face is later obscured")
+            continue
+        traces = traces_by_seq.get(later_seq, ())
+        if not traces:
+            raise ValueError("later native glyph paint provenance unavailable")
+        for trace in traces:
+            glyphs = trace.get("chars")
+            if not isinstance(glyphs, (tuple, list)) or not glyphs:
+                raise ValueError("later native glyph paint provenance unavailable")
+            for glyph in glyphs:
+                if not isinstance(glyph, (tuple, list)) or len(glyph) < 4:
+                    raise ValueError("later native glyph paint provenance unresolved")
+                codepoint = glyph[0]
+                if type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff:
+                    raise ValueError("later native glyph codepoint unresolved")
+                if chr(codepoint).isspace():
+                    continue
+                try:
+                    glyph_box = fitz.Rect(glyph[3])
+                    if not all(isfinite(v) for v in glyph_box):
+                        raise ValueError("nonfinite glyph box")
+                except (TypeError, ValueError, OverflowError):
+                    raise ValueError("later native glyph geometry unresolved") from None
+                if ink.intersects(glyph_box):
+                    raise ValueError("original native wall cap or face is later obscured")
     for later_seq in range(seq + 1, len(bboxlog)):
         entry = bboxlog[later_seq]
         if len(entry) < 2 or entry[0] not in (
