@@ -300,6 +300,7 @@ class ElevationFrameLocalityCensusShadow:
             return self._empty(SOURCE_UNPROVEN)
         document_id = published.revision.document_id
         if (page_id not in tuple(int(v) for v in published.coverage.decoded_pages)
+                or page_id in tuple(int(v) for v in published.coverage.failed_pages)
                 or source._producer.current_revision_id(document_id) != revision_id):
             return self._empty(SOURCE_UNPROVEN)
         payload = source._producer._store.source_bytes_by_revision.get(revision_id)
@@ -310,17 +311,36 @@ class ElevationFrameLocalityCensusShadow:
 
         text_authority = source.text_integrity_authority()
         trusted: list[TrustedWordRef] = []
+        if len(set(published.text_observation_ids)) != len(published.text_observation_ids):
+            return self._empty(SOURCE_UNPROVEN, ownership)
         for observation_id in published.text_observation_ids:
             result = text_authority.resolve_text(ObservationSelector(
                 document_id, revision_id, ownership.source_sha256, ownership.snapshot_id, observation_id))
             receipt = result.receipt
+            # Authenticate the receipt itself before page filtering; a positive
+            # wrapper cannot lend another source's words to this census.
+            if receipt is not None and (
+                    receipt.parent_observation_id != observation_id
+                    or receipt.document_id != document_id or receipt.revision_id != revision_id
+                    or receipt.source_sha256 != ownership.source_sha256):
+                return self._empty(SOURCE_UNPROVEN, ownership)
             if (receipt is None or str(receipt.page_id) != str(page_id)
                     or result.status is not EvidenceResolutionStatus.CORROBORATED
-                    or result.proposition != TRUSTED_PDF_TEXT or not result.trusted_text
-                    or len(receipt.geometry) < 4):
+                    or result.proposition != TRUSTED_PDF_TEXT or not result.trusted_text):
                 continue
-            trusted.append(TrustedWordRef(str(observation_id), str(result.trusted_text),
-                                          tuple(float(v) for v in receipt.geometry[:4])))
+            if (receipt.trusted is not True or type(result.trusted_text) is not str
+                    or receipt.raw_text != result.trusted_text
+                    or type(receipt.geometry) not in (tuple, list) or len(receipt.geometry) != 4
+                    or any(type(v) not in (int, float) for v in receipt.geometry)):
+                return self._empty(SOURCE_UNPROVEN, ownership)
+            try:
+                geometry = tuple(float(v) for v in receipt.geometry)
+            except OverflowError:
+                return self._empty(SOURCE_UNPROVEN, ownership)
+            if (not all(math.isfinite(v) for v in geometry)
+                    or geometry[0] >= geometry[2] or geometry[1] >= geometry[3]):
+                return self._empty(SOURCE_UNPROVEN, ownership)
+            trusted.append(TrustedWordRef(observation_id, result.trusted_text, geometry))
         if not trusted:
             return self._empty(NO_TRUSTED_TAGS, ownership)
 
