@@ -195,7 +195,7 @@ def test_d15_ink_immutable_source_positive_target_is_exact_and_source_free():
                  if step["name"].startswith("Validate immutable"))
     script = guard["run"]
     matches = re.findall(
-        r"(?m)^  d15_ink\\)\\n(?P<body>.*?)(?=^    ;;)",
+        r"(?m)^  d15_ink\)\n(?P<body>.*?)(?=^    ;;)",
         script, flags=re.DOTALL | re.MULTILINE,
     )
     assert len(matches) == 1
@@ -220,7 +220,7 @@ def test_d15_ink_immutable_source_positive_target_is_exact_and_source_free():
         "|tests/test_gpt2_mary_original_figured_door_leader_shadow.py::"
         "test_genuine_horizontal_figured_word_remains_source_only_not_a_door"
     )
-    assert public.count(row + "\\n") == 1
+    assert public.count(row + "\n") == 1
     assert "ORIGINAL_SOURCES_TOKEN" not in public
     assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
     assert "--network none --read-only --cap-drop ALL" in public
