@@ -215,6 +215,10 @@ def execute_source_full_plan_recovery_engine_shadow(
                     finish_sel,
                     finish_mark=finish,
                     internal_face_polygon_pdf_pts=poly,
+                    # Preserve the complete page-local rival universe. The evaluator
+                    # must see all same-room FT2/FT3 and duplicate occurrences;
+                    # a missing rival list silently bypasses its ambiguity veto.
+                    other_finish_marks=page.finish_mark_candidates,
                 )
                 if f_res.status == EvidenceResolutionStatus.CANDIDATE:
                     recovered_finishes.append(finish.occurrence_id)
