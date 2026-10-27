@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink, finish_page]
+        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink, finish_page, office_caps]
 
     steps:
       - name: Checkout the trusted workflow context
@@ -95,6 +95,15 @@ jobs:
               expected_paths='pb_source_floor_finish_occurrence_ownership_shadow.py|pb_source_full_plan_recovery_engine_shadow.py|tests/test_source_floor_finish_occurrence_ownership_shadow.py|tests/test_source_full_plan_recovery_engine_shadow.py'
               original_test=test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned
               test_path=tests/test_source_full_plan_recovery_engine_shadow.py
+              ;;
+            office_caps)
+              # OFFICE cross-view source-ink negative, not physical W4 authority.
+              # Immutable two-file PR tree; never execute mutable branch code.
+              approved_base=6be737582400c739c41420c19962e9b30b9c7d37
+              approved_head=80ab45ddb082f3364cd9c7f429814f921e8b889d
+              expected_paths='pb_gpt2_original_native_crossview_wall_caps_shadow.py|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py'
+              original_test=test_original_maryborough_p7_p11_when_owner_pdf_provisioned
+              test_path=tests/test_gpt2_original_native_crossview_wall_caps_shadow.py
               ;;
             *)
               echo "::error::Unapproved original-source code selection"
