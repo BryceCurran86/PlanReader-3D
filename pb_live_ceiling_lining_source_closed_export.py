@@ -312,11 +312,27 @@ def build_live_ceiling_lining_source_traces(
             room is None
             or rooms_by_physical_id.get(physical_room_id) is not room
             or _clean(ceiling.room_entity_id) != canonical_room_id
-            or _clean(room.source_room_face_record_id)
-            != _clean(metadata.get("source_room_face_record_id"))
         ):
             raise SourceClosedRunConflictError(
                 f"ceiling quantity references unknown room identity: "
+                f"{quantity.quantity_id}"
+            )
+
+        # A source room-face is a producer-owned physical geometry receipt.
+        # Normalizing both sides allowed two missing, padded or type-coerced
+        # receipts to agree and inherit the original room's ceiling m².
+        # Preserve the exact original source identity before any FIRM seal.
+        original_face_id = metadata.get("source_room_face_record_id")
+        producer_face_id = room.source_room_face_record_id
+        if (
+            type(producer_face_id) is not str
+            or not producer_face_id
+            or producer_face_id != producer_face_id.strip()
+            or type(original_face_id) is not str
+            or original_face_id != producer_face_id
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity original room-face receipt mismatch: "
                 f"{quantity.quantity_id}"
             )
 
