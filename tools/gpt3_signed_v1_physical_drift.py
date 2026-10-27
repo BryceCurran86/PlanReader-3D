@@ -7,7 +7,6 @@ equivalent, and an old customer approval cannot follow a new sealed fingerprint.
 from __future__ import annotations
 
 import argparse
-from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import (
     SealedSourceClosedRun, sealed_source_closed_run_from_dict,
 )
+from tools.gpt3_original_source_preflight import _stable_original_digest
 from tools.gpt3_safe_original_report_output import (
     preflight_new_diagnostic, write_new_diagnostic,
 )
@@ -139,11 +139,26 @@ def compare_signed_v1_physical_runs(
     return result
 
 
-def _digest(path: Path) -> str:
-    return sha256(path.read_bytes()).hexdigest()
+def _source_witness(path: Path) -> tuple[str, tuple[int, ...]]:
+    """No-follow descriptor and same-inode SHA for signed/customer inputs."""
+    try:
+        return _stable_original_digest(path)
+    except ValueError as exc:
+        raise ValueError("signed source/customer input changed or is not a regular file") from exc
 
 
-def build_signed_v1_physical_drift_report(
+def _assert_source_witnesses(
+    paths: tuple[Path, ...],
+    expected: tuple[tuple[str, tuple[int, ...]], ...],
+) -> None:
+    if len(paths) != len(expected) or any(
+        _source_witness(path) != witness
+        for path, witness in zip(paths, expected)
+    ):
+        raise ValueError("signed source/customer artifact changed during drift comparison")
+
+
+def _build_signed_v1_physical_drift_with_witnesses(
     *, baseline_path: Path, candidate_path: Path,
     baseline_customer_path: Path | None = None,
     candidate_customer_path: Path | None = None,
@@ -153,7 +168,8 @@ def build_signed_v1_physical_drift_report(
     paths = (baseline_path, candidate_path)
     if baseline_customer_path is not None and candidate_customer_path is not None:
         paths += (baseline_customer_path, candidate_customer_path)
-    hashes_before = tuple(_digest(path) for path in paths)
+    witnesses_before = tuple(_source_witness(path) for path in paths)
+    hashes_before = tuple(witness[0] for witness in witnesses_before)
     baseline = sealed_source_closed_run_from_dict(_json_object(baseline_path))
     candidate = sealed_source_closed_run_from_dict(_json_object(candidate_path))
     if baseline_customer_path is not None and candidate_customer_path is not None:
@@ -168,9 +184,7 @@ def build_signed_v1_physical_drift_report(
         result["candidate_verified_customer_count"] = candidate_verified.customer_row_count
     else:
         result["customer_epoch_bijection"] = "NOT_PROVIDED_NOT_VERIFIED"
-    hashes_after = tuple(_digest(path) for path in paths)
-    if hashes_before != hashes_after:
-        raise ValueError("signed source/customer artifact changed during drift comparison")
+    _assert_source_witnesses(paths, witnesses_before)
     result["source_receipt_file_sha256s"] = {
         "baseline": hashes_before[0],
         "candidate": hashes_before[1],
@@ -180,7 +194,22 @@ def build_signed_v1_physical_drift_report(
             "baseline": hashes_before[2],
             "candidate": hashes_before[3],
         }
-    return result
+    return result, paths, witnesses_before
+
+
+def build_signed_v1_physical_drift_report(
+    *, baseline_path: Path, candidate_path: Path,
+    baseline_customer_path: Path | None = None,
+    candidate_customer_path: Path | None = None,
+) -> dict:
+    """Prepare an UNPUBLISHED drift report from stable source/customer epochs."""
+    report, _paths, _witnesses = _build_signed_v1_physical_drift_with_witnesses(
+        baseline_path=baseline_path,
+        candidate_path=candidate_path,
+        baseline_customer_path=baseline_customer_path,
+        candidate_customer_path=candidate_customer_path,
+    )
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -198,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         args.baseline_customer, args.candidate_customer,
     )
     preflight_new_diagnostic(args.output, protected_roots=protected)
-    report = build_signed_v1_physical_drift_report(
+    report, paths, witnesses = _build_signed_v1_physical_drift_with_witnesses(
         baseline_path=args.baseline_sealed, candidate_path=args.candidate_sealed,
         baseline_customer_path=args.baseline_customer,
         candidate_customer_path=args.candidate_customer,
@@ -207,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         args.output,
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
         protected_roots=protected,
+        verify_inputs=lambda: _assert_source_witnesses(paths, witnesses),
     )
     return 0
 
