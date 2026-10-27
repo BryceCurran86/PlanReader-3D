@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
-    SCHEMA_VERSION, load_project_manifest,
+    SCHEMA_VERSION, load_project_manifest, load_suite_manifests,
 )
 
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
