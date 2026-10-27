@@ -34,12 +34,13 @@ from pb_figured_dimension_evidence import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
+from pb_pdf_text_integrity_authority import TRUSTED_PDF_TEXT
 from pb_portable_raster_ocr_authority import MockOCRBackend
 from pb_raster_text_corroboration_authority import (
     RasterTextCorroborationProducer,
     RasterTextCorroborationSelector,
 )
-from pb_source_observation_authority import ObservationSelector
+from pb_source_observation_authority import SOURCE_OBSERVATION_EXISTS, ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -888,7 +889,83 @@ class OpeningElevationFrameAreaAuthority:
 def _receipt_ordinal(receipt: object, name: str) -> int | None:
     """Receipt ordinal as int, or None when the receipt left it unresolved."""
     value = getattr(receipt, name, None)
-    return None if value is None else int(value)
+    return value if type(value) is int and value >= 0 else None
+
+
+def _receipt_matches_source(authority, selector, result, published) -> bool:
+    """A wrapper status cannot substitute for the immutable native word."""
+    receipt = result.receipt
+    if receipt is None:
+        return False
+    parent_result = authority.resolve(selector)
+    parent = parent_result.observation
+    if (
+        parent_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or parent_result.proposition != SOURCE_OBSERVATION_EXISTS
+        or parent is None
+        or parent.observation_kind != "native_pdf_word"
+        or parent.origin_kind != "native"
+        or parent.viewport_id is not None
+        or parent.observation_id != selector.observation_id
+        or parent.document_id != selector.document_id
+        or parent.revision_id != selector.revision_id
+        or parent.source_sha256 != selector.source_sha256
+        or receipt.parent_observation_id != parent.observation_id
+        or receipt.document_id != parent.document_id
+        or receipt.revision_id != parent.revision_id
+        or receipt.source_sha256 != parent.source_sha256
+        or receipt.page_id != parent.page_id
+        or receipt.source_partition_id != parent.source_partition_id
+        or receipt.raw_text != parent.raw_text
+        or receipt.geometry != parent.geometry
+        or not str(parent.page_id).isdigit()
+        or int(parent.page_id) not in published.coverage.decoded_pages
+        or int(parent.page_id) in published.coverage.failed_pages
+    ):
+        return False
+    geometry = receipt.geometry
+    if (
+        type(geometry) not in (tuple, list)
+        or len(geometry) != 4
+        or any(type(v) not in (int, float) for v in geometry)
+        or any(
+            getattr(receipt, name, None) is not None
+            and _receipt_ordinal(receipt, name) is None
+            for name in ("block_no", "line_no", "word_no", "sequence_number")
+        )
+    ):
+        return False
+    try:
+        box = tuple(float(v) for v in geometry)
+    except OverflowError:
+        return False
+    if (not all(math.isfinite(v) for v in box)
+            or box[0] >= box[2] or box[1] >= box[3]):
+        return False
+    return result.status is not EvidenceResolutionStatus.CORROBORATED or (
+        result.proposition == TRUSTED_PDF_TEXT
+        and receipt.trusted is True
+        and type(result.trusted_text) is str
+        and result.trusted_text == parent.raw_text
+    )
+
+
+def _raster_matches_source(result, receipt, published, observation_id) -> bool:
+    record = result.record
+    return record is not None and (
+        record.document_id == published.revision.document_id
+        and record.revision_id == published.revision.revision_id
+        and record.source_sha256 == published.revision.source_sha256
+        and record.snapshot_id == published.snapshot.snapshot_id
+        and record.native_observation_id == observation_id
+        and record.page_id == receipt.page_id
+        and record.source_partition_id == receipt.source_partition_id
+        and record.text_integrity_receipt_id == receipt.receipt_id
+        and tuple(record.source_bbox) == tuple(receipt.geometry)
+        and type(result.corroborated_text) is str
+        and result.corroborated_text == record.corroborated_text
+        and _claim_norm(result.corroborated_text) == _claim_norm(receipt.raw_text)
+    )
 
 
 class OpeningElevationFrameAreaProducer:
@@ -953,7 +1030,7 @@ class OpeningElevationFrameAreaProducer:
     ) -> _TrustedWord | None:
         try:
             geometry = tuple(float(v) for v in receipt.geometry)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         if (
             len(geometry) != 4
@@ -986,6 +1063,7 @@ class OpeningElevationFrameAreaProducer:
 
     def _build(self) -> None:
         text_authority = self._source.text_integrity_authority()
+        source_authority = self._source._producer.authority()
         for revision_id, published in sorted(self._source._published_by_revision.items()):
             if (
                 self._source._producer.current_revision_id(
@@ -1001,7 +1079,14 @@ class OpeningElevationFrameAreaProducer:
             # or the strict two-render raster corroboration authority.
             claim_words_by_page: dict[str, list[_TrustedWord]] = {}
             native_results: dict[str, object] = {}
+            invalid_revision = False
+            seen_ids: set[str] = set()
             for observation_id in published.text_observation_ids:
+                if (type(observation_id) is not str or not observation_id
+                        or observation_id in seen_ids):
+                    invalid_revision = True
+                    break
+                seen_ids.add(observation_id)
                 selector = ObservationSelector(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
@@ -1011,8 +1096,9 @@ class OpeningElevationFrameAreaProducer:
                 )
                 result = text_authority.resolve_text(selector)
                 receipt = result.receipt
-                if receipt is None:
-                    continue
+                if not _receipt_matches_source(source_authority, selector, result, published):
+                    invalid_revision = True
+                    break
                 claim = self._word_from_receipt(
                     str(observation_id),
                     receipt,
@@ -1022,6 +1108,10 @@ class OpeningElevationFrameAreaProducer:
                     continue
                 native_results[str(observation_id)] = result
                 claim_words_by_page.setdefault(str(receipt.page_id), []).append(claim)
+
+            # A corrupt or omitted rival must not make a remaining frame unique.
+            if invalid_revision:
+                continue
 
             payload = _source_bytes(
                 self._source,
@@ -1116,15 +1206,20 @@ class OpeningElevationFrameAreaProducer:
                                 trusted_words.append(trusted)
                             continue
 
-                        raster = self._raster.publish(
-                            RasterTextCorroborationSelector(
-                                document_id=published.revision.document_id,
-                                revision_id=published.revision.revision_id,
-                                source_sha256=published.revision.source_sha256,
-                                snapshot_id=published.snapshot.snapshot_id,
-                                observation_id=claim.observation_id,
-                            )
+                        raster_selector = RasterTextCorroborationSelector(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            observation_id=claim.observation_id,
                         )
+                        raster = self._raster.publish(raster_selector)
+                        if (raster.status is EvidenceResolutionStatus.CORROBORATED
+                                and (raster != self._raster.authority().resolve(raster_selector)
+                                     or not _raster_matches_source(
+                                         raster, native_receipt, published, claim.observation_id))):
+                            invalid_revision = True
+                            break
                         if (
                             raster.status is EvidenceResolutionStatus.CORROBORATED
                             and raster.record is not None
@@ -1140,6 +1235,9 @@ class OpeningElevationFrameAreaProducer:
                             )
                             if trusted is not None:
                                 trusted_words.append(trusted)
+
+                    if invalid_revision:
+                        break
 
                     # Raw claims never substitute for proof.
                     trusted_family, _trusted_title_ids = _page_family_and_title_ids(
@@ -1161,6 +1259,9 @@ class OpeningElevationFrameAreaProducer:
                         records_by_mark.setdefault(record.type_mark, []).append(record)
             finally:
                 document.close()
+
+            if invalid_revision:
+                continue
 
             for mark, records in sorted(records_by_mark.items()):
                 key = (
