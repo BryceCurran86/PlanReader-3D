@@ -1,4 +1,5 @@
 """Private original proof stays owner/main-only; public PR tests need no secret."""
+import ast
 from pathlib import Path
 
 import yaml
@@ -38,7 +39,7 @@ def test_private_bytes_are_provisioned_only_after_trusted_checkout_and_fail_clos
     assert "assert sha256(data).hexdigest()==sha" in proof["run"]
     assert 'assert result.status.value=="abstained"' in proof["run"]
     assert 'assert result.evidence is None' in proof["run"]
-    assert "exact_head_sha.txt" in proof["run"]
+    assert "git rev-parse HEAD" in proof["run"]
 
 
 def test_public_focused_jobs_remain_dual_python_source_free_and_have_no_credentials():
@@ -55,7 +56,17 @@ def test_public_focused_jobs_remain_dual_python_source_free_and_have_no_credenti
     assert "tests/test_physical_scale_cached_source_scope.py" in events["pull_request"]["paths"]
 
 
-def test_private_original_matrix_artifacts_cannot_overwrite_each_other():
+def test_private_original_job_never_uploads_or_logs_source_derived_artifacts():
     steps = workflow()["jobs"]["original-lot16"]["steps"]
-    artifact = next(s for s in steps if s.get("uses", "").startswith("actions/upload-artifact@"))
-    assert "${{ matrix.python-version }}" in artifact["with"]["name"]
+    assert not any(s.get("uses", "").startswith("actions/upload-artifact@") for s in steps)
+    proof = next(s for s in steps if s.get("name", "").startswith("Reprove original SHA"))
+    code = proof["run"].split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    tree = ast.parse(code)
+    prints = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print"]
+    assert prints
+    assert all(not p.keywords and all(isinstance(a, ast.Constant) and type(a.value) is str for a in p.args)
+               for p in prints)
+    assert ".write_text(" not in code and "json.dumps" not in code
+    assert "artifacts/" not in proof["run"]
+    assert any(s.get("if") == "always()" and s.get("run") == "rm -rf documents/sources" for s in steps)

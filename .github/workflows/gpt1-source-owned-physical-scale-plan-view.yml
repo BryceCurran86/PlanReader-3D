@@ -72,13 +72,10 @@ jobs:
       - name: Reprove original SHA source plan and physical-scale first gate
         run: |
           set -euo pipefail
-          mkdir -p artifacts/gpt1-source-plan-scale
-          git rev-parse HEAD > artifacts/gpt1-source-plan-scale/exact_head_sha.txt
+          git rev-parse HEAD
           python - <<'PY'
-          from dataclasses import asdict
           from hashlib import sha256
           from pathlib import Path
-          import json
           from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
           from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSelector
           from pb_source_visibility_authority import SourceVisibilityProducer
@@ -117,28 +114,10 @@ jobs:
           assert source.published_snapshot_for_revision(pub.revision.revision_id)==before
           assert result.evidence is None, "new scale authority unexpected: independently audit actual source"
           assert result.status.value=="abstained"
-          report={
-              "source_sha256":sha,
-              "page_id":"3",
-              "source_owned_floor_plan_id":viewport.view_id,
-              "authenticated_viewport_bbox_pdf_points":list(viewport.bounding_box),
-              "physical_scale_status":result.status.value,
-              "physical_scale_first_reasons":list(result.reason_codes),
-              "physical_scale_record":None,
-              "metric_floor_area_published":False,
-              "commercial_quantity_published":False,
-              "source_snapshot_unchanged":True,
-              "benchmark_score":None,
-          }
-          out=Path("artifacts/gpt1-source-plan-scale/first_gate.json")
-          out.write_text(json.dumps(report,indent=2,sort_keys=True))
-          print(json.dumps(report,sort_keys=True))
+          print("SHA-verified original source-plan/scale first gate: PASS")
           PY
       - name: Immutable frozen benchmark integrity
         run: python scripts/check_full_plan_v2_integrity.py
-      - uses: actions/upload-artifact@v4
+      - name: Remove private originals after every outcome
         if: always()
-        with:
-          name: gpt1-original-source-plan-scale-first-gate-py${{ matrix.python-version }}
-          path: artifacts/gpt1-source-plan-scale/
-          retention-days: 14
+        run: rm -rf documents/sources
