@@ -119,12 +119,12 @@ def test_unsafe_project_id_fails_before_manifest_loader(
 ):
     guard = _guard()
     (tmp_path / "manifest.json").write_text(
-        json.dumps({"projects": [project_id], "required_project_count": 1}),
+        json.dumps({"schema_version": "2.0", "projects": [project_id], "required_project_count": 1}),
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        guard, "load_suite_manifests",
-        lambda root: pytest.fail("unsafe project reached manifest loader"),
+        guard, "load_project_manifest",
+        lambda path: pytest.fail("unsafe project reached manifest loader"),
     )
     failures = guard.validate_suite(tmp_path)
     assert len(failures) == 1
@@ -136,12 +136,12 @@ def test_suite_project_ids_must_be_a_list_before_manifest_loader(
 ):
     guard = _guard()
     (tmp_path / "manifest.json").write_text(
-        json.dumps({"projects": "au_qld_synthetic", "required_project_count": 1}),
+        json.dumps({"schema_version": "2.0", "projects": "au_qld_synthetic", "required_project_count": 1}),
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        guard, "load_suite_manifests",
-        lambda root: pytest.fail("non-list project IDs reached loader"),
+        guard, "load_project_manifest",
+        lambda path: pytest.fail("non-list project IDs reached loader"),
     )
     assert "unsafe project id" in guard.validate_suite(tmp_path)[0]
 
@@ -151,18 +151,20 @@ def test_safe_project_id_reaches_existing_manifest_authority(
 ):
     guard = _guard()
     (tmp_path / "manifest.json").write_text(
-        json.dumps({"projects": ["au_qld_synthetic"], "required_project_count": 1}),
+        json.dumps({"schema_version": "2.0", "projects": ["au_qld_synthetic"], "required_project_count": 1}),
         encoding="utf-8",
     )
     called = []
 
-    def loader(root):
-        called.append(root)
-        return ()
+    def loader(path):
+        called.append(path)
+        raise ValueError("synthetic loader reached")
 
-    monkeypatch.setattr(guard, "load_suite_manifests", loader)
-    assert guard.validate_suite(tmp_path) == []
-    assert called == [tmp_path]
+    monkeypatch.setattr(guard, "load_project_manifest", loader)
+    assert "synthetic loader reached" in guard.validate_suite(tmp_path)[0]
+    assert called == [
+        tmp_path / "projects" / "au_qld_synthetic" / "source_manifest.json"
+    ]
 
 
 def test_safe_source_digest_and_genuine_missing_private_source_stay_unchanged(tmp_path):
