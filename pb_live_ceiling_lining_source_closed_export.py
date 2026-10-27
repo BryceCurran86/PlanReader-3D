@@ -192,6 +192,22 @@ def build_live_ceiling_lining_source_traces(
                 f"duplicate or invalid original ceiling-lining quantity id: {original_id}"
             )
         seen_source_ids.add(original_id)
+    # A numeric original with unresolved producer blockers cannot become a
+    # source-closed ceiling simply because the direct seal caller bypasses the
+    # customer projection's separate inventory veto. Keep this AFTER the
+    # complete original family/ID census so duplicate source IDs retain their
+    # established first-failure classification. True ABSTAINED rivals remain
+    # in the original material-mark census below.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if (
+            not original.abstained
+            and original.value is not None
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "numeric ceiling-lining source quantity retains unresolved blockers: "
+                f"{original.quantity_id}"
+            )
     source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
