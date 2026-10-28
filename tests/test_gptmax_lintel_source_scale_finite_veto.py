@@ -184,3 +184,32 @@ def test_distinct_sub_centipoint_source_geometry_cannot_reuse_diagnostic_id():
     assert base.status is S.CANDIDATE
     assert slightly_different.status is S.CANDIDATE
     assert slightly_different_pier.status is S.CANDIDATE
+
+
+@pytest.mark.parametrize("right_id", ["shared-pier", " shared-pier "])
+def test_same_physical_pier_cannot_supply_both_flanking_bearing_seats(right_id):
+    r = _eval(scale_ratio=0.01764, left_pier_id="shared-pier", right_pier_id=right_id)
+    assert r.status is S.ABSTAINED
+    assert r.classification is Class.ABSTAINED_CONFLICTING_PIER_IDENTITY
+    assert r.first_remaining_gate == "flanking_pier_identity_conflict"
+    assert r.left_bearing.is_bearing_compliant is False
+    assert r.right_bearing.is_bearing_compliant is False
+    assert r.shadow_only and not r.takeoff_eligible and not r.commercial_projection_allowed
+    assert r.to_dict()["first_remaining_gate"] == "flanking_pier_identity_conflict"
+    assert r == _eval(scale_ratio=0.01764, left_pier_id="shared-pier", right_pier_id=right_id)
+
+
+def test_distinct_flanking_pier_ids_keep_noncommercial_geometric_candidate():
+    r = _eval(scale_ratio=0.01764, left_pier_id="pier-west", right_pier_id="pier-east")
+    assert r.status is S.CANDIDATE
+    assert r.classification is Class.LINTEL_BEARING_GEOMETRIC_CANDIDATE
+    assert r.first_remaining_gate == "source_lintel_host_scale_and_specification_unproven"
+    assert r.shadow_only and not r.takeoff_eligible and not r.commercial_projection_allowed
+
+
+def test_missing_scale_remains_first_gate_even_with_duplicate_pier_claim():
+    r = _eval(left_pier_id="shared-pier", right_pier_id="shared-pier")
+    assert r.status is S.ABSTAINED
+    assert r.classification is Class.ABSTAINED_UNVERIFIED_SCALE
+    assert r.first_remaining_gate == "source_viewport_scale_receipt_missing"
+    assert r.clear_span_m is None

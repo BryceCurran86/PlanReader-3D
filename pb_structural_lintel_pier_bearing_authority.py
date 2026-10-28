@@ -62,6 +62,7 @@ class LintelBearingClassification(str, Enum):
     LINTEL_BEARING_CONFIRMED = "lintel_bearing_confirmed"  # Legacy label; never emitted without source proof.
     LINTEL_BEARING_GEOMETRIC_CANDIDATE = "lintel_bearing_geometric_candidate"
     ABSTAINED_UNVERIFIED_SCALE = "abstained_unverified_scale"
+    ABSTAINED_CONFLICTING_PIER_IDENTITY = "abstained_conflicting_pier_identity"
     ABSTAINED_INSUFFICIENT_BEARING = "abstained_insufficient_bearing"
     ABSTAINED_INSUFFICIENT_PIER_WIDTH = "abstained_insufficient_pier_width"
     ABSTAINED_EXCESSIVE_OVERHANG = "abstained_excessive_overhang"
@@ -266,6 +267,25 @@ class StructuralLintelPierBearingAuthority:
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="source_viewport_scale_receipt_missing",
                 notes="No page/viewport source scale receipt; metric lintel and pier dimensions unavailable.",
+            )
+
+        # Two flanking bearing seats cannot be proved from the same physical
+        # pier identity. Keep the hypothesis as a typed negative, not a
+        # source-free two-support candidate. Do not discard the observation.
+        if left_pier_id.strip() == right_pier_id.strip():
+            return StructuralLintelApertureRecord(
+                contract_id=contract_id,
+                classification=LintelBearingClassification.ABSTAINED_CONFLICTING_PIER_IDENTITY,
+                jamb_left=jamb_left, jamb_right=jamb_right,
+                clear_span_pt=clear_span_pt, clear_span_m=clear_span_m,
+                left_bearing=left_seat, right_bearing=right_seat,
+                total_lintel_length_pt=total_lintel_length_pt,
+                total_lintel_length_m=total_lintel_length_m,
+                lintel_material=lintel_material,
+                lintel_callout_text=lintel_callout_text,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                first_remaining_gate="flanking_pier_identity_conflict",
+                notes="Both bearing seats claim the same physical pier; independent flanking support unproven.",
             )
 
         # Gate 1: Clear span bounds check
