@@ -1048,7 +1048,7 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
             span = _axis_span(segment)
             if span is not None:
                 inked.setdefault((span[0], round(span[1] / _COLLINEAR_IDENTITY_TOL)), []).append(
-                    (span[1], span[2], span[3])
+                    (span[1], span[2], span[3], *_transverse_endpoints(segment, span[0]))
                 )
     # A fill-only boundary (or any extracted edge whose own path is not a proven stroke) is still DRAWN where
     # source-painted strokes of the same line already ink its whole extent: the visible ink at exactly those
@@ -1060,7 +1060,9 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
         if type(path_index) is not int or not 0 <= path_index < len(drawings):
             continue
         span = _axis_span(segment)
-        if span is not None and _collinear_painted_coverage(span, inked):
+        if span is not None and _collinear_painted_coverage(
+            span, inked, edge_endpoints=_transverse_endpoints(segment, span[0])
+        ):
             painted.add(_native_segment_geometry_id(page_id, segment))
     return frozenset(painted)
 
@@ -1090,6 +1092,19 @@ def _axis_span(segment):
     return None
 
 
+def _transverse_endpoints(segment, axis):
+    """Actual perpendicular coordinates at the low and high ends of an axis span."""
+    x0, y0, x1, y1 = (float(segment[k]) for k in ("x1", "y1", "x2", "y2"))
+    if axis == "h":
+        return (y0, y1) if x0 <= x1 else (y1, y0)
+    return (x0, x1) if y0 <= y1 else (x1, x0)
+
+
+def _transverse_at(endpoints, lo, hi, position):
+    """Interpolate the actual source line, not its rounded bucket or midpoint."""
+    return endpoints[0] + (endpoints[1] - endpoints[0]) * ((position - lo) / (hi - lo))
+
+
 def _merge_spans(spans):
     """Union of collinear spans that overlap or touch (exact identity), as sorted disjoint intervals."""
     merged = []
@@ -1101,23 +1116,34 @@ def _merge_spans(spans):
     return merged
 
 
-def _collinear_painted_coverage(span, inked) -> bool:
-    """Require true source-ink offset identity before joining painted spans.
+def _collinear_painted_coverage(span, inked, *, edge_endpoints=None) -> bool:
+    """Require actual source-ink coordinate identity before joining painted spans.
 
-    Rounded buckets only locate candidate strokes; they do not establish
-    collinearity. Filter each source-painted stroke by actual finite offset
-    before merging, so foreign parallel ink cannot complete a frame edge.
+    Rounded midpoint buckets only locate candidates. Even when midpoints are
+    coincident, near-axis lines can diverge at an endpoint: prove the actual
+    perpendicular coordinate at BOTH ends of each overlap before span union.
+    Legacy constant-offset test tuples remain supported.
     """
     axis, offset, lo, hi = span
+    if edge_endpoints is None:
+        edge_endpoints = (offset, offset)
     bucket = round(offset / _COLLINEAR_IDENTITY_TOL)
-    # Rounding at half-integer boundaries can separate offsets within 1 tolerance by TWO buckets.
-    # ±2 is a complete index lookup; actual source-coordinate identity is still checked below.
-    matching = [
-        (start, end)
-        for neighbour in range(bucket - 2, bucket + 3)
-        for stroke_offset, start, end in inked.get((axis, neighbour), ())
-        if abs(stroke_offset - offset) <= _COLLINEAR_IDENTITY_TOL
-    ]
+    # Ties-to-even can put within-tolerance midpoints two buckets apart.
+    matching = []
+    for neighbour in range(bucket - 2, bucket + 3):
+        for stroke_offset, start, end, *stroke_ends in inked.get((axis, neighbour), ()):
+            if abs(stroke_offset - offset) > _COLLINEAR_IDENTITY_TOL:
+                continue
+            overlap_lo, overlap_hi = max(lo, start), min(hi, end)
+            if overlap_lo > overlap_hi:
+                continue
+            endpoints = tuple(stroke_ends) if stroke_ends else (stroke_offset, stroke_offset)
+            if all(
+                abs(_transverse_at(edge_endpoints, lo, hi, position)
+                    - _transverse_at(endpoints, start, end, position)) <= _COLLINEAR_IDENTITY_TOL
+                for position in (overlap_lo, overlap_hi)
+            ):
+                matching.append((start, end))
     return any(
         start - _COLLINEAR_IDENTITY_TOL <= lo and hi <= end + _COLLINEAR_IDENTITY_TOL
         for start, end in _merge_spans(matching)
