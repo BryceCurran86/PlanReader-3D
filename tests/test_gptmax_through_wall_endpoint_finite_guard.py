@@ -488,3 +488,87 @@ def test_external_endpoint_candidate_cannot_be_a_pier_neighbor():
         assert len(piers) == 1
         assert (piers[0].left_opening_id, piers[0].right_opening_id) == ("A", "B")
         assert "outside" not in (piers[0].left_opening_id, piers[0].right_opening_id)
+
+
+@pytest.mark.parametrize("bad_points,bad_gate,obstruction", [
+    (((85.0, 40.0), (95.0, 40.0)), "aperture_outside_host_wall_band", None),
+    (((-2.0, 0.0), (-1.0, 0.0)), "aperture_no_host_wall_overlap", None),
+    (((85.0, 0.0), (95.0, 0.0)), "host_through_wall_obstructed",
+     ((90.0, -30.0), (90.0, 30.0))),
+    (((85.0, 0.0), (85.0, 20.0)), "aperture_wall_axis_misaligned", None),
+])
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (300.0, -100.0)),
+])
+def test_repeated_physical_identity_including_abstained_candidate_vetoes_valid(
+    bad_points, bad_gate, obstruction, angle, shift,
+):
+    """An invalid sibling cannot disappear from the physical identity universe."""
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("A", tr((20.0, 0.0)), tr((30.0, 0.0))),
+        ApertureHostCandidateInput("A", tr(bad_points[0]), tr(bad_points[1])),
+        ApertureHostCandidateInput("B", tr((40.0, 0.0)), tr((50.0, 0.0))),
+        ApertureHostCandidateInput("C", tr((70.0, 0.0)), tr((80.0, 0.0))),
+    )
+    transverse = (tuple(map(tr, obstruction)),) if obstruction else ()
+    authority = _authority()
+    canonical = None
+    for ordered in (openings, openings[::-1]):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordered,
+            transverse_wall_segments=transverse,
+        )
+        assert authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordered,
+            transverse_wall_segments=transverse,
+        ) == (records, piers)
+        assert len(records) == 4
+        assert sorted(r.first_remaining_gate for r in records
+                      if r.physical_opening_id == "A") == sorted((
+                          "aperture_physical_interval_conflict", bad_gate,
+                      ))
+        assert all(r.status is S.ABSTAINED for r in records
+                   if r.physical_opening_id == "A")
+        assert all(r.status is S.CORROBORATED for r in records
+                   if r.physical_opening_id in ("B", "C"))
+        assert len(piers) == 1
+        assert (piers[0].left_opening_id, piers[0].right_opening_id) == ("B", "C")
+        assert all(r.shadow_only and not r.takeoff_eligible
+                   and not r.commercial_projection_allowed for r in records)
+        normalized = sorted(
+            (r.physical_opening_id, r.u0_pt, r.u1_pt,
+             r.status.value, r.first_remaining_gate, r.hosting_record_id)
+            for r in records
+        )
+        if canonical is None:
+            canonical = (normalized, piers)
+        else:
+            assert (normalized, piers) == canonical
+
+
+def test_unrelated_invalid_identity_does_not_veto_genuine_valid_pier_neighbors():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (30.0, 0.0)),
+        ApertureHostCandidateInput("D", (85.0, 40.0), (95.0, 40.0)),
+        ApertureHostCandidateInput("B", (40.0, 0.0), (50.0, 0.0)),
+        ApertureHostCandidateInput("C", (70.0, 0.0), (80.0, 0.0)),
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    by_id = {r.physical_opening_id: r for r in records}
+    assert by_id["D"].status is S.ABSTAINED
+    assert by_id["D"].first_remaining_gate == "aperture_outside_host_wall_band"
+    assert all(by_id[k].status is S.CORROBORATED for k in ("A", "B", "C"))
+    assert len(piers) == 2
+    assert [(p.left_opening_id, p.right_opening_id) for p in piers] == [
+        ("A", "B"), ("B", "C"),
+    ]

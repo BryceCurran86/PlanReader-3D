@@ -408,14 +408,18 @@ class StructuralThroughWallApertureHostAuthority:
             if len(component) > 1:
                 conflicting_positions.update(component)
 
-        first_position_by_identity: dict[str, int] = {}
+        # Identity conflicts belong to the COMPLETE observation universe, not
+        # just the candidates which passed geometry. Otherwise a separately
+        # ABSTAINED observation of the same physical opening silently disappears
+        # and its valid sibling can be incorrectly corroborated.
+        identity_occurrences: dict[str, int] = {}
+        for opening in openings:
+            identity_occurrences[opening.physical_opening_id] = (
+                identity_occurrences.get(opening.physical_opening_id, 0) + 1
+            )
         for index, item in enumerate(valid_items):
-            identity = item["op"].physical_opening_id
-            if identity in first_position_by_identity:
-                conflicting_positions.add(first_position_by_identity[identity])
+            if identity_occurrences[item["op"].physical_opening_id] > 1:
                 conflicting_positions.add(index)
-            else:
-                first_position_by_identity[identity] = index
 
         for index in conflicting_positions:
             item = valid_items[index]
