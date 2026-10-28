@@ -220,6 +220,7 @@ def publish_live_per_wall_surface_area_quantities(
             )
             actual_area = float(polygon.area)
             gross_polygon_area = float(gross_polygon.area)
+            geometry_matches = polygon.equals(replayed_net)
         except Exception:
             # Malformed WKB, invalid void geometry and GEOS failures cannot
             # inherit the original producer's physical wall seal.
@@ -233,7 +234,7 @@ def publish_live_per_wall_surface_area_quantities(
             or not polygon.is_valid or polygon.is_empty
             or not math.isfinite(actual_area)
             or not math.isclose(actual_area, net_m2, rel_tol=0.0, abs_tol=0.000002)
-            or not polygon.equals(replayed_net)
+            or not geometry_matches
         ):
             return ()
         seen.add(wall.canonical_wall_id)
