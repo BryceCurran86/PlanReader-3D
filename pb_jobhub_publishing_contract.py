@@ -316,6 +316,14 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
         )
 
     for q in package.quantities:
+        # Unit provenance must survive through the final customer write gate:
+        # a self-hashed package can otherwise bypass SQLite ingestion and bill
+        # a quantity with no unit. Keep this mode-independent (draft too).
+        if type(q.unit) is not str or not q.unit.strip():
+            blocking_reasons.append(
+                f"Row #{q.row_id} is missing a source measurement unit"
+            )
+
         # Non-finite or negative checks
         if not math.isfinite(q.quantity):
             blocking_reasons.append(f"Row #{q.row_id} has non-finite quantity: {q.quantity}")
