@@ -82,3 +82,27 @@ and correctly abstained upstream. The fixture now uses the existing parser's
 explicit `150mm THICK RC SLAB`; no thickness parser was changed.
 Full immutable-head remote CI and trusted owner-original production/signed
 retention remain separate release gates. No original-source replay is claimed.
+
+
+## 2026-10-29 continuation: original annotation page receipt exactness
+
+**Observed producer:** `pb_slab_classification_geometry.resolve_slab_entity` stores
+`annotation.source_page` as the integer `annotation_source_page` in the
+resolved slab provenance. Before this repair, canonical projection accepted
+missing page receipts by substituting `boundary.source_page` and coerced
+numeric-looking strings using `int(...)`. The independent quantity issuer
+also accepted equivalent printable page aliases from copied canonical objects.
+
+**Source-safe correction:** Both canonical projection and the actual
+`publish_live_slab_area_quantity` issuer now require a present, exact built-in
+integer annotation page equal to the separately authenticated boundary page.
+No page is inferred, no new source or metric authority is granted, and a
+missing or ambiguous receipt abstains. The genuine original producer's integer
+page is unchanged. Adversarial tests exercise `"1"`, `"01"`, `"+1"`,
+padded strings, float, Boolean, null and omitted receipts at BOTH real seams,
+plus original synthetic-PDF producer→canonical→quantity→coverage preservation.
+
+This remains an integrity-only, DRAFT source-gated proposal. New exact-head
+dual-Python 3.13/3.14 CI and signed/customer companions must complete, then
+SHA-verified original-source issuer/customer replay must be demonstrated before
+merge. No new FIRM, official frozen score or merged milestone is claimed.
