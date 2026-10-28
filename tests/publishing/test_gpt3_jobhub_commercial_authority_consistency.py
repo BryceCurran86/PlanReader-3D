@@ -86,13 +86,33 @@ def test_forged_publishable_flag_cannot_promote_excluded_or_unknown_source(sourc
 @pytest.mark.parametrize("source_type", [
     TakeoffSourceType.PDF_SCALED.value,
     TakeoffSourceType.AI_DETECTED.value,
-    TakeoffSourceType.MODEL_DERIVED.value,
+    TakeoffSourceType.MANUAL.value,
 ])
-def test_ai_model_or_scaled_firm_flag_still_requires_named_estimator(source_type):
+def test_raw_scaled_ai_or_manual_source_cannot_self_promote_even_with_approval(source_type):
+    row = _row(source_type=source_type, approved_by="Estimator A")
+    result = _preflight([row])
+    assert not result.is_valid
+    with pytest.raises(ValueError, match="Cannot build commercial payload"):
+        build_jobhub_payload([row], IDENTITY, REVISION)
+
+
+@pytest.mark.parametrize("source_type", [
+    TakeoffSourceType.MODEL_DERIVED.value,
+    TakeoffSourceType.USER_CORRECTED.value,
+    TakeoffSourceType.USER_APPROVED.value,
+])
+def test_approval_requiring_source_cannot_self_promote_without_estimator(source_type):
     row = _row(source_type=source_type, approved_by=None)
     result = _preflight([row])
     assert not result.is_valid
     assert "approval" in " ".join(result.blocking_reasons).lower()
+
+
+@pytest.mark.parametrize("field", ["source_page", "dimension_text_id"])
+def test_documented_firm_source_requires_page_and_figured_dimension_trace(field):
+    row = _row()
+    setattr(row, field, None)
+    assert not _preflight([row]).is_valid
 
 
 def test_user_approved_without_named_approver_is_blocked():
@@ -146,19 +166,19 @@ def test_empty_commercial_payload_cannot_be_marked_ready():
         build_jobhub_payload([], IDENTITY, REVISION)
 
 
-def test_valid_documented_and_explicitly_approved_scaled_rows_reach_consumer():
+def test_valid_documented_and_issuer_user_approved_rows_reach_consumer():
     documented = _row()
-    approved_scaled = _row(
+    approved_row = _row(
         quantity_id="Q-2",
-        source_type=TakeoffSourceType.PDF_SCALED.value,
+        source_type=TakeoffSourceType.USER_APPROVED.value,
         authority_status=AuthorityStatus.USER_APPROVED.value,
         approved_by="Estimator A",
     )
-    result = _preflight([documented, approved_scaled])
+    result = _preflight([documented, approved_row])
     assert result.is_valid
     assert result.publishable_row_count == 2
     payload = build_jobhub_payload(
-        [documented, approved_scaled], IDENTITY, REVISION,
+        [documented, approved_row], IDENTITY, REVISION,
         created_by="Estimator A",
     )
     assert payload.is_commercial_ready is True
