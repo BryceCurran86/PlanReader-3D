@@ -301,7 +301,16 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
         blocking_reasons.append("Zero takeoff quantities in publishing payload")
 
     row_ids = [q.row_id for q in package.quantities]
-    if len(row_ids) != len(set(row_ids)):
+    # The signed physical takeoff row identity comes from an actual SQLite
+    # positive integer primary key. A Python type annotation is not a runtime
+    # source receipt: "1" and "01" otherwise look unique to set() even though
+    # they are aliases for the same physical row, and bool is an int subclass.
+    # Never cast untrusted IDs through int() to create artificial authority.
+    if any(type(row_id) is not int or row_id <= 0 for row_id in row_ids):
+        blocking_reasons.append(
+            "Takeoff row IDs must be exact positive integer source identities"
+        )
+    elif len(row_ids) != len(set(row_ids)):
         blocking_reasons.append(
             "Duplicate physical takeoff row IDs cannot enter JobHub publishing"
         )
