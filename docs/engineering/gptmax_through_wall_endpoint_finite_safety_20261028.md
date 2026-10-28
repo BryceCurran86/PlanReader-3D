@@ -21,3 +21,11 @@ Do not derive any threshold from the frozen 120 objects or change any original P
 ## Validation
 
 Target exact-head Python 3.13 and 3.14 required CI, synthetic positive/negative and order/rotation, signed/customer regression, original-source source-authority replay before any promotion. A public green synthetic run does not replace SHA-verified original-positive release evidence. Review the actual diff before merge.
+
+## 2026-10-28 — additional observed shadow identity defect
+
+**OBSERVED:** `bind_openings_to_through_wall` minted an `inter_aperture_pier` ID with document and wall ID but without original `revision_id` or `source_sha256`; a same-named wall at the same stations across different original receipts could alias. The `through_wall_hosted_opening` ID already bound source SHA/revision but omitted the host's own geometry, so moving or thickening a same-named wall could also alias. Neither record is an original-source-authenticated physical pier.
+
+**INFERENCE / CHANGE:** Add source revision/SHA, both physical-opening identities, and host endpoints/thickness to the deterministic pier payload. Add host endpoints/thickness to the existing shadow opening ID payload. Source-neutral tests cover unchanged deterministic replay, opening order, changed source/revision, wall translation and thickness, and permanent noncommercial flags. Existing public output schema, geometric gates, 2.5pt snap cap and frozen evaluator remain untouched. This fixes shadow provenance collisions, **not** a signed customer quantity or frozen V2 accuracy item.
+
+**RELEASE:** Exact-head Python3.13/3.14, owner-only original-source replay and signed9/customer retention must pass before merge; no original PDF, token, benchmark or signed artifact may enter this branch.

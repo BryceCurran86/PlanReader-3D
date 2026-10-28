@@ -374,3 +374,41 @@ def test_overlap_veto_rotation_translation_invariant():
         assert all(r.status is S.ABSTAINED for r in records)
         assert all(r.first_remaining_gate == "aperture_physical_interval_conflict"
                    for r in records)
+
+
+def test_host_and_pier_ids_do_not_alias_different_source_revisions_or_host_geometry():
+    """Stable shadow identities must bind original-source ownership and physical host."""
+    def evaluate(revision, source_sha, *, offset=0.0, thickness=20.0, reverse=False):
+        wall = ContinuousThroughWallCandidate(
+            "host", (offset, 0.0), (offset + 100.0, 0.0), thickness,
+        )
+        openings = (
+            ApertureHostCandidateInput("A", (offset + 20.0, 0.0), (offset + 40.0, 0.0)),
+            ApertureHostCandidateInput("B", (offset + 50.0, 0.0), (offset + 70.0, 0.0)),
+        )
+        authority = StructuralThroughWallApertureHostAuthority(
+            StructuralThroughWallApertureHostProducer(
+                document_id="synthetic", revision_id=revision, source_sha256=source_sha,
+            )
+        )
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings[::-1] if reverse else openings,
+        )
+        assert len(records) == 2 and len(piers) == 1
+        assert all(r.status is S.CORROBORATED for r in records)
+        assert all(r.shadow_only and not r.takeoff_eligible
+                   and not r.commercial_projection_allowed for r in records)
+        return {r.physical_opening_id: r.hosting_record_id for r in records}, piers[0].pier_id
+
+    original = evaluate("r1", "a" * 64)
+    assert original == evaluate("r1", "a" * 64)
+    assert original == evaluate("r1", "a" * 64, reverse=True)
+    for changed in (
+        evaluate("r2", "a" * 64),
+        evaluate("r1", "b" * 64),
+        evaluate("r1", "a" * 64, offset=1000.0),
+        evaluate("r1", "a" * 64, thickness=30.0),
+    ):
+        assert changed[1] != original[1]  # pier must not alias
+        assert set(changed[0]) == set(original[0])
+        assert all(changed[0][name] != original[0][name] for name in original[0])
