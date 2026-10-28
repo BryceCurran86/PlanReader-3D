@@ -31,6 +31,25 @@ _ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
 _COORD_TOL = 1e-4
 
 
+def _finite_real(value: object) -> bool:
+    """Reject non-numeric, Boolean, nonfinite and unrepresentably large coordinates."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _finite_point(point: object) -> bool:
+    """A source-coordinate pair must contain two real, finite, non-Boolean values."""
+    return (
+        type(point) in (tuple, list)
+        and len(point) == 2
+        and all(_finite_real(value) for value in point)
+    )
+
+
 @dataclass(frozen=True)
 class ContinuousThroughWallCandidate:
     """A continuous structural through-wall running through an architectural plan."""
@@ -43,12 +62,15 @@ class ContinuousThroughWallCandidate:
     def __post_init__(self) -> None:
         if not self.wall_id.strip():
             raise ValueError("wall_id required")
-        if self.thickness_pt <= 0.0:
-            raise ValueError("thickness_pt must be positive")
+        if (not _finite_real(self.thickness_pt) or self.thickness_pt <= 0.0):
+            raise ValueError("thickness_pt must be positive and finite")
+        if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
+            raise ValueError("Through-wall endpoints must have finite coordinates")
         dx = self.end_pt[0] - self.start_pt[0]
         dy = self.end_pt[1] - self.start_pt[1]
-        if math.hypot(dx, dy) <= _COORD_TOL:
-            raise ValueError("Through-wall start and end points must be distinct")
+        distance = math.hypot(dx, dy)
+        if not math.isfinite(distance) or distance <= _COORD_TOL:
+            raise ValueError("Through-wall start and end points must be distinct and finite")
 
     @property
     def length_pt(self) -> float:
@@ -98,10 +120,13 @@ class ApertureHostCandidateInput:
     def __post_init__(self) -> None:
         if not self.physical_opening_id.strip():
             raise ValueError("physical_opening_id required")
+        if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
+            raise ValueError("Aperture endpoints must have finite coordinates")
         dx = self.end_pt[0] - self.start_pt[0]
         dy = self.end_pt[1] - self.start_pt[1]
-        if math.hypot(dx, dy) <= _COORD_TOL:
-            raise ValueError("Aperture start and end points must be distinct")
+        distance = math.hypot(dx, dy)
+        if not math.isfinite(distance) or distance <= _COORD_TOL:
+            raise ValueError("Aperture start and end points must be distinct and finite")
 
 
 @dataclass(frozen=True)
@@ -198,6 +223,21 @@ class StructuralThroughWallApertureHostAuthority:
         tuple[ThroughWallHostedOpeningRecord, ...], tuple[InterAperturePierRecord, ...]
     ]:
         """Bind whole-opening apertures to a continuous through-wall, resolving inter-aperture piers."""
+        if (not _finite_real(snap_tolerance_pt)
+                or not 0.0 <= snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
+            raise ValueError("snap_tolerance_pt must be finite and within the 2.5pt cap")
+        # Every supplied transverse obstruction belongs to the candidate universe.
+        # A malformed/NaN crossing cannot be silently treated as "no obstruction".
+        # Validate even when there are no openings, so bad evidence never disappears.
+        for segment in transverse_wall_segments:
+            if (type(segment) not in (tuple, list) or len(segment) != 2
+                    or not _finite_point(segment[0]) or not _finite_point(segment[1])):
+                raise ValueError("transverse_wall_segments require finite endpoint pairs")
+            dx = segment[1][0] - segment[0][0]
+            dy = segment[1][1] - segment[0][1]
+            distance = math.hypot(dx, dy)
+            if not math.isfinite(distance) or distance <= _COORD_TOL:
+                raise ValueError("transverse_wall_segments require distinct finite endpoints")
         if not openings:
             return ((), ())
 
@@ -222,12 +262,14 @@ class StructuralThroughWallApertureHostAuthority:
 
             u_min = min(p1_along, p2_along)
             u_max = max(p1_along, p2_along)
-            avg_perp = (p1_perp + p2_perp) / 2.0
-
-            # 1. Check transverse displacement from wall centerline
-            if abs(avg_perp) > half_thick + snap_tolerance_pt:
+            # 1. Check angular alignment with wall axis
+            op_dx = op.end_pt[0] - op.start_pt[0]
+            op_dy = op.end_pt[1] - op.start_pt[1]
+            op_len = math.hypot(op_dx, op_dy)
+            cos_theta = abs((op_dx * ax + op_dy * ay) / op_len)
+            if cos_theta < _ALIGNMENT_COS_TOL:
                 status = EvidenceResolutionStatus.ABSTAINED
-                gate = "aperture_outside_host_wall_band"
+                gate = "aperture_wall_axis_misaligned"
                 rec = self._make_record(
                     op.physical_opening_id, through_wall, u_min, u_max, status, gate
                 )
@@ -236,14 +278,14 @@ class StructuralThroughWallApertureHostAuthority:
                 )
                 continue
 
-            # 2. Check angular alignment with wall axis
-            op_dx = op.end_pt[0] - op.start_pt[0]
-            op_dy = op.end_pt[1] - op.start_pt[1]
-            op_len = math.hypot(op_dx, op_dy)
-            cos_theta = abs((op_dx * ax + op_dy * ay) / op_len)
-            if cos_theta < _ALIGNMENT_COS_TOL:
+            # Both physical jamb endpoints must lie in the proved wall band.
+            # Their *average* can be zero even when each is outside it (a long,
+            # slightly oblique opening may still pass the angular threshold).
+            # Do not elect a host from a centroid-only coincidence.
+            # 2. Check transverse displacement from wall centerline
+            if max(abs(p1_perp), abs(p2_perp)) > half_thick + snap_tolerance_pt:
                 status = EvidenceResolutionStatus.ABSTAINED
-                gate = "aperture_wall_axis_misaligned"
+                gate = "aperture_outside_host_wall_band"
                 rec = self._make_record(
                     op.physical_opening_id, through_wall, u_min, u_max, status, gate
                 )
@@ -264,17 +306,61 @@ class StructuralThroughWallApertureHostAuthority:
                 )
                 continue
 
+            # A snap allowance cannot manufacture a physical host interval.
+            # Both endpoints may lie just outside a wall end and still pass
+            # the ±2.5pt extent check; clipping must leave real wall overlap.
+            clipped_u_min = max(0.0, u_min)
+            clipped_u_max = min(wall_len, u_max)
+            if clipped_u_max - clipped_u_min <= _COORD_TOL:
+                rec = self._make_record(
+                    op.physical_opening_id, through_wall, u_min, u_max,
+                    EvidenceResolutionStatus.ABSTAINED,
+                    "aperture_no_host_wall_overlap",
+                )
+                intermediate_openings.append(
+                    {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
+                )
+                continue
+
             # 4. Check transverse wall crossings obstructing the opening
             obstructed = False
             for t_start, t_end in transverse_wall_segments:
                 t1_along, t1_perp = project_pt(t_start)
                 t2_along, t2_perp = project_pt(t_end)
-                # Check if transverse line crosses the opening span interior
-                if (
-                    min(t1_along, t2_along) > u_min + snap_tolerance_pt
-                    and max(t1_along, t2_along) < u_max - snap_tolerance_pt
-                    and ((t1_perp * t2_perp < 0) or (abs(t1_perp) <= half_thick and abs(t2_perp) <= half_thick))
+                # Clip the WHOLE finite segment against the open interior of
+                # the opening's wall band. Both obstacle endpoints may lie
+                # outside the opening while the segment crosses its centre.
+                # An endpoint-only station test would miss that obstruction.
+                if not all(math.isfinite(value) for value in (
+                    t1_along, t1_perp, t2_along, t2_perp,
+                )):
+                    raise ValueError("transverse_wall_segments projection must be finite")
+                # A fixed snap trim can swallow a narrow opening entirely,
+                # skipping a real transverse structural obstruction. Reduce
+                # the trim conservatively to retain a physical test interior.
+                interior_margin = min(snap_tolerance_pt, (u_max - u_min) / 4.0)
+                u_low = u_min + interior_margin
+                u_high = u_max - interior_margin
+                if u_low >= u_high:
+                    obstructed = True  # numerically unresolved: fail closed
+                    break
+                t_low, t_high = 0.0, 1.0
+                for v0, v1, low, high in (
+                    (t1_along, t2_along, u_low, u_high),
+                    (t1_perp, t2_perp, -half_thick, half_thick),
                 ):
+                    delta = v1 - v0
+                    if delta == 0.0:
+                        if not low < v0 < high:
+                            break
+                        continue
+                    enter = (low - v0) / delta
+                    leave = (high - v0) / delta
+                    t_low = max(t_low, min(enter, leave))
+                    t_high = min(t_high, max(enter, leave))
+                    if t_low >= t_high:
+                        break
+                else:
                     obstructed = True
                     break
 
@@ -301,7 +387,56 @@ class StructuralThroughWallApertureHostAuthority:
 
         # 5. Evaluate consecutive openings to discover inter-aperture piers
         valid_items = [item for item in intermediate_openings if item["valid"]]
-        valid_items.sort(key=lambda x: x["u_min"])
+        valid_items.sort(
+            key=lambda x: (x["u_min"], x["u_max"], x["op"].physical_opening_id)
+        )
+
+        # Independently named apertures cannot both corroborate overlapping
+        # physical wall intervals. Keep EVERY candidate and abstain on the
+        # entire overlap-connected component, including nested intervals.
+        # Also reject repeated physical identities even at disjoint stations:
+        # a single physical opening cannot occupy two distinct wall spans.
+        conflicting_positions: set[int] = set()
+        if valid_items:
+            component = [0]
+            component_end = valid_items[0]["u_max"]
+            for index in range(1, len(valid_items)):
+                item = valid_items[index]
+                if item["u_min"] < component_end:
+                    component.append(index)
+                    component_end = max(component_end, item["u_max"])
+                else:
+                    if len(component) > 1:
+                        conflicting_positions.update(component)
+                    component = [index]
+                    component_end = item["u_max"]
+            if len(component) > 1:
+                conflicting_positions.update(component)
+
+        # Identity conflicts belong to the COMPLETE observation universe, not
+        # just the candidates which passed geometry. Otherwise a separately
+        # ABSTAINED observation of the same physical opening silently disappears
+        # and its valid sibling can be incorrectly corroborated.
+        identity_occurrences: dict[str, int] = {}
+        for opening in openings:
+            identity_occurrences[opening.physical_opening_id] = (
+                identity_occurrences.get(opening.physical_opening_id, 0) + 1
+            )
+        for index, item in enumerate(valid_items):
+            if identity_occurrences[item["op"].physical_opening_id] > 1:
+                conflicting_positions.add(index)
+
+        for index in conflicting_positions:
+            item = valid_items[index]
+            item["valid"] = False
+            item["rec"] = self._make_record(
+                item["op"].physical_opening_id,
+                through_wall,
+                item["u_min"],
+                item["u_max"],
+                EvidenceResolutionStatus.ABSTAINED,
+                "aperture_physical_interval_conflict",
+            )
 
         piers: list[InterAperturePierRecord] = []
         pier_ids_by_opening: dict[str, list[str]] = {}
@@ -309,13 +444,24 @@ class StructuralThroughWallApertureHostAuthority:
         for i in range(len(valid_items) - 1):
             curr = valid_items[i]
             nxt = valid_items[i + 1]
+            # Never bridge an ambiguous physical aperture to manufacture a
+            # structural pier between otherwise disjoint candidates.
+            if not curr["valid"] or not nxt["valid"]:
+                continue
             gap = nxt["u_min"] - curr["u_max"]
             if (
                 0.5 <= gap <= 60.0
             ):  # Narrow structural pier (e.g. 7.44 pt in Maryborough)
                 pier_payload = {
                     "document_id": self._producer.document_id,
+                    "revision_id": self._producer.revision_id,
+                    "source_sha256": self._producer.source_sha256,
                     "host_wall_id": through_wall.wall_id,
+                    "host_start_pt": tuple(round(v, 4) for v in through_wall.start_pt),
+                    "host_end_pt": tuple(round(v, 4) for v in through_wall.end_pt),
+                    "host_thickness_pt": round(through_wall.thickness_pt, 4),
+                    "left_opening_id": curr["op"].physical_opening_id,
+                    "right_opening_id": nxt["op"].physical_opening_id,
                     "start_station": round(curr["u_max"], 2),
                     "end_station": round(nxt["u_min"], 2),
                     "width_pt": round(gap, 2),
@@ -378,6 +524,9 @@ class StructuralThroughWallApertureHostAuthority:
             "source_sha256": self._producer.source_sha256,
             "physical_opening_id": opening_id,
             "host_wall_id": through_wall.wall_id,
+            "host_start_pt": tuple(round(v, 4) for v in through_wall.start_pt),
+            "host_end_pt": tuple(round(v, 4) for v in through_wall.end_pt),
+            "host_thickness_pt": round(through_wall.thickness_pt, 4),
             "u0_pt": round(u0, 4),
             "u1_pt": round(u1, 4),
             "status": status.value,
