@@ -31,6 +31,15 @@ _ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
 _COORD_TOL = 1e-4
 
 
+def _finite_point(point: object) -> bool:
+    """A source-coordinate pair must contain two real, finite, non-Boolean values."""
+    return (
+        type(point) in (tuple, list)
+        and len(point) == 2
+        and all(type(value) in (int, float) and math.isfinite(value) for value in point)
+    )
+
+
 @dataclass(frozen=True)
 class ContinuousThroughWallCandidate:
     """A continuous structural through-wall running through an architectural plan."""
@@ -43,12 +52,16 @@ class ContinuousThroughWallCandidate:
     def __post_init__(self) -> None:
         if not self.wall_id.strip():
             raise ValueError("wall_id required")
-        if self.thickness_pt <= 0.0:
-            raise ValueError("thickness_pt must be positive")
+        if (type(self.thickness_pt) not in (int, float)
+                or not math.isfinite(self.thickness_pt) or self.thickness_pt <= 0.0):
+            raise ValueError("thickness_pt must be positive and finite")
+        if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
+            raise ValueError("Through-wall endpoints must have finite coordinates")
         dx = self.end_pt[0] - self.start_pt[0]
         dy = self.end_pt[1] - self.start_pt[1]
-        if math.hypot(dx, dy) <= _COORD_TOL:
-            raise ValueError("Through-wall start and end points must be distinct")
+        distance = math.hypot(dx, dy)
+        if not math.isfinite(distance) or distance <= _COORD_TOL:
+            raise ValueError("Through-wall start and end points must be distinct and finite")
 
     @property
     def length_pt(self) -> float:
@@ -98,10 +111,13 @@ class ApertureHostCandidateInput:
     def __post_init__(self) -> None:
         if not self.physical_opening_id.strip():
             raise ValueError("physical_opening_id required")
+        if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
+            raise ValueError("Aperture endpoints must have finite coordinates")
         dx = self.end_pt[0] - self.start_pt[0]
         dy = self.end_pt[1] - self.start_pt[1]
-        if math.hypot(dx, dy) <= _COORD_TOL:
-            raise ValueError("Aperture start and end points must be distinct")
+        distance = math.hypot(dx, dy)
+        if not math.isfinite(distance) or distance <= _COORD_TOL:
+            raise ValueError("Aperture start and end points must be distinct and finite")
 
 
 @dataclass(frozen=True)
@@ -198,6 +214,10 @@ class StructuralThroughWallApertureHostAuthority:
         tuple[ThroughWallHostedOpeningRecord, ...], tuple[InterAperturePierRecord, ...]
     ]:
         """Bind whole-opening apertures to a continuous through-wall, resolving inter-aperture piers."""
+        if (type(snap_tolerance_pt) not in (int, float)
+                or not math.isfinite(snap_tolerance_pt)
+                or not 0.0 <= snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
+            raise ValueError("snap_tolerance_pt must be finite and within the 2.5pt cap")
         if not openings:
             return ((), ())
 
@@ -222,10 +242,12 @@ class StructuralThroughWallApertureHostAuthority:
 
             u_min = min(p1_along, p2_along)
             u_max = max(p1_along, p2_along)
-            avg_perp = (p1_perp + p2_perp) / 2.0
-
+            # Both physical jamb endpoints must lie in the proved wall band.
+            # Their *average* can be zero even when each is outside it (a long,
+            # slightly oblique opening may still pass the angular threshold).
+            # Do not elect a host from a centroid-only coincidence.
             # 1. Check transverse displacement from wall centerline
-            if abs(avg_perp) > half_thick + snap_tolerance_pt:
+            if max(abs(p1_perp), abs(p2_perp)) > half_thick + snap_tolerance_pt:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_outside_host_wall_band"
                 rec = self._make_record(
