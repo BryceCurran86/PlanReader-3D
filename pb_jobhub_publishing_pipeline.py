@@ -135,7 +135,11 @@ def build_publishing_package_from_workspace(
 
     drawing_revision = DrawingRevisionPayload(
         drawing_issue=drawing_issue,
-        # The workspace has no authenticated original drawing date. Publishing\n        # time is not a drawing revision: using today() changes the sealed\n        # payload hash across days and lets unchanged packages evade the\n        # JobHub duplicate check. Keep source date explicitly unknown.\n        drawing_date="",
+        # The workspace has no authenticated original drawing date. Publishing
+        # time is not a drawing revision: using today() changes the sealed
+        # payload hash across days and lets unchanged packages evade the
+        # JobHub duplicate check. Keep source date explicitly unknown.
+        drawing_date="",
         sheet_count=sheet_count,
         source_files_hash=rev_hash,
         file_names=file_names,
