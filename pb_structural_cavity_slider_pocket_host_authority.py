@@ -47,7 +47,9 @@ POCKET_DEPTH_MARGIN_PT = 5.0
 class CavitySliderClassification(str, Enum):
     """Classification outcome for cavity slider pocket door."""
 
-    CAVITY_SLIDER_HOST_CONFIRMED = "cavity_slider_host_confirmed"
+    CAVITY_SLIDER_HOST_CONFIRMED = "cavity_slider_host_confirmed"  # Legacy label, never source-free emitted.
+    CAVITY_SLIDER_GEOMETRIC_CANDIDATE = "cavity_slider_geometric_candidate"
+    ABSTAINED_UNVERIFIED_SCALE = "abstained_unverified_scale"
     ABSTAINED_INSUFFICIENT_POCKET_DEPTH = "abstained_insufficient_pocket_depth"
     ABSTAINED_DEGENERATE_SPAN = "abstained_degenerate_span"
     ABSTAINED_MISALIGNED_POCKET_AXIS = "abstained_misaligned_pocket_axis"
@@ -63,11 +65,11 @@ class CavitySliderApertureRecord:
     pocket_mouth_jamb: tuple[float, float]
     pocket_back_stud: tuple[float, float]
     clear_span_pt: float
-    clear_span_m: float
+    clear_span_m: float | None
     pocket_depth_pt: float
-    pocket_depth_m: float
+    pocket_depth_m: float | None
     total_frame_extent_pt: float
-    total_frame_extent_m: float
+    total_frame_extent_m: float | None
     host_through_wall_id: str
     status: EvidenceResolutionStatus
     first_remaining_gate: str | None = None
@@ -85,11 +87,11 @@ class CavitySliderApertureRecord:
             "pocket_mouth_jamb": [round(c, 2) for c in self.pocket_mouth_jamb],
             "pocket_back_stud": [round(c, 2) for c in self.pocket_back_stud],
             "clear_span_pt": round(self.clear_span_pt, 2),
-            "clear_span_m": round(self.clear_span_m, 4),
+            "clear_span_m": round(self.clear_span_m, 4) if self.clear_span_m is not None else None,
             "pocket_depth_pt": round(self.pocket_depth_pt, 2),
-            "pocket_depth_m": round(self.pocket_depth_m, 4),
+            "pocket_depth_m": round(self.pocket_depth_m, 4) if self.pocket_depth_m is not None else None,
             "total_frame_extent_pt": round(self.total_frame_extent_pt, 2),
-            "total_frame_extent_m": round(self.total_frame_extent_m, 4),
+            "total_frame_extent_m": round(self.total_frame_extent_m, 4) if self.total_frame_extent_m is not None else None,
             "host_through_wall_id": self.host_through_wall_id,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
@@ -110,37 +112,86 @@ class StructuralCavitySliderPocketHostAuthority:
         pocket_mouth_jamb: tuple[float, float],
         pocket_back_stud: tuple[float, float],
         host_through_wall_id: str,
-        scale_ratio: float = 0.01764,
+        scale_ratio: float | None = None,
         context_label: str = "CAVITY_SLIDER",
     ) -> CavitySliderApertureRecord:
-        """Evaluates cavity slider geometry, verifying pocket depth and isolating clear span."""
+        """Evaluate shadow geometry; a caller ratio cannot authenticate source scale."""
+        def finite_number(value: object) -> bool:
+            if type(value) not in (int, float):
+                return False
+            try:
+                return math.isfinite(float(value))
+            except (OverflowError, TypeError, ValueError):
+                return False
+
+        for name, point in (
+            ("strike_jamb", strike_jamb),
+            ("pocket_mouth_jamb", pocket_mouth_jamb),
+            ("pocket_back_stud", pocket_back_stud),
+        ):
+            if type(point) not in (tuple, list) or len(point) != 2 or not all(
+                finite_number(v) for v in point
+            ):
+                raise ValueError(f"{name} requires two finite numeric coordinates")
+        if type(host_through_wall_id) is not str or not host_through_wall_id.strip():
+            raise ValueError("host_through_wall_id requires a nonempty physical host reference")
+        if type(context_label) is not str or not context_label.strip():
+            raise ValueError("context_label requires nonempty text")
+        if scale_ratio is not None and (
+            not finite_number(scale_ratio) or scale_ratio <= 0
+        ):
+            raise ValueError("scale_ratio requires an explicit finite positive number")
+
         # Vector 1: Clear passage opening from strike jamb to pocket mouth
         dx_clear = pocket_mouth_jamb[0] - strike_jamb[0]
         dy_clear = pocket_mouth_jamb[1] - strike_jamb[1]
         clear_span_pt = math.hypot(dx_clear, dy_clear)
-        clear_span_m = clear_span_pt * scale_ratio
+        clear_span_m = clear_span_pt * scale_ratio if scale_ratio is not None else None
 
         # Vector 2: Pocket retraction depth from pocket mouth to back stud
         dx_pocket = pocket_back_stud[0] - pocket_mouth_jamb[0]
         dy_pocket = pocket_back_stud[1] - pocket_mouth_jamb[1]
         pocket_depth_pt = math.hypot(dx_pocket, dy_pocket)
-        pocket_depth_m = pocket_depth_pt * scale_ratio
+        pocket_depth_m = pocket_depth_pt * scale_ratio if scale_ratio is not None else None
 
         total_frame_pt = clear_span_pt + pocket_depth_pt
-        total_frame_m = total_frame_pt * scale_ratio
+        total_frame_m = total_frame_pt * scale_ratio if scale_ratio is not None else None
+        if any(not math.isfinite(v) for v in (
+            dx_clear, dy_clear, dx_pocket, dy_pocket,
+            clear_span_pt, pocket_depth_pt, total_frame_pt,
+        )) or any(v is not None and not math.isfinite(v) for v in (
+            clear_span_m, pocket_depth_m, total_frame_m,
+        )):
+            raise ValueError("cavity slider geometry and metric arithmetic must remain finite")
 
         contract_id = stable_contract_id(
             f"CAVITY_SLIDER_{context_label}",
             (
                 host_through_wall_id,
-                round(strike_jamb[0], 2),
-                round(strike_jamb[1], 2),
-                round(pocket_mouth_jamb[0], 2),
-                round(pocket_mouth_jamb[1], 2),
-                round(pocket_back_stud[0], 2),
-                round(pocket_back_stud[1], 2),
+                strike_jamb[0], strike_jamb[1],
+                pocket_mouth_jamb[0], pocket_mouth_jamb[1],
+                pocket_back_stud[0], pocket_back_stud[1],
+                context_label, scale_ratio,
             ),
         )
+
+        # No original document/viewport scale receipt is available here.
+        # Keep every geometry observation, but do not mint metric measurements.
+        if scale_ratio is None:
+            return CavitySliderApertureRecord(
+                contract_id=contract_id,
+                classification=CavitySliderClassification.ABSTAINED_UNVERIFIED_SCALE,
+                strike_jamb=strike_jamb,
+                pocket_mouth_jamb=pocket_mouth_jamb,
+                pocket_back_stud=pocket_back_stud,
+                clear_span_pt=clear_span_pt, clear_span_m=None,
+                pocket_depth_pt=pocket_depth_pt, pocket_depth_m=None,
+                total_frame_extent_pt=total_frame_pt, total_frame_extent_m=None,
+                host_through_wall_id=host_through_wall_id,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                first_remaining_gate="source_viewport_scale_receipt_missing",
+                notes="Source-owned viewport scale is unverified; no metric cavity-slider evidence.",
+            )
 
         # Gate 1: Degenerate clear passage span check
         if clear_span_pt < MIN_CLEAR_SPAN_PT or clear_span_pt > MAX_CLEAR_SPAN_PT:
@@ -209,10 +260,10 @@ class StructuralCavitySliderPocketHostAuthority:
                 notes=f"Pocket depth {pocket_depth_pt:.2f}pt insufficient for door leaf span {clear_span_pt:.2f}pt.",
             )
 
-        # Pass: Cavity slider host confirmed
+        # A caller-supplied numeric ratio and wall string are not source proof.
         return CavitySliderApertureRecord(
             contract_id=contract_id,
-            classification=CavitySliderClassification.CAVITY_SLIDER_HOST_CONFIRMED,
+            classification=CavitySliderClassification.CAVITY_SLIDER_GEOMETRIC_CANDIDATE,
             strike_jamb=strike_jamb,
             pocket_mouth_jamb=pocket_mouth_jamb,
             pocket_back_stud=pocket_back_stud,
@@ -224,6 +275,6 @@ class StructuralCavitySliderPocketHostAuthority:
             total_frame_extent_m=total_frame_m,
             host_through_wall_id=host_through_wall_id,
             status=EvidenceResolutionStatus.CANDIDATE,
-            first_remaining_gate="cavity_slider_shadow_authenticated",
-            notes=f"Cavity slider confirmed: clear span {clear_span_pt:.2f}pt isolated from pocket depth {pocket_depth_pt:.2f}pt.",
+            first_remaining_gate="source_cavity_slider_host_and_scale_unproven",
+            notes="Geometry-only pocket hypothesis; original host, scale and door kind are unverified.",
         )
