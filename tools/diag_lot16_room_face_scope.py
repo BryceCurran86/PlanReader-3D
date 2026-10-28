@@ -590,7 +590,8 @@ def _opening_sealing_diagnostic(
         report["sealed_quantity_ids"] = sealed_ids
         report["unsealed_upstream_ids"] = sorted(set(upstream_ids) - set(sealed_ids))
         rows = project_live_opening_customer_rows(
-            claim, workspace_id=1, project_id="source-diagnostic:lot16"
+            claim, workspace_id=1, project_id="source-diagnostic:lot16",
+            source_reproved_append_only=source_reproved_append_only,
         )
         verified = verify_sealed_customer_output(sealed, rows)
         report["customer_draft_row_count"] = len(rows)

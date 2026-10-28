@@ -3,6 +3,13 @@ name: GPT2 trusted original replay (manual)
 # Owner-run only. No push / PR / pull_request_target source-secret exposure.
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Select one immutable original replay or all approved targets"
+        required: true
+        type: choice
+        default: all
+        options: [all, finish_page, office_caps]
 
 permissions:
   contents: read
@@ -13,7 +20,9 @@ concurrency:
 
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    # A collaborator rerun retains the ORIGINAL github.actor privileges. Both
+    # the initial dispatcher and the rerun initiator must be the owner.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     name: ${{ matrix.target }} original (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -21,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink]
+        target: ${{ fromJSON(inputs.target == 'finish_page' && '["finish_page"]' || inputs.target == 'office_caps' && '["office_caps"]' || '["a600","freezer","d15","rcp","grid","rcp_ink","d15_ink","finish_page","office_caps"]') }}
 
     steps:
       - name: Checkout the trusted workflow context
@@ -86,6 +95,24 @@ jobs:
               expected_paths='pb_gpt2_mary_original_figured_door_leader_shadow.py|tests/test_gpt2_mary_original_figured_door_leader_shadow.py'
               original_test=test_private_original_maryborough_native_leader_source_if_provisioned
               test_path=tests/test_gpt2_mary_original_figured_door_leader_shadow.py
+              ;;
+            finish_page)
+              # Exact immutable GPT2 source-to-shadow negative; this does NOT
+              # authenticate a physical room, a cross-sheet join or a quantity.
+              approved_base=f4fd0f786411b45784f77c784546df0ae5f67d6b
+              approved_head=cb19b928982f8565f86443af11c7e2ccc0c5f672
+              expected_paths='pb_source_floor_finish_occurrence_ownership_shadow.py|pb_source_full_plan_recovery_engine_shadow.py|tests/test_source_floor_finish_occurrence_ownership_shadow.py|tests/test_source_full_plan_recovery_engine_shadow.py'
+              original_test=test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned
+              test_path=tests/test_source_full_plan_recovery_engine_shadow.py
+              ;;
+            office_caps)
+              # OFFICE cross-view source-ink negative, not physical W4 authority.
+              # Immutable two-file PR tree; never execute mutable branch code.
+              approved_base=6be737582400c739c41420c19962e9b30b9c7d37
+              approved_head=80ab45ddb082f3364cd9c7f429814f921e8b889d
+              expected_paths='pb_gpt2_original_native_crossview_wall_caps_shadow.py|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py'
+              original_test=test_original_maryborough_p7_p11_when_owner_pdf_provisioned
+              test_path=tests/test_gpt2_original_native_crossview_wall_caps_shadow.py
               ;;
             *)
               echo "::error::Unapproved original-source code selection"

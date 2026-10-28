@@ -18,6 +18,8 @@ HEADS = {
     "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
     "d15_ink": "c52f45f3365b74f3b4070ea051e338329f09de76",
+    "finish_page": "cb19b928982f8565f86443af11c7e2ccc0c5f672",
+    "office_caps": "80ab45ddb082f3364cd9c7f429814f921e8b889d",
 }
 
 
@@ -55,13 +57,32 @@ _WorkflowLoader.add_constructor(
 )
 
 
+
+def _target_matrix_expression():
+    # Never interpolate caller-provided text into the JSON matrix or shell.
+    # Only two immutable approved targets may be individually selected;
+    # the default preserves the full historical matrix.
+    all_targets = "[" + ",".join('"' + target + '"' for target in HEADS) + "]"
+    return (
+        "${{ fromJSON(inputs.target == 'finish_page' && '[\"finish_page\"]' "
+        "|| inputs.target == 'office_caps' && '[\"office_caps\"]' "
+        "|| '" + all_targets + "') }}"
+    )
+
+
 def _parse_workflow(raw):
     document = yaml.load(raw, Loader=_WorkflowLoader)
     assert type(document) is dict
     # A second trigger alias must not be silently discarded by YAML1.1
     # coercion, and unreviewed top-level workflow controls must not pass.
     assert set(document) == {"name", "on", "permissions", "concurrency", "jobs"}
-    assert document["on"] == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "Select one immutable original replay or all approved targets",
+        "required": True,
+        "type": "choice",
+        "default": "all",
+        "options": ["all", "finish_page", "office_caps"],
+    }}}}
     return document
 
 
@@ -71,14 +92,29 @@ def _load():
 
 def test_owner_only_manual_source_triggers():
     document = _load()
-    assert document["on"] == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "Select one immutable original replay or all approved targets",
+        "required": True,
+        "type": "choice",
+        "default": "all",
+        "options": ["all", "finish_page", "office_caps"],
+    }}}}
     assert document["permissions"] == {"contents": "read"}
     assert tuple(document["jobs"]) == ("original",)
     job = document["jobs"]["original"]
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "github.actor == 'BryceCurran86'" in job["if"]
+    # GitHub re-runs keep the original actor's privileges, while the user who
+    # clicked rerun is github.triggering_actor. A non-owner writer must not
+    # re-run an owner-secret job under the owner's original identity.
+    assert job["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == 'BryceCurran86' && "
+        "github.triggering_actor == 'BryceCurran86' }}"
+    )
     assert job["strategy"]["fail-fast"] is False
-    assert job["strategy"]["matrix"]["target"] == list(HEADS)
+    assert job["strategy"]["matrix"]["target"] == _target_matrix_expression()
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
 
 
@@ -97,6 +133,39 @@ def test_trigger_alias_or_duplicate_cannot_masquerade_as_owner_manual(
     corrupt = original.replace("on:\n  workflow_dispatch:", malformed_trigger, 1)
     with pytest.raises((AssertionError, yaml.YAMLError)):
         _parse_workflow(corrupt)
+
+
+@pytest.mark.parametrize(
+    "event,ref,initial_actor,rerun_actor,allowed",
+    (
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", True),
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "OtherWriter", False),
+        ("workflow_dispatch", "refs/heads/main", "OtherWriter", "BryceCurran86", False),
+        ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", False),
+        ("push", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+    ),
+)
+def test_owner_only_rerun_guard_boolean_matrix(
+    event, ref, initial_actor, rerun_actor, allowed,
+):
+    """Evaluate only the fixed equality/AND grammar accepted by the contract."""
+    expression = _load()["jobs"]["original"]["if"]
+    assert expression.startswith("${{ ") and expression.endswith(" }}")
+    clauses = expression[4:-3].split(" && ")
+    assert len(clauses) == 4
+    context = {
+        "github.event_name": event,
+        "github.ref": ref,
+        "github.actor": initial_actor,
+        "github.triggering_actor": rerun_actor,
+    }
+    result = True
+    for clause in clauses:
+        key, separator, quoted = clause.partition(" == ")
+        assert separator and key in context
+        assert quoted.startswith("'") and quoted.endswith("'")
+        result = result and context[key] == quoted[1:-1]
+    assert result is allowed
 
 
 def test_pinned_sha_allowlist_and_no_arbitrary_input():
@@ -162,7 +231,13 @@ def test_new_immutable_targets_are_collected_source_free_before_private_replay()
     workflow = ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
     raw = workflow.read_text(encoding="utf8")
     document = _parse_workflow(FILE.read_text(encoding="utf8"))
-    assert document["on"] == {"workflow_dispatch": None}
+    assert document["on"] == {"workflow_dispatch": {"inputs": {"target": {
+        "description": "Select one immutable original replay or all approved targets",
+        "required": True,
+        "type": "choice",
+        "default": "all",
+        "options": ["all", "finish_page", "office_caps"],
+    }}}}
     expected = {
         "grid": (
             "tests/test_gpt2_native_grid_row_membership_shadow.py",
@@ -471,3 +546,158 @@ def test_real_git_tree_mode_gate_fail_closed(tmp_path, git_mode):
         "ls-tree", "--format=%(objectmode) %(objecttype) %(path)",
         candidate, "--", "missing.py",
     ) == ""
+
+
+def test_finish_page_source_positive_is_exact_tree_and_never_public_secret():
+    """A140/A110 source negative is owner/main-only; no PR-run private source."""
+    guard = next(s for s in _load()["jobs"]["original"]["steps"]
+                 if s["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    match = re.search(
+        r"(?m)^  finish_page\)\n(?P<body>.*?)(?=^    ;;)",
+        script, flags=re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None
+    body = match.group("body")
+    assert "approved_base=f4fd0f786411b45784f77c784546df0ae5f67d6b" in body
+    assert "approved_head=" + HEADS["finish_page"] in body
+    assert (
+        "expected_paths='pb_source_floor_finish_occurrence_ownership_shadow.py|"
+        "pb_source_full_plan_recovery_engine_shadow.py|"
+        "tests/test_source_floor_finish_occurrence_ownership_shadow.py|"
+        "tests/test_source_full_plan_recovery_engine_shadow.py'"
+    ) in body
+    original_test = (
+        "test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provisioned"
+    )
+    assert "original_test=" + original_test in body
+    assert "test_path=tests/test_source_full_plan_recovery_engine_shadow.py" in body
+    assert "github.event.inputs" not in body
+    assert "git diff --name-only" in script
+    assert "git ls-tree" in script
+    assert "100644 blob $expected_path" in script
+    assert 'git archive "$approved_head"' in script
+    assert "git checkout --detach" not in script
+
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    row = (
+        "finish_page|" + HEADS["finish_page"]
+        + "|tests/test_source_full_plan_recovery_engine_shadow.py::"
+        + original_test
+        + "|tests/test_source_full_plan_recovery_engine_shadow.py::"
+        + "test_foreign_page_finish_not_recovered_by_full_plan_shadow_engine"
+    )
+    assert public.count(row + "\n") == 1
+    assert "--network none --read-only --cap-drop ALL" in public
+    assert "python -m pytest --collect-only" in public
+    assert "python -m pytest -q" in public
+    assert "ORIGINAL_SOURCES_TOKEN" not in public
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
+    assert "secrets." not in public
+    trusted = FILE.read_text(encoding="utf8")
+    assert trusted.count("on:\n  workflow_dispatch:") == 1
+    assert "\n  pull_request:" not in trusted
+    assert "\n  pull_request_target:" not in trusted
+    assert "actions/upload-artifact" not in trusted
+
+
+def test_office_caps_original_replay_pin_is_immutable_and_source_free():
+    """Only the reviewed OFFICE cap source/test tree can meet private PDF."""
+    guard = next(step for step in _load()["jobs"]["original"]["steps"]
+                 if step["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    matches = re.findall(
+        r"(?m)^  office_caps\)\n(?P<body>.*?)(?=^    ;;)",
+        script, flags=re.DOTALL | re.MULTILINE,
+    )
+    assert len(matches) == 1
+    body = matches[0]
+    assert "approved_base=6be737582400c739c41420c19962e9b30b9c7d37" in body
+    assert "approved_head=" + HEADS["office_caps"] in body
+    assert (
+        "expected_paths='pb_gpt2_original_native_crossview_wall_caps_shadow.py|"
+        "tests/test_gpt2_original_native_crossview_wall_caps_shadow.py'"
+    ) in body
+    assert "original_test=test_original_maryborough_p7_p11_when_owner_pdf_provisioned" in body
+    assert "test_path=tests/test_gpt2_original_native_crossview_wall_caps_shadow.py" in body
+    assert "github.event.inputs" not in body
+    assert 'git diff --name-only "$approved_base" "$approved_head"' in script
+    assert 'git archive "$approved_head" | tar -x -C "$target_tree"' in script
+    assert 'git ls-tree --format=' in script
+    assert 'entry" != "100644 blob $expected_path"' in script
+
+    public = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml"
+              ).read_text(encoding="utf8")
+    row = (
+        "office_caps|" + HEADS["office_caps"]
+        + "|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py::"
+        "test_original_maryborough_p7_p11_when_owner_pdf_provisioned"
+        "|tests/test_gpt2_original_native_crossview_wall_caps_shadow.py::"
+        "test_exact_original_two_cap_ink_selects_one_candidate_not_physical_wall"
+    )
+    assert public.count(row + "\n") == 1
+    assert "--network none --read-only --cap-drop ALL" in public
+    assert "python -m pytest --collect-only" in public
+    assert "python -m pytest -q" in public
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in public
+    assert "ORIGINAL_SOURCES_TOKEN" not in public
+    assert "secrets." not in public
+
+def test_manual_replay_selects_only_static_reviewed_targets():
+    """A selected original-positive replay must not run eight unrelated targets."""
+    document = _load()
+    assert document["on"]["workflow_dispatch"]["inputs"]["target"]["options"] == [
+        "all", "finish_page", "office_caps",
+    ]
+    job = document["jobs"]["original"]
+    matrix = job["strategy"]["matrix"]
+    assert matrix["python-version"] == ["3.13", "3.14"]
+    assert matrix["target"] == _target_matrix_expression()
+    assert 'format(' not in matrix["target"]
+    assert 'github.event.inputs' not in matrix["target"]
+    assert "github.actor == 'BryceCurran86'" in job["if"]
+    assert "github.ref == 'refs/heads/main'" in job["if"]
+    guard = next(s for s in job["steps"] if s["name"].startswith("Validate immutable"))
+    for label, sha in HEADS.items():
+        assert label + ")" in guard["run"]
+        assert "approved_head=" + sha in guard["run"]
+    assert "ORIGINAL_SOURCES_TOKEN" not in matrix["target"]
+    assert "--network none --read-only --cap-drop ALL" in next(
+        s["run"] for s in job["steps"] if s["name"].startswith("Run private original")
+    )
+
+
+def test_public_offline_matrix_exactly_matches_trusted_private_target_pins():
+    """A public source-free PASS must attest the SAME immutable tree as private replay."""
+    raw = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml").read_text(encoding="utf8")
+    marker = "          done <<'TARGETS'\n"
+    assert raw.count(marker) == 1
+    section = raw.split(marker, 1)[1].split("\n          TARGETS", 1)[0]
+    rows = [line.strip().split("|") for line in section.splitlines() if line.strip()]
+    assert len(rows) == len(HEADS)
+    assert {row[0] for row in rows} == set(HEADS)
+    assert len({row[0] for row in rows}) == len(rows)
+    guard = next(step for step in _load()["jobs"]["original"]["steps"]
+                 if step["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    for label, sha, original_id, synthetic_id in rows:
+        assert re.fullmatch(r"[0-9a-f]{40}", sha)
+        assert sha == HEADS[label]
+        path, separator, original_test = original_id.partition("::")
+        assert separator and path.startswith("tests/") and original_test.startswith("test_")
+        synthetic_path, separator, synthetic_test = synthetic_id.partition("::")
+        assert separator and synthetic_path.startswith("tests/") and synthetic_test.startswith("test_")
+        assert synthetic_path == path
+        match = re.search(
+            r"(?ms)^  " + re.escape(label) + r"\)\n(.*?)^    ;;",
+            script,
+        )
+        assert match is not None
+        case = match.group(1)
+        assert "approved_head=" + sha in case
+        assert "test_path=" + path in case
+        assert "original_test=" + original_test in case
+    assert "ORIGINAL_SOURCES_TOKEN" not in raw
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in raw
+    assert "secrets." not in raw

@@ -73,6 +73,9 @@ def _two_source_owned_ceiling_quantities(
         physical_room_id="physical-room-2",
         source_room_face_record_id="face-2",
         decision_scope_id="scope-2",
+        # Each canonical room owns its own original PDF ring. The second
+        # ceiling must not borrow the first room geometry in this positive.
+        polygon_pdf_pts=second_ceiling.polygon_pdf_pts,
         room_label="SECOND ROOM",
         evidence_ids=("room-evidence-2",),
         room_label_binding_record_id="label-binding-2",

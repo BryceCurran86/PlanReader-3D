@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     name: Original Lot16 8+9 sealed customer (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 95
@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=db5dd0a6182dfd83d889303be7de6a107ae08b42
-          approved_head=f2e7c7492f151be6c34880f81025ffc2c204a364
+          approved_base=cb6936403142ca6d14e85b029907b75aa19dbf79
+          approved_head=2ef34d242c73dc3b70d3cad2ac6afe4707d2c9fa
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort

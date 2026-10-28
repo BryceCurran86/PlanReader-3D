@@ -80,8 +80,10 @@ class TakeoffOutputRow:
             raise ValueError(f"Takeoff value must be finite, got {self.value}")
         if self.value < 0.0:
             raise ValueError(f"Takeoff value cannot be negative, got {self.value}")
-        if self.confidence < 0.0 or self.confidence > 1.0:
-            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
+        # NaN compares neither < 0 nor > 1, but cannot be source confidence.
+        # Do not let it survive as a publishable authority receipt.
+        if not math.isfinite(self.confidence) or self.confidence < 0.0 or self.confidence > 1.0:
+            raise ValueError(f"Confidence must be finite and between 0.0 and 1.0, got {self.confidence}")
 
     def compute_fingerprint(self) -> str:
         """Compute tamper-evident SHA-256 fingerprint over core commercial fields."""
@@ -106,6 +108,12 @@ class TakeoffOutputRow:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "TakeoffOutputRow":
+        # Serialized publishability is a policy receipt, not a truthiness
+        # suggestion. bool("false") is True and would silently create a typed
+        # commercially publishable row before downstream dict-type guards.
+        raw_publishable = data.get("is_publishable", False)
+        if type(raw_publishable) is not bool:
+            raise ValueError("is_publishable must be an explicit Boolean")
         clean = {
             "quantity_id": str(data.get("quantity_id") or ""),
             "description": str(data.get("description") or ""),
@@ -121,7 +129,7 @@ class TakeoffOutputRow:
             "scale_id": data.get("scale_id"),
             "dimension_text_id": data.get("dimension_text_id"),
             "benchmark_status": data.get("benchmark_status"),
-            "is_publishable": bool(data.get("is_publishable", False)),
+            "is_publishable": raw_publishable,
             "warnings": list(data.get("warnings") or []),
             "blocking_reasons": list(data.get("blocking_reasons") or []),
             "approved_by": data.get("approved_by"),
@@ -174,6 +182,10 @@ def create_takeoff_output_row(
 
     warn_list: List[str] = list(warnings or [])
     block_list: List[str] = list(blocking_reasons or [])
+
+    # Approval is a named estimator attribution, never a truthiness test.
+    # SQLite/API caller values can include whitespace, bools and numbers.
+    named_approver = type(approved_by) is str and bool(approved_by.strip())
 
     # Fail closed on any authority metadata this module does not recognize, rather
     # than letting an unrecognized label silently pass through to downstream consumers.
@@ -255,7 +267,7 @@ def create_takeoff_output_row(
         is_publishable = False
 
     elif s_type == TakeoffSourceType.MODEL_DERIVED.value:
-        if approved_by:
+        if named_approver:
             if a_status is None:
                 a_status = AuthorityStatus.USER_APPROVED.value
             if not is_stale and len(block_list) == 0:
@@ -268,7 +280,7 @@ def create_takeoff_output_row(
             is_publishable = False
 
     elif s_type == TakeoffSourceType.USER_CORRECTED.value:
-        if approved_by:
+        if named_approver:
             if a_status is None:
                 a_status = AuthorityStatus.USER_APPROVED.value
             if not is_stale and len(block_list) == 0:
@@ -281,9 +293,9 @@ def create_takeoff_output_row(
     elif s_type == TakeoffSourceType.USER_APPROVED.value:
         if a_status is None:
             a_status = AuthorityStatus.USER_APPROVED.value
-        if not approved_by:
+        if not named_approver:
             block_list.append("User approved row missing approved_by estimator attribution")
-        if not is_stale and approved_by and len(block_list) == 0:
+        if not is_stale and named_approver and len(block_list) == 0:
             is_publishable = True
         else:
             is_publishable = False
