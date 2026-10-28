@@ -46,6 +46,7 @@ SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_CONFLICT = (
     "source_cross_view_floor_correspondence_conflict"
 )
 REGISTRATION_NOT_UNIQUE = "registration_not_unique"
+REGISTRATION_TRANSLATION_ALIAS = "registration_translation_alias"
 REGISTRATION_SCALE_NOT_APPLIED = "registration_scale_not_applied_to_floor_box"
 BOX_NOT_WALL_BOUNDED = "box_not_wall_bounded_on_both_sheets"
 WALL_EVIDENCE_DIFFERS = "wall_evidence_differs_between_sheets"
@@ -550,6 +551,26 @@ class SourceCrossViewFloorCorrespondenceProducer:
         top = ranked[0]
         null_res = null_support(lines_sup, lines_tgt, trials=trials)
         runner_up = ranked[1]["min_support_pt"] if len(ranked) > 1 else 0.0
+        # A single orientation/scale may contain several distinct translations.
+        # The second translation is not ranked[1]. Require separation from
+        # that rival before assigning physical floor correspondence.
+        same_transform_alias = top.get("next_distinct_min_support_pt")
+        if same_transform_alias is None:
+            translation_unique = True
+        else:
+            try:
+                alias_support = (
+                    float(same_transform_alias)
+                    if type(same_transform_alias) in (int, float)
+                    else math.nan
+                )
+            except (ValueError, OverflowError):
+                alias_support = math.nan
+            translation_unique = (
+                math.isfinite(alias_support)
+                and alias_support >= 0.0
+                and top["min_support_pt"] > 1.25 * alias_support
+            )
 
         # Rigorous unique registration gate:
         # 1. Top support must exceed null hypothesis max by at least 10x.
@@ -562,6 +583,7 @@ class SourceCrossViewFloorCorrespondenceProducer:
         scale_applied = top["scale"] == 1.0
         is_unique = (
             scale_applied
+            and translation_unique
             and top["min_support_pt"] > 10.0 * max(null_res["max"], 1e-6)
             and (len(ranked) == 1 or top["min_support_pt"] >= 1.5 * runner_up)
         )
@@ -573,7 +595,10 @@ class SourceCrossViewFloorCorrespondenceProducer:
             else EvidenceResolutionStatus.ABSTAINED
         )
         overall_reasons = [] if is_unique else [
-            REGISTRATION_SCALE_NOT_APPLIED if not scale_applied else REGISTRATION_NOT_UNIQUE
+            REGISTRATION_SCALE_NOT_APPLIED
+            if not scale_applied else
+            REGISTRATION_TRANSLATION_ALIAS
+            if not translation_unique else REGISTRATION_NOT_UNIQUE
         ]
 
         # Derive overlapping measured-floor regions from the full input
@@ -629,11 +654,15 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 ),
                 material_code=selector.material_code,
             )
-            if not scale_applied:
-                # Preserve competing-code CONFLICT and every negative; add
-                # the exact missing geometric transform as a typed reason.
+            # Preserve competing-code CONFLICT and every negative; retain
+            # both the transform and distinct-translation alias vetoes.
+            extra_reasons = (
+                ([REGISTRATION_SCALE_NOT_APPLIED] if not scale_applied else [])
+                + ([REGISTRATION_TRANSLATION_ALIAS] if not translation_unique else [])
+            )
+            if extra_reasons:
                 classified["reason_codes"] = tuple(dict.fromkeys((
-                    *classified["reason_codes"], REGISTRATION_SCALE_NOT_APPLIED,
+                    *classified["reason_codes"], *extra_reasons,
                 )))
 
             record_id = stable_contract_id(

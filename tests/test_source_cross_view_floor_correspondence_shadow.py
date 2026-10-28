@@ -24,6 +24,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     MARK_IN_UNREGISTERED_REGION,
     OVERLAPPING_MEASURED_BOXES,
     REGISTRATION_NOT_UNIQUE,
+    REGISTRATION_TRANSLATION_ALIAS,
     STANDING_AUTHORITY_BLOCKERS,
     build_lines,
     rank_registrations,
@@ -764,3 +765,80 @@ def test_nonunit_registration_cannot_claim_untransformed_floor_box(monkeypatch, 
     assert record.takeoff_eligible is False
     assert record.commercial_projection_allowed is False
     assert record.authority_blockers == ()
+
+@pytest.mark.parametrize("alias_kind", ["equal", "near", "nan", "inf", "string", "overflow"])
+def test_distinct_translation_alias_cannot_claim_floor_correspondence(
+    monkeypatch, alias_kind
+):
+    # A rival translation under the SAME orientation/scale is not ranked[1].
+    import pb_source_cross_view_floor_correspondence_shadow as floor_shadow
+    real_rank = floor_shadow.rank_registrations
+
+    def rival_same_transform(*args, **kwargs):
+        ranked = real_rank(*args, **kwargs)
+        assert ranked and ranked[0]["scale"] == 1.0
+        top = ranked[0]["min_support_pt"]
+        aliases = {
+            "equal": top,
+            "near": top / 1.1,
+            "nan": float("nan"),
+            "inf": float("inf"),
+            "string": str(top),
+            "overflow": 10 ** 1000,
+        }
+        return [{**ranked[0], "next_distinct_min_support_pt": aliases[alias_kind]}] + ranked[1:]
+
+    monkeypatch.setattr(floor_shadow, "rank_registrations", rival_same_transform)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "office",
+            "physical_room_id": "office-room",
+            "source_room_face_record_id": "office-face",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3",
+                "registered_region": True}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_TRANSLATION_ALIAS in result.reason_codes
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_TRANSLATION_ALIAS in result.records[0].reason_codes
+    assert result.winning_registration is not None
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
+
+
+def test_well_separated_same_transform_translation_retains_shadow_candidate(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as floor_shadow
+    real_rank = floor_shadow.rank_registrations
+
+    def separated_same_transform(*args, **kwargs):
+        ranked = real_rank(*args, **kwargs)
+        assert ranked and ranked[0]["scale"] == 1.0
+        return [{
+            **ranked[0],
+            "next_distinct_min_support_pt": ranked[0]["min_support_pt"] / 2.0,
+        }] + ranked[1:]
+
+    monkeypatch.setattr(floor_shadow, "rank_registrations", separated_same_transform)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "office",
+            "physical_room_id": "office-room",
+            "source_room_face_record_id": "office-face",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3",
+                "registered_region": True}],
+    )
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
