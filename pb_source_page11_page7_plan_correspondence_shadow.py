@@ -546,6 +546,9 @@ class SourcePagePlanCorrespondenceProducer:
 
         # 5. Evaluate finish marks inside support sheet room box
         marks_in_box: List[str] = []
+        # Candidate observations stay geometry-only: no mark becomes material
+        # authority merely because its text lies inside a caller-supplied box.
+        mark_observations: List[Tuple[str, float, float]] = []
         competing_marks: List[str] = []
 
         if plan_marks:
@@ -557,13 +560,27 @@ class SourcePagePlanCorrespondenceProducer:
                         competing_marks.append(code)
                     else:
                         marks_in_box.append(code)
+                        mark_observations.append((code, float(pos[0]), float(pos[1])))
 
         if competing_marks:
             res = _abstained(COMPETING_FINISH_CODES_IN_ROOM)
             self._results[selector.key] = res
             return res
 
-        # 6. Mint record
+        # 6. Mint a candidate *claim* identity, not just a selector identity.
+        # Reusing an ID for changed wall-face evidence/marks would let a
+        # downstream diagnostic mistake two mutually exclusive hypotheses
+        # for one verified physical room. Sorted mark observations and merged
+        # source intervals make the ID input-order/split invariant.
+        side_claims = {
+            name: {
+                "support_face_intervals": side["support_sheet"]["covered_intervals"],
+                "target_face_intervals": side["target_sheet"]["covered_intervals"],
+                "support_second_faces": side["support_sheet"]["second_face"],
+                "target_second_faces": side["target_sheet"]["second_face"],
+            }
+            for name, side in sorted(corr["sides"].items())
+        }
         rec_id = stable_contract_id(
             "source_page_plan_correspondence",
             {
@@ -573,7 +590,15 @@ class SourcePagePlanCorrespondenceProducer:
                 "snapshot_id": selector.snapshot_id,
                 "support_page_id": selector.support_page_id,
                 "target_page_id": selector.target_page_id,
+                "decision_scope_id": selector.decision_scope_id,
                 "room_name": selector.room_name,
+                "box_support_sheet": corr["box_support_sheet"],
+                "box_target_sheet": corr["box_target_sheet"],
+                "orientation": orientation,
+                "scale": scale,
+                "translation": translation,
+                "side_claims": side_claims,
+                "mark_observations": sorted(mark_observations),
             },
         )
 
@@ -595,7 +620,7 @@ class SourcePagePlanCorrespondenceProducer:
             min_support_pt=float(best_reg["min_support_pt"]),
             wall_bounded_both_sheets=corr["wall_bounded_on_both_sheets"],
             wall_evidence_identical=corr["wall_evidence_identical_on_both_sheets"],
-            contained_finish_marks=tuple(marks_in_box),
+            contained_finish_marks=tuple(sorted(marks_in_box)),
             side_coverage_summary=MappingProxyType(corr["side_kinds"]),
             corroborating_evidence_ids=tuple(sorted([f"p{selector.support_page_id}_box", f"p{selector.target_page_id}_box"])),
             status=EvidenceResolutionStatus.CANDIDATE,
