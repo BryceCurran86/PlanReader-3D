@@ -1,4 +1,7 @@
-"""Producer-Owned Structural Lintel-to-Pier Bearing and Head Wall Vertical Continuity Authority.
+"""Source-neutral lintel-to-pier geometric hypothesis (shadow only).
+
+No original source owner, viewport-scale receipt, code approval or FIRM authority
+is created here. A geometric candidate is not a verified structural bearing.
 
 Differentiates overhead structural lintel projection and bearing lengths from clear opening
 aperture spans, ensuring physical window/door widths are not inflated by lintel endseats.
@@ -37,8 +40,8 @@ from pb_migration_contracts import (
 
 SCHEMA_VERSION = "1.0.0"
 
-MIN_STRUCTURAL_BEARING_PT = 5.67  # ~100 mm at 1:100 scale (scale_ratio ~ 0.01764 m/pt)
-MAX_STRUCTURAL_BEARING_PT = 20.0  # ~350 mm
+MIN_STRUCTURAL_BEARING_PT = 5.67  # Historical illustrative reference; NOT a source/code authority
+MAX_STRUCTURAL_BEARING_PT = 20.0  # Historical illustrative reference; NOT a source/code authority
 MIN_CLEAR_SPAN_PT = 20.0
 MAX_CLEAR_SPAN_PT = 300.0
 
