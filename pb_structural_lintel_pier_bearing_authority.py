@@ -197,11 +197,24 @@ class StructuralLintelPierBearingAuthority:
         )
         total_lintel_length_m = total_lintel_length_pt * scale_ratio if scale_ratio is not None else None
 
+        if (not math.isfinite(clear_span_pt)
+                or not math.isfinite(total_lintel_length_pt)
+                or (clear_span_m is not None and not math.isfinite(clear_span_m))
+                or (total_lintel_length_m is not None and not math.isfinite(total_lintel_length_m))
+                or (scale_ratio is not None and any(not math.isfinite(v * scale_ratio)
+                    for v in (left_pier_width_pt, right_pier_width_pt,
+                              left_bearing_length_pt, right_bearing_length_pt)))):
+            raise ValueError("lintel geometric or metric arithmetic must remain finite")
+
         # A numeric comparison is NOT proof of a code-compliant structural bearing.
         # Minimum/maximum example thresholds remain shadow-only, and explicit
         # scale still has no source-issued viewport calibration receipt here.
         min_bearing_pt = 0.1 / scale_ratio if scale_ratio is not None else None
         max_bearing_pt = 0.35 / scale_ratio if scale_ratio is not None else None
+        if scale_ratio is not None and (
+            not math.isfinite(min_bearing_pt) or not math.isfinite(max_bearing_pt)
+        ):
+            raise ValueError("lintel scaled reference bounds must remain finite")
 
         left_seat = PierBearingSeatRecord(
             pier_id=left_pier_id,
@@ -223,14 +236,10 @@ class StructuralLintelPierBearingAuthority:
         contract_id = stable_contract_id(
             f"LINTEL_BEARING_{context_label}",
             (
-                round(jamb_left[0], 2),
-                round(jamb_left[1], 2),
-                round(jamb_right[0], 2),
-                round(jamb_right[1], 2),
-                round(left_bearing_length_pt, 2),
-                round(right_bearing_length_pt, 2),
-                round(left_pier_width_pt, 2),
-                round(right_pier_width_pt, 2),
+                jamb_left[0], jamb_left[1],
+                jamb_right[0], jamb_right[1],
+                left_bearing_length_pt, right_bearing_length_pt,
+                left_pier_width_pt, right_pier_width_pt,
                 lintel_material.value,
                 left_pier_id,
                 right_pier_id,
