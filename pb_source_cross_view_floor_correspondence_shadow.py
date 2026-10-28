@@ -566,8 +566,25 @@ class SourceCrossViewFloorCorrespondenceProducer:
         )
         overall_reasons = [] if is_unique else [REGISTRATION_NOT_UNIQUE]
 
-        for item in measured_boxes:
-            box_sup = tuple(float(v) for v in item["dimension_box_pdf_pts"])
+        # Derive overlapping measured-floor regions from the full input
+        # universe; a missing caller hint cannot confer unique mark ownership.
+        box_bounds = [
+            tuple(float(v) for v in item["dimension_box_pdf_pts"])
+            for item in measured_boxes
+        ]
+        overlap_counts = [0] * len(box_bounds)
+        for i, first in enumerate(box_bounds):
+            for j in range(i + 1, len(box_bounds)):
+                second = box_bounds[j]
+                if (
+                    min(first[2], second[2]) > max(first[0], second[0])
+                    and min(first[3], second[3]) > max(first[1], second[1])
+                ):
+                    overlap_counts[i] += 1
+                    overlap_counts[j] += 1
+
+        for box_index, item in enumerate(measured_boxes):
+            box_sup = box_bounds[box_index]
             canonical_floor_id = _clean(item.get("canonical_floor_id"))
             physical_room_id = _clean(item.get("physical_room_id"))
             source_room_face_record_id = _clean(item.get("source_room_face_record_id"))
@@ -596,7 +613,10 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 corr,
                 registration_unique=is_unique,
                 marks_inside=inside_marks,
-                other_labelled_boxes_overlapping=item.get("other_labelled_boxes_overlapping", 0),
+                other_labelled_boxes_overlapping=(
+                    item.get("other_labelled_boxes_overlapping", 0)
+                    or overlap_counts[box_index]
+                ),
                 material_code=selector.material_code,
             )
 

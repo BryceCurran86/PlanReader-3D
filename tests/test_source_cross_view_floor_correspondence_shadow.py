@@ -626,3 +626,55 @@ def test_competing_codes_propagate_conflict_to_aggregate():
     assert len(result.records) == 1
     assert result.records[0].status is EvidenceResolutionStatus.CONFLICT
     assert not result.records[0].commercial_projection_allowed
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_overlapping_measured_floor_boxes_auto_veto_both_finish_owners(reverse):
+    # Two aliases for one physical floor must not both claim a single FT3 mark.
+    box = (251.04, 1382.72, 394.80, 1585.04)
+    measured = [
+        {"dimension_box_pdf_pts": box, "canonical_floor_id": "office-a",
+         "physical_room_id": "room-a", "source_room_face_record_id": "face-a"},
+        {"dimension_box_pdf_pts": box, "canonical_floor_id": "office-b",
+         "physical_room_id": "room-b", "source_room_face_record_id": "face-b"},
+    ]
+    if reverse:
+        measured.reverse()
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=measured,
+        marks=[{"x": 327.8, "y": 1437.5,
+                "code": "FT3", "registered_region": True}],
+    )
+    assert len(result.records) == 2
+    assert len({r.record_id for r in result.records}) == 2
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    for record in result.records:
+        assert record.status is EvidenceResolutionStatus.ABSTAINED
+        assert OVERLAPPING_MEASURED_BOXES in record.reason_codes
+        assert record.finish_codes_in_box == {"FT3": 1}
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+
+
+def test_edge_touching_measured_boxes_do_not_create_false_overlap_veto():
+    first = (251.04, 1382.72, 394.80, 1585.04)
+    second = (394.80, 1382.72, 538.56, 1585.04)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[
+            {"dimension_box_pdf_pts": first, "canonical_floor_id": "office-a",
+             "physical_room_id": "room-a", "source_room_face_record_id": "face-a"},
+            {"dimension_box_pdf_pts": second, "canonical_floor_id": "office-b",
+             "physical_room_id": "room-b", "source_room_face_record_id": "face-b"},
+        ],
+        marks=[{"x": 327.8, "y": 1437.5,
+                "code": "FT3", "registered_region": True}],
+    )
+    assert len(result.records) == 2
+    assert OVERLAPPING_MEASURED_BOXES not in result.records[0].reason_codes
+    assert all(not record.takeoff_eligible for record in result.records)
