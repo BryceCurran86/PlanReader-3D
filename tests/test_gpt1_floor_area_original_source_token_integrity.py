@@ -146,3 +146,47 @@ def test_optional_empty_room_receipts_and_missing_canonical_room_viewport_stay_c
     )
     assert len(publish_live_floor_area_quantities(claim)) == 1
     assert len(publish_live_canonical_room_area_quantities(claim)) == 1
+
+
+class EmptyEqualityAlias:
+    """An untrusted object can masquerade as the historical empty sentinel."""
+
+    def __eq__(self, other):
+        return other is None or other == ""
+
+    def __str__(self):
+        return ""
+
+    def __repr__(self):
+        return "EmptyEqualityAlias()"
+
+
+@pytest.mark.parametrize("field", (
+    "room_snapshot_id", "source_room_face_record_id",
+))
+@pytest.mark.parametrize("alias", (
+    EmptyEqualityAlias(), False, 0,
+))
+def test_optional_source_receipt_equality_alias_cannot_be_absent(field, alias):
+    """An object's __eq__ must not bypass original source ownership."""
+    source = _source_area()
+    forged = replace(source, metadata={
+        **dict(source.metadata), field: alias,
+    })
+    claim = _claim_with_canonical_room(forged)
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_canonical_room_area_quantities(claim) == ()
+    assert len(publish_live_floor_area_quantities(_claim_with(source))) == 1
+
+
+@pytest.mark.parametrize("sentinel", (None, ""))
+def test_native_optional_source_receipt_sentinels_preserve_legacy_floor(sentinel):
+    source = _source_area()
+    optional_absent = replace(source, metadata={
+        **dict(source.metadata),
+        "room_snapshot_id": sentinel,
+        "source_room_face_record_id": sentinel,
+    })
+    claim = _claim_with_canonical_room(optional_absent)
+    assert len(publish_live_floor_area_quantities(claim)) == 1
+    assert len(publish_live_canonical_room_area_quantities(claim)) == 1
