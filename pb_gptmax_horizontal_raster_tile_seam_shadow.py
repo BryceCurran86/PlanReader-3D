@@ -164,6 +164,40 @@ def prove_contiguous_source_ink_across_horizontal_tile_seam(
     top, bottom = basis["image_roots"]
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         page = document[page_no - 1]
+        # The two dark flank roots are not the complete original-source
+        # ownership universe. A third page image can paint only an interior
+        # row (or a subpixel seam), bypassing the selected-roots-only scan.
+        # Inspect ALL original image placements before trusting raster ink.
+        selected_roots = {
+            (int(root["xref"]), tuple(float(v) for v in root["placement"]))
+            for root in (top, bottom)
+        }
+        seen_placements = set()
+        scanline_roots = set()
+        for image in page.get_images(full=True):
+            xref, smask = int(image[0]), int(image[1])
+            for rect, matrix in page.get_image_rects(xref, transform=True):
+                placement_key = (
+                    xref, smask, tuple(float(v) for v in rect),
+                    tuple(float(v) for v in matrix),
+                )
+                if placement_key in seen_placements:
+                    continue
+                seen_placements.add(placement_key)
+                if not (rect.x0 < x < rect.x1 and
+                        rect.y0 < high and rect.y1 > low):
+                    continue
+                root_key = (xref, tuple(round(float(v), 6) for v in rect))
+                if (root_key not in selected_roots or smask
+                        or not _canonical_source_image_placement(rect, matrix)):
+                    return _abstain_horizontal(
+                        basis["source_sha256"], page_no,
+                        "source_pixel_row_membership_ambiguous")
+                scanline_roots.add(root_key)
+        if scanline_roots != selected_roots:
+            return _abstain_horizontal(
+                basis["source_sha256"], page_no,
+                "source_pixel_row_membership_ambiguous")
         composite = page.get_pixmap(
             matrix=fitz.Matrix(scale, scale),
             clip=fitz.Rect(x - 1, low - 1, x + 1, high + 1),
