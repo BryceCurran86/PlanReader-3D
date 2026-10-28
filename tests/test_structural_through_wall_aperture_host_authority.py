@@ -258,7 +258,20 @@ def test_metamorphic_rotation_and_translation_invariance(
     assert math.isclose(
         r1[0].whole_wall_length_pt, r2[0].whole_wall_length_pt, abs_tol=1e-3
     )
-    assert r1[0].hosting_record_id == r2[0].hosting_record_id
+    # A rigid coordinate transform preserves the geometric verdict, but it
+    # changes the physical host's source-page coordinates. The identity is
+    # source-and-host-geometry-bound: aliasing these two source observations
+    # would hide a moved/rotated wall in a later receipt.
+    assert r1[0].status is r2[0].status
+    assert r1[0].first_remaining_gate == r2[0].first_remaining_gate
+    assert r1[0].hosting_record_id != r2[0].hosting_record_id
+    for wall, opening, original in ((w1, op1, r1[0]), (w2, op2, r2[0])):
+        replay, _ = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,)
+        )
+        assert replay[0].hosting_record_id == original.hosting_record_id
+        assert replay[0].shadow_only and not replay[0].takeoff_eligible
+        assert not replay[0].commercial_projection_allowed
 
 
 def test_input_ordering_invariance(
