@@ -23,6 +23,27 @@ def _abstain_horizontal(digest: str, page_no: int, reason: str) -> dict[str, Any
             "elevation_plan_identity_granted": False, "opening_kind_granted": False}
 
 
+def _inline_raster_intersects_scan(page: fitz.Page, x: float, low: float, high: float) -> bool:
+    """Inline BI/ID/EI raster paint is absent from get_images(full=True).
+
+    get_image_info(xrefs=True) includes it with xref=0. Any inline painter
+    intersecting the source scan invalidates unique original-image ownership.
+    """
+    try:
+        images = page.get_image_info(xrefs=True)
+    except Exception:
+        # An undecodable/unsupported inline-image inventory cannot prove
+        # exclusive ownership; abstain instead of treating it as empty.
+        return True
+    for image in images:
+        if int(image.get("xref", 0)) != 0:
+            continue
+        rect = fitz.Rect(image["bbox"])
+        if rect.x0 < x < rect.x1 and rect.y0 < high and rect.y1 > low:
+            return True
+    return False
+
+
 def prove_horizontal_tile_seam_source_pixels(
     pdf_bytes: bytes, *, expected_sha256: str, page_no: int,
     source_x: float, seam_y: float, flank_offset_pt: float = 4.0,
@@ -59,6 +80,11 @@ def prove_horizontal_tile_seam_source_pixels(
             page.rect.contains(fitz.Point(source_x, y)) for y in ys
         ):
             return _abstain_horizontal(digest, page_no, "unresolved_source_page_frame")
+        # get_images(full=True) enumerates XObjects, not inline BI/ID/EI
+        # raster paint. Refuse an unowned inline painter anywhere in the
+        # bounded scan, even when its black pixels preserve the final render.
+        if _inline_raster_intersects_scan(page, source_x, ys[0], ys[1]):
+            return _abstain_horizontal(digest, page_no, "inline_source_image_painter_ambiguous")
         owners: list[list[tuple[int, int, fitz.Rect, bool]]] = [[], []]
         seen = set()
         for image in page.get_images(full=True):
@@ -80,6 +106,12 @@ def prove_horizontal_tile_seam_source_pixels(
         bx, bm, br, bok = bottom
         if not (tok and bok):
             return _abstain_horizontal(digest, page_no, "source_tile_image_transform_unsupported")
+        # PDF image matrices can differ by floating-point rounding, but an
+        # actual source gap or overlap must never be painted in by antialiasing
+        # or missed between 300dpi row centres. Require the original two
+        # placements to meet within 0.0001pt before sampling any dark pixels.
+        if abs(tr.y1 - br.y0) > 0.0001:
+            return _abstain_horizontal(digest, page_no, "source_tile_boundary_gap_unproven")
         if (tx == bx or tm or bm
             or abs(tr.y1 - seam_y) > .03
             or abs(br.y0 - seam_y) > .03
@@ -158,6 +190,40 @@ def prove_contiguous_source_ink_across_horizontal_tile_seam(
     top, bottom = basis["image_roots"]
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         page = document[page_no - 1]
+        # The two dark flank roots are not the complete original-source
+        # ownership universe. A third page image can paint only an interior
+        # row (or a subpixel seam), bypassing the selected-roots-only scan.
+        # Inspect ALL original image placements before trusting raster ink.
+        selected_roots = {
+            (int(root["xref"]), tuple(float(v) for v in root["placement"]))
+            for root in (top, bottom)
+        }
+        seen_placements = set()
+        scanline_roots = set()
+        for image in page.get_images(full=True):
+            xref, smask = int(image[0]), int(image[1])
+            for rect, matrix in page.get_image_rects(xref, transform=True):
+                placement_key = (
+                    xref, smask, tuple(float(v) for v in rect),
+                    tuple(float(v) for v in matrix),
+                )
+                if placement_key in seen_placements:
+                    continue
+                seen_placements.add(placement_key)
+                if not (rect.x0 < x < rect.x1 and
+                        rect.y0 < high and rect.y1 > low):
+                    continue
+                root_key = (xref, tuple(round(float(v), 6) for v in rect))
+                if (root_key not in selected_roots or smask
+                        or not _canonical_source_image_placement(rect, matrix)):
+                    return _abstain_horizontal(
+                        basis["source_sha256"], page_no,
+                        "source_pixel_row_membership_ambiguous")
+                scanline_roots.add(root_key)
+        if scanline_roots != selected_roots:
+            return _abstain_horizontal(
+                basis["source_sha256"], page_no,
+                "source_pixel_row_membership_ambiguous")
         composite = page.get_pixmap(
             matrix=fitz.Matrix(scale, scale),
             clip=fitz.Rect(x - 1, low - 1, x + 1, high + 1),
