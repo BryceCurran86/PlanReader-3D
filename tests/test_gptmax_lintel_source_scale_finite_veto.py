@@ -158,3 +158,29 @@ def test_missing_pier_remains_distinct_negative_with_explicit_scale():
     assert r.status is S.ABSTAINED
     assert r.classification is Class.ABSTAINED_MISSING_HOST_PIER
     assert r.takeoff_eligible is False
+
+
+@pytest.mark.parametrize("overrides", [
+    {"scale_ratio": 1e308},
+    {"scale_ratio": 5e-324},
+    {"scale_ratio": 100.0, "left_pier_width_pt": 1e308},
+    {"scale_ratio": 0.01764, "jamb_a": (-1e308, -1e308), "jamb_b": (1e308, 1e308)},
+])
+def test_even_finite_inputs_cannot_overflow_into_infinite_metric_or_geometry(overrides):
+    with pytest.raises(ValueError, match="remain finite"):
+        _eval(**overrides)
+
+
+def test_distinct_sub_centipoint_source_geometry_cannot_reuse_diagnostic_id():
+    base = _eval(scale_ratio=0.01764)
+    slightly_different = _eval(
+        scale_ratio=0.01764, jamb_b=(200.001, 200.0),
+    )
+    slightly_different_pier = _eval(
+        scale_ratio=0.01764, left_bearing_length_pt=8.501,
+    )
+    assert len({base.contract_id, slightly_different.contract_id,
+                slightly_different_pier.contract_id}) == 3
+    assert base.status is S.CANDIDATE
+    assert slightly_different.status is S.CANDIDATE
+    assert slightly_different_pier.status is S.CANDIDATE
