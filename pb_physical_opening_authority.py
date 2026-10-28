@@ -34,6 +34,7 @@ from pb_plan_opening_detection_indexed_v172 import (
 from pb_source_observation_authority import (
     NativePageImagePlacement,
     ObservationSelector,
+    PRODUCER_INTEGRITY_FAILURE,
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationRecord,
@@ -1331,6 +1332,9 @@ class PhysicalOpeningAuthority:
                 tuple[SourceObservationAuthorityResult, ...],
             ],
         ] = {}
+        # Reuse a raster inventory only while the actual immutable producer
+        # tables and every source receipt are still the authenticated objects.
+        self._raster_primitive_snapshot_inputs: dict[tuple, tuple] = {}
         self._raster_framed_candidate_cache: dict[
             tuple[str, str, str, str, str],
             tuple[CandidateSemanticOpening, ...],
@@ -1385,6 +1389,7 @@ class PhysicalOpeningAuthority:
             "_visible_snapshot_cache",
             "_visible_snapshot_record_index_cache",
             "_raster_primitive_snapshot_cache",
+            "_raster_primitive_snapshot_inputs",
             "_raster_framed_candidate_cache",
             "_raster_gap_candidate_audit_cache",
             "_raster_gap_first_gate_shadow_cache",
@@ -1687,6 +1692,50 @@ class PhysicalOpeningAuthority:
         self._visible_snapshot_record_index_cache[cache_key] = (records, index)
         return index
 
+    @staticmethod
+    def _same_raster_inventory_inputs(first, second) -> bool:
+        if first is None or second is None:
+            return False
+        return (
+            all(a is b for a, b in zip(first[:-1], second[:-1]))
+            and len(first[-1]) == len(second[-1])
+            and all(a is b for a, b in zip(first[-1], second[-1]))
+        )
+
+    def _raster_inventory_inputs(self, published) -> tuple | None:
+        """Immutable source-object token, never a caller-supplied proof.
+
+        Snapshot-chain tables discard their flat view on ANY write, including
+        a parent/fingerprint replacement outside the selected opening/page.
+        Receipt dictionaries are independent, so check every published entry.
+        A diagnostic replacement with an ordinary mapping cannot use this fast
+        path and is reauthenticated through the existing scalar source reader.
+        """
+        producer = self._source_visibility_producer
+        if producer is None:
+            return None
+        if producer.published_snapshot_for_revision(published.revision.revision_id) is not published:
+            return None
+        store = producer._producer._store
+        snapshot_id = published.snapshot.snapshot_id
+        observations = getattr(store.observations, "ensure_flat", None)
+        fingerprints = getattr(store.record_fingerprints, "ensure_flat", None)
+        if observations is None or fingerprints is None:
+            return None
+        rows, hashes = observations(snapshot_id), fingerprints(snapshot_id)
+        if rows is None or hashes is None:
+            return None
+        ids = published.raster_opening_primitive_observation_ids
+        return (
+            published, ids,
+            store.revisions.get(published.revision.revision_id),
+            store.snapshots.get(snapshot_id),
+            store.source_bytes_by_revision.get(published.revision.revision_id),
+            rows, hashes,
+            tuple(producer._raster_opening_primitive_receipts.get((snapshot_id, oid))
+                  for oid in ids),
+        )
+
     def _raster_primitive_snapshot_records(
         self,
         seed: SourceObservationAuthorityResult,
@@ -1709,10 +1758,6 @@ class PhysicalOpeningAuthority:
             str(seed.snapshot.source_sha256),
             str(seed.snapshot.snapshot_id),
         )
-        cached = self._raster_primitive_snapshot_cache.get(key)
-        if cached is not None:
-            return cached
-
         published = producer.published_snapshot_for_revision(
             seed.snapshot.revision_id
         )
@@ -1720,7 +1765,20 @@ class PhysicalOpeningAuthority:
             published is None
             or published.snapshot.snapshot_id != seed.snapshot.snapshot_id
         ):
+            self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
             return (), ()
+
+        inputs = self._raster_inventory_inputs(published)
+        cached = self._raster_primitive_snapshot_cache.get(key)
+        if cached is not None:
+            if self._same_raster_inventory_inputs(
+                inputs, self._raster_primitive_snapshot_inputs.get(key),
+            ):
+                return cached
+            # Clear both positive and negative discovery/closure caches. A
+            # restored receipt must be independently proved, not inherit a
+            # stale negative recorded during a temporary integrity failure.
+            self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
 
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
@@ -1742,7 +1800,19 @@ class PhysicalOpeningAuthority:
             else:
                 failures.append(result)
         resolved = (tuple(records), tuple(failures))
+        after = self._raster_inventory_inputs(published)
+        # An absent pre-read token followed by a tracked post-read token is
+        # itself a changed source transaction. Do not bless the inventory
+        # merely because the original table was restored during enumeration.
+        if (inputs is None) != (after is None) or (
+            inputs is not None
+            and not self._same_raster_inventory_inputs(inputs, after)
+        ):
+            self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
+            return (), (visibility._conflict(PRODUCER_INTEGRITY_FAILURE),)
         self._raster_primitive_snapshot_cache[key] = resolved
+        if after is not None:
+            self._raster_primitive_snapshot_inputs[key] = after
         return resolved
 
     def _raster_framed_candidates_for(
@@ -2396,9 +2466,6 @@ class PhysicalOpeningAuthority:
         source_result: SourceObservationAuthorityResult,
     ) -> PhysicalOpeningExistenceResult:
         cache_key = self._visible_selector_cache_key(selector)
-        cached = self._raster_existence_cache.get(cache_key)
-        if cached is not None:
-            return cached
 
         def cache(
             result: PhysicalOpeningExistenceResult,
@@ -2421,7 +2488,9 @@ class PhysicalOpeningAuthority:
 
         records, failures = self._raster_primitive_snapshot_records(source_result)
         if failures:
-            return cache(PhysicalOpeningExistenceResult(
+            # An interrupted read may have no reusable source-inventory token.
+            # Do not persist its negative proof beyond restoration of source.
+            return PhysicalOpeningExistenceResult(
                 status=_source_failure_status(*failures),
                 proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
@@ -2430,7 +2499,14 @@ class PhysicalOpeningAuthority:
                     *tuple(item.reason_codes for item in failures),
                 ),
                 source_observation=source_result,
-            ))
+            )
+
+        # Inventory freshness precedes a cached physical proposition. Checking
+        # only this selector misses damage to a different supporting primitive
+        # or an off-page competitor in the same original source universe.
+        cached = self._raster_existence_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         observation = source_result.observation
         raw_candidates = self._raster_framed_candidates_for(observation, records)
