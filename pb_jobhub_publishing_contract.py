@@ -176,6 +176,17 @@ class PublishingPackagePayload:
         #
         # Deliberately omit created_at: identical content created on different
         # days must retain one fingerprint so duplicate import is detectable.
+        # Exclusions and source warnings are evidence *multisets*: their
+        # complete records and multiplicity are sealed, but producer arrival
+        # order is not a drawing revision or a new customer package. Sorting
+        # only by exclusion item_code leaves same-code records order-sensitive.
+        # Do not mutate the source lists: their visible presentation is intact.
+        def _complete_record_key(record: Any) -> str:
+            return json.dumps(
+                record.to_dict(), sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            )
+
         normalized_data = {
             "hash_contract": "planreader-jobhub-full-evidence-v2",
             "workspace_id": self.workspace_id,
@@ -188,10 +199,11 @@ class PublishingPackagePayload:
             ],
             "excluded": [
                 e.to_dict()
-                for e in sorted(self.excluded_items, key=lambda x: x.item_code)
+                for e in sorted(self.excluded_items, key=_complete_record_key)
             ],
             "warnings": [
-                w.to_dict() for w in self.warnings
+                w.to_dict()
+                for w in sorted(self.warnings, key=_complete_record_key)
             ],
             "benchmark_status": (
                 self.benchmark_status.to_dict() if self.benchmark_status else None
