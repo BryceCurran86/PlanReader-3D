@@ -626,3 +626,49 @@ def test_narrow_aperture_crossing_is_never_erased_by_snap(width, angle, shift, r
             assert records[0].first_remaining_gate == "none"
             assert records[0].shadow_only and not records[0].takeoff_eligible
             assert not records[0].commercial_projection_allowed
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_finite_extreme_source_points_cannot_overflow_into_full_wall_host(reverse):
+    # All FOUR endpoint coordinates and both individual segment lengths are
+    # finite. Subtracting opposite ~1e308 origins overflows to infinity;
+    # multiplying by the zero normal component then creates NaN. Without
+    # projection validation, NaN skips both host-band and extent checks,
+    # and min/max silently turn it into a CORROBORATED whole-wall interval.
+    step = 2e292
+    wall = ContinuousThroughWallCandidate(
+        "huge-host", (-1e308, -1e308), (-1e308 + step, -1e308), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "distant-opening", (1e308, 1e308), (1e308 + step, 1e308),
+    )
+    assert math.isfinite(wall.length_pt)
+    assert math.isfinite(math.dist(opening.start_pt, opening.end_pt))
+    if reverse:
+        wall = ContinuousThroughWallCandidate(
+            wall.wall_id, wall.end_pt, wall.start_pt, wall.thickness_pt,
+        )
+        opening = ApertureHostCandidateInput(
+            opening.physical_opening_id, opening.end_pt, opening.start_pt,
+        )
+    with pytest.raises(ValueError, match="aperture projection must remain finite"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+        )
+
+
+def test_finite_projection_veto_preserves_normal_host_and_commercial_isolation():
+    wall = ContinuousThroughWallCandidate("normal-host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput("normal-opening", (20.0, 0.0), (40.0, 0.0))
+    result = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    assert result == _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    records, piers = result
+    assert len(records) == 1 and piers == ()
+    assert records[0].status is S.CORROBORATED
+    assert records[0].shadow_only is True
+    assert records[0].takeoff_eligible is False
+    assert records[0].commercial_projection_allowed is False

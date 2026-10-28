@@ -250,8 +250,15 @@ class StructuralThroughWallApertureHostAuthority:
         def project_pt(p: tuple[float, float]) -> tuple[float, float]:
             rel_x = p[0] - ox
             rel_y = p[1] - oy
+            # Individually finite endpoints can still overflow when projected
+            # against a distant wall origin. NaN comparisons would bypass the
+            # wall-band and extent veto and could fabricate a full-wall host.
+            if not math.isfinite(rel_x) or not math.isfinite(rel_y):
+                raise ValueError("aperture projection must remain finite")
             along = rel_x * ax + rel_y * ay
             perp = rel_x * nx + rel_y * ny
+            if not math.isfinite(along) or not math.isfinite(perp):
+                raise ValueError("aperture projection must remain finite")
             return along, perp
 
         intermediate_openings: list[dict[str, Any]] = []
@@ -267,6 +274,8 @@ class StructuralThroughWallApertureHostAuthority:
             op_dy = op.end_pt[1] - op.start_pt[1]
             op_len = math.hypot(op_dx, op_dy)
             cos_theta = abs((op_dx * ax + op_dy * ay) / op_len)
+            if not math.isfinite(cos_theta):
+                raise ValueError("aperture alignment must remain finite")
             if cos_theta < _ALIGNMENT_COS_TOL:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_wall_axis_misaligned"
