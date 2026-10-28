@@ -970,3 +970,73 @@ def test_source_classification_receipt_is_bound_across_page_order_and_quarantine
         assert pages == before
     assert len(ids) == 1
     assert len(receipt_sets) == 1
+
+
+def test_source_classified_candidate_geometry_and_native_address_are_in_record_identity(
+    _native_page_classification_producer,
+):
+    """Equal room/finish IDs cannot hide a changed diagnostic geometry universe."""
+    producer, selector = _native_page_classification_producer
+    original = replace(_healthy_page("1"), page_type="elevation")
+
+    def shift(pt, dx):
+        return (pt[0] + dx, pt[1] + dx)
+
+    moved = replace(
+        original,
+        room_polygon_candidates=tuple(
+            (name, tuple(shift(point, 20.0) for point in poly))
+            for name, poly in original.room_polygon_candidates
+        ),
+        wall_edges=tuple(
+            replace(edge, start_pt=shift(edge.start_pt, 20.0),
+                    end_pt=shift(edge.end_pt, 20.0))
+            for edge in original.wall_edges
+        ),
+        opening_candidates=tuple(
+            replace(opening, start_pt=shift(opening.start_pt, 20.0),
+                    end_pt=shift(opening.end_pt, 20.0))
+            for opening in original.opening_candidates
+        ),
+        finish_mark_candidates=tuple(
+            replace(mark, mark_center_pt=shift(mark.mark_center_pt, 20.0))
+            for mark in original.finish_mark_candidates
+        ),
+    )
+    address_changed = replace(
+        original,
+        finish_mark_candidates=tuple(
+            replace(mark, source_word_address=(99, 1, 2))
+            for mark in original.finish_mark_candidates
+        ),
+    )
+
+    def resolve(page):
+        result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+            selector, pages=(page,), source_visibility_producer=producer,
+        )
+        assert result.record is not None
+        assert result.record.total_rooms_recovered == 1
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.commercial_projection_allowed is False
+        assert result.record.takeoff_eligible is False
+        return result.record
+
+    original_copy = copy.deepcopy(original)
+    baseline = resolve(original)
+    replay = resolve(original)
+    shifted = resolve(moved)
+    readdressed = resolve(address_changed)
+    assert baseline.record_id == replay.record_id
+    assert baseline.source_candidate_universe_digest == replay.source_candidate_universe_digest
+    assert len({
+        baseline.record_id, shifted.record_id, readdressed.record_id,
+    }) == 3
+    assert len({
+        baseline.source_candidate_universe_digest,
+        shifted.source_candidate_universe_digest,
+        readdressed.source_candidate_universe_digest,
+    }) == 3
+    assert baseline.source_page_view_class_receipts == shifted.source_page_view_class_receipts
+    assert baseline.source_page_view_class_receipts == readdressed.source_page_view_class_receipts
+    assert original == original_copy
