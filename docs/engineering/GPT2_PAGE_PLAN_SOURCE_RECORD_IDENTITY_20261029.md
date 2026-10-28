@@ -18,7 +18,7 @@ quantity, issuer, JobHub or frozen evaluator call in this module.
 
 On the checked main version, the producer's `stable_contract_id`
 payload omits `decision_scope_id`, geometry, registration, side evidence,
-and contained mark addresses. Two different candidate claims can
+and contained mark locations. Two different candidate claims can
 therefore carry the same `record_id`, despite different source/physical
 ownership. That is a *diagnostic source-identity collision*, not proof
 that either candidate is a physical room.
@@ -30,7 +30,7 @@ read-only authority unchanged. Calculate the record ID over the same
 document/revision/hash/snapshot/page/room lineage **plus** the decision
 scope and the actual candidate's room boxes, orientation, scale,
 translation, the four paired sides' merged face intervals and second
-faces, and the inside-room candidate finish mark code/point observations.
+faces, and the inside-room candidate finish mark code/center observations.
 Canonical sorting of candidate mark observations makes input iteration
 order immaterial. Source interval union is retained, so splitting a stroke
 does not change the record identity. This does not turn caller-supplied
