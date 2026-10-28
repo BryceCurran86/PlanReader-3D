@@ -176,3 +176,83 @@ def test_competing_original_rcp_grid_lines_not_issued_to_two_zones():
     assert result["status"]=="original_rcp_competing_zone_source_ownership"
     assert len(result["source_competing_grid_boundary_or_finish_mark_owners"])==2
     assert result["new_firm_quantities"]==0
+
+
+# GPT2 source-native cyclic wall/finish ring correspondence: the PDF graph
+# producer owns both ordered cycles; a common vertex *set* is not wall identity.
+_RING_A=((20.,20.),(100.,20.),(100.,100.),(20.,100.),(40.,40.),(80.,60.))
+_RING_RIVAL=((20.,20.),(100.,20.),(100.,100.),(20.,100.),(80.,60.),(40.,40.))
+
+
+def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0)):
+    source=fitz.open()
+    for ring,offset in ((_RING_A,(0.0,0.0)),(finish_vertices,shift)):
+        page=source.new_page(width=240,height=240)
+        coords=tuple((x+offset[0],y+offset[1]) for x,y in ring)
+        for i in range(len(coords)):
+            page.draw_line(coords[i],coords[(i+1)%len(coords)],
+                           color=(0,0,0),width=.48)
+    data=source.tobytes()
+    source.close()
+    digest=hashlib.sha256(data).hexdigest()
+    ids=tuple(f"d{i}i0" for i in range(len(_RING_A)))
+    floor=graph(data,source_sha256=digest,page_1_based=1,source_edge_ids=ids)
+    finish=graph(data,source_sha256=digest,page_1_based=2,source_edge_ids=ids)
+    assert floor["native_candidate_ring_count"]==1, floor["status"]
+    assert finish["native_candidate_ring_count"]==1, finish["status"]
+    assert floor["original_native_edge_ids"]==finish["original_native_edge_ids"]
+    registration={
+        "status":"original_four_edge_ink_correspondence_with_unclosed_doorway",
+        "original_source_sha256":digest,
+        "original_floor_page_id":1,
+        "original_finish_page_id":2,
+        "source_translation_candidate_pdf_pts":shift,
+        "original_witnesses":{
+            "registered-native-side":{
+                "floor_source":{"identity":ids[0]},
+                "finish_source":{"identity":ids[0]},
+            }
+        },
+    }
+    return floor,finish,registration
+
+
+def test_original_source_cyclic_ring_matches_translated_natively_extracted_edges():
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    accepted=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert accepted["status"]=="original_source_ink_ring_translation_candidate"
+    assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
+    assert accepted["physical_room_identity_proven"] is False
+    assert accepted["new_firm_quantities"]==0
+
+
+def test_original_source_same_vertices_different_cyclic_wall_membership_abstains():
+    floor,finish,receipt=_two_original_source_rings(_RING_RIVAL)
+    source_ring=floor["native_components"][0]["source_simple_ring_candidate"]
+    rival_ring=finish["native_components"][0]["source_simple_ring_candidate"]
+    shifted={(round(x+10.,3),round(y+7.,3))
+             for x,y in source_ring["vertices_pdf_pts"]}
+    assert shifted==set(map(tuple,rival_ring["vertices_pdf_pts"]))
+    assert len(source_ring["source_edge_ids"])==len(rival_ring["source_edge_ids"])
+    rejected=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+    assert rejected["first_failure"]=="competing_cross_sheet_original_perimeter"
+    assert rejected["new_firm_quantities"]==0
+
+
+def test_original_source_ring_cyclic_rotation_reversal_and_deterministic_replay():
+    # Neither the original ink stroke starting point nor its traversal
+    # direction changes the physical cyclic edge set.
+    for ring in (_RING_A[2:]+_RING_A[:2],
+                 tuple(reversed(_RING_A)),
+                 tuple(reversed(_RING_A[3:]+_RING_A[:3]))):
+        floor,finish,receipt=_two_original_source_rings(ring)
+        first=compare(floor,finish,original_source_registration=receipt,
+                      translation_pdf_pts=(10.0,7.0))
+        second=compare(floor,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert first==second
+        assert first["status"]=="original_source_ink_ring_translation_candidate"
+        assert first["new_firm_quantities"]==0
