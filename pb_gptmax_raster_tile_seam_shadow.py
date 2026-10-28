@@ -162,6 +162,39 @@ def prove_contiguous_source_ink_across_tile_seam(
     left, right = basis["image_roots"]
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         page = document[page_no - 1]
+        # Endpoint source-root uniqueness is insufficient: a third original
+        # image may paint only interior columns or the unsampled numeric seam.
+        # Audit EVERY native image placement, not only two flank-selected roots.
+        selected_roots = {
+            (int(root["xref"]), tuple(float(v) for v in root["placement"]))
+            for root in (left, right)
+        }
+        scanned_roots = set()
+        seen_placements = set()
+        for item in page.get_images(full=True):
+            xref, smask = int(item[0]), int(item[1])
+            for rect, matrix in page.get_image_rects(xref, transform=True):
+                placement_key = (
+                    xref, smask, tuple(float(v) for v in rect),
+                    tuple(float(v) for v in matrix),
+                )
+                if placement_key in seen_placements:
+                    continue
+                seen_placements.add(placement_key)
+                if not (rect.y0 < y < rect.y1 and
+                        rect.x0 < high and rect.x1 > low):
+                    continue
+                root_key = (xref, tuple(round(float(v), 6) for v in rect))
+                if (root_key not in selected_roots or smask
+                        or not _canonical_source_image_placement(rect, matrix)):
+                    return _abstain(
+                        basis["source_sha256"], page_no,
+                        "source_pixel_column_membership_ambiguous")
+                scanned_roots.add(root_key)
+        if scanned_roots != selected_roots:
+            return _abstain(
+                basis["source_sha256"], page_no,
+                "source_pixel_column_membership_ambiguous")
         composite = page.get_pixmap(
             matrix=fitz.Matrix(scale, scale),
             clip=fitz.Rect(low - 1, y - 1, high + 1, y + 1),
