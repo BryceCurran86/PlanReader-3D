@@ -842,3 +842,36 @@ def test_well_separated_same_transform_translation_retains_shadow_candidate(monk
     assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
     assert result.records[0].takeoff_eligible is False
     assert result.records[0].commercial_projection_allowed is False
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_repeated_real_target_wall_layout_has_ambiguous_translation(reverse):
+    # Two equally supported physical placements exist within one orientation.
+    # The second placement is NOT ranked[1] (which ranks orientations/scales).
+    repeated_target = TARGET_SHEET + moved(TARGET_SHEET, 800.0, 0.0)
+    if reverse:
+        repeated_target.reverse()
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=repeated_target,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "office",
+            "physical_room_id": "office-room",
+            "source_room_face_record_id": "office-face",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3",
+                "registered_region": True}],
+    )
+    winner = result.winning_registration
+    assert winner is not None
+    assert winner["orientation"] == "identity"
+    assert winner["scale"] == 1.0
+    assert winner["next_distinct_min_support_pt"] == winner["min_support_pt"]
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_TRANSLATION_ALIAS in result.reason_codes
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_TRANSLATION_ALIAS in result.records[0].reason_codes
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
