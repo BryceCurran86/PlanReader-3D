@@ -60,7 +60,8 @@ def test_subminimum_bearing_length_fails_closed(
         == LintelBearingClassification.ABSTAINED_INSUFFICIENT_BEARING
     )
     assert eval_res.status == EvidenceResolutionStatus.ABSTAINED
-    assert "below minimum" in eval_res.notes
+    assert "below reference 100mm" in eval_res.notes
+    assert "unverified scale" in eval_res.notes
 
 
 def test_pier_narrower_than_bearing_fails_closed(
