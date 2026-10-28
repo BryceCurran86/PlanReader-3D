@@ -42,7 +42,8 @@ jobs:
           python -m compileall -q tools/diag_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py
           ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_workflow_privacy.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
-          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py      - name: Explicitly label source-free PR scope
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Explicitly label source-free PR scope
         run: |
           echo '### GPT2 public source-free room handoff' >> "$GITHUB_STEP_SUMMARY"
           echo 'Synthetic/source-neutral regressions only; no original PDF, FIRM source replay, signed customer proof or frozen V2 score is established.' >> "$GITHUB_STEP_SUMMARY"
