@@ -11,3 +11,14 @@ At the existing contiguous-source consumer, enumerate the complete original page
 
 ## Verification and unmodified authority
 Only existing #3870 horizontal producer/tests plus this architecture report are in scope. No original private PDF/credential, vertical #3863 lane, source issuer, customer seal, archived signed rows, frozen120 scorer, 20k primitive cap or 2.5pt snap are changed. Required: dual-Python exact-head CI, source-positive owner original replay, signed/customer retention and final main integration. No new measured opening or score gain is asserted.
+
+## Additional observed inline-raster first gate
+PyMuPDF 1.26.7 synthetic reproduction: a PDF with two distinct image
+XObjects and one 0.2pt-high black inline BI/ID/EI image crossing the
+source seam yields only two XObjects from `page.get_images(full=True)`,
+but three painted images from `page.get_image_info(xrefs=True)`,
+including inline xref=0. Therefore the earlier "complete" root census
+was incomplete. This change conservatively abstains if any inline raster
+overlaps the bounded horizontal source scan, and retains a positive
+off-scan control. It does not establish any structural or commercial
+authority; original-source and signed/customer release gates remain.

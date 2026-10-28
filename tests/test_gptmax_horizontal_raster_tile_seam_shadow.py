@@ -234,3 +234,53 @@ def test_unrelated_original_image_outside_scanline_is_invariant():
     assert result["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"
     assert result["source_painted_pixel_rows"] >= 50
     assert not result["opening_kind_granted"]
+
+
+@pytest.mark.parametrize("inline_x,should_abstain", [(40, True), (150, False)])
+def test_inline_pdf_raster_painter_cannot_bypass_complete_source_root_census(
+    inline_x, should_abstain,
+):
+    """BI/ID/EI images have xref=0 and are invisible to page.get_images."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    document = fitz.open(stream=_pdf(), filetype="pdf")
+    page = document[0]
+    stream_xref = page.get_contents()[-1]
+    # Append a genuine 1x1 black inline raster, 0.2pt high across the seam.
+    # PDF stream coordinates are bottom-up; page coordinates are top-down.
+    inline = (
+        f"\\nq\\n20 0 0 0.2 {inline_x} 149.9 cm\\n"
+        "BI /W 1 /H 1 /CS /RGB /BPC 8 ID\\n"
+    ).encode("ascii") + b"\\x00\\x00\\x00\\nEI\\nQ\\n"
+    document.update_stream(
+        stream_xref, document.xref_stream(stream_xref) + inline,
+    )
+    payload = document.tobytes()
+    document.close()
+    with fitz.open(stream=payload, filetype="pdf") as observed:
+        assert any(
+            int(info["xref"]) == 0
+            for info in observed[0].get_image_info(xrefs=True)
+        )
+        assert all(int(item[0]) != 0 for item in observed[0].get_images(full=True))
+    common = dict(
+        expected_sha256=sha256(payload).hexdigest(), page_no=1,
+        source_x=50, seam_y=100, flank_offset_pt=7, dpi=300,
+    )
+    paired = prove_horizontal_tile_seam_source_pixels(payload, **common)
+    strict = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, **common,
+    )
+    if should_abstain:
+        for result in (paired, strict):
+            assert result["status"] == ABSTAIN
+            assert "inline_source_image_painter_ambiguous" in result["reason_codes"]
+            assert not any(result[key] for key in (
+                "structural_host_granted", "whole_wall_frame_granted",
+                "opening_count_granted", "quantity_granted",
+                "elevation_plan_identity_granted", "opening_kind_granted",
+            ))
+    else:
+        assert paired["status"] == SOURCE_ONLY
+        assert strict["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"

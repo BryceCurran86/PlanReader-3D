@@ -23,6 +23,21 @@ def _abstain_horizontal(digest: str, page_no: int, reason: str) -> dict[str, Any
             "elevation_plan_identity_granted": False, "opening_kind_granted": False}
 
 
+def _inline_raster_intersects_scan(page: fitz.Page, x: float, low: float, high: float) -> bool:
+    """Inline BI/ID/EI raster paint is absent from get_images(full=True).
+
+    get_image_info(xrefs=True) includes it with xref=0. Any inline painter
+    intersecting the source scan invalidates unique original-image ownership.
+    """
+    for image in page.get_image_info(xrefs=True):
+        if int(image.get("xref", 0)) != 0:
+            continue
+        rect = fitz.Rect(image["bbox"])
+        if rect.x0 < x < rect.x1 and rect.y0 < high and rect.y1 > low:
+            return True
+    return False
+
+
 def prove_horizontal_tile_seam_source_pixels(
     pdf_bytes: bytes, *, expected_sha256: str, page_no: int,
     source_x: float, seam_y: float, flank_offset_pt: float = 4.0,
@@ -59,6 +74,11 @@ def prove_horizontal_tile_seam_source_pixels(
             page.rect.contains(fitz.Point(source_x, y)) for y in ys
         ):
             return _abstain_horizontal(digest, page_no, "unresolved_source_page_frame")
+        # get_images(full=True) enumerates XObjects, not inline BI/ID/EI
+        # raster paint. Refuse an unowned inline painter anywhere in the
+        # bounded scan, even when its black pixels preserve the final render.
+        if _inline_raster_intersects_scan(page, source_x, ys[0], ys[1]):
+            return _abstain_horizontal(digest, page_no, "inline_source_image_painter_ambiguous")
         owners: list[list[tuple[int, int, fitz.Rect, bool]]] = [[], []]
         seen = set()
         for image in page.get_images(full=True):
