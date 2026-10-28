@@ -34,6 +34,7 @@ COMPETING_FINISH_CODES_IN_ROOM = "competing_finish_codes_in_room"
 COMPETING_FINISH_MARKS_IN_ROOM = "competing_finish_marks_in_room"
 INVALID_ROOM_POLYGON = "invalid_room_polygon"
 SOURCE_LINEAGE_MISMATCH = "source_lineage_mismatch"
+SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED = "source_finish_page_correspondence_unverified"
 DOORWAY_TRANSITION_MISALIGNED = "doorway_transition_misaligned"
 DOORWAY_THRESHOLD_GEOMETRY_ALIGNED_UNAUTHENTICATED = (
     "doorway_threshold_geometry_aligned_unauthenticated"
@@ -104,11 +105,21 @@ class SourceFloorFinishMark:
     def __post_init__(self) -> None:
         if not isinstance(self.occurrence_id, str) or not self.occurrence_id.strip():
             raise ValueError("occurrence_id must be non-empty string")
+        if not isinstance(self.page_id, str) or not self.page_id.strip():
+            raise ValueError("page_id must be non-empty string")
         if not isinstance(self.material_code, str) or not self.material_code.strip():
             raise ValueError("material_code must be non-empty string")
         p = _point(self.mark_center_pt)
         if p is None:
             raise ValueError("mark_center_pt must be a valid 2D coordinate")
+        # PyMuPDF native word address is block/line/word (nonnegative ints).
+        # Malformed or mutable source addresses must never enter sealed receipts.
+        if (
+            type(self.source_word_address) is not tuple
+            or len(self.source_word_address) != 3
+            or any(type(v) is not int or v < 0 for v in self.source_word_address)
+        ):
+            raise ValueError("source_word_address must be a three-int native word address")
 
 
 @dataclass(frozen=True)
@@ -299,6 +310,15 @@ def evaluate_source_floor_finish_ownership_shadow(
             selector=selector,
         )
 
+    # This shadow API has no authenticated cross-view registration receipt.
+    # Equal native x/y coordinates on distinct pages are not physical identity.
+    if finish_mark.page_id != selector.page_id:
+        return SourceFloorFinishOwnershipResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,),
+            selector=selector,
+        )
+
     # 2. Polygon verification
     clean_poly: list[tuple[float, float]] = []
     for raw_pt in internal_face_polygon_pdf_pts:
@@ -345,8 +365,32 @@ def evaluate_source_floor_finish_ownership_shadow(
 
     # 4. Check competing finish marks inside the same polygon
     for other in other_finish_marks:
-        if other.occurrence_id == finish_mark.occurrence_id:
+        if not isinstance(other, SourceFloorFinishMark):
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
+        # A foreign-page rival is not a comparable source-mark universe.
+        if other.page_id != selector.page_id:
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,),
+                selector=selector,
+            )
+        # Only the very same producer observation is "self". Reusing an
+        # occurrence ID for another observation is a conflicting source claim,
+        # even when its glyph lies outside this room or carries the same code.
+        # The full-plan engine also checks duplicate IDs, but direct callers
+        # must never silently bypass the same identity conflict.
+        if other is finish_mark:
             continue
+        if other.occurrence_id == finish_mark.occurrence_id:
+            return SourceFloorFinishOwnershipResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+                selector=selector,
+            )
         if _point_in_polygon(other.mark_center_pt, clean_poly):
             if other.material_code.strip().upper() != selector.material_code.strip().upper():
                 # Different material code competing for the same room!
@@ -389,7 +433,13 @@ def evaluate_source_floor_finish_ownership_shadow(
             "room_id": selector.room_id,
             "material_code": selector.material_code.strip().upper(),
             "occurrence_id": finish_mark.occurrence_id,
+            # Two different native glyph observations must never alias one
+            # producer receipt merely because the textual occurrence ID agrees.
+            "native_word_address": finish_mark.source_word_address,
+            "native_mark_center_pt": mark_pt,
             "polygon": poly_tuple,
+            # The record's diagnostic doorway verdict is a source observation.
+            "doorway_reasons": doorway_reasons,
         },
         digest_chars=32,
     )

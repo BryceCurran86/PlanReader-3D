@@ -18,6 +18,7 @@ from pb_source_floor_finish_occurrence_ownership_shadow import (
     SOURCE_FLOOR_FINISH_OWNERSHIP_CANDIDATE,
     SOURCE_FLOOR_FINISH_OWNERSHIP_RESOLVED,
     SOURCE_LINEAGE_MISMATCH,
+    SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,
     SourceDoorwayThreshold,
     SourceFloorFinishMark,
     SourceFloorFinishOwnershipRecord,
@@ -39,7 +40,7 @@ def _selector(
         revision_id="rev_01",
         source_sha256=source_sha256,
         snapshot_id="snap_01",
-        page_id="page_07",
+        page_id="page_11",
         room_id=room_id,
         material_code=material_code,
     )
@@ -238,7 +239,7 @@ def test_negative_material_code_mismatch():
 def test_negative_invalid_polygon():
     """Degenerate polygon fails closed."""
     sel = _selector()
-    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (5.0, 5.0))
+    mark = SourceFloorFinishMark("OCC_1", "page_11", "FT2", (5.0, 5.0))
 
     res = evaluate_source_floor_finish_ownership_shadow(
         sel,
@@ -254,7 +255,7 @@ def test_negative_lineage_mismatch():
     with pytest.raises(ValueError):
         _selector(source_sha256="invalid")
 
-    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (5.0, 5.0))
+    mark = SourceFloorFinishMark("OCC_1", "page_11", "FT2", (5.0, 5.0))
     res = evaluate_source_floor_finish_ownership_shadow(
         None,  # type: ignore
         finish_mark=mark,
@@ -313,7 +314,7 @@ def test_metamorphic_translation_invariance():
 def test_input_no_mutation():
     """Verify input collections and objects are never mutated."""
     poly = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0), (100.0, 300.0)]
-    mark = SourceFloorFinishMark("OCC_1", "p11", "FT2", (150.0, 200.0))
+    mark = SourceFloorFinishMark("OCC_1", "page_11", "FT2", (150.0, 200.0))
     doorway = SourceDoorwayThreshold("D1", (100.0, 300.0), (150.0, 300.0))
 
     poly_copy = copy.deepcopy(poly)
@@ -409,3 +410,214 @@ def test_forged_threshold_id_cannot_authenticate_doorway_or_faces():
     assert res.record.doorway_transition_authenticated is False
     assert res.record.terminates_at_internal_faces is False
     assert res.record.under_wall_finish_excluded is False
+
+def test_cross_sheet_mark_same_coordinates_abstains_without_registration():
+    polygon = [(100.,100.),(200.,100.),(200.,300.),(100.,300.)]
+    selector = SourceFloorFinishOwnershipSelector(
+        "doc", "rev", VALID_SHA, "snap", "page_07", "OFFICE", "FT3"
+    )
+    foreign = SourceFloorFinishMark("OCC_FT3_P11","page_11","FT3",(150.,200.))
+    blocked = evaluate_source_floor_finish_ownership_shadow(
+        selector, finish_mark=foreign, internal_face_polygon_pdf_pts=polygon,
+    )
+    assert blocked.status == EvidenceResolutionStatus.ABSTAINED
+    assert blocked.reason_codes == (SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,)
+    assert blocked.record is None
+    local = evaluate_source_floor_finish_ownership_shadow(
+        selector, finish_mark=SourceFloorFinishMark(
+            "OCC_FT3_P7","page_07","FT3",(150.,200.)
+        ), internal_face_polygon_pdf_pts=polygon,
+    )
+    assert local.status == EvidenceResolutionStatus.CANDIDATE
+    assert local.record.page_id == "page_07"
+    assert local.record.takeoff_eligible is False
+    assert local.record.commercial_projection_allowed is False
+    assert local.record.terminates_at_internal_faces is False
+
+
+def test_foreign_page_competitor_abstains_in_all_orders():
+    polygon = [(100.,100.),(200.,100.),(200.,300.),(100.,300.)]
+    primary = SourceFloorFinishMark("FT2_PRIMARY","page_11","FT2",(150.,200.))
+    foreign = SourceFloorFinishMark("FT3_FOREIGN","page_07","FT3",(160.,210.))
+    for rivals in ((foreign,), (foreign, primary), (primary, foreign)):
+        result = evaluate_source_floor_finish_ownership_shadow(
+            _selector(), finish_mark=primary,
+            internal_face_polygon_pdf_pts=polygon, other_finish_marks=rivals,
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.reason_codes == (SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,)
+        assert result.record is None
+
+
+def test_blank_page_and_invalid_competitor_fail_closed():
+    with pytest.raises(ValueError, match="page_id"):
+        SourceFloorFinishMark("FT2","","FT2",(150.,200.))
+    result = evaluate_source_floor_finish_ownership_shadow(
+        _selector(), finish_mark=SourceFloorFinishMark(
+            "FT2","page_11","FT2",(150.,200.)
+        ), internal_face_polygon_pdf_pts=[
+            (100.,100.),(200.,100.),(200.,300.),(100.,300.)
+        ], other_finish_marks=(None,),
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert result.record is None
+
+
+def test_private_original_ft3_mark_cannot_claim_unregistered_floor_page():
+    """Original page-11 FT3 glyph is never a page-7 floor owner by equal XY.
+
+    Source-private negative only: it does not authenticate a cross-page transform,
+    physical wall faces, doorway threshold, finish definition, or FIRM quantities.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+    from dataclasses import replace
+
+    source = Path(os.getenv(
+        "PLANREADER_MARYBOROUGH_ORIGINAL_PDF",
+        "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf",
+    ))
+    if not source.is_file():
+        pytest.skip("private original not provisioned: source check NOT VERIFIED")
+    content = source.read_bytes()
+    original_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert len(content) == 5709675
+    assert hashlib.sha256(content).hexdigest() == original_sha
+    fitz = pytest.importorskip("fitz")
+    with fitz.open(stream=content, filetype="pdf") as pdf:
+        assert len(pdf) == 31
+        page_7_ft3 = [
+            w for w in pdf[6].get_text("words")
+            if w[4].strip().upper() == "FT3"
+        ]
+        page_11_ft3 = [
+            w for w in pdf[10].get_text("words")
+            if w[4].strip().upper() == "FT3"
+        ]
+    assert not page_7_ft3
+    assert page_11_ft3  # Genuine source glyph, not a synthetic FT3 label.
+    source_word = page_11_ft3[0]
+    mark = SourceFloorFinishMark(
+        occurrence_id="original_private_p11_ft3",
+        page_id="page_11",
+        material_code="FT3",
+        mark_center_pt=(
+            (source_word[0] + source_word[2]) / 2,
+            (source_word[1] + source_word[3]) / 2,
+        ),
+        source_word_address=tuple(int(v) for v in source_word[5:8]),
+    )
+    floor_selector = replace(
+        _selector(material_code="FT3", source_sha256=original_sha),
+        page_id="page_07",
+    )
+    result = evaluate_source_floor_finish_ownership_shadow(
+        floor_selector,
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=(),  # No cross-page registration supplied.
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_FINISH_PAGE_CORRESPONDENCE_UNVERIFIED,
+    )
+    assert result.record is None
+
+
+def test_native_floor_finish_word_address_and_glyph_location_are_in_receipt_identity():
+    """Distinct native observations must not hash into the same source receipt."""
+    from dataclasses import replace
+
+    polygon = ((100.0, 100.0), (300.0, 100.0),
+               (300.0, 300.0), (100.0, 300.0))
+    mark = SourceFloorFinishMark(
+        "OCC_FT3", "page_11", "FT3", (150.0, 150.0), (113, 0, 0)
+    )
+    selector = _selector(material_code="FT3")
+
+    def record_for(candidate, transitions=()):
+        result = evaluate_source_floor_finish_ownership_shadow(
+            selector,
+            finish_mark=candidate,
+            internal_face_polygon_pdf_pts=polygon,
+            doorway_transitions=transitions,
+        )
+        assert result.status == EvidenceResolutionStatus.CANDIDATE
+        assert result.record is not None
+        assert result.record.commercial_projection_allowed is False
+        assert result.record.takeoff_eligible is False
+        return result.record
+
+    baseline = record_for(mark)
+    replay = record_for(mark)
+    new_address = record_for(replace(mark, source_word_address=(113, 1, 0)))
+    new_position = record_for(replace(mark, mark_center_pt=(155.0, 155.0)))
+    assert baseline.record_id == replay.record_id
+    assert len({baseline.record_id, new_address.record_id, new_position.record_id}) == 3
+    assert baseline.internal_floor_area_sq_pt == new_address.internal_floor_area_sq_pt
+    assert baseline.internal_floor_area_sq_pt == new_position.internal_floor_area_sq_pt
+
+    aligned = SourceDoorwayThreshold("D13", (100.0, 100.0), (200.0, 100.0))
+    misaligned = SourceDoorwayThreshold("D13", (20.0, 20.0), (50.0, 20.0))
+    aligned_record = record_for(mark, (aligned,))
+    misaligned_record = record_for(mark, (misaligned,))
+    assert aligned_record.record_id != misaligned_record.record_id
+    assert aligned_record.record_id != baseline.record_id
+    assert misaligned_record.record_id != baseline.record_id
+
+
+@pytest.mark.parametrize("address", [
+    None, (), (0, 0), (0, 0, -1), (True, 0, 0), (0.0, 0, 0),
+    [0, 0, 0], "113,0,0", (0, 0, 0, 0),
+])
+def test_invalid_native_word_address_rejected_before_receipt_hash(address):
+    with pytest.raises(ValueError, match="source_word_address"):
+        SourceFloorFinishMark("OCC", "page_11", "FT3", (10.0, 10.0), address)
+
+
+@pytest.mark.parametrize("conflict_code,other_center,other_word", [
+    ("FT2", (145.0, 145.0), (12, 0, 2)),
+    ("FT3", (145.0, 145.0), (12, 0, 2)),
+    ("FT2", (250.0, 250.0), (12, 0, 2)),
+    ("FT2", (100.0, 100.0), (12, 0, 1)),
+])
+def test_direct_finish_evaluator_does_not_skip_distinct_reused_occurrence(
+    conflict_code, other_center, other_word,
+):
+    """One repeated source occurrence cannot masquerade as an identical mark."""
+    from dataclasses import replace
+
+    poly = ((0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0))
+    mark = SourceFloorFinishMark(
+        "NATIVE_O1", "page_11", "FT2", (100.0, 100.0), (12, 0, 0)
+    )
+    rival = replace(
+        mark, material_code=conflict_code, mark_center_pt=other_center,
+        source_word_address=other_word,
+    )
+    assert rival is not mark and rival.occurrence_id == mark.occurrence_id
+    before = copy.deepcopy((mark, rival, poly))
+    for others in ((mark, rival), (rival, mark)):
+        result = evaluate_source_floor_finish_ownership_shadow(
+            _selector(material_code="FT2"),
+            finish_mark=mark,
+            internal_face_polygon_pdf_pts=poly,
+            other_finish_marks=others,
+        )
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+        assert result.record is None
+    assert (mark, rival, poly) == before
+    # The single exact observation is allowed as "self" in the complete
+    # source candidate list; it remains diagnostic, never a FIRM quantity.
+    control = evaluate_source_floor_finish_ownership_shadow(
+        _selector(material_code="FT2"),
+        finish_mark=mark,
+        internal_face_polygon_pdf_pts=poly,
+        other_finish_marks=(mark,),
+    )
+    assert control.status == EvidenceResolutionStatus.CANDIDATE
+    assert control.record is not None
+    assert control.record.takeoff_eligible is False
+    assert control.record.commercial_projection_allowed is False
