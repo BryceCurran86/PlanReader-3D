@@ -14,7 +14,7 @@ The stale immutable base/head pair and 51-path allowlist on trusted main cannot 
 
 ## Narrow change
 
-Update only the two approved SHA values in the owner-only manual workflow and its static security contract, and add the single independently reviewed documentation path to the exact allowlist. Do **not** modify the owner-only actor/repository/ref checks, secret provisioner, network isolation, Docker mounts, original test command, source SHA checks, signed/customer eight-body retention, cleanup, or any original/frozen input. Source SHA, page/viewport, snapshot and decision-scope receipts remain enforced by the existing original test.
+Update only the two approved SHA values in the owner-only manual workflow and its static security contract, and add the single independently reviewed documentation path to the exact allowlist. Do **not** modify the owner-only actor/repository/ref checks, secret provisioner, network isolation, Docker mounts, original test command, source SHA checks, signed/customer eight-body retention, cleanup, or any original/frozen input. The original test directly checks source SHA, eight-body signed/customer retention, physical identity and distinct source snapshots. Page/viewport and decision-scope authority remain subject to their separate upstream production gates; this pin does not independently verify or promote those receipts.
 
 ## Required verification and abstentions
 
