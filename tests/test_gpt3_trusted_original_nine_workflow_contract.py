@@ -16,7 +16,8 @@ BASE = "cb6936403142ca6d14e85b029907b75aa19dbf79"
 OWNER_REPOSITORY_GUARD = (
     "${{ github.event_name == 'workflow_dispatch' && "
     "github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && "
-    "github.repository == 'BryceCurran86/PlanReader-3D' }}"
+    "github.repository == 'BryceCurran86/PlanReader-3D' && "
+    "github.triggering_actor == 'BryceCurran86' }}"
 )
 
 
@@ -70,7 +71,8 @@ def test_main_owner_only_immutable_source_positive_workflow():
     assert job["if"] == OWNER_REPOSITORY_GUARD
     for fragment in ("github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'",
                      "github.actor == 'BryceCurran86'",
-                     "github.repository == 'BryceCurran86/PlanReader-3D'"):
+                     "github.repository == 'BryceCurran86/PlanReader-3D'",
+                     "github.triggering_actor == 'BryceCurran86'"):
         assert fragment in job["if"]
     assert job["strategy"]["fail-fast"] is False
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
@@ -196,6 +198,16 @@ def test_private_source_token_never_reaches_candidate_tree_on_host():
     ('dst=/workspace,readonly', 'dst=/workspace'),
     ('dst=/workspace/documents/sources,readonly', 'dst=/workspace/documents/sources'),
     ('github.actor == \'BryceCurran86\'', "github.actor == 'attacker'"),
+    ("github.triggering_actor == 'BryceCurran86'",
+     "github.triggering_actor == 'foreign-writer'"),
+    ("github.triggering_actor == 'BryceCurran86'",
+     "github.triggering_actor != 'foreign-writer'"),
+    (" && github.triggering_actor ==", " || github.triggering_actor =="),
+    (" && github.triggering_actor ==", " && true && github.triggering_actor =="),
+    ("github.event_name == 'workflow_dispatch'",
+     "github.event_name == 'pull_request'"),
+    ("github.ref == 'refs/heads/main'",
+     "github.ref == 'refs/heads/feature'"),
     ("github.repository == 'BryceCurran86/PlanReader-3D'",
      "github.repository == 'attacker/PlanReader-3D'"),
     ("github.repository == 'BryceCurran86/PlanReader-3D'",
@@ -292,3 +304,27 @@ def test_offline_image_dependencies_are_copied_from_approved_snapshot_not_main(t
     for filename in ("requirements.txt", "requirements-ci-v1228.txt"):
         assert (deps / filename).read_bytes() == (approved / filename).read_bytes()
         assert (deps / filename).read_bytes() != (main / filename).read_bytes()
+
+
+@pytest.mark.parametrize(("event", "ref", "dispatcher", "rerunner", "repository", "permitted"), [
+    ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", "BryceCurran86/PlanReader-3D", True),
+    ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "foreign-writer", "BryceCurran86/PlanReader-3D", False),
+    ("workflow_dispatch", "refs/heads/main", "foreign-writer", "BryceCurran86", "BryceCurran86/PlanReader-3D", False),
+    ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", "other/PlanReader-3D", False),
+    ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", "BryceCurran86/PlanReader-3D", False),
+    ("pull_request", "refs/heads/main", "BryceCurran86", "BryceCurran86", "BryceCurran86/PlanReader-3D", False),
+])
+def test_owner_only_replay_requires_original_and_rerun_actor(
+    event, ref, dispatcher, rerunner, repository, permitted,
+):
+    # The exact literal workflow expression is separately enforced by
+    # OWNER_REPOSITORY_GUARD. This exercises its five intended predicates
+    # without evaluating arbitrary expressions or exposing private sources.
+    assert _load()["jobs"]["original"]["if"] == OWNER_REPOSITORY_GUARD
+    assert all((
+        event == "workflow_dispatch",
+        ref == "refs/heads/main",
+        dispatcher == "BryceCurran86",
+        repository == "BryceCurran86/PlanReader-3D",
+        rerunner == "BryceCurran86",
+    )) is permitted
