@@ -358,6 +358,11 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                     f"Row #{q.row_id} commercial line cost disagrees with client quantity and rate"
                 )
 
+        # Commercial approval is an actual named estimator action, not merely
+        # a truthy field. SQLite TEXT can preserve whitespace-only approvals;
+        # dataclass annotations do not reject non-string caller payloads.
+        named_approver = type(q.approved_by) is str and bool(q.approved_by.strip())
+
         # Commercial Mode Authority Gates
         if is_commercial:
             if q.authority_status not in {
@@ -379,7 +384,7 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                 blocking_reasons.append(
                     f"Row #{q.row_id} is not commercially measurable source work"
                 )
-            if q.authority_status == AuthorityStatus.USER_APPROVED.value and not q.approved_by:
+            if q.authority_status == AuthorityStatus.USER_APPROVED.value and not named_approver:
                 blocking_reasons.append(
                     f"Row #{q.row_id} lacks named estimator user approval"
                 )
@@ -396,8 +401,10 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                 MeasurementAuthorityType.AI_DETECTED.value,
                 MeasurementAuthorityType.MODEL_DERIVED.value,
                 MeasurementAuthorityType.PDF_SCALED.value,
+                MeasurementAuthorityType.USER_CORRECTED.value,
+                MeasurementAuthorityType.USER_APPROVED.value,
             ):
-                if not q.approved_by or q.authority_status not in (
+                if not named_approver or q.authority_status not in (
                     AuthorityStatus.FIRM.value,
                     AuthorityStatus.USER_APPROVED.value,
                 ):
