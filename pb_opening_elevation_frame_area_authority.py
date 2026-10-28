@@ -1338,7 +1338,10 @@ class OpeningElevationFrameAreaProducer:
                         )
                         layout = calibrate_dimension_layout(page)
                     except Exception:
-                        continue
+                        # A failed claimed elevation page may contain a rival of a frame on
+                        # another page. Skipping it could falsely elect that rival as unique.
+                        invalid_revision = True
+                        break
 
                     required_ids = set(title_ids)
                     required_ids.update(
@@ -1440,7 +1443,9 @@ class OpeningElevationFrameAreaProducer:
                             trusted_words=trusted_words,
                         )
                     except Exception:
-                        continue
+                        # Candidate-production failure cannot prove the absence of rivals.
+                        invalid_revision = True
+                        break
                     if records:
                         try:
                             painted_ids = _source_painted_geometry_ids(page, page_id)
