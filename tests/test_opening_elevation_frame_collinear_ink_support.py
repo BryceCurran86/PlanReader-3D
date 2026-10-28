@@ -208,6 +208,46 @@ def test_neighbour_bucket_at_1_49_micro_points_is_not_same_painted_line():
     assert not module._collinear_painted_coverage(("h", 0.0, 0.0, 10.0), painted)
 
 
+def test_exact_tolerance_near_half_bucket_boundary_is_not_falsely_rejected():
+    # Python round() uses ties-to-even: the candidate and truly coincident stroke
+    # can occupy buckets TWO indices apart, even though their actual distance is <= 1e-6.
+    candidate, painted = 100.0000005, 100.0000015
+    assert abs(painted - candidate) <= module._COLLINEAR_IDENTITY_TOL
+    assert abs(round(painted / module._COLLINEAR_IDENTITY_TOL)
+               - round(candidate / module._COLLINEAR_IDENTITY_TOL)) == 2
+    assert module._collinear_painted_coverage(
+        ("h", candidate, 0.0, 10.0), _indexed_ink(("h", painted, 0.0, 10.0))
+    )
+
+
+def test_sub_micro_point_translation_does_not_change_actual_collinear_coverage():
+    for translation in (0.0, 1e-7, 10.0, -10.0):
+        candidate = 100.0000005 + translation
+        painted = 100.0000015 + translation
+        assert abs(painted - candidate) <= module._COLLINEAR_IDENTITY_TOL
+        assert module._collinear_painted_coverage(
+            ("v", candidate, 0.0, 10.0), _indexed_ink(("v", painted, 0.0, 10.0))
+        )
+
+
+def test_two_bucket_retrieval_never_weakens_actual_offset_veto():
+    candidate = 100.0000005
+    out_of_tolerance = 100.00000151
+    assert abs(out_of_tolerance - candidate) > module._COLLINEAR_IDENTITY_TOL
+    assert not module._collinear_painted_coverage(
+        ("h", candidate, 0.0, 10.0),
+        _indexed_ink(("h", out_of_tolerance, 0.0, 10.0))
+    )
+    # A foreign second half cannot complete a genuinely painted first half.
+    assert not module._collinear_painted_coverage(
+        ("h", candidate, 0.0, 10.0),
+        _indexed_ink(
+            ("h", 100.0000015, 0.0, 5.0),
+            ("h", out_of_tolerance, 5.0, 10.0),
+        )
+    )
+
+
 def test_only_actual_coincident_strokes_may_complete_a_split_edge():
     mixed = _indexed_ink(
         ("h", 0.2e-6, 0.0, 5.0),

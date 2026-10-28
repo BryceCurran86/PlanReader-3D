@@ -1110,9 +1110,11 @@ def _collinear_painted_coverage(span, inked) -> bool:
     """
     axis, offset, lo, hi = span
     bucket = round(offset / _COLLINEAR_IDENTITY_TOL)
+    # Rounding at half-integer boundaries can separate offsets within 1 tolerance by TWO buckets.
+    # ±2 is a complete index lookup; actual source-coordinate identity is still checked below.
     matching = [
         (start, end)
-        for neighbour in (bucket - 1, bucket, bucket + 1)
+        for neighbour in range(bucket - 2, bucket + 3)
         for stroke_offset, start, end in inked.get((axis, neighbour), ())
         if abs(stroke_offset - offset) <= _COLLINEAR_IDENTITY_TOL
     ]
