@@ -11,6 +11,9 @@ from __future__ import annotations
 import math
 
 from shapely import wkb
+from shapely.geometry import box
+
+from pb_net_wall_boolean_union_authority import subtract_void_union_from_wall_polygon
 
 from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
@@ -192,15 +195,43 @@ def publish_live_per_wall_surface_area_quantities(
         gross_m2, net_m2 = _positive(wall.gross_area_m2), _positive(wall.net_area_m2)
         if gross_m2 is None or net_m2 is None or net_m2 > gross_m2 + 0.000001:
             return ()
+        # The original producer computes net = gross - union(ALL physical
+        # opening voids). The aggregate ID binds the receipt roster and total
+        # area, not the individual net polygon's physical position. Replay
+        # that exact existing boolean operation before source-closed reissue:
+        # a different same-area WKB must never inherit original wall evidence.
         try:
+            gross_polygon = wkb.loads(bytes.fromhex(wall.gross_polygon_wkb_hex))
             polygon = wkb.loads(bytes.fromhex(wall.net_polygon_wkb_hex))
+            if any(
+                not all(math.isfinite(float(v)) for v in (
+                    opening.u0, opening.u1, opening.z0, opening.z1,
+                ))
+                or not (opening.u0 < opening.u1 and opening.z0 < opening.z1)
+                for opening in wall.opening_voids
+            ):
+                return ()
+            replayed_net = subtract_void_union_from_wall_polygon(
+                gross_polygon,
+                tuple(
+                    box(opening.u0, opening.z0, opening.u1, opening.z1)
+                    for opening in wall.opening_voids
+                ),
+            )
             actual_area = float(polygon.area)
-        except (TypeError, ValueError, OverflowError, Exception):
+            gross_polygon_area = float(gross_polygon.area)
+        except (TypeError, ValueError, OverflowError):
             return ()
         if (
-            not polygon.is_valid or polygon.is_empty
+            not gross_polygon.is_valid or gross_polygon.is_empty
+            or not math.isfinite(gross_polygon_area)
+            or not math.isclose(
+                gross_polygon_area, gross_m2, rel_tol=0.0, abs_tol=0.000002
+            )
+            or not polygon.is_valid or polygon.is_empty
             or not math.isfinite(actual_area)
             or not math.isclose(actual_area, net_m2, rel_tol=0.0, abs_tol=0.000002)
+            or not polygon.equals(replayed_net)
         ):
             return ()
         seen.add(wall.canonical_wall_id)
