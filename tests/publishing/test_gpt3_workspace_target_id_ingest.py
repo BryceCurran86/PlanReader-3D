@@ -48,7 +48,7 @@ def _one_source_neutral_row(pr):
 def test_noncanonical_workspace_id_cannot_be_sealed_or_published(
     test_dbs, raw_id, stored_type, mode,
 ):
-    pr, hub, bridge = test_dbs
+    pr, hub, _ = test_dbs
     _one_source_neutral_row(pr)
     # SQLite's INTEGER affinity does NOT require every stored value to be int.
     # The old int(raw_id) truncated REAL 501.9 to the real target 501.
