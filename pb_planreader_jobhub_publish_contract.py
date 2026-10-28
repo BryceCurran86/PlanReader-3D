@@ -303,6 +303,11 @@ def run_jobhub_publish_preflight(
 
     blocking_reasons: List[str] = []
     warnings: List[str] = []
+    # Unrecognised modes are never an implicit draft permission. The legacy
+    # code selected draft behavior for *every* value other than commercial,
+    # including typos such as 'commercial_publish ', without any blocker.
+    if p_mode not in {PublishMode.DRAFT_PUBLISH.value, PublishMode.COMMERCIAL_PUBLISH.value}:
+        blocking_reasons.append("Unsupported JobHub publishing mode cannot bypass commercial preflight")
 
     # 1. Project Identity Validation
     if not project_identity or not project_identity.get("project_id"):
@@ -584,6 +589,11 @@ def build_jobhub_payload(
 ) -> PlanReaderJobHubPayload:
     """Construct a verified PlanReaderJobHubPayload enforcing commercial preflight invariants."""
     p_mode = publish_mode.value if isinstance(publish_mode, PublishMode) else str(publish_mode).lower()
+    # The legacy builder tolerates preflight blockers for explicit DRAFT.
+    # An unknown value must therefore be refused *before* it could be
+    # treated like draft or sealed into a recipient customer payload.
+    if p_mode not in {PublishMode.DRAFT_PUBLISH.value, PublishMode.COMMERCIAL_PUBLISH.value}:
+        raise ValueError("Unsupported JobHub publishing mode cannot construct a payload")
     is_commercial = (p_mode == PublishMode.COMMERCIAL_PUBLISH.value)
 
     preflight = run_jobhub_publish_preflight(
