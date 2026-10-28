@@ -29,7 +29,13 @@ def _inline_raster_intersects_scan(page: fitz.Page, x: float, low: float, high: 
     get_image_info(xrefs=True) includes it with xref=0. Any inline painter
     intersecting the source scan invalidates unique original-image ownership.
     """
-    for image in page.get_image_info(xrefs=True):
+    try:
+        images = page.get_image_info(xrefs=True)
+    except Exception:
+        # An undecodable/unsupported inline-image inventory cannot prove
+        # exclusive ownership; abstain instead of treating it as empty.
+        return True
+    for image in images:
         if int(image.get("xref", 0)) != 0:
             continue
         rect = fitz.Rect(image["bbox"])
