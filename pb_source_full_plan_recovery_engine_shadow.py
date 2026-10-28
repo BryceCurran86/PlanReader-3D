@@ -17,7 +17,7 @@ import math
 import re
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -448,4 +448,87 @@ def execute_source_full_plan_recovery_engine_shadow(
         reason_codes=overall_reasons,
         record=record,
         selector=selector,
+    )
+
+
+def execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+    selector: SourceFullPlanEngineSelector,
+    *,
+    pages: Sequence[SourcePageInputPayload],
+    source_visibility_producer: "SourceVisibilityProducer",
+) -> SourceFullPlanEngineResult:
+    """Run recovery using *source-produced* page class rather than caller text.
+
+    Unlike the legacy direct diagnostic, this boundary refuses a forged
+    page_type='floor_plan' when original producer text cannot corroborate it.
+    The PDF's source revision and snapshot must be the selector's exact scope.
+    Room polygons, dimensions and finish occurrences remain shadow candidates
+    and this API never signs construction quantities.
+    """
+    from pb_page_view_class_source_adapter import (
+        build_source_page_view_class_authority,
+        page_viewport_id,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_viewport_view_class_authority import (
+        VIEW_KIND_FLOOR_PLAN,
+        ViewportViewClassSelector,
+    )
+
+    if (
+        type(selector) is not SourceFullPlanEngineSelector
+        or type(source_visibility_producer) is not SourceVisibilityProducer
+        or not isinstance(pages, (tuple, list))
+        or any(type(page) is not SourcePageInputPayload for page in pages)
+    ):
+        return SourceFullPlanEngineResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+            selector=selector if type(selector) is SourceFullPlanEngineSelector else None,
+        )
+    published = source_visibility_producer.published_snapshot_for_revision(
+        selector.revision_id
+    )
+    if (
+        published is None
+        or published.revision.document_id != selector.document_id
+        or published.revision.revision_id != selector.revision_id
+        or published.revision.source_sha256 != selector.source_sha256
+        or published.snapshot.snapshot_id != selector.snapshot_id
+    ):
+        return SourceFullPlanEngineResult(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            reason_codes=(SOURCE_LINEAGE_MISMATCH,),
+            selector=selector,
+        )
+
+    authority = build_source_page_view_class_authority(
+        source_visibility_producer=source_visibility_producer,
+        revision_id=selector.revision_id,
+        page_ids=tuple(page.page_id for page in pages),
+    )
+    classified_pages: list[SourcePageInputPayload] = []
+    for page in pages:
+        view = authority.resolve(
+            ViewportViewClassSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                viewport_id=page_viewport_id(page.page_id),
+            )
+        )
+        # A caller's claimed classification is never a fallback. A missing,
+        # conflicting, non-floor or foreign-page source receipt is quarantined.
+        authenticated = (
+            view.status is EvidenceResolutionStatus.CORROBORATED
+            and view.record is not None
+            and view.record.view_kind == VIEW_KIND_FLOOR_PLAN
+            and bool(view.record.evidence_observation_ids)
+        )
+        classified_pages.append(
+            replace(page, page_type="floor_plan" if authenticated else "unverified")
+        )
+    return execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=tuple(classified_pages)
     )
