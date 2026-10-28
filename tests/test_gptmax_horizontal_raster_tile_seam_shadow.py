@@ -169,3 +169,68 @@ def test_original_elevation_panel_rail_is_continuous_across_horizontal_source_ti
     assert report["source_painted_pixel_rows"] == 33
     assert report["source_pixel_rows_per_image_root"] == [17, 16]
     assert report["elevation_plan_identity_granted"] is False
+
+
+@pytest.mark.parametrize("rect,reuse_existing_xref", [
+    ((40, 96, 60, 98), False),
+    ((40, 99.9999, 60, 100.0001), False),
+    ((40, 102, 60, 104), False),
+    ((40, 97, 60, 99), True),
+])
+def test_third_original_image_placement_inside_scan_must_abstain(
+    rect, reuse_existing_xref,
+):
+    """Two dark flank roots do not exclude an extra original interior painter."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    document = fitz.open(stream=_pdf(), filetype="pdf")
+    page = document[0]
+    if reuse_existing_xref:
+        # Same image payload/xref at a DISTINCT placement still adds a root.
+        xref = int(page.get_images(full=True)[0][0])
+        page.insert_image(fitz.Rect(*rect), xref=xref)
+    else:
+        extra_image = Image.new("RGB", (40, 20), "black")
+        content = BytesIO()
+        extra_image.save(content, format="PNG")
+        page.insert_image(fitz.Rect(*rect), stream=content.getvalue())
+    payload = document.tobytes()
+    document.close()
+
+    args = dict(expected_sha256=sha256(payload).hexdigest(), page_no=1,
+                source_x=50, seam_y=100, flank_offset_pt=7, dpi=300)
+    # The added painter deliberately avoids the two original flank samples.
+    assert prove_horizontal_tile_seam_source_pixels(payload, **args)["status"] == SOURCE_ONLY
+    result = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, **args,
+    )
+    assert result["status"] == ABSTAIN
+    assert "source_pixel_row_membership_ambiguous" in result["reason_codes"]
+    assert not any(result[key] for key in (
+        "structural_host_granted", "whole_wall_frame_granted",
+        "opening_count_granted", "quantity_granted",
+        "elevation_plan_identity_granted", "opening_kind_granted",
+    ))
+
+
+def test_unrelated_original_image_outside_scanline_is_invariant():
+    """An unrelated source image away from the scan must not veto two roots."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    document = fitz.open(stream=_pdf(), filetype="pdf")
+    content = BytesIO()
+    Image.new("RGB", (40, 20), "black").save(content, format="PNG")
+    document[0].insert_image(
+        fitz.Rect(150, 96, 170, 98), stream=content.getvalue(),
+    )
+    payload = document.tobytes()
+    document.close()
+    result = prove_contiguous_source_ink_across_horizontal_tile_seam(
+        payload, expected_sha256=sha256(payload).hexdigest(),
+        page_no=1, source_x=50, seam_y=100, flank_offset_pt=7, dpi=300,
+    )
+    assert result["status"] == "SOURCE_HORIZONTAL_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert result["source_painted_pixel_rows"] >= 50
+    assert not result["opening_kind_granted"]
