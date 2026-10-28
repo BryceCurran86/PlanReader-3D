@@ -85,4 +85,4 @@ def test_source_bearing_public_workflow_mutations_are_rejected(injected):
 def test_missing_source_free_and_security_gates_are_rejected(removed):
     text = WORKFLOW.read_text(encoding="utf-8")
     assert removed in text
-    assert _unsafe_public_workflow_reasons(text.replace(removed, "", 1))
+    assert _unsafe_public_workflow_reasons(text.replace(removed, ""))
