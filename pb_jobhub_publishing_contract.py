@@ -301,12 +301,29 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
         blocking_reasons.append("Zero takeoff quantities in publishing payload")
 
     row_ids = [q.row_id for q in package.quantities]
-    if len(row_ids) != len(set(row_ids)):
+    # The signed physical takeoff row identity comes from an actual SQLite
+    # positive integer primary key. A Python type annotation is not a runtime
+    # source receipt: "1" and "01" otherwise look unique to set() even though
+    # they are aliases for the same physical row, and bool is an int subclass.
+    # Never cast untrusted IDs through int() to create artificial authority.
+    if any(type(row_id) is not int or row_id <= 0 for row_id in row_ids):
+        blocking_reasons.append(
+            "Takeoff row IDs must be exact positive integer source identities"
+        )
+    elif len(row_ids) != len(set(row_ids)):
         blocking_reasons.append(
             "Duplicate physical takeoff row IDs cannot enter JobHub publishing"
         )
 
     for q in package.quantities:
+        # Unit provenance must survive through the final customer write gate:
+        # a self-hashed package can otherwise bypass SQLite ingestion and bill
+        # a quantity with no unit. Keep this mode-independent (draft too).
+        if type(q.unit) is not str or not q.unit.strip():
+            blocking_reasons.append(
+                f"Row #{q.row_id} is missing a source measurement unit"
+            )
+
         # Non-finite or negative checks
         if not math.isfinite(q.quantity):
             blocking_reasons.append(f"Row #{q.row_id} has non-finite quantity: {q.quantity}")
@@ -349,6 +366,11 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                     f"Row #{q.row_id} commercial line cost disagrees with client quantity and rate"
                 )
 
+        # Commercial approval is an actual named estimator action, not merely
+        # a truthy field. SQLite TEXT can preserve whitespace-only approvals;
+        # dataclass annotations do not reject non-string caller payloads.
+        named_approver = type(q.approved_by) is str and bool(q.approved_by.strip())
+
         # Commercial Mode Authority Gates
         if is_commercial:
             if q.authority_status not in {
@@ -370,7 +392,7 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                 blocking_reasons.append(
                     f"Row #{q.row_id} is not commercially measurable source work"
                 )
-            if q.authority_status == AuthorityStatus.USER_APPROVED.value and not q.approved_by:
+            if q.authority_status == AuthorityStatus.USER_APPROVED.value and not named_approver:
                 blocking_reasons.append(
                     f"Row #{q.row_id} lacks named estimator user approval"
                 )
@@ -387,8 +409,10 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                 MeasurementAuthorityType.AI_DETECTED.value,
                 MeasurementAuthorityType.MODEL_DERIVED.value,
                 MeasurementAuthorityType.PDF_SCALED.value,
+                MeasurementAuthorityType.USER_CORRECTED.value,
+                MeasurementAuthorityType.USER_APPROVED.value,
             ):
-                if not q.approved_by or q.authority_status not in (
+                if not named_approver or q.authority_status not in (
                     AuthorityStatus.FIRM.value,
                     AuthorityStatus.USER_APPROVED.value,
                 ):

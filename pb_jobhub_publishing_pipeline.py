@@ -41,6 +41,13 @@ def build_publishing_package_from_workspace(
     - ``created_by`` comes from ``acting_user`` when provided, before payload fingerprinting.
     Missing commercial attribution remains missing and is blocked by the publishing gate.
     """
+    # The caller's workspace identifier determines which original project,
+    # documents, pages and commercial quantities enter the sealed package.
+    # SQLite aliases True, 1.0 and "1" to INTEGER primary key 1. Reject
+    # those lossily-equivalent aliases BEFORE any source database read;
+    # otherwise the final SHA can bind an unproven caller workspace identity.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise ValueError("Source workspace ID must be an exact positive integer")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -193,7 +200,11 @@ def build_publishing_package_from_workspace(
         sub = str(r["substrate"] or "Plasterboard")
         tag = str(r["finish_tag"] or "")
         elem = str(r["element"] or "Element")
-        unit = str(r["unit"] or "m²")
+        # A missing source unit is an unresolved measurement, not implicit m².
+        # Preserve explicit per-trade units, and leave unknown units blank so
+        # the downstream gate can prevent a unitless JobHub line in any mode.
+        raw_unit = r["unit"]
+        unit = raw_unit.strip() if type(raw_unit) is str else ""
         qty = float(r["quantity"] or 0.0)
         rate = float(r["rate"] or 0.0)
         # Price is a client-owned commercial input. A zero entered amount is
@@ -385,9 +396,22 @@ def execute_jobhub_publishing(
         if isinstance(package.created_by, str) and package.created_by.strip()
         else ""
     )
+    # The gate deliberately permits customer-visible informational source
+    # warnings and draft provisional/critical notices, but the previous final
+    # JobHub writer silently discarded them. Preserve their full text in a
+    # canonical JSON note so the recipient receives exactly what passed the
+    # original gate. Stable sorting preserves duplicate warnings and makes
+    # equivalent orderings match the full-evidence canonical payload seal.
+    customer_warnings = sorted(gate_result.warnings)
+    warning_note = (
+        " | Gate warnings: "
+        + json.dumps(customer_warnings, ensure_ascii=False, separators=(",", ":"))
+        if customer_warnings else ""
+    )
     notes_str = (
         f"Mode: {package.mode.upper()} | Fingerprint: {package.preflight_fingerprint} | "
         f"Payload: {package.payload_hash} | Published by {publishing_actor}{creator_note}"
+        f"{warning_note}"
     )
 
     # A previous bridge.query() checked job_no on a separate connection,
@@ -500,4 +524,5 @@ def execute_jobhub_publishing(
         "exterior_m2": exterior_m2,
         "preflight_fingerprint": package.preflight_fingerprint,
         "payload_hash": package.payload_hash,
+        "warnings": customer_warnings,
     }
