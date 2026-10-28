@@ -80,6 +80,12 @@ def prove_horizontal_tile_seam_source_pixels(
         bx, bm, br, bok = bottom
         if not (tok and bok):
             return _abstain_horizontal(digest, page_no, "source_tile_image_transform_unsupported")
+        # PDF image matrices can differ by floating-point rounding, but an
+        # actual source gap or overlap must never be painted in by antialiasing
+        # or missed between 300dpi row centres. Require the original two
+        # placements to meet within 0.0001pt before sampling any dark pixels.
+        if abs(tr.y1 - br.y0) > 0.0001:
+            return _abstain_horizontal(digest, page_no, "source_tile_boundary_gap_unproven")
         if (tx == bx or tm or bm
             or abs(tr.y1 - seam_y) > .03
             or abs(br.y0 - seam_y) > .03

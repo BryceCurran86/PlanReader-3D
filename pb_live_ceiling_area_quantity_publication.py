@@ -29,6 +29,34 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+
+def _original_scale_receipt_conflicts(
+    meta: Mapping, physical_scale_record_id: str | None,
+) -> bool:
+    """Shared source→issuer/seal veto; absence never fabricates scale proof.
+
+    Only explicit original scale fields are considered. A missing canonical
+    physical-scale owner cannot validate an explicitly claimed scale ID.
+    """
+    if "scale_status" in meta and (
+        type(meta["scale_status"]) is not str
+        or meta["scale_status"] not in ("resolved", "verified")
+    ):
+        return True
+    if "scale_conflicts" in meta and (
+        type(meta["scale_conflicts"]) not in (tuple, list)
+        or bool(meta["scale_conflicts"])
+    ):
+        return True
+    for field in ("resolved_scale_id", "physical_scale_record_id"):
+        if field in meta and (
+            type(meta[field]) is not str
+            or not physical_scale_record_id
+            or meta[field] != physical_scale_record_id
+        ):
+            return True
+    return False
+
 def _source_quantities(
     result: LiveCeilingLiningResult,
 ) -> dict[str, QuantityEvidence]:
@@ -235,6 +263,13 @@ def _publish_one(
         resolved_scale_id = _clean(ceiling.physical_scale_record_id)
         if not resolved_scale_id:
             return None
+        # The canonical physical scale record is necessary but does not
+        # override a negative original producer scale receipt. Explicit
+        # conflict/status/identity evidence must survive the source→issuer
+        # boundary; absence retains the older producer contract, not a new
+        # claim that the original was independently replayed here.
+        if _original_scale_receipt_conflicts(meta, resolved_scale_id):
+            return None
     else:
         return None
 
@@ -285,6 +320,15 @@ def _publish_one(
             "measurement_authority": measurement_authority,
             "figured_dimension_ids": figured_ids,
             "resolved_scale_id": resolved_scale_id,
+            # When present, preserve the exact authenticated source status
+            # for the customer authority adapter instead of silently
+            # substituting its legacy default.
+            **({"scale_status": meta["scale_status"]}
+               if measurement_authority == MeasurementAuthorityType.PDF_SCALED.value
+               and "scale_status" in meta else {}),
+            **({"scale_conflicts": ()}
+               if measurement_authority == MeasurementAuthorityType.PDF_SCALED.value
+               and "scale_conflicts" in meta else {}),
             "commercial_projection_allowed": False,
             "quantity_handoff_only": True,
             "row_role": "ceiling_area",
