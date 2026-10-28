@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     name: Original Lot16 8+9 sealed customer (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 95
@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=c491c5fb2a155a54825d639ef277218707b76327
-          approved_head=31439c9e4137d7f210488877cc0ab868ed7ffecb
+          approved_base=cb6936403142ca6d14e85b029907b75aa19dbf79
+          approved_head=2ef34d242c73dc3b70d3cad2ac6afe4707d2c9fa
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -88,7 +88,8 @@ jobs:
           # Before seeing any private source, reject an approved PR file that
           # has independently changed on trusted main since the candidate base.
           # A safe post-replay restack must keep BOTH code ancestries intact.
-          main_changed="$(git diff --name-only "$approved_base" "$GITHUB_SHA" | LC_ALL=C sort)"
+          # Disable rename similarity detection: a move must expose BOTH its old approved path and new destination.
+          main_changed="$(git diff --no-renames --name-only "$approved_base" "$GITHUB_SHA" | LC_ALL=C sort)"
           conflicting="$(comm -12 <(printf '%s\n' "$observed") <(printf '%s\n' "$main_changed"))"
           if [[ -n "$conflicting" ]]; then
             echo "::error::Trusted main modified an immutable GPT3 release path"
@@ -121,7 +122,12 @@ jobs:
           COPY requirements.txt requirements-ci-v1228.txt /deps/
           RUN python -m pip install --no-cache-dir -r /deps/requirements.txt -r /deps/requirements-ci-v1228.txt
           DOCKER
-          docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" .
+          # Build from ONLY the two immutable approved-candidate dependency files,
+          # not the moving trusted-main checkout or a networked candidate code context.
+          deps_dir="$RUNNER_TEMP/gpt3-approved-deps"
+          mkdir -p "$deps_dir"
+          cp -- "$GPT3_APPROVED_TREE/requirements.txt" "$GPT3_APPROVED_TREE/requirements-ci-v1228.txt" "$deps_dir/"
+          docker build -q -f "$dockerfile" -t "gpt3-offline:${{ matrix.python-version }}" "$deps_dir"
       - name: Provision SHA-verified original Lot16 source
         uses: ./.github/actions/provision-original-sources
         with:
@@ -176,4 +182,4 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/gpt3-owner-original-positive.log" "$RUNNER_TEMP/gpt3-offline.Dockerfile"
-          rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" documents/sources
+          rm -rf "$RUNNER_TEMP/gpt3-approved-candidate" "$RUNNER_TEMP/gpt3-approved-deps" documents/sources

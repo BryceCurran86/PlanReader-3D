@@ -36,30 +36,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Prove immutable trusted main SHA
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - name: Provision owner-private 3Laurel original (fail closed)
-        uses: ./.github/actions/provision-original-sources
-        with:
-          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
-          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
-          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
-          projects: au_qld_3laurel
-          allow-missing: "false"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Install pinned dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Provision exact private original from trusted main
+        uses: ./.github/actions/provision-original-sources
+        with:
+          token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}
+          repository: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
+          ref: ${{ vars.ORIGINAL_SOURCES_REF }}
+          names: 3LAUREL - Construction Plan Set Rev3 08.05.26.pdf
+          allow-missing: "false"
       - name: Authenticate full original PDF and execute source-positive plan page
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-3.sh"
+          private_output="$RUNNER_TEMP/guarded-original-3.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           python - <<'PY'
           from pathlib import Path
           import hashlib, fitz, subprocess, sys
@@ -82,11 +87,22 @@ jobs:
               "--output-dir","laurel-source-positive-core",
           ],check=True)
           PY
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
       - name: Prove any sealed quantities and refuse scores without identity
         if: success()
         env:
           PYTHONPATH: .
         run: |
+          set -euo pipefail
+          private_script="$RUNNER_TEMP/guarded-original-4.sh"
+          private_output="$RUNNER_TEMP/guarded-original-4.log"
+          cat > "$private_script" <<'PRIVATE_ORIGINAL_COMMANDS'
           python - <<'PY'
           import json,hashlib
           from pathlib import Path
@@ -121,8 +137,16 @@ jobs:
               assert s["customer_rows_verified"] is False
           print("Owner-main 3Laurel source/customer checks complete; no frozen score claimed")
           PY
-      - name: Destroy private originals and source-derived customer files
+          PRIVATE_ORIGINAL_COMMANDS
+          if bash -euo pipefail "$private_script" > "$private_output" 2>&1; then
+            echo "PRIVATE ORIGINAL STEP PASS"
+          else
+            echo "::error::Private original verification failed; source details withheld."
+            exit 1
+          fi
+      - name: Destroy private originals and unpublished diagnostics
         if: always()
-        shell: bash
         run: |
-          rm -rf documents/sources laurel-source-positive-core
+          rm -rf documents/sources artifacts q5446-original-positive-floor laurel-original-floor-produced laurel-source-positive-core
+          rm -f source-before.json source-after.json source-retention.json native-paint-partitions.json
+          rm -f "$RUNNER_TEMP"/guarded-original-*.sh "$RUNNER_TEMP"/guarded-original-*.log

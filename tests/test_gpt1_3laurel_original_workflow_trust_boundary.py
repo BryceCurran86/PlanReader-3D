@@ -30,9 +30,14 @@ def test_original_is_pinned_private_and_no_report_is_publicly_uploaded():
     text, original = _workflow()
     assert "uses: ./.github/actions/provision-original-sources" in original
     assert "token: ${{ secrets.ORIGINAL_SOURCES_TOKEN }}" in original
-    assert "projects: au_qld_3laurel" in original
+    # Main's exact manifest filename selector supersedes the older project
+    # selector; do not broaden provisioning during branch integration.
+    assert "names: 3LAUREL - Construction Plan Set Rev3 08.05.26.pdf" in original
     assert 'allow-missing: "false"' in original
     assert "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e" in original
     assert "verify_sealed_customer_output(run,rows)" in original
     assert "actions/upload-artifact" not in text
-    assert "rm -rf documents/sources laurel-source-positive-core" in original
+    assert "rm -rf documents/sources artifacts" in original
+    cleanup = original.split("- name: Destroy private originals", 1)[1]
+    assert "laurel-source-positive-core" in cleanup
+    assert 'rm -f "$RUNNER_TEMP"/guarded-original-*.sh' in cleanup

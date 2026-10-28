@@ -59,6 +59,10 @@ def publish_live_per_wall_surface_area_quantities(
     if (
         type(aggregate) is not QuantityEvidence
         or aggregate.abstained
+        # A non-abstained numeric source object can still carry unresolved
+        # original wall/opening conflicts. Never reissue its area as separate
+        # per-wall source-closed facts by dropping these blockers.
+        or bool(aggregate.blocking_reasons)
         or aggregate.status != "corroborated"
         or aggregate.family != "wall_net_area"
         or aggregate.semantic_key != "perimeter_walling"
@@ -84,6 +88,72 @@ def publish_live_per_wall_surface_area_quantities(
         or publication.revision_id != aggregate.metadata.get("revision_id")
     ):
         return ()
+    # The upstream producer binds every original gross/role/void/universe
+    # receipt and the metric total into one stable aggregate contract. A
+    # copied QuantityEvidence with a changed receipt roster must not be
+    # reissued as source-closed per-wall quantities merely because its total
+    # and physical-wall IDs still agree. Recompute the original producer seal
+    # before selecting any individual wall. This grants no new authority.
+    source_rosters = (
+        ("gross_geometry_record_ids", publication.gross_geometry_record_ids),
+        ("whole_wall_role_record_ids", publication.whole_wall_role_record_ids),
+        ("physical_void_record_ids", publication.physical_void_record_ids),
+        ("opening_universe_record_ids", publication.opening_universe_record_ids),
+    )
+    if any(
+        _exact_ids(roster) is None
+        or _exact_ids(aggregate.metadata.get(name)) != tuple(roster)
+        for name, roster in source_rosters
+    ):
+        return ()
+    # Every external wall requires an independently completed original
+    # opening-universe census, including when no physical openings exist.
+    # The producer's evidence roster is also exact and ordered; a copied
+    # aggregate may not omit a void or universe receipt while retaining its ID.
+    original_evidence_ids = tuple(dict.fromkeys(
+        receipt
+        for _, roster in source_rosters
+        for receipt in roster
+    ))
+    if (
+        not publication.opening_universe_record_ids
+        or _exact_ids(aggregate.evidence_ids) != original_evidence_ids
+    ):
+        return ()
+    if (
+        len(publication.gross_geometry_record_ids) != len(ids)
+        or len(publication.whole_wall_role_record_ids) != len(ids)
+        or tuple(w.gross_geometry_record_id for w in walls)
+            != tuple(publication.gross_geometry_record_ids)
+        or tuple(w.whole_wall_role_record_id for w in walls)
+            != tuple(publication.whole_wall_role_record_ids)
+        or tuple(
+            void.physical_void_record_id
+            for wall in walls for void in wall.opening_voids
+        ) != tuple(publication.physical_void_record_ids)
+    ):
+        return ()
+    expected_aggregate_id = stable_contract_id(
+        "external_physical_net_wall_area",
+        {
+            "revision_id": publication.revision_id,
+            "physical_wall_ids": ids,
+            "gross_geometry_record_ids": tuple(
+                publication.gross_geometry_record_ids
+            ),
+            "whole_wall_role_record_ids": tuple(
+                publication.whole_wall_role_record_ids
+            ),
+            "physical_void_record_ids": tuple(publication.physical_void_record_ids),
+            "opening_universe_record_ids": tuple(
+                publication.opening_universe_record_ids
+            ),
+            "value_m2": agg_m2,
+        },
+    )
+    if aggregate.quantity_id != expected_aggregate_id:
+        return ()
+
     source_scope = None
     output = []
     net_areas = []

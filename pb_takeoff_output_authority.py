@@ -80,8 +80,10 @@ class TakeoffOutputRow:
             raise ValueError(f"Takeoff value must be finite, got {self.value}")
         if self.value < 0.0:
             raise ValueError(f"Takeoff value cannot be negative, got {self.value}")
-        if self.confidence < 0.0 or self.confidence > 1.0:
-            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {self.confidence}")
+        # NaN compares neither < 0 nor > 1, but cannot be source confidence.
+        # Do not let it survive as a publishable authority receipt.
+        if not math.isfinite(self.confidence) or self.confidence < 0.0 or self.confidence > 1.0:
+            raise ValueError(f"Confidence must be finite and between 0.0 and 1.0, got {self.confidence}")
 
     def compute_fingerprint(self) -> str:
         """Compute tamper-evident SHA-256 fingerprint over core commercial fields."""
@@ -106,6 +108,12 @@ class TakeoffOutputRow:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "TakeoffOutputRow":
+        # Serialized publishability is a policy receipt, not a truthiness
+        # suggestion. bool("false") is True and would silently create a typed
+        # commercially publishable row before downstream dict-type guards.
+        raw_publishable = data.get("is_publishable", False)
+        if type(raw_publishable) is not bool:
+            raise ValueError("is_publishable must be an explicit Boolean")
         clean = {
             "quantity_id": str(data.get("quantity_id") or ""),
             "description": str(data.get("description") or ""),
@@ -121,7 +129,7 @@ class TakeoffOutputRow:
             "scale_id": data.get("scale_id"),
             "dimension_text_id": data.get("dimension_text_id"),
             "benchmark_status": data.get("benchmark_status"),
-            "is_publishable": bool(data.get("is_publishable", False)),
+            "is_publishable": raw_publishable,
             "warnings": list(data.get("warnings") or []),
             "blocking_reasons": list(data.get("blocking_reasons") or []),
             "approved_by": data.get("approved_by"),

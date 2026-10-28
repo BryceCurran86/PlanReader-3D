@@ -16,6 +16,30 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 SECURITY = run_path(str(ROOT / "tests" / "test_gpt3_private_original_workflow_manual_trust.py"))
 Loader = SECURITY["UniqueMappingLoader"]
 OWNER_GUARD = SECURITY["OWNER_GUARD"]
+# A credentialed job may also require the exact trusted repository. This is a
+# stricter conjunction, not a general expression parser: arbitrary OR clauses,
+# extra interpolations and modified owner/main/manual predicates fail closed.
+REPOSITORY_OWNER_GUARD = (
+    OWNER_GUARD.removesuffix(" }}")
+    + " && github.repository == 'BryceCurran86/PlanReader-3D' }}"
+)
+# GitHub reruns retain github.actor (the original dispatcher), while
+# github.triggering_actor identifies the person initiating the rerun.
+# Exact-string allowlisting prevents arbitrary OR, interpolation, or extra
+# clauses. Legacy three-clause workflows remain accepted until each owner
+# migrates its own workflow; this census change grants no source authority.
+RERUN_OWNER_GUARD = (
+    OWNER_GUARD.removesuffix(" }}")
+    + " && github.triggering_actor == 'BryceCurran86' }}"
+)
+REPOSITORY_RERUN_OWNER_GUARD = (
+    REPOSITORY_OWNER_GUARD.removesuffix(" }}")
+    + " && github.triggering_actor == 'BryceCurran86' }}"
+)
+RERUN_REPOSITORY_OWNER_GUARD = (
+    RERUN_OWNER_GUARD.removesuffix(" }}")
+    + " && github.repository == 'BryceCurran86/PlanReader-3D' }}"
+)
 TRUSTED_SHA = SECURITY["TRUSTED_SHA"]
 TOKEN = "${{ secrets.ORIGINAL_SOURCES_TOKEN }}"
 
@@ -50,13 +74,23 @@ def _token_jobs(raw: str):
     return document, matching
 
 
+def _trusted_original_job_guard(value: object) -> bool:
+    return type(value) is str and value in (
+        OWNER_GUARD,
+        REPOSITORY_OWNER_GUARD,
+        RERUN_OWNER_GUARD,
+        REPOSITORY_RERUN_OWNER_GUARD,
+        RERUN_REPOSITORY_OWNER_GUARD,
+    )
+
+
 def check_original_token_boundary(raw: str) -> int:
     document, matches = _token_jobs(raw)
     assert matches, "a supposedly credentialed workflow does not consume the source token"
     assert "workflow_dispatch" in document["on"]
     assert "pull_request_target" not in document["on"]
     for name, job in matches:
-        assert job.get("if") == OWNER_GUARD, name
+        assert _trusted_original_job_guard(job.get("if")), name
         steps = job.get("steps")
         assert type(steps) is list and steps
         checkouts = [
@@ -178,3 +212,110 @@ def test_alternative_token_expression_cannot_escape_dynamic_security_census(secr
     unsafe = raw.replace(OWNER_GUARD, "${{ github.event_name == 'pull_request' }}")
     with pytest.raises(AssertionError):
         check_original_token_boundary(unsafe)
+
+
+def test_exact_trusted_repository_conjunction_is_accepted_without_weakening_owner_guard():
+    # GPT1 #3758 has the same owner/main/manual guard plus an exact repository
+    # restriction. Its private original job must not need a weaker condition
+    # merely to pass GPT3's dynamic workflow census.
+    raw = _new_workflow().replace(OWNER_GUARD, REPOSITORY_OWNER_GUARD)
+    assert check_original_token_boundary(raw) == 1
+
+
+@pytest.mark.parametrize(("old", "new"), (
+    ("github.repository == 'BryceCurran86/PlanReader-3D'", "github.repository == 'other/repo'"),
+    ("github.repository == 'BryceCurran86/PlanReader-3D'", "github.repository != 'other/repo'"),
+    (" && github.repository ==", " || github.repository =="),
+    ("github.event_name == 'workflow_dispatch'", "github.event_name == 'pull_request'"),
+    ("github.ref == 'refs/heads/main'", "github.ref == 'refs/heads/dev'"),
+    ("github.actor == 'BryceCurran86'", "github.actor != 'BryceCurran86'"),
+    ("github.actor == 'BryceCurran86'", "github.actor == 'attacker'"),
+    (" && github.repository ==", " && true && github.repository =="),
+    (" && github.repository ==", " && !github.repository =="),
+    (" }}", " || true }}"),
+))
+def test_trusted_repository_guard_rejects_unsafe_or_unrecognized_mutations(old, new):
+    raw = _new_workflow().replace(OWNER_GUARD, REPOSITORY_OWNER_GUARD)
+    assert old in raw
+    with pytest.raises(AssertionError):
+        check_original_token_boundary(raw.replace(old, new, 1))
+
+
+@pytest.mark.parametrize("guard", (
+    OWNER_GUARD,
+    REPOSITORY_OWNER_GUARD,
+    RERUN_OWNER_GUARD,
+    REPOSITORY_RERUN_OWNER_GUARD,
+    RERUN_REPOSITORY_OWNER_GUARD,
+))
+def test_exact_legacy_and_rerun_owner_conjunctions_preserve_secret_job_controls(guard):
+    # The exact four-clause guard unblocks GPT1/GPT2/MAX security hardening;
+    # existing three-clause jobs still need their own owner-controlled upgrade.
+    assert _trusted_original_job_guard(guard)
+    assert check_original_token_boundary(_new_workflow().replace(OWNER_GUARD, guard)) == 1
+
+
+@pytest.mark.parametrize(("old", "new"), (
+    ("github.triggering_actor == 'BryceCurran86'", "github.triggering_actor == 'foreign-writer'"),
+    ("github.triggering_actor == 'BryceCurran86'", "github.triggering_actor != 'foreign-writer'"),
+    ("github.triggering_actor == 'BryceCurran86'", "github.actor == 'BryceCurran86'"),
+    ("github.actor == 'BryceCurran86'", "github.actor == 'foreign-writer'"),
+    ("github.event_name == 'workflow_dispatch'", "github.event_name == 'pull_request'"),
+    ("github.ref == 'refs/heads/main'", "github.ref == 'refs/heads/feature'"),
+    (" && github.triggering_actor ==", " || github.triggering_actor =="),
+    (" && github.triggering_actor ==", " && true && github.triggering_actor =="),
+    (" && github.triggering_actor ==", " && !github.triggering_actor =="),
+    (" }}", " || true }}"),
+    (" }}", " && github.event_name == 'workflow_dispatch' }}"),
+))
+def test_rerun_owner_guard_rejects_foreign_actor_event_ref_or_injected_clauses(old, new):
+    raw = _new_workflow().replace(OWNER_GUARD, RERUN_OWNER_GUARD)
+    assert old in raw
+    with pytest.raises(AssertionError):
+        check_original_token_boundary(raw.replace(old, new, 1))
+
+
+@pytest.mark.parametrize("guard", (
+    REPOSITORY_RERUN_OWNER_GUARD,
+    RERUN_REPOSITORY_OWNER_GUARD,
+))
+def test_rerun_repository_guard_is_exact_and_does_not_accept_arbitrary_repository(guard):
+    raw = _new_workflow().replace(OWNER_GUARD, guard)
+    assert check_original_token_boundary(raw) == 1
+    for bad in (
+        guard.replace("github.repository == 'BryceCurran86/PlanReader-3D'", "github.repository == 'attacker/repo'"),
+        guard.replace("github.repository == 'BryceCurran86/PlanReader-3D'", "github.repository != 'attacker/repo'"),
+        guard.replace(" && github.repository ==", " || github.repository =="),
+        guard.replace(" }}", " && true }}"),
+    ):
+        assert bad != guard
+        with pytest.raises(AssertionError):
+            check_original_token_boundary(raw.replace(guard, bad, 1))
+
+
+def test_rerun_owner_boolean_matrix_requires_both_actor_identities():
+    # Verify the intended meaning of the four fixed equality clauses without
+    # evaluating any untrusted GitHub expression or introducing a parser.
+    guard = RERUN_OWNER_GUARD
+    clauses = guard.removeprefix("${{ ").removesuffix(" }}").split(" && ")
+    assert clauses == [
+        "github.event_name == 'workflow_dispatch'",
+        "github.ref == 'refs/heads/main'",
+        "github.actor == 'BryceCurran86'",
+        "github.triggering_actor == 'BryceCurran86'",
+    ]
+    for event, ref, original, rerunner, expected in (
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", True),
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "foreign-writer", False),
+        ("workflow_dispatch", "refs/heads/main", "foreign-writer", "BryceCurran86", False),
+        ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", False),
+        ("push", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+    ):
+        values = {
+            "github.event_name": event,
+            "github.ref": ref,
+            "github.actor": original,
+            "github.triggering_actor": rerunner,
+        }
+        assert all(values[key] == literal[1:-1] for key, literal in
+                   (clause.split(" == ", 1) for clause in clauses)) is expected

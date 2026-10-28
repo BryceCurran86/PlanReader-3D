@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+from stat import S_ISREG
 from pathlib import Path, PurePosixPath
 import re
 import sys
@@ -42,10 +44,12 @@ class PinnedOriginals(NamedTuple):
     sha256_by_size: dict[int, frozenset[str]]
 
 
-def _normalized_git_path(raw: str) -> str:
+def _normalized_git_path(raw: str, *, git_path: bool = False) -> str:
     if type(raw) is not str or not raw or "\x00" in raw:
         raise ValueError("Invalid changed-path record")
-    path = raw.replace("\\", "/")
+    # Git diff -z emits POSIX paths: a backslash is a literal filename byte.
+    # Keep Windows separator normalization for non-Git helper callers only.
+    path = raw if git_path else raw.replace("\\", "/")
     if (
         path.startswith("/")
         or ":" in path.split("/", 1)[0]
@@ -99,21 +103,70 @@ def load_pinned_originals(root: Path) -> PinnedOriginals:
     )
 
 
+_FILE_IDENTITY_FIELDS = (
+    "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
+    "st_mtime_ns", "st_ctime_ns",
+)
+
+
+def _same_regular_file(*witnesses: os.stat_result) -> bool:
+    return (
+        bool(witnesses)
+        and all(S_ISREG(stat.st_mode) for stat in witnesses)
+        and all(
+            getattr(stat, field) == getattr(witnesses[0], field)
+            for stat in witnesses[1:]
+            for field in _FILE_IDENTITY_FIELDS
+        )
+    )
+
+
 def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(_HASH_CHUNK_BYTES), b""):
-            digest.update(chunk)
+    """Hash one stable regular inode without following a raced source symlink.
+
+    These bytes are ONLY matched against the frozen source SHA inventory; no
+    source payload is returned, logged, or ever placed in a public artifact.
+    """
+    try:
+        before = path.lstat()
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not _same_regular_file(before, opened):
+                raise ValueError("changed source file identity while checking private originals")
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(_HASH_CHUNK_BYTES), b""):
+                digest.update(chunk)
+            completed = os.fstat(handle.fileno())
+        after = path.lstat()
+    except OSError as exc:
+        raise ValueError("changed source file identity while checking private originals") from exc
+    if not _same_regular_file(before, opened, completed, after):
+        raise ValueError("changed source file identity while checking private originals")
     return digest.hexdigest()
 
 
 def _is_pinned_original_bytes(path: Path, pinned: PinnedOriginals) -> bool:
-    # A symlink's Git blob is its target text, not file bytes, so it is not
-    # followed; a path absent from the working tree cannot be hashed.
-    if path.is_symlink() or not path.is_file():
+    # Absent worktree files and Git symlink blobs are not original PDF bytes.
+    # When a regular file is hash-eligible, bind the size-bucket lookup and
+    # no-follow descriptor hash to the SAME physical inode before and after.
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
         return False
-    digests = pinned.sha256_by_size.get(path.stat().st_size)
-    return bool(digests) and _file_sha256(path) in digests
+    if not S_ISREG(before.st_mode):
+        return False
+    digests = pinned.sha256_by_size.get(before.st_size)
+    if not digests:
+        return False
+    digest = _file_sha256(path)
+    try:
+        after = path.lstat()
+    except OSError as exc:
+        raise ValueError("changed source file identity while checking private originals") from exc
+    if not _same_regular_file(before, after):
+        raise ValueError("changed source file identity while checking private originals")
+    return digest in digests
 
 
 def source_addition_findings(
@@ -121,6 +174,7 @@ def source_addition_findings(
     *,
     pinned: PinnedOriginals | None = None,
     root: Path | None = None,
+    git_path: bool = False,
 ) -> tuple[tuple[str, str], ...]:
     """Return sorted (changed path, reason) pairs for protected payloads.
 
@@ -129,7 +183,7 @@ def source_addition_findings(
     """
     found: dict[str, str] = {}
     for raw in paths:
-        normalized = _normalized_git_path(raw)
+        normalized = _normalized_git_path(raw, git_path=git_path)
         path = normalized.casefold()
         name = path.rsplit("/", 1)[-1]
         parts = path.split("/")
@@ -161,9 +215,12 @@ def blocked_source_additions(
     *,
     pinned: PinnedOriginals | None = None,
     root: Path | None = None,
+    git_path: bool = False,
 ) -> tuple[str, ...]:
     """Report changed protected source payloads, never delete files."""
-    return tuple(raw for raw, _ in source_addition_findings(paths, pinned=pinned, root=root))
+    return tuple(raw for raw, _ in source_addition_findings(
+        paths, pinned=pinned, root=root, git_path=git_path,
+    ))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,7 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # -z is used by our caller to retain spaces and original Git paths. A
     # newline-stream fallback supports manual audits, not CI's source proof.
-    if b"\x00" in payload:
+    git_path = b"\x00" in payload
+    if git_path:
         paths = [
             item.decode("utf-8", errors="strict")
             for item in payload.split(b"\x00") if item
@@ -191,7 +249,9 @@ def main(argv: list[str] | None = None) -> int:
         ]
     try:
         pinned = load_pinned_originals(args.root)
-        findings = source_addition_findings(paths, pinned=pinned, root=args.root)
+        findings = source_addition_findings(
+            paths, pinned=pinned, root=args.root, git_path=git_path,
+        )
     except ValueError as exc:
         print(f"Private original-source addition gate failed: {exc}", file=sys.stderr)
         return 1

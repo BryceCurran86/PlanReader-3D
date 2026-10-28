@@ -120,6 +120,16 @@ def project_live_floor_finish_customer_rows(
                 f"duplicate original floor-finish quantity id in customer projection: {source_id}"
             )
         original_quantity_ids.add(source_id)
+        # A numeric original quantity retaining unresolved producer blockers
+        # must never disappear from customer output via the later selection
+        # filter. The real source-closed sealer still receives this member;
+        # returning zero/fewer customer rows would violate whole-inventory
+        # completeness even if another independent FIRM member is valid.
+        if not original.abstained and original.value is not None and original.blocking_reasons:
+            raise SourceClosedRunConflictError(
+                "numeric floor-finish source quantity retains unresolved blockers: "
+                f"{source_id}"
+            )
 
     quantities = tuple(
         quantity

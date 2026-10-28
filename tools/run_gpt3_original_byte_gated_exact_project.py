@@ -18,6 +18,9 @@ from tools.gpt3_safe_original_report_output import (preflight_new_diagnostic, wr
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
+from tools.gpt3_original_source_preflight import (
+    _original_source_path_kind, _stable_original_digest,
+)
 
 FROZEN_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -85,15 +88,25 @@ def _original_sha_gate(
         return False, ["original_source_file_universe_mismatch"], []
     actual_hashes: list[str] = []
     for path in original_files:
+        # A symlink or other present nonregular path cannot authenticate the
+        # owner's original, even if following it would yield the expected PDF
+        # digest. Only lstat's genuine absence is "missing"; failed access
+        # and changed file identity must be rejected as unreadable.
         try:
-            if not path.is_file():
-                return False, [f"original_source_missing:{path.name}"], []
-            expected_sha, expected_size = expected[path.name]
-            if path.stat().st_size != expected_size:
-                return False, [f"original_source_size_mismatch:{path.name}"], []
-            actual_sha = _sha256(path)
-        except OSError:
+            kind = _original_source_path_kind(path)
+        except (OSError, ValueError):
             return False, [f"original_source_unreadable:{path.name}"], []
+        if kind == "missing":
+            return False, [f"original_source_missing:{path.name}"], []
+        try:
+            # One no-follow regular descriptor owns both the SHA and its
+            # physical size; ordinary path.stat()/open() races are forbidden.
+            actual_sha, source_witness = _stable_original_digest(path)
+        except (OSError, ValueError):
+            return False, [f"original_source_unreadable:{path.name}"], []
+        expected_sha, expected_size = expected[path.name]
+        if source_witness[2] != expected_size:
+            return False, [f"original_source_size_mismatch:{path.name}"], []
         if actual_sha != expected_sha:
             return False, [f"original_source_sha_mismatch:{path.name}"], []
         actual_hashes.append(actual_sha)
