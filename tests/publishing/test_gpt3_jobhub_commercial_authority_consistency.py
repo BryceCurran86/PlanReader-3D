@@ -113,6 +113,31 @@ def test_explicit_source_blocker_overrides_forged_publishable_flag():
         build_jobhub_payload([row], IDENTITY, REVISION)
 
 
+
+@pytest.mark.parametrize("bad_field", ["authority_status", "source_type"])
+@pytest.mark.parametrize("bad_value", [None, "", "   "])
+def test_blank_serialized_authority_metadata_does_not_default_to_firm(bad_field, bad_value):
+    raw = _row().to_dict()
+    raw[bad_field] = bad_value
+    result = _preflight([raw])
+    assert not result.is_valid
+    with pytest.raises(ValueError, match="Cannot build commercial payload"):
+        build_jobhub_payload([raw], IDENTITY, REVISION)
+
+
+@pytest.mark.parametrize("bad_value", ["false", "true", 1, None])
+def test_serialized_publishability_must_be_explicit_boolean(bad_value):
+    raw = _row().to_dict()
+    raw["is_publishable"] = bad_value
+    result = _preflight([raw])
+    assert not result.is_valid
+    assert result.blocked_row_count == 1
+
+
+def test_typed_publishability_string_cannot_bypass_final_consumer():
+    row = _row(is_publishable="false")
+    assert not _preflight([row]).is_valid
+
 def test_empty_commercial_payload_cannot_be_marked_ready():
     result = _preflight([])
     assert not result.is_valid
