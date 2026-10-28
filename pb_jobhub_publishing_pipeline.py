@@ -5,7 +5,6 @@ and atomic publishing to JobHub with full support for DRAFT and COMMERCIAL modes
 """
 from __future__ import annotations
 
-import datetime
 import hashlib
 import json
 import math
@@ -136,7 +135,11 @@ def build_publishing_package_from_workspace(
 
     drawing_revision = DrawingRevisionPayload(
         drawing_issue=drawing_issue,
-        drawing_date=datetime.date.today().isoformat(),
+        # The workspace has no authenticated original drawing date. Publishing
+        # time is not a drawing revision: using today() changes the sealed
+        # payload hash across days and lets unchanged packages evade the
+        # JobHub duplicate check. Keep source date explicitly unknown.
+        drawing_date="",
         sheet_count=sheet_count,
         source_files_hash=rev_hash,
         file_names=file_names,
