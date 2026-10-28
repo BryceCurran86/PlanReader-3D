@@ -25,6 +25,21 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _optional_source_token(value: object, original: object) -> bool:
+    """Only native absent/empty sentinels can omit an optional source receipt.
+
+    Arbitrary objects can claim equality to None or "" through __eq__; they
+    must never be treated as missing original-source identities.
+    """
+    if value is None:
+        return True
+    if type(value) is not str:
+        return False
+    if value == "":
+        return True
+    return _exact_source_token(value, original)
+
+
 def _exact_original_page_match(raw_page: object, canonical_page: object) -> bool:
     """Match native one-based source integers or canonical decimal page text.
 
@@ -319,12 +334,10 @@ def publish_live_floor_area_quantities(
         # Do not use a measurement from another room-face snapshot even if
         # its revision, quantity value and viewport happen to match.
         room_snapshot_id = metadata.get("room_snapshot_id")
-        if room_snapshot_id not in (None, "") and not _exact_source_token(
-            room_snapshot_id, floor.snapshot_id
-        ):
+        if not _optional_source_token(room_snapshot_id, floor.snapshot_id):
             continue
         source_room_face_id = metadata.get("source_room_face_record_id")
-        if source_room_face_id not in (None, "") and not _exact_source_token(
+        if not _optional_source_token(
             source_room_face_id, floor.source_room_face_record_id
         ):
             continue
@@ -492,9 +505,7 @@ def publish_live_canonical_room_area_quantities(
         # snapshot. An explicitly declared physical room snapshot must not
         # reissue its area onto another canonical room snapshot.
         source_room_snapshot = metadata.get("room_snapshot_id")
-        if source_room_snapshot not in (None, "") and not _exact_source_token(
-            source_room_snapshot, room.snapshot_id
-        ):
+        if not _optional_source_token(source_room_snapshot, room.snapshot_id):
             continue
         source_viewport = metadata.get("viewport_id")
         if (
