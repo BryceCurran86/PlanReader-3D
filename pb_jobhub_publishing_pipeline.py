@@ -385,9 +385,22 @@ def execute_jobhub_publishing(
         if isinstance(package.created_by, str) and package.created_by.strip()
         else ""
     )
+    # The gate deliberately permits customer-visible informational source
+    # warnings and draft provisional/critical notices, but the previous final
+    # JobHub writer silently discarded them. Preserve their full text in a
+    # canonical JSON note so the recipient receives exactly what passed the
+    # original gate. Stable sorting preserves duplicate warnings and makes
+    # equivalent orderings match the full-evidence canonical payload seal.
+    customer_warnings = sorted(gate_result.warnings)
+    warning_note = (
+        " | Gate warnings: "
+        + json.dumps(customer_warnings, ensure_ascii=False, separators=(",", ":"))
+        if customer_warnings else ""
+    )
     notes_str = (
         f"Mode: {package.mode.upper()} | Fingerprint: {package.preflight_fingerprint} | "
         f"Payload: {package.payload_hash} | Published by {publishing_actor}{creator_note}"
+        f"{warning_note}"
     )
 
     # A previous bridge.query() checked job_no on a separate connection,
@@ -500,4 +513,5 @@ def execute_jobhub_publishing(
         "exterior_m2": exterior_m2,
         "preflight_fingerprint": package.preflight_fingerprint,
         "payload_hash": package.payload_hash,
+        "warnings": customer_warnings,
     }
