@@ -295,7 +295,9 @@ def side_evidence(
         second = []
         for k in index.keys[orient]:
             signed = (k - coord) * sign
-            if band[0] <= abs(signed) <= band[1]:
+            # A measured floor uses the room-facing wall face; its paired
+            # wall face must lie outward, not across the room interior.
+            if band[0] <= signed <= band[1]:
                 c2 = sum(max(0.0, min(b, hi) - max(a, lo)) for a, b in lines[orient][k]) / length
                 if c2 >= SIDE_PARTIAL:
                     second.append((round(signed, 2), round(c2, 3)))

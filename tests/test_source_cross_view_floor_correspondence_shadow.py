@@ -32,6 +32,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     build_lines,
     rank_registrations,
     box_correspondence,
+    side_evidence,
     classify_floor,
     merge_intervals,
 )
@@ -1012,3 +1013,57 @@ def test_missing_physical_identity_abstains_only_affected_floor(field_name):
     assert result.records[1].status is EvidenceResolutionStatus.CANDIDATE
     assert all(not r.takeoff_eligible and not r.commercial_projection_allowed
                for r in result.records)
+
+
+@pytest.mark.parametrize(
+    "side,axis,old_coord,new_coord",
+    [
+        ("x0", "x", 94.72, 105.28),
+        ("x1", "x", 255.28, 244.72),
+        ("y0", "y", 94.72, 105.28),
+        ("y1", "y", 255.28, 244.72),
+    ],
+)
+def test_wrong_side_second_wall_face_cannot_authenticate_floor(
+    side: str, axis: str, old_coord: float, new_coord: float
+):
+    """Interior parallel strokes cannot serve as the outward wall face."""
+    box = (100.0, 100.0, 250.0, 250.0)
+    valid = room(*box)
+    invalid = copy.deepcopy(valid)
+    changed = 0
+    for segment in invalid:
+        k1, k2 = ("x1", "x2") if axis == "x" else ("y1", "y2")
+        if segment[k1] == segment[k2] == old_coord:
+            segment[k1] = segment[k2] = new_coord
+            changed += 1
+    assert changed == 1
+    valid_lines = build_lines(valid)
+    invalid_lines = build_lines(invalid)
+    assert side_evidence(box, valid_lines)[side]["second_face"]
+    assert side_evidence(box, invalid_lines)[side]["second_face"] == []
+
+    valid_corr = box_correspondence(
+        box, lines_support=valid_lines, lines_target=valid_lines,
+        orientation="identity", translation=(0.0, 0.0),
+    )
+    assert valid_corr["wall_bounded_on_both_sheets"] is True
+    assert valid_corr["side_kinds"][side] == "full"
+    invalid_corr = box_correspondence(
+        box, lines_support=invalid_lines, lines_target=invalid_lines,
+        orientation="identity", translation=(0.0, 0.0),
+    )
+    assert invalid_corr["side_kinds"][side] == "not_wall"
+    assert invalid_corr["wall_bounded_on_both_sheets"] is False
+    mark = [{"code": "FT3", "margin_pt": 40.0, "registered_region": True}]
+    positive = classify_floor(
+        valid_corr, registration_unique=True, marks_inside=mark,
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    negative = classify_floor(
+        invalid_corr, registration_unique=True, marks_inside=mark,
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert positive["status"] is EvidenceResolutionStatus.CANDIDATE
+    assert negative["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert BOX_NOT_WALL_BOUNDED in negative["reason_codes"]

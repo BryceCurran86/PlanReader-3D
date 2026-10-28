@@ -103,7 +103,16 @@ def build_publishing_package_from_workspace(
     # SQLite ingestion row order is not drawing-revision authority. Preserve the
     # full filename multiset but seal it in canonical order, consistent with
     # the already-sorted (filename, source SHA-256) revision manifest.
-    file_names = sorted(str(row["file_name"]) for row in doc_rows if row["file_name"])
+    # The source revision manifest below already strips incidental filename
+    # padding before hashing (filename, SHA-256). Use the SAME canonical name
+    # for the separately sealed file roster, or byte-identical re-ingestion
+    # with padded names can evade the transactional JobHub duplicate check.
+    # Preserve case and multiplicity; an empty canonical name remains invalid
+    # source evidence for the commercial revision manifest.
+    file_names = sorted(
+        name for row in doc_rows
+        if (name := str(row["file_name"] or "").strip())
+    )
     # The publisher must never substitute filename equality for PDF byte
     # identity. SHA values originate from source ingestion; separate original
     # byte replay is still required for full benchmark/issuer certification.
@@ -443,8 +452,14 @@ def execute_jobhub_publishing(
                     q.substrate,
                     q.element,
                     q.unit,
-                    round(q.quantity, 4),
-                    round(q.rate, 2),
+                    # The full-evidence payload SHA seals the original measured
+                    # quantity and client-supplied unit rate without rounding.
+                    # The commercial gate explicitly allows sub-cent rates when
+                    # the payable line total is cent-exact. Rounding either
+                    # field here silently changes the customer JobHub line
+                    # after its source and commercial evidence were sealed.
+                    q.quantity,
+                    q.rate,
                     round(q.total_price, 2),
                 ),
             )
