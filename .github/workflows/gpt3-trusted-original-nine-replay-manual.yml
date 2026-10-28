@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=cb6936403142ca6d14e85b029907b75aa19dbf79
-          approved_head=2ef34d242c73dc3b70d3cad2ac6afe4707d2c9fa
+          approved_base=a8d0fa5ef2dc0db3e1171ab8e8558bf9448f1e94
+          approved_head=296f48e8d89496afd96b4eda5a2e65f18285227b
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -41,6 +41,7 @@ jobs:
           .github/workflows/test-gpt3-v1-unsigned-scope-wire.yml
           .github/workflows/test-gpt3-v2-opening-kind-consistency.yml
           .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
+          docs/engineering/gptmax_append_only_diagnostic_scope_replay_20261029.md
           pb_customer_output_verification.py
           pb_live_opening_customer_projection.py
           pb_live_opening_source_closed_export.py

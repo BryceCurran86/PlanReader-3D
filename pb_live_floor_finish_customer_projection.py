@@ -168,9 +168,28 @@ def project_live_floor_finish_customer_rows(
     for quantity in quantities:
         if len(quantity.input_entity_ids) != 1:
             continue
-        floor = floors.get(_clean(quantity.input_entity_ids[0]))
+        # A canonical floor address is an original producer-owned identity.
+        # The source trace builder currently strips/coerces this lookup; the
+        # commercial location must not inherit that alias as a FIRM address.
+        source_floor_id = quantity.input_entity_ids[0]
+        if (
+            type(source_floor_id) is not str
+            or not source_floor_id
+            or source_floor_id != source_floor_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish customer canonical floor input lacks exact source identity"
+            )
+        floor = floors.get(source_floor_id)
         if floor is None:
             continue
+        if (
+            type(floor.canonical_floor_id) is not str
+            or floor.canonical_floor_id != source_floor_id
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish customer canonical floor disagrees with original source identity"
+            )
         # The physical room address is an original producer identity, not a
         # customer label. Never coerce a missing, padded or foreign token into
         # a plausible commercial location while keeping the FIRM quantity.

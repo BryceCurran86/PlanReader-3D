@@ -90,3 +90,44 @@ def test_abstained_original_floor_finish_still_has_no_customer_row():
     assert project_live_floor_finish_customer_rows(
         claim, workspace_id=1, project_id="project-1",
     ) == ()
+
+
+@pytest.mark.parametrize(
+    "source_floor_id",
+    (
+        " floor-1",
+        "floor-1 ",
+        1,
+        True,
+        _StringAlias("floor-1"),
+    ),
+)
+def test_firm_customer_rejects_coerced_quantity_canonical_floor_id(source_floor_id):
+    quantity = replace(_quantity(), input_entity_ids=(source_floor_id,))
+    claim = replace(_claim(), floor_finish_quantity_evidence=(quantity,))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="customer canonical floor input lacks exact source identity",
+    ):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "source_floor_id",
+    (
+        " floor-1",
+        "floor-1 ",
+        _StringAlias("floor-1"),
+    ),
+)
+def test_firm_customer_rejects_coerced_original_canonical_floor_record(source_floor_id):
+    claim = _claim(replace(_floor(), canonical_floor_id=source_floor_id))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="customer canonical floor disagrees with original source identity",
+    ):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1",
+        )

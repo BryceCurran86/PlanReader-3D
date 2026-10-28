@@ -19,3 +19,15 @@ Adversarial real-projector tests cover missing, blank, padded and coerced source
 ## Files and authority kept untouched
 
 No changes to GPT2 original room, FT2/FT3, doorway or RCP producers; GPT MAX/Claude hosts or glazing; GPT3 signing/scoring; GPT1 existing floor source exporter or source/quantity issuer; private original PDFs, source hashes/tokens, frozen V2 truth/evaluator, previously signed Lot16 customer bodies, 20,000 primitive limit or 2.5pt snap. Original-source replay and signed/customer preservation remain mandatory before any merge.
+
+## Follow-up: exact canonical floor input and producer identity
+
+The original source-trace builder and customer projector both previously
+looked up canonical floors with `_clean()`, allowing padded or non-native
+`QuantityEvidence.input_entity_ids[0]` and `canonical_floor_id` to resolve
+to a valid-looking customer location. The selected FIRM row now requires
+an exact native, nonempty, unpadded input ID and an identical exact original
+canonical-floor ID. The source-trace producer remains unchanged; abstained
+siblings and the valid customer row remain untouched. Regression negatives
+exercise both sides of this producer-to-customer identity boundary. This
+does not establish new original-source geometry, a FIRM quantity or a score.
