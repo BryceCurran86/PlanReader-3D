@@ -96,6 +96,11 @@ def build_live_ceiling_area_source_traces(
         ceilings[canonical_id] = ceiling
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # Two distinct canonical rooms must not reissue the very same physical
+    # original ceiling face as independent FIRM quantities.  Source-area IDs
+    # and room labels alone cannot establish two physical ceiling surfaces.
+    # This is a negative-only seal check, not an area/finish measurement.
+    claimed_original_faces: dict[tuple[object, ...], str] = {}
     for quantity in publish_live_ceiling_area_quantities(result):
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("ceiling quantities must contain QuantityEvidence")
@@ -239,6 +244,33 @@ def build_live_ceiling_area_source_traces(
                 raise SourceClosedRunConflictError(
                     f"ceiling source polygon is invalid or degenerate: {quantity.quantity_id}"
                 ) from exc
+
+        # The simple-ring validator above authenticates shape validity but
+        # does not compare it with independently named FIRM ceilings.  Compare
+        # undirected source edges so a rotated starting vertex, reversed
+        # winding, or explicit closing point cannot evade physical identity.
+        # Different source pages/viewports/revisions remain independent.
+        ring = tuple(zip(xs, ys))
+        if ring[0] == ring[-1]:
+            ring = ring[:-1]
+        original_edges = tuple(sorted(
+            (a, b) if a <= b else (b, a)
+            for a, b in zip(ring, ring[1:] + ring[:1])
+        ))
+        physical_face_key = (
+            ceiling.source_sha256.lower(),
+            ceiling.revision_id,
+            ceiling.source_page,
+            ceiling.viewport_id,
+            original_edges,
+        )
+        previous_owner = claimed_original_faces.get(physical_face_key)
+        if previous_owner is not None and previous_owner != canonical_id:
+            raise SourceClosedRunConflictError(
+                "distinct canonical ceilings claim the same original source face: "
+                f"{previous_owner}, {canonical_id}"
+            )
+        claimed_original_faces[physical_face_key] = canonical_id
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
