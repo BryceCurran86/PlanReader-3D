@@ -120,6 +120,9 @@ class SourceFullPlanEngineRecord:
     total_rooms_recovered: int
     total_finish_zones_recovered: int
     page_verdicts: tuple[SourcePageExecutionVerdict, ...]
+    # Only the SourceVisibilityProducer entry fills these original-page
+    # view-class receipt IDs; the caller-owned direct diagnostic leaves empty.
+    source_page_view_class_receipts: tuple[tuple[str, str], ...] = ()
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     reason_codes: tuple[str, ...] = (SOURCE_FULL_PLAN_ENGINE_CANDIDATE,)
     schema_version: str = SCHEMA_VERSION
@@ -511,6 +514,7 @@ def execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
         page_ids=tuple(page.page_id for page in pages),
     )
     classified_pages: list[SourcePageInputPayload] = []
+    source_view_receipts: list[tuple[str, str]] = []
     for page in pages:
         view = authority.resolve(
             ViewportViewClassSelector(
@@ -532,6 +536,30 @@ def execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
         classified_pages.append(
             replace(page, page_type="floor_plan" if authenticated else "unverified")
         )
-    return execute_source_full_plan_recovery_engine_shadow(
+        if authenticated:
+            source_view_receipts.append((page.page_id, view.record.record_id))
+
+    base_result = execute_source_full_plan_recovery_engine_shadow(
         selector, pages=tuple(classified_pages)
     )
+    # The same room/mark candidates can be passed directly to the unverified
+    # diagnostic API. Do not mint an indistinguishable result for the genuinely
+    # source-classified path. Bind every corroborated native view-class receipt
+    # to the diagnostic record's identity without granting FIRM/area authority.
+    if base_result.record is None or not source_view_receipts:
+        return base_result
+    receipts = tuple(sorted(source_view_receipts))
+    trusted_identity = stable_contract_id(
+        "source_full_plan_recovery_native_page_class",
+        {
+            "base_record_id": base_result.record.record_id,
+            "source_page_view_class_receipts": receipts,
+        },
+        digest_chars=32,
+    )
+    record = replace(
+        base_result.record,
+        record_id=trusted_identity,
+        source_page_view_class_receipts=receipts,
+    )
+    return replace(base_result, record=record)
