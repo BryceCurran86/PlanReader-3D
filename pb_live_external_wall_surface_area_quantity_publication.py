@@ -169,7 +169,17 @@ def publish_live_per_wall_surface_area_quantities(
             # Recheck original producer-owned opening identity and metric frame
             # before commercial source-closed reissue. Geometry and area can
             # remain unchanged while these source identities are substituted.
-            or wall.wall_local_frame_id != wall.physical_wall_id
+            or type(wall.wall_local_frame_id) is not str
+            or not wall.wall_local_frame_id
+            or wall.wall_local_frame_id != wall.wall_local_frame_id.strip()
+            # Opening-bearing walls are addressed by their whole-wall frame
+            # when joining physical voids. Zero-opening walls instead have
+            # an independently sealed stable zero-opening frame ID, which is
+            # not required to equal the physical wall candidate ID.
+            or (
+                bool(wall.opening_voids)
+                and wall.wall_local_frame_id != wall.physical_wall_id
+            )
             or wall.coordinate_unit != "metre"
             or _exact_ids(wall.opening_identity_ids) is None
             or wall.opening_identity_ids != tuple(
