@@ -93,10 +93,38 @@ def test_manual_only_owner_main_context_never_pr_or_push():
     assert "github.event_name == 'workflow_dispatch'" in job["if"]
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "github.actor == 'BryceCurran86'" in job["if"]
+    assert "github.triggering_actor == 'BryceCurran86'" in job["if"]
     assert job["strategy"]["matrix"]["target"] == list(HEADS)
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
     assert job["strategy"]["fail-fast"] is False
     assert "github.event.inputs" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_owner_rerun_guard_rejects_foreign_writer_and_non_manual_context():
+    # github.actor is the ORIGINAL workflow initiator on a rerun; the
+    # rerunning writer is github.triggering_actor. Both must be the owner.
+    guard = _load()["jobs"]["verify"]["if"]
+    assert guard == (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == 'BryceCurran86' && "
+        "github.triggering_actor == 'BryceCurran86' }}"
+    )
+    cases = (
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", True),
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "foreign-writer", False),
+        ("workflow_dispatch", "refs/heads/main", "foreign-writer", "BryceCurran86", False),
+        ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", False),
+        ("pull_request", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+        ("push", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+    )
+    for event, ref, original, rerunner, allowed in cases:
+        assert all((
+            event == "workflow_dispatch",
+            ref == "refs/heads/main",
+            original == "BryceCurran86",
+            rerunner == "BryceCurran86",
+        )) is allowed
 
 
 def test_exact_head_code_diff_and_parent_tree_veto_precede_original_download():
