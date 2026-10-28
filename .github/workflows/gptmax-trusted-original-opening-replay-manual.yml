@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     name: ${{ matrix.target }} original (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
