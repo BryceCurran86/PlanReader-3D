@@ -318,6 +318,14 @@ def execute_jobhub_publishing(
             "JobHub publishing requires a sealed matching SHA-256 payload hash"
         )
 
+    # The sealed package creator is attribution for the source estimate;
+    # the person actually publishing can be a different delegated user.
+    # Do not let an empty or non-string delivery actor write an anonymous
+    # JobHub customer package. Check before opening any destination.
+    if type(user_name) is not str or not user_name.strip():
+        raise RuntimeError("JobHub publishing requires a named delivery actor")
+    publishing_actor = user_name.strip()
+
     target_job_id = package.project_identity.target_jobhub_job_id
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
@@ -369,9 +377,17 @@ def execute_jobhub_publishing(
 
     takeoff_no = f"PR-{package.project_identity.job_no}-{'PUB' if package.mode == PublishingMode.COMMERCIAL.value else 'DFT'}-{package.payload_hash[:8]}"
     status_label = "Published" if package.mode == PublishingMode.COMMERCIAL.value else "Draft"
+    # Preserve BOTH roles in the destination. The source creator was already
+    # SHA-sealed; the delivery actor is the caller authenticated at write time.
+    # Missing draft provenance remains absent rather than invented.
+    creator_note = (
+        f" | Package creator: {package.created_by}"
+        if isinstance(package.created_by, str) and package.created_by.strip()
+        else ""
+    )
     notes_str = (
         f"Mode: {package.mode.upper()} | Fingerprint: {package.preflight_fingerprint} | "
-        f"Payload: {package.payload_hash} | Published by {user_name}"
+        f"Payload: {package.payload_hash} | Published by {publishing_actor}{creator_note}"
     )
 
     # A previous bridge.query() checked job_no on a separate connection,
@@ -434,7 +450,7 @@ def execute_jobhub_publishing(
                 exterior_m2,
                 0.0,
                 0.0,
-                user_name,
+                publishing_actor,
                 notes_str,
             ),
         )
