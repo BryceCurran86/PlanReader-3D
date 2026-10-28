@@ -49,21 +49,20 @@ def _competing_room_claim(live_claim, *, variant="same", reverse=False):
     ring = tuple(first_floor.polygon_pdf_pts)
     if len(ring) > 1 and ring[0] == ring[-1]:
         ring = ring[:-1]
-    if len(ring) < 4:
-        raise AssertionError("expected original fixture four-corner physical floor")
-    a, b, c, d, *rest = ring
-    if rest:
-        # Use the source's own ring for the unchanged case.
-        if variant not in ("same", "rotated", "reversed", "closed"):
-            raise AssertionError("unexpected source ring shape")
+    if len(ring) < 3:
+        raise AssertionError("expected an original source ring with three corners")
+    a, b = ring[:2]
     mid_ab = ((a[0]+b[0])/2, (a[1]+b[1])/2)
+    # A full original-width translation makes the positive control adjacent
+    # rather than accidentally overlapping a large source-room face.
+    source_width = max(x for x, _ in ring) - min(x for x, _ in ring)
     alternate = {
         "same": ring,
         "rotated": ring[2:] + ring[:2],
         "reversed": tuple(reversed(ring)),
         "closed": ring + (ring[0],),
         "collinear": (a, mid_ab, *ring[1:]),
-        "adjacent": tuple((x + 10.0, y) for x, y in ring),
+        "adjacent": tuple((x + source_width, y) for x, y in ring),
     }[variant]
     floor2 = next(f for f in claim.canonical_floors
                   if f.metric_area_quantity_id == second.quantity_id)
