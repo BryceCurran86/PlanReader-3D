@@ -671,13 +671,17 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     "selector": {
                         "document_id": selector.document_id,
                         "revision_id": selector.revision_id,
+                        "source_sha256": selector.source_sha256,
+                        "snapshot_id": selector.snapshot_id,
                         "support_page_id": selector.support_page_id,
                         "target_page_id": selector.target_page_id,
                         "material_code": selector.material_code,
                     },
                     "canonical_floor_id": canonical_floor_id,
                     "physical_room_id": physical_room_id,
+                    "source_room_face_record_id": source_room_face_record_id,
                     "box_support": box_sup,
+                    "box_target": corr["box_target_sheet"],
                 },
             )
 

@@ -7,6 +7,7 @@ zero PDF or benchmark gold consumed.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import math
 import pytest
 
@@ -875,3 +876,54 @@ def test_repeated_real_target_wall_layout_has_ambiguous_translation(reverse):
     assert REGISTRATION_TRANSLATION_ALIAS in result.records[0].reason_codes
     assert result.records[0].takeoff_eligible is False
     assert result.records[0].commercial_projection_allowed is False
+
+
+# GPT2: stable shadow IDs must not alias different source snapshots or
+# different source-face/target correspondence evidence under one document ID.
+def _source_lineage_record(*, selector=None, face_id="face-office", target_shift=(0.0, 0.0)):
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=selector or sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=moved(TARGET_SHEET, *target_shift),
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": face_id,
+        }],
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.takeoff_eligible is False
+    assert rec.commercial_projection_allowed is False
+    return rec
+
+
+def test_shadow_record_id_separates_source_sha_snapshot_and_face_identity():
+    selector = sample_selector()
+    base = _source_lineage_record(selector=selector)
+    replay = _source_lineage_record(selector=selector)
+    changed_sha = _source_lineage_record(selector=replace(selector, source_sha256="b" * 64))
+    changed_snapshot = _source_lineage_record(selector=replace(selector, snapshot_id="snap-test-2"))
+    changed_face = _source_lineage_record(selector=selector, face_id="face-office-revision")
+
+    assert base.record_id == replay.record_id
+    assert len({base.record_id, changed_sha.record_id,
+                changed_snapshot.record_id, changed_face.record_id}) == 4
+    assert base.canonical_floor_id == changed_sha.canonical_floor_id
+    assert base.support_dimension_box_pdf_pts == changed_snapshot.support_dimension_box_pdf_pts
+    assert base.physical_room_id == changed_face.physical_room_id
+
+
+def test_shadow_record_id_separates_distinct_target_sheet_correspondence():
+    base = _source_lineage_record()
+    moved_target = _source_lineage_record(target_shift=(100.0, -70.0))
+    assert base.support_dimension_box_pdf_pts == moved_target.support_dimension_box_pdf_pts
+    assert base.target_box_pdf_pts != moved_target.target_box_pdf_pts
+    assert base.record_id != moved_target.record_id
+    assert moved_target.takeoff_eligible is False
+    assert moved_target.commercial_projection_allowed is False
