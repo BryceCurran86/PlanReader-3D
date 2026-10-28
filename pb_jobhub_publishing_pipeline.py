@@ -452,8 +452,14 @@ def execute_jobhub_publishing(
                     q.substrate,
                     q.element,
                     q.unit,
-                    round(q.quantity, 4),
-                    round(q.rate, 2),
+                    # The full-evidence payload SHA seals the original measured
+                    # quantity and client-supplied unit rate without rounding.
+                    # The commercial gate explicitly allows sub-cent rates when
+                    # the payable line total is cent-exact. Rounding either
+                    # field here silently changes the customer JobHub line
+                    # after its source and commercial evidence were sealed.
+                    q.quantity,
+                    q.rate,
                     round(q.total_price, 2),
                 ),
             )
