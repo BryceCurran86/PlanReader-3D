@@ -18,7 +18,10 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pb_source_visibility_authority import SourceVisibilityProducer
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_floor_finish_occurrence_ownership_shadow import (
