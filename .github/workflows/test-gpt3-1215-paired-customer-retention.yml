@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   original-paired-source-customer:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 70
     env:
@@ -36,7 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
           fetch-depth: 0
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
@@ -70,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           HEAD_SHA="$(git rev-parse HEAD)"
-          test "$HEAD_SHA" = "${{ github.event.pull_request.head.sha }}"
+          test "$HEAD_SHA" = "${{ github.sha }}"
           # Source-signed historical pre-1215 control; current PR base already has the eighth row.
           # Preserve exact 7->8 source/quantity/customer transition proof, not a current-main comparison.
           BASE_SHA="f1ce6adcd20eee4004edd995f534694dcdd5c7ad"
@@ -262,20 +264,9 @@ jobs:
           )
           print(json.dumps(evidence,sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-1215-fresh-paired-customer-retention
-          path: |
-            artifacts/base_sha.txt
-            artifacts/head_sha.txt
-            artifacts/baseline/source-report.json
-            artifacts/baseline/production/source_sealed_run.json
-            artifacts/baseline/production/source_production_openings.json
-            artifacts/baseline/production/verified_customer_rows.json
-            artifacts/candidate/source-report.json
-            artifacts/candidate/production/source_sealed_run.json
-            artifacts/candidate/production/source_production_openings.json
-            artifacts/candidate/production/verified_customer_rows.json
-            artifacts/gpt3-1215-fresh-customer-retention.json
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
+          rm -rf /tmp/gpt3-1215-base

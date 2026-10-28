@@ -19,10 +19,14 @@ concurrency:
 
 jobs:
   original-lot16-real-seal:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -82,9 +86,14 @@ jobs:
           )
           print("SOURCE SHA VERIFIED", receipt["actual_sha256"], flush=True)
           PY
-          /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
+          # Real source producer output remains local; GitHub PR/main logs
+          # must not expose page geometry, opening tags or signed object IDs.
+          if ! /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
-            --output-dir "$OUT/production" 2>&1 | tee "$OUT/producer_console.log"
+            --output-dir "$OUT/production" > "$OUT/producer_console.log" 2>&1; then
+            echo "::error::Original Lot16 producer FAILED (private details withheld)"
+            exit 1
+          fi
           python - <<'PY'
           import json
           from pathlib import Path
@@ -111,7 +120,7 @@ jobs:
           assert receipt["frozen_v2_reconciliation_complete"] is False
           print(json.dumps({
               "source_sha_verified": True,
-              "sealed_run_fingerprint":sealed.fingerprint,
+              "sealed_run_integrity_verified":True,
               "signed_quantity_count":len(sealed.quantities),
               "customer_verified_count":verified.valid_quantity_count,
               "benchmark_status":"IDENTITY_MAP_REQUIRED_UNPUBLISHED",
@@ -140,9 +149,8 @@ jobs:
           PY
         env:
           PYTHONPATH: .
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-lot16-original-sealed-score-input
-          path: artifacts/gpt3-lot16-original-source-score-input
-          retention-days: 4
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts

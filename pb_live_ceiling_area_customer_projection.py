@@ -148,6 +148,19 @@ def project_live_ceiling_area_customer_rows(
                 f"duplicate or invalid original ceiling source quantity id: {source_id}"
             )
         original_ids.add(source_id)
+        # A contradictory original FIRM numeric claim must never silently
+        # disappear before whole-customer reconciliation. Ordinary provisional
+        # shadows retain their existing nonpublishing behavior.
+        if (
+            not source.abstained
+            and source.value is not None
+            and _clean(source.status).casefold() == "firm"
+            and source.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "legacy numeric firm ceiling source retains unresolved blockers: "
+                f"{source_id}"
+            )
 
     original = tuple(
         quantity

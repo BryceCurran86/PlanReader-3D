@@ -452,3 +452,278 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+@pytest.mark.parametrize("stolen", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+def test_original_abstained_rcp_mark_cannot_be_reissued_on_firm_ceiling(stolen):
+    published=_quantity()
+    rival_source=dict(published.metadata)
+    other_key=("finish_occurrence_evidence_id"
+               if stolen=="finish_occurrence_record_id"
+               else "finish_occurrence_record_id")
+    rival_source[other_key]="distinct-source-claim"
+    blocked=replace(
+        published,quantity_id="blocked-other-ceiling",
+        value=None,abstained=True,
+        blocking_reasons=("original_room_ceiling_unresolved",),
+        metadata=rival_source,
+    )
+    claim=replace(
+        _claim(published),ceiling_lining_quantity_evidence=(published,blocked),
+    )
+    for consumer in (
+        seal_live_ceiling_lining_run,project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original RCP material mark contested by abstained source quantity",
+        ):
+            consumer(claim,workspace_id=1,project_id="project-1")
+
+
+@pytest.mark.parametrize("foreign_field,foreign_value", (
+    ("source_sha256","b"*64),
+    ("revision_id","foreign-original-revision"),
+))
+def test_independent_source_abstained_ceiling_mark_is_not_a_false_rival(
+    foreign_field,foreign_value,
+):
+    published=_quantity()
+    blocked=replace(
+        published,quantity_id="foreign-ceiling-candidate",
+        value=None,abstained=True,
+        blocking_reasons=("foreign_unscaled_ceiling",),
+        metadata={**dict(published.metadata),foreign_field:foreign_value},
+    )
+    claim=replace(
+        _claim(published),ceiling_lining_quantity_evidence=(blocked,published),
+    )
+    sealed=seal_live_ceiling_lining_run(
+        claim,workspace_id=1,project_id="project-1",
+    )
+    assert len(sealed.quantities)==1
+    projected=project_live_ceiling_customer_rows(
+        claim,workspace_id=1,project_id="project-1",
+    )
+    assert len(projected)==1
+
+
+def test_unrelated_abstained_rcp_occurrence_preserves_existing_ceiling_quantity():
+    published=_quantity()
+    blocked=replace(
+        published,quantity_id="unrelated-rcp-source",
+        value=None,abstained=True,
+        blocking_reasons=("original_coverage_incomplete",),
+        metadata={
+            **dict(published.metadata),
+            "finish_occurrence_record_id":"unrelated-occurrence",
+            "finish_occurrence_evidence_id":"unrelated-observation",
+        },
+    )
+    claim=replace(
+        _claim(published),ceiling_lining_quantity_evidence=(published,blocked),
+    )
+    assert len(seal_live_ceiling_lining_run(
+        claim,workspace_id=1,project_id="project-1",
+    ).quantities)==1
+    assert len(project_live_ceiling_customer_rows(
+        claim,workspace_id=1,project_id="project-1",
+    ))==1
+
+
+@pytest.mark.parametrize("bad_root", (
+    {"source_sha256": None}, {"source_sha256": "not-a-sha"},
+    {"revision_id": None}, {"revision_id": " unresolved-revision "},
+))
+@pytest.mark.parametrize("identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_unknown_original_root_does_not_erase_an_abstained_rcp_claim(
+    bad_root, identity, reverse,
+):
+    firm = _quantity()
+    other = ("finish_occurrence_evidence_id" if identity == "finish_occurrence_record_id"
+             else "finish_occurrence_record_id")
+    rival = replace(
+        firm, quantity_id="unknown-root-original-rival", value=None, abstained=True,
+        blocking_reasons=("original_source_root_unverified",),
+        metadata={**firm.metadata, **bad_root, other: "independent-other-identity"},
+    )
+    quantities = (rival, firm) if reverse else (firm, rival)
+    claim = replace(_claim(firm), ceiling_lining_quantity_evidence=quantities)
+    for consumer in (seal_live_ceiling_lining_run, project_live_ceiling_customer_rows):
+        with pytest.raises(SourceClosedRunConflictError, match="original RCP material mark contested"):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("bad_root", ({"source_sha256": None}, {"revision_id": None}))
+def test_unknown_root_with_independent_original_mark_does_not_veto_ceiling(bad_root):
+    firm = _quantity()
+    rival = replace(
+        firm, quantity_id="unknown-root-independent-source", value=None, abstained=True,
+        blocking_reasons=("original_source_root_unverified",),
+        metadata={**firm.metadata, **bad_root,
+                  "finish_occurrence_record_id": "independent-occurrence",
+                  "finish_occurrence_evidence_id": "independent-source-word"},
+    )
+    claim = replace(_claim(firm), ceiling_lining_quantity_evidence=(rival, firm))
+    sealed = seal_live_ceiling_lining_run(claim, workspace_id=1, project_id="project-1")
+    rows = project_live_ceiling_customer_rows(claim, workspace_id=1, project_id="project-1")
+    assert len(sealed.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == firm.quantity_id
+
+
+def _two_source_ceiling_claim(
+    *,
+    other_sha: str = SOURCE_SHA,
+    other_revision: str = "rev-1",
+    other_area_id: str = "room-area-qty-1",
+    other_occurrence_id: str = "occ-grid",
+    other_mark_id: str = "occ-evidence",
+) -> LivePhysicalNetWallClaim:
+    """Two real typed canonical ceilings; source-local IDs may overlap."""
+    first = _quantity()
+    other_evidence = tuple(
+        other_mark_id if witness == "occ-evidence" else witness
+        for witness in first.evidence_ids
+    )
+    second = replace(
+        first,
+        quantity_id="qty-ceiling-2",
+        semantic_key="ceiling_lining:ceiling-2:GRID:ceiling_grid",
+        input_entity_ids=("ceiling-2",),
+        evidence_ids=other_evidence,
+        metadata={
+            **dict(first.metadata),
+            "document_id": "doc-2",
+            "snapshot_id": "snap-2",
+            "source_sha256": other_sha,
+            "revision_id": other_revision,
+            "canonical_ceiling_id": "ceiling-2",
+            "physical_ceiling_surface_id": "ceiling-2",
+            "canonical_room_id": "canonical-room-2",
+            "physical_room_id": "physical-room-2",
+            "source_room_face_record_id": "face-2",
+            "upstream_room_area_quantity_id": other_area_id,
+            "room_area_quantity_id": other_area_id,
+            "finish_occurrence_record_id": other_occurrence_id,
+            "finish_occurrence_evidence_id": other_mark_id,
+        },
+    )
+    second_room = replace(
+        _room(),
+        canonical_room_id="canonical-room-2",
+        physical_room_id="physical-room-2",
+        document_id="doc-2",
+        revision_id=other_revision,
+        source_sha256=other_sha,
+        snapshot_id="snap-2",
+        source_room_face_record_id="face-2",
+    )
+    second_ceiling = replace(
+        _canonical_ceiling(first),
+        canonical_ceiling_id="ceiling-2",
+        document_id="doc-2",
+        revision_id=other_revision,
+        source_sha256=other_sha,
+        snapshot_id="snap-2",
+        room_entity_id="canonical-room-2",
+        room_area_quantity_id=other_area_id,
+        ceiling_quantity_id="qty-ceiling-2",
+        evidence_ids=other_evidence,
+    )
+    original = _claim(first)
+    return replace(
+        original,
+        canonical_rooms=(*original.canonical_rooms, second_room),
+        canonical_ceilings=(*original.canonical_ceilings, second_ceiling),
+        ceiling_lining_quantity_evidence=(first, second),
+    )
+
+
+@pytest.mark.parametrize("root", (
+    {"other_sha": "b" * 64},
+    {"other_revision": "rev-2"},
+    {"other_sha": "b" * 64, "other_revision": "rev-2"},
+))
+def test_independent_original_ceiling_roots_may_reuse_local_area_and_rcp_mark_ids(root):
+    claim = _two_source_ceiling_claim(**root)
+    before = claim.ceiling_lining_quantity_evidence
+    traces = build_live_ceiling_lining_source_traces(
+        claim, workspace_id=1, project_id="project-1"
+    )
+    assert set(traces) == {"qty-ceiling-1", "qty-ceiling-2"}
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1"
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim, workspace_id=1, project_id="project-1"
+    )
+    assert len(sealed.quantities) == len(rows) == 2
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+    assert claim.ceiling_lining_quantity_evidence == before
+
+
+def test_same_original_ceiling_area_cannot_be_reissued_to_second_surface():
+    claim = _two_source_ceiling_claim(
+        other_occurrence_id="occ-grid-2",
+        other_mark_id="occ-evidence-2",
+    )
+    for consumer in (
+        build_live_ceiling_lining_source_traces,
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(SourceClosedRunConflictError, match="competing ceiling surfaces"):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("collision", (
+    {"other_occurrence_id": "occ-grid", "other_mark_id": "occ-evidence-2"},
+    {"other_occurrence_id": "occ-grid-2", "other_mark_id": "occ-evidence"},
+))
+def test_same_original_rcp_occurrence_or_observation_cannot_be_reissued(collision):
+    claim = _two_source_ceiling_claim(
+        other_area_id="room-area-qty-2", **collision,
+    )
+    for consumer in (
+        build_live_ceiling_lining_source_traces,
+        seal_live_ceiling_lining_run,
+        project_live_ceiling_customer_rows,
+    ):
+        with pytest.raises(SourceClosedRunConflictError, match="competing ceilings"):
+            consumer(claim, workspace_id=1, project_id="project-1")
+
+
+def test_independent_same_root_ceiling_sources_remain_valid():
+    claim = _two_source_ceiling_claim(
+        other_area_id="room-area-qty-2",
+        other_occurrence_id="occ-grid-2",
+        other_mark_id="occ-evidence-2",
+    )
+    sealed = seal_live_ceiling_lining_run(
+        claim, workspace_id=1, project_id="project-1"
+    )
+    assert len(sealed.quantities) == 2
+
+
+@pytest.mark.parametrize("bad_root", (
+    {"other_sha": "invalid-sha"},
+    {"other_revision": " padded-revision "},
+    {"other_revision": ""},
+))
+def test_consistently_forged_second_ceiling_source_root_still_fails_closed(bad_root):
+    claim = _two_source_ceiling_claim(
+        other_area_id="room-area-qty-2",
+        other_occurrence_id="occ-grid-2",
+        other_mark_id="occ-evidence-2",
+        **bad_root,
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="source root is malformed"):
+        build_live_ceiling_lining_source_traces(
+            claim, workspace_id=1, project_id="project-1"
+        )
+

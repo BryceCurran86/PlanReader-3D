@@ -1,0 +1,645 @@
+"""Negatives, ambiguity, look-alikes and metamorphic invariants for the callout -> strip shadow."""
+from __future__ import annotations
+
+import random
+
+import fitz
+import pytest
+
+import pb_source_plan_glazing_strip_callout_shadow as shadow
+from dataclasses import replace
+
+from plan_callout_strip_fixture import (
+    ABST, CAND, CONF, GAP, HEX_H, MM_PER_PT, Sheet, add_window, by_mark, decision, ink_of, run, three_windows, types_of, words_of,
+)
+
+
+def reasons(result, mark):
+    return by_mark(result)[mark].reason_codes
+
+
+# ------------------------------------------------------------------------------------
+# the elevation fingerprint and the cross-window consistency
+# ------------------------------------------------------------------------------------
+
+def test_panel_count_that_disagrees_with_the_elevation_abstains_and_the_others_stay_candidates():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0, elevation_panels=4)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    got = by_mark(run(sheet))
+    assert got["W1"].status is ABST and "no_count_matching_strip" in got["W1"].reason_codes
+    assert got["W2"].status is CAND and got["W3"].status is CAND
+
+
+def test_length_that_disagrees_with_the_common_ratio_abstains_for_that_window_only():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0, width_mm=120.0 * MM_PER_PT * 1.25)
+    got = by_mark(run(sheet))
+    assert got["W1"].status is CAND and got["W2"].status is CAND
+    assert got["W3"].status is ABST and "no_scale_consistent_strip" in got["W3"].reason_codes
+    assert got["W3"].count_matching_strip_ids and got["W3"].strip_id is None
+
+
+def test_the_tagged_type_must_have_exactly_one_elevation_record():
+    sheet = three_windows()
+    result = run(sheet, types=[t for t in types_of(sheet) if t.type_mark != "W2"])
+    assert by_mark(result)["W2"].status is ABST and "elevation_type_record_missing" in reasons(result, "W2")
+    dup = types_of(sheet) + [shadow.ElevationTypeObservation("W1", "record:other", 3600.0, 3)]
+    result = run(sheet, types=dup)
+    assert by_mark(result)["W1"].status is CONF and "elevation_type_record_ambiguous" in reasons(result, "W1")
+    assert by_mark(result)["W2"].status is CAND and by_mark(result)["W3"].status is CAND
+
+
+def test_an_unresolved_elevation_width_abstains_with_the_adapters_reason():
+    sheet = three_windows()
+    types = [t if t.type_mark != "W1" else shadow.ElevationTypeObservation(
+        "W1", t.record_id, None, 3, unresolved_reason="frame_axis_ambiguous") for t in types_of(sheet)]
+    got = by_mark(run(sheet, types=types))
+    assert got["W1"].status is ABST and "frame_axis_ambiguous" in got["W1"].reason_codes
+
+
+def test_a_single_panel_window_is_never_measurable_even_when_the_length_matches():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=1, length=41.04)
+    got = by_mark(run(sheet))
+    assert got["W3"].status is ABST and "single_panel_fingerprint_unmeasurable" in got["W3"].reason_codes
+    assert got["W1"].status is CAND and got["W2"].status is CAND
+
+
+def test_strips_one_and_a_half_percent_apart_are_separated_by_the_quantum_tolerance():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W4", panels=3, length=206.88)          # 1.4 percent longer, same panel count
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    got = by_mark(run(sheet))
+    assert {m: c.status for m, c in got.items()} == {"W1": CAND, "W3": CAND, "W4": CAND}
+    assert got["W1"].strip_id != got["W4"].strip_id
+    assert len(got["W1"].count_matching_strip_ids) == 2        # both were retained as rivals
+    assert got["W4"].strip_id in got["W1"].rival_strip_ids
+
+
+def test_two_tags_whose_fingerprints_land_on_one_strip_are_both_conflicts():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W4", panels=3, length=206.88, width_mm=204.0 * MM_PER_PT)    # prints W1's width
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    got = by_mark(run(sheet))
+    assert got["W1"].status is CONF and got["W4"].status is CONF
+    assert "fingerprint_strip_claimed_by_several_tags" in got["W1"].reason_codes
+    assert got["W3"].status is ABST or got["W3"].status is CAND      # decided on its own conditions
+
+
+def test_two_identical_strips_for_one_tag_are_a_conflict_with_both_retained():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    twin, _ = add_window(sheet, 1, "W9", panels=3, length=204.0, callout=False, elevation=False)
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    got = by_mark(run(sheet))
+    assert got["W1"].status is CONF and got["W1"].strip_id is None
+    assert "several_scale_consistent_strips" in got["W1"].reason_codes
+    assert len(got["W1"].scale_consistent_strip_ids) == 2 and len(got["W1"].rival_strip_ids) == 2
+
+
+def test_a_strip_without_both_end_posts_has_no_measurable_extent():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    s = sheet.strip("H", 440.0, 300.0, panels=3, frame_len=232.0, end_posts=False)
+    sheet.callout(((s["frame"][0] + s["frame"][1]) / 2 + 2.0, s["band"][1] + GAP + HEX_H), "W2")
+    sheet.elevation_frame("W2", (460.0, 100.0, 580.0, 220.0), 3, 232.0 * MM_PER_PT)
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    result = run(sheet)
+    incomplete = [s for s in result.strips if not s.extent_complete]
+    assert len(incomplete) == 1 and incomplete[0].panel_count == 3
+    got = by_mark(result)["W2"]
+    assert got.status is ABST and dict(got.numbers)["count_matching_strips_without_complete_extent"] >= 1.0
+
+
+# ------------------------------------------------------------------------------------
+# the location filter can only remove a candidate
+# ------------------------------------------------------------------------------------
+
+def _two_with_custom_w1_callout(centre, **callout):
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0, callout=False)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    sheet.callout(centre, "W1", **callout)
+    return sheet
+
+
+def test_callout_beyond_the_strip_end_abstains_and_the_fingerprint_strip_is_kept_as_a_rival():
+    sheet = _two_with_custom_w1_callout((330.0, 305.52 + GAP + HEX_H))
+    got = by_mark(run(sheet))["W1"]
+    assert got.status is ABST and "callout_not_at_fingerprint_strip" in got.reason_codes
+    assert got.scale_consistent_strip_ids and set(got.scale_consistent_strip_ids) <= set(got.rival_strip_ids)
+
+
+def test_callout_straddling_the_strip_end_abstains_because_a_vertex_lies_outside_the_extent():
+    got = by_mark(run(_two_with_custom_w1_callout((264.0, 305.52 + GAP + HEX_H))))["W1"]
+    assert got.status is ABST and "callout_not_at_fingerprint_strip" in got.reason_codes
+
+
+def test_callout_overlapping_the_strip_band_abstains():
+    got = by_mark(run(_two_with_custom_w1_callout((164.0, 302.76))))["W1"]
+    assert got.status is ABST and "callout_not_at_fingerprint_strip" in got.reason_codes
+
+
+def test_the_gap_between_callout_and_strip_is_data_not_a_threshold():
+    near = by_mark(run(_two_with_custom_w1_callout((164.0, 305.52 + 1.0 + HEX_H))))["W1"]
+    far = by_mark(run(_two_with_custom_w1_callout((164.0, 305.52 + 30.0 + HEX_H))))["W1"]
+    assert near.status is CAND and far.status is CAND
+    assert dict(near.numbers)["callout_normal_gap_pt"] == pytest.approx(1.0, abs=0.05)
+    assert dict(far.numbers)["callout_normal_gap_pt"] == pytest.approx(30.0, abs=0.05)
+
+
+def test_a_ring_missing_one_edge_abstains():
+    got = by_mark(run(_two_with_custom_w1_callout((164.0, 305.52 + GAP + HEX_H), drop_edge=2)))["W1"]
+    assert got.status is ABST and "callout_ring_not_found" in got.reason_codes
+    assert dict(got.conditions)["callout_ring_unique"] == shadow.FAILED
+
+
+def test_a_second_ring_around_the_same_word_is_a_conflict_not_a_choice():
+    got = by_mark(run(_two_with_custom_w1_callout((164.0, 305.52 + GAP + HEX_H), extra_ring=True)))["W1"]
+    assert got.status is CONF and "callout_ring_not_unique" in got.reason_codes
+
+
+def test_single_ink_and_double_ink_rings_are_the_same_callout():
+    single = by_mark(run(_two_with_custom_w1_callout((164.0, 305.52 + GAP + HEX_H), ink_twice=False)))["W1"]
+    double = by_mark(run(_two_with_custom_w1_callout((164.0, 305.52 + GAP + HEX_H), ink_twice=True)))["W1"]
+    assert single.status is CAND and double.status is CAND
+    assert len(single.ring.ink_ids) == 6 and len(double.ring.ink_ids) == 12
+
+
+def test_the_same_tag_printed_twice_on_the_plan_page_is_never_resolved():
+    sheet = three_windows()
+    sheet.text((700.0, 600.0), "W1")
+    got = by_mark(run(sheet))
+    assert got["W1"].status is ABST and "tag_not_unique_on_plan_page" in got["W1"].reason_codes
+    assert len([c for c in run(sheet).correspondences if c.tag_mark == "W1"]) == 2
+
+
+# ------------------------------------------------------------------------------------
+# exclusivity runs over every callout ring on the page, not over the tags asked about
+# ------------------------------------------------------------------------------------
+
+def test_a_door_callout_inside_the_strip_extent_is_a_rival_claimant_and_forces_a_conflict():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "D1")           # same side, same strip extent
+    result = run(sheet)
+    got = by_mark(result)
+    assert got["W1"].status is CONF and "strip_has_other_callout_claimants" in got["W1"].reason_codes
+    assert got["D1"].tag_observation_id in got["W1"].rival_callout_ids
+    assert got["D1"].status is ABST and "elevation_type_record_missing" in got["D1"].reason_codes
+    assert got["W2"].status is CAND and got["W3"].status is CAND
+
+
+def test_a_claimant_on_the_other_side_of_the_strip_is_still_a_claimant():
+    sheet = three_windows()
+    sheet.callout((100.0, 300.0 - GAP - HEX_H), "D1")
+    assert by_mark(run(sheet))["W1"].status is CONF
+
+
+def test_every_callout_on_the_page_is_reported_whichever_tags_a_caller_cares_about():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "D1")
+    assert sorted(by_mark(run(sheet))) == ["D1", "W1", "W2", "W3"]
+
+
+# ------------------------------------------------------------------------------------
+# viewports
+# ------------------------------------------------------------------------------------
+
+def test_a_callout_outside_every_resolved_viewport_abstains():
+    result = run(three_windows(), viewports=())
+    assert {c.status for c in result.correspondences} == {ABST}
+    assert all("callout_outside_resolved_plan_viewport" in c.reason_codes for c in result.correspondences)
+
+
+def test_a_strip_in_another_viewport_than_its_callout_abstains():
+    top = shadow.PlanViewportRef("view_strips", (0.0, 290.0, 1400.0, 307.0))
+    bottom = shadow.PlanViewportRef("view_callouts", (0.0, 308.0, 1400.0, 900.0))
+    result = run(three_windows(), viewports=(top, bottom))
+    assert {c.status for c in result.correspondences} == {ABST}
+    assert all("strip_outside_callout_viewport" in c.reason_codes for c in result.correspondences)
+
+
+def test_expanding_the_viewport_does_not_change_any_decision():
+    base = run(three_windows())
+    big = shadow.PlanViewportRef("view_plan", (-500.0, -500.0, 9000.0, 9000.0))
+    assert decision(run(three_windows(), viewports=(big,))) == decision(base)
+
+
+def test_overlapping_viewports_leave_the_callout_without_a_unique_viewport():
+    a = shadow.PlanViewportRef("a", (0.0, 0.0, 1400.0, 900.0))
+    b = shadow.PlanViewportRef("b", (0.0, 0.0, 1400.0, 900.0))
+    assert {c.status for c in run(three_windows(), viewports=(a, b)).correspondences} == {ABST}
+
+
+# ------------------------------------------------------------------------------------
+# look-alikes that must never be a glazing strip
+# ------------------------------------------------------------------------------------
+
+def test_equally_spaced_parallel_lines_are_not_a_glazing_strip():
+    sheet = Sheet()
+    for k in range(5):
+        sheet.line((200.0, 300.0 + 1.4 * k), (404.0, 300.0 + 1.4 * k))
+    assert run(sheet).strips == ()
+
+
+def test_a_door_leaf_and_swing_arc_is_not_a_strip():
+    sheet = Sheet()
+    sheet.line((300.0, 300.0), (300.0, 360.0))
+    sheet.plan.draw_sector(fitz.Point(300.0, 300.0), fitz.Point(360.0, 300.0), 90, color=(0, 0, 0), width=0.48)
+    assert run(sheet).strips == ()
+
+
+def test_a_wall_of_two_double_inked_faces_without_a_pane_box_is_not_a_strip():
+    sheet = Sheet()
+    sheet.line((200.0, 300.0), (404.0, 300.0), double=True)
+    sheet.line((200.0, 305.52), (404.0, 305.52), double=True)
+    assert run(sheet).strips == ()
+
+
+def test_panes_drawn_in_a_different_line_weight_than_their_frame_are_not_mixed_into_a_strip():
+    sheet = Sheet()
+    sheet.strip("H", 200.0, 300.0, panels=3, frame_len=204.0, width=0.48, pane_width=0.24)
+    assert run(sheet).strips == ()
+
+
+def test_a_dimension_chain_of_ticks_parallel_to_a_strip_does_not_add_a_strip():
+    sheet = three_windows()
+    for x in (60.0, 120.0, 180.0, 264.0):
+        sheet.line((x, 282.0), (x, 292.0))
+    sheet.line((60.0, 287.0), (264.0, 287.0))
+    assert len(run(sheet).strips) == len(run(three_windows()).strips) == 3
+
+
+# ------------------------------------------------------------------------------------
+# metamorphic invariants: the decision may not depend on where, how big, or in what order
+# ------------------------------------------------------------------------------------
+
+BASE = {"W1": CAND, "W2": CAND, "W3": CAND}
+
+
+def _shifted(dx, dy):
+    sheet = Sheet(size=(1800.0, 1300.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0, dx=dx, dy=dy)
+    add_window(sheet, 1, "W2", panels=3, length=232.0, dx=dx, dy=dy)
+    add_window(sheet, 2, "W3", panels=5, length=120.0, dx=dx, dy=dy)
+    return sheet
+
+
+@pytest.mark.parametrize("dx,dy", [(137.0, 211.0), (137.37, 211.11), (0.003, 0.003), (0.123, 0.0)])
+def test_translation_of_the_whole_plan_does_not_change_any_decision(dx, dy):
+    reference = decision(run(_shifted(0.0, 0.0)))
+    assert {m: v[0] for m, v in reference.items()} == BASE
+    assert decision(run(_shifted(dx, dy))) == reference
+
+
+def test_axis_swap_of_the_plan_gives_the_same_decisions():
+    sheet = Sheet(size=(1400.0, 1400.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0, axis="V")
+    add_window(sheet, 1, "W2", panels=3, length=232.0, axis="V")
+    add_window(sheet, 2, "W3", panels=5, length=120.0, axis="V")
+    assert decision(run(sheet)) == decision(run(three_windows()))
+
+
+def test_a_uniform_scale_of_every_elevation_width_gives_the_same_decisions():
+    sheet = three_windows()
+    assert decision(run(sheet, types=types_of(sheet, width_scale=1.7))) == decision(run(sheet))
+
+
+def test_unrelated_content_cannot_move_a_decision_even_when_it_outnumbers_the_strokes():
+    base = decision(run(three_windows()))
+    noisy = three_windows()
+    rng = random.Random(7)
+    for _ in range(800):
+        x, y = rng.uniform(20, 1380), rng.uniform(560, 880)
+        noisy.line((x, y), (x + rng.uniform(5, 40), y + rng.uniform(-3, 3)), width=0.1)
+    for _ in range(40):
+        x, y = rng.uniform(20, 1380), rng.uniform(560, 880)
+        noisy.line((x, y), (x + rng.uniform(5, 40), y), width=0.48)
+    assert decision(run(noisy)) == base
+
+
+def test_collinear_splitting_of_every_frame_line_does_not_change_a_decision():
+    base = run(three_windows())
+
+    class Splitting(Sheet):
+        def line(self, a, b, page=None, double=False, **kw):
+            if (abs(a[1] - b[1]) < 1e-9 and abs(a[0] - b[0]) > 6.0) or (abs(a[0] - b[0]) < 1e-9 and abs(b[1] - a[1]) > 6.0):
+                mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+                super().line(a, mid, page, double, **kw)
+                super().line(mid, b, page, double, **kw)
+            else:
+                super().line(a, b, page, double, **kw)
+
+    sheet = Splitting(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0)
+    result = run(sheet)
+    assert decision(result) == decision(base)
+    assert [(s.axis, s.panel_count, s.frame_along) for s in result.strips] == \
+           [(s.axis, s.panel_count, s.frame_along) for s in base.strips]
+
+
+def test_input_order_of_ink_words_and_types_does_not_change_a_decision():
+    sheet = three_windows()
+    pdf = sheet.pdf()
+    base = run(sheet)
+    reversed_result = run(sheet, ink=list(reversed(ink_of(pdf))), words=list(reversed(words_of(pdf))),
+                          types=list(reversed(types_of(sheet))))
+    assert decision(reversed_result) == decision(base)
+    assert {c.record_id for c in reversed_result.correspondences} == {c.record_id for c in base.correspondences}
+    assert [s.strip_id for s in reversed_result.strips] == [s.strip_id for s in base.strips]
+
+
+def test_a_page_over_the_ink_budget_abstains_for_every_tag_instead_of_raising(monkeypatch):
+    monkeypatch.setattr(shadow, "_MAX_INK", 10)
+    result = run(three_windows())
+    assert result.strips == () and "stroke_budget_exceeded" in result.page_reason_codes
+    assert {c.status for c in result.correspondences} == {ABST}
+    assert all("stroke_budget_exceeded" in c.reason_codes for c in result.correspondences)
+
+
+def _with_untrusted(sheet, marks):
+    """Run with the named plan words withheld from the trusted set and passed as untrusted native words."""
+    pdf = sheet.pdf()
+    everything = words_of(pdf)
+    trusted = [w for w in everything if w.text not in marks]
+    untrusted = tuple(w for w in everything if w.text in marks)
+    return run(sheet, words=trusted, untrusted_plan_words=untrusted)
+
+
+def test_an_untrusted_word_inside_a_ring_beside_the_strip_is_an_unverified_rival_and_blocks_the_candidate():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "X9")           # a second ring beside W1's strip, label not trusted
+    result = _with_untrusted(sheet, {"X9"})
+    got = by_mark(result)
+    assert got["W1"].status is ABST and "strip_has_claimant_with_untrusted_label" in got["W1"].reason_codes
+    assert dict(got["W1"].conditions)["no_other_callout_claims_strip"] == shadow.FAILED
+    assert any(c.startswith("untrusted:") for c in got["W1"].rival_callout_ids)
+    assert got["W2"].status is CAND and got["W3"].status is CAND
+    assert result.untrusted_plan_word_count == 1
+
+
+def test_a_trusted_second_claimant_wins_over_an_unverified_one_as_a_conflict():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "D1")
+    sheet.callout((220.0, 305.52 + GAP + HEX_H), "X9")
+    assert by_mark(_with_untrusted(sheet, {"X9"}))["W1"].status is CONF
+
+
+def test_untrusted_words_without_a_ring_or_beside_another_strip_leave_every_candidate_alone():
+    sheet = three_windows()
+    sheet.text((700.0, 700.0), "X8")                              # a stray untrusted word, no ring
+    sheet.callout((350.0, 305.52 + GAP + HEX_H + 90.0), "X9")              # a ring between the strips, outside every extent
+    result = _with_untrusted(sheet, {"X8", "X9"})
+    assert {m: c.status for m, c in by_mark(result).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
+    assert result.untrusted_plan_word_count == 2
+    assert "callout_rings_without_native_words_not_inventoried" in result.page_reason_codes
+
+
+def test_an_undecidable_ring_around_an_untrusted_word_blocks_by_the_words_own_position():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "X9", extra_ring=True)      # two rings: undecidable
+    got = by_mark(_with_untrusted(sheet, {"X9"}))
+    assert got["W1"].status is ABST and "strip_has_unresolved_ring_claimant" in got["W1"].reason_codes
+
+
+# ------------------------------------------------------------------------------------
+# bounded ring search
+# ------------------------------------------------------------------------------------
+
+def _dense_ink(points=22, radius=9.0, centre=(300.0, 300.0)):
+    import math as _m
+    pts = [(centre[0] + radius * _m.cos(2 * _m.pi * k / points), centre[1] + radius * _m.sin(2 * _m.pi * k / points))
+           for k in range(points)]
+    ink = []
+    for a in range(points):
+        for b in range(a + 1, points):
+            ink.append(shadow.PlanInkSegment(f"e{a}-{b}", pts[a][0], pts[a][1], pts[b][0], pts[b][1], 0.48, True))
+    return ink
+
+
+def test_a_dense_endpoint_graph_under_the_edge_cap_abstains_promptly_instead_of_enumerating_millions_of_paths():
+    import time
+    ink = _dense_ink()
+    assert len(ink) == 231 < shadow._MAX_RING_EDGES
+    word = shadow.PlanTextObservation("p1:W1:0", "W1", (294.0, 296.0, 306.0, 304.0))
+    scope = shadow.PlanCalloutStripScope(
+        ownership=shadow.SourceOwnership("d", "r", "s", "a" * 64, shadow.PRODUCER_INPUT_PROVENANCE),
+        plan_page_id="1", elevation_page_id="2", callout_mark_pattern=r"[WD]\d+", coordinate_quantum_pt=0.24,
+        dimension_quantum_mm=5.0, plan_viewports=(shadow.PlanViewportRef("v", (0.0, 0.0, 600.0, 600.0)),))
+    started = time.perf_counter()
+    result = shadow.audit_plan_callout_to_glazing_strip_shadow(scope, ink=ink, words=[word], elevation_types=[])
+    assert time.perf_counter() - started < 20.0
+    got = by_mark(result)["W1"]
+    assert got.status is ABST and "callout_ring_search_budget_exceeded" in got.reason_codes
+    assert got.strip_id is None and result.strips == ()
+    assert all(getattr(result, flag) is False for flag in shadow._GRANT_FLAGS)
+
+
+def test_the_ring_search_budget_is_deterministic_and_does_not_change_ordinary_rings():
+    sheet = three_windows()
+    assert decision(run(sheet)) == decision(run(sheet))
+    assert {m: c.status for m, c in by_mark(run(sheet)).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
+
+
+def test_an_elevation_mark_printed_outside_its_type_frame_is_a_caveat_not_a_block():
+    sheet = three_windows()
+    types = [t if t.type_mark != "W1" else shadow.ElevationTypeObservation(
+        t.type_mark, t.record_id, t.display_width_mm, t.panel_count, outside_frame_mark_count=2) for t in types_of(sheet)]
+    got = by_mark(run(sheet, types=types))["W1"]
+    assert got.status is CAND and "elevation_mark_also_printed_outside_type_frame" in got.reason_codes
+
+
+# ------------------------------------------------------------------------------------
+# second exact-head review: unresolved TRUSTED rivals, target-pattern independence, receipt contract,
+# one shared ratio group
+# ------------------------------------------------------------------------------------
+
+def _dense_cluster(sheet, centre, radius=9.0, points=22):
+    import math as _m
+    pts = [(centre[0] + radius * _m.cos(2 * _m.pi * k / points), centre[1] + radius * _m.sin(2 * _m.pi * k / points))
+           for k in range(points)]
+    for a in range(points):
+        for b in range(a + 1, points):
+            sheet.line(pts[a], pts[b])
+
+
+def test_a_trusted_second_ring_that_cannot_be_decided_is_an_exclusion_only_rival_not_an_absence():
+    sheet = three_windows()
+    sheet.callout((100.0, 320.0), "D99", extra_ring=True)                    # two rings around a trusted opening tag
+    got = by_mark(run(sheet))
+    assert got["D99"].status is CONF and "callout_ring_not_unique" in got["D99"].reason_codes
+    assert got["W1"].status is ABST and "strip_has_unresolved_ring_claimant" in got["W1"].reason_codes
+    assert any(c.startswith("unresolved:") for c in got["W1"].rival_callout_ids)
+    assert got["W2"].status is CAND and got["W3"].status is CAND
+
+
+def test_a_trusted_ring_whose_search_hits_the_budget_still_opposes_the_strip():
+    sheet = three_windows()
+    sheet.text((95.0, 322.0), "D99")
+    _dense_cluster(sheet, (100.0, 320.0))
+    got = by_mark(run(sheet))
+    assert got["D99"].status is ABST and "callout_ring_search_budget_exceeded" in got["D99"].reason_codes
+    assert got["W1"].status is ABST and "strip_has_unresolved_ring_claimant" in got["W1"].reason_codes
+
+
+def test_trusting_a_label_cannot_erase_unresolved_competing_geometry():
+    trusted = three_windows()
+    trusted.callout((100.0, 320.0), "D99", extra_ring=True)
+    untrusted = three_windows()
+    untrusted.callout((100.0, 320.0), "D99", extra_ring=True)
+    a = by_mark(run(trusted))["W1"]
+    b = by_mark(_with_untrusted(untrusted, {"D99"}))["W1"]
+    assert a.status is ABST and b.status is ABST          # the same geometry blocks whichever way its label is trusted
+    assert (a.conditions == b.conditions)
+
+
+def test_the_target_pattern_selects_what_is_reported_never_which_rivals_exist():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "D99")                        # a unique trusted door-tag ring beside W1's strip
+    broad = by_mark(run(sheet))
+    narrow = by_mark(run(sheet, callout_mark_pattern=r"W\d+"))
+    assert broad["W1"].status is CONF
+    assert narrow["W1"].status is CONF and "D99" not in narrow                  # not reported, still a rival
+    assert any(c for c in narrow["W1"].rival_callout_ids)
+
+
+def test_a_trusted_ring_whose_label_is_not_an_opening_tag_is_not_a_rival():
+    sheet = three_windows()
+    sheet.callout((100.0, 305.52 + GAP + HEX_H), "A7")                         # a grid or finish bubble
+    assert by_mark(run(sheet))["W1"].status is CAND
+
+
+def test_a_correspondence_must_carry_exactly_the_complete_ordered_condition_set():
+    c = by_mark(run(three_windows()))["W1"]
+    for bad in ((), c.conditions[:1], c.conditions + c.conditions[:1], tuple(reversed(c.conditions)),
+                tuple((name, "passed") for name in ["x"] * len(c.conditions)),
+                tuple((n, "maybe") for n, _ in c.conditions)):
+        with pytest.raises(ValueError):
+            replace(c, conditions=bad)
+    failed = tuple((n, shadow.FAILED if i == 2 else s) for i, (n, s) in enumerate(c.conditions))
+    assert replace(c, status=ABST, strip_id=None, conditions=failed).status is ABST
+
+
+def _four_strips_two_incompatible_groups():
+    sheet = Sheet(size=(1800.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0, width_mm=120.0 * MM_PER_PT * 1.31)
+    add_window(sheet, 3, "W4", panels=7, length=300.0, width_mm=300.0 * MM_PER_PT * 1.31)
+    return sheet
+
+
+def test_two_internally_consistent_but_incompatible_ratio_groups_cannot_each_claim_one_shared_ratio():
+    got = by_mark(run(_four_strips_two_incompatible_groups()))
+    assert {m: c.status for m, c in got.items()} == {"W1": CONF, "W2": CONF, "W3": CONF, "W4": CONF}
+    assert all("competing_ratio_groups" in c.reason_codes for c in got.values())
+    assert all(dict(c.conditions)["one_common_ratio_group"] == shadow.FAILED for c in got.values())
+
+
+def test_a_pair_with_no_partner_in_the_chosen_group_abstains_while_the_group_stays():
+    sheet = Sheet(size=(1800.0, 900.0))
+    add_window(sheet, 0, "W1", panels=3, length=204.0)
+    add_window(sheet, 1, "W2", panels=3, length=232.0)
+    add_window(sheet, 2, "W3", panels=5, length=120.0, width_mm=120.0 * MM_PER_PT * 1.31)
+    got = by_mark(run(sheet))
+    assert got["W1"].status is CAND and got["W2"].status is CAND
+    assert got["W3"].status is ABST
+
+
+def test_the_one_group_case_is_unchanged():
+    assert {m: c.status for m, c in by_mark(run(three_windows())).items()} == {"W1": CAND, "W2": CAND, "W3": CAND}
+
+
+# ------------------------------------------------------------------------------------
+# third review: an unsegmented page is not a resolved viewport; uniqueness ignores the report pattern
+# ------------------------------------------------------------------------------------
+
+def test_toggling_only_the_viewport_basis_flips_every_candidate_to_a_typed_abstention_and_back():
+    sheet = three_windows()
+    resolved = run(sheet)
+    unsegmented = run(sheet, plan_viewport_basis=shadow.WHOLE_PAGE_UNSEGMENTED)
+    assert {c.status for c in resolved.correspondences} == {CAND}
+    assert {c.status for c in unsegmented.correspondences} == {ABST}
+    assert all("plan_viewport_not_resolved" in c.reason_codes for c in unsegmented.correspondences)
+    assert [s.strip_id for s in unsegmented.strips] == [s.strip_id for s in resolved.strips]      # diagnostics kept
+    assert "plan_viewport_whole_page_unsegmented" in unsegmented.page_reason_codes
+    assert decision(run(sheet, plan_viewport_basis=shadow.WHOLE_PAGE_UNSEGMENTED)) == decision(unsegmented)
+    assert decision(run(sheet)) == decision(resolved)
+
+
+def _w01_family(second_text="W1", ring_second=False):
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W01", panels=3, length=204.0)
+    add_window(sheet, 1, "W02", panels=3, length=232.0)
+    add_window(sheet, 2, "W03", panels=5, length=120.0)
+    if ring_second:
+        sheet.callout((700.0, 700.0), second_text)
+    else:
+        sheet.text((700.0, 700.0), second_text)
+    return sheet
+
+
+@pytest.mark.parametrize("pattern", [r"[WD]\d+", r"W\d{2}", r"W01"])
+@pytest.mark.parametrize("ring_second", [False, True])
+def test_a_second_trusted_word_with_the_same_type_key_disproves_uniqueness_whatever_the_report_pattern(pattern, ring_second):
+    # W01 and W1 normalise to one type key; a narrow report pattern must not hide the duplicate, with or without a ring
+    got = by_mark(run(_w01_family(ring_second=ring_second), callout_mark_pattern=pattern))
+    assert got["W01"].status is ABST and "tag_not_unique_on_plan_page" in got["W01"].reason_codes
+    assert dict(got["W01"].conditions)["tag_unique_on_plan_page"] == shadow.FAILED
+
+
+def test_the_duplicate_is_found_whatever_the_insertion_order_of_the_words():
+    sheet = _w01_family()
+    pdf = sheet.pdf()
+    forward = words_of(pdf)
+    got = by_mark(run(sheet, words=list(reversed(forward)), callout_mark_pattern=r"W\d{2}"))
+    assert got["W01"].status is ABST and "tag_not_unique_on_plan_page" in got["W01"].reason_codes
+
+
+def test_without_the_duplicate_the_narrow_pattern_reports_only_its_marks_and_they_stay_candidates():
+    sheet = Sheet(size=(1400.0, 900.0))
+    add_window(sheet, 0, "W01", panels=3, length=204.0)
+    add_window(sheet, 1, "W02", panels=3, length=232.0)
+    add_window(sheet, 2, "W03", panels=5, length=120.0)
+    got = by_mark(run(sheet, callout_mark_pattern=r"W\d{2}"))
+    assert {m: c.status for m, c in got.items()} == {"W01": CAND, "W02": CAND, "W03": CAND}
+
+
+# ------------------------------------------------------------------------------------
+# fourth review: the shared-ratio proof is over the whole decision scope, not the reported subset
+# ------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pattern", [r"[WD]\d+", r"W[12]", r"W1", r"W[34]"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_the_report_pattern_cannot_hide_a_contrary_ratio_group(pattern, reverse):
+    sheet = _four_strips_two_incompatible_groups()
+    pdf = sheet.pdf()
+    ink, words, types = ink_of(pdf), words_of(pdf), types_of(sheet)
+    if reverse:
+        ink, words, types = list(reversed(ink)), list(reversed(words)), list(reversed(types))
+    result = run(sheet, ink=ink, words=words, types=types, callout_mark_pattern=pattern)
+    reported = {m for m in ("W1", "W2", "W3", "W4") if shadow._tag_key(m) and __import__("re").fullmatch(pattern, m)}
+    assert {c.tag_mark for c in result.correspondences} == reported
+    for c in result.correspondences:
+        assert c.status is CONF and "competing_ratio_groups" in c.reason_codes
+        assert dict(c.conditions)["one_common_ratio_group"] == shadow.FAILED
+
+
+def test_reported_rows_are_a_projection_of_one_decision_over_the_whole_scope():
+    sheet = three_windows()
+    broad = {c.tag_mark: (c.status, c.reason_codes, c.conditions) for c in run(sheet).correspondences}
+    narrow = {c.tag_mark: (c.status, c.reason_codes, c.conditions)
+              for c in run(sheet, callout_mark_pattern=r"W[12]").correspondences}
+    assert set(narrow) == {"W1", "W2"}
+    assert all(narrow[m] == broad[m] for m in narrow)

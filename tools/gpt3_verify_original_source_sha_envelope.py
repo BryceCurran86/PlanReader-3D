@@ -8,7 +8,6 @@ a score or exposes original drawing content in its diagnostic.
 from __future__ import annotations
 
 import argparse
-from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -18,16 +17,32 @@ from pb_source_closed_run_export import (
 from tools.gpt3_safe_original_report_output import (
     preflight_new_diagnostic, write_new_diagnostic,
 )
+from tools.gpt3_original_source_preflight import (
+    _original_source_path_kind, _stable_original_digest,
+)
 from tools.report_gpt3_four_project_evidence import FROZEN_ROOT, _json_object
 
 
-def _file_sha256(path: Path) -> str:
-    """Bound memory to a 1-MiB chunk for arbitrarily large original drawings."""
-    digest = sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _source_witness(path: Path) -> tuple[str, tuple[int, ...]]:
+    """Bind one original/seal digest to its regular no-follow source inode."""
+    try:
+        kind = _original_source_path_kind(path)
+    except ValueError as exc:
+        raise ValueError("source original must be a regular non-symlink file") from exc
+    if kind != "regular":
+        raise ValueError("source original must be a regular non-symlink file")
+    return _stable_original_digest(path)
+
+
+def _assert_source_witnesses(
+    paths: list[Path], expected: tuple[tuple[str, tuple[int, ...]], ...],
+) -> None:
+    """A same-byte source replacement is still a different audit input."""
+    if len(paths) != len(expected):
+        raise ValueError("original source inventory changed during audit")
+    for path, witness in zip(paths, expected):
+        if _source_witness(path) != witness:
+            raise ValueError("original source changed during audit")
 
 
 def verify_original_source_sha_envelope(
@@ -41,11 +56,9 @@ def verify_original_source_sha_envelope(
         raise ValueError("one original source file per unique signed SHA required")
     found = {}
     for path in source_files:
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("source original must be a regular non-symlink file")
-        # Do not trust filenames or caller-provided hashes. Digest real bytes
-        # from the original file on this run.
-        source_sha = _file_sha256(path)
+        # No-follow descriptor SHA+inode proof; a raced symlink or same-byte
+        # replacement cannot stand in for the authenticated original.
+        source_sha, _identity = _source_witness(path)
         if source_sha not in expected:
             raise ValueError("original source file bytes do not match signed V1 envelope")
         if source_sha in found:
@@ -69,20 +82,24 @@ def verify_original_source_sha_envelope(
     }
 
 
+def _build_original_source_sha_report_with_witnesses(
+    *, sealed_path: Path, original_paths: list[Path],
+) -> tuple[dict, tuple[tuple[str, tuple[int, ...]], ...]]:
+    sources = [sealed_path, *original_paths]
+    witnesses = tuple(_source_witness(path) for path in sources)
+    sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
+    report = verify_original_source_sha_envelope(sealed, original_paths)
+    _assert_source_witnesses(sources, witnesses)
+    report["sealed_v1_file_sha256"] = witnesses[0][0]
+    return report, witnesses
+
+
 def build_original_source_sha_report(
     *, sealed_path: Path, original_paths: list[Path],
 ) -> dict:
-    sources = [sealed_path, *original_paths]
-    if sealed_path.is_symlink() or not sealed_path.is_file():
-        raise ValueError("sealed V1 source must be a regular non-symlink file")
-    if any(path.is_symlink() or not path.is_file() for path in original_paths):
-        raise ValueError("original sources must be regular non-symlink files")
-    originals = [_file_sha256(path) for path in sources]
-    sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
-    report = verify_original_source_sha_envelope(sealed, original_paths)
-    if originals != [_file_sha256(path) for path in sources]:
-        raise ValueError("original source bytes changed during audit")
-    report["sealed_v1_file_sha256"] = originals[0]
+    report, _witnesses = _build_original_source_sha_report_with_witnesses(
+        sealed_path=sealed_path, original_paths=original_paths,
+    )
     return report
 
 
@@ -94,13 +111,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     protected = (FROZEN_ROOT, args.sealed_run, *args.original_source)
     preflight_new_diagnostic(args.output, protected_roots=protected)
-    report = build_original_source_sha_report(
+    report, witnesses = _build_original_source_sha_report_with_witnesses(
         sealed_path=args.sealed_run, original_paths=args.original_source,
     )
+    sources = [args.sealed_run, *args.original_source]
     write_new_diagnostic(
         args.output,
         json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n",
         protected_roots=protected,
+        verify_inputs=lambda: _assert_source_witnesses(sources, witnesses),
     )
     return 0
 

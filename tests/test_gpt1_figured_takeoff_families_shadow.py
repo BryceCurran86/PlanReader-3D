@@ -71,7 +71,8 @@ def test_figured_wall_gross_net_opening_and_skirting():
     assert measured.candidate_perimeter_m==30.0
     assert measured.candidate_gross_lining_m2==90.0
     assert math.isclose(measured.candidate_net_lining_m2,87.9)
-    assert measured.candidate_skirting_m==29.0
+    assert measured.candidate_skirting_m is None
+    assert "source_figured_skirting_opening_floor_contact_unproven" in measured.reason_codes
     assert measured.candidate_opening_deductions_m2==(("door-1",2.1),)
 
 
