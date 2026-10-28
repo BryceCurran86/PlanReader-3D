@@ -47,7 +47,8 @@ MAX_HEAD_HEIGHT_MM = 4000.0
 class SpandrelSubSillClassification(str, Enum):
     """Classification outcome for window over sub-sill spandrel wall."""
 
-    SPANDREL_SUB_SILL_CONFIRMED = "spandrel_sub_sill_confirmed"
+    SPANDREL_SUB_SILL_CONFIRMED = "spandrel_sub_sill_confirmed"  # reserved for future source-backed receipt
+    GEOMETRIC_CANDIDATE = "geometric_candidate"
     ABSTAINED_INVALID_VERTICAL_LEVELS = "abstained_invalid_vertical_levels"
     ABSTAINED_DEGENERATE_SPAN = "abstained_degenerate_span"
 
@@ -120,15 +121,35 @@ class StructuralSpandrelSubSillContinuityAuthority:
         sill_height_mm: float,
         head_height_mm: float,
         host_through_wall_id: str,
-        scale_ratio: float = 0.01764,
+        scale_ratio: float | None = None,
         context_label: str = "SPANDREL_WINDOW",
     ) -> SpandrelSubSillRecord:
         """Evaluates clear span and vertical levels, computing glazing and sub-sill wall areas."""
+        # Source-free inputs must never mint a metric or a confirmed opening.
+        if scale_ratio is None:
+            raise ValueError("original source scale authority unverified")
+        for name, value in (("scale_ratio", scale_ratio), ("sill_height_mm", sill_height_mm),
+                            ("head_height_mm", head_height_mm)):
+            if type(value) not in (int, float) or not math.isfinite(float(value)):
+                raise ValueError(f"{name} must be finite real")
+        if scale_ratio <= 0:
+            raise ValueError("scale_ratio must be positive")
+        if not isinstance(host_through_wall_id, str) or not host_through_wall_id.strip():
+            raise ValueError("nonblank physical host identity required")
+        if not isinstance(context_label, str) or not context_label.strip():
+            raise ValueError("nonblank context identity required")
+        for name, point in (("jamb_a", jamb_a), ("jamb_b", jamb_b)):
+            if not isinstance(point, (tuple, list)) or len(point) != 2:
+                raise ValueError(f"{name} must contain two coordinates")
+            if any(type(v) not in (int, float) or not math.isfinite(float(v)) for v in point):
+                raise ValueError(f"{name} must contain finite real coordinates")
         jamb_left, jamb_right = self._order_jambs(jamb_a, jamb_b)
         dx = jamb_right[0] - jamb_left[0]
         dy = jamb_right[1] - jamb_left[1]
         clear_span_pt = math.hypot(dx, dy)
         clear_span_m = clear_span_pt * scale_ratio
+        if not math.isfinite(clear_span_pt) or not math.isfinite(clear_span_m):
+            raise ValueError("nonfinite geometric span or metric conversion")
 
         glazing_height_mm = max(0.0, head_height_mm - sill_height_mm)
         glazing_height_m = glazing_height_mm / 1000.0
@@ -137,18 +158,19 @@ class StructuralSpandrelSubSillContinuityAuthority:
 
         glazing_area_sqm = clear_span_m * glazing_height_m
         spandrel_area_sqm = clear_span_m * sill_height_m
-        total_opening_area_sqm = clear_span_m * head_height_m
+        # Solid sub-sill wall is not an opening deduction.
+        total_opening_area_sqm = glazing_area_sqm
+        if not all(math.isfinite(v) for v in (glazing_area_sqm, spandrel_area_sqm)):
+            raise ValueError("nonfinite hypothetical area")
 
         contract_id = stable_contract_id(
             f"SPANDREL_SUB_SILL_{context_label}",
             (
                 host_through_wall_id,
-                round(jamb_left[0], 2),
-                round(jamb_left[1], 2),
-                round(jamb_right[0], 2),
-                round(jamb_right[1], 2),
-                round(sill_height_mm, 1),
-                round(head_height_mm, 1),
+                *(float(v).hex() for v in (*jamb_left, *jamb_right)),
+                float(sill_height_mm).hex(),
+                float(head_height_mm).hex(),
+                float(scale_ratio).hex(),
             ),
         )
 
@@ -201,7 +223,7 @@ class StructuralSpandrelSubSillContinuityAuthority:
         # Pass: Spandrel sub-sill confirmed
         return SpandrelSubSillRecord(
             contract_id=contract_id,
-            classification=SpandrelSubSillClassification.SPANDREL_SUB_SILL_CONFIRMED,
+            classification=SpandrelSubSillClassification.GEOMETRIC_CANDIDATE,
             jamb_left=jamb_left,
             jamb_right=jamb_right,
             clear_span_pt=clear_span_pt,
@@ -214,9 +236,9 @@ class StructuralSpandrelSubSillContinuityAuthority:
             total_wall_opening_area_sqm=total_opening_area_sqm,
             host_through_wall_id=host_through_wall_id,
             status=EvidenceResolutionStatus.CANDIDATE,
-            first_remaining_gate="spandrel_sub_sill_shadow_authenticated",
+            first_remaining_gate="original_source_spandrel_host_scale_levels_unverified",
             notes=(
-                f"Window confirmed over sub-sill spandrel wall: "
+                f"Unverified geometry only, NOT a source-authenticated opening: "
                 f"glazing area={glazing_area_sqm:.2f}sqm, spandrel area={spandrel_area_sqm:.2f}sqm."
             ),
         )
