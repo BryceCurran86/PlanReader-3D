@@ -125,12 +125,6 @@ jobs:
           )
           print("ORIGINAL_GRID_SOURCE_VALIDATED_CANDIDATE_ONLY")
           PY
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: gpt1-original-cross-view-grid-source-neutral-receipt
-          path: artifacts/gpt1-original-cross-view-grid/receipt.json
-          retention-days: 14
       - name: Remove private original and unpublished diagnostic data
         if: always()
         shell: bash
@@ -254,12 +248,6 @@ jobs:
           )
           print("ORIGINAL_CROSSVIEW_ROOM_FT3_CANDIDATES_ONLY_NO_CONSTRUCTION_QUANTITY")
           PY
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: gpt1-original-crossview-room-ft3-source-neutral-receipt
-          path: artifacts/gpt1-original-crossview-room-mark/receipt.json
-          retention-days: 14
       - name: Remove private original and unpublished diagnostic data
         if: always()
         shell: bash
