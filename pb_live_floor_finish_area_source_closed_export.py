@@ -132,6 +132,12 @@ def build_live_floor_finish_area_source_traces(
     quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
     floor_owner_by_occurrence: dict[tuple[str, str, str], str] = {}
     floor_owner_by_original_observation: dict[tuple[str, str, str], str] = {}
+    # A physical original PDF face cannot fund two independent FIRM finish
+    # areas just because their canonical floor, source-face and material mark
+    # IDs differ. Only compare independently validated, source-scoped rings.
+    claimed_original_physical_faces: dict[
+        tuple[object, ...], list[tuple[str, object]]
+    ] = {}
     # Original quantity identity is a producer-owned family invariant, not
     # only a FIRM-survivor invariant. Filtering blocked evidence before this
     # check would conceal a disputed source identity from commercial sealing.
@@ -665,6 +671,43 @@ def build_live_floor_finish_area_source_traces(
                     "floor-finish original canonical room geometry/source mismatch: "
                     f"{quantity.quantity_id}"
                 )
+
+        # Existing producer IDs and finish occurrences are necessary but do
+        # not establish distinct *physical* floor faces. Two differently named
+        # FIRM floor finishes must not double-count one exact original PDF
+        # polygon. Topological equality is exact (no coordinate tolerance):
+        # it accepts different ring starts/winding and collinear edge splits,
+        # but never infers a source face, metric area or finish code.
+        # Restrict comparisons to the same verified original source scope and
+        # equal PDF bbox, retaining distinct/adjacent faces and other pages.
+        physical_face_scope = (
+            floor.source_sha256.lower(), floor.revision_id,
+            floor.page_id, viewport_id, source_bbox,
+        )
+        try:
+            from shapely.geometry import Polygon
+
+            original_face = Polygon(points)
+            for prior_floor_id, prior_face in claimed_original_physical_faces.get(
+                physical_face_scope, ()
+            ):
+                if original_face.equals(prior_face):
+                    raise SourceClosedRunConflictError(
+                        "distinct FIRM floor finishes claim the same original "
+                        "physical floor face: "
+                        f"{prior_floor_id}, {floor_id}"
+                    )
+        except SourceClosedRunConflictError:
+            raise
+        except Exception as exc:
+            # GEOS failure cannot silently license a second physical face.
+            raise SourceClosedRunConflictError(
+                "floor-finish original physical face comparison failed closed: "
+                f"{quantity.quantity_id}"
+            ) from exc
+        claimed_original_physical_faces.setdefault(
+            physical_face_scope, []
+        ).append((floor_id, original_face))
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
