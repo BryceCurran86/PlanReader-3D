@@ -1047,27 +1047,21 @@ def _source_painted_geometry_ids(page, page_id: str) -> frozenset[str]:
             painted.add(_native_segment_geometry_id(page_id, segment))
             span = _axis_span(segment)
             if span is not None:
-                inked.setdefault((span[0], round(span[1] / _COLLINEAR_IDENTITY_TOL)), []).append((span[2], span[3]))
+                inked.setdefault((span[0], round(span[1] / _COLLINEAR_IDENTITY_TOL)), []).append(
+                    (span[1], span[2], span[3])
+                )
     # A fill-only boundary (or any extracted edge whose own path is not a proven stroke) is still DRAWN where
     # source-painted strokes of the same line already ink its whole extent: the visible ink at exactly those
     # coordinates is what the frame needs, and the stroke itself passed every check above (opaque, solid, visible,
     # nothing later erases it). Exact coordinate identity only; a shorter stroke, a parallel stroke, a gap or an
     # unpainted stroke never supports an edge.
-    merged = {key: _merge_spans(spans) for key, spans in inked.items()}
     for segment in native["segments"]:
         path_index = segment.get("path_index")
         if type(path_index) is not int or not 0 <= path_index < len(drawings):
             continue
         span = _axis_span(segment)
-        if span is None:
-            continue
-        axis, offset, lo, hi = span
-        base = round(offset / _COLLINEAR_IDENTITY_TOL)
-        for neighbour in (base - 1, base, base + 1):
-            if any(a - _COLLINEAR_IDENTITY_TOL <= lo and hi <= b + _COLLINEAR_IDENTITY_TOL
-                   for a, b in merged.get((axis, neighbour), ())):
-                painted.add(_native_segment_geometry_id(page_id, segment))
-                break
+        if span is not None and _collinear_painted_coverage(span, inked):
+            painted.add(_native_segment_geometry_id(page_id, segment))
     return frozenset(painted)
 
 
@@ -1105,6 +1099,27 @@ def _merge_spans(spans):
         else:
             merged.append((lo, hi))
     return merged
+
+
+def _collinear_painted_coverage(span, inked) -> bool:
+    """Require true source-ink offset identity before joining painted spans.
+
+    Rounded buckets only locate candidate strokes; they do not establish
+    collinearity. Filter each source-painted stroke by actual finite offset
+    before merging, so foreign parallel ink cannot complete a frame edge.
+    """
+    axis, offset, lo, hi = span
+    bucket = round(offset / _COLLINEAR_IDENTITY_TOL)
+    matching = [
+        (start, end)
+        for neighbour in (bucket - 1, bucket, bucket + 1)
+        for stroke_offset, start, end in inked.get((axis, neighbour), ())
+        if abs(stroke_offset - offset) <= _COLLINEAR_IDENTITY_TOL
+    ]
+    return any(
+        start - _COLLINEAR_IDENTITY_TOL <= lo and hi <= end + _COLLINEAR_IDENTITY_TOL
+        for start, end in _merge_spans(matching)
+    )
 
 
 class OpeningElevationFrameAreaProducer:

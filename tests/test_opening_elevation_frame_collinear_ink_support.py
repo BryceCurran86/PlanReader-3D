@@ -190,3 +190,51 @@ def test_merge_spans_joins_only_overlapping_or_touching_intervals():
 
 def test_the_identity_tolerance_is_float_identity_not_a_measurement():
     assert module._COLLINEAR_IDENTITY_TOL <= 1e-6
+
+
+# Direct source-coordinate tests retain sub-micro-point offsets that PyMuPDF
+# may quantise when serialising synthetic PDF drawing commands.
+def _indexed_ink(*strokes):
+    indexed = {}
+    for axis, offset, lo, hi in strokes:
+        indexed.setdefault(
+            (axis, round(offset / module._COLLINEAR_IDENTITY_TOL)), []
+        ).append((offset, lo, hi))
+    return indexed
+
+
+def test_neighbour_bucket_at_1_49_micro_points_is_not_same_painted_line():
+    painted = _indexed_ink(("h", 1.49e-6, 0.0, 10.0))
+    assert not module._collinear_painted_coverage(("h", 0.0, 0.0, 10.0), painted)
+
+
+def test_only_actual_coincident_strokes_may_complete_a_split_edge():
+    mixed = _indexed_ink(
+        ("h", 0.2e-6, 0.0, 5.0),
+        ("h", 1.49e-6, 5.0, 10.0),
+    )
+    assert not module._collinear_painted_coverage(("h", 0.0, 0.0, 10.0), mixed)
+    matching = _indexed_ink(
+        ("h", 0.2e-6, 0.0, 5.0),
+        ("h", -0.3e-6, 5.0, 10.0),
+    )
+    assert module._collinear_painted_coverage(("h", 0.0, 0.0, 10.0), matching)
+
+
+def test_collinear_coverage_is_order_independent_and_axis_scoped():
+    strokes = (
+        ("h", 0.2e-6, 0.0, 5.0),
+        ("h", -0.3e-6, 5.0, 10.0),
+        ("h", 1.49e-6, 0.0, 10.0),
+        ("v", 0.0, 0.0, 10.0),
+    )
+    expected = module._collinear_painted_coverage(
+        ("h", 0.0, 0.0, 10.0), _indexed_ink(*strokes)
+    )
+    assert expected is True
+    assert module._collinear_painted_coverage(
+        ("h", 0.0, 0.0, 10.0), _indexed_ink(*reversed(strokes))
+    ) is expected
+    assert not module._collinear_painted_coverage(
+        ("v", 3.0, 0.0, 10.0), _indexed_ink(*strokes)
+    )
