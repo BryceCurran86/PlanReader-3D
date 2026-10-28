@@ -136,3 +136,89 @@ def test_original_gross_minus_union_source_wall_seal_stays_byte_identical():
     assert original.canonical_walls == wall_before
     assert original.quantity_evidence == aggregate_before
     assert publish_live_per_wall_surface_area_quantities(original) == quantities_before
+
+
+@pytest.mark.parametrize("tamper", (
+    "wall_local_frame",
+    "wall_coordinate_unit",
+    "opening_identity_roster",
+    "void_wall_local_frame",
+    "void_coordinate_unit",
+    "void_profile_kind",
+    "void_opening_identity",
+    "coordinated_frame_substitution",
+    "coordinated_unit_substitution",
+))
+def test_original_opening_identity_and_metric_frame_cannot_be_reissued(
+    tamper,
+):
+    original = _produced()
+    wall = original.canonical_walls[0]
+    assert len(wall.opening_voids) == 1
+    void = wall.opening_voids[0]
+    baseline = publish_live_per_wall_surface_area_quantities(original)
+    assert len(baseline) == 1
+
+    if tamper == "wall_local_frame":
+        changed = _mutated_wall(original, wall_local_frame_id="foreign-frame")
+    elif tamper == "wall_coordinate_unit":
+        changed = _mutated_wall(original, coordinate_unit="feet")
+    elif tamper == "opening_identity_roster":
+        changed = _mutated_wall(
+            original, opening_identity_ids=("foreign-opening",)
+        )
+    elif tamper == "void_wall_local_frame":
+        changed = _mutated_wall(
+            original, opening_voids=(replace(
+                void, wall_local_frame_id="foreign-frame",
+            ),),
+        )
+    elif tamper == "void_coordinate_unit":
+        changed = _mutated_wall(
+            original, opening_voids=(replace(
+                void, coordinate_unit="feet",
+            ),),
+        )
+    elif tamper == "void_profile_kind":
+        changed = _mutated_wall(
+            original, opening_voids=(replace(
+                void, profile_kind="unsupported-shape",
+            ),),
+        )
+    elif tamper == "void_opening_identity":
+        changed = _mutated_wall(
+            original, opening_voids=(replace(
+                void, opening_identity_id="foreign-opening",
+            ),),
+        )
+    elif tamper == "coordinated_frame_substitution":
+        changed = _mutated_wall(
+            original,
+            wall_local_frame_id="foreign-frame",
+            opening_voids=(replace(
+                void, wall_local_frame_id="foreign-frame",
+            ),),
+        )
+    else:
+        changed = _mutated_wall(
+            original,
+            coordinate_unit="feet",
+            opening_voids=(replace(void, coordinate_unit="feet"),),
+        )
+
+    # A source identity swap does not change either geometry, area, receipt
+    # roster or original aggregate contract; the real issuer must catch it.
+    altered_wall = changed.canonical_walls[0]
+    assert changed.quantity_evidence == original.quantity_evidence
+    assert altered_wall.gross_polygon_wkb_hex == wall.gross_polygon_wkb_hex
+    assert altered_wall.net_polygon_wkb_hex == wall.net_polygon_wkb_hex
+    assert altered_wall.net_area_m2 == wall.net_area_m2
+    assert changed.physical_void_record_ids == original.physical_void_record_ids
+    assert publish_live_per_wall_surface_area_quantities(changed) == ()
+    with pytest.raises(
+        ValueError, match="no source-complete original external wall surfaces"
+    ):
+        seal_live_per_wall_surface_area_run(
+            changed, workspace_id=7, project_id="source-wall-replay",
+        )
+    assert publish_live_per_wall_surface_area_quantities(original) == baseline

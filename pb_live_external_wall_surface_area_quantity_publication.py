@@ -166,6 +166,21 @@ def publish_live_per_wall_surface_area_quantities(
             return ()
         if (
             wall.physical_wall_id != wall.canonical_wall_id
+            # Recheck original producer-owned opening identity and metric frame
+            # before commercial source-closed reissue. Geometry and area can
+            # remain unchanged while these source identities are substituted.
+            or wall.wall_local_frame_id != wall.physical_wall_id
+            or wall.coordinate_unit != "metre"
+            or _exact_ids(wall.opening_identity_ids) is None
+            or wall.opening_identity_ids != tuple(
+                opening.opening_identity_id for opening in wall.opening_voids
+            )
+            or any(
+                opening.wall_local_frame_id != wall.wall_local_frame_id
+                or opening.coordinate_unit != "metre"
+                or opening.profile_kind != "rectangular_rough_opening"
+                for opening in wall.opening_voids
+            )
             or wall.canonical_wall_id not in ids
             or wall.canonical_wall_id in seen
             or wall.role != "external"
