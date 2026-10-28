@@ -384,7 +384,7 @@ def test_overlapping_source_lines_can_connect_at_an_actual_interior_crossing():
     edge = ("h", 0.0, 0.0, 10.0)
     strokes = (
         ("h", 0.0, 0.0, 6.0, 0.0, 0.8e-6),
-        ("h", 0.0, 4.0, 10.0, -0.8e-6, 0.0),
+        ("h", 0.0, 4.0, 10.0, 0.8e-6, 0.0),
     )
     # They intersect within [4,6] and each matches the target throughout
     # its own interval; the chain has real source-coordinate continuity.
