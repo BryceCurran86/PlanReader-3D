@@ -572,3 +572,57 @@ def test_unrelated_invalid_identity_does_not_veto_genuine_valid_pier_neighbors()
     assert [(p.left_opening_id, p.right_opening_id) for p in piers] == [
         ("A", "B"), ("B", "C"),
     ]
+
+
+@pytest.mark.parametrize("width", [4.0, 5.0, 6.0, 10.0])
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (300.0, -200.0)),
+    (math.pi, (-400.0, 700.0)),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_narrow_aperture_crossing_is_never_erased_by_snap(width, angle, shift, reverse):
+    """Even a 4pt opening retains a testable finite obstruction interior."""
+    tr = lambda point: _rotated(point, angle, shift)
+    centre = 20.0 + width / 2.0
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "narrow", tr((20.0, 0.0)), tr((20.0 + width, 0.0)),
+    )
+    crossing = (tr((centre, -30.0)), tr((centre, 30.0)))
+    if reverse:
+        crossing = crossing[::-1]
+    unrelated = (tr((90.0, -30.0)), tr((90.0, 30.0)))
+    split = (
+        (tr((centre, -30.0)), tr((centre, 0.0))),
+        (tr((centre, 0.0)), tr((centre, 30.0))),
+    )
+    authority = _authority()
+    for snap in (0.0, 2.5):
+        for segments in ((crossing,), (unrelated, crossing),
+                         (crossing, unrelated), split, split[::-1]):
+            records, piers = authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=(opening,),
+                transverse_wall_segments=segments, snap_tolerance_pt=snap,
+            )
+            assert len(records) == 1 and piers == ()
+            assert records[0].status is S.ABSTAINED
+            assert records[0].first_remaining_gate == "host_through_wall_obstructed"
+            assert records[0].shadow_only and not records[0].takeoff_eligible
+            assert not records[0].commercial_projection_allowed
+            assert authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=(opening,),
+                transverse_wall_segments=segments, snap_tolerance_pt=snap,
+            ) == (records, piers)
+        for segments in ((), (unrelated,)):
+            records, piers = authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=(opening,),
+                transverse_wall_segments=segments, snap_tolerance_pt=snap,
+            )
+            assert len(records) == 1 and piers == ()
+            assert records[0].status is S.CORROBORATED
+            assert records[0].first_remaining_gate == "none"
+            assert records[0].shadow_only and not records[0].takeoff_eligible
+            assert not records[0].commercial_projection_allowed

@@ -335,10 +335,15 @@ class StructuralThroughWallApertureHostAuthority:
                     t1_along, t1_perp, t2_along, t2_perp,
                 )):
                     raise ValueError("transverse_wall_segments projection must be finite")
-                u_low = u_min + snap_tolerance_pt
-                u_high = u_max - snap_tolerance_pt
+                # A fixed snap trim can swallow a narrow opening entirely,
+                # skipping a real transverse structural obstruction. Reduce
+                # the trim conservatively to retain a physical test interior.
+                interior_margin = min(snap_tolerance_pt, (u_max - u_min) / 4.0)
+                u_low = u_min + interior_margin
+                u_high = u_max - interior_margin
                 if u_low >= u_high:
-                    continue
+                    obstructed = True  # numerically unresolved: fail closed
+                    break
                 t_low, t_high = 0.0, 1.0
                 for v0, v1, low, high in (
                     (t1_along, t2_along, u_low, u_high),
