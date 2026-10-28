@@ -392,6 +392,8 @@ def validate_publishing_gate(package: PublishingPackagePayload) -> PublishingGat
                 MeasurementAuthorityType.AI_DETECTED.value,
                 MeasurementAuthorityType.MODEL_DERIVED.value,
                 MeasurementAuthorityType.PDF_SCALED.value,
+                MeasurementAuthorityType.USER_CORRECTED.value,
+                MeasurementAuthorityType.USER_APPROVED.value,
             ):
                 if not named_approver or q.authority_status not in (
                     AuthorityStatus.FIRM.value,
