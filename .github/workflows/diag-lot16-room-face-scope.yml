@@ -35,6 +35,7 @@ jobs:
           import subprocess
           import sys
           from pathlib import Path
+          from tempfile import TemporaryDirectory
 
           expected = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           candidates = sorted(Path("documents/sources").glob("*.pdf"))
@@ -44,21 +45,28 @@ jobs:
           ]
           if len(matched) != 1:
               raise SystemExit(f"Lot16 SHA-verified architecture PDF unavailable: matches={len(matched)}")
-          subprocess.run(
-              [
-                  sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
-                  "--pdf", str(matched[0]), "--page-index", "2",
-                  "--diagnostic-label", "BED",
-                  "--diagnostic-label", "2",
-                  "--diagnostic-label", "3",
-                  "--output", "lot16-room-face-scope.json",
-              ],
-              check=True,
-          )
+          # The diagnostic's detailed output includes original-owned room
+          # names, source face identities, drawing coordinates and polygons.
+          # Never emit that private material to PR logs or GitHub artifacts.
+          # TemporaryDirectory removes its report after PASS and FAIL alike.
+          with TemporaryDirectory(prefix="gpt3-lot16-private-source-") as temporary:
+              completed = subprocess.run(
+                  [
+                      sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
+                      "--pdf", str(matched[0]), "--page-index", "2",
+                      "--diagnostic-label", "BED",
+                      "--diagnostic-label", "2",
+                      "--diagnostic-label", "3",
+                      "--output", str(Path(temporary) / "lot16-room-face-scope.json"),
+                  ],
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  check=False,
+              )
+              if completed.returncode != 0:
+                  raise SystemExit(
+                      "Original Lot16 room-face validation FAILED "
+                      "(private source details withheld)"
+                  )
+          print("Original Lot16 room-face validation PASS (private report unpublished)")
           PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lot16-room-face-source-diagnostic
-          path: lot16-room-face-scope.json
-          retention-days: 14
