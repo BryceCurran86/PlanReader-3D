@@ -99,6 +99,7 @@ def test_minimal_token_scope_and_exact_head_are_preserved() -> None:
     assert text.count("persist-credentials: false") == 2
     assert text.count("ref: ${{ github.sha }}") == 2
     assert text.count("github.actor == 'BryceCurran86'") == 2
+    assert text.count("github.triggering_actor == 'BryceCurran86'") == 2
     assert text.count("github.ref == 'refs/heads/main'") == 2
     assert "test \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"" in text
     assert "actions/upload-artifact@" not in text
@@ -110,6 +111,7 @@ def test_owner_main_only_source_execution_and_immutable_checkout() -> None:
         assert "github.event_name == 'workflow_dispatch'" in job
         assert "github.ref == 'refs/heads/main'" in job
         assert "github.actor == 'BryceCurran86'" in job
+        assert "github.triggering_actor == 'BryceCurran86'" in job
         assert "ref: ${{ github.sha }}" in job
         assert "persist-credentials: false" in job
         assert "github.event.pull_request.head.sha" not in job
@@ -154,3 +156,32 @@ def test_security_contract_rejects_trigger_and_network_mutations() -> None:
     assert "pull_request:" in unsafe_trigger
     assert unsafe_network.count("--network none") != 2
     assert unsafe_actor.count("github.actor == 'BryceCurran86'") != 2
+    unsafe_rerunner = text.replace("github.triggering_actor == 'BryceCurran86'", "true", 1)
+    assert unsafe_rerunner.count("github.triggering_actor == 'BryceCurran86'") != 2
+
+def test_owner_rerun_actor_gate_rejects_foreign_reruns_and_nonmain_dispatch() -> None:
+    # GitHub retains github.actor on rerun but changes github.triggering_actor.
+    # Both identities must be owner-authorized before source provisioning.
+    expected = (
+        "github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == 'BryceCurran86' && "
+        "github.triggering_actor == 'BryceCurran86'"
+    )
+    for job in _jobs():
+        actual = next(line.strip() for line in job.splitlines() if line.startswith("    if: "))
+        assert actual == "if: " + "${{ " + expected + " }}"
+    checks = (
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", True),
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "other-writer", False),
+        ("workflow_dispatch", "refs/heads/main", "other-writer", "BryceCurran86", False),
+        ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", False),
+        ("pull_request", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+    )
+    for event, ref, actor, triggering_actor, allowed in checks:
+        assert (
+            event == "workflow_dispatch"
+            and ref == "refs/heads/main"
+            and actor == "BryceCurran86"
+            and triggering_actor == "BryceCurran86"
+        ) is allowed
