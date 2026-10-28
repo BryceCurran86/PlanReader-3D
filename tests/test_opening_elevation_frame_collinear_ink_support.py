@@ -313,7 +313,7 @@ def test_genuinely_coincident_near_axis_split_ink_remains_order_invariant():
     )
     assert module._collinear_painted_coverage(edge, _indexed_ink(*strokes), edge_endpoints=ends)
     assert module._collinear_painted_coverage(edge, _indexed_ink(*reversed(strokes)), edge_endpoints=ends)
-    wrong_second = strokes[1][:4] + (0.70e-6, -0.28e-6)
+    wrong_second = ("h", 0.71e-6, 5.0, 10.0, 1.20e-6, 0.22e-6)
     assert not module._collinear_painted_coverage(
         edge, _indexed_ink(strokes[0], wrong_second), edge_endpoints=ends
     )
