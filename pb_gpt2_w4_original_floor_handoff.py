@@ -114,8 +114,11 @@ def audit_gpt2_w4_bound_original_floor(
         source_correspondence.get("source_finishes_perimeter_polygon_pdf_pts"))
     if source_floor is None or source_finish is None:
         return {**blocked,"first_failure":"original_cross_sheet_source_ring_invalid"}
+    # The actual source-ink producer compares native rings on a 0.001pt
+    # coordinate grid. Reuse that original comparison precision exactly.
     moved_floor=Polygon(
-        tuple((float(x)+float(shift[0]),float(y)+float(shift[1]))
+        tuple((round(float(x)+float(shift[0]),3),
+               round(float(y)+float(shift[1]),3))
               for x,y in source_floor.exterior.coords[:-1]))
     if not moved_floor.is_valid or not moved_floor.equals(source_finish):
         return {**blocked,"first_failure":"original_cross_sheet_source_ring_mismatch"}
