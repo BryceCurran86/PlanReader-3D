@@ -542,6 +542,8 @@ def test_end_to_end_duplicate_ft3_marks_abstain_without_commercial_grant():
             {"x": 335.8, "y": 1447.5, "code": "FT3", "registered_region": True},
         ],
     )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX in result.reason_codes
     assert len(result.records) == 1
     assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
     assert MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX in result.records[0].reason_codes
@@ -562,6 +564,8 @@ def test_end_to_end_missing_registration_abstains_without_commercial_grant():
         }],
         marks=[{"x": 327.8, "y": 1437.5, "code": "FT3"}],
     )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_IN_UNREGISTERED_REGION in result.reason_codes
     assert len(result.records) == 1
     assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
     assert MARK_IN_UNREGISTERED_REGION in result.records[0].reason_codes
@@ -584,3 +588,41 @@ def test_invalid_minimum_mark_margin_abstains(minimum):
     )
     assert result["status"] is EvidenceResolutionStatus.ABSTAINED
     assert MARK_TOO_CLOSE_TO_BOX_SIDE in result["reason_codes"]
+
+
+def test_no_measured_boxes_does_not_advertise_aggregate_floor_candidate():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[],
+        marks=[{"x": 327.8, "y": 1437.5,
+                "code": "FT3", "registered_region": True}],
+    )
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes
+    assert result.winning_registration is not None
+
+
+def test_competing_codes_propagate_conflict_to_aggregate():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[
+            {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True},
+            {"x": 335.8, "y": 1447.5, "code": "FT2", "registered_region": True},
+        ],
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert COMPETING_FINISH_CODES_IN_BOX in result.reason_codes
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.CONFLICT
+    assert not result.records[0].commercial_projection_allowed
