@@ -46,6 +46,7 @@ def publish_live_slab_area_quantity(
         or type(slab.source_sha256) is not str
         or len(slab.source_sha256) != 64
         or any(ch not in "0123456789abcdef" for ch in slab.source_sha256)
+        or slab.source_sha256 == "0" * 64
         or type(slab.area_m2) is bool
     ):
         return None
@@ -80,15 +81,13 @@ def publish_live_slab_area_quantity(
     raw_boundary_id = provenance.get("boundary_id")
     if type(raw_boundary_id) is not str or raw_boundary_id != slab.boundary_id:
         return None
+    # Recheck the producer's exact page receipt at the independent quantity
+    # issuer. A canonical object may be copied and its provenance replaced
+    # after projection; no string, float, bool or missing page may borrow the
+    # original integer source-page authority.
     source_page = provenance.get("annotation_source_page")
-    if source_page is not None:
-        if type(source_page) not in (int, str):
-            return None
-        try:
-            if int(source_page) != slab.source_page:
-                return None
-        except (TypeError, ValueError, OverflowError):
-            return None
+    if type(source_page) is not int or source_page != slab.source_page:
+        return None
     for optional_receipt in ("annotation_id", "dimension_evidence_id"):
         receipt = provenance.get(optional_receipt)
         if receipt is not None and (
