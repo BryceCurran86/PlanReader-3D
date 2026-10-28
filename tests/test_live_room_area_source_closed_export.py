@@ -833,3 +833,146 @@ def test_room_area_seal_rejects_boolean_canonical_floor_metric(live_claim):
         export.build_live_room_area_source_traces(
             claim, workspace_id=7, project_id="source-project",
         )
+
+def _second_original_figured_room(live_claim, *, same_root=False):
+    """Distinct source-shaped room issuer; no benchmark or inferred dimensions."""
+    source = _firm_quantity(live_claim)
+    floor = _resolved_floor(live_claim)
+    room = next(
+        room for room in live_claim.canonical_rooms
+        if room.canonical_room_id == floor.room_entity_id
+    )
+    second_sha = floor.source_sha256 if same_root else (
+        "a" * 64 if floor.source_sha256.lower() != "a" * 64 else "b" * 64
+    )
+    second_revision = floor.revision_id if same_root else "independent-revision"
+    second_document = floor.document_id if same_root else "independent-document"
+    second_snapshot = floor.snapshot_id if same_root else "independent-snapshot"
+    source_room_id = "independent-original-room"
+    canonical_room_id = "independent-canonical-room"
+    face_id = "independent-source-face"
+    second_quantity = replace(
+        source,
+        quantity_id="independent-figured-room-area",
+        input_entity_ids=(source_room_id,),
+        semantic_key=f"room_area:{source_room_id}",
+        metadata={
+            **dict(source.metadata),
+            "source_sha256": second_sha,
+            "revision_id": second_revision,
+            "document_id": second_document,
+            "room_snapshot_id": second_snapshot,
+            "source_room_face_record_id": face_id,
+        },
+    )
+    second_room = replace(
+        room,
+        canonical_room_id=canonical_room_id,
+        physical_room_id="independent-physical-room",
+        document_id=second_document,
+        revision_id=second_revision,
+        source_sha256=second_sha,
+        snapshot_id=second_snapshot,
+        source_room_face_record_id=face_id,
+    )
+    second_floor = replace(
+        floor,
+        canonical_floor_id="independent-canonical-floor",
+        physical_floor_surface_id="independent-physical-floor",
+        room_entity_id=canonical_room_id,
+        document_id=second_document,
+        revision_id=second_revision,
+        source_sha256=second_sha,
+        snapshot_id=second_snapshot,
+        source_room_face_record_id=face_id,
+        metric_area_quantity_id=second_quantity.quantity_id,
+    )
+    return replace(
+        live_claim,
+        room_area_quantity_evidence=(
+            *live_claim.room_area_quantity_evidence, second_quantity,
+        ),
+        canonical_rooms=(*live_claim.canonical_rooms, second_room),
+        canonical_floors=(*live_claim.canonical_floors, second_floor),
+    )
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_independent_originals_reuse_local_figured_pair_in_real_room_seal(
+    live_claim, reverse,
+):
+    combined = _second_original_figured_room(live_claim)
+    source = _firm_quantity(live_claim)
+    second = next(q for q in combined.room_area_quantity_evidence
+                  if q.quantity_id == "independent-figured-room-area")
+    assert tuple(source.metadata["figured_dimension_ids"]) == tuple(
+        second.metadata["figured_dimension_ids"]
+    )
+    if reverse:
+        combined = replace(
+            combined,
+            room_area_quantity_evidence=tuple(reversed(
+                combined.room_area_quantity_evidence
+            )),
+        )
+    before = tuple(q.quantity_id for q in combined.room_area_quantity_evidence)
+    run = export.seal_live_room_area_run(
+        combined, workspace_id=7, project_id="source-project",
+    )
+    assert len(run.quantities) == 2
+    assert {row.quantity_id for row in run.quantities} == {
+        source.quantity_id, second.quantity_id,
+    }
+    assert set(run.source_sha256s) == {
+        _resolved_floor(live_claim).source_sha256.lower(),
+        second.metadata["source_sha256"].lower(),
+    }
+    assert tuple(q.quantity_id for q in combined.room_area_quantity_evidence) == before
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_same_original_figured_pair_competing_rooms_still_vetoed(
+    live_claim, reverse,
+):
+    combined = _second_original_figured_room(live_claim, same_root=True)
+    if reverse:
+        combined = replace(
+            combined,
+            room_area_quantity_evidence=tuple(reversed(
+                combined.room_area_quantity_evidence
+            )),
+        )
+    with pytest.raises(SourceClosedRunConflictError, match="one original figured pair"):
+        export.seal_live_room_area_run(
+            combined, workspace_id=7, project_id="source-project",
+        )
+
+
+@pytest.mark.parametrize("field,value", (
+    ("source_sha256", None),
+    ("source_sha256", "not-a-real-sha"),
+    ("source_sha256", "g" * 64),
+    ("revision_id", None),
+    ("revision_id", ""),
+    ("revision_id", " padded-revision "),
+    ("revision_id", 123),
+))
+def test_figured_room_pair_refuses_untrusted_original_root(
+    live_claim, field, value,
+):
+    original = _firm_quantity(live_claim)
+    changed = replace(
+        original,
+        metadata={**dict(original.metadata), field: value},
+    )
+    claim = replace(
+        live_claim,
+        room_area_quantity_evidence=tuple(
+            changed if q.quantity_id == original.quantity_id else q
+            for q in live_claim.room_area_quantity_evidence
+        ),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="valid source root"):
+        export.seal_live_room_area_run(
+            claim, workspace_id=7, project_id="source-project",
+        )

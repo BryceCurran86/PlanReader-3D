@@ -55,9 +55,18 @@ def test_two_blocked_original_source_records_cannot_reuse_one_quantity_id():
 
 def test_distinct_blocked_source_is_unavailable_not_poisoning_true_firm_finish():
     firm = _quantity()
+    # A different quantity ID alone does not mean a different original
+    # finish mark. Preserve a genuinely distinct occurrence/observation so
+    # this positive control cannot bypass the new source-rival veto.
     blocked = replace(
         firm, quantity_id="other-source-unavailable",
         value=None, abstained=True, status="provisional",
+        evidence_ids=("ev-area", "ev-other", "ev-def"),
+        metadata={
+            **firm.metadata,
+            "finish_occurrence_record_id": "occ-other",
+            "finish_occurrence_evidence_id": "ev-other",
+        },
         blocking_reasons=("unresolved_finish_occurrence",),
     )
     traces = _traces(blocked, firm)

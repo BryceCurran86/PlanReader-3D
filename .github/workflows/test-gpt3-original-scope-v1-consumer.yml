@@ -56,12 +56,14 @@ jobs:
           python scripts/check_provider_gold_isolation.py
 
   original-lot16:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Provision original sources
         uses: ./.github/actions/provision-original-sources
         with:
@@ -124,9 +126,8 @@ jobs:
           assert receipt["snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
           print("ORIGINAL EIGHT RETAINED; V1 JOIN ONLY; UNSIGNED AND UNPUBLISHED")
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Destroy private originals and unpublished source reports
         if: always()
-        with:
-          name: gpt3-original-v1-scope-consumer
-          path: artifacts/gpt3-original-scope-v1
-          retention-days: 30
+        shell: bash
+        run: |
+          rm -rf documents/sources artifacts
