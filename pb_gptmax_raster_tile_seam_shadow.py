@@ -51,6 +51,22 @@ def _abstain(digest: str, page_no: int, reason: str) -> dict[str, Any]:
             "opening_count_granted": False, "quantity_granted": False}
 
 
+def _inline_raster_intersects_source_scan(page: fitz.Page, low: float, high: float, y: float) -> bool:
+    """A PDF BI/ID/EI image has xref=0 and is absent from get_images(full=True)."""
+    try:
+        images = page.get_image_info(xrefs=True)
+    except Exception:
+        # Missing source-painter inventory is negative evidence, not emptiness.
+        return True
+    for image in images:
+        if int(image.get("xref", 0)) != 0:
+            continue
+        rect = fitz.Rect(image["bbox"])
+        if rect.y0 < y < rect.y1 and rect.x0 < high and rect.x1 > low:
+            return True
+    return False
+
+
 def prove_tile_seam_source_pixels(
     pdf_bytes: bytes, *, expected_sha256: str, page_no: int,
     seam_x: float, source_y: float, flank_offset_pt: float = 4.0,
@@ -83,6 +99,10 @@ def prove_tile_seam_source_pixels(
         page = document[page_no - 1]
         if page.rotation != 0 or not all(page.rect.contains(fitz.Point(x, source_y)) for x in xs):
             return _abstain(digest, page_no, "unresolved_source_page_frame")
+        # get_images(full=True) excludes inline BI/ID/EI raster paint. An
+        # unowned painter anywhere on the source scan invalidates root uniqueness.
+        if _inline_raster_intersects_source_scan(page, xs[0], xs[1], source_y):
+            return _abstain(digest, page_no, "inline_source_image_painter_ambiguous")
         owners: list[list[tuple[int, int, fitz.Rect, bool]]] = [[], []]
         seen = set()
         for item in page.get_images(full=True):

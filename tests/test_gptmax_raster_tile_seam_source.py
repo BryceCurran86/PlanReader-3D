@@ -342,3 +342,46 @@ def test_unrelated_image_outside_vertical_scanline_is_invariant():
         "structural_host_granted", "whole_wall_frame_granted",
         "opening_count_granted", "quantity_granted",
     ))
+
+
+@pytest.mark.parametrize("inline_pdf_y,should_abstain", [(90, True), (20, False)])
+def test_inline_pdf_image_painter_cannot_escape_vertical_source_root_census(
+    inline_pdf_y, should_abstain,
+):
+    """A 0.2pt inline raster at the seam is not an owned XObject root."""
+    from pb_gptmax_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_tile_seam,
+    )
+    document = fitz.open(stream=_source(), filetype="pdf")
+    page = document[0]
+    stream_xref = page.get_contents()[-1]
+    # PDF content coordinates are bottom-up; page source scan is y=50.
+    inline = (
+        f"\nq\n0.2 0 0 20 99.9 {inline_pdf_y} cm\n"
+        "BI /W 1 /H 1 /CS /RGB /BPC 8 ID\n"
+    ).encode("ascii") + b"\x00\x00\x00\nEI\nQ\n"
+    document.update_stream(
+        stream_xref, document.xref_stream(stream_xref) + inline,
+    )
+    payload = document.tobytes()
+    document.close()
+    with fitz.open(stream=payload, filetype="pdf") as observed:
+        assert any(int(info["xref"]) == 0 for info in observed[0].get_image_info(xrefs=True))
+        assert all(int(item[0]) != 0 for item in observed[0].get_images(full=True))
+    common = dict(
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=7, dpi=300,
+    )
+    paired = prove_tile_seam_source_pixels(payload, **common)
+    strict = prove_contiguous_source_ink_across_tile_seam(payload, **common)
+    if should_abstain:
+        for result in (paired, strict):
+            assert result["status"] == ABSTAIN
+            assert "inline_source_image_painter_ambiguous" in result["reason_codes"]
+            assert not any(result[key] for key in (
+                "structural_host_granted", "whole_wall_frame_granted",
+                "opening_count_granted", "quantity_granted",
+            ))
+    else:
+        assert paired["status"] == SOURCE_ONLY
+        assert strict["status"] == "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW"

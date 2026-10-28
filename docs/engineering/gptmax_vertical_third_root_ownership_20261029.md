@@ -11,3 +11,13 @@ Preserve existing 0.0001pt abutment and numerical seam source-edge checks. Befor
 
 ## Boundary and validation
 Only the previously claimed existing vertical #3863 producer and its tests plus this architecture report may change. No private PDF, source hashes, original text issuers, signed/customer artefacts, benchmark truth/evaluator, 20k primitive cap or 2.5pt snap changes. Required before merge: exact-head Python3.13/3.14 CI, source-positive immutable original replay at pinned library version and complete signed/customer retention. No new opening/quantity or frozen120 accuracy increase asserted.
+
+## Additional first-failing inline-raster ownership gate
+A synthetic PDF containing two distinct image XObjects plus a genuine black
+0.2pt BI/ID/EI inline image crossing the source seam produces only two
+entries from PyMuPDF 1.26.7 page.get_images(full=True), but
+page.get_image_info(xrefs=True) reports a third raster with xref=0.
+The original two-root census therefore missed a possible source painter.
+The conservative remediation abstains on inline paint anywhere on the
+bounded source scan and retains a positive off-scan metamorphic control.
+This does not prove a host, kind, area, customer row or frozen score.
