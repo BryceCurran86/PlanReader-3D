@@ -412,3 +412,79 @@ def test_host_and_pier_ids_do_not_alias_different_source_revisions_or_host_geome
         assert changed[1] != original[1]  # pier must not alias
         assert set(changed[0]) == set(original[0])
         assert all(changed[0][name] != original[0][name] for name in original[0])
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (250.0, -130.0)),
+    (math.pi, (-80.0, 400.0)),
+])
+@pytest.mark.parametrize("span", [
+    (-2.0, -1.0), (101.0, 102.0),
+    (-2.0, 0.0), (100.0, 102.0),
+])
+def test_endpoint_snap_does_not_host_wholly_external_aperture(span, angle, shift):
+    # These pass the 2.5pt endpoint tolerance but have zero host overlap.
+    tr = lambda p: _rotated(p, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "outside", tr((span[0], 0.0)), tr((span[1], 0.0)),
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    assert len(records) == 1 and piers == ()
+    record = records[0]
+    assert record.status is S.ABSTAINED
+    assert record.first_remaining_gate == "aperture_no_host_wall_overlap"
+    assert record.adjacent_pier_ids == ()
+    assert record.shadow_only and not record.takeoff_eligible
+    assert not record.commercial_projection_allowed
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    ) == (records, piers)
+
+
+@pytest.mark.parametrize("span,expected", [
+    ((-2.0, 10.0), (0.0, 10.0)),
+    ((90.0, 102.0), (90.0, 100.0)),
+])
+def test_partial_endpoint_straddles_retain_real_positive_host_overlap(span, expected):
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput(
+        "partially-hosted", (span[0], 0.0), (span[1], 0.0),
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    assert len(records) == 1 and piers == ()
+    assert records[0].status is S.CORROBORATED
+    assert records[0].first_remaining_gate == "none"
+    assert (records[0].u0_pt, records[0].u1_pt) == expected
+    assert records[0].shadow_only and not records[0].takeoff_eligible
+    assert not records[0].commercial_projection_allowed
+
+
+def test_external_endpoint_candidate_cannot_be_a_pier_neighbor():
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = (
+        ApertureHostCandidateInput("outside", (-2.0, 0.0), (-1.0, 0.0)),
+        ApertureHostCandidateInput("A", (20.0, 0.0), (30.0, 0.0)),
+        ApertureHostCandidateInput("B", (40.0, 0.0), (50.0, 0.0)),
+    )
+    authority = _authority()
+    for order in (openings, openings[::-1]):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=order,
+        )
+        by_id = {r.physical_opening_id: r for r in records}
+        assert by_id["outside"].status is S.ABSTAINED
+        assert by_id["outside"].adjacent_pier_ids == ()
+        assert by_id["A"].status is S.CORROBORATED
+        assert by_id["B"].status is S.CORROBORATED
+        assert len(piers) == 1
+        assert (piers[0].left_opening_id, piers[0].right_opening_id) == ("A", "B")
+        assert "outside" not in (piers[0].left_opening_id, piers[0].right_opening_id)

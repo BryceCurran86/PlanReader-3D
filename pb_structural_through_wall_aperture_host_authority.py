@@ -306,6 +306,22 @@ class StructuralThroughWallApertureHostAuthority:
                 )
                 continue
 
+            # A snap allowance cannot manufacture a physical host interval.
+            # Both endpoints may lie just outside a wall end and still pass
+            # the ±2.5pt extent check; clipping must leave real wall overlap.
+            clipped_u_min = max(0.0, u_min)
+            clipped_u_max = min(wall_len, u_max)
+            if clipped_u_max - clipped_u_min <= _COORD_TOL:
+                rec = self._make_record(
+                    op.physical_opening_id, through_wall, u_min, u_max,
+                    EvidenceResolutionStatus.ABSTAINED,
+                    "aperture_no_host_wall_overlap",
+                )
+                intermediate_openings.append(
+                    {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
+                )
+                continue
+
             # 4. Check transverse wall crossings obstructing the opening
             obstructed = False
             for t_start, t_end in transverse_wall_segments:
