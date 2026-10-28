@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     name: Original Lot16 8+9 sealed customer (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 95
