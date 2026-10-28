@@ -32,6 +32,39 @@ def _single_ring(graph: dict):
     return ring
 
 
+def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0)):
+    """Exact native ink-ring EDGE topology, independent of start and direction.
+
+    The source graph issues a degree-two ordered cycle; sorting its vertices
+    would destroy which original sides are physically connected.
+    """
+    if type(vertices) not in (tuple, list) or not 4 <= len(vertices) <= 20000:
+        return None
+    try:
+        pts=[]
+        for point in vertices:
+            if (type(point) not in (tuple,list) or len(point)!=2
+                    or any(type(v) not in (int,float) or not math.isfinite(v)
+                           for v in point)):
+                return None
+            pts.append((round(float(point[0])+translation[0],3),
+                        round(float(point[1])+translation[1],3)))
+        if pts[0]==pts[-1]:
+            pts.pop()
+        if len(pts)<4 or len(set(pts))!=len(pts):
+            return None
+        poly=Polygon(pts)
+        if not poly.is_valid or poly.is_empty or poly.area<=0:
+            return None
+        edges=frozenset(
+            frozenset((pts[i],pts[(i+1)%len(pts)]))
+            for i in range(len(pts))
+        )
+        return edges if len(edges)==len(pts) else None
+    except (TypeError,ValueError,OverflowError):
+        return None
+
+
 def audit_gpt2_original_cross_sheet_ring_correspondence(
     floor_graph: dict, finish_graph: dict, *,
     original_source_registration: dict,
@@ -76,10 +109,15 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     if not floor_ring or not finish_ring:
         return {**base,"first_failure":"physical_floor_or_finish_source_ring_open"}
     dx,dy=translation_pdf_pts
-    transferred={(round(x+dx,3),round(y+dy,3))
-                 for x,y in floor_ring["vertices_pdf_pts"]}
-    received={tuple(v) for v in finish_ring["vertices_pdf_pts"]}
-    if transferred != received or len(transferred)!=len(received):
+    # Equal source vertex sets can describe NON-equal wall cycles. Compare
+    # every independently extracted native boundary side, including closure.
+    # Stroke order/reversal and cyclic starting vertex have no authority.
+    translated_edges=_source_cyclic_ring_edges_native(
+        floor_ring.get("vertices_pdf_pts"),translation=(dx,dy))
+    received_edges=_source_cyclic_ring_edges_native(
+        finish_ring.get("vertices_pdf_pts"))
+    if (not translated_edges or not received_edges
+            or translated_edges!=received_edges):
         return {**base,"first_failure":"competing_cross_sheet_original_perimeter"}
     # Vertex equality alone is insufficient: source perimeter must have the
     # same number of actual independently issued original source side edges.
