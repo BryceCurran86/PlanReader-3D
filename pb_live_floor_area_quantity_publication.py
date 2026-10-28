@@ -319,12 +319,12 @@ def publish_live_floor_area_quantities(
         # Do not use a measurement from another room-face snapshot even if
         # its revision, quantity value and viewport happen to match.
         room_snapshot_id = metadata.get("room_snapshot_id")
-        if room_snapshot_id is not None and not _exact_source_token(
+        if room_snapshot_id not in (None, "") and not _exact_source_token(
             room_snapshot_id, floor.snapshot_id
         ):
             continue
         source_room_face_id = metadata.get("source_room_face_record_id")
-        if source_room_face_id is not None and not _exact_source_token(
+        if source_room_face_id not in (None, "") and not _exact_source_token(
             source_room_face_id, floor.source_room_face_record_id
         ):
             continue
@@ -492,12 +492,16 @@ def publish_live_canonical_room_area_quantities(
         # snapshot. An explicitly declared physical room snapshot must not
         # reissue its area onto another canonical room snapshot.
         source_room_snapshot = metadata.get("room_snapshot_id")
-        if source_room_snapshot is not None and not _exact_source_token(
+        if source_room_snapshot not in (None, "") and not _exact_source_token(
             source_room_snapshot, room.snapshot_id
         ):
             continue
         source_viewport = metadata.get("viewport_id")
-        if not _exact_source_token(source_viewport, room.viewport_id):
+        if (
+            type(source_viewport) is not str or not source_viewport
+            or source_viewport != source_viewport.strip()
+            or (room.viewport_id and not _exact_source_token(source_viewport, room.viewport_id))
+        ):
             continue
         raw_page_id = floor_quantity.metadata.get("page_no")
         if not _exact_original_page_match(raw_page_id, room.page_id):
