@@ -644,6 +644,22 @@ class SourceCrossViewFloorCorrespondenceProducer:
             )
             records.append(rec)
 
+        # Registration alone is not a floor-finish correspondence. If every
+        # measured floor abstains (or one is in conflict), the aggregate must
+        # not advertise CANDIDATE while carrying zero candidate floor owners.
+        # Keep each source mark and its typed negative for later inspection.
+        if any(row.status is EvidenceResolutionStatus.CONFLICT for row in records):
+            overall_status = EvidenceResolutionStatus.CONFLICT
+        elif not any(row.status is EvidenceResolutionStatus.CANDIDATE for row in records):
+            overall_status = EvidenceResolutionStatus.ABSTAINED
+        if overall_status is not EvidenceResolutionStatus.CANDIDATE:
+            overall_reasons = list(dict.fromkeys((
+                *overall_reasons,
+                *(reason for row in records for reason in row.reason_codes),
+            )))
+            if not overall_reasons:
+                overall_reasons = [SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_UNAVAILABLE]
+
         return SourceCrossViewFloorCorrespondenceResult(
             status=overall_status,
             reason_codes=tuple(overall_reasons),
