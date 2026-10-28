@@ -319,6 +319,12 @@ def run_jobhub_publish_preflight(
         else:
             warnings.append("Drawing revision hash is unrecorded")
 
+    # A commercial package with no rows is not a verified release.  An
+    # empty list previously returned is_valid=True and could be stamped
+    # is_commercial_ready by build_jobhub_payload.
+    if is_commercial and not rows:
+        blocking_reasons.append("Commercial release requires at least one verified quantity")
+
     # 3. Row-by-Row Gate Validation
     publishable_count = 0
     blocked_count = 0
@@ -357,6 +363,51 @@ def run_jobhub_publish_preflight(
             continue
 
         auth_status = row_obj.authority_status.lower()
+        source_type = row_obj.source_type.lower()
+
+        # The issuer's is_publishable flag is not an authority certificate:
+        # serialized, corrected, or externally supplied rows can carry an
+        # inconsistent flag. Re-check the typed status and source at the final
+        # commercial consumer rather than promoting a forged flag to JobHub.
+        if is_commercial:
+            if row_obj.blocking_reasons:
+                blocking_reasons.append(
+                    f"Row {qid}: unresolved source authority blockers"
+                )
+                blocked_count += 1
+                continue
+            if auth_status not in {
+                AuthorityStatus.FIRM.value,
+                AuthorityStatus.USER_APPROVED.value,
+            }:
+                blocking_reasons.append(
+                    f"Row {qid}: non-firm or unapproved measurement authority ({auth_status})"
+                )
+                blocked_count += 1
+                continue
+            if source_type not in {kind.value for kind in TakeoffSourceType} or source_type in {
+                TakeoffSourceType.EXCLUDED.value,
+                TakeoffSourceType.REFERENCE_ONLY.value,
+                TakeoffSourceType.BLOCKED.value,
+            }:
+                blocking_reasons.append(
+                    f"Row {qid}: excluded, blocked or unknown source authority ({source_type})"
+                )
+                blocked_count += 1
+                continue
+            if (
+                auth_status == AuthorityStatus.USER_APPROVED.value
+                or source_type in {
+                    TakeoffSourceType.PDF_SCALED.value,
+                    TakeoffSourceType.AI_DETECTED.value,
+                    TakeoffSourceType.MODEL_DERIVED.value,
+                }
+            ) and not str(row_obj.approved_by or "").strip():
+                blocking_reasons.append(
+                    f"Row {qid}: estimator approval required for this measurement authority"
+                )
+                blocked_count += 1
+                continue
 
         # Check revision staleness
         if row_obj.revision_hash and curr_rev_hash and row_obj.revision_hash != curr_rev_hash:
