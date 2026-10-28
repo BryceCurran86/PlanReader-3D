@@ -386,7 +386,7 @@ def model_surface_authority(row: Mapping[str, Any]) -> Tuple[bool, str]:
     # Workspace binding: row must carry a valid positive workspace identity
     workspace_id = row.get("workspace_id")
     if type(workspace_id) is not int or workspace_id <= 0:
-        return False, "3D model surface approval requires an exact positive integer workspace identity"
+        return False, "3D model surface approval requires a positive workspace identity (exact positive integer workspace identity required)"
 
     # Provenance fields must be non-empty and not sentinel strings
     sentinels = {"nan", "none", "null"}
