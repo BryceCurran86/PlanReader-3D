@@ -293,19 +293,31 @@ def side_evidence(
         )
         cov = sum(b - a for a, b in covered) / length if length > 0 else 0.0
         second = []
+        second_intervals = []
         for k in index.keys[orient]:
             signed = (k - coord) * sign
             # A measured floor uses the room-facing wall face; its paired
             # wall face must lie outward, not across the room interior.
             if band[0] <= signed <= band[1]:
-                c2 = sum(max(0.0, min(b, hi) - max(a, lo)) for a, b in lines[orient][k]) / length
+                outer_covered = merge_intervals(
+                    (max(a, lo), min(b, hi))
+                    for a, b in lines[orient][k]
+                    if min(b, hi) > max(a, lo)
+                )
+                c2 = sum(b - a for a, b in outer_covered) / length if length > 0 else 0.0
                 if c2 >= SIDE_PARTIAL:
-                    second.append((round(signed, 2), round(c2, 3)))
+                    offset = round(signed, 2)
+                    second.append((offset, round(c2, 3)))
+                    second_intervals.append((
+                        offset,
+                        [(round(a, 2), round(b, 2)) for a, b in outer_covered],
+                    ))
         out[name] = {
             "coordinate": round(coord, 3),
             "face_coverage": round(cov, 4),
             "covered_intervals": [(round(a, 2), round(b, 2)) for a, b in covered],
             "second_face": second,
+            "second_face_intervals": second_intervals,
         }
     return out
 
@@ -314,6 +326,32 @@ def interval_iou(a: Sequence[Sequence[float]], b: Sequence[Sequence[float]]) -> 
     inter = _overlap(merge_intervals(a), merge_intervals(b))
     union = sum(hi - lo for lo, hi in merge_intervals(a)) + sum(hi - lo for lo, hi in merge_intervals(b)) - inter
     return None if union <= 0 else inter / union
+
+
+def matching_outward_second_faces(
+    support: Mapping[str, Any],
+    target: Mapping[str, Any],
+    *,
+    shift: float,
+) -> bool:
+    """Require the complete outward-face offset and void pattern on both sheets.
+
+    Merely finding *some* parallel stroke on each sheet cannot prove that the
+    same physical wall thickness or second-face openings were observed.
+    Retain all candidate offsets; missing, extra or different faces abstain.
+    """
+    src_faces = sorted(support["second_face_intervals"], key=lambda row: row[0])
+    dst_faces = sorted(target["second_face_intervals"], key=lambda row: row[0])
+    if not src_faces or len(src_faces) != len(dst_faces):
+        return False
+    for (src_offset, src_ivs), (dst_offset, dst_ivs) in zip(src_faces, dst_faces):
+        if abs(src_offset - dst_offset) > COORD_TOL:
+            return False
+        unshifted = [(lo - shift, hi - shift) for lo, hi in dst_ivs]
+        iou = interval_iou(src_ivs, unshifted)
+        if iou is None or iou < 0.98:
+            return False
+    return True
 
 
 def translate_box(
@@ -344,9 +382,14 @@ def box_correspondence(
         tgt_name = name
         shift = translation[1] if name in ("x0", "x1") else translation[0]
         t_iv = [(a - shift, b - shift) for a, b in tgt[tgt_name]["covered_intervals"]]
+        outward_faces_match = (
+            orientation == "identity"
+            and matching_outward_second_faces(sup[name], tgt[tgt_name], shift=shift)
+        )
         sides[name] = {
             "support_sheet": sup[name],
             "target_sheet": tgt[tgt_name],
+            "outward_second_faces_match": outward_faces_match,
             "covered_interval_iou": (
                 interval_iou(sup[name]["covered_intervals"], t_iv)
                 if orientation == "identity"
@@ -367,7 +410,11 @@ def box_correspondence(
     kinds = [s["wall_side"] for s in sides.values()]
     ious = [s["covered_interval_iou"] for s in sides.values() if s["covered_interval_iou"] is not None]
     bounded = all(k != "not_wall" for k in kinds)
-    identical = bool(ious) and all(i is not None and i >= 0.98 for i in ious)
+    identical = (
+        bool(ious)
+        and all(i is not None and i >= 0.98 for i in ious)
+        and all(s["outward_second_faces_match"] for s in sides.values())
+    )
     return {
         "box_support_sheet": tuple(round(v, 3) for v in box_support),
         "box_target_sheet": tuple(round(v, 3) for v in box_target),

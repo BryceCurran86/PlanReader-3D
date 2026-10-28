@@ -1067,3 +1067,104 @@ def test_wrong_side_second_wall_face_cannot_authenticate_floor(
     assert positive["status"] is EvidenceResolutionStatus.CANDIDATE
     assert negative["status"] is EvidenceResolutionStatus.ABSTAINED
     assert BOX_NOT_WALL_BOUNDED in negative["reason_codes"]
+
+
+# GPT2: a parallel wall stroke is not physical wall equivalence unless the
+# complete outward-face thickness and void geometry match on both sheets.
+@pytest.mark.parametrize(
+    "side,axis,old_coord,new_coord",
+    [
+        ("x0", "x", 94.72, 92.72),
+        ("x1", "x", 255.28, 257.28),
+        ("y0", "y", 94.72, 92.72),
+        ("y1", "y", 255.28, 257.28),
+    ],
+)
+@pytest.mark.parametrize("translate", [(0.0, 0.0), (700.0, -320.0)])
+def test_cross_sheet_different_outward_wall_thickness_abstains(
+    side, axis, old_coord, new_coord, translate,
+):
+    box = (100.0, 100.0, 250.0, 250.0)
+    source = room(*box)
+    target = copy.deepcopy(source)
+    changed = 0
+    k1, k2 = ("x1", "x2") if axis == "x" else ("y1", "y2")
+    for segment in target:
+        if segment[k1] == segment[k2] == old_coord:
+            segment[k1] = segment[k2] = new_coord
+            changed += 1
+    assert changed == 1
+    dx, dy = translate
+    shifted_box = tuple(v + (dx if i % 2 == 0 else dy)
+                        for i, v in enumerate(box))
+    source_lines = build_lines(moved(source, dx, dy))
+    target_lines = build_lines(moved(target, dx, dy))
+    positive = box_correspondence(
+        shifted_box, lines_support=source_lines, lines_target=source_lines,
+        orientation="identity", translation=(0.0, 0.0),
+    )
+    mismatch = box_correspondence(
+        shifted_box, lines_support=source_lines, lines_target=target_lines,
+        orientation="identity", translation=(0.0, 0.0),
+    )
+    assert positive["wall_bounded_on_both_sheets"] is True
+    assert positive["wall_evidence_identical_on_both_sheets"] is True
+    assert mismatch["wall_bounded_on_both_sheets"] is True
+    assert mismatch["side_kinds"][side] == "full"
+    assert mismatch["sides"][side]["outward_second_faces_match"] is False
+    assert mismatch["wall_evidence_identical_on_both_sheets"] is False
+    mark = [{"code": "FT3", "margin_pt": 40.0, "registered_region": True}]
+    classified = classify_floor(
+        mismatch, registration_unique=True, marks_inside=mark,
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert classified["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert WALL_EVIDENCE_DIFFERS in classified["reason_codes"]
+    assert classified["authenticated_physical_wall_face_equivalence"] is False
+
+
+def _different_outer_face_gap(lo, hi):
+    original = room(100.0, 100.0, 250.0, 250.0)
+    result = []
+    for segment in original:
+        if segment["x1"] == segment["x2"] == 94.72:
+            result += [
+                seg(94.72, segment["y1"], 94.72, lo),
+                seg(94.72, hi, 94.72, segment["y2"]),
+            ]
+        else:
+            result.append(segment)
+    return result
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_same_second_face_coverage_with_different_void_position_abstains(reverse):
+    box = (100.0, 100.0, 250.0, 250.0)
+    source = _different_outer_face_gap(130.0, 160.0)
+    target = _different_outer_face_gap(170.0, 200.0)
+    if reverse:
+        source.reverse()
+        target.reverse()
+    src_lines, tgt_lines = build_lines(source), build_lines(target)
+    positive = box_correspondence(
+        box, lines_support=src_lines, lines_target=src_lines,
+        orientation="identity", translation=(0.0, 0.0),
+    )
+    negative = box_correspondence(
+        box, lines_support=src_lines, lines_target=tgt_lines,
+        orientation="identity", translation=(0.0, 0.0),
+    )
+    assert positive["wall_evidence_identical_on_both_sheets"] is True
+    assert negative["wall_bounded_on_both_sheets"] is True
+    assert negative["sides"]["x0"]["support_sheet"]["second_face"] == (
+        negative["sides"]["x0"]["target_sheet"]["second_face"]
+    )
+    assert negative["sides"]["x0"]["outward_second_faces_match"] is False
+    assert negative["wall_evidence_identical_on_both_sheets"] is False
+    classified = classify_floor(
+        negative, registration_unique=True,
+        marks_inside=[{"code": "FT3", "margin_pt": 40.0, "registered_region": True}],
+        other_labelled_boxes_overlapping=0, material_code="FT3",
+    )
+    assert classified["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert WALL_EVIDENCE_DIFFERS in classified["reason_codes"]
