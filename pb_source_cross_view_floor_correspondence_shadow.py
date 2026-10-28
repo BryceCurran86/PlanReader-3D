@@ -51,6 +51,8 @@ REGISTRATION_SCALE_NOT_APPLIED = "registration_scale_not_applied_to_floor_box"
 BOX_NOT_WALL_BOUNDED = "box_not_wall_bounded_on_both_sheets"
 WALL_EVIDENCE_DIFFERS = "wall_evidence_differs_between_sheets"
 OVERLAPPING_MEASURED_BOXES = "overlapping_measured_boxes"
+DUPLICATE_PHYSICAL_FLOOR_IDENTITY = "duplicate_physical_floor_identity"
+MISSING_PHYSICAL_FLOOR_IDENTITY = "missing_physical_floor_identity"
 MARK_TOO_CLOSE_TO_BOX_SIDE = "mark_too_close_to_box_side"
 MARK_IN_UNREGISTERED_REGION = "mark_in_unregistered_region"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
@@ -381,6 +383,8 @@ def classify_floor(
     marks_inside: Sequence[Mapping[str, Any]],
     other_labelled_boxes_overlapping: int,
     material_code: str,
+    identity_ambiguous: bool = False,
+    identity_missing: bool = False,
     min_margin_pt: float = 5.0,
     authority_blockers: Sequence[str] = STANDING_AUTHORITY_BLOCKERS,
 ) -> dict[str, Any]:
@@ -394,6 +398,13 @@ def classify_floor(
         reasons.append(WALL_EVIDENCE_DIFFERS)
     if other_labelled_boxes_overlapping:
         reasons.append(OVERLAPPING_MEASURED_BOXES)
+    # Source-face / physical-room / canonical-floor identifiers are a
+    # one-to-one claim for this shadow correspondence. Repeating an identity
+    # across distinct measured boxes cannot authenticate either owner.
+    if identity_ambiguous is not False:
+        reasons.append(DUPLICATE_PHYSICAL_FLOOR_IDENTITY)
+    if identity_missing is not False:
+        reasons.append(MISSING_PHYSICAL_FLOOR_IDENTITY)
     # A missing, malformed, overflowing or non-finite mark margin is not a
     # positive source containment receipt. Never let NaN bypass comparison.
     try:
@@ -618,6 +629,20 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     overlap_counts[i] += 1
                     overlap_counts[j] += 1
 
+        # Derive identity collisions from the *entire* measured-box universe,
+        # not from caller hints or spatial overlap alone. Two disjoint boxes
+        # may still assert one physical floor, room face or canonical floor.
+        identity_fields = (
+            "canonical_floor_id", "physical_room_id",
+            "source_room_face_record_id",
+        )
+        identity_counts = collections.Counter(
+            (field_name, value)
+            for item in measured_boxes
+            for field_name in identity_fields
+            if (value := _clean(item.get(field_name)))
+        )
+
         for box_index, item in enumerate(measured_boxes):
             box_sup = box_bounds[box_index]
             canonical_floor_id = _clean(item.get("canonical_floor_id"))
@@ -653,6 +678,19 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     or overlap_counts[box_index]
                 ),
                 material_code=selector.material_code,
+                identity_missing=not all((
+                    canonical_floor_id, physical_room_id,
+                    source_room_face_record_id,
+                )),
+                identity_ambiguous=any(
+                    identity_counts[(field_name, value)] > 1
+                    for field_name, value in (
+                        ("canonical_floor_id", canonical_floor_id),
+                        ("physical_room_id", physical_room_id),
+                        ("source_room_face_record_id", source_room_face_record_id),
+                    )
+                    if value
+                ),
             )
             # Preserve competing-code CONFLICT and every negative; retain
             # both the transform and distinct-translation alias vetoes.

@@ -24,6 +24,8 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     MARK_TOO_CLOSE_TO_BOX_SIDE,
     MARK_IN_UNREGISTERED_REGION,
     OVERLAPPING_MEASURED_BOXES,
+    DUPLICATE_PHYSICAL_FLOOR_IDENTITY,
+    MISSING_PHYSICAL_FLOOR_IDENTITY,
     REGISTRATION_NOT_UNIQUE,
     REGISTRATION_TRANSLATION_ALIAS,
     STANDING_AUTHORITY_BLOCKERS,
@@ -927,3 +929,86 @@ def test_shadow_record_id_separates_distinct_target_sheet_correspondence():
     assert base.record_id != moved_target.record_id
     assert moved_target.takeoff_eligible is False
     assert moved_target.commercial_projection_allowed is False
+
+
+# A source-face/canonical-floor identity is a single physical claim even when
+# the corresponding measured boxes do not geometrically overlap.
+def _two_separated_floor_boxes():
+    return [
+        {
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-first",
+            "physical_room_id": "physical-room-first",
+            "source_room_face_record_id": "source-face-first",
+        },
+        {
+            "dimension_box_pdf_pts": (418.50, 1390.00, 638.20, 1600.00),
+            "canonical_floor_id": "canonical-floor-second",
+            "physical_room_id": "physical-room-second",
+            "source_room_face_record_id": "source-face-second",
+        },
+    ]
+
+
+def _two_separated_floor_marks():
+    return [
+        {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True},
+        {"x": 470.0, "y": 1460.0, "code": "FT3", "registered_region": True},
+    ]
+
+
+def _two_floor_result(boxes):
+    return SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=boxes,
+        marks=_two_separated_floor_marks(),
+    )
+
+
+def test_two_distinct_disjoint_physical_floors_remain_shadow_candidates():
+    result = _two_floor_result(_two_separated_floor_boxes())
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 2
+    assert all(r.status is EvidenceResolutionStatus.CANDIDATE for r in result.records)
+    assert all(not r.takeoff_eligible and not r.commercial_projection_allowed
+               for r in result.records)
+
+
+@pytest.mark.parametrize("field_name", [
+    "canonical_floor_id", "physical_room_id", "source_room_face_record_id",
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_disjoint_boxes_reusing_one_physical_identity_abstain_without_order_bias(
+    field_name, reverse,
+):
+    boxes = _two_separated_floor_boxes()
+    boxes[1][field_name] = boxes[0][field_name]
+    if reverse:
+        boxes.reverse()
+    result = _two_floor_result(boxes)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert len(result.records) == 2
+    assert all(r.status is EvidenceResolutionStatus.ABSTAINED for r in result.records)
+    assert all(DUPLICATE_PHYSICAL_FLOOR_IDENTITY in r.reason_codes
+               for r in result.records)
+    assert DUPLICATE_PHYSICAL_FLOOR_IDENTITY in result.reason_codes
+    assert all(not r.takeoff_eligible and not r.commercial_projection_allowed
+               for r in result.records)
+
+
+@pytest.mark.parametrize("field_name", [
+    "canonical_floor_id", "physical_room_id", "source_room_face_record_id",
+])
+def test_missing_physical_identity_abstains_only_affected_floor(field_name):
+    boxes = _two_separated_floor_boxes()
+    boxes[0].pop(field_name)
+    result = _two_floor_result(boxes)
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 2
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert MISSING_PHYSICAL_FLOOR_IDENTITY in result.records[0].reason_codes
+    assert result.records[1].status is EvidenceResolutionStatus.CANDIDATE
+    assert all(not r.takeoff_eligible and not r.commercial_projection_allowed
+               for r in result.records)
