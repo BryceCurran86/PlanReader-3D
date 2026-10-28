@@ -220,7 +220,9 @@ def publish_live_per_wall_surface_area_quantities(
             )
             actual_area = float(polygon.area)
             gross_polygon_area = float(gross_polygon.area)
-        except (TypeError, ValueError, OverflowError):
+        except Exception:
+            # Malformed WKB, invalid void geometry and GEOS failures cannot
+            # inherit the original producer's physical wall seal.
             return ()
         if (
             not gross_polygon.is_valid or gross_polygon.is_empty
