@@ -1,9 +1,12 @@
 name: GPT2 Original Maryborough Canonical Room Metric Handoff Integrity
 on:
+  # Source-free public PR validation only. Original-source positive proof must
+  # run separately in an owner/main/manual, SHA-pinned offline environment.
   pull_request:
     paths:
       - "tools/diag_gpt2_source_room_handoff_integrity.py"
       - "tests/test_gpt2_source_room_handoff_integrity.py"
+      - "tests/test_gpt2_source_room_handoff_workflow_privacy.py"
       - "pb_live_canonical_room_composition.py"
       - "pb_live_canonical_floor_surface.py"
       - "tests/test_gpt2_canonical_source_polygon_geometry_gate.py"
@@ -11,6 +14,9 @@ on:
       - "tests/test_gpt1_firm_floor_area_source_integrity.py"
       - ".github/workflows/test-gpt2-source-room-handoff-integrity.yml"
       - "docs/engineering/gpt2_maryborough_source_room_handoff.md"
+permissions:
+  contents: read
+
 concurrency:
   group: gpt2-original-room-handoff-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -25,215 +31,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Eight original source floor/metric/label gate regressions
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_handoff_integrity.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py tests/test_live_canonical_room_composition.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_workflow_privacy.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py tests/test_live_canonical_room_composition.py
           python -m compileall -q tools/diag_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py
-          ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py
+          ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_workflow_privacy.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
-          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-  source-proof:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
-      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: SHA-pinned original topology and independently decoded area-support page
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py      - name: Explicitly label source-free PR scope
         run: |
-          set -euo pipefail
-          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
-          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          PYTHONPATH=. python -u - <<'PY'
-          import json
-          from pathlib import Path
-          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
-          from tools.diag_gpt2_source_room_handoff_integrity import report_source_room_handoff
-          from tools.diag_gpt2_room_measurement_gates import inspect_room_measurement_gates
-          sha='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          claim=collect_live_physical_net_wall_claim(
-              Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'),
-              pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
-          )
-          d=report_source_room_handoff(claim,original_source_sha=sha)
-          assert d['source_sha256']==sha
-          assert d['reported_source_room_count']==15
-          # Original FREEZER can possess a source face and native label but
-          # still fail a SIMPLE physical-ring gate. Observe the actual
-          # Shapely source validity without repairing vertices or minting m².
-          freezer=next(row for row in d['room_handoff_first_gates']
-                       if row['source_room_label']=='FREEZER')
-          assert freezer['first_unproved_authority']=='SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE'
-          native=freezer['original_polygon_source_validity_diagnostic_only']
-          assert native is not None and native['original_polygon_repaired'] is False
-          assert native['metric_area_published_by_diagnostic'] is False
-          assert native['original_native_polygon_valid_diagnostic_only'] is False
-          crossing=native['original_native_source_ring_crossing_diagnostic_only']
-          assert crossing is not None
-          assert crossing['first_source_crossing_gate_diagnostic_only']=='original_nonadjacent_ring_edges_intersect_role_unproven'
-          assert len(crossing['original_ring_crossing_edge_indices'])==2
-          assert len(crossing['original_ring_crossing_edge_pdf_pts'])==2
-          assert crossing['source_edge_wall_owner_proven'] is False
-          assert crossing['source_room_geometry_repaired'] is False
-          original_freezer_rooms=[room for room in claim.canonical_rooms
-                                  if room.room_label == 'FREEZER']
-          assert len(original_freezer_rooms)==1
-          original_freezer=original_freezer_rooms[0]
-          assert original_freezer.source_room_face_record_id==freezer['original_source_face_receipt_id']
-          assert original_freezer.geometry_complete is False
-          assert original_freezer.metric_geometry_complete is False
-          original_freezer_floors=[floor for floor in claim.canonical_floors
-                                  if floor.room_entity_id==original_freezer.canonical_room_id]
-          assert len(original_freezer_floors)==1
-          original_freezer_floor=original_freezer_floors[0]
-          assert original_freezer_floor.geometry_complete is False
-          assert original_freezer_floor.physical_floor_surface_identity_resolved is False
-          assert original_freezer_floor.metric_geometry_complete is False
-          assert original_freezer_floor.metric_area_m2 is None
-          assert original_freezer_floor.commercial_quantity_authority is False
-          print('G2_ORIGINAL_FREEZER_CANONICAL_GEOMETRY_ABORT',json.dumps({
-              'source_sha256':sha,
-              'original_face_receipt':original_freezer.source_room_face_record_id,
-              'room_geometry_complete':original_freezer.geometry_complete,
-              'floor_geometry_complete':original_freezer_floor.geometry_complete,
-              'physical_floor_resolved':original_freezer_floor.physical_floor_surface_identity_resolved,
-              'metric_area':original_freezer_floor.metric_area_m2,
-              'benchmark_accuracy':None,
-          },sort_keys=True))
-          print('G2_ORIGINAL_FREEZER_NATIVE_CROSSING_EDGE_FIRST_GATE',json.dumps({
-              'source_sha256':sha,
-              'source_room_face_record_id':freezer['original_source_face_receipt_id'],
-              'original_source_ring_crossing':crossing,
-              'physical_wall_owner_authenticated':False,
-              'metric_area_published':False,
-              'benchmark_accuracy':None,
-          },sort_keys=True))
-          print('G2_ORIGINAL_FREEZER_SOURCE_RING_FIRST_GATE',json.dumps({
-              'source_sha256':sha,
-              'source_room_face_record_id':freezer['original_source_face_receipt_id'],
-              'native_polygon':native,
-              'metric_area_published':False,
-              'benchmark_accuracy':None,
-          },sort_keys=True))
-          assert all(
-              row['original_polygon_source_validity_diagnostic_only'] is None
-              or (row['original_polygon_source_validity_diagnostic_only']['original_polygon_repaired'] is False
-                  and row['original_polygon_source_validity_diagnostic_only']['metric_area_published_by_diagnostic'] is False)
-              for row in d['room_handoff_first_gates']
-          )
-          # Original producer separately reissued three source-proven
-          # floor-area quantities; no customer sealing is proven here.
-          observed_reissues = {
-              row['source_room_label']:
-              row['producer_floor_area_reissue_quantity_id_observed_only']
-              for row in d['room_handoff_first_gates']
-              if row['producer_floor_area_reissue_quantity_id_observed_only']
-          }
-          assert set(observed_reissues) == {'FOOD PREP', 'COLD ROOM', 'OFFICE'}
-          assert d['independent_floor_area_reissue_observed_count'] == 3
-          assert all(row['customer_floor_area_seal_verified_by_this_report'] is False
-                     for row in d['room_handoff_first_gates'])
-          assert d['benchmark_accuracy'] is None
-          assert d['diagnostic_only'] is True
-          assert d['dry_store_must_abstain_without_new_proof'] is True
-          assert not d['floor_finish_publication_allowed']
-          assert not d['ceiling_lining_publication_allowed']
-          assert all(r['metric_area_inferred_from_page_points'] is False
-                     and r['floor_finish_publication_allowed'] is False
-                     and r['ceiling_lining_publication_allowed'] is False
-                     and r['benchmark_accuracy'] is None
-                     for r in d['room_handoff_first_gates'])
-          # The original 31-page PDF independently proves three source
-          # FIRM room areas. Run the real GPT1 floor/room-area reissuers
-          # and GPT3 source-closed customer gate on the SAME typed claim.
-          # This must never require manually enabling the canonical-floor
-          # commercial flag, or claim a frozen V2 matched object.
-          downstream=inspect_room_measurement_gates(claim)
-          original_firm=[
-              qty for qty in claim.room_area_quantity_evidence
-              if qty.status=='firm' and not qty.abstained
-          ]
-          assert len(original_firm)==3
-          assert all(
-              isinstance(qty.input_entity_ids,(tuple,list))
-              and len(qty.input_entity_ids)==1
-              and type(qty.input_entity_ids[0]) is str
-              and qty.semantic_key==f'room_area:{qty.input_entity_ids[0]}'
-              for qty in original_firm
-          )
-          controls={'FOOD PREP':13.270425,'OFFICE':9.05352,'COLD ROOM':25.37875}
-          source_rows={r['source_room_label']:r for r in d['room_handoff_first_gates']}
-          measured_by_label={}
-          for row in downstream['rooms']:
-              measured_by_label.setdefault(row['room_label'],[]).append(row)
-          for label,expected_area in controls.items():
-              # Generic source validity gating may not discard existing
-              # three independently measured, authentic physical rooms.
-              rooms=[r for r in claim.canonical_rooms if r.room_label==label]
-              assert len(rooms)==1, (label,'canonical source face ambiguous')
-              source_room=rooms[0]
-              assert source_room.geometry_complete is True
-              assert source_room.metric_geometry_complete is False
-              floors=[f for f in claim.canonical_floors
-                      if f.room_entity_id==source_room.canonical_room_id]
-              assert len(floors)==1, (label,'physical floor owner ambiguous')
-              assert floors[0].geometry_complete is True
-              assert floors[0].physical_floor_surface_identity_resolved is True
-              rows=measured_by_label.get(label,[])
-              assert len(rows)==1, (label,'original owner ambiguous')
-              item=rows[0]
-              source=source_rows[label]
-              assert source['source_proven_area_m2']==expected_area
-              assert item['source_room_face_record_id']==source['original_source_face_receipt_id']
-              assert item['canonical_floor_id']==source['canonical_floor_id']
-              assert item['metric_quantity_id']==source['documented_area_quantity_id']
-              assert item['firm_documented_area_receipt'] is True
-              assert item['metric_area_m2'] is not None and abs(item['metric_area_m2']-expected_area)<1e-8
-              assert item['metric_geometry_complete'] is False
-              assert item['commercial_quantity_authority_flag'] is False
-              assert item['floor_area_reissued_quantity_id']==observed_reissues[label]
-              assert item['canonical_room_area_reissued_quantity_id']
-              assert item['floor_area_source_sealed'] is True
-              assert item['floor_area_customer_row_verified'] is True
-              assert item['first_unclosed_gate']=='CUSTOMER_REVIEW_ROW_VERIFIED_UNSCORED'
-          assert downstream['reissued_floor_area_quantity_count']==3
-          assert downstream['reissued_canonical_room_area_quantity_count']==3
-          assert downstream['source_closed_floor_seal_quantity_count']==3
-          assert downstream['verified_floor_customer_row_count']==3
-          assert downstream['commercial_estimator_approved'] is False
-          assert downstream['benchmark_accuracy'] is None
-          # This proves original source-to-customer row integrity, not the
-          # frozen 24-object comparison or material-occurrence completeness.
-          Path('original-maryborough-floor-publisher-firstgate.json').write_text(
-              json.dumps(downstream,sort_keys=True,indent=2)+'\n'
-          )
-          print('G2_ORIGINAL_FLOOR_CUSTOMER_ROWS',json.dumps(
-              [(name,measured_by_label[name][0]['floor_area_reissued_quantity_id'],
-                measured_by_label[name][0]['canonical_room_area_reissued_quantity_id'])
-               for name in controls],sort_keys=True))
-          Path('original-maryborough-source-room-handoff.json').write_text(
-              json.dumps(d,sort_keys=True,indent=2)+'\n'
-          )
-          print('G2_SOURCE_METRIC_HANDOFF',json.dumps(
-              [(r['source_room_label'],r['first_unproved_authority'],
-                r['original_source_face_receipt_id'],r['documented_area_quantity_id'])
-                for r in d['room_handoff_first_gates']],sort_keys=True))
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gpt2-original-maryborough-room-metric-handoff
-          path: |
-            original-maryborough-source-room-handoff.json
-            original-maryborough-floor-publisher-firstgate.json
-          retention-days: 30
+          echo '### GPT2 public source-free room handoff' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Synthetic/source-neutral regressions only; no original PDF, FIRM source replay, signed customer proof or frozen V2 score is established.' >> "$GITHUB_STEP_SUMMARY"
