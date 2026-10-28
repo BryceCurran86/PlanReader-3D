@@ -6,7 +6,6 @@ logs or downloadable artifacts. These tests need no private original PDF.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 WORKFLOW = (
@@ -52,35 +51,31 @@ def test_both_diagnostics_keep_original_derived_json_in_private_runner_temp() ->
         assert "> /dev/null 2>&1" in job
         assert "| tee " not in job
         assert "console.log" not in job
-        upload_only = job.split("      - uses: actions/upload-artifact@v4", 1)[1].split("      - name: Remove private original", 1)[0]
-        assert "if: success()" in upload_only
-        assert "if: always()" not in upload_only
+        # Token-bearing original-source jobs must never upload artifacts,
+        # even bounded receipts: the repository-wide credential census vetoes it.
+        assert "actions/upload-artifact@" not in job
     assert "--output /private-output/native_grid_candidate.json" in first
     assert 'Path(os.environ["PRIVATE_OUT"])/"native_grid_candidate.json"' in first
     assert "--output /private-output/original_room_mark_registration.json" in second
     assert 'Path(os.environ["PRIVATE_OUT"])/"original_room_mark_registration.json"' in second
 
 
-def test_artifacts_are_bounded_source_neutral_receipts_only() -> None:
+def test_original_source_jobs_never_upload_even_bounded_receipts() -> None:
     first, second = _jobs()
     for job in (first, second):
-        assert job.count("actions/upload-artifact@v4") == 1
-        assert "if: success()" in job
-        upload = job.split("      - uses: actions/upload-artifact@v4", 1)[1]
-        paths = re.findall(r"(?m)^\s+path:\s*(\S+)\s*$", upload)
-        assert len(paths) == 1
-        assert paths[0].endswith("/receipt.json")
-        assert "native_grid_candidate.json" not in upload
-        assert "original_room_mark_registration.json" not in upload
-        assert "console.log" not in upload
-        assert "retention-days: 14" in upload
-        for key in ("schema_version", "source_sha_verified",
-                    "original_source_checks_passed", "diagnostic_only",
-                    "commercial_projection_allowed"):
-            assert f'"{key}"' in job
-    assert '"floor_finish_quantity_issued":False' in first
-    assert '"floor_finish_quantity_issued":False' in second
-
+        assert "actions/upload-artifact@" not in job
+        assert "upload-artifact" not in job
+        assert 'Path("artifacts/gpt1-original-' in job
+        assert '/receipt.json").write_text(' in job
+        assert '"source_sha_verified":True' in job
+        assert '"original_source_checks_passed":True' in job
+        assert '"diagnostic_only":True' in job
+        assert '"commercial_projection_allowed":False' in job
+        assert '"floor_finish_quantity_issued":False' in job
+        assert "Remove private original and unpublished diagnostic data" in job
+    # Only bounded constant status messages may appear in Actions logs.
+    assert 'print("ORIGINAL_GRID_SOURCE_VALIDATED_CANDIDATE_ONLY")' in first
+    assert 'print("ORIGINAL_CROSSVIEW_ROOM_FT3_CANDIDATES_ONLY_NO_CONSTRUCTION_QUANTITY")' in second
 
 def test_diagnostic_errors_cannot_echo_original_source_payloads() -> None:
     first, second = _jobs()
@@ -106,7 +101,7 @@ def test_minimal_token_scope_and_exact_head_are_preserved() -> None:
     assert text.count("github.actor == 'BryceCurran86'") == 2
     assert text.count("github.ref == 'refs/heads/main'") == 2
     assert "test \"$(git rev-parse HEAD)\" = \"$EXPECTED_SHA\"" in text
-    assert text.count("actions/upload-artifact@v4") == 2
+    assert "actions/upload-artifact@" not in text
 
 
 def test_owner_main_only_source_execution_and_immutable_checkout() -> None:
