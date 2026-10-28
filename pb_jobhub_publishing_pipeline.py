@@ -293,6 +293,14 @@ def execute_jobhub_publishing(
     target_job_id = package.project_identity.target_jobhub_job_id
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
+    # ProjectIdentityPayload's Optional[int] hint is not runtime authority.
+    # Boolean True, float 1.0 and string "1" can be coerced by SQLite into
+    # real job row 1 (even when its job_no matches the intended project).
+    # Refuse aliases before opening or locking any JobHub destination.
+    if type(target_job_id) is not int or target_job_id <= 0:
+        raise RuntimeError(
+            "Target JobHub job ID must be an exact positive integer"
+        )
 
     # Calculate aggregates
     total_qty_m2 = 0.0
@@ -305,10 +313,27 @@ def execute_jobhub_publishing(
         if q.unit in ("m²", "m2", "sqm"):
             total_qty_m2 += q.quantity
             sec_lower = q.section.lower()
-            if any(k in sec_lower for k in ["internal", "ceiling", "interior", "wall"]):
-                interior_m2 += q.quantity
-            elif any(k in sec_lower for k in ["external", "facade", "elevation", "soffit"]):
+            # External WALLS must not be consumed by the generic "wall"
+            # interior fallback. Contradictory explicit interior/exterior
+            # section labels have no defensible category: retain the source
+            # line but abstain from both customer summary buckets.
+            explicit_interior = any(
+                key in sec_lower for key in ("internal", "interior", "ceiling")
+            )
+            explicit_exterior = any(
+                key in sec_lower for key in (
+                    "external", "exterior", "facade", "façade",
+                    "elevation", "soffit",
+                )
+            )
+            if explicit_exterior and not explicit_interior:
                 exterior_m2 += q.quantity
+            elif explicit_interior and not explicit_exterior:
+                interior_m2 += q.quantity
+            elif not explicit_exterior and not explicit_interior and "wall" in sec_lower:
+                # Preserve the historical generic wall bucket only where no
+                # conflicting exterior or interior marker was provided.
+                interior_m2 += q.quantity
 
     takeoff_no = f"PR-{package.project_identity.job_no}-{'PUB' if package.mode == PublishingMode.COMMERCIAL.value else 'DFT'}-{package.payload_hash[:8]}"
     status_label = "Published" if package.mode == PublishingMode.COMMERCIAL.value else "Draft"

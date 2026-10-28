@@ -329,10 +329,48 @@ def run_jobhub_publish_preflight(
     publishable_count = 0
     blocked_count = 0
     provisional_count = 0
+    seen_quantity_ids: set[str] = set()
 
     for idx, raw_row in enumerate(rows):
-        qid = getattr(raw_row, "quantity_id", None) or (raw_row.get("quantity_id") if isinstance(raw_row, dict) else f"ROW-{idx}")
-        
+        raw_quantity_id = (
+            raw_row.get("quantity_id")
+            if isinstance(raw_row, dict)
+            else getattr(raw_row, "quantity_id", None)
+        )
+        # The issuer's quantity_id is the physical quantity identity, not
+        # merely a display label. Two separately hashed rows can still claim
+        # the same measured work and must never both reach commercial JobHub.
+        # Trim only for identity comparison; do not silently rewrite source IDs.
+        physical_id = (
+            raw_quantity_id.strip()
+            if isinstance(raw_quantity_id, str) else ""
+        )
+        qid = physical_id or f"ROW-{idx}"
+        if is_commercial:
+            if not physical_id:
+                blocking_reasons.append(
+                    f"Row {qid}: missing stable physical quantity_id for commercial release"
+                )
+                blocked_count += 1
+                continue
+            if physical_id in seen_quantity_ids:
+                blocking_reasons.append(
+                    f"Row {qid}: duplicate physical quantity_id in commercial payload"
+                )
+                blocked_count += 1
+                continue
+            seen_quantity_ids.add(physical_id)
+        elif not physical_id:
+            warnings.append(
+                f"Draft row {qid}: missing stable physical quantity_id (not commercial authority)"
+            )
+        elif physical_id in seen_quantity_ids:
+            warnings.append(
+                f"Draft row {qid}: duplicate physical quantity_id (not commercial authority)"
+            )
+        else:
+            seen_quantity_ids.add(physical_id)
+
         # Check basic authority metadata
         if isinstance(raw_row, dict):
             if (

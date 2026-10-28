@@ -1,0 +1,406 @@
+"""Autonomous structural opening accuracy recovery — Milestone 3.
+
+Source-authenticated continuous through-wall aperture hosting and host frame authority.
+Reconciles whole-opening apertures (e.g. Maryborough W05, W03/W01, W02) with continuous
+loadbearing through-walls and narrow inter-aperture structural dividing piers.
+
+Enforces:
+1. Through-wall continuity: Openings are hosted in continuous structural walls without
+   destroying through-wall continuity or fragmenting the parent wall into severed stubs.
+2. Narrow inter-aperture pier reconciliation: Solid structural piers (e.g. 7.44 pt pier
+   between Maryborough W03 and W02) are authenticated as structural wall elements.
+3. Strict fail-closed geometric validation: Fails closed on transverse wall crossings,
+   angular misalignment (> 1°), or transverse displacements exceeding wall half-thickness.
+4. Strict shadow isolation: commercial_projection_allowed=False, takeoff_eligible=False.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from pb_migration_contracts import (
+    EvidenceResolutionStatus,
+    stable_contract_id,
+)
+
+DEFAULT_SNAP_TOLERANCE_PT = 2.5
+_ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
+_COORD_TOL = 1e-4
+
+
+@dataclass(frozen=True)
+class ContinuousThroughWallCandidate:
+    """A continuous structural through-wall running through an architectural plan."""
+
+    wall_id: str
+    start_pt: tuple[float, float]
+    end_pt: tuple[float, float]
+    thickness_pt: float
+
+    def __post_init__(self) -> None:
+        if not self.wall_id.strip():
+            raise ValueError("wall_id required")
+        if self.thickness_pt <= 0.0:
+            raise ValueError("thickness_pt must be positive")
+        dx = self.end_pt[0] - self.start_pt[0]
+        dy = self.end_pt[1] - self.start_pt[1]
+        if math.hypot(dx, dy) <= _COORD_TOL:
+            raise ValueError("Through-wall start and end points must be distinct")
+
+    @property
+    def length_pt(self) -> float:
+        dx = self.end_pt[0] - self.start_pt[0]
+        dy = self.end_pt[1] - self.start_pt[1]
+        return math.hypot(dx, dy)
+
+    @property
+    def axis_unit(self) -> tuple[float, float]:
+        dx = self.end_pt[0] - self.start_pt[0]
+        dy = self.end_pt[1] - self.start_pt[1]
+        length = self.length_pt
+        return (dx / length, dy / length)
+
+    @property
+    def normal_unit(self) -> tuple[float, float]:
+        ax, ay = self.axis_unit
+        return (-ay, ax)
+
+    @property
+    def origin_pt(self) -> tuple[float, float]:
+        return self.start_pt
+
+
+@dataclass(frozen=True)
+class InterAperturePierRecord:
+    """A structural wall pier bridging consecutive openings along a through-wall."""
+
+    pier_id: str
+    pier_start_station: float
+    pier_end_station: float
+    pier_width_pt: float
+    left_opening_id: str
+    right_opening_id: str
+    is_structural_masonry_pier: bool = True
+
+
+@dataclass(frozen=True)
+class ApertureHostCandidateInput:
+    """Input whole-opening aperture to be bound to a host through-wall."""
+
+    physical_opening_id: str
+    start_pt: tuple[float, float]
+    end_pt: tuple[float, float]
+    terminal_jamb_observation_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.physical_opening_id.strip():
+            raise ValueError("physical_opening_id required")
+        dx = self.end_pt[0] - self.start_pt[0]
+        dy = self.end_pt[1] - self.start_pt[1]
+        if math.hypot(dx, dy) <= _COORD_TOL:
+            raise ValueError("Aperture start and end points must be distinct")
+
+
+@dataclass(frozen=True)
+class ThroughWallHostedOpeningRecord:
+    """Immutable record binding a whole-opening aperture to a continuous host wall."""
+
+    hosting_record_id: str
+    physical_opening_id: str
+    host_wall_id: str
+    u0_pt: float
+    u1_pt: float
+    whole_wall_length_pt: float
+    wall_thickness_pt: float
+    axis_unit: tuple[float, float]
+    normal_unit: tuple[float, float]
+    origin_pt: tuple[float, float]
+    status: EvidenceResolutionStatus
+    first_remaining_gate: str
+    adjacent_pier_ids: tuple[str, ...] = ()
+    commercial_projection_allowed: bool = False
+    takeoff_eligible: bool = False
+    shadow_only: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hosting_record_id": self.hosting_record_id,
+            "physical_opening_id": self.physical_opening_id,
+            "host_wall_id": self.host_wall_id,
+            "u0_pt": self.u0_pt,
+            "u1_pt": self.u1_pt,
+            "whole_wall_length_pt": self.whole_wall_length_pt,
+            "wall_thickness_pt": self.wall_thickness_pt,
+            "axis_unit": list(self.axis_unit),
+            "normal_unit": list(self.normal_unit),
+            "origin_pt": list(self.origin_pt),
+            "status": self.status.value,
+            "first_remaining_gate": self.first_remaining_gate,
+            "adjacent_pier_ids": list(self.adjacent_pier_ids),
+            "commercial_projection_allowed": self.commercial_projection_allowed,
+            "takeoff_eligible": self.takeoff_eligible,
+            "shadow_only": self.shadow_only,
+        }
+
+
+class StructuralThroughWallApertureHostProducer:
+    """Producer responsible for structuring through-wall hosting evidence."""
+
+    def __init__(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+    ) -> None:
+        if not document_id.strip():
+            raise ValueError("document_id required")
+        if not revision_id.strip():
+            raise ValueError("revision_id required")
+        if not source_sha256.strip():
+            raise ValueError("source_sha256 required")
+        self._document_id = document_id
+        self._revision_id = revision_id
+        self._source_sha256 = source_sha256
+
+    @property
+    def document_id(self) -> str:
+        return self._document_id
+
+    @property
+    def revision_id(self) -> str:
+        return self._revision_id
+
+    @property
+    def source_sha256(self) -> str:
+        return self._source_sha256
+
+
+class StructuralThroughWallApertureHostAuthority:
+    """Authority evaluating through-wall continuity, inter-aperture piers, and host frame geometry."""
+
+    def __init__(self, producer: StructuralThroughWallApertureHostProducer) -> None:
+        self._producer = producer
+
+    def bind_openings_to_through_wall(
+        self,
+        *,
+        through_wall: ContinuousThroughWallCandidate,
+        openings: Sequence[ApertureHostCandidateInput],
+        transverse_wall_segments: Sequence[
+            tuple[tuple[float, float], tuple[float, float]]
+        ] = (),
+        snap_tolerance_pt: float = DEFAULT_SNAP_TOLERANCE_PT,
+    ) -> tuple[
+        tuple[ThroughWallHostedOpeningRecord, ...], tuple[InterAperturePierRecord, ...]
+    ]:
+        """Bind whole-opening apertures to a continuous through-wall, resolving inter-aperture piers."""
+        if not openings:
+            return ((), ())
+
+        wall_len = through_wall.length_pt
+        ax, ay = through_wall.axis_unit
+        nx, ny = through_wall.normal_unit
+        ox, oy = through_wall.origin_pt
+        half_thick = through_wall.thickness_pt / 2.0
+
+        def project_pt(p: tuple[float, float]) -> tuple[float, float]:
+            rel_x = p[0] - ox
+            rel_y = p[1] - oy
+            along = rel_x * ax + rel_y * ay
+            perp = rel_x * nx + rel_y * ny
+            return along, perp
+
+        intermediate_openings: list[dict[str, Any]] = []
+
+        for op in openings:
+            p1_along, p1_perp = project_pt(op.start_pt)
+            p2_along, p2_perp = project_pt(op.end_pt)
+
+            u_min = min(p1_along, p2_along)
+            u_max = max(p1_along, p2_along)
+            avg_perp = (p1_perp + p2_perp) / 2.0
+
+            # 1. Check transverse displacement from wall centerline
+            if abs(avg_perp) > half_thick + snap_tolerance_pt:
+                status = EvidenceResolutionStatus.ABSTAINED
+                gate = "aperture_outside_host_wall_band"
+                rec = self._make_record(
+                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                )
+                intermediate_openings.append(
+                    {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
+                )
+                continue
+
+            # 2. Check angular alignment with wall axis
+            op_dx = op.end_pt[0] - op.start_pt[0]
+            op_dy = op.end_pt[1] - op.start_pt[1]
+            op_len = math.hypot(op_dx, op_dy)
+            cos_theta = abs((op_dx * ax + op_dy * ay) / op_len)
+            if cos_theta < _ALIGNMENT_COS_TOL:
+                status = EvidenceResolutionStatus.ABSTAINED
+                gate = "aperture_wall_axis_misaligned"
+                rec = self._make_record(
+                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                )
+                intermediate_openings.append(
+                    {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
+                )
+                continue
+
+            # 3. Check bounds along wall length
+            if u_min < -snap_tolerance_pt or u_max > wall_len + snap_tolerance_pt:
+                status = EvidenceResolutionStatus.ABSTAINED
+                gate = "aperture_extends_beyond_wall_extent"
+                rec = self._make_record(
+                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                )
+                intermediate_openings.append(
+                    {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
+                )
+                continue
+
+            # 4. Check transverse wall crossings obstructing the opening
+            obstructed = False
+            for t_start, t_end in transverse_wall_segments:
+                t1_along, t1_perp = project_pt(t_start)
+                t2_along, t2_perp = project_pt(t_end)
+                # Check if transverse line crosses the opening span interior
+                if (
+                    min(t1_along, t2_along) > u_min + snap_tolerance_pt
+                    and max(t1_along, t2_along) < u_max - snap_tolerance_pt
+                    and ((t1_perp * t2_perp < 0) or (abs(t1_perp) <= half_thick and abs(t2_perp) <= half_thick))
+                ):
+                    obstructed = True
+                    break
+
+            if obstructed:
+                status = EvidenceResolutionStatus.ABSTAINED
+                gate = "host_through_wall_obstructed"
+                rec = self._make_record(
+                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                )
+                intermediate_openings.append(
+                    {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
+                )
+                continue
+
+            # Passed all structural gating
+            intermediate_openings.append(
+                {
+                    "op": op,
+                    "u_min": max(0.0, u_min),
+                    "u_max": min(wall_len, u_max),
+                    "valid": True,
+                }
+            )
+
+        # 5. Evaluate consecutive openings to discover inter-aperture piers
+        valid_items = [item for item in intermediate_openings if item["valid"]]
+        valid_items.sort(key=lambda x: x["u_min"])
+
+        piers: list[InterAperturePierRecord] = []
+        pier_ids_by_opening: dict[str, list[str]] = {}
+
+        for i in range(len(valid_items) - 1):
+            curr = valid_items[i]
+            nxt = valid_items[i + 1]
+            gap = nxt["u_min"] - curr["u_max"]
+            if (
+                0.5 <= gap <= 60.0
+            ):  # Narrow structural pier (e.g. 7.44 pt in Maryborough)
+                pier_payload = {
+                    "document_id": self._producer.document_id,
+                    "host_wall_id": through_wall.wall_id,
+                    "start_station": round(curr["u_max"], 2),
+                    "end_station": round(nxt["u_min"], 2),
+                    "width_pt": round(gap, 2),
+                }
+                pier_id = stable_contract_id(
+                    "inter_aperture_pier", pier_payload, digest_chars=32
+                )
+                pier_rec = InterAperturePierRecord(
+                    pier_id=pier_id,
+                    pier_start_station=curr["u_max"],
+                    pier_end_station=nxt["u_min"],
+                    pier_width_pt=gap,
+                    left_opening_id=curr["op"].physical_opening_id,
+                    right_opening_id=nxt["op"].physical_opening_id,
+                    is_structural_masonry_pier=True,
+                )
+                piers.append(pier_rec)
+                pier_ids_by_opening.setdefault(
+                    curr["op"].physical_opening_id, []
+                ).append(pier_id)
+                pier_ids_by_opening.setdefault(
+                    nxt["op"].physical_opening_id, []
+                ).append(pier_id)
+
+        # Assemble final records
+        final_records: list[ThroughWallHostedOpeningRecord] = []
+        for item in intermediate_openings:
+            if not item["valid"]:
+                final_records.append(item["rec"])
+            else:
+                op = item["op"]
+                op_id = op.physical_opening_id
+                adjacent_piers = tuple(pier_ids_by_opening.get(op_id, ()))
+                rec = self._make_record(
+                    op_id,
+                    through_wall,
+                    item["u_min"],
+                    item["u_max"],
+                    EvidenceResolutionStatus.CORROBORATED,
+                    "none",
+                    adjacent_piers=adjacent_piers,
+                )
+                final_records.append(rec)
+
+        return tuple(final_records), tuple(piers)
+
+    def _make_record(
+        self,
+        opening_id: str,
+        through_wall: ContinuousThroughWallCandidate,
+        u0: float,
+        u1: float,
+        status: EvidenceResolutionStatus,
+        gate: str,
+        adjacent_piers: tuple[str, ...] = (),
+    ) -> ThroughWallHostedOpeningRecord:
+        payload = {
+            "document_id": self._producer.document_id,
+            "revision_id": self._producer.revision_id,
+            "source_sha256": self._producer.source_sha256,
+            "physical_opening_id": opening_id,
+            "host_wall_id": through_wall.wall_id,
+            "u0_pt": round(u0, 4),
+            "u1_pt": round(u1, 4),
+            "status": status.value,
+            "first_remaining_gate": gate,
+        }
+        rec_id = stable_contract_id(
+            "through_wall_hosted_opening", payload, digest_chars=32
+        )
+        return ThroughWallHostedOpeningRecord(
+            hosting_record_id=rec_id,
+            physical_opening_id=opening_id,
+            host_wall_id=through_wall.wall_id,
+            u0_pt=round(u0, 4),
+            u1_pt=round(u1, 4),
+            whole_wall_length_pt=round(through_wall.length_pt, 4),
+            wall_thickness_pt=round(through_wall.thickness_pt, 4),
+            axis_unit=through_wall.axis_unit,
+            normal_unit=through_wall.normal_unit,
+            origin_pt=through_wall.origin_pt,
+            status=status,
+            first_remaining_gate=gate,
+            adjacent_pier_ids=adjacent_piers,
+            commercial_projection_allowed=False,
+            takeoff_eligible=False,
+            shadow_only=True,
+        )

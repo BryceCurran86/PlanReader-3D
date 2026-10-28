@@ -678,3 +678,47 @@ def test_edge_touching_measured_boxes_do_not_create_false_overlap_veto():
     assert len(result.records) == 2
     assert OVERLAPPING_MEASURED_BOXES not in result.records[0].reason_codes
     assert all(not record.takeoff_eligible for record in result.records)
+
+
+@pytest.mark.parametrize("scale", [0.5, 0.75, 1.25, 2.0])
+def test_nonunit_registration_cannot_claim_untransformed_floor_box(monkeypatch, scale):
+    # The registration search can return a strong nonunit-scale winner.
+    # The existing box_correspondence applies only orientation+translation.
+    # Preserve the ranked diagnostic, but never grant floor correspondence.
+    import pb_source_cross_view_floor_correspondence_shadow as floor_shadow
+
+    real_rank = floor_shadow.rank_registrations
+
+    def nonunit_winner(*args, **kwargs):
+        ranked = real_rank(*args, **kwargs)
+        assert ranked and ranked[0]["scale"] == 1.0
+        return [{**ranked[0], "scale": scale}]
+
+    monkeypatch.setattr(floor_shadow, "rank_registrations", nonunit_winner)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "office",
+            "physical_room_id": "office-room",
+            "source_room_face_record_id": "office-face",
+        }],
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert result.winning_registration is not None
+    assert result.winning_registration["scale"] == scale
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert floor_shadow.REGISTRATION_SCALE_NOT_APPLIED in result.reason_codes
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.registration_scale == scale
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert floor_shadow.REGISTRATION_SCALE_NOT_APPLIED in record.reason_codes
+    assert record.takeoff_eligible is False
+    assert record.commercial_projection_allowed is False
+    assert record.authority_blockers == ()

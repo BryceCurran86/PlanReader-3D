@@ -46,6 +46,7 @@ SOURCE_CROSS_VIEW_FLOOR_CORRESPONDENCE_CONFLICT = (
     "source_cross_view_floor_correspondence_conflict"
 )
 REGISTRATION_NOT_UNIQUE = "registration_not_unique"
+REGISTRATION_SCALE_NOT_APPLIED = "registration_scale_not_applied_to_floor_box"
 BOX_NOT_WALL_BOUNDED = "box_not_wall_bounded_on_both_sheets"
 WALL_EVIDENCE_DIFFERS = "wall_evidence_differs_between_sheets"
 OVERLAPPING_MEASURED_BOXES = "overlapping_measured_boxes"
@@ -553,8 +554,15 @@ class SourceCrossViewFloorCorrespondenceProducer:
         # Rigorous unique registration gate:
         # 1. Top support must exceed null hypothesis max by at least 10x.
         # 2. Top support must exceed runner up by at least 1.5x (unless zero competitors).
+        # Registration search can propose a non-unit scale, but
+        # box_correspondence/translate_box only transform orientation and
+        # translation. Until the measured box and its source-wall intervals
+        # are scale-transformed and independently authenticated, that winner
+        # must not establish a physical floor owner.
+        scale_applied = top["scale"] == 1.0
         is_unique = (
-            top["min_support_pt"] > 10.0 * max(null_res["max"], 1e-6)
+            scale_applied
+            and top["min_support_pt"] > 10.0 * max(null_res["max"], 1e-6)
             and (len(ranked) == 1 or top["min_support_pt"] >= 1.5 * runner_up)
         )
 
@@ -564,7 +572,9 @@ class SourceCrossViewFloorCorrespondenceProducer:
             if is_unique
             else EvidenceResolutionStatus.ABSTAINED
         )
-        overall_reasons = [] if is_unique else [REGISTRATION_NOT_UNIQUE]
+        overall_reasons = [] if is_unique else [
+            REGISTRATION_SCALE_NOT_APPLIED if not scale_applied else REGISTRATION_NOT_UNIQUE
+        ]
 
         # Derive overlapping measured-floor regions from the full input
         # universe; a missing caller hint cannot confer unique mark ownership.
@@ -619,6 +629,12 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 ),
                 material_code=selector.material_code,
             )
+            if not scale_applied:
+                # Preserve competing-code CONFLICT and every negative; add
+                # the exact missing geometric transform as a typed reason.
+                classified["reason_codes"] = tuple(dict.fromkeys((
+                    *classified["reason_codes"], REGISTRATION_SCALE_NOT_APPLIED,
+                )))
 
             record_id = stable_contract_id(
                 "source_cross_view_floor_correspondence_record",
