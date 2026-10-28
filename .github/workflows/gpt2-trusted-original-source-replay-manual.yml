@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
+    # A collaborator rerun retains the ORIGINAL github.actor privileges. Both
+    # the initial dispatcher and the rerun initiator must be the owner.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
     name: ${{ matrix.target }} original (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 40

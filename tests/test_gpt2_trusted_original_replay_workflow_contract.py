@@ -104,6 +104,15 @@ def test_owner_only_manual_source_triggers():
     job = document["jobs"]["original"]
     assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "github.actor == 'BryceCurran86'" in job["if"]
+    # GitHub re-runs keep the original actor's privileges, while the user who
+    # clicked rerun is github.triggering_actor. A non-owner writer must not
+    # re-run an owner-secret job under the owner's original identity.
+    assert job["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "github.ref == 'refs/heads/main' && "
+        "github.actor == 'BryceCurran86' && "
+        "github.triggering_actor == 'BryceCurran86' }}"
+    )
     assert job["strategy"]["fail-fast"] is False
     assert job["strategy"]["matrix"]["target"] == _target_matrix_expression()
     assert job["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
@@ -124,6 +133,39 @@ def test_trigger_alias_or_duplicate_cannot_masquerade_as_owner_manual(
     corrupt = original.replace("on:\n  workflow_dispatch:", malformed_trigger, 1)
     with pytest.raises((AssertionError, yaml.YAMLError)):
         _parse_workflow(corrupt)
+
+
+@pytest.mark.parametrize(
+    "event,ref,initial_actor,rerun_actor,allowed",
+    (
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "BryceCurran86", True),
+        ("workflow_dispatch", "refs/heads/main", "BryceCurran86", "OtherWriter", False),
+        ("workflow_dispatch", "refs/heads/main", "OtherWriter", "BryceCurran86", False),
+        ("workflow_dispatch", "refs/heads/feature", "BryceCurran86", "BryceCurran86", False),
+        ("push", "refs/heads/main", "BryceCurran86", "BryceCurran86", False),
+    ),
+)
+def test_owner_only_rerun_guard_boolean_matrix(
+    event, ref, initial_actor, rerun_actor, allowed,
+):
+    """Evaluate only the fixed equality/AND grammar accepted by the contract."""
+    expression = _load()["jobs"]["original"]["if"]
+    assert expression.startswith("${{ ") and expression.endswith(" }}")
+    clauses = expression[4:-3].split(" && ")
+    assert len(clauses) == 4
+    context = {
+        "github.event_name": event,
+        "github.ref": ref,
+        "github.actor": initial_actor,
+        "github.triggering_actor": rerun_actor,
+    }
+    result = True
+    for clause in clauses:
+        key, separator, quoted = clause.partition(" == ")
+        assert separator and key in context
+        assert quoted.startswith("'") and quoted.endswith("'")
+        result = result and context[key] == quoted[1:-1]
+    assert result is allowed
 
 
 def test_pinned_sha_allowlist_and_no_arbitrary_input():
