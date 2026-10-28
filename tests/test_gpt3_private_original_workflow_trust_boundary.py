@@ -15,6 +15,7 @@ JOBS = {
     "score-gpt3-lot16-1215-opening-local.yml":"original-source-score",
 }
 GUARD = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}"
+RERUN_GUARD = GUARD.removesuffix(" }}") + " && github.triggering_actor == 'BryceCurran86' }}"
 
 class Loader(yaml.SafeLoader):
     pass
@@ -50,7 +51,7 @@ def safe(job):
     if len(checkouts) != 1:
         return False
     opts = checkouts[0].get("with", {})
-    return (job.get("if") == GUARD and opts.get("ref") == "${{ github.sha }}"
+    return (job.get("if") in (GUARD, RERUN_GUARD) and opts.get("ref") == "${{ github.sha }}"
             and opts.get("persist-credentials") is False
             and "github.event.pull_request.head.sha" not in str(job)
             and "secrets.ORIGINAL_SOURCES_TOKEN" in str(job))
@@ -86,3 +87,24 @@ def test_duplicate_trigger_key_rejected(name):
     _, raw = read(name)
     with pytest.raises((yaml.YAMLError, AssertionError)):
         yaml.load(raw.replace("\non:\n", "\non:\n  push:\non:\n", 1), Loader=Loader)
+
+
+@pytest.mark.parametrize("name", [
+    "test-gpt3-maryborough-original-floor-score-input.yml",
+    "test-gpt3-lot16-original-sealed-score-input.yml",
+])
+def test_stricter_rerun_owner_guard_rejects_foreign_writer_or_bypass(name):
+    data, _ = read(name)
+    job = data["jobs"][JOBS[name]]
+    assert job["if"] == RERUN_GUARD
+    assert safe(job)
+    for bad in (
+        RERUN_GUARD.replace("github.triggering_actor == 'BryceCurran86'",
+                            "github.triggering_actor == 'foreign-writer'"),
+        RERUN_GUARD.replace(" && github.triggering_actor ==",
+                            " || github.triggering_actor =="),
+        RERUN_GUARD.replace("github.actor == 'BryceCurran86'",
+                            "github.actor == 'foreign-writer'"),
+        RERUN_GUARD.replace(" }}", " || true }}"),
+    ):
+        assert not safe(dict(job, **{"if": bad}))
