@@ -459,6 +459,47 @@ def _classify_source_marks(marks):
     )
 
 
+@pytest.mark.parametrize("registration", [1, "true", "false", None, 0, []])
+def test_nonboolean_unique_registration_receipt_never_mints_candidate(registration):
+    result = classify_floor(
+        _fully_supported_correspondence(),
+        registration_unique=registration,
+        marks_inside=[{"code": "FT3", "margin_pt": 15.0,
+                       "registered_region": True}],
+        other_labelled_boxes_overlapping=0,
+        material_code="FT3",
+    )
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert REGISTRATION_NOT_UNIQUE in result["reason_codes"]
+    assert result["authority_blockers"] == ()
+
+
+@pytest.mark.parametrize("field, value, reason", [
+    ("wall_bounded_on_both_sheets", 1, BOX_NOT_WALL_BOUNDED),
+    ("wall_bounded_on_both_sheets", "true", BOX_NOT_WALL_BOUNDED),
+    ("wall_bounded_on_both_sheets", "false", BOX_NOT_WALL_BOUNDED),
+    ("wall_bounded_on_both_sheets", None, BOX_NOT_WALL_BOUNDED),
+    ("wall_evidence_identical_on_both_sheets", 1, WALL_EVIDENCE_DIFFERS),
+    ("wall_evidence_identical_on_both_sheets", "true", WALL_EVIDENCE_DIFFERS),
+    ("wall_evidence_identical_on_both_sheets", "false", WALL_EVIDENCE_DIFFERS),
+    ("wall_evidence_identical_on_both_sheets", None, WALL_EVIDENCE_DIFFERS),
+])
+def test_nonboolean_wall_evidence_receipt_never_mints_candidate(field, value, reason):
+    correspondence = _fully_supported_correspondence()
+    correspondence[field] = value
+    result = classify_floor(
+        correspondence,
+        registration_unique=True,
+        marks_inside=[{"code": "FT3", "margin_pt": 15.0,
+                       "registered_region": True}],
+        other_labelled_boxes_overlapping=0,
+        material_code="FT3",
+    )
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert reason in result["reason_codes"]
+    assert result["authority_blockers"] == ()
+
+
 def test_one_registered_ft3_mark_remains_a_shadow_candidate():
     result = _classify_source_marks([
         {"code": "FT3", "margin_pt": 15.0, "registered_region": True}

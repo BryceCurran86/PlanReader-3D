@@ -385,11 +385,11 @@ def classify_floor(
 ) -> dict[str, Any]:
     reasons: list[str] = []
     codes = collections.Counter(m["code"] for m in marks_inside)
-    if not registration_unique:
+    if registration_unique is not True:
         reasons.append(REGISTRATION_NOT_UNIQUE)
-    if not correspondence["wall_bounded_on_both_sheets"]:
+    if correspondence["wall_bounded_on_both_sheets"] is not True:
         reasons.append(BOX_NOT_WALL_BOUNDED)
-    elif not correspondence["wall_evidence_identical_on_both_sheets"]:
+    elif correspondence["wall_evidence_identical_on_both_sheets"] is not True:
         reasons.append(WALL_EVIDENCE_DIFFERS)
     if other_labelled_boxes_overlapping:
         reasons.append(OVERLAPPING_MEASURED_BOXES)

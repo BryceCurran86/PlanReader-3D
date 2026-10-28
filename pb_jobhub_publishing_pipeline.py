@@ -65,7 +65,19 @@ def build_publishing_package_from_workspace(
     estimator = str(raw_estimator).strip() if raw_estimator else None
     if estimator == "":
         estimator = None
-    target_job_id = int(ws_row["jobhub_job_id"]) if ws_row["jobhub_job_id"] else None
+    # A workspace SQLite INTEGER-affinity column can still hold REAL/TEXT/BLOB.
+    # int(501.9) silently truncates to 501, then the freshly computed payload
+    # hash seals that WRONG target as an exact integer, bypassing the final
+    # writer's canonical-ID check. Never mint destination identity by casting.
+    raw_target_job_id = ws_row["jobhub_job_id"]
+    if raw_target_job_id is None:
+        target_job_id = None  # Missing link remains unpublishable downstream.
+    elif type(raw_target_job_id) is not int or raw_target_job_id <= 0:
+        raise ValueError(
+            "Workspace JobHub job ID must be an exact positive integer"
+        )
+    else:
+        target_job_id = raw_target_job_id
 
     project_identity = ProjectIdentityPayload(
         job_no=job_no,
