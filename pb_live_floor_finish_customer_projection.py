@@ -171,6 +171,18 @@ def project_live_floor_finish_customer_rows(
         floor = floors.get(_clean(quantity.input_entity_ids[0]))
         if floor is None:
             continue
+        # The physical room address is an original producer identity, not a
+        # customer label. Never coerce a missing, padded or foreign token into
+        # a plausible commercial location while keeping the FIRM quantity.
+        room_id = floor.room_entity_id
+        if (
+            type(room_id) is not str
+            or not room_id
+            or room_id != room_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish customer location lacks exact original room identity"
+            )
         metadata = (
             dict(quantity.metadata)
             if isinstance(quantity.metadata, Mapping)
@@ -180,7 +192,7 @@ def project_live_floor_finish_customer_rows(
             {
                 "section": "Internal",
                 "element": "Floor finish area",
-                "location": _clean(floor.room_entity_id),
+                "location": room_id,
                 "substrate": "Floor",
                 "finish_system": _clean(
                     metadata.get("semantic_finish")
