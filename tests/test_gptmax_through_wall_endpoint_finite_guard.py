@@ -249,3 +249,128 @@ def test_extended_obstruction_split_and_order_invariant():
         )
         assert actual == baseline
     assert baseline[0].status is S.ABSTAINED
+
+
+@pytest.mark.parametrize("spans", [
+    ((20.0, 60.0), (40.0, 80.0)),  # partial overlap
+    ((20.0, 60.0), (20.0, 60.0)),  # identical span, different identities
+    ((20.0, 80.0), (30.0, 40.0)),  # nested aperture
+    ((20.0, 80.0), (70.0, 90.0)),  # overlapping end
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_overlapping_apertures_all_abstain_without_pier(spans, reverse):
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = tuple(
+        ApertureHostCandidateInput(name, (lo, 0.0), (hi, 0.0))
+        for name, (lo, hi) in zip(("A", "B"), spans)
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=openings[::-1] if reverse else openings,
+    )
+    assert len(records) == 2 and piers == ()
+    assert {r.physical_opening_id for r in records} == {"A", "B"}
+    for record in records:
+        assert record.status is S.ABSTAINED
+        assert record.first_remaining_gate == "aperture_physical_interval_conflict"
+        assert record.adjacent_pier_ids == ()
+        assert record.shadow_only is True
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+
+
+def test_overlap_chain_and_nonadjacent_nested_candidate_all_abstain():
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (80.0, 0.0)),
+        ApertureHostCandidateInput("B", (30.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("C", (70.0, 0.0), (90.0, 0.0)),
+    )
+    authority = _authority()
+    baseline, baseline_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(baseline) == 3 and baseline_piers == ()
+    assert all(r.status is S.ABSTAINED for r in baseline)
+    for ordering in (openings[::-1], (openings[1], openings[2], openings[0])):
+        actual, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordering,
+        )
+        assert piers == ()
+        assert {r.physical_opening_id: r for r in actual} == {
+            r.physical_opening_id: r for r in baseline
+        }
+
+
+@pytest.mark.parametrize("spans", [
+    ((20.0, 40.0), (20.0, 40.0)),
+    ((20.0, 40.0), (60.0, 80.0)),
+])
+def test_repeated_physical_identity_abstains_even_if_disjoint(spans):
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = tuple(
+        ApertureHostCandidateInput("same", (lo, 0.0), (hi, 0.0))
+        for lo, hi in spans
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(records) == 2 and piers == ()
+    assert all(r.status is S.ABSTAINED for r in records)
+    assert all(r.first_remaining_gate == "aperture_physical_interval_conflict" for r in records)
+
+
+def test_ambiguous_intervals_do_not_create_pier_across_their_gap():
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = (
+        ApertureHostCandidateInput("left", (5.0, 0.0), (15.0, 0.0)),
+        ApertureHostCandidateInput("A", (20.0, 0.0), (50.0, 0.0)),
+        ApertureHostCandidateInput("B", (40.0, 0.0), (60.0, 0.0)),
+        ApertureHostCandidateInput("right", (65.0, 0.0), (75.0, 0.0)),
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    by_id = {r.physical_opening_id: r for r in records}
+    assert by_id["left"].status is S.CORROBORATED
+    assert by_id["right"].status is S.CORROBORATED
+    assert by_id["A"].status is S.ABSTAINED
+    assert by_id["B"].status is S.ABSTAINED
+    assert piers == ()
+    assert all(not r.adjacent_pier_ids for r in records)
+
+
+@pytest.mark.parametrize("gap,expected_piers", [(0.0, 0), (2.0, 1)])
+def test_touching_and_disjoint_apertures_preserve_shadow_positive(gap, expected_piers):
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("B", (40.0 + gap, 0.0), (60.0 + gap, 0.0)),
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert all(r.status is S.CORROBORATED for r in records)
+    assert all(r.first_remaining_gate == "none" for r in records)
+    assert len(piers) == expected_piers
+    assert all(r.shadow_only and not r.takeoff_eligible for r in records)
+
+
+def test_overlap_veto_rotation_translation_invariant():
+    authority = _authority()
+    for angle, shift in ((0.0, (0.0, 0.0)), (math.pi / 2, (250.0, 70.0)),
+                         (math.pi, (-100.0, 300.0))):
+        tr = lambda p: _rotated(p, angle, shift)
+        wall = ContinuousThroughWallCandidate(
+            "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+        )
+        openings = (
+            ApertureHostCandidateInput("A", tr((20.0, 0.0)), tr((60.0, 0.0))),
+            ApertureHostCandidateInput("B", tr((40.0, 0.0)), tr((80.0, 0.0))),
+        )
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings,
+        )
+        assert piers == ()
+        assert all(r.status is S.ABSTAINED for r in records)
+        assert all(r.first_remaining_gate == "aperture_physical_interval_conflict"
+                   for r in records)

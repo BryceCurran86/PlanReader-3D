@@ -366,7 +366,52 @@ class StructuralThroughWallApertureHostAuthority:
 
         # 5. Evaluate consecutive openings to discover inter-aperture piers
         valid_items = [item for item in intermediate_openings if item["valid"]]
-        valid_items.sort(key=lambda x: x["u_min"])
+        valid_items.sort(
+            key=lambda x: (x["u_min"], x["u_max"], x["op"].physical_opening_id)
+        )
+
+        # Independently named apertures cannot both corroborate overlapping
+        # physical wall intervals. Keep EVERY candidate and abstain on the
+        # entire overlap-connected component, including nested intervals.
+        # Also reject repeated physical identities even at disjoint stations:
+        # a single physical opening cannot occupy two distinct wall spans.
+        conflicting_positions: set[int] = set()
+        if valid_items:
+            component = [0]
+            component_end = valid_items[0]["u_max"]
+            for index in range(1, len(valid_items)):
+                item = valid_items[index]
+                if item["u_min"] < component_end:
+                    component.append(index)
+                    component_end = max(component_end, item["u_max"])
+                else:
+                    if len(component) > 1:
+                        conflicting_positions.update(component)
+                    component = [index]
+                    component_end = item["u_max"]
+            if len(component) > 1:
+                conflicting_positions.update(component)
+
+        first_position_by_identity: dict[str, int] = {}
+        for index, item in enumerate(valid_items):
+            identity = item["op"].physical_opening_id
+            if identity in first_position_by_identity:
+                conflicting_positions.add(first_position_by_identity[identity])
+                conflicting_positions.add(index)
+            else:
+                first_position_by_identity[identity] = index
+
+        for index in conflicting_positions:
+            item = valid_items[index]
+            item["valid"] = False
+            item["rec"] = self._make_record(
+                item["op"].physical_opening_id,
+                through_wall,
+                item["u_min"],
+                item["u_max"],
+                EvidenceResolutionStatus.ABSTAINED,
+                "aperture_physical_interval_conflict",
+            )
 
         piers: list[InterAperturePierRecord] = []
         pier_ids_by_opening: dict[str, list[str]] = {}
@@ -374,6 +419,10 @@ class StructuralThroughWallApertureHostAuthority:
         for i in range(len(valid_items) - 1):
             curr = valid_items[i]
             nxt = valid_items[i + 1]
+            # Never bridge an ambiguous physical aperture to manufacture a
+            # structural pier between otherwise disjoint candidates.
+            if not curr["valid"] or not nxt["valid"]:
+                continue
             gap = nxt["u_min"] - curr["u_max"]
             if (
                 0.5 <= gap <= 60.0
