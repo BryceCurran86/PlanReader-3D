@@ -508,7 +508,8 @@ def test_missing_registration_does_not_default_to_true():
 
 
 @pytest.mark.parametrize("margin", [None, float("nan"), float("inf"),
-                                    -float("inf"), "15.0", True, -1.0])
+                                    -float("inf"), "15.0", True, -1.0,
+                                    10 ** 1000])
 def test_untrusted_or_nonfinite_mark_margin_abstains(margin):
     result = _classify_source_marks([
         {"code": "FT3", "margin_pt": margin, "registered_region": True}
@@ -566,3 +567,20 @@ def test_end_to_end_missing_registration_abstains_without_commercial_grant():
     assert MARK_IN_UNREGISTERED_REGION in result.records[0].reason_codes
     assert result.records[0].commercial_projection_allowed is False
     assert result.records[0].takeoff_eligible is False
+
+
+@pytest.mark.parametrize("minimum", [float("nan"), float("inf"),
+                                     -1.0, "5.0", True, 10 ** 1000])
+def test_invalid_minimum_mark_margin_abstains(minimum):
+    result = classify_floor(
+        _fully_supported_correspondence(),
+        registration_unique=True,
+        marks_inside=[{
+            "code": "FT3", "margin_pt": 15.0, "registered_region": True
+        }],
+        other_labelled_boxes_overlapping=0,
+        material_code="FT3",
+        min_margin_pt=minimum,
+    )
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_TOO_CLOSE_TO_BOX_SIDE in result["reason_codes"]
