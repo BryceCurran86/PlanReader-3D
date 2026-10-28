@@ -41,6 +41,13 @@ def build_publishing_package_from_workspace(
     - ``created_by`` comes from ``acting_user`` when provided, before payload fingerprinting.
     Missing commercial attribution remains missing and is blocked by the publishing gate.
     """
+    # The caller's workspace identifier determines which original project,
+    # documents, pages and commercial quantities enter the sealed package.
+    # SQLite aliases True, 1.0 and "1" to INTEGER primary key 1. Reject
+    # those lossily-equivalent aliases BEFORE any source database read;
+    # otherwise the final SHA can bind an unproven caller workspace identity.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise ValueError("Source workspace ID must be an exact positive integer")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -193,9 +200,20 @@ def build_publishing_package_from_workspace(
         sub = str(r["substrate"] or "Plasterboard")
         tag = str(r["finish_tag"] or "")
         elem = str(r["element"] or "Element")
-        unit = str(r["unit"] or "m²")
+        # A missing source unit is an unresolved measurement, not implicit m².
+        # Preserve explicit per-trade units, and leave unknown units blank so
+        # the downstream gate can prevent a unitless JobHub line in any mode.
+        raw_unit = r["unit"]
+        unit = raw_unit.strip() if type(raw_unit) is str else ""
         qty = float(r["quantity"] or 0.0)
-        rate = float(r["rate"] or 0.0)
+        # The client owns each commercial unit rate. A missing SQL rate
+        # cannot become an invented approved zero-dollar line item; explicit
+        # numeric zero remains a valid client-owned choice.
+        if r["rate"] is None and mode == PublishingMode.COMMERCIAL:
+            raise ValueError(
+                f"Missing client commercial unit rate for takeoff row #{row_id}"
+            )
+        rate = float(r["rate"]) if r["rate"] is not None else 0.0
         # Price is a client-owned commercial input. A zero entered amount is
         # never permission to silently replace it with quantity × rate, nor
         # is a missing price approval to quote a computed line to JobHub.

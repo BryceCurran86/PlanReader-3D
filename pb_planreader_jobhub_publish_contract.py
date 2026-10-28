@@ -114,6 +114,12 @@ class PlanReaderJobHubQuantityRow:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PlanReaderJobHubQuantityRow":
+        # Serialized customer permission must be an exact native Boolean.
+        # bool("false") and bool("0") are True; a typed deserialization
+        # otherwise evades the raw-dict preflight's Boolean requirement.
+        raw_publishable = data.get("is_publishable", False)
+        if type(raw_publishable) is not bool:
+            raise ValueError("Legacy row is_publishable must be an explicit Boolean")
         return cls(
             quantity_id=str(data.get("quantity_id") or ""),
             description=str(data.get("description") or ""),
@@ -129,7 +135,7 @@ class PlanReaderJobHubQuantityRow:
             scale_id=data.get("scale_id"),
             dimension_text_id=data.get("dimension_text_id"),
             benchmark_status=data.get("benchmark_status"),
-            is_publishable=bool(data.get("is_publishable", False)),
+            is_publishable=raw_publishable,
             warnings=list(data.get("warnings") or []),
             blocking_reasons=list(data.get("blocking_reasons") or []),
             approved_by=data.get("approved_by"),
@@ -213,6 +219,11 @@ class PlanReaderJobHubPayload:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PlanReaderJobHubPayload":
+        # The top-level commercial-ready seal is not truthiness-based.
+        # A string "false" must not become a customer approval receipt.
+        raw_commercial_ready = data.get("is_commercial_ready", False)
+        if type(raw_commercial_ready) is not bool:
+            raise ValueError("Legacy is_commercial_ready must be an explicit Boolean")
         quantities = [
             PlanReaderJobHubQuantityRow.from_dict(q)
             for q in (data.get("quantities") or [])
@@ -231,7 +242,7 @@ class PlanReaderJobHubPayload:
             publish_mode=str(data.get("publish_mode") or PublishMode.COMMERCIAL_PUBLISH.value),
             benchmark_status=data.get("benchmark_status"),
             payload_fingerprint=str(data.get("payload_fingerprint") or ""),
-            is_commercial_ready=bool(data.get("is_commercial_ready", False)),
+            is_commercial_ready=raw_commercial_ready,
             notes=str(data.get("notes") or ""),
         )
 
@@ -303,6 +314,11 @@ def run_jobhub_publish_preflight(
 
     blocking_reasons: List[str] = []
     warnings: List[str] = []
+    # Unrecognised modes are never an implicit draft permission. The legacy
+    # code selected draft behavior for *every* value other than commercial,
+    # including typos such as 'commercial_publish ', without any blocker.
+    if p_mode not in {PublishMode.DRAFT_PUBLISH.value, PublishMode.COMMERCIAL_PUBLISH.value}:
+        blocking_reasons.append("Unsupported JobHub publishing mode cannot bypass commercial preflight")
 
     # 1. Project Identity Validation
     if not project_identity or not project_identity.get("project_id"):
@@ -584,6 +600,11 @@ def build_jobhub_payload(
 ) -> PlanReaderJobHubPayload:
     """Construct a verified PlanReaderJobHubPayload enforcing commercial preflight invariants."""
     p_mode = publish_mode.value if isinstance(publish_mode, PublishMode) else str(publish_mode).lower()
+    # The legacy builder tolerates preflight blockers for explicit DRAFT.
+    # An unknown value must therefore be refused *before* it could be
+    # treated like draft or sealed into a recipient customer payload.
+    if p_mode not in {PublishMode.DRAFT_PUBLISH.value, PublishMode.COMMERCIAL_PUBLISH.value}:
+        raise ValueError("Unsupported JobHub publishing mode cannot construct a payload")
     is_commercial = (p_mode == PublishMode.COMMERCIAL_PUBLISH.value)
 
     preflight = run_jobhub_publish_preflight(
