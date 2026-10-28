@@ -141,14 +141,17 @@ def project_resolved_slab_entity(
     if type(slab) is not ResolvedSlabEntity or type(boundary) is not CandidateBoundary:
         raise TypeError("slab and boundary must use the existing slab resolver contracts")
 
-    lineage = tuple(
-        str(value or "").strip()
-        for value in (document_id, revision_id, source_sha256, snapshot_id)
-    )
+    # Preserve original source tokens. A printed object or padded alias must
+    # not inherit a genuine source identity through string normalization.
+    lineage = (document_id, revision_id, source_sha256, snapshot_id)
     if (
-        not all(lineage)
+        any(
+            type(value) is not str or not value or value != value.strip()
+            for value in lineage
+        )
         or len(lineage[2]) != 64
         or any(ch not in "0123456789abcdefABCDEF" for ch in lineage[2])
+        or lineage[2] == "0" * 64
     ):
         return LiveCanonicalSlabProjection(
             object=None,
@@ -167,7 +170,7 @@ def project_resolved_slab_entity(
         )
 
     provenance = dict(slab.provenance or {})
-    provenance_boundary_id = str(provenance.get("boundary_id") or "").strip()
+    provenance_boundary_id = provenance.get("boundary_id")
     # These are real metre-space polygons. Source-reported area alone is not
     # sufficient when the same source receipt can be replayed with changed
     # coordinates or a stale value.
@@ -192,9 +195,12 @@ def project_resolved_slab_entity(
             reason_codes=(LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH,),
         )
     if (
-        not provenance_boundary_id
-        or provenance_boundary_id != str(boundary.boundary_id)
-        or not boundary.units_authoritative
+        any(
+            type(value) is not str or not value or value != value.strip()
+            for value in (slab.slab_id, boundary.boundary_id, provenance_boundary_id)
+        )
+        or provenance_boundary_id != boundary.boundary_id
+        or boundary.units_authoritative is not True
         or not validate_boundary_polygon(boundary.polygon)
         or not math.isfinite(float(boundary.area_m2))
         or float(boundary.area_m2) <= 0.0
@@ -264,14 +270,14 @@ def project_resolved_slab_entity(
     canonical = LiveCanonicalSlabObject(
         canonical_slab_id=physical_slab_id,
         physical_slab_id=physical_slab_id,
-        slab_id=str(slab.slab_id),
+        slab_id=slab.slab_id,
         slab_type=str(slab.slab_type),
         document_id=lineage[0],
         revision_id=lineage[1],
         source_sha256=lineage[2].lower(),
         snapshot_id=lineage[3],
         source_page=source_page,
-        boundary_id=str(boundary.boundary_id),
+        boundary_id=boundary.boundary_id,
         polygon_m=tuple(
             (float(point[0]), float(point[1])) for point in slab.boundary_polygon
         ),

@@ -46,6 +46,7 @@ def publish_live_slab_area_quantity(
         or type(slab.source_sha256) is not str
         or len(slab.source_sha256) != 64
         or any(ch not in "0123456789abcdef" for ch in slab.source_sha256)
+        or slab.source_sha256 == "0" * 64
         or type(slab.area_m2) is bool
     ):
         return None
