@@ -385,9 +385,22 @@ def run_jobhub_publish_preflight(
                 )
                 blocked_count += 1
                 continue
+            # Preserve the issuer's typed veto and audit reason at the final
+            # commercial boundary. These rows must remain rejected, but a
+            # generic authority error must not hide exclusion or staleness.
+            if auth_status in (
+                AuthorityStatus.EXCLUDED.value,
+                AuthorityStatus.REFERENCE_ONLY.value,
+                AuthorityStatus.BLOCKED.value,
+            ):
+                blocking_reasons.append(
+                    f"Row {qid}: item with status '{auth_status}' cannot enter commercial release"
+                )
+                blocked_count += 1
+                continue
             if row_obj.blocking_reasons:
                 blocking_reasons.append(
-                    f"Row {qid}: unresolved source authority blockers"
+                    f"Row {qid}: unpublishable item ({', '.join(row_obj.blocking_reasons)})"
                 )
                 blocked_count += 1
                 continue
