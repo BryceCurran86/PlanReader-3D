@@ -16,6 +16,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SourceCrossViewFloorCorrespondenceSelector,
     BOX_NOT_WALL_BOUNDED,
     COMPETING_FINISH_CODES_IN_BOX,
+    MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX,
     NO_FINISH_MARK_IN_BOX,
     BOX_OWNED_BY_OTHER_FINISH_CODE,
     MARK_TOO_CLOSE_TO_BOX_SIDE,
@@ -436,3 +437,132 @@ def test_selector_validation():
             target_page_id="7",
             material_code="",
         )
+
+
+# GPT2: the finish-code text is not a physical source-mark identity.
+# A valid same-code mark must be unique, explicitly registered, and inside
+# the original measured box with a finite source margin before CANDIDATE.
+def _fully_supported_correspondence():
+    return {
+        "wall_bounded_on_both_sheets": True,
+        "wall_evidence_identical_on_both_sheets": True,
+    }
+
+
+def _classify_source_marks(marks):
+    return classify_floor(
+        _fully_supported_correspondence(),
+        registration_unique=True,
+        marks_inside=marks,
+        other_labelled_boxes_overlapping=0,
+        material_code="FT3",
+    )
+
+
+def test_one_registered_ft3_mark_remains_a_shadow_candidate():
+    result = _classify_source_marks([
+        {"code": "FT3", "margin_pt": 15.0, "registered_region": True}
+    ])
+    assert result["status"] is EvidenceResolutionStatus.CANDIDATE
+    assert result["authority_blockers"] == STANDING_AUTHORITY_BLOCKERS
+    assert result["authenticated_physical_wall_face_equivalence"] is False
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_two_distinct_same_code_ft3_marks_never_choose_one_owner(reverse):
+    marks = [
+        {"code": "FT3", "margin_pt": 15.0, "registered_region": True},
+        {"code": "FT3", "margin_pt": 24.0, "registered_region": True},
+    ]
+    if reverse:
+        marks.reverse()
+    result = _classify_source_marks(marks)
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX in result["reason_codes"]
+    assert result["finish_codes_in_box"] == {"FT3": 2}
+    assert result["authority_blockers"] == ()
+
+
+def test_distinct_competing_ft2_ft3_marks_still_conflict():
+    result = _classify_source_marks([
+        {"code": "FT3", "margin_pt": 15.0, "registered_region": True},
+        {"code": "FT2", "margin_pt": 20.0, "registered_region": True},
+    ])
+    assert result["status"] is EvidenceResolutionStatus.CONFLICT
+    assert COMPETING_FINISH_CODES_IN_BOX in result["reason_codes"]
+
+
+@pytest.mark.parametrize("registration", [None, False, "true", 1, 0])
+def test_untrusted_registration_is_not_a_source_positive(registration):
+    result = _classify_source_marks([
+        {"code": "FT3", "margin_pt": 15.0, "registered_region": registration}
+    ])
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_IN_UNREGISTERED_REGION in result["reason_codes"]
+
+
+def test_missing_registration_does_not_default_to_true():
+    result = _classify_source_marks([{"code": "FT3", "margin_pt": 15.0}])
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_IN_UNREGISTERED_REGION in result["reason_codes"]
+
+
+@pytest.mark.parametrize("margin", [None, float("nan"), float("inf"),
+                                    -float("inf"), "15.0", True, -1.0])
+def test_untrusted_or_nonfinite_mark_margin_abstains(margin):
+    result = _classify_source_marks([
+        {"code": "FT3", "margin_pt": margin, "registered_region": True}
+    ])
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_TOO_CLOSE_TO_BOX_SIDE in result["reason_codes"]
+
+
+def test_missing_mark_margin_is_not_a_positive_containment_receipt():
+    result = _classify_source_marks([
+        {"code": "FT3", "registered_region": True}
+    ])
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_TOO_CLOSE_TO_BOX_SIDE in result["reason_codes"]
+
+
+def test_end_to_end_duplicate_ft3_marks_abstain_without_commercial_grant():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[
+            {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True},
+            {"x": 335.8, "y": 1447.5, "code": "FT3", "registered_region": True},
+        ],
+    )
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX in result.records[0].reason_codes
+    assert result.records[0].commercial_projection_allowed is False
+    assert result.records[0].takeoff_eligible is False
+
+
+def test_end_to_end_missing_registration_abstains_without_commercial_grant():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3"}],
+    )
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert MARK_IN_UNREGISTERED_REGION in result.records[0].reason_codes
+    assert result.records[0].commercial_projection_allowed is False
+    assert result.records[0].takeoff_eligible is False
