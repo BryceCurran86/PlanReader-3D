@@ -198,3 +198,43 @@ def test_polygon_order_and_collinear_split_preserve_metric_receipt_rule(source, 
     assert _publish((changed[0], replace(
         changed[1], units_authoritative=1,
     ), lineage))[1] is None
+
+@pytest.mark.parametrize("receipt", [
+    "1", "01", "+1", " 1 ", 1.0, True, None,
+])
+def test_original_annotation_page_alias_cannot_borrow_slab_source_authority(
+    source, receipt,
+):
+    slab, boundary, lineage = source
+    original, original_quantity = _publish(source)
+    assert original.object is not None and original_quantity is not None
+    forged = {**slab.provenance, "annotation_source_page": receipt}
+    projected, quantity = _publish((
+        replace(slab, provenance=forged), boundary, lineage,
+    ))
+    assert projected.object is None
+    assert quantity is None
+    # A copied canonical object cannot reissue an old source quantity after
+    # replacing the original integer producer receipt with an equivalent
+    # printable or numerically convertible alias.
+    assert publish_live_slab_area_quantity(
+        replace(original.object, provenance=forged)
+    ) is None
+    assert _publish(source) == (original, original_quantity)
+
+
+def test_missing_original_annotation_page_abstains_at_both_slab_seams(source):
+    slab, boundary, lineage = source
+    original, original_quantity = _publish(source)
+    assert original.object is not None and original_quantity is not None
+    missing = dict(slab.provenance)
+    del missing["annotation_source_page"]
+    projected, quantity = _publish((
+        replace(slab, provenance=missing), boundary, lineage,
+    ))
+    assert projected.object is None
+    assert quantity is None
+    assert publish_live_slab_area_quantity(
+        replace(original.object, provenance=missing)
+    ) is None
+    assert _publish(source) == (original, original_quantity)
