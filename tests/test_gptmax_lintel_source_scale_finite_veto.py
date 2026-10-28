@@ -5,8 +5,6 @@ PDF, wall, schedule, customer or frozen Full Plan V2 verification.
 """
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus as S
