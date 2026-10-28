@@ -5,8 +5,6 @@ an original PDF, sign a quantity or assert any frozen V2 score improvement.
 """
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from pb_geometry_takeoff_model import AuthorityStatus
