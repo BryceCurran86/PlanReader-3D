@@ -392,14 +392,23 @@ def classify_floor(
         reasons.append(WALL_EVIDENCE_DIFFERS)
     if other_labelled_boxes_overlapping:
         reasons.append(OVERLAPPING_MEASURED_BOXES)
-    # A missing, malformed or non-finite mark margin is not a positive
-    # original source containment receipt. Reject it rather than defaulting
-    # to zero or letting NaN bypass the geometric comparison.
-    if any(
-        type(mark.get("margin_pt")) not in (int, float)
-        or not math.isfinite(float(mark["margin_pt"]))
-        or float(mark["margin_pt"]) < min_margin_pt
-        for mark in marks_inside
+    # A missing, malformed, overflowing or non-finite mark margin is not a
+    # positive source containment receipt. Never let NaN bypass comparison.
+    def valid_margin(mark: Mapping[str, Any]) -> bool:
+        raw = mark.get("margin_pt")
+        if type(raw) not in (int, float):
+            return False
+        try:
+            margin = float(raw)
+        except (ValueError, OverflowError):
+            return False
+        return math.isfinite(margin) and margin >= min_margin_pt
+
+    if (
+        type(min_margin_pt) not in (int, float)
+        or not math.isfinite(float(min_margin_pt))
+        or min_margin_pt < 0
+        or any(not valid_margin(mark) for mark in marks_inside)
     ):
         reasons.append(MARK_TOO_CLOSE_TO_BOX_SIDE)
     # Registration is an explicit source fact, not a truthy caller hint.
