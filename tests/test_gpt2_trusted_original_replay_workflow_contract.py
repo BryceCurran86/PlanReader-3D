@@ -18,7 +18,7 @@ HEADS = {
     "grid": "c4595ce1191502e93decbd4d070924b81814c4a5",
     "rcp_ink": "794a114c3b422aa81f044f45d8f099b79b3454f1",
     "d15_ink": "c52f45f3365b74f3b4070ea051e338329f09de76",
-    "finish_page": "d281fa15c29dc7e9717953355e9ddf42c040215c",
+    "finish_page": "cb19b928982f8565f86443af11c7e2ccc0c5f672",
     "office_caps": "80ab45ddb082f3364cd9c7f429814f921e8b889d",
 }
 
@@ -666,3 +666,38 @@ def test_manual_replay_selects_only_static_reviewed_targets():
     assert "--network none --read-only --cap-drop ALL" in next(
         s["run"] for s in job["steps"] if s["name"].startswith("Run private original")
     )
+
+
+def test_public_offline_matrix_exactly_matches_trusted_private_target_pins():
+    """A public source-free PASS must attest the SAME immutable tree as private replay."""
+    raw = (ROOT / ".github/workflows/test-gpt2-offline-collection-no-original.yml").read_text(encoding="utf8")
+    marker = "          done <<'TARGETS'\n"
+    assert raw.count(marker) == 1
+    section = raw.split(marker, 1)[1].split("\n          TARGETS", 1)[0]
+    rows = [line.strip().split("|") for line in section.splitlines() if line.strip()]
+    assert len(rows) == len(HEADS)
+    assert {row[0] for row in rows} == set(HEADS)
+    assert len({row[0] for row in rows}) == len(rows)
+    guard = next(step for step in _load()["jobs"]["original"]["steps"]
+                 if step["name"].startswith("Validate immutable"))
+    script = guard["run"]
+    for label, sha, original_id, synthetic_id in rows:
+        assert re.fullmatch(r"[0-9a-f]{40}", sha)
+        assert sha == HEADS[label]
+        path, separator, original_test = original_id.partition("::")
+        assert separator and path.startswith("tests/") and original_test.startswith("test_")
+        synthetic_path, separator, synthetic_test = synthetic_id.partition("::")
+        assert separator and synthetic_path.startswith("tests/") and synthetic_test.startswith("test_")
+        assert synthetic_path == path
+        match = re.search(
+            r"(?ms)^  " + re.escape(label) + r"\)\n(.*?)^    ;;",
+            script,
+        )
+        assert match is not None
+        case = match.group(1)
+        assert "approved_head=" + sha in case
+        assert "test_path=" + path in case
+        assert "original_test=" + original_test in case
+    assert "ORIGINAL_SOURCES_TOKEN" not in raw
+    assert "PLANREADER_MARYBOROUGH_ORIGINAL_PDF" not in raw
+    assert "secrets." not in raw
