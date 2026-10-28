@@ -280,3 +280,65 @@ def test_original_lot16_2124_corner_rail_has_two_independent_vertical_tile_roots
         "structural_host_granted", "whole_wall_frame_granted",
         "opening_count_granted", "quantity_granted",
     ))
+
+
+@pytest.mark.parametrize("rect,reuse_existing_xref", [
+    ((96, 40, 98, 60), False),
+    ((99.9999, 40, 100.0001, 60), False),
+    ((102, 40, 104, 60), False),
+    ((97, 40, 99, 60), True),
+])
+def test_third_original_image_placement_inside_vertical_source_scan_abstains(
+    rect, reuse_existing_xref,
+):
+    """A third interior/seam painter cannot borrow two dark flank owners."""
+    from pb_gptmax_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_tile_seam,
+    )
+    document = fitz.open(stream=_source(), filetype="pdf")
+    page = document[0]
+    if reuse_existing_xref:
+        xref = int(page.get_images(full=True)[0][0])
+        page.insert_image(fitz.Rect(*rect), xref=xref)
+    else:
+        png = BytesIO()
+        Image.new("RGB", (20, 40), "black").save(png, format="PNG")
+        page.insert_image(fitz.Rect(*rect), stream=png.getvalue())
+    pdf = document.tobytes()
+    document.close()
+
+    kwargs = dict(expected_sha256=hashlib.sha256(pdf).hexdigest(),
+                  page_no=1, seam_x=100, source_y=50,
+                  flank_offset_pt=7, dpi=300)
+    assert prove_tile_seam_source_pixels(pdf, **kwargs)["status"] == SOURCE_ONLY
+    strict = prove_contiguous_source_ink_across_tile_seam(pdf, **kwargs)
+    assert strict["status"] == ABSTAIN
+    assert "source_pixel_column_membership_ambiguous" in strict["reason_codes"]
+    assert not any(strict[key] for key in (
+        "structural_host_granted", "whole_wall_frame_granted",
+        "opening_count_granted", "quantity_granted",
+    ))
+
+
+def test_unrelated_image_outside_vertical_scanline_is_invariant():
+    """An image missing the source-y band must not create a false conflict."""
+    from pb_gptmax_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_tile_seam,
+    )
+    document = fitz.open(stream=_source(), filetype="pdf")
+    png = BytesIO()
+    Image.new("RGB", (20, 40), "black").save(png, format="PNG")
+    document[0].insert_image(
+        fitz.Rect(96, 110, 98, 130), stream=png.getvalue(),
+    )
+    pdf = document.tobytes()
+    document.close()
+    strict = prove_contiguous_source_ink_across_tile_seam(
+        pdf, expected_sha256=hashlib.sha256(pdf).hexdigest(),
+        page_no=1, seam_x=100, source_y=50, flank_offset_pt=7, dpi=300,
+    )
+    assert strict["status"] == "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW"
+    assert not any(strict[key] for key in (
+        "structural_host_granted", "whole_wall_frame_granted",
+        "opening_count_granted", "quantity_granted",
+    ))
