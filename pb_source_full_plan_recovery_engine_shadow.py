@@ -123,6 +123,9 @@ class SourceFullPlanEngineRecord:
     # Only the SourceVisibilityProducer entry fills these original-page
     # view-class receipt IDs; the caller-owned direct diagnostic leaves empty.
     source_page_view_class_receipts: tuple[tuple[str, str], ...] = ()
+    # Hash of the complete caller-supplied candidate universe actually examined
+    # on source-classified, recovered pages; never physical source authority.
+    source_candidate_universe_digest: str = ""
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     reason_codes: tuple[str, ...] = (SOURCE_FULL_PLAN_ENGINE_CANDIDATE,)
     schema_version: str = SCHEMA_VERSION
@@ -549,11 +552,54 @@ def execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
     if base_result.record is None or not source_view_receipts:
         return base_result
     receipts = tuple(sorted(source_view_receipts))
+    # A different wall/room/mark candidate universe can produce the same
+    # recovered IDs and counts. Hash the exact candidate inputs for each
+    # successfully recovered page so changed geometry cannot replay its
+    # source-classified diagnostic identity. Candidate coordinates remain
+    # caller-provided and this hash is NOT evidence of physical correctness.
+    recovered_ids = {
+        verdict.page_id for verdict in base_result.record.page_verdicts
+        if verdict.status is EvidenceResolutionStatus.CANDIDATE
+    }
+    candidate_universes = []
+    for page in classified_pages:
+        if page.page_id not in recovered_ids:
+            continue
+        candidate_universes.append((
+            page.page_id,
+            tuple(sorted(
+                (room_id, tuple(tuple(float(v) for v in p) for p in poly))
+                for room_id, poly in page.room_polygon_candidates
+            )),
+            tuple(sorted(
+                (edge.wall_id, tuple(float(v) for v in edge.start_pt),
+                 tuple(float(v) for v in edge.end_pt), str(edge.stroke_id))
+                for edge in page.wall_edges
+            )),
+            tuple(sorted(
+                (opening.opening_id, tuple(float(v) for v in opening.start_pt),
+                 tuple(float(v) for v in opening.end_pt),
+                 str(opening.opening_type))
+                for opening in page.opening_candidates
+            )),
+            tuple(sorted(
+                (mark.occurrence_id, mark.page_id, mark.material_code,
+                 tuple(float(v) for v in mark.mark_center_pt),
+                 mark.source_word_address)
+                for mark in page.finish_mark_candidates
+            )),
+        ))
+    universe_digest = stable_contract_id(
+        "source_full_plan_recovery_diagnostic_candidate_universe",
+        {"pages": tuple(sorted(candidate_universes))},
+        digest_chars=32,
+    )
     trusted_identity = stable_contract_id(
         "source_full_plan_recovery_native_page_class",
         {
             "base_record_id": base_result.record.record_id,
             "source_page_view_class_receipts": receipts,
+            "diagnostic_candidate_universe_digest": universe_digest,
         },
         digest_chars=32,
     )
@@ -561,5 +607,6 @@ def execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
         base_result.record,
         record_id=trusted_identity,
         source_page_view_class_receipts=receipts,
+        source_candidate_universe_digest=universe_digest,
     )
     return replace(base_result, record=record)
