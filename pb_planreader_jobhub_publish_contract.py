@@ -319,6 +319,12 @@ def run_jobhub_publish_preflight(
         else:
             warnings.append("Drawing revision hash is unrecorded")
 
+    # A commercial package with no rows is not a verified release.  An
+    # empty list previously returned is_valid=True and could be stamped
+    # is_commercial_ready by build_jobhub_payload.
+    if is_commercial and not rows:
+        blocking_reasons.append("Commercial release requires at least one verified quantity")
+
     # 3. Row-by-Row Gate Validation
     publishable_count = 0
     blocked_count = 0
@@ -329,8 +335,17 @@ def run_jobhub_publish_preflight(
         
         # Check basic authority metadata
         if isinstance(raw_row, dict):
-            if "authority_status" not in raw_row or "source_type" not in raw_row:
+            if (
+                not str(raw_row.get("authority_status") or "").strip()
+                or not str(raw_row.get("source_type") or "").strip()
+            ):
                 blocking_reasons.append(f"Row {qid}: missing measurement authority metadata")
+                blocked_count += 1
+                continue
+            if is_commercial and type(raw_row.get("is_publishable")) is not bool:
+                blocking_reasons.append(
+                    f"Row {qid}: commercial publishability must be an explicit boolean"
+                )
                 blocked_count += 1
                 continue
             row_obj = PlanReaderJobHubQuantityRow.from_dict(raw_row)
@@ -357,6 +372,92 @@ def run_jobhub_publish_preflight(
             continue
 
         auth_status = row_obj.authority_status.lower()
+        source_type = row_obj.source_type.lower()
+
+        # The issuer's is_publishable flag is not an authority certificate:
+        # serialized, corrected, or externally supplied rows can carry an
+        # inconsistent flag. Re-check the typed status and source at the final
+        # commercial consumer rather than promoting a forged flag to JobHub.
+        if is_commercial:
+            if type(row_obj.is_publishable) is not bool:
+                blocking_reasons.append(
+                    f"Row {qid}: commercial publishability must be an explicit boolean"
+                )
+                blocked_count += 1
+                continue
+            # Preserve the issuer's typed veto and audit reason at the final
+            # commercial boundary. These rows must remain rejected, but a
+            # generic authority error must not hide exclusion or staleness.
+            if auth_status in (
+                AuthorityStatus.EXCLUDED.value,
+                AuthorityStatus.REFERENCE_ONLY.value,
+                AuthorityStatus.BLOCKED.value,
+            ):
+                blocking_reasons.append(
+                    f"Row {qid}: item with status '{auth_status}' cannot enter commercial release"
+                )
+                blocked_count += 1
+                continue
+            if row_obj.blocking_reasons:
+                blocking_reasons.append(
+                    f"Row {qid}: unpublishable item ({', '.join(row_obj.blocking_reasons)})"
+                )
+                blocked_count += 1
+                continue
+            if auth_status not in {
+                AuthorityStatus.FIRM.value,
+                AuthorityStatus.USER_APPROVED.value,
+            }:
+                blocking_reasons.append(
+                    f"Row {qid}: non-firm or unapproved measurement authority ({auth_status})"
+                )
+                blocked_count += 1
+                continue
+            # The upstream issuer never marks raw PDF-scaled, AI-detected or
+            # manual rows commercially publishable. An estimator approval
+            # creates a USER_APPROVED source row instead; a forged FIRM flag
+            # must not bypass that transition.
+            if source_type not in {kind.value for kind in TakeoffSourceType} or source_type in {
+                TakeoffSourceType.EXCLUDED.value,
+                TakeoffSourceType.REFERENCE_ONLY.value,
+                TakeoffSourceType.BLOCKED.value,
+                TakeoffSourceType.PDF_SCALED.value,
+                TakeoffSourceType.AI_DETECTED.value,
+                TakeoffSourceType.MANUAL.value,
+            }:
+                blocking_reasons.append(
+                    f"Row {qid}: excluded, blocked or unknown source authority ({source_type})"
+                )
+                blocked_count += 1
+                continue
+            if (
+                source_type == TakeoffSourceType.DOCUMENTED_DIMENSION.value
+                and (
+                    not (
+                        (row_obj.source_page is not None and str(row_obj.source_page).strip())
+                        or str(row_obj.source_sheet or "").strip()
+                    )
+                    or not str(row_obj.dimension_text_id or "").strip()
+                )
+            ):
+                blocking_reasons.append(
+                    f"Row {qid}: documented dimension lacks source page or figured-dimension trace"
+                )
+                blocked_count += 1
+                continue
+            if (
+                auth_status == AuthorityStatus.USER_APPROVED.value
+                or source_type in {
+                    TakeoffSourceType.MODEL_DERIVED.value,
+                    TakeoffSourceType.USER_CORRECTED.value,
+                    TakeoffSourceType.USER_APPROVED.value,
+                }
+            ) and not str(row_obj.approved_by or "").strip():
+                blocking_reasons.append(
+                    f"Row {qid}: estimator approval required for this measurement authority"
+                )
+                blocked_count += 1
+                continue
 
         # Check revision staleness
         if row_obj.revision_hash and curr_rev_hash and row_obj.revision_hash != curr_rev_hash:
