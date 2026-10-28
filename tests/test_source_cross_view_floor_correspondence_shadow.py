@@ -15,6 +15,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SourceCrossViewFloorCorrespondenceProducer,
     SourceCrossViewFloorCorrespondenceSelector,
     BOX_NOT_WALL_BOUNDED,
+    WALL_EVIDENCE_DIFFERS,
     COMPETING_FINISH_CODES_IN_BOX,
     MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX,
     NO_FINISH_MARK_IN_BOX,
