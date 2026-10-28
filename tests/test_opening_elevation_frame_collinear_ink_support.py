@@ -324,3 +324,33 @@ def test_transverse_endpoint_order_follows_axis_span_direction():
     vertical = {"x1": 0.49e-6, "y1": 10.0, "x2": -0.49e-6, "y2": 0.0}
     assert module._transverse_endpoints(horizontal, "h") == (-0.49e-6, 0.49e-6)
     assert module._transverse_endpoints(vertical, "v") == (-0.49e-6, 0.49e-6)
+
+
+@pytest.mark.parametrize("axis", ["h", "v"])
+@pytest.mark.parametrize("shortfall", [1e-8, 3e-7, 9e-7])
+def test_painted_ink_stopping_short_at_both_axial_frame_ends_cannot_prove_whole_edge(axis, shortfall):
+    # The 1e-6 pt *transverse* coordinate-identity tolerance must not paint
+    # an axial endpoint which the original source stroke never reaches.
+    edge = (axis, 100.0, 0.0, 10.0)
+    ink = _indexed_ink((axis, 100.0, shortfall, 10.0 - shortfall))
+    assert not module._collinear_painted_coverage(edge, ink)
+
+
+@pytest.mark.parametrize("axis", ["h", "v"])
+@pytest.mark.parametrize("gap", [1e-9, 4e-7, 9e-7])
+def test_two_real_source_strokes_with_positive_axial_gap_cannot_be_joined(axis, gap):
+    # Prior _merge_spans treated a positive gap <= 1e-6 pt as if it were ink.
+    edge = (axis, 100.0, 0.0, 10.0)
+    strokes = ((axis, 100.0, 0.0, 5.0), (axis, 100.0, 5.0 + gap, 10.0))
+    assert not module._collinear_painted_coverage(edge, _indexed_ink(*strokes))
+    assert not module._collinear_painted_coverage(edge, _indexed_ink(*reversed(strokes)))
+
+
+@pytest.mark.parametrize("axis", ["h", "v"])
+def test_exact_touching_axial_split_remains_source_painted_with_order_and_translation(axis):
+    for shift in (-100.0, 0.0, 20.0):
+        edge = (axis, 100.0, shift, shift + 10.0)
+        strokes = ((axis, 100.0, shift, shift + 5.0),
+                   (axis, 100.0, shift + 5.0, shift + 10.0))
+        assert module._collinear_painted_coverage(edge, _indexed_ink(*strokes))
+        assert module._collinear_painted_coverage(edge, _indexed_ink(*reversed(strokes)))

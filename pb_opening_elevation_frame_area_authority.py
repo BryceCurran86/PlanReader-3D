@@ -1109,7 +1109,8 @@ def _merge_spans(spans):
     """Union of collinear spans that overlap or touch (exact identity), as sorted disjoint intervals."""
     merged = []
     for lo, hi in sorted(spans):
-        if merged and lo <= merged[-1][1] + _COLLINEAR_IDENTITY_TOL:
+        # Axial source-ink extents must really touch; transverse identity tolerance is not gap fill.
+        if merged and lo <= merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
         else:
             merged.append((lo, hi))
@@ -1145,7 +1146,7 @@ def _collinear_painted_coverage(span, inked, *, edge_endpoints=None) -> bool:
             ):
                 matching.append((start, end))
     return any(
-        start - _COLLINEAR_IDENTITY_TOL <= lo and hi <= end + _COLLINEAR_IDENTITY_TOL
+        start <= lo and hi <= end
         for start, end in _merge_spans(matching)
     )
 
