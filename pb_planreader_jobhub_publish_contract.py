@@ -400,10 +400,17 @@ def run_jobhub_publish_preflight(
                 )
                 blocked_count += 1
                 continue
+            # The upstream issuer never marks raw PDF-scaled, AI-detected or
+            # manual rows commercially publishable. An estimator approval
+            # creates a USER_APPROVED source row instead; a forged FIRM flag
+            # must not bypass that transition.
             if source_type not in {kind.value for kind in TakeoffSourceType} or source_type in {
                 TakeoffSourceType.EXCLUDED.value,
                 TakeoffSourceType.REFERENCE_ONLY.value,
                 TakeoffSourceType.BLOCKED.value,
+                TakeoffSourceType.PDF_SCALED.value,
+                TakeoffSourceType.AI_DETECTED.value,
+                TakeoffSourceType.MANUAL.value,
             }:
                 blocking_reasons.append(
                     f"Row {qid}: excluded, blocked or unknown source authority ({source_type})"
@@ -411,11 +418,23 @@ def run_jobhub_publish_preflight(
                 blocked_count += 1
                 continue
             if (
+                source_type == TakeoffSourceType.DOCUMENTED_DIMENSION.value
+                and (
+                    not (row_obj.source_page is not None or row_obj.source_sheet)
+                    or not row_obj.dimension_text_id
+                )
+            ):
+                blocking_reasons.append(
+                    f"Row {qid}: documented dimension lacks source page or figured-dimension trace"
+                )
+                blocked_count += 1
+                continue
+            if (
                 auth_status == AuthorityStatus.USER_APPROVED.value
                 or source_type in {
-                    TakeoffSourceType.PDF_SCALED.value,
-                    TakeoffSourceType.AI_DETECTED.value,
                     TakeoffSourceType.MODEL_DERIVED.value,
+                    TakeoffSourceType.USER_CORRECTED.value,
+                    TakeoffSourceType.USER_APPROVED.value,
                 }
             ) and not str(row_obj.approved_by or "").strip():
                 blocking_reasons.append(
