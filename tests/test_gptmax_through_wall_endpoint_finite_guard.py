@@ -120,3 +120,68 @@ def test_zero_and_fixed_snap_are_accepted_with_explicit_difference():
     )
     assert strict[0].status is S.ABSTAINED
     assert allowed[0].status is S.CORROBORATED
+
+
+@pytest.mark.parametrize("bad_segment", [
+    ((float("nan"), -30.0), (50.0, 30.0)),
+    ((50.0, -30.0), (50.0, float("inf"))),
+    ((50.0, float("-inf")), (50.0, 30.0)),
+    ((50.0, -30.0), (50.0, -30.0)),
+    ((50.0, -30.0), (50.0 + 1e-6, -30.0)),
+    ((50.0, -30.0), ("50", 30.0)),
+    ((50.0, -30.0), (True, 30.0)),
+    ((50.0, -30.0), (10 ** 400, 30.0)),
+    ((50.0, -30.0),),
+    "not-a-wall-segment",
+])
+def test_malformed_transverse_wall_evidence_never_disappears(bad_segment):
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput("opening", (20.0, 0.0), (80.0, 0.0))
+    authority = _authority()
+    for openings in ((opening,), ()):
+        with pytest.raises(ValueError, match="transverse_wall_segments"):
+            authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=openings,
+                transverse_wall_segments=(bad_segment,),
+            )
+    # The same immutable input still produces the original positive with no obstacle.
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    assert records[0].status is S.CORROBORATED and not piers
+
+
+def test_valid_transverse_obstruction_still_vetoes_host_and_unrelated_wall_does_not():
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput("opening", (20.0, 0.0), (80.0, 0.0))
+    authority = _authority()
+    crossed = ((50.0, -30.0), (50.0, 30.0))
+    unrelated = ((90.0, -30.0), (90.0, 30.0))
+    for segment, expected_status, expected_gate in (
+        (crossed, S.ABSTAINED, "host_through_wall_obstructed"),
+        (unrelated, S.CORROBORATED, "none"),
+    ):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=(segment,),
+        )
+        assert len(records) == 1 and not piers
+        assert records[0].status is expected_status
+        assert records[0].first_remaining_gate == expected_gate
+        assert records[0].commercial_projection_allowed is False
+        assert records[0].takeoff_eligible is False
+
+
+def test_unrepresentably_large_numeric_inputs_fail_closed_not_overflow():
+    huge = 10 ** 400
+    with pytest.raises(ValueError, match="finite"):
+        ContinuousThroughWallCandidate("host", (huge, 0), (100, 0), 20.0)
+    with pytest.raises(ValueError, match="finite"):
+        ContinuousThroughWallCandidate("host", (0, 0), (100, 0), huge)
+    with pytest.raises(ValueError, match="finite"):
+        ApertureHostCandidateInput("opening", (0, 0), (huge, 0))
+    wall = ContinuousThroughWallCandidate("host", (0, 0), (100, 0), 20.0)
+    with pytest.raises(ValueError, match="snap_tolerance_pt"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=(), snap_tolerance_pt=huge,
+        )

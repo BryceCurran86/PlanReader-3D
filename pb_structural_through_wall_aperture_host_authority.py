@@ -31,12 +31,22 @@ _ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
 _COORD_TOL = 1e-4
 
 
+def _finite_real(value: object) -> bool:
+    """Reject non-numeric, Boolean, nonfinite and unrepresentably large coordinates."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _finite_point(point: object) -> bool:
     """A source-coordinate pair must contain two real, finite, non-Boolean values."""
     return (
         type(point) in (tuple, list)
         and len(point) == 2
-        and all(type(value) in (int, float) and math.isfinite(value) for value in point)
+        and all(_finite_real(value) for value in point)
     )
 
 
@@ -52,8 +62,7 @@ class ContinuousThroughWallCandidate:
     def __post_init__(self) -> None:
         if not self.wall_id.strip():
             raise ValueError("wall_id required")
-        if (type(self.thickness_pt) not in (int, float)
-                or not math.isfinite(self.thickness_pt) or self.thickness_pt <= 0.0):
+        if (not _finite_real(self.thickness_pt) or self.thickness_pt <= 0.0):
             raise ValueError("thickness_pt must be positive and finite")
         if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
             raise ValueError("Through-wall endpoints must have finite coordinates")
@@ -214,10 +223,21 @@ class StructuralThroughWallApertureHostAuthority:
         tuple[ThroughWallHostedOpeningRecord, ...], tuple[InterAperturePierRecord, ...]
     ]:
         """Bind whole-opening apertures to a continuous through-wall, resolving inter-aperture piers."""
-        if (type(snap_tolerance_pt) not in (int, float)
-                or not math.isfinite(snap_tolerance_pt)
+        if (not _finite_real(snap_tolerance_pt)
                 or not 0.0 <= snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
             raise ValueError("snap_tolerance_pt must be finite and within the 2.5pt cap")
+        # Every supplied transverse obstruction belongs to the candidate universe.
+        # A malformed/NaN crossing cannot be silently treated as "no obstruction".
+        # Validate even when there are no openings, so bad evidence never disappears.
+        for segment in transverse_wall_segments:
+            if (type(segment) not in (tuple, list) or len(segment) != 2
+                    or not _finite_point(segment[0]) or not _finite_point(segment[1])):
+                raise ValueError("transverse_wall_segments require finite endpoint pairs")
+            dx = segment[1][0] - segment[0][0]
+            dy = segment[1][1] - segment[0][1]
+            distance = math.hypot(dx, dy)
+            if not math.isfinite(distance) or distance <= _COORD_TOL:
+                raise ValueError("transverse_wall_segments require distinct finite endpoints")
         if not openings:
             return ((), ())
 
@@ -242,14 +262,14 @@ class StructuralThroughWallApertureHostAuthority:
 
             u_min = min(p1_along, p2_along)
             u_max = max(p1_along, p2_along)
-            # Both physical jamb endpoints must lie in the proved wall band.
-            # Their *average* can be zero even when each is outside it (a long,
-            # slightly oblique opening may still pass the angular threshold).
-            # Do not elect a host from a centroid-only coincidence.
-            # 1. Check transverse displacement from wall centerline
-            if max(abs(p1_perp), abs(p2_perp)) > half_thick + snap_tolerance_pt:
+            # 1. Check angular alignment with wall axis
+            op_dx = op.end_pt[0] - op.start_pt[0]
+            op_dy = op.end_pt[1] - op.start_pt[1]
+            op_len = math.hypot(op_dx, op_dy)
+            cos_theta = abs((op_dx * ax + op_dy * ay) / op_len)
+            if cos_theta < _ALIGNMENT_COS_TOL:
                 status = EvidenceResolutionStatus.ABSTAINED
-                gate = "aperture_outside_host_wall_band"
+                gate = "aperture_wall_axis_misaligned"
                 rec = self._make_record(
                     op.physical_opening_id, through_wall, u_min, u_max, status, gate
                 )
@@ -258,14 +278,14 @@ class StructuralThroughWallApertureHostAuthority:
                 )
                 continue
 
-            # 2. Check angular alignment with wall axis
-            op_dx = op.end_pt[0] - op.start_pt[0]
-            op_dy = op.end_pt[1] - op.start_pt[1]
-            op_len = math.hypot(op_dx, op_dy)
-            cos_theta = abs((op_dx * ax + op_dy * ay) / op_len)
-            if cos_theta < _ALIGNMENT_COS_TOL:
+            # Both physical jamb endpoints must lie in the proved wall band.
+            # Their *average* can be zero even when each is outside it (a long,
+            # slightly oblique opening may still pass the angular threshold).
+            # Do not elect a host from a centroid-only coincidence.
+            # 2. Check transverse displacement from wall centerline
+            if max(abs(p1_perp), abs(p2_perp)) > half_thick + snap_tolerance_pt:
                 status = EvidenceResolutionStatus.ABSTAINED
-                gate = "aperture_wall_axis_misaligned"
+                gate = "aperture_outside_host_wall_band"
                 rec = self._make_record(
                     op.physical_opening_id, through_wall, u_min, u_max, status, gate
                 )
