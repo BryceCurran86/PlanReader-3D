@@ -26,6 +26,7 @@ from pb_source_full_plan_recovery_engine_shadow import (
     SourcePageExecutionVerdict,
     SourcePageInputPayload,
     execute_source_full_plan_recovery_engine_shadow,
+    execute_source_full_plan_recovery_engine_from_source_visibility_shadow,
 )
 from pb_source_room_boundary_doorway_opening_shadow import (
     SourceRoomOpeningCandidate,
@@ -805,3 +806,107 @@ def test_private_original_maryborough_p11_ft3_foreign_page_abstains_if_provision
     assert control.record.total_finish_zones_recovered == 1
     assert control.record.takeoff_eligible is False
     assert control.record.commercial_projection_allowed is False
+
+
+@pytest.fixture(scope="module")
+def _native_page_classification_producer():
+    """Two actual native PDF pages; room geometry is intentionally synthetic."""
+    import fitz
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    pdf = fitz.open()
+    pdf.new_page(width=400, height=300).insert_text(
+        (20, 30), "GROUND FLOOR PLAN", fontsize=12
+    )
+    pdf.new_page(width=400, height=300).insert_text(
+        (20, 30), "EXTERNAL ELEVATIONS", fontsize=12
+    )
+    source_bytes = pdf.tobytes()
+    pdf.close()
+    producer = SourceVisibilityProducer(
+        producer_method="gpt2-source-page-visibility-test",
+        producer_version="1",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="gpt2-sheet-scope",
+        source_bytes=source_bytes,
+        source_locator="memory://native-test",
+    )
+    selector = SourceFullPlanEngineSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+    return producer, selector
+
+
+def test_source_verified_full_plan_classifies_from_native_pdf_and_ignores_forged_caller_type(
+    _native_page_classification_producer,
+):
+    """Real producer text, not the caller's floor_plan string, controls recovery."""
+    producer, selector = _native_page_classification_producer
+    # The caller *inverts* the actual source page roles.
+    real_floor = replace(_healthy_page("1"), page_type="elevation")
+    fake_floor = replace(_healthy_page("2"), page_type="floor_plan")
+    pages = (real_floor, fake_floor)
+    original = copy.deepcopy(pages)
+    seen_ids = set()
+    for permutation in (pages, tuple(reversed(pages))):
+        result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+            selector,
+            pages=permutation,
+            source_visibility_producer=producer,
+        )
+        assert result.status == EvidenceResolutionStatus.CANDIDATE
+        assert result.record is not None
+        record = result.record
+        seen_ids.add(record.record_id)
+        assert record.successful_pages_count == 1
+        assert record.quarantined_pages_count == 1
+        assert record.total_rooms_recovered == 1
+        assert record.total_finish_zones_recovered == 1
+        floor = next(v for v in record.page_verdicts if v.page_id == "1")
+        other = next(v for v in record.page_verdicts if v.page_id == "2")
+        assert floor.recovered_finish_ids == ("OCC_FT2",)
+        assert floor.is_quarantined is False
+        assert other.recovered_finish_ids == ()
+        assert other.recovered_room_ids == ()
+        assert other.reason_codes == (
+            UNSUPPORTED_SOURCE_PAGE_TYPE, PAGE_QUARANTINED_SAFELY
+        )
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+    assert pages == original
+    assert len(seen_ids) == 1
+
+
+def test_source_verified_full_plan_rejects_forged_page_identity_and_stale_source(
+    _native_page_classification_producer,
+):
+    from dataclasses import replace as replace_selector
+
+    producer, selector = _native_page_classification_producer
+    miss = replace(_healthy_page("unknown-page"), page_type="floor_plan")
+    source_result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(miss,), source_visibility_producer=producer,
+    )
+    assert source_result.status == EvidenceResolutionStatus.ABSTAINED
+    assert source_result.record is not None
+    assert source_result.record.quarantined_pages_count == 1
+    assert source_result.record.total_finish_zones_recovered == 0
+
+    forged = replace_selector(selector, snapshot_id="another-snapshot")
+    invalid_result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        forged, pages=(_healthy_page("1"),), source_visibility_producer=producer,
+    )
+    assert invalid_result.status == EvidenceResolutionStatus.ABSTAINED
+    assert invalid_result.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert invalid_result.record is None
+
+    unowned = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(_healthy_page("1"),), source_visibility_producer=None,
+    )
+    assert unowned.status == EvidenceResolutionStatus.ABSTAINED
+    assert unowned.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
+    assert unowned.record is None
