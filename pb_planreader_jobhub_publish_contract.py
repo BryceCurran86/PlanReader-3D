@@ -420,8 +420,11 @@ def run_jobhub_publish_preflight(
             if (
                 source_type == TakeoffSourceType.DOCUMENTED_DIMENSION.value
                 and (
-                    not (row_obj.source_page is not None or row_obj.source_sheet)
-                    or not row_obj.dimension_text_id
+                    not (
+                        (row_obj.source_page is not None and str(row_obj.source_page).strip())
+                        or str(row_obj.source_sheet or "").strip()
+                    )
+                    or not str(row_obj.dimension_text_id or "").strip()
                 )
             ):
                 blocking_reasons.append(
