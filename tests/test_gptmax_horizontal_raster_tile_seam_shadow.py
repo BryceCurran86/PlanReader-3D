@@ -66,6 +66,31 @@ def test_false_or_unsupported_seam_abstains(kwargs):
     assert failure["elevation_plan_identity_granted"] is False
 
 
+@pytest.mark.parametrize("gap", [0.0005, 0.01])
+def test_subpixel_horizontal_source_gap_is_not_painted_in_by_raster(gap):
+    """Dark endpoint pixels and a dark render cannot close a real source gap."""
+    from pb_gptmax_horizontal_raster_tile_seam_shadow import (
+        prove_contiguous_source_ink_across_horizontal_tile_seam,
+    )
+    payload = _pdf(gap=gap)
+    digest = sha256(payload).hexdigest()
+    common = dict(
+        expected_sha256=digest, page_no=1, source_x=50,
+        seam_y=100, flank_offset_pt=7, dpi=300,
+    )
+    for report in (
+        prove_horizontal_tile_seam_source_pixels(payload, **common),
+        prove_contiguous_source_ink_across_horizontal_tile_seam(payload, **common),
+    ):
+        assert report["status"] == ABSTAIN
+        assert "source_tile_boundary_gap_unproven" in report["reason_codes"]
+        assert all(report[key] is False for key in (
+            "structural_host_granted", "whole_wall_frame_granted",
+            "opening_count_granted", "quantity_granted",
+            "elevation_plan_identity_granted", "opening_kind_granted",
+        ))
+
+
 def test_sha_bound_and_explicit_finite_parameters():
     src = _pdf()
     with pytest.raises(ValueError, match="SHA-256"):

@@ -7,8 +7,11 @@ text block and competing word is preserved; no nearest room-word election.
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from hashlib import sha256
-from math import isfinite
+from math import isfinite, hypot
 import fitz
+from pb_native_text_render_authority import (
+    PROVEN_RENDERED, extract_native_text_render_evidence,
+)
 
 # Lexical shortlist only, NOT source semantic/material or physical ceiling grant.
 _SOURCE_CEILING_CODE_CANDIDATES = frozenset(('IPF1','GRID','WFPB','FPB','IP'))
@@ -25,6 +28,7 @@ class NativeRcpWordScopeShadow:
     original_source_role: str
     reason_codes: tuple[str,...]
     original_source_word_verified: bool = True
+    original_ceiling_code_visible_ink_verified: bool = False
     original_plan_viewport_authorized: bool = False
     original_material_definition_authorized: bool = False
     physical_ceiling_zone_authorized: bool = False
@@ -40,6 +44,166 @@ class NativeRcpWordScopeShadow:
 def _inside(box,outer):
     return (outer[0]<=box[0] and outer[1]<=box[1] and
             box[2]<=outer[2] and box[3]<=outer[3])
+
+
+def _visible_native_ceiling_code_ink(page, word) -> bool:
+    """Original glyph paint negative gate, not Unicode or ceiling authority.
+
+    A texttrace may combine several separate words; use the source word's
+    own glyph subset. All eligible source glyphs must be visibly painted.
+    Never select the first matching span or rescue a partially hidden code.
+    """
+    try:
+        box = tuple(float(v) for v in word[:4])
+        text = str(word[4])
+        if (not text or not all(isfinite(v) for v in box)
+                or box[0] >= box[2] or box[1] >= box[3]):
+            return False
+        traces = tuple(page.get_texttrace())
+        bboxlog = tuple(page.get_bboxlog())
+        receipts = extract_native_text_render_evidence(page)
+        receipt_index = {}
+        for receipt in receipts:
+            if type(receipt.sequence_number) is int:
+                receipt_index.setdefault(
+                    (receipt.sequence_number, receipt.bbox), []
+                ).append(receipt)
+        selected = []
+        selected_seq = []
+        selected_directions = []
+        for trace in traces:
+            seq = trace.get('seqno')
+            raw_box = trace.get('bbox')
+            if (type(seq) is not int or not isinstance(raw_box, (tuple,list))
+                    or len(raw_box) != 4):
+                return False
+            trace_box = tuple(float(v) for v in raw_box)
+            if not all(isfinite(v) for v in trace_box):
+                return False
+            direction = trace.get('dir')
+            if (not isinstance(direction, (tuple, list))
+                    or len(direction) != 2):
+                return False
+            dx, dy = (float(v) for v in direction)
+            if (not isfinite(dx) or not isfinite(dy)
+                    or abs(hypot(dx, dy) - 1.0) > .001):
+                return False
+            for glyph in trace.get('chars') or ():
+                codepoint, glyph_id, _origin, raw_glyph_box = glyph
+                glyph_box = tuple(float(v) for v in raw_glyph_box)
+                if (len(glyph_box) != 4
+                        or not all(isfinite(v) for v in glyph_box)
+                        or glyph_box[0] >= glyph_box[2]
+                        or glyph_box[1] >= glyph_box[3]):
+                    return False
+                if type(codepoint) is not int or not 0 <= codepoint <= 0x10ffff:
+                    return False
+                # PDF texttrace SPACE has an advance box but no painted
+                # glyph. A later unrelated text span can cross a code using
+                # whitespace without concealing its original ink.
+                if chr(codepoint).isspace():
+                    continue
+                centre_x = (glyph_box[0] + glyph_box[2]) / 2
+                centre_y = (glyph_box[1] + glyph_box[3]) / 2
+                if not (box[0] - .1 <= centre_x <= box[2] + .1
+                        and box[1] - .1 <= centre_y <= box[3] + .1):
+                    continue
+                if (type(glyph_id) is not int or glyph_id < 0
+                        or not 0 <= seq < len(bboxlog)
+                        or bboxlog[seq][0] not in ('fill-text','stroke-text')):
+                    return False
+                possible = receipt_index.get((seq, trace_box), ())
+                if (len(possible) != 1 or not possible[0].render_eligible
+                        or possible[0].render_state != PROVEN_RENDERED):
+                    return False
+                selected.append((chr(codepoint), glyph_box))
+                selected_seq.append(seq)
+                selected_directions.append((dx, dy))
+        if len(selected) != len(text):
+            return False
+        # Multiset equality is not source glyph identity: DIRG and GRID
+        # contain the same letters but represent different painted words.
+        # Preserve original texttrace character order; the caller has already
+        # resolved one exact native (block, line, word) source address.
+        if ''.join(char for char, _ in selected) != text:
+            return False
+        # Source glyphs must also progress along the original paint direction.
+        # A reordered/spliced trace can retain the same Unicode sequence
+        # while moving its glyph boxes into a different visual word.
+        dx, dy = selected_directions[0]
+        if any(abs(x - dx) > .001 or abs(y - dy) > .001
+               for x, y in selected_directions[1:]):
+            return False
+        projected_centres = [
+            ((glyph_box[0] + glyph_box[2]) * dx
+             + (glyph_box[1] + glyph_box[3]) * dy) / 2
+            for _, glyph_box in selected
+        ]
+        if any(right - left <= .001 for left, right in zip(
+                projected_centres, projected_centres[1:])):
+            return False
+        # The shared render receipt checks later fill-path/image/shade.
+        # A later opaque STROKE or native TEXT glyph can also conceal the
+        # selected code, including when its glyph CENTRE lies outside the
+        # original word box. Do not rely on the whole text-span bbox (CAD
+        # spans can cross a grid with no painted glyph at the crossing).
+        traces_by_seq = {}
+        for trace in traces:
+            seq = trace.get('seqno')
+            if type(seq) is int:
+                traces_by_seq.setdefault(seq, []).append(trace)
+        for (_, glyph_box), text_seq in zip(selected, selected_seq):
+            for later_seq, paint in enumerate(
+                    bboxlog[text_seq + 1:], start=text_seq + 1):
+                kind = paint[0]
+                if kind not in ('stroke-path', 'fill-text', 'stroke-text'):
+                    continue
+                paint_box = tuple(float(v) for v in paint[1])
+                if (len(paint_box) != 4
+                        or not all(isfinite(v) for v in paint_box)):
+                    return False
+                if not (
+                    min(glyph_box[2], paint_box[2]) > max(glyph_box[0], paint_box[0])
+                    and min(glyph_box[3], paint_box[3]) > max(glyph_box[1], paint_box[1])
+                ):
+                    continue
+                if kind == 'stroke-path':
+                    return False
+                later_traces = traces_by_seq.get(later_seq, ())
+                if not later_traces:
+                    return False
+                for later_trace in later_traces:
+                    later_chars = later_trace.get('chars')
+                    if not isinstance(later_chars, (tuple, list)) or not later_chars:
+                        return False
+                    for later_char in later_chars:
+                        if (not isinstance(later_char, (tuple, list))
+                                or len(later_char) < 4
+                                or type(later_char[0]) is not int
+                                or not 0 <= later_char[0] <= 0x10ffff):
+                            return False
+                        if chr(later_char[0]).isspace():
+                            continue
+                        later_box = tuple(float(v) for v in later_char[3])
+                        if (len(later_box) != 4
+                                or not all(isfinite(v) for v in later_box)
+                                or later_box[0] >= later_box[2]
+                                or later_box[1] >= later_box[3]):
+                            return False
+                        if (
+                            min(glyph_box[2], later_box[2]) > max(glyph_box[0], later_box[0])
+                            and min(glyph_box[3], later_box[3]) > max(glyph_box[1], later_box[1])
+                        ):
+                            return False
+        # Extracted word boxes include font advance/bearing margins. Source
+        # ink need not TOUCH those edges: require complete matching glyph
+        # coverage INSIDE the original word box, never infer global snap.
+        return (min(b[0] for _, b in selected) >= box[0] - .1
+                and max(b[2] for _, b in selected) <= box[2] + .1
+                and min(b[1] for _, b in selected) >= box[1] - .1
+                and max(b[3] for _, b in selected) <= box[3] + .1)
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def inspect_original_mary_rcp_word_scope_shadow(
@@ -60,7 +224,16 @@ def inspect_original_mary_rcp_word_scope_shadow(
     with fitz.open(stream=pdf_bytes,filetype='pdf') as doc:
         if type(page_number) is not int or not 1<=page_number<=len(doc):
             raise ValueError('original RCP page not found')
-        words=doc[page_number-1].get_text('words')
+        page = doc[page_number-1]
+        words = page.get_text('words')
+        targets = [w for w in words if tuple(w[5:8]) == native_word_address]
+        # Read the source paint while the original page is open, but only for
+        # a candidate code. Other room/note words keep their lexical receipt.
+        rendered_code = (
+            len(targets) == 1
+            and str(targets[0][4]).upper() in _SOURCE_CEILING_CODE_CANDIDATES
+            and _visible_native_ceiling_code_ink(page, targets[0])
+        )
     target=[w for w in words if tuple(w[5:8])==native_word_address]
     if len(target)!=1:
         raise ValueError('unique original native word missing')
@@ -78,6 +251,15 @@ def inspect_original_mary_rcp_word_scope_shadow(
     if not within:
         role,reasons='SOURCE_OUTSIDE_PROPOSED_PLAN_VIEWPORT',('original_word_outside_candidate_plan_box',)
     elif token in _SOURCE_CEILING_CODE_CANDIDATES:
+        if not rendered_code:
+            role,reasons='SOURCE_CEILING_CODE_INK_UNRESOLVED',(
+                'original_ceiling_code_glyph_paint_not_proven',
+            )
+            return NativeRcpWordScopeShadow(
+                expected_source_sha256,page_number,native_word_address,
+                str(selected[4]),block_words,line_words,bounds,role,reasons,
+                original_ceiling_code_visible_ink_verified=False,
+            )
         # Native text blocks with just TWO words can be mixed source notes
         # ("GRID OFFICE"), not automatically a code+figure. Verify EVERY
         # source sibling before assigning even lexical CANDIDATE status.
@@ -105,4 +287,5 @@ def inspect_original_mary_rcp_word_scope_shadow(
         role,reasons='SOURCE_NON_CEILING_CODE_WORD',('original_room_or_other_label_not_ceiling_material',)
     return NativeRcpWordScopeShadow(
         expected_source_sha256,page_number,native_word_address,str(selected[4]),
-        block_words,line_words,bounds,role,reasons)
+        block_words,line_words,bounds,role,reasons,
+        original_ceiling_code_visible_ink_verified=bool(within and rendered_code))

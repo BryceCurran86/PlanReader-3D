@@ -106,6 +106,11 @@ def prove_tile_seam_source_pixels(
             or abs(left_rect.x1 - seam_x) > 0.03 or abs(right_rect.x0 - seam_x) > 0.03
             or abs(left_rect.x1 - right_rect.x0) > 0.03):
             return _abstain(digest, page_no, "distinct_abutting_unmasked_image_roots_unproven")
+        # Dark flank pixels alone cannot authenticate a real subpixel source
+        # placement gap or overlap, even when the rendered page looks joined.
+        # Match the strict contiguous proof's original-root tolerance.
+        if abs(left_rect.x1 - right_rect.x0) > 0.0001:
+            return _abstain(digest, page_no, "source_tile_boundary_gap_unproven")
         scale = dpi / 72.0
         clip = fitz.Rect(xs[0] - 1, source_y - 1, xs[1] + 1, source_y + 1)
         composite = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
@@ -164,6 +169,13 @@ def prove_contiguous_source_ink_across_tile_seam(
         )
         pixels = {row["xref"]: fitz.Pixmap(document, row["xref"]) for row in (left, right)}
         counts = {left["xref"]: 0, right["xref"]: 0}
+        seam_boundary_columns = 0
+        left_rect, right_rect = (fitz.Rect(root["placement"]) for root in (left, right))
+        # Original PDF matrices can disagree by float rounding (~0.000061pt
+        # on the 2124 source), but 0.0005pt is a real placement gap/overlap
+        # that no 300dpi sample need hit. Fail closed before pixel proof.
+        if abs(left_rect.x1 - right_rect.x0) > 0.0001:
+            return _abstain(basis["source_sha256"], page_no, "source_tile_boundary_gap_unproven")
         x0, x1 = int(low * scale), int(high * scale)
         if x1 <= x0 or x1 - x0 > 250:
             return _abstain(basis["source_sha256"], page_no, "source_scan_unbounded_or_empty")
@@ -173,6 +185,30 @@ def prove_contiguous_source_ink_across_tile_seam(
                 root for root in (left, right)
                 if fitz.Rect(root["placement"]).contains(fitz.Point(x, y))
             ]
+            cx, cy = column - composite.x, int(y * scale) - composite.y
+            if not (0 <= cx < composite.width and 0 <= cy < composite.height):
+                return _abstain(basis["source_sha256"], page_no, "source_scan_pixel_outside_composite")
+            rendered_rgb = composite.pixel(cx, cy)[:3]
+            if not matches and abs(x - float(seam_x)) <= 0.5 / scale + 0.001:
+                # A numerical seam column has NO unique image owner. Require
+                # independent original dark pixels at BOTH source-image edges,
+                # plus the actual rendered PDF pixel. Never assign it to the
+                # nearest image, interpolate paint, or grant structural meaning.
+                if seam_boundary_columns:
+                    return _abstain(basis["source_sha256"], page_no, "source_pixel_column_membership_ambiguous")
+                edges = []
+                for root, ix in ((left, pixels[left["xref"]].width - 1), (right, 0)):
+                    source = pixels[root["xref"]]
+                    rect = fitz.Rect(root["placement"])
+                    iy = min(source.height - 1, max(0, int((y - rect.y0) / rect.height * source.height)))
+                    edges.append(source.pixel(ix, iy)[:3])
+                if (max(rendered_rgb) > 64 or any(
+                    max(rgb) > 64 or any(abs(a - b) > 16 for a, b in zip(rgb, rendered_rgb))
+                    for rgb in edges
+                )):
+                    return _abstain(basis["source_sha256"], page_no, "source_seam_edge_ink_unproven")
+                seam_boundary_columns += 1
+                continue
             if len(matches) != 1:
                 return _abstain(basis["source_sha256"], page_no, "source_pixel_column_membership_ambiguous")
             root = matches[0]
@@ -181,12 +217,10 @@ def prove_contiguous_source_ink_across_tile_seam(
             ix = min(source.width - 1, max(0, int((x - rect.x0) / rect.width * source.width)))
             iy = min(source.height - 1, max(0, int((y - rect.y0) / rect.height * source.height)))
             source_rgb = source.pixel(ix, iy)[:3]
-            cx, cy = column - composite.x, int(y * scale) - composite.y
-            if not (0 <= cx < composite.width and 0 <= cy < composite.height):
-                return _abstain(basis["source_sha256"], page_no, "source_scan_pixel_outside_composite")
-            rendered_rgb = composite.pixel(cx, cy)[:3]
+            # Dark antialiased source/render samples may differ by 13 RGB
+            # levels at an original tile boundary; white still always fails.
             if (max(source_rgb) > 64 or max(rendered_rgb) > 64
-                or any(abs(a - b) > 12 for a, b in zip(source_rgb, rendered_rgb))):
+                or any(abs(a - b) > 16 for a, b in zip(source_rgb, rendered_rgb))):
                 return _abstain(basis["source_sha256"], page_no, "contiguous_source_ink_scan_failed")
             counts[root["xref"]] += 1
         if not all(counts.values()):
@@ -195,6 +229,7 @@ def prove_contiguous_source_ink_across_tile_seam(
         **basis,
         "status": "SOURCE_TILE_CROSSING_INK_VERIFIED_SHADOW",
         "source_painted_pixel_columns": x1 - x0,
+        "source_seam_boundary_columns": seam_boundary_columns,
         "source_pixel_columns_per_image_root": [counts[left["xref"]], counts[right["xref"]]],
         "source_scanline_y_pt": y,
         "structural_host_granted": False,

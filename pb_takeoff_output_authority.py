@@ -183,6 +183,10 @@ def create_takeoff_output_row(
     warn_list: List[str] = list(warnings or [])
     block_list: List[str] = list(blocking_reasons or [])
 
+    # Approval is a named estimator attribution, never a truthiness test.
+    # SQLite/API caller values can include whitespace, bools and numbers.
+    named_approver = type(approved_by) is str and bool(approved_by.strip())
+
     # Fail closed on any authority metadata this module does not recognize, rather
     # than letting an unrecognized label silently pass through to downstream consumers.
     if a_status is not None and a_status not in _KNOWN_AUTHORITY_STATUSES:
@@ -263,7 +267,7 @@ def create_takeoff_output_row(
         is_publishable = False
 
     elif s_type == TakeoffSourceType.MODEL_DERIVED.value:
-        if approved_by:
+        if named_approver:
             if a_status is None:
                 a_status = AuthorityStatus.USER_APPROVED.value
             if not is_stale and len(block_list) == 0:
@@ -276,7 +280,7 @@ def create_takeoff_output_row(
             is_publishable = False
 
     elif s_type == TakeoffSourceType.USER_CORRECTED.value:
-        if approved_by:
+        if named_approver:
             if a_status is None:
                 a_status = AuthorityStatus.USER_APPROVED.value
             if not is_stale and len(block_list) == 0:
@@ -289,9 +293,9 @@ def create_takeoff_output_row(
     elif s_type == TakeoffSourceType.USER_APPROVED.value:
         if a_status is None:
             a_status = AuthorityStatus.USER_APPROVED.value
-        if not approved_by:
+        if not named_approver:
             block_list.append("User approved row missing approved_by estimator attribution")
-        if not is_stale and approved_by and len(block_list) == 0:
+        if not is_stale and named_approver and len(block_list) == 0:
             is_publishable = True
         else:
             is_publishable = False
