@@ -114,14 +114,34 @@ class TakeoffOutputRow:
         raw_publishable = data.get("is_publishable", False)
         if type(raw_publishable) is not bool:
             raise ValueError("is_publishable must be an explicit Boolean")
+        # A missing serialized authority receipt is not a FIRM documented
+        # dimension. The final legacy consumer accepts typed rows without
+        # rechecking raw-dictionary field presence, so never manufacture
+        # commercial evidence here.
+        raw_source_type = data.get("source_type")
+        raw_authority_status = data.get("authority_status")
+        missing_authority = (
+            type(raw_source_type) is not str
+            or not raw_source_type.strip()
+            or type(raw_authority_status) is not str
+            or not raw_authority_status.strip()
+        )
+        if missing_authority and raw_publishable:
+            raise ValueError(
+                "Published takeoff row requires explicit source_type and authority_status"
+            )
         clean = {
             "quantity_id": str(data.get("quantity_id") or ""),
             "description": str(data.get("description") or ""),
             "value": float(data.get("value") or 0.0),
             "unit": str(data.get("unit") or ""),
             "trade": str(data.get("trade") or "general"),
-            "source_type": str(data.get("source_type") or TakeoffSourceType.DOCUMENTED_DIMENSION.value),
-            "authority_status": str(data.get("authority_status") or AuthorityStatus.FIRM.value),
+            "source_type": (
+                TakeoffSourceType.BLOCKED.value if missing_authority else raw_source_type
+            ),
+            "authority_status": (
+                AuthorityStatus.BLOCKED.value if missing_authority else raw_authority_status
+            ),
             "confidence": float(data.get("confidence") if data.get("confidence") is not None else 1.0),
             "source_page": data.get("source_page"),
             "source_sheet": data.get("source_sheet"),
