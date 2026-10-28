@@ -196,10 +196,10 @@ def test_the_identity_tolerance_is_float_identity_not_a_measurement():
 # may quantise when serialising synthetic PDF drawing commands.
 def _indexed_ink(*strokes):
     indexed = {}
-    for axis, offset, lo, hi in strokes:
+    for axis, offset, lo, hi, *endpoints in strokes:
         indexed.setdefault(
             (axis, round(offset / module._COLLINEAR_IDENTITY_TOL)), []
-        ).append((offset, lo, hi))
+        ).append((offset, lo, hi, *endpoints))
     return indexed
 
 
@@ -278,3 +278,49 @@ def test_collinear_coverage_is_order_independent_and_axis_scoped():
     assert not module._collinear_painted_coverage(
         ("v", 3.0, 0.0, 10.0), _indexed_ink(*strokes)
     )
+
+
+# The midpoint alone is not coordinate identity for a near-axis line. Two
+# opposite sub-micro-point slopes can agree at the midpoint but be separated
+# by more than the identity tolerance at one end of their shared extent.
+def test_crossed_near_horizontal_strokes_cannot_paint_an_unmatched_endpoint():
+    edge = ("h", 0.0, 0.0, 10.0)
+    edge_ends = (-0.49e-6, 0.49e-6)
+    foreign = _indexed_ink(("h", 0.21e-6, 0.0, 10.0, 0.70e-6, -0.28e-6))
+    assert abs(0.21e-6) < module._COLLINEAR_IDENTITY_TOL
+    assert abs(edge_ends[0] - 0.70e-6) > module._COLLINEAR_IDENTITY_TOL
+    assert not module._collinear_painted_coverage(edge, foreign, edge_endpoints=edge_ends)
+    authentic = _indexed_ink(("h", 0.0, 0.0, 10.0, *edge_ends))
+    assert module._collinear_painted_coverage(edge, authentic, edge_endpoints=edge_ends)
+
+
+def test_crossed_near_vertical_strokes_are_equally_vetoed():
+    edge = ("v", 0.0, 0.0, 10.0)
+    edge_ends = (-0.49e-6, 0.49e-6)
+    foreign = _indexed_ink(("v", 0.21e-6, 0.0, 10.0, 0.70e-6, -0.28e-6))
+    assert not module._collinear_painted_coverage(edge, foreign, edge_endpoints=edge_ends)
+    assert module._collinear_painted_coverage(
+        edge, _indexed_ink(("v", 0.0, 0.0, 10.0, *edge_ends)), edge_endpoints=edge_ends
+    )
+
+
+def test_genuinely_coincident_near_axis_split_ink_remains_order_invariant():
+    edge = ("h", 0.0, 0.0, 10.0)
+    ends = (-0.49e-6, 0.49e-6)
+    strokes = (
+        ("h", -0.245e-6, 0.0, 5.0, -0.49e-6, 0.0),
+        ("h", 0.245e-6, 5.0, 10.0, 0.0, 0.49e-6),
+    )
+    assert module._collinear_painted_coverage(edge, _indexed_ink(*strokes), edge_endpoints=ends)
+    assert module._collinear_painted_coverage(edge, _indexed_ink(*reversed(strokes)), edge_endpoints=ends)
+    wrong_second = strokes[1][:4] + (0.70e-6, -0.28e-6)
+    assert not module._collinear_painted_coverage(
+        edge, _indexed_ink(strokes[0], wrong_second), edge_endpoints=ends
+    )
+
+
+def test_transverse_endpoint_order_follows_axis_span_direction():
+    horizontal = {"x1": 10.0, "y1": 0.49e-6, "x2": 0.0, "y2": -0.49e-6}
+    vertical = {"x1": 0.49e-6, "y1": 10.0, "x2": -0.49e-6, "y2": 0.0}
+    assert module._transverse_endpoints(horizontal, "h") == (-0.49e-6, 0.49e-6)
+    assert module._transverse_endpoints(vertical, "v") == (-0.49e-6, 0.49e-6)
