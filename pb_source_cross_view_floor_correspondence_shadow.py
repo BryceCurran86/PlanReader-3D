@@ -52,6 +52,7 @@ OVERLAPPING_MEASURED_BOXES = "overlapping_measured_boxes"
 MARK_TOO_CLOSE_TO_BOX_SIDE = "mark_too_close_to_box_side"
 MARK_IN_UNREGISTERED_REGION = "mark_in_unregistered_region"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
+MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX = "multiple_same_code_finish_marks_in_box"
 NO_FINISH_MARK_IN_BOX = "no_finish_mark_in_box"
 BOX_OWNED_BY_OTHER_FINISH_CODE = "box_owned_by_other_finish_code"
 FLOOR_GEOMETRICALLY_OWNED_EQUIVALENCE_NOT_AUTHENTICATED = (
@@ -391,9 +392,18 @@ def classify_floor(
         reasons.append(WALL_EVIDENCE_DIFFERS)
     if other_labelled_boxes_overlapping:
         reasons.append(OVERLAPPING_MEASURED_BOXES)
-    if any(m.get("margin_pt", 0.0) < min_margin_pt for m in marks_inside):
+    # A missing, malformed or non-finite mark margin is not a positive
+    # original source containment receipt. Reject it rather than defaulting
+    # to zero or letting NaN bypass the geometric comparison.
+    if any(
+        type(mark.get("margin_pt")) not in (int, float)
+        or not math.isfinite(float(mark["margin_pt"]))
+        or float(mark["margin_pt"]) < min_margin_pt
+        for mark in marks_inside
+    ):
         reasons.append(MARK_TOO_CLOSE_TO_BOX_SIDE)
-    if any(not m.get("registered_region", True) for m in marks_inside):
+    # Registration is an explicit source fact, not a truthy caller hint.
+    if any(mark.get("registered_region") is not True for mark in marks_inside):
         reasons.append(MARK_IN_UNREGISTERED_REGION)
 
     if len(codes) > 1:
@@ -405,6 +415,11 @@ def classify_floor(
     elif material_code not in codes:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons.append(BOX_OWNED_BY_OTHER_FINISH_CODE)
+    elif sum(codes.values()) != 1:
+        # Repeated same-code marks can belong to different physical finish
+        # regions. One dimension box cannot choose an owner by code alone.
+        status = EvidenceResolutionStatus.ABSTAINED
+        reasons.append(MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX)
     elif reasons:
         status = EvidenceResolutionStatus.ABSTAINED
     else:
@@ -561,7 +576,7 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     inside_marks.append({
                         "code": mark["code"],
                         "margin_pt": margin,
-                        "registered_region": mark.get("registered_region", True),
+                        "registered_region": mark.get("registered_region"),
                     })
 
             classified = classify_floor(
