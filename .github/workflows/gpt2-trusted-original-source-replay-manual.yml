@@ -3,6 +3,13 @@ name: GPT2 trusted original replay (manual)
 # Owner-run only. No push / PR / pull_request_target source-secret exposure.
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Select one immutable original replay or all approved targets"
+        required: true
+        type: choice
+        default: all
+        options: [all, finish_page, office_caps]
 
 permissions:
   contents: read
@@ -21,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: [a600, freezer, d15, rcp, grid, rcp_ink, d15_ink, finish_page, office_caps]
+        target: ${{ fromJSON(inputs.target == 'finish_page' && '["finish_page"]' || inputs.target == 'office_caps' && '["office_caps"]' || '["a600","freezer","d15","rcp","grid","rcp_ink","d15_ink","finish_page","office_caps"]') }}
 
     steps:
       - name: Checkout the trusted workflow context
