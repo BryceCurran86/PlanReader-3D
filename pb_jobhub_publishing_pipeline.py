@@ -331,15 +331,16 @@ def execute_jobhub_publishing(
         )
 
     # Calculate aggregates
-    total_qty_m2 = 0.0
-    interior_m2 = 0.0
-    exterior_m2 = 0.0
+    # A customer summary must retain the accepted measured area, not a
+    # separately rounded approximation of the SHA-sealed JobHub line values.
+    # fsum also makes the two independent buckets stable under line ordering.
+    interior_area_lines: List[float] = []
+    exterior_area_lines: List[float] = []
     total_cost = 0.0
 
     for q in package.quantities:
         total_cost += q.total_price
         if q.unit in ("m²", "m2", "sqm"):
-            total_qty_m2 += q.quantity
             sec_lower = q.section.lower()
             # External WALLS must not be consumed by the generic "wall"
             # interior fallback. Contradictory explicit interior/exterior
@@ -355,13 +356,16 @@ def execute_jobhub_publishing(
                 )
             )
             if explicit_exterior and not explicit_interior:
-                exterior_m2 += q.quantity
+                exterior_area_lines.append(q.quantity)
             elif explicit_interior and not explicit_exterior:
-                interior_m2 += q.quantity
+                interior_area_lines.append(q.quantity)
             elif not explicit_exterior and not explicit_interior and "wall" in sec_lower:
                 # Preserve the historical generic wall bucket only where no
                 # conflicting exterior or interior marker was provided.
-                interior_m2 += q.quantity
+                interior_area_lines.append(q.quantity)
+
+    interior_m2 = math.fsum(interior_area_lines)
+    exterior_m2 = math.fsum(exterior_area_lines)
 
     takeoff_no = f"PR-{package.project_identity.job_no}-{'PUB' if package.mode == PublishingMode.COMMERCIAL.value else 'DFT'}-{package.payload_hash[:8]}"
     status_label = "Published" if package.mode == PublishingMode.COMMERCIAL.value else "Draft"
@@ -426,8 +430,8 @@ def execute_jobhub_publishing(
                 target_job_id,
                 takeoff_no,
                 status_label,
-                round(interior_m2, 2),
-                round(exterior_m2, 2),
+                interior_m2,
+                exterior_m2,
                 0.0,
                 0.0,
                 user_name,
@@ -476,8 +480,8 @@ def execute_jobhub_publishing(
         "job_id": target_job_id,
         "total_lines": len(package.quantities),
         "total_cost": round(total_cost, 2),
-        "interior_m2": round(interior_m2, 2),
-        "exterior_m2": round(exterior_m2, 2),
+        "interior_m2": interior_m2,
+        "exterior_m2": exterior_m2,
         "preflight_fingerprint": package.preflight_fingerprint,
         "payload_hash": package.payload_hash,
     }
