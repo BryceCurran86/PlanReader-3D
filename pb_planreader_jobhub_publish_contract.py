@@ -335,8 +335,17 @@ def run_jobhub_publish_preflight(
         
         # Check basic authority metadata
         if isinstance(raw_row, dict):
-            if "authority_status" not in raw_row or "source_type" not in raw_row:
+            if (
+                not str(raw_row.get("authority_status") or "").strip()
+                or not str(raw_row.get("source_type") or "").strip()
+            ):
                 blocking_reasons.append(f"Row {qid}: missing measurement authority metadata")
+                blocked_count += 1
+                continue
+            if is_commercial and type(raw_row.get("is_publishable")) is not bool:
+                blocking_reasons.append(
+                    f"Row {qid}: commercial publishability must be an explicit boolean"
+                )
                 blocked_count += 1
                 continue
             row_obj = PlanReaderJobHubQuantityRow.from_dict(raw_row)
@@ -370,6 +379,12 @@ def run_jobhub_publish_preflight(
         # inconsistent flag. Re-check the typed status and source at the final
         # commercial consumer rather than promoting a forged flag to JobHub.
         if is_commercial:
+            if type(row_obj.is_publishable) is not bool:
+                blocking_reasons.append(
+                    f"Row {qid}: commercial publishability must be an explicit boolean"
+                )
+                blocked_count += 1
+                continue
             if row_obj.blocking_reasons:
                 blocking_reasons.append(
                     f"Row {qid}: unresolved source authority blockers"
