@@ -8,6 +8,7 @@ replay contract; this test never reads an original PDF.
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 WORKFLOW = Path(".github/workflows/test-gpt2-source-room-handoff-integrity.yml")
@@ -55,6 +56,14 @@ def test_public_room_handoff_never_runs_private_original_source_or_uploads():
     assert text.count("    runs-on: ubuntu-latest") == 1
     assert "  focused:" in text
     assert "source-free" in text.lower()
+    # Parse the actual workflow, not just substrings: a swallowed YAML step
+    # must never silently turn a required safety check into shell text.
+    parsed = yaml.safe_load(text)
+    assert set(parsed["jobs"]) == {"focused"}
+    assert parsed["permissions"] == {"contents": "read"}
+    assert parsed["jobs"]["focused"]["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
+    steps = parsed["jobs"]["focused"]["steps"]
+    assert any(step.get("name") == "Explicitly label source-free PR scope" for step in steps)
 
 
 @pytest.mark.parametrize("injected", (
