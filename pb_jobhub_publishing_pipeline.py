@@ -41,6 +41,13 @@ def build_publishing_package_from_workspace(
     - ``created_by`` comes from ``acting_user`` when provided, before payload fingerprinting.
     Missing commercial attribution remains missing and is blocked by the publishing gate.
     """
+    # The caller's workspace identifier determines which original project,
+    # documents, pages and commercial quantities enter the sealed package.
+    # SQLite aliases True, 1.0 and "1" to INTEGER primary key 1. Reject
+    # those lossily-equivalent aliases BEFORE any source database read;
+    # otherwise the final SHA can bind an unproven caller workspace identity.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise ValueError("Source workspace ID must be an exact positive integer")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -193,9 +200,20 @@ def build_publishing_package_from_workspace(
         sub = str(r["substrate"] or "Plasterboard")
         tag = str(r["finish_tag"] or "")
         elem = str(r["element"] or "Element")
-        unit = str(r["unit"] or "m²")
+        # A missing source unit is an unresolved measurement, not implicit m².
+        # Preserve explicit per-trade units, and leave unknown units blank so
+        # the downstream gate can prevent a unitless JobHub line in any mode.
+        raw_unit = r["unit"]
+        unit = raw_unit.strip() if type(raw_unit) is str else ""
         qty = float(r["quantity"] or 0.0)
-        rate = float(r["rate"] or 0.0)
+        # The client owns each commercial unit rate. A missing SQL rate
+        # cannot become an invented approved zero-dollar line item; explicit
+        # numeric zero remains a valid client-owned choice.
+        if r["rate"] is None and mode == PublishingMode.COMMERCIAL:
+            raise ValueError(
+                f"Missing client commercial unit rate for takeoff row #{row_id}"
+            )
+        rate = float(r["rate"]) if r["rate"] is not None else 0.0
         # Price is a client-owned commercial input. A zero entered amount is
         # never permission to silently replace it with quantity × rate, nor
         # is a missing price approval to quote a computed line to JobHub.
@@ -318,6 +336,14 @@ def execute_jobhub_publishing(
             "JobHub publishing requires a sealed matching SHA-256 payload hash"
         )
 
+    # The sealed package creator is attribution for the source estimate;
+    # the person actually publishing can be a different delegated user.
+    # Do not let an empty or non-string delivery actor write an anonymous
+    # JobHub customer package. Check before opening any destination.
+    if type(user_name) is not str or not user_name.strip():
+        raise RuntimeError("JobHub publishing requires a named delivery actor")
+    publishing_actor = user_name.strip()
+
     target_job_id = package.project_identity.target_jobhub_job_id
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
@@ -331,15 +357,16 @@ def execute_jobhub_publishing(
         )
 
     # Calculate aggregates
-    total_qty_m2 = 0.0
-    interior_m2 = 0.0
-    exterior_m2 = 0.0
+    # A customer summary must retain the accepted measured area, not a
+    # separately rounded approximation of the SHA-sealed JobHub line values.
+    # fsum also makes the two independent buckets stable under line ordering.
+    interior_area_lines: List[float] = []
+    exterior_area_lines: List[float] = []
     total_cost = 0.0
 
     for q in package.quantities:
         total_cost += q.total_price
         if q.unit in ("m²", "m2", "sqm"):
-            total_qty_m2 += q.quantity
             sec_lower = q.section.lower()
             # External WALLS must not be consumed by the generic "wall"
             # interior fallback. Contradictory explicit interior/exterior
@@ -355,19 +382,43 @@ def execute_jobhub_publishing(
                 )
             )
             if explicit_exterior and not explicit_interior:
-                exterior_m2 += q.quantity
+                exterior_area_lines.append(q.quantity)
             elif explicit_interior and not explicit_exterior:
-                interior_m2 += q.quantity
+                interior_area_lines.append(q.quantity)
             elif not explicit_exterior and not explicit_interior and "wall" in sec_lower:
                 # Preserve the historical generic wall bucket only where no
                 # conflicting exterior or interior marker was provided.
-                interior_m2 += q.quantity
+                interior_area_lines.append(q.quantity)
+
+    interior_m2 = math.fsum(interior_area_lines)
+    exterior_m2 = math.fsum(exterior_area_lines)
 
     takeoff_no = f"PR-{package.project_identity.job_no}-{'PUB' if package.mode == PublishingMode.COMMERCIAL.value else 'DFT'}-{package.payload_hash[:8]}"
     status_label = "Published" if package.mode == PublishingMode.COMMERCIAL.value else "Draft"
+    # Preserve BOTH roles in the destination. The source creator was already
+    # SHA-sealed; the delivery actor is the caller authenticated at write time.
+    # Missing draft provenance remains absent rather than invented.
+    creator_note = (
+        f" | Package creator: {package.created_by}"
+        if isinstance(package.created_by, str) and package.created_by.strip()
+        else ""
+    )
+    # The gate deliberately permits customer-visible informational source
+    # warnings and draft provisional/critical notices, but the previous final
+    # JobHub writer silently discarded them. Preserve their full text in a
+    # canonical JSON note so the recipient receives exactly what passed the
+    # original gate. Stable sorting preserves duplicate warnings and makes
+    # equivalent orderings match the full-evidence canonical payload seal.
+    customer_warnings = sorted(gate_result.warnings)
+    warning_note = (
+        " | Gate warnings: "
+        + json.dumps(customer_warnings, ensure_ascii=False, separators=(",", ":"))
+        if customer_warnings else ""
+    )
     notes_str = (
         f"Mode: {package.mode.upper()} | Fingerprint: {package.preflight_fingerprint} | "
-        f"Payload: {package.payload_hash} | Published by {user_name}"
+        f"Payload: {package.payload_hash} | Published by {publishing_actor}{creator_note}"
+        f"{warning_note}"
     )
 
     # A previous bridge.query() checked job_no on a separate connection,
@@ -426,11 +477,11 @@ def execute_jobhub_publishing(
                 target_job_id,
                 takeoff_no,
                 status_label,
-                round(interior_m2, 2),
-                round(exterior_m2, 2),
+                interior_m2,
+                exterior_m2,
                 0.0,
                 0.0,
-                user_name,
+                publishing_actor,
                 notes_str,
             ),
         )
@@ -476,8 +527,9 @@ def execute_jobhub_publishing(
         "job_id": target_job_id,
         "total_lines": len(package.quantities),
         "total_cost": round(total_cost, 2),
-        "interior_m2": round(interior_m2, 2),
-        "exterior_m2": round(exterior_m2, 2),
+        "interior_m2": interior_m2,
+        "exterior_m2": exterior_m2,
         "preflight_fingerprint": package.preflight_fingerprint,
         "payload_hash": package.payload_hash,
+        "warnings": customer_warnings,
     }
