@@ -225,22 +225,16 @@ def project_resolved_slab_entity(
             reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
         )
 
-    source_page_raw = provenance.get("annotation_source_page", boundary.source_page)
-    # An annotation on an unrelated source page cannot silently own a metric
-    # boundary merely because its text and geometry happened to bind. Page
-    # numbers must be actual integral source-page receipts, not bool or float.
+    # The real slab annotation producer always issues an exact integer page
+    # receipt. Never replace a missing receipt with the boundary page or
+    # normalize "01", "+1", padded strings, floats or bools to that page:
+    # those aliases have not been authenticated by the original producer.
+    source_page = provenance.get("annotation_source_page")
     if (
         type(boundary.source_page) is not int
         or boundary.source_page < 0
-        or type(source_page_raw) not in (str, int)
+        or type(source_page) is not int
     ):
-        return LiveCanonicalSlabProjection(
-            object=None,
-            reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
-        )
-    try:
-        source_page = int(source_page_raw)
-    except (TypeError, ValueError, OverflowError):
         return LiveCanonicalSlabProjection(
             object=None,
             reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
