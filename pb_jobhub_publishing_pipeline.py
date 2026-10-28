@@ -274,6 +274,22 @@ def execute_jobhub_publishing(
         reasons = "; ".join(gate_result.blocking_reasons)
         raise RuntimeError(f"Publishing blocked by gate QA checks: {reasons}")
 
+    # validate_publishing_gate deliberately tolerates an absent hash for
+    # source-neutral diagnostics. A real JobHub write cannot: without the
+    # complete original payload seal, its duplicate lookup degenerates to
+    # SQL LIKE '%' and the customer package loses immutable identity.
+    # Recheck the exact full evidence fingerprint at the final write boundary,
+    # before opening SQLite or PostgreSQL or touching destination rows.
+    if (
+        type(package.payload_hash) is not str
+        or len(package.payload_hash) != 64
+        or any(ch not in "0123456789abcdef" for ch in package.payload_hash)
+        or package.payload_hash != gate_result.payload_hash
+    ):
+        raise RuntimeError(
+            "JobHub publishing requires a sealed matching SHA-256 payload hash"
+        )
+
     target_job_id = package.project_identity.target_jobhub_job_id
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
