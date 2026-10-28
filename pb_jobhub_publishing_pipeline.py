@@ -293,6 +293,14 @@ def execute_jobhub_publishing(
     target_job_id = package.project_identity.target_jobhub_job_id
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
+    # ProjectIdentityPayload's Optional[int] hint is not runtime authority.
+    # Boolean True, float 1.0 and string "1" can be coerced by SQLite into
+    # real job row 1 (even when its job_no matches the intended project).
+    # Refuse aliases before opening or locking any JobHub destination.
+    if type(target_job_id) is not int or target_job_id <= 0:
+        raise RuntimeError(
+            "Target JobHub job ID must be an exact positive integer"
+        )
 
     # Calculate aggregates
     total_qty_m2 = 0.0
