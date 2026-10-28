@@ -46,6 +46,9 @@ def _package(conn, mode=PublishingMode.COMMERCIAL):
 _APPROVAL_REQUIRED = (
     ("user_approved", "user_approved"),
     ("user_approved", "documented_dimension"),
+    ("firm", "user_corrected"),
+    ("firm", "user_approved"),
+    ("user_approved", "user_corrected"),
     ("firm", "ai_detected"),
     ("firm", "model_derived"),
     ("firm", "pdf_scaled"),
