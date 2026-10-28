@@ -1144,11 +1144,51 @@ def _collinear_painted_coverage(span, inked, *, edge_endpoints=None) -> bool:
                     - _transverse_at(endpoints, start, end, position)) <= _COLLINEAR_IDENTITY_TOL
                 for position in (overlap_lo, overlap_hi)
             ):
-                matching.append((start, end))
-    return any(
-        start <= lo and hi <= end
-        for start, end in _merge_spans(matching)
-    )
+                # Clip to the candidate edge: a point-only contact does not paint
+                # a positive-length interval, and no extrapolated stroke can help.
+                if overlap_lo < overlap_hi:
+                    matching.append((
+                        overlap_lo, overlap_hi,
+                        (_transverse_at(endpoints, start, end, overlap_lo),
+                         _transverse_at(endpoints, start, end, overlap_hi)),
+                    ))
+    if any(start <= lo and hi <= end for start, end, _ends in matching):
+        return True
+    # A union of axial spans alone is insufficient. Two touching strokes can
+    # EACH be within 1e-6 pt of the candidate yet be 1.8e-6 pt apart from
+    # EACH OTHER at the handoff. Only a connected chain of actual source ink
+    # may establish a whole frame edge. Bound pathological same-line fanout.
+    if len(matching) > 1024:
+        return False
+    reached = {i for i, (start, end, _ends) in enumerate(matching)
+               if start <= lo <= end}
+    pending = list(reached)
+    while pending:
+        i = pending.pop()
+        start, end, ends = matching[i]
+        if end >= hi:
+            return True
+        for j, (other_start, other_end, other_ends) in enumerate(matching):
+            if j in reached:
+                continue
+            joint_lo, joint_hi = max(start, other_start), min(end, other_end)
+            if joint_lo > joint_hi:
+                continue
+            delta_lo = (
+                _transverse_at(ends, start, end, joint_lo)
+                - _transverse_at(other_ends, other_start, other_end, joint_lo)
+            )
+            delta_hi = (
+                _transverse_at(ends, start, end, joint_hi)
+                - _transverse_at(other_ends, other_start, other_end, joint_hi)
+            )
+            # Linear strokes may meet at an interior crossing, not only at
+            # interval endpoints; otherwise require actual coordinate identity.
+            if (min(abs(delta_lo), abs(delta_hi)) <= _COLLINEAR_IDENTITY_TOL
+                    or delta_lo * delta_hi < 0):
+                reached.add(j)
+                pending.append(j)
+    return False
 
 
 class OpeningElevationFrameAreaProducer:

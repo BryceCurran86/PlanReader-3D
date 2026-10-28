@@ -354,3 +354,38 @@ def test_exact_touching_axial_split_remains_source_painted_with_order_and_transl
                    (axis, 100.0, shift + 5.0, shift + 10.0))
         assert module._collinear_painted_coverage(edge, _indexed_ink(*strokes))
         assert module._collinear_painted_coverage(edge, _indexed_ink(*reversed(strokes)))
+
+
+def test_two_touching_strokes_may_each_match_the_frame_but_not_each_other():
+    # Old axial union incorrectly promoted a frame despite a real transverse
+    # 1.8e-6 pt break between the two source-painted strokes at x=5.
+    edge = ("h", 0.0, 0.0, 10.0)
+    discontinuous = (
+        ("h", 0.9e-6, 0.0, 5.0),
+        ("h", -0.9e-6, 5.0, 10.0),
+    )
+    for strokes in (discontinuous, tuple(reversed(discontinuous))):
+        assert not module._collinear_painted_coverage(edge, _indexed_ink(*strokes))
+
+
+@pytest.mark.parametrize("axis", ["h", "v"])
+def test_an_actual_collinear_bridge_restores_continuous_painted_support(axis):
+    edge = (axis, 0.0, 0.0, 10.0)
+    strokes = (
+        (axis, 0.9e-6, 0.0, 5.0),
+        (axis, -0.9e-6, 5.0, 10.0),
+        (axis, 0.0, 4.0, 6.0),
+    )
+    assert module._collinear_painted_coverage(edge, _indexed_ink(*strokes))
+    assert module._collinear_painted_coverage(edge, _indexed_ink(*reversed(strokes)))
+
+
+def test_overlapping_source_lines_can_connect_at_an_actual_interior_crossing():
+    edge = ("h", 0.0, 0.0, 10.0)
+    strokes = (
+        ("h", 0.0, 0.0, 6.0, 0.0, 0.8e-6),
+        ("h", 0.0, 4.0, 10.0, -0.8e-6, 0.0),
+    )
+    # They intersect within [4,6] and each matches the target throughout
+    # its own interval; the chain has real source-coordinate continuity.
+    assert module._collinear_painted_coverage(edge, _indexed_ink(*strokes))
