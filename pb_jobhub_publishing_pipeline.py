@@ -41,6 +41,13 @@ def build_publishing_package_from_workspace(
     - ``created_by`` comes from ``acting_user`` when provided, before payload fingerprinting.
     Missing commercial attribution remains missing and is blocked by the publishing gate.
     """
+    # The caller's workspace identifier determines which original project,
+    # documents, pages and commercial quantities enter the sealed package.
+    # SQLite aliases True, 1.0 and "1" to INTEGER primary key 1. Reject
+    # those lossily-equivalent aliases BEFORE any source database read;
+    # otherwise the final SHA can bind an unproven caller workspace identity.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise ValueError("Source workspace ID must be an exact positive integer")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
