@@ -180,8 +180,17 @@ def test_competing_original_rcp_grid_lines_not_issued_to_two_zones():
 
 # GPT2 source-native cyclic wall/finish ring correspondence: the PDF graph
 # producer owns both ordered cycles; a common vertex *set* is not wall identity.
-_RING_A=((20.,20.),(100.,20.),(100.,100.),(20.,100.),(40.,40.),(80.,60.))
-_RING_RIVAL=((20.,20.),(100.,20.),(100.,100.),(20.,100.),(80.,60.),(40.,40.))
+# Both are independently drawn SIMPLE, ORTHOGONAL native-PDF rings.
+# The same ten source vertices can connect into different cyclic perimeters.
+# Do not relax the actual graph producer's orthogonal-stroke contract.
+_RING_A=(
+    (80.,20.),(20.,20.),(20.,40.),(20.,60.),(20.,80.),
+    (80.,80.),(80.,60.),(40.,60.),(40.,40.),(80.,40.),
+)
+_RING_RIVAL=(
+    (80.,20.),(20.,20.),(20.,40.),(40.,40.),(40.,60.),
+    (20.,60.),(20.,80.),(80.,80.),(80.,60.),(80.,40.),
+)
 
 
 def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0)):
