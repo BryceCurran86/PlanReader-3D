@@ -100,7 +100,10 @@ def build_publishing_package_from_workspace(
         (workspace_id,),
     )
     doc_rows = cur.fetchall()
-    file_names = [str(row["file_name"]) for row in doc_rows if row["file_name"]]
+    # SQLite ingestion row order is not drawing-revision authority. Preserve the
+    # full filename multiset but seal it in canonical order, consistent with
+    # the already-sorted (filename, source SHA-256) revision manifest.
+    file_names = sorted(str(row["file_name"]) for row in doc_rows if row["file_name"])
     # The publisher must never substitute filename equality for PDF byte
     # identity. SHA values originate from source ingestion; separate original
     # byte replay is still required for full benchmark/issuer certification.
@@ -123,7 +126,8 @@ def build_publishing_package_from_workspace(
     )
     sheet_count = cur.fetchone()[0] or 0
 
-    drawing_issue = str(ws_row["drawing_issue"] or "BA")
+    # A missing workspace issue is unknown, not a default BA revision.
+    drawing_issue = str(ws_row["drawing_issue"] or "").strip()
     rev_hash = (
         hashlib.sha256(json.dumps(
             sorted(revision_documents),

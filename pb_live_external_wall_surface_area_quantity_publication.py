@@ -193,7 +193,12 @@ def publish_live_per_wall_surface_area_quantities(
         elif scope != source_scope:
             return ()
         gross_m2, net_m2 = _positive(wall.gross_area_m2), _positive(wall.net_area_m2)
-        if gross_m2 is None or net_m2 is None or net_m2 > gross_m2 + 0.000001:
+        length_m, height_m = _positive(wall.length_m), _positive(wall.height_m)
+        if (
+            gross_m2 is None or net_m2 is None
+            or length_m is None or height_m is None
+            or net_m2 > gross_m2 + 0.000001
+        ):
             return ()
         # The original producer computes net = gross - union(ALL physical
         # opening voids). The aggregate ID binds the receipt roster and total
@@ -211,6 +216,12 @@ def publish_live_per_wall_surface_area_quantities(
                 for opening in wall.opening_voids
             ):
                 return ()
+            # The trusted gross-wall producer owns a wall-local rectangle
+            # anchored at (0, 0), not an arbitrary same-area face. Replaying
+            # only gross-minus-voids would accept a coordinated displacement
+            # of gross, net and void geometry under unchanged source receipts.
+            expected_gross = box(0.0, 0.0, length_m, height_m)
+            gross_domain_matches = gross_polygon.equals(expected_gross)
             replayed_net = subtract_void_union_from_wall_polygon(
                 gross_polygon,
                 tuple(
@@ -227,6 +238,7 @@ def publish_live_per_wall_surface_area_quantities(
             return ()
         if (
             not gross_polygon.is_valid or gross_polygon.is_empty
+            or not gross_domain_matches
             or not math.isfinite(gross_polygon_area)
             or not math.isclose(
                 gross_polygon_area, gross_m2, rel_tol=0.0, abs_tol=0.000002

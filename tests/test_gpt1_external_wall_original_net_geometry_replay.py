@@ -40,6 +40,8 @@ def _same_area_translated_wkb(hex_wkb: str) -> str:
     "void_same_area_shifted",
     "void_nan_coordinate",
     "gross_wkb_invalid",
+    "gross_net_and_void_frame_displaced",
+    "gross_length_metric_mismatch",
 ))
 def test_original_net_wall_geometry_cannot_be_reissued_from_changed_face(
     tamper,
@@ -72,6 +74,27 @@ def test_original_net_wall_geometry_cannot_be_reissued_from_changed_face(
         changed = _mutated_wall(
             original, opening_voids=(replace(void, u0=float("nan")),)
         )
+    elif tamper == "gross_net_and_void_frame_displaced":
+        # Gross-minus-void replay alone accepts this coordinated shift:
+        # all three geometries still agree, but the original producer fixes
+        # the wall-local gross domain to box(0,0,length_m,height_m).
+        void = wall.opening_voids[0]
+        changed = _mutated_wall(
+            original,
+            gross_polygon_wkb_hex=_same_area_translated_wkb(
+                wall.gross_polygon_wkb_hex
+            ),
+            net_polygon_wkb_hex=_same_area_translated_wkb(
+                wall.net_polygon_wkb_hex
+            ),
+            opening_voids=(replace(
+                void,
+                u0=void.u0 + 100.0, u1=void.u1 + 100.0,
+                z0=void.z0 + 100.0, z1=void.z1 + 100.0,
+            ),),
+        )
+    elif tamper == "gross_length_metric_mismatch":
+        changed = _mutated_wall(original, length_m=wall.length_m + 1.0)
     else:
         changed = _mutated_wall(
             original, gross_polygon_wkb_hex="01030000"
