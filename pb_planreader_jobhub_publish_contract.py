@@ -315,6 +315,16 @@ def run_jobhub_publish_preflight(
     elif project_identity.get("identity_confirmed") is False:
         reason = project_identity.get("mismatch_reason") or "Project identity unconfirmed or mismatched"
         blocking_reasons.append(f"Project identity mismatch rejected: {reason}")
+    elif is_commercial and project_identity.get("identity_confirmed") is not True:
+        # Unknown, missing or truthy non-boolean identity is not a source
+        # confirmation. Only an explicit owner/source match can authorize a
+        # commercial JobHub payload; a project_id string is not that proof.
+        blocking_reasons.append(
+            "Commercial publishing requires explicitly confirmed project identity"
+        )
+    elif project_identity.get("identity_confirmed") is not True:
+        # Preserve provisional draft work without inventing source ownership.
+        warnings.append("Draft project identity not explicitly confirmed")
 
     # 2. Drawing Revision Validation
     curr_rev_hash = str(drawing_revision.get("revision_hash") or "")
