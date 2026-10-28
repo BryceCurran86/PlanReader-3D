@@ -416,6 +416,22 @@ class GPT2OriginalSourceGeometryBridge:
         finish,_=self._source_revision(
             revision_id,page_1_based=finish_page_1_based)
         expected_root=floor.revision.source_sha256
+        if floor_page_1_based==finish_page_1_based:
+            raise ValueError("original_source_doorway_distinct_pages_required")
+        # The original jamb-bound ring producer emits a typed native page.
+        # A matching SHA alone cannot authorize a ring from a DIFFERENT
+        # floor/finish sheet in this sealed source-visibility compilation.
+        if any(
+            type(row) is not dict
+            or row.get("status")!="source_jamb_bound_open_door_perimeter_candidate_only"
+            or type(row.get("original_page_1_based")) is not int
+            or row["original_page_1_based"]!=page
+            for row,page in (
+                (original_floor_doorway_ring,floor_page_1_based),
+                (original_finish_doorway_ring,finish_page_1_based),
+            )
+        ):
+            raise ValueError("original_source_doorway_compiler_page_receipt_conflict")
         if (finish.revision.source_sha256!=expected_root or
                 any(row.get("original_source_sha256")!=expected_root
                     for row in (original_floor_doorway_ring,
