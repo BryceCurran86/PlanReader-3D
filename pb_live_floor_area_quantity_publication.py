@@ -48,6 +48,17 @@ def _valid_original_source_sha(value: object) -> bool:
         type(value) is str
         and len(value) == 64
         and all(char in "0123456789abcdefABCDEF" for char in value)
+        and any(char != "0" for char in value)
+    )
+
+
+def _exact_source_token(value: object, original: object) -> bool:
+    """Source-owner identities compare byte-for-byte, never through str()/strip()."""
+    return (
+        type(value) is str and type(original) is str
+        and bool(value) and value == value.strip()
+        and bool(original) and original == original.strip()
+        and value == original
     )
 
 
@@ -290,26 +301,31 @@ def publish_live_floor_area_quantities(
         # identity in metadata. When present it cannot be replayed onto a
         # different canonical-floor document.
         source_document_id = metadata.get("document_id")
-        if source_document_id is not None and _clean(source_document_id) != floor.document_id:
+        if source_document_id is not None and not _exact_source_token(
+            source_document_id, floor.document_id
+        ):
             continue
-        if _clean(metadata.get("source_sha256")).lower() != floor.source_sha256.lower():
+        raw_source_sha = metadata.get("source_sha256")
+        if (
+            not _valid_original_source_sha(raw_source_sha)
+            or raw_source_sha.lower() != floor.source_sha256.lower()
+        ):
             continue
-        if _clean(metadata.get("revision_id")) != floor.revision_id:
+        if not _exact_source_token(metadata.get("revision_id"), floor.revision_id):
             continue
         # Figured same/cross-view room-area claims carry the identity of the
         # source ROOM snapshot, which must agree with the canonical floor's
         # source room. Dimension-support snapshots can legitimately differ.
         # Do not use a measurement from another room-face snapshot even if
         # its revision, quantity value and viewport happen to match.
-        room_snapshot_id = _clean(metadata.get("room_snapshot_id"))
-        if room_snapshot_id and room_snapshot_id != floor.snapshot_id:
+        room_snapshot_id = metadata.get("room_snapshot_id")
+        if room_snapshot_id is not None and not _exact_source_token(
+            room_snapshot_id, floor.snapshot_id
+        ):
             continue
-        source_room_face_id = _clean(
-            metadata.get("source_room_face_record_id")
-        )
-        if (
-            source_room_face_id
-            and source_room_face_id != floor.source_room_face_record_id
+        source_room_face_id = metadata.get("source_room_face_record_id")
+        if source_room_face_id is not None and not _exact_source_token(
+            source_room_face_id, floor.source_room_face_record_id
         ):
             continue
         # The room-area producer's original page is a physical source ID,
@@ -319,10 +335,10 @@ def publish_live_floor_area_quantities(
         area_page_id = metadata.get("page_no")
         if not _exact_original_page_match(area_page_id, floor.page_id):
             continue
-        q_viewport = _clean(metadata.get("viewport_id"))
-        if not q_viewport:
+        q_viewport = metadata.get("viewport_id")
+        if type(q_viewport) is not str or not q_viewport or q_viewport != q_viewport.strip():
             continue
-        if floor.viewport_id and _clean(floor.viewport_id) != q_viewport:
+        if floor.viewport_id and not _exact_source_token(q_viewport, floor.viewport_id):
             continue
         # Empty receipts must not vacuously pass the source lineage subset
         # test and become commercially publishable metric quantities.
@@ -457,8 +473,8 @@ def publish_live_canonical_room_area_quantities(
             or source_face_owner_counts.get(_clean(room.source_room_face_record_id), 0) != 1
         ):
             continue
-        if _clean(room.source_room_face_record_id) != _clean(
-            metadata.get("source_room_face_record_id")
+        if not _exact_source_token(
+            metadata.get("source_room_face_record_id"), room.source_room_face_record_id
         ):
             continue
         source_floor_sha = floor_quantity.metadata.get("source_sha256")
@@ -475,11 +491,13 @@ def publish_live_canonical_room_area_quantities(
         # Room source identity is independent of a cross-view dimension
         # snapshot. An explicitly declared physical room snapshot must not
         # reissue its area onto another canonical room snapshot.
-        source_room_snapshot = _clean(metadata.get("room_snapshot_id"))
-        if source_room_snapshot and source_room_snapshot != room.snapshot_id:
+        source_room_snapshot = metadata.get("room_snapshot_id")
+        if source_room_snapshot is not None and not _exact_source_token(
+            source_room_snapshot, room.snapshot_id
+        ):
             continue
-        source_viewport = _clean(metadata.get("viewport_id"))
-        if room.viewport_id and source_viewport and _clean(room.viewport_id) != source_viewport:
+        source_viewport = metadata.get("viewport_id")
+        if not _exact_source_token(source_viewport, room.viewport_id):
             continue
         raw_page_id = floor_quantity.metadata.get("page_no")
         if not _exact_original_page_match(raw_page_id, room.page_id):
