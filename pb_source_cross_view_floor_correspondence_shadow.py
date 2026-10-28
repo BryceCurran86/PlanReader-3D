@@ -394,6 +394,11 @@ def classify_floor(
         reasons.append(OVERLAPPING_MEASURED_BOXES)
     # A missing, malformed, overflowing or non-finite mark margin is not a
     # positive source containment receipt. Never let NaN bypass comparison.
+    try:
+        minimum = float(min_margin_pt) if type(min_margin_pt) in (int, float) else math.nan
+    except (ValueError, OverflowError):
+        minimum = math.nan
+
     def valid_margin(mark: Mapping[str, Any]) -> bool:
         raw = mark.get("margin_pt")
         if type(raw) not in (int, float):
@@ -402,12 +407,11 @@ def classify_floor(
             margin = float(raw)
         except (ValueError, OverflowError):
             return False
-        return math.isfinite(margin) and margin >= min_margin_pt
+        return math.isfinite(margin) and margin >= minimum
 
     if (
-        type(min_margin_pt) not in (int, float)
-        or not math.isfinite(float(min_margin_pt))
-        or min_margin_pt < 0
+        not math.isfinite(minimum)
+        or minimum < 0
         or any(not valid_margin(mark) for mark in marks_inside)
     ):
         reasons.append(MARK_TOO_CLOSE_TO_BOX_SIDE)
