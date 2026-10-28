@@ -15,3 +15,12 @@ At the real per-wall issuer, load original gross and net WKB, reconstruct every 
 
 ## Authority and untouched files
 No original PDFs/tokens, frozen V2 truth/evaluator, GPT2 Maryborough FT2/FT3/RCP, GPT MAX Wxx hosts, GPT3 signed scoring, existing nine Lot16 customer bodies, or raster 20,000 cap / 2.5 pt snap are modified. No benchmark expected quantity or score informs this rule. Synthetic fixtures cannot prove an original-source FIRM quantity; trusted SHA-verified owner-original replay and exact-head dual-Python CI remain merge gates. This is an integrity-only milestone until merged with complete proof.
+
+
+## 2026-10-29 continuation — source-bound physical void receipt replay
+
+**OBSERVED:** `PhysicalOpeningVoidProducer.publish` in `pb_physical_opening_void_authority.py` computes `physical_opening_void_v2` `record_id` (32 digest characters) over exact original source scope, viewport, opening identity, host binding/wall, universe, width, height, wall-local frame, unit mapping, vertical placement, rectangular profile, metric unit, rounded wall-local bounds and v2 schema. `compose_live_external_physical_net_wall_publication` retains that record ID and some but not all of its hash inputs. The aggregate quantity ID binds the physical void ID roster; the downstream per-wall issuer did not replay the per-void ID's complete source receipt relationships.
+
+**INFERRED:** A canonical void with unchanged physical void ID, geometry, WKB and aggregate receipt roster could substitute `width_record_id`, `opening_universe_record_id` or another source receipt without changing any existing issuer check. This is a lineage integrity gap, not missing geometric or material authority.
+
+**IMPLEMENTED proposal pending exact-head tests:** Retain only the missing original record fields (viewport ID, host-wall ID and unit-mapping receipt) on the canonical void, then independently reconstruct the exact existing v2 producer record hash at the real per-wall issuer. Require the hash to equal the original aggregate-bound physical void ID and require the source universe ID to belong to the original complete census. Fail closed on absent, malformed or mismatched receipts. Existing per-wall quantity IDs, aggregate seal, geometry, commercial finish veto and immutable frozen evaluator are not changed. Adversarial publisher→sealed-consumer tests mutate every original receipt and source scope, and preserve the source-shaped positive. Owner-original SHA replay and signed/customer whole-body parity are still required; no new FIRM or official score claimed.

@@ -14,6 +14,7 @@ from shapely import wkb
 from shapely.geometry import box
 
 from pb_net_wall_boolean_union_authority import subtract_void_union_from_wall_polygon
+from pb_physical_opening_void_authority import PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
 from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
@@ -44,6 +45,74 @@ def _positive(value: object) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) and number > 0.0 else None
+
+
+def _original_void_receipt_matches(wall: LiveCanonicalWallObject, opening: object) -> bool:
+    """Replay the ORIGINAL physical-void producer's source-bound record ID.
+
+    The aggregate seals physical_void_record_id, but not its canonical copy's
+    constituent host/universe/dimension/placement receipts. Recompute the
+    producer's existing v2 contract using retained original record fields,
+    rather than accepting arbitrary nonempty IDs or a mutable canonical seal.
+    No new authority or ID vocabulary is introduced here.
+    """
+    try:
+        if (
+            type(opening.host_wall_id) is not str or not opening.host_wall_id
+            or type(opening.unit_mapping_record_id) is not str
+            or not opening.unit_mapping_record_id
+            or opening.viewport_id is not None
+            and (type(opening.viewport_id) is not str or not opening.viewport_id)
+            or opening.opening_universe_record_id is None
+            or any(
+                type(value) is not str or not value or value != value.strip()
+                for value in (
+                    opening.opening_identity_id,
+                    opening.physical_void_record_id,
+                    opening.host_binding_record_id,
+                    opening.opening_universe_record_id,
+                    opening.width_record_id,
+                    opening.height_record_id,
+                    opening.vertical_placement_record_id,
+                    opening.wall_local_frame_id,
+                )
+            )
+            or any(
+                type(value) not in (int, float) or not math.isfinite(float(value))
+                for value in (opening.u0, opening.u1, opening.z0, opening.z1)
+            )
+        ):
+            return False
+        payload = {
+            "document_id": wall.document_id,
+            "revision_id": wall.revision_id,
+            "source_sha256": wall.source_sha256,
+            "snapshot_id": wall.snapshot_id,
+            "page_id": wall.page_id,
+            "viewport_id": opening.viewport_id,
+            "decision_scope_id": wall.decision_scope_id,
+            "opening_identity_id": opening.opening_identity_id,
+            "host_binding_record_id": opening.host_binding_record_id,
+            "host_wall_id": opening.host_wall_id,
+            "opening_universe_record_id": opening.opening_universe_record_id,
+            "width_record_id": opening.width_record_id,
+            "height_record_id": opening.height_record_id,
+            "wall_local_frame_id": opening.wall_local_frame_id,
+            "unit_mapping_record_id": opening.unit_mapping_record_id,
+            "vertical_placement_record_id": opening.vertical_placement_record_id,
+            "profile_kind": opening.profile_kind,
+            "coordinate_unit": opening.coordinate_unit,
+            "u0": round(opening.u0, 12),
+            "u1": round(opening.u1, 12),
+            "z0": round(opening.z0, 12),
+            "z1": round(opening.z1, 12),
+            "schema_version": PHYSICAL_OPENING_VOID_SCHEMA_VERSION,
+        }
+        return opening.physical_void_record_id == stable_contract_id(
+            "physical_opening_void_v2", payload, digest_chars=32,
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def publish_live_per_wall_surface_area_quantities(
@@ -189,6 +258,9 @@ def publish_live_per_wall_surface_area_quantities(
                 opening.wall_local_frame_id != wall.wall_local_frame_id
                 or opening.coordinate_unit != "metre"
                 or opening.profile_kind != "rectangular_rough_opening"
+                or opening.opening_universe_record_id
+                    not in publication.opening_universe_record_ids
+                or not _original_void_receipt_matches(wall, opening)
                 for opening in wall.opening_voids
             )
             or wall.canonical_wall_id not in ids

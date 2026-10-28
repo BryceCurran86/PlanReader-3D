@@ -222,3 +222,85 @@ def test_original_opening_identity_and_metric_frame_cannot_be_reissued(
             changed, workspace_id=7, project_id="source-wall-replay",
         )
     assert publish_live_per_wall_surface_area_quantities(original) == baseline
+
+
+@pytest.mark.parametrize("field", (
+    "host_binding_record_id",
+    "opening_universe_record_id",
+    "width_record_id",
+    "height_record_id",
+    "vertical_placement_record_id",
+    "host_wall_id",
+    "unit_mapping_record_id",
+    "viewport_id",
+))
+def test_original_void_receipt_source_substitution_fails_real_issuer_and_seal(field):
+    original = _produced()
+    wall = original.canonical_walls[0]
+    void = wall.opening_voids[0]
+    baseline = publish_live_per_wall_surface_area_quantities(original)
+    assert len(baseline) == 1
+    assert void.physical_void_record_id in original.physical_void_record_ids
+    assert void.unit_mapping_record_id
+    assert void.host_wall_id
+    foreign = "foreign-" + field
+    altered = _mutated_wall(
+        original, opening_voids=(replace(void, **{field: foreign}),),
+    )
+    # All original aggregate receipts, physical geometry, net area and WKB
+    # are unchanged. Only one original-source relationship was forged.
+    assert altered.quantity_evidence == original.quantity_evidence
+    assert altered.physical_void_record_ids == original.physical_void_record_ids
+    assert altered.canonical_walls[0].net_polygon_wkb_hex == wall.net_polygon_wkb_hex
+    assert publish_live_per_wall_surface_area_quantities(altered) == ()
+    with pytest.raises(
+        ValueError, match="no source-complete original external wall surfaces"
+    ):
+        seal_live_per_wall_surface_area_run(
+            altered, workspace_id=7, project_id="void-receipt-substitution",
+        )
+    assert publish_live_per_wall_surface_area_quantities(original) == baseline
+
+
+@pytest.mark.parametrize("field", (
+    "document_id", "revision_id", "source_sha256", "snapshot_id",
+    "page_id", "decision_scope_id",
+))
+def test_original_void_source_scope_substitution_fails_without_changing_void_receipt(field):
+    original = _produced()
+    wall = original.canonical_walls[0]
+    baseline = publish_live_per_wall_surface_area_quantities(original)
+    assert len(baseline) == 1
+    bad = ("a" * 64 if field == "source_sha256" else "foreign-" + field)
+    altered = _mutated_wall(original, **{field: bad})
+    assert altered.physical_void_record_ids == original.physical_void_record_ids
+    assert altered.quantity_evidence == original.quantity_evidence
+    assert publish_live_per_wall_surface_area_quantities(altered) == ()
+    with pytest.raises(
+        ValueError, match="no source-complete original external wall surfaces"
+    ):
+        seal_live_per_wall_surface_area_run(
+            altered, workspace_id=7, project_id="void-scope-substitution",
+        )
+    assert publish_live_per_wall_surface_area_quantities(original) == baseline
+
+
+def test_source_producer_void_record_id_replays_from_original_receipt_fields():
+    original = _produced()
+    wall = original.canonical_walls[0]
+    assert len(wall.opening_voids) == 1
+    void = wall.opening_voids[0]
+    from pb_live_external_wall_surface_area_quantity_publication import (
+        _original_void_receipt_matches,
+    )
+    assert _original_void_receipt_matches(wall, void)
+    assert publish_live_per_wall_surface_area_quantities(original)
+    sealed = seal_live_per_wall_surface_area_run(
+        original, workspace_id=7, project_id="original-void-receipt-positive",
+    )
+    assert len(sealed.quantities) == 1
+    assert sealed.quantities[0].lineage_ok
+    assert not sealed.quantities[0].abstained
+    assert publish_live_per_wall_surface_area_quantities(original)[0].metadata[
+        "commercial_finish_permission"
+    ] is False
