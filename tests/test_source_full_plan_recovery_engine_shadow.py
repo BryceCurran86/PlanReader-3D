@@ -910,3 +910,63 @@ def test_source_verified_full_plan_rejects_forged_page_identity_and_stale_source
     assert unowned.status == EvidenceResolutionStatus.ABSTAINED
     assert unowned.reason_codes == (SOURCE_LINEAGE_MISMATCH,)
     assert unowned.record is None
+
+
+def test_native_page_classification_receipt_changes_source_verified_record_identity(
+    _native_page_classification_producer,
+):
+    """Caller-only diagnostic and original-page-class source result cannot alias."""
+    producer, selector = _native_page_classification_producer
+    caller_floor = _healthy_page("1")
+    native_floor = replace(caller_floor, page_type="elevation")
+    caller_result = execute_source_full_plan_recovery_engine_shadow(
+        selector, pages=(caller_floor,),
+    )
+    verified_result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(native_floor,), source_visibility_producer=producer,
+    )
+    replay = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+        selector, pages=(native_floor,), source_visibility_producer=producer,
+    )
+    assert caller_result.record is not None
+    assert verified_result.record is not None
+    assert replay.record is not None
+    assert caller_result.record.source_page_view_class_receipts == ()
+    receipts = verified_result.record.source_page_view_class_receipts
+    assert len(receipts) == 1
+    assert receipts[0][0] == "1"
+    assert type(receipts[0][1]) is str and receipts[0][1]
+    assert verified_result.record.record_id != caller_result.record.record_id
+    assert verified_result.record.record_id == replay.record.record_id
+    assert verified_result.record.source_page_view_class_receipts == replay.record.source_page_view_class_receipts
+    assert verified_result.record.total_finish_zones_recovered == 1
+    assert verified_result.record.takeoff_eligible is False
+    assert verified_result.record.commercial_projection_allowed is False
+    assert verified_result.record.diagnostic_only is True
+
+
+def test_source_classification_receipt_is_bound_across_page_order_and_quarantine(
+    _native_page_classification_producer,
+):
+    producer, selector = _native_page_classification_producer
+    floor = replace(_healthy_page("1"), page_type="elevation")
+    elevation = replace(_healthy_page("2"), page_type="floor_plan")
+    ids = set()
+    receipt_sets = set()
+    for pages in ((floor, elevation), (elevation, floor)):
+        before = copy.deepcopy(pages)
+        result = execute_source_full_plan_recovery_engine_from_source_visibility_shadow(
+            selector, pages=pages, source_visibility_producer=producer,
+        )
+        assert result.record is not None
+        ids.add(result.record.record_id)
+        receipt_sets.add(result.record.source_page_view_class_receipts)
+        assert result.record.quarantined_pages_count == 1
+        assert result.record.total_finish_zones_recovered == 1
+        assert result.record.source_page_view_class_receipts[0][0] == "1"
+        assert len(result.record.source_page_view_class_receipts) == 1
+        assert result.record.takeoff_eligible is False
+        assert result.record.commercial_projection_allowed is False
+        assert pages == before
+    assert len(ids) == 1
+    assert len(receipt_sets) == 1
