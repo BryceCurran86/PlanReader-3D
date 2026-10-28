@@ -206,7 +206,14 @@ def build_publishing_package_from_workspace(
         raw_unit = r["unit"]
         unit = raw_unit.strip() if type(raw_unit) is str else ""
         qty = float(r["quantity"] or 0.0)
-        rate = float(r["rate"] or 0.0)
+        # The client owns each commercial unit rate. A missing SQL rate
+        # cannot become an invented approved zero-dollar line item; explicit
+        # numeric zero remains a valid client-owned choice.
+        if r["rate"] is None and mode == PublishingMode.COMMERCIAL:
+            raise ValueError(
+                f"Missing client commercial unit rate for takeoff row #{row_id}"
+            )
+        rate = float(r["rate"]) if r["rate"] is not None else 0.0
         # Price is a client-owned commercial input. A zero entered amount is
         # never permission to silently replace it with quantity × rate, nor
         # is a missing price approval to quote a computed line to JobHub.

@@ -79,8 +79,6 @@ def _invoke(monkeypatch, *, floor_page=7, finish_page=11,
 @pytest.mark.parametrize("bad",[
     _ring(8), _ring(11), _ring("7"), _ring(True),
     _ring(7,status="caller-falsified-w4"), {"original_page_1_based":7},
-    {"original_page_1_based":7,"status":
-     "source_jamb_bound_open_door_perimeter_candidate_only"},
     {"status":"source_jamb_bound_open_door_perimeter_candidate_only"},
     [],
 ])
@@ -91,6 +89,22 @@ def test_wrong_original_floor_page_or_missing_native_receipt_never_enters_issuer
     with pytest.raises(ValueError,match="original_source_doorway_compiler_page_receipt_conflict"):
         run()
     assert all(name[0]=="decoded" for name in calls)
+
+
+@pytest.mark.parametrize("bad_sha",[None, "", "0" * 64, True, 1])
+def test_matching_native_page_with_missing_or_forged_source_root_abstains_at_root_gate(
+    monkeypatch, bad_sha,
+):
+    # A valid typed page/status reaches the separate immutable SHA gate;
+    # this is not a page-receipt failure and must never call either issuer.
+    floor = _ring(7)
+    floor["original_source_sha256"] = bad_sha
+    run, calls = _invoke(monkeypatch, floor=floor)
+    with pytest.raises(
+        ValueError, match="original_source_doorway_handoff_revision_root_conflict"
+    ):
+        run()
+    assert calls == [("decoded", 7), ("decoded", 11)]
 
 
 @pytest.mark.parametrize("bad",[
@@ -126,4 +140,4 @@ def test_valid_original_page_pair_reaches_source_only_issuers_but_never_firm(mon
     assert outcome["new_firm_quantities"]==0
     assert outcome["customer_floor_finish_area_issued"] is False
     assert outcome["source_virtual_door_connectors_are_structural"] is False
-    assert outcome["source_original_sha256"]==SOURCE_SHA
+    assert outcome["original_source_sha256"]==SOURCE_SHA
