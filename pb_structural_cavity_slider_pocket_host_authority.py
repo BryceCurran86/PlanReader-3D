@@ -141,6 +141,8 @@ class StructuralCavitySliderPocketHostAuthority:
             not finite_number(scale_ratio) or scale_ratio <= 0
         ):
             raise ValueError("scale_ratio requires an explicit finite positive number")
+        if scale_ratio is not None and not math.isfinite(1.0 / scale_ratio):
+            raise ValueError("cavity slider metric arithmetic must remain finite")
 
         # Vector 1: Clear passage opening from strike jamb to pocket mouth
         dx_clear = pocket_mouth_jamb[0] - strike_jamb[0]

@@ -56,7 +56,7 @@ def test_missing_host_or_context_cannot_mint_candidate(field, bad):
 ])
 def test_finite_inputs_cannot_overflow_arithmetic(kwargs):
     with pytest.raises(ValueError, match="remain finite"):
-        evaluate(scale_ratio=0.01764, **kwargs)
+        evaluate(**({"scale_ratio": 0.01764} | kwargs))
 
 
 def test_explicit_unverified_numeric_ratio_remains_noncommercial_candidate():
