@@ -5,7 +5,6 @@ and atomic publishing to JobHub with full support for DRAFT and COMMERCIAL modes
 """
 from __future__ import annotations
 
-import datetime
 import hashlib
 import json
 import math
@@ -42,6 +41,13 @@ def build_publishing_package_from_workspace(
     - ``created_by`` comes from ``acting_user`` when provided, before payload fingerprinting.
     Missing commercial attribution remains missing and is blocked by the publishing gate.
     """
+    # The caller's workspace identifier determines which original project,
+    # documents, pages and commercial quantities enter the sealed package.
+    # SQLite aliases True, 1.0 and "1" to INTEGER primary key 1. Reject
+    # those lossily-equivalent aliases BEFORE any source database read;
+    # otherwise the final SHA can bind an unproven caller workspace identity.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise ValueError("Source workspace ID must be an exact positive integer")
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -65,7 +71,19 @@ def build_publishing_package_from_workspace(
     estimator = str(raw_estimator).strip() if raw_estimator else None
     if estimator == "":
         estimator = None
-    target_job_id = int(ws_row["jobhub_job_id"]) if ws_row["jobhub_job_id"] else None
+    # A workspace SQLite INTEGER-affinity column can still hold REAL/TEXT/BLOB.
+    # int(501.9) silently truncates to 501, then the freshly computed payload
+    # hash seals that WRONG target as an exact integer, bypassing the final
+    # writer's canonical-ID check. Never mint destination identity by casting.
+    raw_target_job_id = ws_row["jobhub_job_id"]
+    if raw_target_job_id is None:
+        target_job_id = None  # Missing link remains unpublishable downstream.
+    elif type(raw_target_job_id) is not int or raw_target_job_id <= 0:
+        raise ValueError(
+            "Workspace JobHub job ID must be an exact positive integer"
+        )
+    else:
+        target_job_id = raw_target_job_id
 
     project_identity = ProjectIdentityPayload(
         job_no=job_no,
@@ -89,7 +107,19 @@ def build_publishing_package_from_workspace(
         (workspace_id,),
     )
     doc_rows = cur.fetchall()
-    file_names = [str(row["file_name"]) for row in doc_rows if row["file_name"]]
+    # SQLite ingestion row order is not drawing-revision authority. Preserve the
+    # full filename multiset but seal it in canonical order, consistent with
+    # the already-sorted (filename, source SHA-256) revision manifest.
+    # The source revision manifest below already strips incidental filename
+    # padding before hashing (filename, SHA-256). Use the SAME canonical name
+    # for the separately sealed file roster, or byte-identical re-ingestion
+    # with padded names can evade the transactional JobHub duplicate check.
+    # Preserve case and multiplicity; an empty canonical name remains invalid
+    # source evidence for the commercial revision manifest.
+    file_names = sorted(
+        name for row in doc_rows
+        if (name := str(row["file_name"] or "").strip())
+    )
     # The publisher must never substitute filename equality for PDF byte
     # identity. SHA values originate from source ingestion; separate original
     # byte replay is still required for full benchmark/issuer certification.
@@ -112,7 +142,8 @@ def build_publishing_package_from_workspace(
     )
     sheet_count = cur.fetchone()[0] or 0
 
-    drawing_issue = str(ws_row["drawing_issue"] or "BA")
+    # A missing workspace issue is unknown, not a default BA revision.
+    drawing_issue = str(ws_row["drawing_issue"] or "").strip()
     rev_hash = (
         hashlib.sha256(json.dumps(
             sorted(revision_documents),
@@ -124,7 +155,11 @@ def build_publishing_package_from_workspace(
 
     drawing_revision = DrawingRevisionPayload(
         drawing_issue=drawing_issue,
-        drawing_date=datetime.date.today().isoformat(),
+        # The workspace has no authenticated original drawing date. Publishing
+        # time is not a drawing revision: using today() changes the sealed
+        # payload hash across days and lets unchanged packages evade the
+        # JobHub duplicate check. Keep source date explicitly unknown.
+        drawing_date="",
         sheet_count=sheet_count,
         source_files_hash=rev_hash,
         file_names=file_names,
@@ -165,9 +200,20 @@ def build_publishing_package_from_workspace(
         sub = str(r["substrate"] or "Plasterboard")
         tag = str(r["finish_tag"] or "")
         elem = str(r["element"] or "Element")
-        unit = str(r["unit"] or "m²")
+        # A missing source unit is an unresolved measurement, not implicit m².
+        # Preserve explicit per-trade units, and leave unknown units blank so
+        # the downstream gate can prevent a unitless JobHub line in any mode.
+        raw_unit = r["unit"]
+        unit = raw_unit.strip() if type(raw_unit) is str else ""
         qty = float(r["quantity"] or 0.0)
-        rate = float(r["rate"] or 0.0)
+        # The client owns each commercial unit rate. A missing SQL rate
+        # cannot become an invented approved zero-dollar line item; explicit
+        # numeric zero remains a valid client-owned choice.
+        if r["rate"] is None and mode == PublishingMode.COMMERCIAL:
+            raise ValueError(
+                f"Missing client commercial unit rate for takeoff row #{row_id}"
+            )
+        rate = float(r["rate"]) if r["rate"] is not None else 0.0
         # Price is a client-owned commercial input. A zero entered amount is
         # never permission to silently replace it with quantity × rate, nor
         # is a missing price approval to quote a computed line to JobHub.
@@ -274,58 +320,143 @@ def execute_jobhub_publishing(
         reasons = "; ".join(gate_result.blocking_reasons)
         raise RuntimeError(f"Publishing blocked by gate QA checks: {reasons}")
 
+    # validate_publishing_gate deliberately tolerates an absent hash for
+    # source-neutral diagnostics. A real JobHub write cannot: without the
+    # complete original payload seal, its duplicate lookup degenerates to
+    # SQL LIKE '%' and the customer package loses immutable identity.
+    # Recheck the exact full evidence fingerprint at the final write boundary,
+    # before opening SQLite or PostgreSQL or touching destination rows.
+    if (
+        type(package.payload_hash) is not str
+        or len(package.payload_hash) != 64
+        or any(ch not in "0123456789abcdef" for ch in package.payload_hash)
+        or package.payload_hash != gate_result.payload_hash
+    ):
+        raise RuntimeError(
+            "JobHub publishing requires a sealed matching SHA-256 payload hash"
+        )
+
+    # The sealed package creator is attribution for the source estimate;
+    # the person actually publishing can be a different delegated user.
+    # Do not let an empty or non-string delivery actor write an anonymous
+    # JobHub customer package. Check before opening any destination.
+    if type(user_name) is not str or not user_name.strip():
+        raise RuntimeError("JobHub publishing requires a named delivery actor")
+    publishing_actor = user_name.strip()
+
     target_job_id = package.project_identity.target_jobhub_job_id
     if not target_job_id:
         raise RuntimeError("Target JobHub job ID is required to publish package")
-
-    # Verify target job exists in JobHub
-    # The numeric row ID is not an authoritative cross-system project ID.
-    job_rows = bridge.query(
-        "SELECT id, status, job_no FROM jobs WHERE id=?", (target_job_id,)
-    )
-    if not job_rows:
-        raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
-    target_no = job_rows[0].get("job_no")
-    original_no = package.project_identity.job_no
-    if (
-        type(target_no) is not str
-        or not target_no.strip()
-        or target_no.strip() != original_no.strip()
-    ):
+    # ProjectIdentityPayload's Optional[int] hint is not runtime authority.
+    # Boolean True, float 1.0 and string "1" can be coerced by SQLite into
+    # real job row 1 (even when its job_no matches the intended project).
+    # Refuse aliases before opening or locking any JobHub destination.
+    if type(target_job_id) is not int or target_job_id <= 0:
         raise RuntimeError(
-            "JobHub target job number conflicts with PlanReader project identity"
+            "Target JobHub job ID must be an exact positive integer"
         )
 
     # Calculate aggregates
-    total_qty_m2 = 0.0
-    interior_m2 = 0.0
-    exterior_m2 = 0.0
+    # A customer summary must retain the accepted measured area, not a
+    # separately rounded approximation of the SHA-sealed JobHub line values.
+    # fsum also makes the two independent buckets stable under line ordering.
+    interior_area_lines: List[float] = []
+    exterior_area_lines: List[float] = []
     total_cost = 0.0
 
     for q in package.quantities:
         total_cost += q.total_price
         if q.unit in ("m²", "m2", "sqm"):
-            total_qty_m2 += q.quantity
             sec_lower = q.section.lower()
-            if any(k in sec_lower for k in ["internal", "ceiling", "interior", "wall"]):
-                interior_m2 += q.quantity
-            elif any(k in sec_lower for k in ["external", "facade", "elevation", "soffit"]):
-                exterior_m2 += q.quantity
+            # External WALLS must not be consumed by the generic "wall"
+            # interior fallback. Contradictory explicit interior/exterior
+            # section labels have no defensible category: retain the source
+            # line but abstain from both customer summary buckets.
+            explicit_interior = any(
+                key in sec_lower for key in ("internal", "interior", "ceiling")
+            )
+            explicit_exterior = any(
+                key in sec_lower for key in (
+                    "external", "exterior", "facade", "façade",
+                    "elevation", "soffit",
+                )
+            )
+            if explicit_exterior and not explicit_interior:
+                exterior_area_lines.append(q.quantity)
+            elif explicit_interior and not explicit_exterior:
+                interior_area_lines.append(q.quantity)
+            elif not explicit_exterior and not explicit_interior and "wall" in sec_lower:
+                # Preserve the historical generic wall bucket only where no
+                # conflicting exterior or interior marker was provided.
+                interior_area_lines.append(q.quantity)
+
+    interior_m2 = math.fsum(interior_area_lines)
+    exterior_m2 = math.fsum(exterior_area_lines)
 
     takeoff_no = f"PR-{package.project_identity.job_no}-{'PUB' if package.mode == PublishingMode.COMMERCIAL.value else 'DFT'}-{package.payload_hash[:8]}"
     status_label = "Published" if package.mode == PublishingMode.COMMERCIAL.value else "Draft"
+    # Preserve BOTH roles in the destination. The source creator was already
+    # SHA-sealed; the delivery actor is the caller authenticated at write time.
+    # Missing draft provenance remains absent rather than invented.
+    creator_note = (
+        f" | Package creator: {package.created_by}"
+        if isinstance(package.created_by, str) and package.created_by.strip()
+        else ""
+    )
+    # The gate deliberately permits customer-visible informational source
+    # warnings and draft provisional/critical notices, but the previous final
+    # JobHub writer silently discarded them. Preserve their full text in a
+    # canonical JSON note so the recipient receives exactly what passed the
+    # original gate. Stable sorting preserves duplicate warnings and makes
+    # equivalent orderings match the full-evidence canonical payload seal.
+    customer_warnings = sorted(gate_result.warnings)
+    warning_note = (
+        " | Gate warnings: "
+        + json.dumps(customer_warnings, ensure_ascii=False, separators=(",", ":"))
+        if customer_warnings else ""
+    )
     notes_str = (
         f"Mode: {package.mode.upper()} | Fingerprint: {package.preflight_fingerprint} | "
-        f"Payload: {package.payload_hash} | Published by {user_name}"
+        f"Payload: {package.payload_hash} | Published by {publishing_actor}{creator_note}"
+        f"{warning_note}"
     )
 
-    # Insert package header and line items into JobHub
+    # A previous bridge.query() checked job_no on a separate connection,
+    # allowing another writer to change the destination before package INSERT.
+    # Reserve a SQLite writer or lock the PostgreSQL job row before checking
+    # its identity. Keep that lock through duplicate detection and BOTH writes.
+    # A pre-existing SQLite caller transaction is not restarted.
+    is_postgres = getattr(bridge, "kind", "sqlite") == "postgres"
+    placeholder = "%s" if is_postgres else "?"
     with bridge.connect() as conn:
         cur = conn.cursor()
+        if is_postgres:
+            # psycopg2 starts a transaction on first statement; FOR UPDATE
+            # prevents a competing job_no change until this transaction ends.
+            cur.execute("SELECT job_no FROM jobs WHERE id=%s FOR UPDATE", (target_job_id,))
+        else:
+            if not conn.in_transaction:
+                cur.execute("BEGIN IMMEDIATE")
+            cur.execute("SELECT job_no FROM jobs WHERE id=?", (target_job_id,))
+
+        # The numeric JobHub id alone is never physical project identity.
+        target_row = cur.fetchone()
+        if target_row is None:
+            raise RuntimeError(f"Job #{target_job_id} does not exist in JobHub")
+        target_no = target_row[0]
+        original_no = package.project_identity.job_no
+        if (
+            type(target_no) is not str
+            or not target_no.strip()
+            or target_no.strip() != original_no.strip()
+        ):
+            raise RuntimeError(
+                "JobHub target job number conflicts with PlanReader project identity"
+            )
 
         # Check existing package duplicate
         cur.execute(
-            "SELECT id FROM painting_takeoff_packages WHERE job_id=? AND notes LIKE ?",
+            f"SELECT id FROM painting_takeoff_packages WHERE job_id={placeholder} AND notes LIKE {placeholder}",
             (target_job_id, f"%{package.payload_hash}%"),
         )
         dup = cur.fetchone()
@@ -340,20 +471,21 @@ def execute_jobhub_publishing(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cur.execute(
-            insert_pkg_sql,
+            (insert_pkg_sql.replace("?", "%s") + " RETURNING id")
+            if is_postgres else insert_pkg_sql,
             (
                 target_job_id,
                 takeoff_no,
                 status_label,
-                round(interior_m2, 2),
-                round(exterior_m2, 2),
+                interior_m2,
+                exterior_m2,
                 0.0,
                 0.0,
-                user_name,
+                publishing_actor,
                 notes_str,
             ),
         )
-        pkg_id = cur.lastrowid
+        pkg_id = cur.fetchone()[0] if is_postgres else cur.lastrowid
 
         # Insert lines
         insert_line_sql = """
@@ -363,7 +495,7 @@ def execute_jobhub_publishing(
         """
         for q in package.quantities:
             cur.execute(
-                insert_line_sql,
+                insert_line_sql.replace("?", "%s") if is_postgres else insert_line_sql,
                 (
                     pkg_id,
                     q.section,
@@ -371,8 +503,14 @@ def execute_jobhub_publishing(
                     q.substrate,
                     q.element,
                     q.unit,
-                    round(q.quantity, 4),
-                    round(q.rate, 2),
+                    # The full-evidence payload SHA seals the original measured
+                    # quantity and client-supplied unit rate without rounding.
+                    # The commercial gate explicitly allows sub-cent rates when
+                    # the payable line total is cent-exact. Rounding either
+                    # field here silently changes the customer JobHub line
+                    # after its source and commercial evidence were sealed.
+                    q.quantity,
+                    q.rate,
                     round(q.total_price, 2),
                 ),
             )
@@ -389,8 +527,9 @@ def execute_jobhub_publishing(
         "job_id": target_job_id,
         "total_lines": len(package.quantities),
         "total_cost": round(total_cost, 2),
-        "interior_m2": round(interior_m2, 2),
-        "exterior_m2": round(exterior_m2, 2),
+        "interior_m2": interior_m2,
+        "exterior_m2": exterior_m2,
         "preflight_fingerprint": package.preflight_fingerprint,
         "payload_hash": package.payload_hash,
+        "warnings": customer_warnings,
     }

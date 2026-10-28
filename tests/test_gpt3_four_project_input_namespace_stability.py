@@ -6,13 +6,13 @@ snapshot assertion used both before and after exclusive diagnostic output.
 """
 from __future__ import annotations
 
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from tools.report_gpt3_four_project_evidence import (
     _assert_four_project_publication_inputs_stable as assert_unchanged,
+    _stable_original_digest as witness,
 )
 
 
@@ -20,7 +20,7 @@ def test_unchanged_missing_and_unchanged_regular_paths_remain_acceptable(tmp_pat
     missing = tmp_path / "private-not-provisioned.pdf"
     signed = tmp_path / "source-sealed.json"
     signed.write_bytes(b"already-verified-signed-input")
-    digest = sha256(signed.read_bytes()).hexdigest()
+    digest = witness(signed)
     snapshot = ((missing, None), (signed, digest))
     assert_unchanged(snapshot)
     assert_unchanged(tuple(reversed(snapshot)))
@@ -48,7 +48,7 @@ def test_original_absent_path_that_appears_invalidates_publication(tmp_path: Pat
 def test_existing_signed_input_replaced_or_modified_fails(tmp_path: Path, replacement: str):
     signed = tmp_path / "source-signed.json"
     signed.write_bytes(b"certified-signed-run")
-    prior = sha256(signed.read_bytes()).hexdigest()
+    prior = witness(signed)
     snapshot = ((signed, prior),)
     assert_unchanged(snapshot)
     signed.unlink()
@@ -78,10 +78,10 @@ def test_input_read_error_fails_closed(tmp_path: Path, monkeypatch):
     from tools import report_gpt3_four_project_evidence as report
     original = tmp_path / "original.pdf"
     original.write_bytes(b"%PDF-protected")
-    digest = sha256(original.read_bytes()).hexdigest()
+    digest = witness(original)
     def unavailable(_path):
         raise OSError("read unavailable")
-    monkeypatch.setattr(report, "_sha256", unavailable)
+    monkeypatch.setattr(report, "_stable_original_digest", unavailable)
     with pytest.raises(ValueError, match="four-project input changed"):
         report._assert_four_project_publication_inputs_stable(((original, digest),))
     assert original.read_bytes() == b"%PDF-protected"
@@ -96,7 +96,7 @@ def test_uninspectable_input_fails_closed_before_and_after_publication(
     input_path = tmp_path / "private-source.pdf"
     if was_present:
         input_path.write_bytes(b"%PDF-original-unchanged")
-    digest = sha256(input_path.read_bytes()).hexdigest() if was_present else None
+    digest = witness(input_path) if was_present else None
     receipt = ((input_path, digest),)
     assert_unchanged(receipt)
     original_lstat = Path.lstat
@@ -154,3 +154,64 @@ def test_dangling_symlink_is_not_a_missing_input(tmp_path: Path):
     with pytest.raises(ValueError, match="four-project input changed"):
         assert_unchanged(((missing, None),))
     assert report._publication_input_path_kind(missing) == "symlink"
+
+
+def test_same_bytes_different_inode_cannot_revalidate_signed_customer_or_original(tmp_path: Path):
+    """A matching SHA does not make a substituted physical input the original."""
+    for filename in ("original.pdf", "sealed.json", "customer_rows.json", "source_manifest.json"):
+        original = tmp_path / filename
+        original.write_bytes(b"same-content-but-new-physical-input")
+        receipt = ((original, witness(original)),)
+        assert_unchanged(receipt)
+        replacement = tmp_path / ("replacement-" + filename)
+        replacement.write_bytes(original.read_bytes())
+        replacement.replace(original)
+        assert original.read_bytes() == b"same-content-but-new-physical-input"
+        with pytest.raises(ValueError, match="four-project input changed"):
+            assert_unchanged(receipt)
+
+
+def test_same_byte_source_replacement_after_exclusive_link_rolls_back_report(
+    tmp_path: Path, monkeypatch,
+):
+    """Exercise the real create-only publication callback, not only its helper."""
+    from tools import gpt3_safe_original_report_output as publish
+
+    original = tmp_path / "sealed-source.json"
+    original.write_bytes(b"source-neutral-signed-bytes")
+    output = tmp_path / "four-project-report.json"
+    receipt = ((original, witness(original)),)
+    actual_link = publish.os.link
+    swapped = False
+
+    def substitute_after_link(staged, destination):
+        nonlocal swapped
+        actual_link(staged, destination)
+        replacement = tmp_path / "same-byte-replacement.json"
+        replacement.write_bytes(original.read_bytes())
+        replacement.replace(original)
+        swapped = True
+
+    monkeypatch.setattr(publish.os, "link", substitute_after_link)
+    with pytest.raises(ValueError, match="four-project input changed"):
+        publish.write_new_diagnostic(
+            output, '{"publication_status":"UNPUBLISHED"}\n',
+            protected_roots=(original,),
+            verify_inputs=lambda: assert_unchanged(receipt),
+        )
+    assert swapped
+    assert not output.exists()
+    assert original.read_bytes() == b"source-neutral-signed-bytes"
+    assert not list(tmp_path.glob(".gpt3-original-report-*.tmp"))
+
+
+def test_same_inode_stable_witness_accepts_repeated_checks_without_persisting_identity(
+    tmp_path: Path,
+):
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"%PDF-source-neutral-fixture")
+    receipt = ((original, witness(original)),)
+    assert len(receipt[0][1][0]) == 64
+    assert isinstance(receipt[0][1][1], tuple)
+    assert_unchanged(receipt)
+    assert_unchanged(receipt)

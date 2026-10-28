@@ -13,6 +13,7 @@ from typing import Mapping
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_live_floor_area_quantity_publication import _valid_original_source_sha
+from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
@@ -192,6 +193,22 @@ def build_live_ceiling_lining_source_traces(
                 f"duplicate or invalid original ceiling-lining quantity id: {original_id}"
             )
         seen_source_ids.add(original_id)
+    # A numeric original with unresolved producer blockers cannot become a
+    # source-closed ceiling simply because the direct seal caller bypasses the
+    # customer projection's separate inventory veto. Keep this AFTER the
+    # complete original family/ID census so duplicate source IDs retain their
+    # established first-failure classification. True ABSTAINED rivals remain
+    # in the original material-mark census below.
+    for original in claim.ceiling_lining_quantity_evidence:
+        if (
+            not original.abstained
+            and original.value is not None
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "numeric ceiling-lining source quantity retains unresolved blockers: "
+                f"{original.quantity_id}"
+            )
     source_area_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_mark_ceiling_owners: dict[tuple[str, str, str], str] = {}
     original_occurrence_ceiling_owners: dict[tuple[str, str, str], str] = {}
@@ -296,11 +313,27 @@ def build_live_ceiling_lining_source_traces(
             room is None
             or rooms_by_physical_id.get(physical_room_id) is not room
             or _clean(ceiling.room_entity_id) != canonical_room_id
-            or _clean(room.source_room_face_record_id)
-            != _clean(metadata.get("source_room_face_record_id"))
         ):
             raise SourceClosedRunConflictError(
                 f"ceiling quantity references unknown room identity: "
+                f"{quantity.quantity_id}"
+            )
+
+        # A source room-face is a producer-owned physical geometry receipt.
+        # Normalizing both sides allowed two missing, padded or type-coerced
+        # receipts to agree and inherit the original room's ceiling m².
+        # Preserve the exact original source identity before any FIRM seal.
+        original_face_id = metadata.get("source_room_face_record_id")
+        producer_face_id = room.source_room_face_record_id
+        if (
+            type(producer_face_id) is not str
+            or not producer_face_id
+            or producer_face_id != producer_face_id.strip()
+            or type(original_face_id) is not str
+            or original_face_id != producer_face_id
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity original room-face receipt mismatch: "
                 f"{quantity.quantity_id}"
             )
 
@@ -365,15 +398,23 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling original source root is malformed: {quantity.quantity_id}"
             )
 
-        if (
-            not _clean(metadata.get("support_snapshot_id"))
-            or not _clean(metadata.get("support_page_id"))
-            or not _clean(metadata.get("support_viewport_id"))
+        # RCP support IDs are independent original semantic-source receipts.
+        # Stringifying or stripping an imported value here would allow a
+        # reconstructed FIRM row to borrow an unproved page, viewport or
+        # snapshot before the actual seal/customer source trace is built.
+        for support_field in (
+            "support_snapshot_id", "support_page_id", "support_viewport_id",
         ):
-            raise SourceClosedRunConflictError(
-                f"ceiling quantity lacks semantic support lineage: "
-                f"{quantity.quantity_id}"
-            )
+            receipt = metadata.get(support_field)
+            if (
+                type(receipt) is not str
+                or not receipt
+                or receipt != receipt.strip()
+            ):
+                raise SourceClosedRunConflictError(
+                    "ceiling quantity lacks exact semantic support lineage: "
+                    f"{quantity.quantity_id} ({support_field})"
+                )
 
         if _clean(metadata.get("row_role")) != "ceiling_area":
             raise SourceClosedRunConflictError(
@@ -476,6 +517,46 @@ def build_live_ceiling_lining_source_traces(
         source_bbox = _original_ceiling_simple_bbox(
             checked, quantity_id=quantity.quantity_id
         )
+
+        # The cross-view FIRM producer copies the exact original PDF room
+        # ring to its whole-room ceiling. A reconstructed ceiling must not
+        # borrow that room's documented area with a different physical ring
+        # or source root. This is a negative source veto, not a new m² grant.
+        room_root = (
+            room.document_id, room.revision_id, room.snapshot_id, room.page_id,
+        )
+        ceiling_root = (
+            ceiling.document_id, ceiling.revision_id, ceiling.snapshot_id,
+            str(ceiling.source_page),
+        )
+        if (
+            type(ceiling.source_page) is not int
+            or any(
+                type(receipt) is not str
+                or not receipt or receipt != receipt.strip()
+                for receipt in (*room_root, *ceiling_root)
+            )
+            or room_root != ceiling_root
+            or not _valid_original_source_sha(room.source_sha256)
+            or room.source_sha256.lower() != ceiling.source_sha256.lower()
+            or (
+                room.viewport_id is not None
+                and (
+                    type(room.viewport_id) is not str
+                    or not room.viewport_id
+                    or room.viewport_id != room.viewport_id.strip()
+                    or room.viewport_id != ceiling.viewport_id
+                )
+            )
+            or not _same_original_floor_room_ring(
+                checked, room.polygon_pdf_pts,
+                quantity_id=quantity.quantity_id,
+            )
+        ):
+            raise SourceClosedRunConflictError(
+                "ceiling original canonical room polygon/source ownership mismatch: "
+                f"{quantity.quantity_id}"
+            )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,

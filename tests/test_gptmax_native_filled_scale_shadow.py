@@ -1,0 +1,233 @@
+"""Gold-free shadow geometry proof; original positive requires private source."""
+import hashlib
+import os
+from pathlib import Path
+
+import fitz
+import pytest
+
+from pb_gptmax_native_filled_scale_shadow import find_native_filled_scale_bar_shadows
+
+
+def _synthetic(*, count=5, x=40, y=50, width=20, height=3, missing=None,
+               colour=(0, 0, 0), opacity=1, wrong_label=None,
+               extra_bar=False, stroked=False, uniform_row=False,
+               overpaint=False, overpaint_label=False,
+               invisible_labels_with_black_strokes=False,
+               conflicting_unit_label=False):
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=250)
+    if conflicting_unit_label:
+        # Earlier independently printed foreign-unit tick, near the same
+        # terminal boundary but not the intended metre source label.
+        page.insert_text(
+            (x + count * width - 7.2, y + 2 * height + 19),
+            f"{count}ft", fontsize=8, fontname="helv", color=(0, 0, 0),
+        )
+
+    def add_bar(x0, y0):
+        for i in range(count):
+            if i == missing:
+                continue
+            top = y0 + (0 if (i % 2 or uniform_row) else height)
+            rect = fitz.Rect(x0 + i * width, top, x0 + (i + 1) * width, top + height)
+            page.draw_rect(rect, fill=colour, color=(0, 0, 0) if stroked else None,
+                           fill_opacity=opacity)
+        for i in range(count + 1):
+            label = str(i) if i < count else f'{count}m'
+            if i == wrong_label:
+                label = 'unknown'
+            bx = x0 + i * width
+            baseline = y0 + 2 * height + 10
+            if invisible_labels_with_black_strokes:
+                # Unrelated earlier black ink within the native glyph bbox
+                # must never authenticate a WHITE-on-white invisible label.
+                page.draw_line(
+                    fitz.Point(bx - len(label) * 2.4, baseline - 3),
+                    fitz.Point(bx + len(label) * 2.1, baseline - 3),
+                    color=(0, 0, 0), width=0.4,
+                )
+            page.insert_text((bx - len(label) * 2.4, baseline), label,
+                             fontsize=8, fontname='helv',
+                             color=(1, 1, 1) if invisible_labels_with_black_strokes
+                             else (0, 0, 0))
+
+    add_bar(x, y)
+    if extra_bar:
+        add_bar(x, y + 70)
+    if overpaint:
+        # A later opaque white source path erases the middle block while
+        # get_drawings() still retains the earlier black native fill.
+        page.draw_rect(
+            fitz.Rect(x + 2 * width, y, x + 3 * width, y + 2 * height),
+            fill=(1, 1, 1), color=None,
+        )
+    if overpaint_label:
+        # Erase the rendered '3' tick AFTER native text is painted; extraction
+        # must still see its old decoded word, but source visibility must not.
+        label = next(word for word in page.get_text('words') if word[4] == '3')
+        page.draw_rect(fitz.Rect(label[:4]), fill=(1, 1, 1), color=None)
+    content = doc.tobytes(garbage=4, deflate=True)
+    doc.close()
+    return content
+
+
+def _scan(data, *, page_id='1', digest=None):
+    return find_native_filled_scale_bar_shadows(
+        data, expected_source_sha256=digest or hashlib.sha256(data).hexdigest(), page_id=page_id)
+
+
+def test_alternating_native_fill_positive_and_deterministic_replay():
+    data = _synthetic()
+    first = _scan(data)
+    assert len(first) == 1
+    assert first == _scan(data)
+    assert len(first[0].drawing_indices) == 5
+    assert first[0].physical_span_mm == 5000
+    assert first[0].source_span_pt == pytest.approx(100)
+    assert first[0].points_per_mm == pytest.approx(0.02)
+
+
+@pytest.mark.parametrize('delta_x,delta_y,scale', [(12, 20, 1), (0, 0, 2), (32, 30, 0.75)])
+def test_translation_and_uniform_scale_invariance(delta_x, delta_y, scale):
+    data = _synthetic(x=40 + delta_x, y=50 + delta_y,
+                      width=20 * scale, height=3 * scale)
+    result = _scan(data)
+    assert len(result) == 1
+    assert result[0].points_per_mm == pytest.approx(20 * scale / 1000)
+
+
+@pytest.mark.parametrize('rotation', (0, 90, 180, 270))
+@pytest.mark.parametrize('damage', (None, 'bar', 'label'))
+def test_display_rotation_preserves_native_witness_and_overpaint_veto(rotation, damage):
+    data = _synthetic(overpaint=damage == 'bar', overpaint_label=damage == 'label')
+    with fitz.open(stream=data, filetype='pdf') as document:
+        document[0].set_rotation(rotation)
+        rotated = document.tobytes()
+    before = hashlib.sha256(rotated).hexdigest()
+    result = _scan(rotated)
+    assert hashlib.sha256(rotated).hexdigest() == before
+    if damage:
+        assert result == ()
+    else:
+        reference, = _scan(data)
+        actual, = result
+        assert actual.source_sha256 == before
+        assert actual.drawing_indices == reference.drawing_indices
+        assert actual.text_witnesses == reference.text_witnesses
+        assert actual.source_span_pt == reference.source_span_pt
+        assert actual.points_per_mm == reference.points_per_mm
+        assert result == _scan(rotated)
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'missing': 2}, {'colour': (0.1, 0.1, 0.1)},
+    {'opacity': 0.7}, {'wrong_label': 3}, {'stroked': True},
+    {'uniform_row': True},
+])
+def test_source_paint_and_label_negatives(kwargs):
+    assert _scan(_synthetic(**kwargs)) == ()
+
+
+def test_competing_equally_scaled_bars_retained_not_elected():
+    candidates = _scan(_synthetic(extra_bar=True))
+    assert len(candidates) == 2
+    assert candidates[0].drawing_indices != candidates[1].drawing_indices
+    assert candidates[0].points_per_mm == candidates[1].points_per_mm
+    # A consumer MUST abstain unless a separate authority resolves rivals.
+
+
+def test_later_opaque_overpaint_vetoes_source_native_fill():
+    data = _synthetic(overpaint=True)
+    doc = fitz.open(stream=data, filetype="pdf")
+    assert len(doc[0].get_drawings()) >= 6  # hidden source fill still exists
+    doc.close()
+    assert _scan(data) == ()
+
+
+def test_later_opaque_overpaint_of_scale_tick_vetoes_decoded_native_word():
+    data = _synthetic(overpaint_label=True)
+    doc = fitz.open(stream=data, filetype='pdf')
+    page = doc[0]
+    # get_text still returns the hidden source label; its actual glyph ink
+    # has been erased without touching the source-native filled scale bar.
+    assert any(word[4] == '3' for word in page.get_text('words'))
+    assert len(page.get_drawings()) >= 6
+    doc.close()
+    assert _scan(data) == ()
+
+
+def test_invisible_white_tick_glyphs_cannot_borrow_unrelated_black_ink():
+    data = _synthetic(invisible_labels_with_black_strokes=True)
+    doc = fitz.open(stream=data, filetype='pdf')
+    page = doc[0]
+    assert len([w for w in page.get_text('words')
+                if w[4] in {'0', '1', '2', '3', '4', '5m'}]) == 6
+    assert all(span['color'] == (1.0, 1.0, 1.0)
+               for span in page.get_texttrace() if span['type'] == 0)
+    doc.close()
+    # All source words exist and unrelated black hairlines are rendered in
+    # their bboxes, but no native black tick glyph exists. ABSTAIN.
+    assert _scan(data) == ()
+
+
+def test_foreign_unit_rival_at_same_boundary_must_abstain():
+    data = _synthetic(conflicting_unit_label=True)
+    doc = fitz.open(stream=data, filetype="pdf")
+    words = doc[0].get_text("words")
+    assert any(word[4] == "5m" for word in words)
+    assert any(word[4] == "5ft" for word in words)
+    doc.close()
+    # All five native fill blocks remain source-valid; the conflicting
+    # unit cannot be discarded while electing the otherwise valid "5m".
+    assert _scan(data) == ()
+
+
+def test_native_clip_vetoes_fill_even_when_words_remain_visible():
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=250)
+    for i in range(5):
+        top = 50 + (0 if i % 2 else 3)
+        page.draw_rect(
+            fitz.Rect(40 + i * 20, top, 60 + i * 20, top + 3),
+            fill=(0, 0, 0), color=None,
+        )
+    page.clean_contents()
+    content_xref = page.get_contents()[0]
+    source_commands = doc.xref_stream(content_xref)
+    # Clip only the bar drawing commands, then close the clip graphics state.
+    doc.update_stream(
+        content_xref, b"q 0 0 1 1 re W n\n" + source_commands + b"\nQ",
+    )
+    for i in range(6):
+        label = str(i) if i < 5 else "5m"
+        page.insert_text((40 + i * 20 - len(label) * 2.4, 66), label, fontsize=8)
+    data = doc.tobytes(garbage=4, deflate=True)
+    doc.close()
+    reread = fitz.open(stream=data, filetype="pdf")
+    assert len(reread[0].get_drawings()) == 5
+    assert len(reread[0].get_text("words")) >= 6
+    reread.close()
+    assert _scan(data) == ()
+
+
+def test_sha_and_page_scope_fail_closed():
+    data = _synthetic()
+    assert _scan(data, digest='0' * 64) == ()
+    assert _scan(data, page_id='2') == ()
+    assert _scan(data, page_id='not-a-page') == ()
+
+
+def test_private_original_source_positive_if_provisioned():
+    path = os.environ.get('THREELAUREL_ARCH_ORIGINAL')
+    if not path:
+        pytest.skip('private original source not provisioned; no source-positive claim')
+    data = Path(path).read_bytes()
+    expected = '014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e'
+    assert hashlib.sha256(data).hexdigest() == expected
+    candidates = _scan(data, page_id='3')
+    assert len(candidates) == 1
+    assert len(candidates[0].drawing_indices) == 10
+    assert len(candidates[0].text_witnesses) == 11
+    assert candidates[0].source_span_pt == pytest.approx(283.46502685546875, abs=1e-3)
+    assert candidates[0].physical_span_mm == 10000
