@@ -130,3 +130,19 @@ def test_exact_source_identifiers_remain_order_independent_with_provisional_repl
     assert len(expected) == 1
     for order in ((original, provisional), (provisional, original)):
         assert publish_live_floor_area_quantities(_claim_with(*order)) == expected
+
+
+def test_optional_empty_room_receipts_and_missing_canonical_room_viewport_stay_compatible():
+    source = _source_area()
+    optional_absent = replace(source, metadata={
+        **dict(source.metadata),
+        "room_snapshot_id": "",
+        "source_room_face_record_id": "",
+    })
+    claim = _claim_with_canonical_room(optional_absent)
+    claim = replace(
+        claim,
+        canonical_rooms=(replace(claim.canonical_rooms[0], viewport_id=None),),
+    )
+    assert len(publish_live_floor_area_quantities(claim)) == 1
+    assert len(publish_live_canonical_room_area_quantities(claim)) == 1
