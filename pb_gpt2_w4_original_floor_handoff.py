@@ -75,13 +75,50 @@ def audit_gpt2_w4_bound_original_floor(
     if (type(source_correspondence) is not dict
             or source_correspondence.get("status")!=
                 "original_source_ink_ring_translation_candidate"
-            or not source_correspondence.get("geometric_ink_correspondence_only")
-            or not isinstance(source_correspondence.get("original_floor_page"),int)
+            or source_correspondence.get("geometric_ink_correspondence_only") is not True
+            or type(source_correspondence.get("original_floor_page")) is not int
+            or source_correspondence["original_floor_page"] <= 0
+            or type(source_correspondence.get("original_finish_page")) is not int
+            or source_correspondence["original_finish_page"] <= 0
+            or source_correspondence["original_finish_page"] ==
+                source_correspondence["original_floor_page"]
             or source_correspondence.get("original_source_sha256")!=room.source_sha256
             or str(source_correspondence["original_floor_page"])!=room.page_id):
         return {**blocked,"first_failure":"original_pdf_room_root_or_page_mismatch"}
+
+    # The independent floor/finish source-ink ring issuer records the full
+    # edge universes and exact rigid translation. A copied room polygon and
+    # a truthy status alone are not native cross-sheet provenance.
+    def exact_source_edge_ids(value):
+        return (
+            type(value) in (tuple,list) and bool(value)
+            and all(type(edge_id) is str and bool(edge_id)
+                    and edge_id == edge_id.strip() for edge_id in value)
+            and len(set(value)) == len(value)
+        )
+
+    if (not exact_source_edge_ids(
+                source_correspondence.get("original_floor_source_ids"))
+            or not exact_source_edge_ids(
+                source_correspondence.get("original_finish_source_ids"))):
+        return {**blocked,"first_failure":"original_cross_sheet_source_edge_receipt_invalid"}
+
+    shift=source_correspondence.get("source_cross_sheet_translation_pdf_pts")
+    if (type(shift) not in (tuple,list) or len(shift)!=2
+            or any(type(value) not in (int,float) or not math.isfinite(value)
+                   for value in shift)):
+        return {**blocked,"first_failure":"original_cross_sheet_translation_receipt_invalid"}
     source_floor=_polygon(
         source_correspondence.get("source_floor_perimeter_polygon_pdf_pts"))
+    source_finish=_polygon(
+        source_correspondence.get("source_finishes_perimeter_polygon_pdf_pts"))
+    if source_floor is None or source_finish is None:
+        return {**blocked,"first_failure":"original_cross_sheet_source_ring_invalid"}
+    moved_floor=Polygon(
+        tuple((float(x)+float(shift[0]),float(y)+float(shift[1]))
+              for x,y in source_floor.exterior.coords[:-1]))
+    if not moved_floor.is_valid or not moved_floor.equals(source_finish):
+        return {**blocked,"first_failure":"original_cross_sheet_source_ring_mismatch"}
     existing_face=_polygon(room.polygon_pdf_pts)
     if (source_floor is None or existing_face is None
             or not existing_face.equals(source_floor)
