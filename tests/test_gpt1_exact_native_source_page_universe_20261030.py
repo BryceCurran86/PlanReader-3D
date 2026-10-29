@@ -4,7 +4,6 @@ No private originals, benchmark gold, scale/geometry promotion or customer rows.
 """
 from __future__ import annotations
 
-import math
 
 import fitz
 import pytest
