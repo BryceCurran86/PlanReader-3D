@@ -924,3 +924,95 @@ def test_distinct_terminal_observations_keep_geometric_pier_candidate():
     assert all(record.status is S.CANDIDATE for record in records)
     assert all(record.first_remaining_gate == "original_source_host_unverified" for record in records)
     assert all(record.shadow_only and not record.takeoff_eligible for record in records)
+
+
+def test_host_receipt_id_changes_with_geometric_pier_adjacency():
+    """A changed pier neighborhood must never reuse the isolated host receipt ID.
+
+    A pier remains source-unverified in every case; this is identity integrity
+    for shadow evidence, not an original-source physical-host promotion.
+    """
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (200.0, 0.0), 20.0,
+    )
+    opening_a = ApertureHostCandidateInput(
+        "A", (20.0, 0.0), (40.0, 0.0), ("native_a_left", "native_a_right"),
+    )
+    opening_b = ApertureHostCandidateInput(
+        "B", (50.0, 0.0), (70.0, 0.0), ("native_b_left", "native_b_right"),
+    )
+    opening_b_reobserved = ApertureHostCandidateInput(
+        "B", (50.0, 0.0), (70.0, 0.0), ("native_b_new_left", "native_b_new_right"),
+    )
+    distant = ApertureHostCandidateInput(
+        "C", (120.0, 0.0), (140.0, 0.0), ("native_c_left", "native_c_right"),
+    )
+    authority = _authority()
+
+    def bind(openings):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings,
+        )
+        return {record.physical_opening_id: record for record in records}, piers
+
+    isolated, no_piers = bind((opening_a,))
+    distant_pair, distant_piers = bind((opening_a, distant))
+    neighbors, piers = bind((opening_a, opening_b))
+    reversed_neighbors, reversed_piers = bind((opening_b, opening_a))
+    changed_neighbors, changed_piers = bind((opening_a, opening_b_reobserved))
+    assert not no_piers and not distant_piers
+    assert len(piers) == len(reversed_piers) == len(changed_piers) == 1
+    assert isolated["A"].adjacent_pier_ids == distant_pair["A"].adjacent_pier_ids == ()
+    assert isolated["A"].hosting_record_id == distant_pair["A"].hosting_record_id
+    assert neighbors["A"].hosting_record_id != isolated["A"].hosting_record_id
+    assert neighbors["A"].adjacent_pier_ids == (piers[0].pier_id,)
+    assert neighbors["A"].hosting_record_id == reversed_neighbors["A"].hosting_record_id
+    assert neighbors["B"].hosting_record_id == reversed_neighbors["B"].hosting_record_id
+    assert piers == reversed_piers
+    # A's native jamb geometry and physical ID are unchanged, but B's
+    # source observation changed, so A's adjacent pier lineage changed.
+    assert neighbors["A"].opening_start_pt == changed_neighbors["A"].opening_start_pt
+    assert neighbors["A"].opening_end_pt == changed_neighbors["A"].opening_end_pt
+    assert piers[0].pier_id != changed_piers[0].pier_id
+    assert neighbors["A"].hosting_record_id != changed_neighbors["A"].hosting_record_id
+    assert neighbors["A"].to_dict()["adjacent_pier_ids"] != (
+        changed_neighbors["A"].to_dict()["adjacent_pier_ids"]
+    )
+    for rows in (isolated, distant_pair, neighbors, reversed_neighbors, changed_neighbors):
+        assert all(record.status is S.CANDIDATE for record in rows.values())
+        assert all(record.first_remaining_gate == "original_source_host_unverified"
+                   for record in rows.values())
+        assert all(record.shadow_only and not record.takeoff_eligible
+                   and not record.commercial_projection_allowed
+                   for record in rows.values())
+    assert all(pier.is_structural_masonry_pier is None for pier in (*piers, *changed_piers))
+    assert opening_a.terminal_jamb_observation_ids == ("native_a_left", "native_a_right")
+
+
+def test_conflicting_neighbor_cannot_change_isolated_host_identity_or_create_pier():
+    """An overlap-conflicted neighbor cannot mint a pier or change A's receipt."""
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (200.0, 0.0), 20.0,
+    )
+    a = ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0))
+    b = ApertureHostCandidateInput("B", (50.0, 0.0), (70.0, 0.0))
+    conflict = ApertureHostCandidateInput("D", (55.0, 0.0), (75.0, 0.0))
+    authority = _authority()
+    isolated, _ = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(a,),
+    )
+    for openings in ((a, b, conflict), (conflict, b, a)):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings,
+        )
+        assert piers == ()
+        by_id = {record.physical_opening_id: record for record in records}
+        assert by_id["A"].status is S.CANDIDATE
+        assert by_id["A"].adjacent_pier_ids == ()
+        assert by_id["A"].hosting_record_id == isolated[0].hosting_record_id
+        assert all(by_id[key].status is S.ABSTAINED for key in ("B", "D"))
+        assert all(by_id[key].first_remaining_gate == "aperture_physical_interval_conflict"
+                   for key in ("B", "D"))
+        assert all(record.shadow_only and not record.takeoff_eligible
+                   and not record.commercial_projection_allowed
+                   for record in records)

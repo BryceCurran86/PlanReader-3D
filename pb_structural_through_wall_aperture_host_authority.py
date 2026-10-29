@@ -601,6 +601,10 @@ class StructuralThroughWallApertureHostAuthority:
             "u1_pt": float(u1).hex(),
             "status": status.value,
             "first_remaining_gate": gate,
+            # The record's lineage includes its geometric neighbor relationships.
+            # Otherwise one isolated host and the same host with a candidate
+            # pier share an ID despite different adjacent_pier_ids in to_dict().
+            "adjacent_pier_ids": tuple(sorted(adjacent_piers)),
         }
         rec_id = stable_contract_id(
             "through_wall_hosted_opening", payload, digest_chars=32
