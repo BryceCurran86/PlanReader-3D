@@ -32,7 +32,8 @@ def _single_ring(graph: dict):
     return ring
 
 
-def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0)):
+def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0),
+                                     quantize_pdf_pts=True):
     """Exact native ink-ring EDGE topology, independent of start and direction.
 
     The source graph issues a degree-two ordered cycle; sorting its vertices
@@ -47,8 +48,12 @@ def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0)):
                     or any(type(v) not in (int,float) or not math.isfinite(v)
                            for v in point)):
                 return None
-            pts.append((round(float(point[0])+translation[0],3),
-                        round(float(point[1])+translation[1],3)))
+            x=float(point[0])+translation[0]
+            y=float(point[1])+translation[1]
+            if not math.isfinite(x) or not math.isfinite(y):
+                return None
+            pts.append((round(x,3),round(y,3))
+                       if quantize_pdf_pts else (x,y))
         if pts[0]==pts[-1]:
             pts.pop()
         if len(pts)<4 or len(set(pts))!=len(pts):
@@ -110,7 +115,8 @@ def _original_issued_native_ring_edges(graph: dict):
     return by_id
 
 
-def _original_source_witness_edge(ends, *, translation=(0.0, 0.0)):
+def _original_source_witness_edge(ends, *, translation=(0.0, 0.0),
+                                  quantize_pdf_pts=True):
     """Validate a four-side issuer's literal native PDF endpoint receipt."""
     if type(ends) not in (tuple, list) or len(ends) != 2:
         return None
@@ -123,11 +129,11 @@ def _original_source_witness_edge(ends, *, translation=(0.0, 0.0)):
             x, y = (float(v) for v in point)
             if not math.isfinite(x) or not math.isfinite(y):
                 return None
-            shifted = (round(x + translation[0], 3),
-                       round(y + translation[1], 3))
+            shifted = (x + translation[0], y + translation[1])
             if not all(math.isfinite(v) for v in shifted):
                 return None
-            points.append(shifted)
+            points.append(tuple(round(v,3) for v in shifted)
+                          if quantize_pdf_pts else shifted)
     except (TypeError, ValueError, OverflowError):
         return None
     return frozenset(points) if len(set(points)) == 2 else None
@@ -249,8 +255,10 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     native_by_page=[]
     for graph,ring in ((floor_graph,floor_ring),(finish_graph,finish_ring)):
         native_edges=_original_issued_native_ring_edges(graph)
+        # Same-page original-ink ancestry is literal: rounding would reject
+        # genuine PyMuPDF fractional endpoints or conceal a tiny forged edge.
         ring_edges=_source_cyclic_ring_edges_native(
-            ring.get("vertices_pdf_pts"))
+            ring.get("vertices_pdf_pts"),quantize_pdf_pts=False)
         if (not native_edges or not ring_edges
                 or frozenset(native_edges.values())!=ring_edges):
             return {**base,"first_failure":
@@ -261,14 +269,20 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     # four issuer-signed endpoint pairs must agree with its OWN native graph
     # edge and with the independently registered opposite-page paint.
     for floor_id,finish_id,floor_ends,finish_ends in witness_receipts:
-        floor_witness=_original_source_witness_edge(floor_ends)
-        finish_witness=_original_source_witness_edge(finish_ends)
+        # Literal same-page issuer equality precedes the deliberately
+        # quantized 0.001pt cross-sheet translation comparison.
+        floor_witness=_original_source_witness_edge(
+            floor_ends,quantize_pdf_pts=False)
+        finish_witness=_original_source_witness_edge(
+            finish_ends,quantize_pdf_pts=False)
         translated_witness=_original_source_witness_edge(
             floor_ends,translation=translation_pdf_pts)
+        registered_finish=_original_source_witness_edge(finish_ends)
         if (floor_witness is None or finish_witness is None
                 or floor_witness!=floor_native[floor_id]
                 or finish_witness!=finish_native[finish_id]
-                or translated_witness!=finish_witness):
+                or translated_witness is None
+                or translated_witness!=registered_finish):
             return {**base,"first_failure":
                     "original_registration_witness_geometry_conflict"}
     dx,dy=translation_pdf_pts
