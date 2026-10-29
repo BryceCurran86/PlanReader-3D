@@ -77,6 +77,15 @@ def _measurement_authority(
         scale_id = metadata.get("resolved_scale_id")
         scale_status = metadata.get("scale_status")
         raw_conflicts = metadata.get("scale_conflicts", ())
+        # Optional original calibration lineage must remain literal; do not
+        # clean a padded/imported source fingerprint into customer metadata.
+        scale_fingerprint = metadata.get("scale_fingerprint")
+        if scale_fingerprint is not None and (
+            type(scale_fingerprint) is not str
+            or not scale_fingerprint
+            or scale_fingerprint != scale_fingerprint.strip()
+        ):
+            return None
         if (
             type(scale_id) is not str or not scale_id
             or scale_id != scale_id.strip()
@@ -98,7 +107,7 @@ def _measurement_authority(
             metadata={
                 "source": "live_floor_area_customer_projection",
                 "quantity_id": quantity.quantity_id,
-                "scale_fingerprint": _clean(metadata.get("scale_fingerprint")),
+                "scale_fingerprint": scale_fingerprint or "",
             },
         )
 
