@@ -470,3 +470,43 @@ def test_same_host_wall_cannot_create_dual_host_corner_candidate(authority):
     assert distinct.classification == CornerApertureClassification.GEOMETRIC_CANDIDATE
     assert distinct.total_girth_m is not None
     assert distinct.contract_id != first.contract_id
+
+
+@pytest.mark.parametrize("field", ["jamb_a", "jamb_b", "corner_vertex"])
+@pytest.mark.parametrize("huge", [float(2**53) + 2.0, -(float(2**53) + 2.0)])
+def test_oversized_native_float_corner_points_rejected(authority, field, huge):
+    kwargs = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    original_point = [huge, 300.0]
+    with pytest.raises(ValueError, match=f"{field} requires finite real coordinates"):
+        authority.evaluate_corner_aperture(**(kwargs | {field: original_point}))
+    assert original_point == [huge, 300.0]
+
+
+def test_inclusive_corner_source_coordinate_boundary_is_shadow_only(authority):
+    limit = float(2**53)
+    kwargs = dict(
+        jamb_a=(limit, limit - 80.0),
+        jamb_b=(limit - 60.0, limit),
+        corner_vertex=(limit, limit),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=None, scale_ratio=None,
+    )
+    before = dict(kwargs)
+    first = authority.evaluate_corner_aperture(**kwargs)
+    second = authority.evaluate_corner_aperture(**kwargs)
+    assert kwargs == before
+    assert first == second
+    assert first.corner_vertex == (limit, limit)
+    assert first.total_girth_pt == 140.0
+    assert first.classification == CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+    assert first.first_remaining_gate == "original_source_scale_or_post_unverified"
+    assert first.total_girth_m is None
+    assert first.leg_a.leg_span_m is None
+    assert first.leg_b.leg_span_m is None
+    assert first.shadow_only and not first.takeoff_eligible
+    assert not first.commercial_projection_allowed

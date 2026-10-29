@@ -132,6 +132,12 @@ def _finite_real(value: object) -> bool:
         return False
 
 
+def _finite_source_coordinate(value: object) -> bool:
+    # Match the existing inclusive 2**53 native source-point identity limit
+    # for floats and ints, without constraining independent scale/post scalars.
+    return _finite_real(value) and abs(value) <= 2**53
+
+
 class StructuralCornerApertureContinuityAuthority:
     """Source-neutral corner-leg hypotheses; never authenticates an opening."""
 
@@ -154,7 +160,7 @@ class StructuralCornerApertureContinuityAuthority:
         ):
             if not isinstance(point, (tuple, list)) or len(point) != 2:
                 raise ValueError(f"{name} requires exactly two coordinates")
-            if any(not _finite_real(value) for value in point):
+            if any(not _finite_source_coordinate(value) for value in point):
                 raise ValueError(f"{name} requires finite real coordinates")
         for name, value in (
             ("post_dimension_pt", post_dimension_pt),
