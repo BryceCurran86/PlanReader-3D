@@ -543,14 +543,15 @@ def test_floor_finish_customer_projection_uses_canonical_not_physical_floor_join
     ("dim-h-source", ""), "dim-h-source", None,
 ))
 def test_floor_finish_customer_rejects_unowned_figured_measurement(dimensions):
-    from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
     claim = _claim()
     original = claim.floor_finish_quantity_evidence[0]
     forged = replace(
         original,
         metadata={**dict(original.metadata), "figured_dimension_ids": dimensions},
     )
-    with pytest.raises(MissingCommercialAuthorityError):
+    # The direct source seal now catches malformed original axes before the
+    # later customer-only authority projector can normalize or classify them.
+    with pytest.raises(SourceClosedRunConflictError, match="exact figured dimension pair"):
         project_live_floor_finish_customer_rows(
             replace(claim, floor_finish_quantity_evidence=(forged,)),
             workspace_id=1, project_id="project-1",
@@ -966,3 +967,120 @@ def test_same_document_cannot_mix_source_revisions_even_when_mark_roots_differ(
             match="conflicting sealed source revisions or snapshots",
         ):
             output(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("figured_ids", (
+    None, (), ("dim-h-source",), ("dim-h-source", "dim-h-source"),
+    (" dim-h-source", "dim-v-source"),
+    ("dim-h-source", "dim-v-source "),
+    (True, "dim-v-source"),
+    "dim-h-source",
+    ("dim-h-source", "dim-v-source", "third-axis"),
+))
+def test_original_floor_finish_source_seal_requires_exact_figured_axes(figured_ids):
+    """Direct signing cannot bypass the customer-only figured-axis check."""
+    source = _claim()
+    original = source.floor_finish_quantity_evidence[0]
+    altered = replace(
+        original, metadata={**dict(original.metadata), "figured_dimension_ids": figured_ids},
+    )
+    forged = replace(source, floor_finish_quantity_evidence=(altered,))
+    before_floor = source.canonical_floors[0].to_dict()
+    before_quantity = original.to_dict()
+    for publisher in (build_live_floor_finish_area_source_traces, seal_live_floor_finish_area_run):
+        with pytest.raises(SourceClosedRunConflictError, match="exact figured dimension pair"):
+            publisher(forged, workspace_id=1, project_id="project-1")
+    assert source.canonical_floors[0].to_dict() == before_floor
+    assert original.to_dict() == before_quantity
+    assert len(seal_live_floor_finish_area_run(
+        source, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+@pytest.mark.parametrize("method", (
+    " documented_dimension ", "documented_dimension ", " DOCUMENTED_DIMENSION",
+    "pdf_scaled ", "model_derived", "user_corrected",
+))
+def test_floor_finish_source_seal_rejects_matching_forged_authority_aliases(method):
+    """Matching aliases on both original receipts do not prove a measurement."""
+    original = _claim()
+    floor = replace(original.canonical_floors[0], metric_area_authority=method)
+    quantity = replace(original.floor_finish_quantity_evidence[0], authority=method)
+    forged = replace(original, canonical_floors=(floor,),
+                     floor_finish_quantity_evidence=(quantity,))
+    with pytest.raises(SourceClosedRunConflictError, match="metric authority disagrees"):
+        seal_live_floor_finish_area_run(
+            forged, workspace_id=1, project_id="project-1",
+        )
+    assert len(seal_live_floor_finish_area_run(
+        original, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+def _scaled_floor_finish_claim():
+    source = _claim()
+    floor = replace(
+        source.canonical_floors[0],
+        metric_area_authority=MeasurementAuthorityType.PDF_SCALED.value,
+    )
+    quantity = source.floor_finish_quantity_evidence[0]
+    scaled = replace(
+        quantity,
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        metadata={
+            **dict(quantity.metadata),
+            "resolved_scale_id": "original-physical-scale-1",
+            "scale_status": "resolved",
+            "scale_conflicts": (),
+        },
+    )
+    return replace(source, canonical_floors=(floor,),
+                   floor_finish_quantity_evidence=(scaled,))
+
+
+def test_original_floor_finish_source_seal_keeps_exact_resolved_scale_positive():
+    source = _scaled_floor_finish_claim()
+    first = seal_live_floor_finish_area_run(
+        source, workspace_id=1, project_id="project-1",
+    )
+    second = seal_live_floor_finish_area_run(
+        source, workspace_id=1, project_id="project-1",
+    )
+    assert len(first.quantities) == 1
+    assert first.to_dict() == second.to_dict()
+    rows = project_live_floor_finish_customer_rows(
+        source, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows) == 1
+    assert rows[0]["measurement_method"] == "scaled_geometry"
+    assert verify_sealed_customer_output(first, rows).verified_quantity_ids == (
+        source.floor_finish_quantity_evidence[0].quantity_id,
+    )
+
+
+@pytest.mark.parametrize("overrides", (
+    {"resolved_scale_id": True},
+    {"resolved_scale_id": " scale-1 "},
+    {"resolved_scale_id": ""},
+    {"scale_status": "provisional"},
+    {"scale_status": True},
+    {"scale_conflicts": ("independent-scale-rival",)},
+    {"scale_conflicts": "not-a-typed-census"},
+    {"scale_conflicts": None},
+))
+def test_original_floor_finish_source_seal_rejects_unproved_scale(overrides):
+    original = _scaled_floor_finish_claim()
+    quantity = original.floor_finish_quantity_evidence[0]
+    forged = replace(
+        original,
+        floor_finish_quantity_evidence=(replace(
+            quantity, metadata={**dict(quantity.metadata), **overrides},
+        ),),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="exact resolved physical scale"):
+        seal_live_floor_finish_area_run(
+            forged, workspace_id=1, project_id="project-1",
+        )
+    assert len(seal_live_floor_finish_area_run(
+        original, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
