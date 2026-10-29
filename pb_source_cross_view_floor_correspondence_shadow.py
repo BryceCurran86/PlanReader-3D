@@ -63,6 +63,11 @@ SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED = "source_finish_code_summary_budget_
 MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES = 250_000
 SOURCE_WALL_SEGMENT_UNIVERSE_INVALID = "source_wall_segment_universe_invalid"
 SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED = "source_registration_vote_budget_exceeded"
+SOURCE_NULL_SUPPORT_TRIALS_INVALID = "source_null_support_trials_invalid"
+# Preserve the established 60-trial null comparison; a caller cannot shrink
+# the evidence sample or request unbounded source-shadow scoring work.
+MIN_SOURCE_NULL_SUPPORT_TRIALS = 60
+MAX_SOURCE_NULL_SUPPORT_TRIALS = 1000
 # Diagnostic work budgets, not PDF primitive, topology snap or quantity limits.
 # Never publish a partial registration if a complete source search is too costly.
 MAX_SOURCE_REGISTRATION_VOTE_PAIRS = 250_000
@@ -983,13 +988,24 @@ class SourceCrossViewFloorCorrespondenceProducer:
         trials: int = 60,
     ) -> SourceCrossViewFloorCorrespondenceResult:
         """Pure geometric evaluation using in-memory segments and boxes."""
+        # A caller-controlled null sample must not weaken the existing 60-trial
+        # registration gate, crash on an empty sample, or consume unbounded work.
+        # Validate it independently of malformed source inputs so all typed
+        # negatives remain visible when several gates fail together.
+        invalid_null_trials = (
+            type(trials) is not int
+            or not MIN_SOURCE_NULL_SUPPORT_TRIALS <= trials <= MAX_SOURCE_NULL_SUPPORT_TRIALS
+        )
         # Validate the complete mark universe BEFORE spatial filtering. An
         # unlocatable or untyped original mark may occupy any measured box;
         # dropping it would falsely make a surviving FT2/FT3 mark unique.
         if type(marks) not in (tuple, list) or len(marks) > 20000:
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=(SOURCE_FINISH_MARK_IDENTITY_INVALID,),
+                reason_codes=(
+                    SOURCE_FINISH_MARK_IDENTITY_INVALID,
+                    *([SOURCE_NULL_SUPPORT_TRIALS_INVALID] if invalid_null_trials else []),
+                ),
                 records=(),
             )
         checked_marks: list[tuple[float, float, Mapping[str, Any]]] = []
@@ -1038,6 +1054,8 @@ class SourceCrossViewFloorCorrespondenceProducer:
             if invalid_mark_universe:
                 reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
             reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
+            if invalid_null_trials:
+                reasons.append(SOURCE_NULL_SUPPORT_TRIALS_INVALID)
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
                 reason_codes=tuple(reasons),
@@ -1087,6 +1105,7 @@ class SourceCrossViewFloorCorrespondenceProducer:
         if (
             invalid_wall_universe
             or summary_over_budget
+            or invalid_null_trials
             or (invalid_box_universe and not checked_boxes)
         ):
             reasons = []
@@ -1098,6 +1117,8 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
             if invalid_box_universe:
                 reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
+            if invalid_null_trials:
+                reasons.append(SOURCE_NULL_SUPPORT_TRIALS_INVALID)
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
                 reason_codes=tuple(reasons),
