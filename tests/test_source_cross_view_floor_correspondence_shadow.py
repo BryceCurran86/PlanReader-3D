@@ -1907,3 +1907,23 @@ def test_valid_native_wall_universe_preserves_shadow_candidate_only():
     assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
     assert result.records[0].takeoff_eligible is False
     assert result.records[0].commercial_projection_allowed is False
+
+
+def test_wall_veto_preserves_independent_malformed_mark_and_box_evidence():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet() + [{"x1": 1.0, "y1": 2.0}],
+        target_segments=list(TARGET_SHEET),
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (0.0, 0.0, 0.0, 1.0),
+            "canonical_floor_id": "malformed-room",
+        }],
+        marks=[{"x": float("nan"), "y": 100.0, "code": "FT3"}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+    )
+    assert result.records == ()
