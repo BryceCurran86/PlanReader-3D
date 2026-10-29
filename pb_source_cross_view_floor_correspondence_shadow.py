@@ -600,6 +600,111 @@ class SourceCrossViewFloorCorrespondenceResult:
     all_competing_registrations: tuple[dict[str, Any], ...] = ()
 
 
+
+def _overlapping_measured_box_flags(
+    boxes: Sequence[tuple[float, float, float, float]],
+) -> list[bool]:
+    """Flag every strictly positive-area overlap without enumerating pairs.
+
+    The caller has already validated all box coordinates and bounds. Sweep
+    increasing left x, expiring rectangles whose right x only touches the
+    incoming left edge. Two compressed-y interval indexes retain all active
+    boxes and only the active boxes not yet known to overlap. Each previously
+    unmarked box is removed from the second index at most once, so even 20k
+    identical overlapping boxes remain O(n log n), not O(n squared).
+
+    The result is only a veto, never a chosen physical owner.
+    """
+    if not boxes:
+        return []
+    import heapq
+
+    y_coords = sorted({y for box in boxes for y in (box[1], box[3])})
+    y_index = {y: i for i, y in enumerate(y_coords)}
+    y_ranges = [(y_index[b[1]], y_index[b[3]] - 1) for b in boxes]
+    y_cells = len(y_coords) - 1
+
+    class _ActiveY:
+        def __init__(self) -> None:
+            self.subtree_counts = [0] * (4 * y_cells + 4)
+            self.owners: dict[int, set[int]] = {}
+
+        def update(self, item: int, delta: int) -> None:
+            left, right = y_ranges[item]
+
+            def visit(node: int, lo: int, hi: int) -> None:
+                self.subtree_counts[node] += delta
+                if left <= lo and hi <= right:
+                    if delta > 0:
+                        self.owners.setdefault(node, set()).add(item)
+                    else:
+                        bucket = self.owners[node]
+                        bucket.remove(item)
+                        if not bucket:
+                            del self.owners[node]
+                    return
+                mid = (lo + hi) // 2
+                if left <= mid:
+                    visit(node * 2, lo, mid)
+                if right > mid:
+                    visit(node * 2 + 1, mid + 1, hi)
+
+            visit(1, 0, y_cells - 1)
+
+        def find_overlap(self, item: int) -> Optional[int]:
+            left, right = y_ranges[item]
+
+            def visit(node: int, lo: int, hi: int) -> Optional[int]:
+                if right < lo or hi < left or not self.subtree_counts[node]:
+                    return None
+                bucket = self.owners.get(node)
+                if bucket:
+                    return next(iter(bucket))
+                if lo == hi:
+                    return None
+                mid = (lo + hi) // 2
+                if left <= mid:
+                    match = visit(node * 2, lo, mid)
+                    if match is not None:
+                        return match
+                if right > mid:
+                    return visit(node * 2 + 1, mid + 1, hi)
+                return None
+
+            return visit(1, 0, y_cells - 1)
+
+    active = _ActiveY()
+    unmarked = _ActiveY()
+    marked = [False] * len(boxes)
+    expirations: list[tuple[float, int]] = []
+    order = sorted(
+        range(len(boxes)),
+        key=lambda i: (boxes[i][0], boxes[i][2], boxes[i][1], boxes[i][3], i),
+    )
+    for i in order:
+        x0, _, x1, _ = boxes[i]
+        while expirations and expirations[0][0] <= x0:
+            _, old = heapq.heappop(expirations)
+            active.update(old, -1)
+            if not marked[old]:
+                unmarked.update(old, -1)
+
+        if active.find_overlap(i) is not None:
+            marked[i] = True
+            # Mark every previously unmarked overlapping rectangle, but
+            # never revisit it once marked. Already-marked boxes remain in
+            # the complete active index to veto future overlaps.
+            while (old := unmarked.find_overlap(i)) is not None:
+                marked[old] = True
+                unmarked.update(old, -1)
+
+        active.update(i, 1)
+        if not marked[i]:
+            unmarked.update(i, 1)
+        heapq.heappush(expirations, (x1, i))
+    return marked
+
+
 class SourceCrossViewFloorCorrespondenceProducer:
     """Producer-owned shadow authority for cross-sheet plan correspondence."""
 
@@ -774,17 +879,9 @@ class SourceCrossViewFloorCorrespondenceProducer:
 
         # Derive overlapping measured-floor regions from the full input
         # universe; a missing caller hint cannot confer unique mark ownership.
-        box_bounds = [box for _, box in checked_boxes]
-        overlap_counts = [0] * len(box_bounds)
-        for i, first in enumerate(box_bounds):
-            for j in range(i + 1, len(box_bounds)):
-                second = box_bounds[j]
-                if (
-                    min(first[2], second[2]) > max(first[0], second[0])
-                    and min(first[3], second[3]) > max(first[1], second[1])
-                ):
-                    overlap_counts[i] += 1
-                    overlap_counts[j] += 1
+        overlap_flags = _overlapping_measured_box_flags(
+            [box for _, box in checked_boxes]
+        )
 
         # Derive identity collisions from the *entire* measured-box universe,
         # not from caller hints or spatial overlap alone. Two disjoint boxes
@@ -830,7 +927,7 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 marks_inside=inside_marks,
                 other_labelled_boxes_overlapping=(
                     item.get("other_labelled_boxes_overlapping", 0)
-                    or overlap_counts[box_index]
+                    or overlap_flags[box_index]
                 ),
                 material_code=selector.material_code,
                 identity_missing=not all((
