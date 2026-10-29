@@ -198,28 +198,6 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 first_remaining_gate="original_source_scale_authority_unverified",
                 notes="Source scale absent; no metric opening or wall area.",
             )
-        clear_span_m = clear_span_pt * scale_ratio
-        if not math.isfinite(clear_span_m) or (clear_span_pt > 0 and clear_span_m == 0):
-            raise ValueError("nonfinite or underflowed metric conversion")
-
-        glazing_height_mm = max(0.0, head_height_mm - sill_height_mm)
-        glazing_height_m = glazing_height_mm / 1000.0
-        sill_height_m = sill_height_mm / 1000.0
-        head_height_m = head_height_mm / 1000.0
-        if ((glazing_height_mm > 0 and glazing_height_m == 0)
-                or (sill_height_mm > 0 and sill_height_m == 0)
-                or (head_height_mm > 0 and head_height_m == 0)):
-            raise ValueError("underflowed positive vertical measurement")
-
-        glazing_area_sqm = clear_span_m * glazing_height_m
-        spandrel_area_sqm = clear_span_m * sill_height_m
-        # Solid sub-sill wall is not an opening deduction.
-        total_opening_area_sqm = glazing_area_sqm
-        if not all(math.isfinite(v) for v in (glazing_area_sqm, spandrel_area_sqm)):
-            raise ValueError("nonfinite hypothetical area")
-        if ((glazing_height_mm > 0 and glazing_area_sqm == 0)
-                or (sill_height_mm > 0 and spandrel_area_sqm == 0)):
-            raise ValueError("underflowed positive hypothetical area")
 
         contract_id = stable_contract_id(
             f"SPANDREL_SUB_SILL_{context_label}",
@@ -277,6 +255,32 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 first_remaining_gate="vertical_levels_inverted_or_negative",
                 notes=f"Invalid vertical levels: sill={sill_height_mm:.1f}mm >= head={head_height_mm:.1f}mm.",
             )
+
+        # Source-free rejected geometry must abstain before metric conversion.
+        # Extreme but finite caller scale/levels cannot mask the first typed
+        # geometry or vertical-level failure with an arithmetic exception.
+        clear_span_m = clear_span_pt * scale_ratio
+        if not math.isfinite(clear_span_m) or (clear_span_pt > 0 and clear_span_m == 0):
+            raise ValueError("nonfinite or underflowed metric conversion")
+
+        glazing_height_mm = max(0.0, head_height_mm - sill_height_mm)
+        glazing_height_m = glazing_height_mm / 1000.0
+        sill_height_m = sill_height_mm / 1000.0
+        head_height_m = head_height_mm / 1000.0
+        if ((glazing_height_mm > 0 and glazing_height_m == 0)
+                or (sill_height_mm > 0 and sill_height_m == 0)
+                or (head_height_mm > 0 and head_height_m == 0)):
+            raise ValueError("underflowed positive vertical measurement")
+
+        glazing_area_sqm = clear_span_m * glazing_height_m
+        spandrel_area_sqm = clear_span_m * sill_height_m
+        # Solid sub-sill wall is not an opening deduction.
+        total_opening_area_sqm = glazing_area_sqm
+        if not all(math.isfinite(v) for v in (glazing_area_sqm, spandrel_area_sqm)):
+            raise ValueError("nonfinite hypothetical area")
+        if ((glazing_height_mm > 0 and glazing_area_sqm == 0)
+                or (sill_height_mm > 0 and spandrel_area_sqm == 0)):
+            raise ValueError("underflowed positive hypothetical area")
 
         # Shadow candidate only: physical opening and source scale unproven
         return SpandrelSubSillRecord(

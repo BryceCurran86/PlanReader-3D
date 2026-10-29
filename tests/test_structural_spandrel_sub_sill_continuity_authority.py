@@ -363,3 +363,51 @@ def test_serialized_spandrel_abstention_keeps_native_geometry_and_null_metrics(a
     assert payload["glazing_aperture_area_sqm"] is None
     assert payload["spandrel_wall_area_sqm"] is None
     assert payload["shadow_only"] and not payload["takeoff_eligible"]
+
+@pytest.mark.parametrize(
+    "jamb_b, sill_mm, head_mm, expected_class, expected_gate",
+    [
+        ((110.0, 200.0), 900.0, 2100.0,
+         SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN,
+         "clear_span_out_of_bounds"),
+        ((200.0, 200.0), 2100.0, 900.0,
+         SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS,
+         "vertical_levels_inverted_or_negative"),
+        ((200.0, 200.0), 1e308, 900.0,
+         SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS,
+         "vertical_levels_inverted_or_negative"),
+    ],
+)
+def test_rejected_spandrel_abstains_before_extreme_metric_arithmetic(
+    authority, jamb_b, sill_mm, head_mm, expected_class, expected_gate
+):
+    """A rejected geometry/level cannot be replaced by overflow from caller scale."""
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=jamb_b,
+        sill_height_mm=sill_mm, head_height_mm=head_mm,
+        host_through_wall_id="HOST", scale_ratio=1e308,
+    )
+    result = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert result.classification == expected_class
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.first_remaining_gate == expected_gate
+    assert result.shadow_only and not result.takeoff_eligible
+    assert not result.commercial_projection_allowed
+    for field in (
+        "clear_span_m", "glazing_height_mm", "glazing_aperture_area_sqm",
+        "spandrel_wall_area_sqm", "total_wall_opening_area_sqm",
+    ):
+        assert getattr(result, field) is None
+        assert result.to_dict()[field] is None
+    assert result.contract_id == authority.evaluate_spandrel_sub_sill(
+        **(kwargs | {"jamb_a": jamb_b, "jamb_b": kwargs["jamb_a"]})
+    ).contract_id
+
+
+def test_valid_spandrel_still_rejects_extreme_metric_overflow(authority):
+    with pytest.raises(ValueError, match="nonfinite or underflowed metric conversion"):
+        authority.evaluate_spandrel_sub_sill(
+            jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+            sill_height_mm=900.0, head_height_mm=2100.0,
+            host_through_wall_id="HOST", scale_ratio=1e308,
+        )
