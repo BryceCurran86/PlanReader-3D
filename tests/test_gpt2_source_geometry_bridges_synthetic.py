@@ -311,12 +311,28 @@ def test_original_registration_witnesses_fail_closed_on_malformed_nested_receipt
     )
     for role in bad_roles:
         receipt=deepcopy(registration)
+        # Keep ink confirmation valid when testing malformed ancestry.
+        # Otherwise the earlier, independently correct ink-proof veto
+        # masks the source-shape reason this regression is asserting.
+        if type(role) is dict:
+            role={**role,"matched_original_ink_only":True}
         receipt["original_witnesses"]["left"]=role
         result=compare(floor,finish,original_source_registration=receipt,
                        translation_pdf_pts=(10.0,7.0))
         assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
         assert result["first_failure"]=="unjoined_source_wall_ancestry"
         assert result["new_firm_quantities"]==0
+
+    # A well-formed witness that lacks genuine original-ink confirmation
+    # must retain its distinct fail-closed reason, not be mistaken for
+    # a missing wall ancestry or accepted as a source candidate.
+    receipt=deepcopy(registration)
+    receipt["original_witnesses"]["left"]["matched_original_ink_only"]=False
+    result=compare(floor,finish,original_source_registration=receipt,
+                   translation_pdf_pts=(10.0,7.0))
+    assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+    assert result["first_failure"]=="original_registration_ink_witness_unproven"
+    assert result["new_firm_quantities"]==0
 
 
 def test_original_registration_reused_wall_witness_is_not_independent_proof():
