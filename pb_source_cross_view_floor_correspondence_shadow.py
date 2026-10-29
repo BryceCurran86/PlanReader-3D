@@ -1002,6 +1002,12 @@ class SourceCrossViewFloorCorrespondenceProducer:
             if type(raw_x) not in (int, float) or type(raw_y) not in (int, float):
                 invalid_mark_universe = True
                 continue
+            # Native PDF coordinates above the exact binary64 integer range
+            # can alias distinct source marks during float conversion. Apply
+            # the same lossless source-coordinate limit as wall and box input.
+            if abs(raw_x) > 2**53 or abs(raw_y) > 2**53:
+                invalid_mark_universe = True
+                continue
             try:
                 mx, my = float(raw_x), float(raw_y)
             except (ValueError, OverflowError):
