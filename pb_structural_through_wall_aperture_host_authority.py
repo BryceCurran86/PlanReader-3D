@@ -456,7 +456,28 @@ class StructuralThroughWallApertureHostAuthority:
             if identity_occurrences[item["op"].physical_opening_id] > 1:
                 conflicting_positions.add(index)
 
-        for index in conflicting_positions:
+        # One native terminal jamb observation cannot prove two different
+        # physical apertures, even when their station intervals are disjoint.
+        # Consult the COMPLETE observation universe: an already-rejected
+        # sibling must not disappear and silently validate the other claim.
+        observation_owners: dict[str, set[str]] = {}
+        for opening in openings:
+            for observation_id in opening.terminal_jamb_observation_ids:
+                observation_owners.setdefault(observation_id, set()).add(
+                    opening.physical_opening_id
+                )
+        reused_observations = {
+            observation_id for observation_id, owners in observation_owners.items()
+            if len(owners) > 1
+        }
+        observation_conflicts = {
+            index for index, item in enumerate(valid_items)
+            if reused_observations.intersection(
+                item["op"].terminal_jamb_observation_ids
+            )
+        }
+
+        for index in sorted(conflicting_positions | observation_conflicts):
             item = valid_items[index]
             item["valid"] = False
             item["rec"] = self._make_record(
@@ -465,7 +486,11 @@ class StructuralThroughWallApertureHostAuthority:
                 item["u_min"],
                 item["u_max"],
                 EvidenceResolutionStatus.ABSTAINED,
-                "aperture_physical_interval_conflict",
+                (
+                    "aperture_terminal_jamb_observation_conflict"
+                    if index in observation_conflicts
+                    else "aperture_physical_interval_conflict"
+                ),
             )
 
         piers: list[InterAperturePierRecord] = []

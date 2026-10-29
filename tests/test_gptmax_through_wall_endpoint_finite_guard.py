@@ -835,3 +835,92 @@ def test_invalid_terminal_observation_universe_rejected(bad):
         ApertureHostCandidateInput(
             "A", (20.0, 0.0), (40.0, 0.0), bad,
         )
+
+
+def test_distinct_openings_cannot_reuse_one_terminal_jamb_observation():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (500.0, 0.0), 20.0
+    )
+    first = ApertureHostCandidateInput(
+        "opening_a", (100.0, 0.0), (200.0, 0.0),
+        ("native_jamb_shared", "native_jamb_a"),
+    )
+    second = ApertureHostCandidateInput(
+        "opening_b", (210.0, 0.0), (310.0, 0.0),
+        ("native_jamb_shared", "native_jamb_b"),
+    )
+    authority = _authority()
+    baseline = None
+    for inputs in ((first, second), (second, first)):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=inputs,
+        )
+        assert not piers
+        by_id = {record.physical_opening_id: record for record in records}
+        assert set(by_id) == {"opening_a", "opening_b"}
+        for record in by_id.values():
+            assert record.status is S.ABSTAINED
+            assert record.first_remaining_gate == "aperture_terminal_jamb_observation_conflict"
+            assert not record.adjacent_pier_ids
+            assert record.shadow_only and not record.takeoff_eligible
+            assert not record.commercial_projection_allowed
+        evidence = {key: value.to_dict() for key, value in by_id.items()}
+        if baseline is None:
+            baseline = evidence
+        else:
+            assert evidence == baseline
+
+
+def test_invalid_sibling_still_vetoes_double_spent_terminal_observation():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (500.0, 0.0), 20.0
+    )
+    valid = ApertureHostCandidateInput(
+        "opening_valid", (100.0, 0.0), (200.0, 0.0), ("native_shared",),
+    )
+    invalid = ApertureHostCandidateInput(
+        "opening_outside", (300.0, 50.0), (400.0, 50.0), ("native_shared",),
+    )
+    unrelated = ApertureHostCandidateInput(
+        "opening_unrelated", (250.0, 0.0), (350.0, 0.0), ("native_other",),
+    )
+    authority = _authority()
+    for inputs in ((valid, invalid, unrelated), (unrelated, invalid, valid)):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=inputs,
+        )
+        by_id = {record.physical_opening_id: record for record in records}
+        assert by_id["opening_valid"].status is S.ABSTAINED
+        assert by_id["opening_valid"].first_remaining_gate == (
+            "aperture_terminal_jamb_observation_conflict"
+        )
+        assert by_id["opening_outside"].status is S.ABSTAINED
+        assert by_id["opening_outside"].first_remaining_gate == (
+            "aperture_outside_host_wall_band"
+        )
+        assert by_id["opening_unrelated"].status is S.CANDIDATE
+        assert by_id["opening_unrelated"].first_remaining_gate == (
+            "original_source_host_unverified"
+        )
+        assert not piers
+
+
+def test_distinct_terminal_observations_keep_geometric_pier_candidate():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (500.0, 0.0), 20.0
+    )
+    first = ApertureHostCandidateInput(
+        "opening_a", (100.0, 0.0), (200.0, 0.0), ("native_a_left", "native_a_right"),
+    )
+    second = ApertureHostCandidateInput(
+        "opening_b", (210.0, 0.0), (310.0, 0.0), ("native_b_left", "native_b_right"),
+    )
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=(first, second),
+    )
+    assert len(piers) == 1 and piers[0].pier_width_pt == 10.0
+    assert piers[0].is_structural_masonry_pier is None
+    assert piers[0].status is S.CANDIDATE
+    assert all(record.status is S.CANDIDATE for record in records)
+    assert all(record.first_remaining_gate == "original_source_host_unverified" for record in records)
+    assert all(record.shadow_only and not record.takeoff_eligible for record in records)
