@@ -2511,3 +2511,92 @@ def test_outward_wall_band_index_20000_native_keys_many_boxes():
             for side in ("x0", "x1", "y0", "y1")
         )
     assert (len(lines["H"]), len(lines["V"])) == before
+
+
+def test_reused_sheet_line_index_matches_full_rebuild_and_rejects_cross_sheet_alias():
+    # The same exact source wall evidence must be used with or without a
+    # prebuilt index. A target index cannot masquerade as support-wall ink.
+    support = build_lines(support_sheet())
+    target = build_lines(TARGET_SHEET)
+    box = (251.04, 1382.72, 394.80, 1585.04)
+    before = repr((support, target, box))
+    kwargs = {
+        "lines_support": support,
+        "lines_target": target,
+        "orientation": "identity",
+        "translation": TRUE_T,
+    }
+    rebuilt = box_correspondence(box, **kwargs)
+    indexed = box_correspondence(
+        box, **kwargs,
+        _support_index=LineIndex(support),
+        _target_index=LineIndex(target),
+    )
+    assert indexed == rebuilt
+    assert indexed["wall_bounded_on_both_sheets"] is True
+    assert indexed["wall_evidence_identical_on_both_sheets"] is True
+    assert all(
+        indexed["sides"][side]["outward_second_faces_match"]
+        for side in ("x0", "x1", "y0", "y1")
+    )
+    with pytest.raises(ValueError, match="source_line_index_does_not_match_sheet"):
+        box_correspondence(box, **kwargs, _support_index=LineIndex(target))
+    with pytest.raises(ValueError, match="source_line_index_does_not_match_sheet"):
+        box_correspondence(box, **kwargs, _target_index=LineIndex(support))
+    assert repr((support, target, box)) == before
+
+
+def test_producer_reuses_two_source_side_indexes_for_complete_many_box_universe(monkeypatch):
+    # Registration and null sampling build their own two indexes. The
+    # producer must build only TWO additional sheet-bound side indexes,
+    # regardless of how many physical floor boxes are evaluated.
+    import pb_source_cross_view_floor_correspondence_shadow as source_module
+
+    original_index = source_module.LineIndex
+    indexed_sheets = []
+
+    class CountingIndex(original_index):
+        def __init__(self, lines):
+            indexed_sheets.append(id(lines))
+            super().__init__(lines)
+
+    monkeypatch.setattr(source_module, "LineIndex", CountingIndex)
+    boxes = [{
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-room-office",
+        "source_room_face_record_id": "face-office",
+    }]
+    boxes.extend({
+        "dimension_box_pdf_pts": (
+            3000.0 + 120.0 * i, 3000.0,
+            3080.0 + 120.0 * i, 3090.0,
+        ),
+        "canonical_floor_id": f"far-floor-{i}",
+        "physical_room_id": f"far-room-{i}",
+        "source_room_face_record_id": f"far-face-{i}",
+    } for i in range(256))
+    marks = [{
+        "x": 327.8, "y": 1437.5, "code": "FT3",
+        "registered_region": True,
+    }]
+    before = copy.deepcopy((boxes, marks))
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=boxes,
+        marks=marks,
+    )
+    assert len(indexed_sheets) == 4
+    assert indexed_sheets[2] != indexed_sheets[3]
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == len(boxes)
+    assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert all(
+        record.status is EvidenceResolutionStatus.ABSTAINED
+        for record in result.records[1:]
+    )
+    assert all(not record.takeoff_eligible and not record.commercial_projection_allowed
+               for record in result.records)
+    assert (boxes, marks) == before
