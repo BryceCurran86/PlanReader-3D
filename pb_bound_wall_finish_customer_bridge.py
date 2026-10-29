@@ -56,7 +56,16 @@ def bound_wall_finish_record_to_takeoff_row(
     if record.status is not EvidenceResolutionStatus.CORROBORATED:
         raise ValueError("Cannot publish uncorroborated finish record to customer takeoff")
 
-    qty = round(max(0.0, float(record.quantity_m2)), 2)
+    # Reprove the exact source record before customer rounding. A positive
+    # original area smaller than the two-decimal display quantum must never
+    # silently become a measured 0.00 m² row, nor be rounded UP to a
+    # fabricated minimum. The batch caller fails closed on this error.
+    quantity = publish_bound_wall_finish_quantity(record)
+    qty = round(float(quantity.value), 2)
+    if not math.isfinite(qty) or qty <= 0.0:
+        raise ValueError(
+            "positive source wall-finish area is unrepresentable in customer m²"
+        )
     trade_lower = str(record.trade_scope_id or "").lower()
     is_external = "external" in trade_lower or "exterior" in trade_lower
 
@@ -74,7 +83,6 @@ def bound_wall_finish_record_to_takeoff_row(
         f"Host walls: {wall_list}; faces bound: {face_count}; net area: {qty:.2f} m²."
     )
     source_page = str(record.page_id or "1")
-    quantity = publish_bound_wall_finish_quantity(record)
     source_ref = (
         f"{source_prefix} · bound_wall_finish:{record.record_id}"
         f" · finish_quantity:{quantity.quantity_id}"
