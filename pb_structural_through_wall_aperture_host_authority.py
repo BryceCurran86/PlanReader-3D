@@ -28,6 +28,9 @@ from pb_migration_contracts import (
 )
 
 DEFAULT_SNAP_TOLERANCE_PT = 2.5
+# The repository's 20k geometry-primitive cap applies even with no
+# transverse obstructions (where the pairwise work product would be zero).
+_MAX_GEOMETRIC_PRIMITIVES = 20_000
 # Bounded shadow-only candidate work: 20k primitives must not imply 400m
 # opening/obstruction intersection tests. This is NOT a geometry threshold.
 _MAX_TRANSVERSE_INTERSECTION_CHECKS = 250_000
@@ -271,6 +274,13 @@ class StructuralThroughWallApertureHostAuthority:
             raise ValueError(
                 "transverse_wall_segments must be a complete list/tuple obstruction universe"
             )
+        # Count the continuous host itself and BOTH complete candidate
+        # universes. A product-only work budget misses 20k+ openings when
+        # transverse evidence is empty, and misses transverse-only inputs
+        # when no openings were detected. Never truncate either universe.
+        if (1 + len(openings) + len(transverse_wall_segments)
+                > _MAX_GEOMETRIC_PRIMITIVES):
+            raise ValueError("through_wall_primitive_limit_exceeded")
         openings = tuple(openings)
         if any(type(opening) is not ApertureHostCandidateInput for opening in openings):
             raise ValueError("openings must contain ApertureHostCandidateInput records")

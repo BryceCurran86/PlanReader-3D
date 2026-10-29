@@ -1510,3 +1510,72 @@ def test_transverse_work_budget_boundary_and_small_positive_are_fail_closed():
         assert actual[0].status is S.ABSTAINED
         assert actual[0].first_remaining_gate == "host_through_wall_obstructed"
         assert not actual[0].commercial_projection_allowed
+
+
+def test_complete_primitive_cap_rejects_opening_only_overflow_before_shadow():
+    """A zero transverse product cannot bypass the repository's 20k cap."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = tuple(
+        ApertureHostCandidateInput(f"native-{i}", (20.0, 0.0), (30.0, 0.0))
+        for i in range(20_000)
+    )
+    original = openings
+    authority = _authority()
+    for order in (openings, openings[::-1]):
+        with pytest.raises(ValueError, match="through_wall_primitive_limit_exceeded"):
+            authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=order,
+                transverse_wall_segments=(),
+            )
+    assert openings == original
+    # No partial candidate, inferred pier, FIRM authority or commercial row.
+
+
+def test_complete_primitive_cap_rejects_transverse_only_overflow_and_keeps_boundary():
+    """A zero opening product also requires a complete, bounded obstruction universe."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    transverse = tuple(
+        ((float(i), 100.0), (float(i), 120.0))
+        for i in range(20_000)
+    )
+    original = transverse
+    authority = _authority()
+    with pytest.raises(ValueError, match="through_wall_primitive_limit_exceeded"):
+        authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(),
+            transverse_wall_segments=transverse,
+        )
+    # Exactly 20,000 total primitives: 1 host + 19,999 obstructions.
+    # The empty opening universe must not emit a fabricated host or pier.
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(),
+        transverse_wall_segments=transverse[:-1],
+    ) == ((), ())
+    assert transverse == original
+
+
+def test_complete_primitive_cap_counts_host_and_both_universes():
+    """The 20k cap is independent of the separate 250k pairwise-work budget."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput("A", (20.0, 0.0), (30.0, 0.0))
+    # 1 host + 1 opening + 19,999 segments exceeds 20k while the
+    # 19,999 potential crossing checks remain BELOW the 250k budget.
+    transverse = tuple(
+        ((float(i), 100.0), (float(i), 120.0))
+        for i in range(19_999)
+    )
+    with pytest.raises(ValueError, match="through_wall_primitive_limit_exceeded"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=transverse,
+        )
+    # Small ordinary geometry retains the original shadow-only contract.
+    records, piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+        transverse_wall_segments=transverse[:1],
+    )
+    assert len(records) == 1 and piers == ()
+    assert records[0].status is S.CANDIDATE
+    assert records[0].first_remaining_gate == "original_source_host_unverified"
+    assert records[0].shadow_only and not records[0].takeoff_eligible
+    assert not records[0].commercial_projection_allowed
