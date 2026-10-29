@@ -17,6 +17,7 @@ Enforces:
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -511,6 +512,20 @@ class StructuralThroughWallApertureHostAuthority:
             if max(abs(p0_perp), abs(p1_perp)) <= half_thick + snap_tolerance_pt:
                 unresolved_wall_band_intervals.append((low, high))
 
+        # An in-band rejected aperture blocks a gap iff its low station is
+        # strictly below the next opening start AND its high station is
+        # strictly above the previous opening end.  Prefix maximum highs
+        # over sorted lows answer that exact predicate in logarithmic time,
+        # rather than scanning every rejected interval for every candidate.
+        unresolved_wall_band_intervals.sort()
+        rejected_lows: list[float] = []
+        rejected_prefix_highs: list[float] = []
+        greatest_high = -math.inf
+        for low, high in unresolved_wall_band_intervals:
+            rejected_lows.append(low)
+            greatest_high = max(greatest_high, high)
+            rejected_prefix_highs.append(greatest_high)
+
         piers: list[InterAperturePierRecord] = []
         pier_ids_by_opening: dict[str, list[str]] = {}
 
@@ -523,8 +538,10 @@ class StructuralThroughWallApertureHostAuthority:
                 continue
             # An abstained same-band candidate inside the proposed gap leaves
             # physical consecutiveness unresolved, so no pier is inferred.
-            if any(low < nxt["u_min"] and high > curr["u_max"]
-                   for low, high in unresolved_wall_band_intervals):
+            # bisect_left excludes low == next start; the strict prefix
+            # comparison excludes high == previous end (edge touch only).
+            cutoff = bisect_left(rejected_lows, nxt["u_min"])
+            if cutoff and rejected_prefix_highs[cutoff - 1] > curr["u_max"]:
                 continue
             gap = nxt["u_min"] - curr["u_max"]
             if (

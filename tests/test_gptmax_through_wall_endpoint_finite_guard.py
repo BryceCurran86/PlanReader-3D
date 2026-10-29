@@ -1089,3 +1089,89 @@ def test_rejected_in_band_opening_cannot_be_skipped_for_pier_adjacency(
             through_wall=wall, openings=openings,
             transverse_wall_segments=transverse,
         ) == (records, piers)
+
+
+def test_dense_unreviewed_wall_band_universe_never_mints_false_piers():
+    """Thousands of rejected in-band candidates must not cause pairwise scans."""
+    count = 2048
+    wall = ContinuousThroughWallCandidate(
+        "dense-host", (0.0, 0.0), (count * 10.0 + 10.0, 0.0), 20.0,
+    )
+    openings = []
+    for i in range(count):
+        station = i * 10.0
+        openings.append(ApertureHostCandidateInput(
+            f"valid-{i}", (station + 1.0, 0.0), (station + 3.0, 0.0),
+        ))
+        if i < count - 1:
+            # In-band but misaligned, strictly inside the 8pt proposed gap.
+            openings.append(ApertureHostCandidateInput(
+                f"rejected-{i}", (station + 5.0, 0.0),
+                (station + 6.0, 4.0),
+            ))
+    originals = tuple((op.start_pt, op.end_pt) for op in openings)
+    authority = _authority()
+    canonical = None
+    for ordered in (tuple(openings), tuple(reversed(openings))):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordered,
+        )
+        assert len(records) == 2 * count - 1
+        assert piers == ()
+        by_id = {record.physical_opening_id: record for record in records}
+        assert len(by_id) == len(records)
+        assert all(by_id[f"valid-{i}"].status is S.CANDIDATE
+                   for i in range(count))
+        assert all(by_id[f"rejected-{i}"].status is S.ABSTAINED
+                   and by_id[f"rejected-{i}"].first_remaining_gate
+                   == "aperture_wall_axis_misaligned"
+                   for i in range(count - 1))
+        assert all(not r.adjacent_pier_ids and r.shadow_only
+                   and not r.takeoff_eligible and not r.commercial_projection_allowed
+                   for r in records)
+        observed = {key: (rec.hosting_record_id, rec.first_remaining_gate)
+                    for key, rec in by_id.items()}
+        if canonical is None:
+            canonical = observed
+        else:
+            assert observed == canonical
+    assert tuple((op.start_pt, op.end_pt) for op in openings) == originals
+
+
+def test_rejected_wall_band_interval_edge_touch_does_not_veto_pier():
+    """Retain strict overlap semantics: touching a boundary is not crossing."""
+    wall = ContinuousThroughWallCandidate(
+        "edge-host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    a = ApertureHostCandidateInput("A", (20.0, 0.0), (30.0, 0.0))
+    b = ApertureHostCandidateInput("B", (40.0, 0.0), (50.0, 0.0))
+    left_touch = ApertureHostCandidateInput(
+        "left-touch", (29.0, 0.0), (30.0, 4.0),
+    )
+    right_touch = ApertureHostCandidateInput(
+        "right-touch", (40.0, 0.0), (41.0, 4.0),
+    )
+    authority = _authority()
+    canonical = None
+    for ordered in (
+        (a, b, left_touch, right_touch),
+        (right_touch, left_touch, b, a),
+    ):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordered,
+        )
+        by_id = {r.physical_opening_id: r for r in records}
+        assert len(piers) == 1
+        assert piers[0].pier_width_pt == 10.0
+        assert piers[0].is_structural_masonry_pier is None
+        assert all(by_id[key].status is S.CANDIDATE for key in ("A", "B"))
+        assert all(by_id[key].status is S.ABSTAINED
+                   and by_id[key].first_remaining_gate == "aperture_wall_axis_misaligned"
+                   for key in ("left-touch", "right-touch"))
+        assert all(r.shadow_only and not r.takeoff_eligible
+                   and not r.commercial_projection_allowed for r in records)
+        evidence = ({key: r.to_dict() for key, r in by_id.items()}, piers)
+        if canonical is None:
+            canonical = evidence
+        else:
+            assert evidence == canonical
