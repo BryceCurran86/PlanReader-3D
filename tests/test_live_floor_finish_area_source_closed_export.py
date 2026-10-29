@@ -13,6 +13,7 @@ from pb_live_external_physical_net_wall_publication import (
 )
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_customer_projection import (
+    _measurement_authority,
     project_live_floor_finish_customer_rows,
 )
 from pb_live_floor_finish_area_source_closed_export import (
@@ -22,6 +23,7 @@ from pb_live_floor_finish_area_source_closed_export import (
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_source_closed_run_export import SourceClosedRunConflictError
+from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
 
 
 def _floor() -> LiveCanonicalFloorSurfaceObject:
@@ -1081,6 +1083,39 @@ def test_original_floor_finish_source_seal_rejects_unproved_scale(overrides):
         seal_live_floor_finish_area_run(
             forged, workspace_id=1, project_id="project-1",
         )
+    assert len(seal_live_floor_finish_area_run(
+        original, workspace_id=1, project_id="project-1",
+    ).quantities) == 1
+
+
+
+def test_original_floor_finish_requires_present_empty_source_scale_conflict_census():
+    """Missing original conflict inventory is not a proven empty inventory."""
+    original = _scaled_floor_finish_claim()
+    quantity = original.floor_finish_quantity_evidence[0]
+    metadata = dict(quantity.metadata)
+    assert metadata.pop("scale_conflicts") == ()
+    missing_quantity = replace(quantity, metadata=metadata)
+    missing = replace(original, floor_finish_quantity_evidence=(missing_quantity,))
+    before_floor = original.canonical_floors[0].to_dict()
+    before_quantity = quantity.to_dict()
+    before_missing = missing_quantity.to_dict()
+
+    for publisher in (build_live_floor_finish_area_source_traces, seal_live_floor_finish_area_run):
+        with pytest.raises(SourceClosedRunConflictError, match="exact resolved physical scale"):
+            publisher(missing, workspace_id=1, project_id="project-1")
+    with pytest.raises(SourceClosedRunConflictError, match="exact resolved physical scale"):
+        project_live_floor_finish_customer_rows(
+            missing, workspace_id=1, project_id="project-1",
+        )
+    # Independent customer measurement boundary must also reject the receipt
+    # even when called without the direct source-seal boundary.
+    with pytest.raises(MissingCommercialAuthorityError, match="original resolved physical scale"):
+        _measurement_authority(missing_quantity)
+
+    assert original.canonical_floors[0].to_dict() == before_floor
+    assert quantity.to_dict() == before_quantity
+    assert missing_quantity.to_dict() == before_missing
     assert len(seal_live_floor_finish_area_run(
         original, workspace_id=1, project_id="project-1",
     ).quantities) == 1
