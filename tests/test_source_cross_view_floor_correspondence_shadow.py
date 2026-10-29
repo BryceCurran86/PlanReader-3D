@@ -29,6 +29,9 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES,
     SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
     SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED,
+    SOURCE_NULL_SUPPORT_TRIALS_INVALID,
+    MIN_SOURCE_NULL_SUPPORT_TRIALS,
+    MAX_SOURCE_NULL_SUPPORT_TRIALS,
     MAX_SOURCE_REGISTRATION_VOTE_PAIRS,
     SOURCE_MEASURED_FLOOR_BOX_INVALID,
     SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
@@ -2283,3 +2286,119 @@ def test_oversized_native_float_floor_box_retains_genuine_ft2_ft3_conflict():
     assert SOURCE_MEASURED_FLOOR_BOX_INVALID in rec.reason_codes
     assert rec.commercial_projection_allowed is False
     assert rec.takeoff_eligible is False
+
+
+# GPT2: null-registration support is part of the source identity gate, not a
+# caller-tunable shortcut. A zero/one-trial null sample can crash or make a
+# weak registration appear unique. Reject it before scoring any source box.
+@pytest.mark.parametrize("bad_trials", [
+    None, False, True, 0, -1, 1, 59, 60.0, "60",
+    1001, 10**100, float("nan"), float("inf"),
+])
+def test_null_support_trial_budget_abstains_without_source_owner(bad_trials):
+    boxes = [{
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-room-office",
+        "source_room_face_record_id": "face-office",
+    }]
+    marks = [{"x": 327.8, "y": 1437.5, "code": "FT3",
+              "registered_region": True}]
+    original_boxes, original_marks = copy.deepcopy(boxes), copy.deepcopy(marks)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET, measured_boxes=boxes,
+        marks=marks, trials=bad_trials,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_NULL_SUPPORT_TRIALS_INVALID,)
+    assert result.records == ()
+    assert result.winning_registration is None
+    assert boxes == original_boxes
+    assert marks == original_marks
+
+
+@pytest.mark.parametrize("trials", [
+    MIN_SOURCE_NULL_SUPPORT_TRIALS, MAX_SOURCE_NULL_SUPPORT_TRIALS,
+])
+def test_bounded_complete_null_support_retains_clean_shadow_candidate(trials):
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3",
+                "registered_region": True}],
+        trials=trials,
+    )
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
+
+
+def test_invalid_null_trials_retain_independent_source_universe_negatives():
+    support = support_sheet() + [
+        {"x1": 0.0, "y1": 0.0, "x2": True, "y2": 1.0},
+    ]
+    boxes = [
+        {"dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04)},
+        {"dimension_box_pdf_pts": (0.0, 0.0, 0.0, 20.0)},
+    ]
+    marks = [
+        {"x": 327.8, "y": 1437.5, "code": "FT3",
+         "registered_region": True},
+        {"x": 328.0, "y": 1438.0, "code": None,
+         "registered_region": True},
+    ]
+    before = copy.deepcopy((support, boxes, marks))
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=support,
+        target_segments=TARGET_SHEET, measured_boxes=boxes,
+        marks=marks, trials=0,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+        SOURCE_NULL_SUPPORT_TRIALS_INVALID,
+    )
+    assert result.records == ()
+    assert (support, boxes, marks) == before
+
+
+@pytest.mark.parametrize("malformed_input,expected_reasons", [
+    ("marks", (
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_NULL_SUPPORT_TRIALS_INVALID,
+    )),
+    ("boxes", (
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+        SOURCE_NULL_SUPPORT_TRIALS_INVALID,
+    )),
+])
+def test_invalid_null_trials_survive_early_malformed_container_abstain(
+    malformed_input, expected_reasons,
+):
+    kwargs = {
+        "selector": sample_selector(),
+        "support_segments": support_sheet(),
+        "target_segments": TARGET_SHEET,
+        "measured_boxes": [{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        }],
+        "marks": [{"x": 327.8, "y": 1437.5, "code": "FT3",
+                   "registered_region": True}],
+        "trials": False,
+    }
+    kwargs["marks" if malformed_input == "marks" else "measured_boxes"] = None
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(**kwargs)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == expected_reasons
+    assert result.records == ()
