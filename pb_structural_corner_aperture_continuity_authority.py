@@ -62,13 +62,15 @@ class CornerOpeningLegRecord:
     host_wall_id: str
 
     def to_dict(self) -> Mapping[str, Any]:
+        # Native shadow evidence must retain the coordinates used by contract_id.
+        # Display rounding here would alias distinct source hypotheses.
         return {
             "leg_id": self.leg_id,
-            "terminal_jamb": [round(c, 2) for c in self.terminal_jamb],
-            "corner_vertex": [round(c, 2) for c in self.corner_vertex],
-            "axis_vector": [round(c, 4) for c in self.axis_vector],
-            "leg_span_pt": round(self.leg_span_pt, 2),
-            "leg_span_m": _optional_round(self.leg_span_m, 4),
+            "terminal_jamb": list(self.terminal_jamb),
+            "corner_vertex": list(self.corner_vertex),
+            "axis_vector": list(self.axis_vector),
+            "leg_span_pt": self.leg_span_pt,
+            "leg_span_m": self.leg_span_m,
             "host_wall_id": self.host_wall_id,
         }
 
@@ -102,13 +104,13 @@ class StructuralCornerApertureRecord:
             "classification": self.classification.value,
             "leg_a": self.leg_a.to_dict(),
             "leg_b": self.leg_b.to_dict(),
-            "corner_vertex": [round(c, 2) for c in self.corner_vertex],
-            "corner_angle_deg": round(self.corner_angle_deg, 2),
+            "corner_vertex": list(self.corner_vertex),
+            "corner_angle_deg": self.corner_angle_deg,
             "post_condition": self.post_condition.value,
-            "post_dimension_pt": _optional_round(self.post_dimension_pt, 2),
-            "total_girth_pt": round(self.total_girth_pt, 2),
-            "total_girth_m": _optional_round(self.total_girth_m, 4),
-            "diagonal_chord_pt": round(self.diagonal_chord_pt, 2),
+            "post_dimension_pt": self.post_dimension_pt,
+            "total_girth_pt": self.total_girth_pt,
+            "total_girth_m": self.total_girth_m,
+            "diagonal_chord_pt": self.diagonal_chord_pt,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
             "notes": self.notes,
@@ -128,13 +130,6 @@ def _finite_real(value: object) -> bool:
         return math.isfinite(float(value))
     except (OverflowError, ValueError):
         return False
-
-
-def _optional_round(value: float | None, places: int) -> float | None:
-    if value is None:
-        return None
-    rounded = round(value, places)
-    return value if rounded == 0 and value != 0 else rounded
 
 
 class StructuralCornerApertureContinuityAuthority:

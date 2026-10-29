@@ -376,3 +376,65 @@ def test_explicit_post_dimension_cannot_authenticate_physical_post(authority):
         assert record.status == EvidenceResolutionStatus.CANDIDATE
         assert record.first_remaining_gate == "original_source_corner_host_frame_unverified"
         assert not record.commercial_projection_allowed and not record.takeoff_eligible
+
+
+def test_serialized_corner_geometry_preserves_subcentipoint_source_hypotheses(authority):
+    kwargs = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    base = authority.evaluate_corner_aperture(**kwargs)
+    shifted = authority.evaluate_corner_aperture(
+        **(kwargs | {"jamb_a": (200.001, 380.0)})
+    )
+    assert base.contract_id != shifted.contract_id
+    assert base.to_dict()["leg_a"]["terminal_jamb"] != shifted.to_dict()["leg_a"]["terminal_jamb"]
+    assert shifted.to_dict()["leg_a"]["terminal_jamb"] == [200.001, 380.0]
+    assert base.to_dict()["leg_a"]["axis_vector"] != shifted.to_dict()["leg_a"]["axis_vector"]
+    assert base.to_dict()["total_girth_pt"] != shifted.to_dict()["total_girth_pt"]
+    assert base.shadow_only and shifted.shadow_only
+    assert not base.takeoff_eligible and not shifted.takeoff_eligible
+
+
+def test_serialized_post_and_scale_receipts_do_not_round_into_same_values(authority):
+    kwargs = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    base = authority.evaluate_corner_aperture(**kwargs)
+    changed_post = authority.evaluate_corner_aperture(
+        **(kwargs | {"post_dimension_pt": 0.001})
+    )
+    changed_scale = authority.evaluate_corner_aperture(
+        **(kwargs | {"scale_ratio": 0.017640001})
+    )
+    assert base.contract_id != changed_post.contract_id
+    assert base.to_dict()["post_dimension_pt"] == 0.0
+    assert changed_post.to_dict()["post_dimension_pt"] == 0.001
+    assert base.contract_id != changed_scale.contract_id
+    assert base.to_dict()["total_girth_m"] != changed_scale.to_dict()["total_girth_m"]
+    assert base.to_dict()["leg_a"]["leg_span_m"] != changed_scale.to_dict()["leg_a"]["leg_span_m"]
+    for record in (base, changed_post, changed_scale):
+        assert record.classification == CornerApertureClassification.GEOMETRIC_CANDIDATE
+        assert record.post_condition == CornerPostCondition.UNRESOLVED_CORNER_CONDITION
+        assert not record.takeoff_eligible and not record.commercial_projection_allowed
+
+
+def test_serialized_abstention_retains_exact_geometry_without_metric(authority):
+    record = authority.evaluate_corner_aperture(
+        jamb_a=(200.001, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.001,
+    )
+    payload = record.to_dict()
+    assert record.status == EvidenceResolutionStatus.ABSTAINED
+    assert payload["leg_a"]["terminal_jamb"] == [200.001, 380.0]
+    assert payload["post_dimension_pt"] == 0.001
+    assert payload["total_girth_m"] is None
+    assert payload["leg_a"]["leg_span_m"] is None
+    assert payload["shadow_only"] and not payload["takeoff_eligible"]
