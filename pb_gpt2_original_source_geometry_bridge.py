@@ -134,19 +134,36 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
         return False
     if point(gap[0]) != chain[-1] or point(gap[1]) != chain[0]:
         return False
+    # Reissued endpoint degrees are evidence only when they account for
+    # EVERY native vertex and the exact source IDs incident on that vertex.
+    # Two reported open endpoints alone could hide a missing interior node,
+    # a duplicate degree row, or an unrelated source-edge owner.
+    native_incidence = {}
+    for source_id, endpoints in native.items():
+        for vertex in endpoints:
+            native_incidence.setdefault(vertex, set()).add(source_id)
     degrees = components[0].get("native_endpoint_degrees")
     if type(degrees) not in (tuple, list):
         return False
-    open_ends = []
+    reported_incidence = {}
     for row in degrees:
         if type(row) is not dict or type(row.get("degree")) is not int:
             return False
         coordinate = point(row.get("point_pdf_pt"))
-        if coordinate is None or row["degree"] not in (1, 2):
+        owners = row.get("original_source_edge_ids")
+        if (coordinate is None or coordinate in reported_incidence
+                or row["degree"] not in (1, 2)
+                or type(owners) not in (tuple, list)
+                or len(owners) != row["degree"]
+                or any(type(owner) is not str for owner in owners)
+                or len(set(owners)) != len(owners)):
             return False
-        if row["degree"] == 1:
-            open_ends.append(coordinate)
-    if len(open_ends) != 2 or set(open_ends) != {chain[0], chain[-1]}:
+        reported_incidence[coordinate] = set(owners)
+    if reported_incidence != native_incidence:
+        return False
+    open_ends = {vertex for vertex, owners in reported_incidence.items()
+                 if len(owners) == 1}
+    if len(open_ends) != 2 or open_ends != {chain[0], chain[-1]}:
         return False
     area = ring.get("source_only_native_polygon_area_pdf_pt2_not_m2")
     if type(area) not in (int, float):
