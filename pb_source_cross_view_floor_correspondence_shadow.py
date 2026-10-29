@@ -56,6 +56,11 @@ MISSING_PHYSICAL_FLOOR_IDENTITY = "missing_physical_floor_identity"
 MARK_TOO_CLOSE_TO_BOX_SIDE = "mark_too_close_to_box_side"
 MARK_IN_UNREGISTERED_REGION = "mark_in_unregistered_region"
 SOURCE_FINISH_MARK_IDENTITY_INVALID = "source_finish_mark_identity_invalid"
+SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED = "source_finish_code_summary_budget_exceeded"
+# Source-only diagnostic output budget, NOT a geometry, raster or quantity cap.
+# Full per-box code multiplicities require at least boxes * distinct codes
+# entries in the worst case; never attempt a 20k * 20k materialization.
+MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES = 250_000
 SOURCE_MEASURED_FLOOR_BOX_INVALID = "source_measured_floor_box_invalid"
 SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID = "source_physical_floor_identity_invalid"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
@@ -716,6 +721,28 @@ def _overlapping_measured_box_flags(
 
 
 
+def _finish_code_summary_exceeds_budget(
+    checked_marks: Sequence[tuple[float, float, Mapping[str, Any]]],
+    box_count: int,
+) -> bool:
+    """Bound possible complete per-box code counts before Fenwick allocation.
+
+    A huge distinct-code universe cannot be faithfully materialized for every
+    box within a bounded source-shadow memory budget. This is a diagnostic
+    availability veto, not evidence that any material or room is absent.
+    """
+    if box_count <= 0:
+        return False
+    distinct = {
+        mark.get("code")
+        for _, _, mark in checked_marks
+        if type(mark.get("code")) is str
+        and bool(mark.get("code"))
+        and mark.get("code") == mark.get("code").strip()
+    }
+    return box_count * len(distinct) > MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES
+
+
 def _indexed_marks_in_boxes(
     checked_marks: Sequence[tuple[float, float, Mapping[str, Any]]],
     boxes: Sequence[tuple[float, float, float, float]],
@@ -732,6 +759,8 @@ def _indexed_marks_in_boxes(
         return []
     if not checked_marks:
         return [([], {}) for _ in boxes]
+    if _finish_code_summary_exceeds_budget(checked_marks, len(boxes)):
+        raise ValueError(SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED)
 
     xs = sorted({x for x, _, _ in checked_marks})
     ys = sorted({y for _, y, _ in checked_marks})
@@ -958,6 +987,15 @@ class SourceCrossViewFloorCorrespondenceProducer:
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
                 reason_codes=(SOURCE_MEASURED_FLOOR_BOX_INVALID,),
+                records=(),
+            )
+        # A 20k-by-20k high-cardinality source universe is input-bounded but
+        # not output-bounded. Fail closed BEFORE registration or Fenwick work;
+        # do not silently truncate finish codes or choose a physical owner.
+        if _finish_code_summary_exceeds_budget(checked_marks, len(checked_boxes)):
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,),
                 records=(),
             )
 
