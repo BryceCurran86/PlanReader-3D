@@ -352,3 +352,48 @@ def test_original_direct_translation_argument_overflow_and_invalid_types_abstain
     assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
     assert accepted["physical_room_identity_proven"] is False
     assert accepted["new_firm_quantities"]==0
+
+
+def test_original_ring_side_membership_must_equal_issued_native_graph_edges():
+    # Native PDF issuer proves edge ancestry, not an unverified ring receipt.
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for side in ("floor","finish"):
+        for wrong in (
+            ("d999i0",)+tuple(floor["original_native_edge_ids"][1:]),
+            ("d0i0",)+tuple(floor["original_native_edge_ids"][1:-1])+("d0i0",),
+            (["d0i0"],)+tuple(floor["original_native_edge_ids"][1:]),
+            None,
+        ):
+            a,b=deepcopy(floor),deepcopy(finish)
+            graph_side=a if side=="floor" else b
+            graph_side["native_components"][0]["source_simple_ring_candidate"][
+                "source_edge_ids"]=wrong
+            rejected=compare(a,b,original_source_registration=receipt,
+                             translation_pdf_pts=(10.0,7.0))
+            assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+            assert rejected["first_failure"]=="original_cross_sheet_edge_membership_count_conflict"
+            assert rejected["physical_room_identity_proven"] is False
+            assert rejected["new_firm_quantities"]==0
+    positive=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert positive["status"]=="original_source_ink_ring_translation_candidate"
+    assert positive["new_firm_quantities"]==0
+
+
+def test_original_native_graph_ids_reject_unhashable_and_duplicate_receipts():
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for malformed in (
+        (["d0i0"],)+tuple(floor["original_native_edge_ids"][1:]),
+        ("d0i0","d0i0")+tuple(floor["original_native_edge_ids"][2:]),
+        None,
+        "d0i0",
+    ):
+        bad=deepcopy(floor)
+        bad["original_native_edge_ids"]=malformed
+        result=compare(bad,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]=="unjoined_source_wall_ancestry"
+        assert result["new_firm_quantities"]==0

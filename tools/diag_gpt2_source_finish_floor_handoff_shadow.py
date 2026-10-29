@@ -114,8 +114,20 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     witnesses=reg.get("original_witnesses")
     if type(witnesses) is not dict or not witnesses:
         return {**base,"first_failure":"original_registration_witnesses_missing"}
-    floor_ids=set(floor_graph.get("original_native_edge_ids",()))
-    finish_ids=set(finish_graph.get("original_native_edge_ids",()))
+    # A native graph issuer emits bounded, unique, typed path IDs. Do not
+    # let malformed receipts crash set construction or supply false ancestry.
+    raw_floor_ids=floor_graph.get("original_native_edge_ids")
+    raw_finish_ids=finish_graph.get("original_native_edge_ids")
+    if (type(raw_floor_ids) is not tuple or type(raw_finish_ids) is not tuple
+            or not 4 <= len(raw_floor_ids) <= 20000
+            or not 4 <= len(raw_finish_ids) <= 20000
+            or any(type(i) is not str or not i
+                   for ids in (raw_floor_ids,raw_finish_ids) for i in ids)
+            or len(set(raw_floor_ids))!=len(raw_floor_ids)
+            or len(set(raw_finish_ids))!=len(raw_finish_ids)):
+        return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+    floor_ids=set(raw_floor_ids)
+    finish_ids=set(raw_finish_ids)
     seen_floor=set()
     seen_finish=set()
     for role in witnesses.values():
@@ -139,6 +151,17 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     finish_ring=_single_ring(finish_graph)
     if not floor_ring or not finish_ring:
         return {**base,"first_failure":"physical_floor_or_finish_source_ring_open"}
+    # A ring must use exactly the independently issued original native
+    # source edges. Equal ring side counts do not prove source membership.
+    for ring,issued_ids in ((floor_ring,floor_ids),(finish_ring,finish_ids)):
+        ring_ids=ring.get("source_edge_ids")
+        if (type(ring_ids) is not tuple
+                or len(ring_ids)!=len(issued_ids)
+                or any(type(i) is not str for i in ring_ids)
+                or len(set(ring_ids))!=len(ring_ids)
+                or set(ring_ids)!=issued_ids):
+            return {**base,"first_failure":
+                    "original_cross_sheet_edge_membership_count_conflict"}
     dx,dy=translation_pdf_pts
     # Equal source vertex sets can describe NON-equal wall cycles. Compare
     # every independently extracted native boundary side, including closure.
