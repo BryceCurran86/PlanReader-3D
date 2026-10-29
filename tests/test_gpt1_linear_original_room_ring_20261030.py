@@ -10,6 +10,7 @@ import random
 
 import pytest
 
+from pb_migration_contracts import canonical_contract_json
 from pb_room_area_quantity import _canonical_ring, _original_pdf_ring
 from tests.test_room_area_quantity_v2 import _room, _scale, _scaled_qty
 
@@ -54,10 +55,14 @@ def test_linear_ring_is_exactly_legacy_source_id_ring_for_random_originals():
     ((1.0, 2.0), (1.0, 2.0000000001), (2.0, 1.0), (3.0, 0.0)),
 ))
 def test_rounded_aliases_and_signed_zero_preserve_original_contract_bytes(points):
-    assert _canonical_ring(points) == _legacy_quadratic_oracle(points)
+    assert canonical_contract_json(_canonical_ring(points)) == canonical_contract_json(
+        _legacy_quadratic_oracle(points)
+    )
     for offset in range(len(points)):
         rotated = points[offset:] + points[:offset]
-        assert _canonical_ring(rotated) == _legacy_quadratic_oracle(rotated)
+        assert canonical_contract_json(_canonical_ring(rotated)) == canonical_contract_json(
+            _legacy_quadratic_oracle(rotated)
+        )
 
 
 def test_original_ring_cyclic_winding_and_20k_vertex_work_is_bounded():
