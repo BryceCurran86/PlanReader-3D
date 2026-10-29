@@ -630,31 +630,18 @@ def test_narrow_aperture_crossing_is_never_erased_by_snap(width, angle, shift, r
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_finite_extreme_source_points_cannot_overflow_into_full_wall_host(reverse):
-    # All FOUR endpoint coordinates and both individual segment lengths are
-    # finite. Subtracting opposite ~1e308 origins overflows to infinity;
-    # multiplying by the zero normal component then creates NaN. Without
-    # projection validation, NaN skips both host-band and extent checks,
-    # and min/max silently turn it into a CANDIDATE whole-wall interval.
+    # The source-coordinate identity bound rejects these extreme native
+    # endpoints before any host projection. Reversal cannot bypass it.
     step = 2e292
-    wall = ContinuousThroughWallCandidate(
-        "huge-host", (-1e308, -1e308), (-1e308 + step, -1e308), 20.0,
-    )
-    opening = ApertureHostCandidateInput(
-        "distant-opening", (1e308, 1e308), (1e308 + step, 1e308),
-    )
-    assert math.isfinite(wall.length_pt)
-    assert math.isfinite(math.dist(opening.start_pt, opening.end_pt))
+    wall_points = ((-1e308, -1e308), (-1e308 + step, -1e308))
+    opening_points = ((1e308, 1e308), (1e308 + step, 1e308))
     if reverse:
-        wall = ContinuousThroughWallCandidate(
-            wall.wall_id, wall.end_pt, wall.start_pt, wall.thickness_pt,
-        )
-        opening = ApertureHostCandidateInput(
-            opening.physical_opening_id, opening.end_pt, opening.start_pt,
-        )
-    with pytest.raises(ValueError, match="aperture projection must remain finite"):
-        _authority().bind_openings_to_through_wall(
-            through_wall=wall, openings=(opening,),
-        )
+        wall_points = wall_points[::-1]
+        opening_points = opening_points[::-1]
+    with pytest.raises(ValueError, match="Through-wall endpoints must have finite coordinates"):
+        ContinuousThroughWallCandidate("huge-host", *wall_points, 20.0)
+    with pytest.raises(ValueError, match="Aperture endpoints must have finite coordinates"):
+        ApertureHostCandidateInput("distant-opening", *opening_points)
 
 
 def test_finite_projection_veto_preserves_normal_host_and_commercial_isolation():
@@ -1582,30 +1569,27 @@ def test_complete_primitive_cap_counts_host_and_both_universes():
 
 
 def test_complete_transverse_projection_rejects_hidden_overflow_in_both_orders():
-    # Native finite endpoints can overflow only when converted to coordinates
-    # relative to a distant but finite host origin. A first valid crossing
-    # must not hide the second invalid obstruction by short-circuiting.
+    # An extreme obstruction cannot hide behind an earlier genuine crossing.
+    # It now fails at the earliest native-coordinate gate in either order.
     wall = ContinuousThroughWallCandidate(
-        "host", (-1e308, 0.0), (-1e308 + 1e294, 0.0), 20.0,
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
     )
     opening = ApertureHostCandidateInput(
-        "opening", (-1e308 + 2e293, 0.0), (-1e308 + 4e293, 0.0),
+        "opening", (20.0, 0.0), (40.0, 0.0),
     )
-    crossing_x = -1e308 + 3e293
-    crossing = ((crossing_x, -30.0), (crossing_x, 30.0))
+    crossing = ((30.0, -30.0), (30.0, 30.0))
     distant = ((1e308, -30.0), (1e308, 30.0))
     authority = _authority()
     for segments in ((crossing, distant), (distant, crossing)):
         original = tuple(segments)
-        with pytest.raises(ValueError, match="aperture projection must remain finite"):
+        with pytest.raises(ValueError, match="transverse_wall_segments require finite endpoint pairs"):
             authority.bind_openings_to_through_wall(
                 through_wall=wall, openings=(opening,),
                 transverse_wall_segments=segments,
             )
         assert segments == original
 
-    # The legitimate crossing still vetoes a candidate without the invalid
-    # second segment. It never creates a firm or commercial host.
+    # The legitimate crossing alone still vetoes an opening in shadow scope.
     records, piers = authority.bind_openings_to_through_wall(
         through_wall=wall, openings=(opening,),
         transverse_wall_segments=(crossing,),
@@ -1620,18 +1604,17 @@ def test_complete_transverse_projection_rejects_hidden_overflow_in_both_orders()
 
 def test_empty_opening_universe_still_validates_all_host_relative_obstructions():
     wall = ContinuousThroughWallCandidate(
-        "host", (-1e308, 0.0), (-1e308 + 1e294, 0.0), 20.0,
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
     )
     distant = ((1e308, -30.0), (1e308, 30.0))
     authority = _authority()
     for segments in ((distant,), [distant]):
-        with pytest.raises(ValueError, match="aperture projection must remain finite"):
+        with pytest.raises(ValueError, match="transverse_wall_segments require finite endpoint pairs"):
             authority.bind_openings_to_through_wall(
                 through_wall=wall, openings=(),
                 transverse_wall_segments=segments,
             )
-    # An empty, complete and finite obstruction universe remains a clean
-    # shadow-only empty result; no inferred opening is minted.
+    # Empty and valid obstruction universes remain clean shadow-only empties.
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=(), transverse_wall_segments=(),
     ) == ((), ())
