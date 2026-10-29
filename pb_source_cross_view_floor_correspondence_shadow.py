@@ -1021,9 +1021,20 @@ class SourceCrossViewFloorCorrespondenceProducer:
         # A malformed competing room could overlap a valid FT mark, so
         # dropping it must never leave a surviving source-owner candidate.
         if type(measured_boxes) not in (tuple, list) or len(measured_boxes) > 20000:
+            # A malformed box container must not erase independently observed
+            # source negatives. No box can be selected from this universe.
+            reasons = []
+            if (
+                not _valid_source_wall_segment_universe(support_segments)
+                or not _valid_source_wall_segment_universe(target_segments)
+            ):
+                reasons.append(SOURCE_WALL_SEGMENT_UNIVERSE_INVALID)
+            if invalid_mark_universe:
+                reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=(SOURCE_MEASURED_FLOOR_BOX_INVALID,),
+                reason_codes=tuple(reasons),
                 records=(),
             )
         checked_boxes: list[tuple[dict[str, Any], tuple[float, float, float, float]]] = []
@@ -1108,6 +1119,8 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 status=EvidenceResolutionStatus.ABSTAINED,
                 reason_codes=tuple(dict.fromkeys((
                     REGISTRATION_NOT_UNIQUE,
+                    *([SOURCE_FINISH_MARK_IDENTITY_INVALID]
+                      if invalid_mark_universe else []),
                     *([SOURCE_MEASURED_FLOOR_BOX_INVALID]
                       if invalid_box_universe else []),
                 ))),
