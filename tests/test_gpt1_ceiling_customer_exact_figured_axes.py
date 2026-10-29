@@ -52,12 +52,18 @@ def test_final_customer_axis_authority_never_repairs_original_pair(raw):
     assert dict(tampered.metadata) == before
 
 
-@pytest.mark.parametrize("bad_authority", ("pdf_scaled", " documented_dimension", True, None))
+@pytest.mark.parametrize("bad_authority", ("pdf_scaled", " documented_dimension", True))
 def test_final_customer_axis_authority_requires_original_documented_source(bad_authority):
     original = _quantity()
     tampered = replace(original, authority=bad_authority)
     assert _figured_authority(tampered) is None
 
+
+
+def test_original_quantity_constructor_rejects_missing_authority_first():
+    original = _quantity()
+    with pytest.raises(ValueError, match="authority must be a non-empty string"):
+        replace(original, authority=None)
 
 def test_exact_native_two_axis_pair_preserves_original_customer_receipt():
     original = _quantity()
