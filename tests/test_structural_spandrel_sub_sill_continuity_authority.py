@@ -411,3 +411,43 @@ def test_valid_spandrel_still_rejects_extreme_metric_overflow(authority):
             sill_height_mm=900.0, head_height_mm=2100.0,
             host_through_wall_id="HOST", scale_ratio=1e308,
         )
+
+
+@pytest.mark.parametrize("sill,head", [
+    (0.0, 2100.0),
+    (-0.0, 2100.0),
+    (-1e-12, 2100.0),
+    (900.0, 900.0),
+])
+def test_no_positive_subsill_height_never_creates_spandrel_candidate(authority, sill, head):
+    # A zero-height sill is not a physical sub-sill spandrel, even with
+    # an explicitly supplied but still unverified metric scale.
+    record = authority.evaluate_spandrel_sub_sill(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=sill, head_height_mm=head,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    assert record.classification == SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert record.first_remaining_gate == "vertical_levels_inverted_or_negative"
+    assert record.glazing_aperture_area_sqm is None
+    assert record.spandrel_wall_area_sqm is None
+    assert record.total_wall_opening_area_sqm is None
+    assert record.to_dict()["commercial_projection_allowed"] is False
+    assert record.to_dict()["takeoff_eligible"] is False
+    assert record.to_dict()["shadow_only"] is True
+
+
+def test_positive_subsill_height_retains_only_shadow_geometric_candidate(authority):
+    record = authority.evaluate_spandrel_sub_sill(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    assert record.classification == SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    assert record.status is EvidenceResolutionStatus.CANDIDATE
+    assert record.spandrel_wall_area_sqm is not None
+    assert record.spandrel_wall_area_sqm > 0
+    assert record.shadow_only
+    assert not record.commercial_projection_allowed
+    assert not record.takeoff_eligible

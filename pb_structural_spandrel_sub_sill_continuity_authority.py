@@ -235,7 +235,7 @@ class StructuralSpandrelSubSillContinuityAuthority:
         if (
             sill_height_mm >= head_height_mm
             or head_height_mm <= 0
-            or sill_height_mm < 0
+            or sill_height_mm <= 0
         ):
             return SpandrelSubSillRecord(
                 contract_id=contract_id,
