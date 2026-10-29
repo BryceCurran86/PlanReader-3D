@@ -1640,16 +1640,16 @@ def test_empty_opening_universe_still_validates_all_host_relative_obstructions()
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("empty_openings", [False, True])
 def test_projected_transverse_overflow_cannot_hide_real_crossing(reverse, empty_openings):
-    """Finite native/projection endpoints may have a nonfinite segment delta."""
+    """Unrepresentable native endpoints are rejected before projection work."""
     wall = ContinuousThroughWallCandidate(
         "host", (0.0, 0.0), (100.0, 0.0), 20.0,
     )
     opening = ApertureHostCandidateInput(
         "opening", (20.0, 0.0), (30.0, 0.0),
     )
-    # The real crossing is at x=25, but the y delta is +infinity in
-    # floating-point arithmetic. Before preflight this collapsed the
-    # Liang-Barsky entry/exit fractions to t=0 and missed the obstruction.
+    # The real crossing is at x=25, but native y coordinates exceed
+    # the binary64 source-identity bound. Reject at the earliest source
+    # gate rather than relying on the later projected-delta defense.
     extreme = ((25.0, -1e308), (25.0, 1e308))
     ordinary_crossing = ((25.0, -30.0), (25.0, 30.0))
     assert all(math.isfinite(v) for p in extreme for v in p)
@@ -1659,7 +1659,7 @@ def test_projected_transverse_overflow_cannot_hide_real_crossing(reverse, empty_
         segments = segments[::-1]
     before = tuple(tuple(tuple(p) for p in segment) for segment in segments)
     with pytest.raises(
-        ValueError, match="transverse_wall_segments projected delta must be finite"
+        ValueError, match="transverse_wall_segments require finite endpoint pairs"
     ):
         _authority().bind_openings_to_through_wall(
             through_wall=wall,
@@ -1698,3 +1698,81 @@ def test_projected_transverse_overflow_guard_preserves_ordinary_shadow_results()
             through_wall=wall, openings=(opening,),
             transverse_wall_segments=segments,
         ) == (records, piers)
+
+
+@pytest.mark.parametrize("bad", [
+    float(2**53 + 2), -float(2**53 + 2),
+    float(2**60), -float(2**60),
+])
+@pytest.mark.parametrize("axis", [0, 1])
+def test_lossy_large_float_source_coordinates_are_rejected_everywhere(bad, axis):
+    """Native float endpoints have the same lossless identity limit as ints."""
+    point = (bad, 0.0) if axis == 0 else (0.0, bad)
+    with pytest.raises(ValueError, match="finite coordinates"):
+        ContinuousThroughWallCandidate("host", point, (100.0, 0.0), 20.0)
+    with pytest.raises(ValueError, match="finite coordinates"):
+        ContinuousThroughWallCandidate("host", (0.0, 0.0), point, 20.0)
+    with pytest.raises(ValueError, match="finite coordinates"):
+        ApertureHostCandidateInput("opening", point, (100.0, 0.0))
+    with pytest.raises(ValueError, match="finite coordinates"):
+        ApertureHostCandidateInput("opening", (0.0, 0.0), point)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("empty_openings", [False, True])
+@pytest.mark.parametrize("axis", [0, 1])
+def test_lossy_float_transverse_coordinate_vetoes_entire_universe(
+    reverse, empty_openings, axis,
+):
+    """An unrelated valid segment must not hide an aliased native endpoint."""
+    bad = float(2**53 + 2)
+    point = [bad, 0.0] if axis == 0 else [0.0, -bad]
+    other = [bad, 10.0] if axis == 0 else [10.0, -bad]
+    invalid = [point, other]
+    valid = [[90.0, -30.0], [90.0, 30.0]]
+    segments = [valid, invalid]
+    if reverse:
+        segments.reverse()
+    before = [[p.copy() for p in segment] for segment in segments]
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "opening", (20.0, 0.0), (40.0, 0.0),
+    )
+    with pytest.raises(ValueError, match="finite endpoint pairs"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall,
+            openings=() if empty_openings else (opening,),
+            transverse_wall_segments=segments,
+        )
+    assert segments == before
+
+
+def test_source_coordinate_boundary_and_independent_scalar_validation():
+    """The existing inclusive 2**53 boundary is not a thickness restriction."""
+    bound = float(2**53)
+    wall = ContinuousThroughWallCandidate(
+        "host", (bound - 128.0, 0.0), (bound, 0.0), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "opening", (bound - 96.0, 0.0), (bound - 64.0, 0.0),
+    )
+    authority = _authority()
+    first, first_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    second, second_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    assert (first, first_piers) == (second, second_piers)
+    assert not first_piers
+    assert first[0].status is S.CANDIDATE
+    assert first[0].first_remaining_gate == "original_source_host_unverified"
+    assert first[0].shadow_only and not first[0].takeoff_eligible
+    assert not first[0].commercial_projection_allowed
+    # Coordinate identity rules must not silently rewrite scalar semantics.
+    large_thickness = ContinuousThroughWallCandidate(
+        "scalar-only", (0.0, 0.0), (100.0, 0.0), float(2**53 + 2),
+    )
+    assert large_thickness.thickness_pt == float(2**53 + 2)

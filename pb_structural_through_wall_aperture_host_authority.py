@@ -60,12 +60,19 @@ def _finite_real(value: object) -> bool:
         return False
 
 
+def _finite_source_coordinate(value: object) -> bool:
+    """Refuse source-point magnitudes beyond binary64's integer identity limit."""
+    # The same identity bound applies to native float and int coordinates.
+    # Scalar thickness and snap values use _finite_real independently.
+    return _finite_real(value) and abs(value) <= 2**53
+
+
 def _finite_point(point: object) -> bool:
-    """A source-coordinate pair must contain two real, finite, non-Boolean values."""
+    """A source-coordinate pair must preserve finite native coordinate identity."""
     return (
         type(point) in (tuple, list)
         and len(point) == 2
-        and all(_finite_real(value) for value in point)
+        and all(_finite_source_coordinate(value) for value in point)
     )
 
 
