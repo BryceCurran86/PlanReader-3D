@@ -993,9 +993,16 @@ class SourceCrossViewFloorCorrespondenceProducer:
         # not output-bounded. Fail closed BEFORE registration or Fenwick work;
         # do not silently truncate finish codes or choose a physical owner.
         if _finish_code_summary_exceeds_budget(checked_marks, len(checked_boxes)):
+            # Keep independently observed malformed rival evidence in the
+            # typed refusal; a resource veto must not erase earlier negatives.
+            reasons = [SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED]
+            if invalid_mark_universe:
+                reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            if invalid_box_universe:
+                reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=(SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,),
+                reason_codes=tuple(reasons),
                 records=(),
             )
 
