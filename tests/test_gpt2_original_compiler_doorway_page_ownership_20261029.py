@@ -442,3 +442,41 @@ def test_native_endpoint_owner_receipt_is_order_independent():
     )
     graph["native_components"] = (component,)
     assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph)
+
+
+@pytest.mark.parametrize(
+    "malformed_census",
+    [None, False, 0, "", [], {}, [{"source_id": "d0i0"}]],
+)
+def test_native_overlap_census_must_be_explicit_and_complete(malformed_census):
+    """A missing or untyped census cannot certify an unobstructed source ring."""
+    graph = _graph()
+    graph["interior_stroke_intersections_and_overlaps"] = malformed_census
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        _ring(), graph
+    )
+
+
+def test_native_overlap_census_missing_field_and_component_proof_abstain():
+    graph = _graph()
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(
+        _ring(), graph
+    )
+    missing_census = {key: value for key, value in graph.items()
+                      if key != "interior_stroke_intersections_and_overlaps"}
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        _ring(), missing_census
+    )
+    missing_ring_field = dict(graph)
+    component = dict(graph["native_components"][0])
+    component.pop("source_simple_ring_candidate")
+    missing_ring_field["native_components"] = (component,)
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        _ring(), missing_ring_field
+    )
+    # The actual native producer's complete, explicitly empty tuple is valid.
+    assert graph["interior_stroke_intersections_and_overlaps"] == ()
+    assert graph["native_components"][0]["source_simple_ring_candidate"] is None
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(
+        _ring(), graph
+    )
