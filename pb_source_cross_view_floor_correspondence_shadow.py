@@ -61,6 +61,7 @@ SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED = "source_finish_code_summary_budget_
 # Full per-box code multiplicities require at least boxes * distinct codes
 # entries in the worst case; never attempt a 20k * 20k materialization.
 MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES = 250_000
+SOURCE_WALL_SEGMENT_UNIVERSE_INVALID = "source_wall_segment_universe_invalid"
 SOURCE_MEASURED_FLOOR_BOX_INVALID = "source_measured_floor_box_invalid"
 SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID = "source_physical_floor_identity_invalid"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
@@ -109,6 +110,35 @@ def _native_source_identity(value: Any) -> tuple[str, bool]:
     if type(value) is str and value == value.strip() and value.isprintable():
         return value, False
     return "", True
+
+
+def _valid_source_wall_segment_universe(segments: Any) -> bool:
+    """Require a complete bounded native wall-segment universe on each sheet.
+
+    A malformed or omitted competing wall must never be silently dropped
+    before rigid registration can claim a unique physical floor. Keep this
+    source-only validation separate from the existing 2.5pt topology snap.
+    """
+    if type(segments) not in (list, tuple) or len(segments) > 20_000:
+        return False
+    for segment in segments:
+        if not isinstance(segment, Mapping):
+            return False
+        for field_name in ("x1", "y1", "x2", "y2"):
+            raw = segment.get(field_name)
+            if type(raw) not in (int, float):
+                return False
+            # Beyond the exact binary64 integer range, a native PDF point
+            # coordinate cannot retain reliable source endpoint identity.
+            if abs(raw) > 2**53:
+                return False
+            try:
+                value = float(raw)
+            except (ValueError, OverflowError):
+                return False
+            if not math.isfinite(value):
+                return False
+    return True
 
 
 def merge_intervals(intervals: Iterable[Sequence[float]]) -> list[tuple[float, float]]:
@@ -1003,6 +1033,19 @@ class SourceCrossViewFloorCorrespondenceProducer:
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
                 reason_codes=tuple(reasons),
+                records=(),
+            )
+
+        # Fail closed on the COMPLETE wall universe on either sheet. A bad
+        # competing source segment cannot be dropped to manufacture unique
+        # registration or physical-room correspondence.
+        if (
+            not _valid_source_wall_segment_universe(support_segments)
+            or not _valid_source_wall_segment_universe(target_segments)
+        ):
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,),
                 records=(),
             )
 
