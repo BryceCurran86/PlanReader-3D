@@ -503,11 +503,20 @@ class SourceBoundWallFinishQuantityProducer:
                         f"physical_face_id={face_id}",
                     ),
                 )
+            # A source-owned metric cannot be minted by float(True), a
+            # numeric string or a caller object. Even a native positive int
+            # may be too large to represent as a finite PDF-derived m².
             area = net_record.net_area_m2
+            area_m2 = None
+            if type(area) in (int, float):
+                try:
+                    area_m2 = float(area)
+                except (TypeError, ValueError, OverflowError):
+                    pass
             if (
-                area is None
-                or not math.isfinite(float(area))
-                or float(area) <= 0.0
+                area_m2 is None
+                or not math.isfinite(area_m2)
+                or area_m2 <= 0.0
             ):
                 return self._store(
                     selector,
@@ -517,7 +526,19 @@ class SourceBoundWallFinishQuantityProducer:
                         f"physical_face_id={face_id}",
                     ),
                 )
-            quantity_m2 += float(area)
+            # Each source face can be finite while the complete original
+            # finish-face universe overflows. Reject the whole quantity,
+            # never publish a partial face subtotal or throw at record seal.
+            quantity_m2 += area_m2
+            if not math.isfinite(quantity_m2):
+                return self._store(
+                    selector,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        FINISH_QUANTITY_INVALID_AREA,
+                        "aggregate_net_finish_area_not_finite",
+                    ),
+                )
             net_record_ids.add(net_record.record_id)
             physical_wall_ids.add(wall_id)
             physical_surface_ids.add(
