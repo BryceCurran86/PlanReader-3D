@@ -2180,3 +2180,104 @@ def test_exact_native_mark_coordinate_limit_preserves_existing_clean_candidate()
     assert len(result.records) == 1
     assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
     assert result.records[0].takeoff_eligible is False
+@pytest.mark.parametrize("axis", (0, 1, 2, 3))
+@pytest.mark.parametrize("reverse_boxes", (False, True))
+def test_oversized_native_float_floor_box_coordinates_fail_closed(axis, reverse_boxes):
+    """A malformed competing physical box must not confer a unique owner.
+
+    The source mark and wall universes already reject magnitudes above 2**53
+    for both numeric types; a float floor-box endpoint must do the same.
+    """
+    good = {
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-room-office",
+        "source_room_face_record_id": "face-office",
+    }
+    bad = copy.deepcopy(good)
+    bad["canonical_floor_id"] = "canonical-floor-competitor"
+    bad["physical_room_id"] = "physical-room-competitor"
+    bad["source_room_face_record_id"] = "face-competitor"
+    coords = list(bad["dimension_box_pdf_pts"])
+    # Preserve ordered box geometry so the only source defect is precision.
+    coords[axis] = float(-(2**53 + 2) if axis in (0, 1) else 2**53 + 2)
+    bad["dimension_box_pdf_pts"] = tuple(coords)
+    boxes = [good, bad]
+    if reverse_boxes:
+        boxes.reverse()
+    marks = [{"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True}]
+    original_boxes, original_marks = copy.deepcopy(boxes), copy.deepcopy(marks)
+
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=boxes,
+        marks=marks,
+    )
+    assert len(result.records) == 1
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    rec = result.records[0]
+    assert rec.canonical_floor_id == good["canonical_floor_id"]
+    assert rec.status == EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_MEASURED_FLOOR_BOX_INVALID in rec.reason_codes
+    assert SOURCE_MEASURED_FLOOR_BOX_INVALID in result.reason_codes
+    assert rec.finish_codes_in_box == {"FT3": 1}
+    assert rec.commercial_projection_allowed is False
+    assert rec.takeoff_eligible is False
+    assert rec.authority_blockers == ()
+    assert boxes == original_boxes
+    assert marks == original_marks
+
+
+def test_only_oversized_native_float_floor_box_abstains_without_record():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, float(2**53 + 2), 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True}],
+    )
+    assert result.status == EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_MEASURED_FLOOR_BOX_INVALID,)
+    assert result.records == ()
+
+
+def test_oversized_native_float_floor_box_retains_genuine_ft2_ft3_conflict():
+    good = {
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-office",
+        "physical_room_id": "physical-room-office",
+        "source_room_face_record_id": "face-office",
+    }
+    bad = {
+        **good,
+        "dimension_box_pdf_pts": (-float(2**53 + 2), 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "canonical-floor-competitor",
+        "physical_room_id": "physical-room-competitor",
+        "source_room_face_record_id": "face-competitor",
+    }
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[bad, good],
+        marks=[
+            {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True},
+            {"x": 345.0, "y": 1440.0, "code": "FT2", "registered_region": True},
+        ],
+    )
+    assert result.status == EvidenceResolutionStatus.CONFLICT
+    assert len(result.records) == 1
+    rec = result.records[0]
+    assert rec.status == EvidenceResolutionStatus.CONFLICT
+    assert rec.finish_codes_in_box == {"FT2": 1, "FT3": 1}
+    assert COMPETING_FINISH_CODES_IN_BOX in rec.reason_codes
+    assert SOURCE_MEASURED_FLOOR_BOX_INVALID in rec.reason_codes
+    assert rec.commercial_projection_allowed is False
+    assert rec.takeoff_eligible is False
