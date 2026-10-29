@@ -337,6 +337,17 @@ class StructuralThroughWallApertureHostAuthority:
             (project_pt(start), project_pt(end))
             for start, end in transverse_wall_segments
         )
+        # Finite projected endpoints can still have an infinite difference
+        # (for example, -1e308 to +1e308 across the wall). The clipping
+        # algorithm would divide by infinity and collapse a real crossing to
+        # a zero-width parameter interval, incorrectly accepting its host.
+        # Validate the COMPLETE universe before any early obstruction veto
+        # or empty-opening return; obstruction order must not hide this.
+        for (a0, p0), (a1, p1) in projected_transverse_segments:
+            if not math.isfinite(a1 - a0) or not math.isfinite(p1 - p0):
+                raise ValueError(
+                    "transverse_wall_segments projected delta must be finite"
+                )
         if not openings:
             return ((), ())
 

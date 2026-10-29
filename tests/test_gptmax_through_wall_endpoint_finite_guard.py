@@ -1635,3 +1635,66 @@ def test_empty_opening_universe_still_validates_all_host_relative_obstructions()
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=(), transverse_wall_segments=(),
     ) == ((), ())
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("empty_openings", [False, True])
+def test_projected_transverse_overflow_cannot_hide_real_crossing(reverse, empty_openings):
+    """Finite native/projection endpoints may have a nonfinite segment delta."""
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "opening", (20.0, 0.0), (30.0, 0.0),
+    )
+    # The real crossing is at x=25, but the y delta is +infinity in
+    # floating-point arithmetic. Before preflight this collapsed the
+    # Liang-Barsky entry/exit fractions to t=0 and missed the obstruction.
+    extreme = ((25.0, -1e308), (25.0, 1e308))
+    ordinary_crossing = ((25.0, -30.0), (25.0, 30.0))
+    assert all(math.isfinite(v) for p in extreme for v in p)
+    assert not math.isfinite(extreme[1][1] - extreme[0][1])
+    segments = (ordinary_crossing, extreme)
+    if reverse:
+        segments = segments[::-1]
+    before = tuple(tuple(tuple(p) for p in segment) for segment in segments)
+    with pytest.raises(
+        ValueError, match="transverse_wall_segments projected delta must be finite"
+    ):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall,
+            openings=() if empty_openings else (opening,),
+            transverse_wall_segments=segments,
+        )
+    assert segments == before
+
+
+def test_projected_transverse_overflow_guard_preserves_ordinary_shadow_results():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "opening", (20.0, 0.0), (30.0, 0.0),
+    )
+    authority = _authority()
+    normal = ((90.0, -30.0), (90.0, 30.0))
+    crossing = ((25.0, -30.0), (25.0, 30.0))
+    for segments, expected_status, expected_gate in (
+        ((normal,), S.CANDIDATE, "original_source_host_unverified"),
+        ((crossing,), S.ABSTAINED, "host_through_wall_obstructed"),
+        ((normal, crossing), S.ABSTAINED, "host_through_wall_obstructed"),
+        ((crossing, normal), S.ABSTAINED, "host_through_wall_obstructed"),
+    ):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=segments,
+        )
+        assert len(records) == 1 and not piers
+        assert records[0].status is expected_status
+        assert records[0].first_remaining_gate == expected_gate
+        assert records[0].shadow_only and not records[0].takeoff_eligible
+        assert not records[0].commercial_projection_allowed
+        assert authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=segments,
+        ) == (records, piers)
