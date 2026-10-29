@@ -368,9 +368,17 @@ def side_evidence(
     *,
     tol: float = COORD_TOL,
     band: tuple[float, float] = WALL_BAND,
+    _index: Optional[LineIndex] = None,
 ) -> dict[str, dict[str, Any]]:
     x0, y0, x1, y1 = (float(v) for v in box)
-    index = LineIndex(lines)
+    # Producer-owned reuse: one sorted-key index per immutable sheet, not a
+    # fresh 20k-key sort for every measured floor side. Reject a mismatched
+    # caller index rather than comparing wall evidence from another sheet.
+    if _index is not None and (
+        type(_index) is not LineIndex or _index.lines is not lines
+    ):
+        raise ValueError("source_line_index_does_not_match_sheet")
+    index = LineIndex(lines) if _index is None else _index
     out: dict[str, dict[str, Any]] = {}
     for name, orient, coord, lo, hi, sign in (
         ("x0", "V", x0, y0, y1, -1),
@@ -485,10 +493,12 @@ def box_correspondence(
     lines_target: Lines,
     orientation: str,
     translation: Sequence[float],
+    _support_index: Optional[LineIndex] = None,
+    _target_index: Optional[LineIndex] = None,
 ) -> dict[str, Any]:
     box_target = translate_box(box_support, orientation, translation)
-    sup = side_evidence(box_support, lines_support)
-    tgt = side_evidence(box_target, lines_target)
+    sup = side_evidence(box_support, lines_support, _index=_support_index)
+    tgt = side_evidence(box_target, lines_target, _index=_target_index)
     sides: dict[str, Any] = {}
     for name in sup:
         tgt_name = name
@@ -1268,6 +1278,12 @@ class SourceCrossViewFloorCorrespondenceProducer:
             if value
         )
 
+        # Registration and null-support use their own complete indexes.
+        # Physical-side checks reuse exactly one index per authenticated
+        # sheet for the entire measured-box universe, with no cross-sheet
+        # identity substitution and no changed geometric predicate.
+        support_side_index = LineIndex(lines_sup)
+        target_side_index = LineIndex(lines_tgt)
         for box_index, (item, box_sup) in enumerate(checked_boxes):
             identities = native_identities[box_index]
             canonical_floor_id = identities["canonical_floor_id"][0]
@@ -1280,6 +1296,8 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 lines_target=lines_tgt,
                 orientation=top["orientation"],
                 translation=(top["dx"], top["dy"]),
+                _support_index=support_side_index,
+                _target_index=target_side_index,
             )
 
             # Complete source counts and all negative predicates are retained
