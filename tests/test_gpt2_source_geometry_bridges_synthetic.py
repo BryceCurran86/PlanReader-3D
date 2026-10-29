@@ -193,9 +193,10 @@ _RING_RIVAL=(
 )
 
 
-def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0)):
+def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0),
+                               floor_vertices=_RING_A):
     source=fitz.open()
-    for ring,offset in ((_RING_A,(0.0,0.0)),(finish_vertices,shift)):
+    for ring,offset in ((floor_vertices,(0.0,0.0)),(finish_vertices,shift)):
         page=source.new_page(width=240,height=240)
         coords=tuple((x+offset[0],y+offset[1]) for x,y in ring)
         for i in range(len(coords)):
@@ -204,7 +205,7 @@ def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0)):
     data=source.tobytes()
     source.close()
     digest=hashlib.sha256(data).hexdigest()
-    ids=tuple(f"d{i}i0" for i in range(len(_RING_A)))
+    ids=tuple(f"d{i}i0" for i in range(len(floor_vertices)))
     floor=graph(data,source_sha256=digest,page_1_based=1,source_edge_ids=ids)
     finish=graph(data,source_sha256=digest,page_1_based=2,source_edge_ids=ids)
     assert floor["native_candidate_ring_count"]==1, floor["status"]
@@ -260,6 +261,42 @@ def test_original_source_cyclic_ring_matches_translated_natively_extracted_edges
     assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
     assert accepted["physical_room_identity_proven"] is False
     assert accepted["new_firm_quantities"]==0
+
+
+def test_original_fractional_native_pdf_edges_match_literal_same_page_issuer():
+    # PyMuPDF retains fractional native coordinates beyond 0.001pt.
+    # A literal ring/issuer match must not be compared to a rounded ring,
+    # even though the independent cross-page translation uses 0.001pt.
+    fractional=tuple((x+.123456,y+.654321) for x,y in _RING_A)
+    floor,finish,registration=_two_original_source_rings(
+        fractional,floor_vertices=fractional)
+    native=tuple(p for edge in floor["original_native_edges"]
+                 for p in edge["endpoints_pdf_pts"])
+    assert any(abs(v-round(v,3))>0.00001 for p in native for v in p)
+    accepted=compare(floor,finish,original_source_registration=registration,
+                     translation_pdf_pts=(10.0,7.0))
+    assert accepted["status"]=="original_source_ink_ring_translation_candidate"
+    assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
+    assert accepted["new_firm_quantities"]==0
+    assert accepted["physical_room_identity_proven"] is False
+
+
+def test_original_submillipt_ring_endpoint_tamper_cannot_borrow_native_ids():
+    # Quantizing before same-page source ancestry would silently erase this
+    # displaced vertex and treat a non-source edge as the original ink.
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    forged=deepcopy(floor)
+    ring=forged["native_components"][0]["source_simple_ring_candidate"]
+    vertices=list(ring["vertices_pdf_pts"])
+    x,y=vertices[0]
+    vertices[0]=(x+0.0002,y)
+    ring["vertices_pdf_pts"]=tuple(vertices)
+    rejected=compare(forged,finish,original_source_registration=registration,
+                     translation_pdf_pts=(10.0,7.0))
+    assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+    assert rejected["first_failure"]=="original_native_edge_endpoint_ancestry_conflict"
+    assert rejected["new_firm_quantities"]==0
 
 
 def test_original_source_same_vertices_different_cyclic_wall_membership_abstains():
