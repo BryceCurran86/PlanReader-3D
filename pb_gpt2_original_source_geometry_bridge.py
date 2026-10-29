@@ -98,9 +98,16 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
     edges = graph.get("original_native_edges")
     if type(edges) not in (tuple, list) or len(edges) != len(ids):
         return False
+    # The sealed source can expose many native strokes. Tuple membership for
+    # each stroke is quadratic and can stall a source replay on large rooms.
+    # This set changes lookup complexity only; it does not elect any edge.
+    id_set = set(ids)
     native = {}
     for row in edges:
-        if type(row) is not dict or row.get("source_id") not in ids:
+        if type(row) is not dict:
+            return False
+        source_id = row.get("source_id")
+        if type(source_id) is not str or source_id not in id_set:
             return False
         ends = row.get("endpoints_pdf_pts")
         if type(ends) not in (tuple, list) or len(ends) != 2:

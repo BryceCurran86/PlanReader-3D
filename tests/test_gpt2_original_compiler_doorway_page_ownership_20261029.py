@@ -318,3 +318,65 @@ def test_real_generated_native_pdf_edges_are_reissued_before_compiler_candidate(
     assert result["new_firm_quantities"] == 0
     assert result["customer_floor_finish_area_issued"] is False
     assert hashlib.sha256(raw).hexdigest() == sha
+
+
+def test_large_native_perimeter_id_membership_is_exact_and_fail_closed():
+    # Source-neutral complexity regression: the full edge universe must be
+    # checked without choosing an edge, and unhashable foreign IDs ABSTAIN.
+    # This is NOT an original drawing, source-positive or commercial test.
+    count = 512
+    points = [(0, 0)]
+    for i in range(count):
+        points.extend(((i + 1, i), (i + 1, i + 1)))
+    ids = tuple(f"d{i}i0" for i in range(2 * count))
+    edges = tuple(
+        {"source_id": ident,
+         "endpoints_pdf_pts": (points[i], points[i + 1])}
+        for i, ident in enumerate(ids)
+    )
+    area = abs(sum(
+        a[0] * b[1] - b[0] * a[1]
+        for a, b in zip(points, points[1:] + points[:1])
+    )) / 2
+    assert area > 0
+    ring = {
+        "original_source_sha256": SOURCE_SHA,
+        "original_page_1_based": 7,
+        "original_source_perimeter_side_ids": ids,
+        "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts": tuple(points),
+        "source_virtual_door_connector_pdf_pts": (points[-1], points[0]),
+        "source_only_native_polygon_area_pdf_pt2_not_m2": area,
+        "source_jamb_roles_same_sha_rechecked": True,
+        "source_wall_and_jamb_geometry_independently_recomputed": True,
+    }
+    graph = {
+        "source_sha256": SOURCE_SHA,
+        "page_1_based": 7,
+        "original_native_edge_ids": tuple(sorted(ids)),
+        "original_native_edges": edges,
+        "native_components": ({
+            "source_simple_ring_candidate": None,
+            "native_endpoint_degrees": tuple(
+                {"point_pdf_pt": point,
+                 "degree": 1 if i in (0, len(points) - 1) else 2}
+                for i, point in enumerate(points)
+            ),
+        },),
+        "interior_stroke_intersections_and_overlaps": (),
+    }
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph
+    )
+    for foreign_id in ("d999999i0", ["d0i0"], None):
+        corrupted = dict(graph)
+        corrupted_edges = list(edges)
+        corrupted_edges[count] = {
+            **corrupted_edges[count], "source_id": foreign_id
+        }
+        corrupted["original_native_edges"] = tuple(corrupted_edges)
+        assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+            ring, corrupted
+        )
+    # No producer-owned receipt is mutated by the validation.
+    assert graph["original_native_edges"] == edges
+    assert ring["original_source_perimeter_side_ids"] == ids
