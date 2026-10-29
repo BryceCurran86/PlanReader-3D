@@ -23,6 +23,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     BOX_OWNED_BY_OTHER_FINISH_CODE,
     MARK_TOO_CLOSE_TO_BOX_SIDE,
     MARK_IN_UNREGISTERED_REGION,
+    SOURCE_FINISH_MARK_IDENTITY_INVALID,
     OVERLAPPING_MEASURED_BOXES,
     DUPLICATE_PHYSICAL_FLOOR_IDENTITY,
     MISSING_PHYSICAL_FLOOR_IDENTITY,
@@ -1168,3 +1169,62 @@ def test_same_second_face_coverage_with_different_void_position_abstains(reverse
     )
     assert classified["status"] is EvidenceResolutionStatus.ABSTAINED
     assert WALL_EVIDENCE_DIFFERS in classified["reason_codes"]
+
+
+# GPT2 original finish marks are source identities, not arbitrary OCR values.
+# A single valid code must not borrow a malformed rival's missing lineage.
+@pytest.mark.parametrize("bad_mark", [
+    None,
+    "FT3",
+    17,
+    {"margin_pt": 15.0, "registered_region": True},
+    {"code": None, "margin_pt": 15.0, "registered_region": True},
+    {"code": ["FT3"], "margin_pt": 15.0, "registered_region": True},
+    {"code": {"glyph": "FT3"}, "margin_pt": 15.0, "registered_region": True},
+    {"code": True, "margin_pt": 15.0, "registered_region": True},
+    {"code": 3, "margin_pt": 15.0, "registered_region": True},
+    {"code": " FT3 ", "margin_pt": 15.0, "registered_region": True},
+    {"code": "", "margin_pt": 15.0, "registered_region": True},
+])
+def test_malformed_original_finish_mark_identity_abstains(bad_mark):
+    result = _classify_source_marks([bad_mark])
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result["reason_codes"]
+    assert result["authority_blockers"] == ()
+    assert result["authenticated_physical_wall_face_equivalence"] is False
+
+
+def test_valid_finish_mark_cannot_borrow_untyped_rival_as_unique_owner():
+    valid = {"code": "FT3", "margin_pt": 15.0, "registered_region": True}
+    malformed = {"code": ["FT2"], "margin_pt": 20.0,
+                 "registered_region": True}
+    for marks in ([valid, malformed], [malformed, valid]):
+        result = _classify_source_marks(marks)
+        assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+        assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result["reason_codes"]
+        assert result["finish_codes_in_box"] == {"FT3": 1}
+        assert result["authority_blockers"] == ()
+
+
+@pytest.mark.parametrize("unbounded_or_untyped", [
+    None, "FT3", {"code": "FT3"}, 3,
+    [{"code": "FT3", "margin_pt": 15.0,
+      "registered_region": True}] * 20001,
+])
+def test_unbounded_or_untyped_original_finish_mark_universe_abstains(
+    unbounded_or_untyped,
+):
+    result = _classify_source_marks(unbounded_or_untyped)
+    assert result["status"] is EvidenceResolutionStatus.ABSTAINED
+    assert result["reason_codes"] == (SOURCE_FINISH_MARK_IDENTITY_INVALID,)
+    assert result["finish_codes_in_box"] == {}
+    assert result["authority_blockers"] == ()
+
+
+def test_valid_original_finish_code_still_remains_source_only_candidate():
+    result = _classify_source_marks([
+        {"code": "FT3", "margin_pt": 15.0, "registered_region": True}
+    ])
+    assert result["status"] is EvidenceResolutionStatus.CANDIDATE
+    assert result["authority_blockers"] == STANDING_AUTHORITY_BLOCKERS
+    assert result["authenticated_physical_wall_face_equivalence"] is False
