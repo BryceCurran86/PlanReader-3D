@@ -176,3 +176,224 @@ def test_competing_original_rcp_grid_lines_not_issued_to_two_zones():
     assert result["status"]=="original_rcp_competing_zone_source_ownership"
     assert len(result["source_competing_grid_boundary_or_finish_mark_owners"])==2
     assert result["new_firm_quantities"]==0
+
+
+# GPT2 source-native cyclic wall/finish ring correspondence: the PDF graph
+# producer owns both ordered cycles; a common vertex *set* is not wall identity.
+# Both are independently drawn SIMPLE, ORTHOGONAL native-PDF rings.
+# The same ten source vertices can connect into different cyclic perimeters.
+# Do not relax the actual graph producer's orthogonal-stroke contract.
+_RING_A=(
+    (80.,20.),(20.,20.),(20.,40.),(20.,60.),(20.,80.),
+    (80.,80.),(80.,60.),(40.,60.),(40.,40.),(80.,40.),
+)
+_RING_RIVAL=(
+    (80.,20.),(20.,20.),(20.,40.),(40.,40.),(40.,60.),
+    (20.,60.),(20.,80.),(80.,80.),(80.,60.),(80.,40.),
+)
+
+
+def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0)):
+    source=fitz.open()
+    for ring,offset in ((_RING_A,(0.0,0.0)),(finish_vertices,shift)):
+        page=source.new_page(width=240,height=240)
+        coords=tuple((x+offset[0],y+offset[1]) for x,y in ring)
+        for i in range(len(coords)):
+            page.draw_line(coords[i],coords[(i+1)%len(coords)],
+                           color=(0,0,0),width=.48)
+    data=source.tobytes()
+    source.close()
+    digest=hashlib.sha256(data).hexdigest()
+    ids=tuple(f"d{i}i0" for i in range(len(_RING_A)))
+    floor=graph(data,source_sha256=digest,page_1_based=1,source_edge_ids=ids)
+    finish=graph(data,source_sha256=digest,page_1_based=2,source_edge_ids=ids)
+    assert floor["native_candidate_ring_count"]==1, floor["status"]
+    assert finish["native_candidate_ring_count"]==1, finish["status"]
+    assert floor["original_native_edge_ids"]==finish["original_native_edge_ids"]
+    registration={
+        "status":"original_four_edge_ink_correspondence_with_unclosed_doorway",
+        "original_source_sha256":digest,
+        "original_floor_page_id":1,
+        "original_finish_page_id":2,
+        "source_translation_candidate_pdf_pts":shift,
+        "original_witnesses":{
+            "registered-native-side":{
+                "floor_source":{"identity":ids[0]},
+                "finish_source":{"identity":ids[0]},
+            }
+        },
+    }
+    return floor,finish,registration
+
+
+def test_original_source_cyclic_ring_matches_translated_natively_extracted_edges():
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    accepted=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert accepted["status"]=="original_source_ink_ring_translation_candidate"
+    assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
+    assert accepted["physical_room_identity_proven"] is False
+    assert accepted["new_firm_quantities"]==0
+
+
+def test_original_source_same_vertices_different_cyclic_wall_membership_abstains():
+    floor,finish,receipt=_two_original_source_rings(_RING_RIVAL)
+    source_ring=floor["native_components"][0]["source_simple_ring_candidate"]
+    rival_ring=finish["native_components"][0]["source_simple_ring_candidate"]
+    shifted={(round(x+10.,3),round(y+7.,3))
+             for x,y in source_ring["vertices_pdf_pts"]}
+    assert shifted==set(map(tuple,rival_ring["vertices_pdf_pts"]))
+    assert len(source_ring["source_edge_ids"])==len(rival_ring["source_edge_ids"])
+    rejected=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+    assert rejected["first_failure"]=="competing_cross_sheet_original_perimeter"
+    assert rejected["new_firm_quantities"]==0
+
+
+def test_original_source_ring_cyclic_rotation_reversal_and_deterministic_replay():
+    # Neither the original ink stroke starting point nor its traversal
+    # direction changes the physical cyclic edge set.
+    for ring in (_RING_A[2:]+_RING_A[:2],
+                 tuple(reversed(_RING_A)),
+                 tuple(reversed(_RING_A[3:]+_RING_A[:3]))):
+        floor,finish,receipt=_two_original_source_rings(ring)
+        first=compare(floor,finish,original_source_registration=receipt,
+                      translation_pdf_pts=(10.0,7.0))
+        second=compare(floor,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert first==second
+        assert first["status"]=="original_source_ink_ring_translation_candidate"
+        assert first["new_firm_quantities"]==0
+
+
+def test_original_registration_witnesses_fail_closed_on_malformed_nested_receipts():
+    # All source roles must be typed original-edge identities. Malformed
+    # nested receipts must ABSTAIN, not crash or become a source candidate.
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    bad_roles=(
+        None, [], "untrusted", 42,
+        {"floor_source":None,"finish_source":{"identity":"d0i0"}},
+        {"floor_source":{"identity":"d0i0"},"finish_source":None},
+        {"floor_source":{"identity":["d0i0"]},
+         "finish_source":{"identity":"d0i0"}},
+        {"floor_source":{"identity":"d0i0"},
+         "finish_source":{"identity":{"id":"d0i0"}}},
+        {"floor_source":{"identity":"unknown"},
+         "finish_source":{"identity":"d0i0"}},
+    )
+    for role in bad_roles:
+        receipt=deepcopy(registration)
+        receipt["original_witnesses"]={"native-side":role}
+        result=compare(floor,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]=="unjoined_source_wall_ancestry"
+        assert result["new_firm_quantities"]==0
+
+
+def test_original_registration_reused_wall_witness_is_not_independent_proof():
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    receipt=deepcopy(registration)
+    receipt["original_witnesses"]["duplicate-side"]=deepcopy(
+        receipt["original_witnesses"]["registered-native-side"])
+    result=compare(floor,finish,original_source_registration=receipt,
+                   translation_pdf_pts=(10.0,7.0))
+    assert result["first_failure"]=="original_registration_witness_identity_alias_conflict"
+    assert result["new_firm_quantities"]==0
+    # Two genuinely distinct native source identities remain candidates only.
+    receipt["original_witnesses"]["duplicate-side"]={
+        "floor_source":{"identity":"d1i0"},
+        "finish_source":{"identity":"d1i0"},
+    }
+    candidate=compare(floor,finish,original_source_registration=receipt,
+                      translation_pdf_pts=(10.0,7.0))
+    assert candidate["status"]=="original_source_ink_ring_translation_candidate"
+    assert candidate["physical_room_identity_proven"] is False
+    assert candidate["new_firm_quantities"]==0
+
+
+def test_original_registration_transform_receipt_invalid_shapes_abstain():
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    for shift in (None,False,0,"10,7",{"x":10,"y":7},
+                  (10.,), (10.,7.,0.), (True,7.),
+                  (float("nan"),7.), (float("inf"),7.),
+                  (10**1000,7.)):
+        receipt=deepcopy(registration)
+        receipt["source_translation_candidate_pdf_pts"]=shift
+        result=compare(floor,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]=="original_registration_issuer_or_scope_missing"
+        assert result["new_firm_quantities"]==0
+
+
+def test_original_direct_translation_argument_overflow_and_invalid_types_abstain():
+    # The caller's direct transform must fail closed as strictly as the
+    # nested original-source registration witness, including huge Python ints.
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for shift in (
+        None, False, [], "10,7", (10.,), (10.,7.,0.),
+        (True,7.), (float("nan"),7.), (float("inf"),7.),
+        (10**1000,7.), (-10**1000,7.),
+    ):
+        rejected=compare(floor,finish,original_source_registration=receipt,
+                         translation_pdf_pts=shift)
+        assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert rejected["first_failure"]=="original_registration_transform_invalid"
+        assert rejected["physical_room_identity_proven"] is False
+        assert rejected["new_firm_quantities"]==0
+    accepted=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.,7.))
+    assert accepted["status"]=="original_source_ink_ring_translation_candidate"
+    assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
+    assert accepted["physical_room_identity_proven"] is False
+    assert accepted["new_firm_quantities"]==0
+
+
+def test_original_ring_side_membership_must_equal_issued_native_graph_edges():
+    # Native PDF issuer proves edge ancestry, not an unverified ring receipt.
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for side in ("floor","finish"):
+        for wrong in (
+            ("d999i0",)+tuple(floor["original_native_edge_ids"][1:]),
+            ("d0i0",)+tuple(floor["original_native_edge_ids"][1:-1])+("d0i0",),
+            (["d0i0"],)+tuple(floor["original_native_edge_ids"][1:]),
+            None,
+        ):
+            a,b=deepcopy(floor),deepcopy(finish)
+            graph_side=a if side=="floor" else b
+            graph_side["native_components"][0]["source_simple_ring_candidate"][
+                "source_edge_ids"]=wrong
+            rejected=compare(a,b,original_source_registration=receipt,
+                             translation_pdf_pts=(10.0,7.0))
+            assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+            assert rejected["first_failure"]=="original_cross_sheet_edge_membership_count_conflict"
+            assert rejected["physical_room_identity_proven"] is False
+            assert rejected["new_firm_quantities"]==0
+    positive=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert positive["status"]=="original_source_ink_ring_translation_candidate"
+    assert positive["new_firm_quantities"]==0
+
+
+def test_original_native_graph_ids_reject_unhashable_and_duplicate_receipts():
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for malformed in (
+        (["d0i0"],)+tuple(floor["original_native_edge_ids"][1:]),
+        ("d0i0","d0i0")+tuple(floor["original_native_edge_ids"][2:]),
+        None,
+        "d0i0",
+    ):
+        bad=deepcopy(floor)
+        bad["original_native_edge_ids"]=malformed
+        result=compare(bad,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]=="unjoined_source_wall_ancestry"
+        assert result["new_firm_quantities"]==0

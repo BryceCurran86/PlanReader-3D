@@ -32,6 +32,39 @@ def _single_ring(graph: dict):
     return ring
 
 
+def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0)):
+    """Exact native ink-ring EDGE topology, independent of start and direction.
+
+    The source graph issues a degree-two ordered cycle; sorting its vertices
+    would destroy which original sides are physically connected.
+    """
+    if type(vertices) not in (tuple, list) or not 4 <= len(vertices) <= 20000:
+        return None
+    try:
+        pts=[]
+        for point in vertices:
+            if (type(point) not in (tuple,list) or len(point)!=2
+                    or any(type(v) not in (int,float) or not math.isfinite(v)
+                           for v in point)):
+                return None
+            pts.append((round(float(point[0])+translation[0],3),
+                        round(float(point[1])+translation[1],3)))
+        if pts[0]==pts[-1]:
+            pts.pop()
+        if len(pts)<4 or len(set(pts))!=len(pts):
+            return None
+        poly=Polygon(pts)
+        if not poly.is_valid or poly.is_empty or poly.area<=0:
+            return None
+        edges=frozenset(
+            frozenset((pts[i],pts[(i+1)%len(pts)]))
+            for i in range(len(pts))
+        )
+        return edges if len(edges)==len(pts) else None
+    except (TypeError,ValueError,OverflowError):
+        return None
+
+
 def audit_gpt2_original_cross_sheet_ring_correspondence(
     floor_graph: dict, finish_graph: dict, *,
     original_source_registration: dict,
@@ -48,38 +81,97 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
             or sha!=finish_graph.get("source_sha256")):
         return {**base,"first_failure":"original_source_pdf_root_mismatch"}
     if (type(translation_pdf_pts) is not tuple or len(translation_pdf_pts)!=2
-            or any(type(z) not in (int,float) or not math.isfinite(z)
+            or any(type(z) not in (int,float)
                    for z in translation_pdf_pts)):
         return {**base,"first_failure":"original_registration_transform_invalid"}
+    # Python's isfinite() raises OverflowError on extremely large integers.
+    # Caller-supplied transforms must fail closed just like source receipts.
+    try:
+        finite_translation=all(math.isfinite(z) for z in translation_pdf_pts)
+    except OverflowError:
+        finite_translation=False
+    if not finite_translation:
+        return {**base,"first_failure":"original_registration_transform_invalid"}
     reg=original_source_registration
-    if (type(reg) is not dict or reg.get("status") !=
+    # Malformed caller receipts abstain, never raise or coerce a
+    # source registration. The source producer owns the page-pair transform.
+    reg_shift=(reg.get("source_translation_candidate_pdf_pts")
+               if type(reg) is dict else None)
+    if (type(reg_shift) not in (tuple,list) or len(reg_shift)!=2
+            or any(type(z) not in (int,float) for z in reg_shift)):
+        return {**base,"first_failure":"original_registration_issuer_or_scope_missing"}
+    try:
+        finite_shift=all(math.isfinite(z) for z in reg_shift)
+    except OverflowError:
+        finite_shift=False
+    if (not finite_shift or type(reg) is not dict or reg.get("status") !=
             "original_four_edge_ink_correspondence_with_unclosed_doorway"
             or reg.get("original_source_sha256")!=sha
             or reg.get("original_floor_page_id")!=floor_graph.get("page_1_based")
             or reg.get("original_finish_page_id")!=finish_graph.get("page_1_based")
-            or tuple(reg.get("source_translation_candidate_pdf_pts",()))!=
-                tuple(translation_pdf_pts)):
+            or tuple(reg_shift)!=tuple(translation_pdf_pts)):
         return {**base,"first_failure":"original_registration_issuer_or_scope_missing"}
     witnesses=reg.get("original_witnesses")
     if type(witnesses) is not dict or not witnesses:
         return {**base,"first_failure":"original_registration_witnesses_missing"}
-    floor_ids=set(floor_graph.get("original_native_edge_ids",()))
-    finish_ids=set(finish_graph.get("original_native_edge_ids",()))
-    if any(
-        role.get("floor_source",{}).get("identity") not in floor_ids
-        or role.get("finish_source",{}).get("identity") not in finish_ids
-        for role in witnesses.values()
-    ):
+    # A native graph issuer emits bounded, unique, typed path IDs. Do not
+    # let malformed receipts crash set construction or supply false ancestry.
+    raw_floor_ids=floor_graph.get("original_native_edge_ids")
+    raw_finish_ids=finish_graph.get("original_native_edge_ids")
+    if (type(raw_floor_ids) is not tuple or type(raw_finish_ids) is not tuple
+            or not 4 <= len(raw_floor_ids) <= 20000
+            or not 4 <= len(raw_finish_ids) <= 20000
+            or any(type(i) is not str or not i
+                   for ids in (raw_floor_ids,raw_finish_ids) for i in ids)
+            or len(set(raw_floor_ids))!=len(raw_floor_ids)
+            or len(set(raw_finish_ids))!=len(raw_finish_ids)):
         return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+    floor_ids=set(raw_floor_ids)
+    finish_ids=set(raw_finish_ids)
+    seen_floor=set()
+    seen_finish=set()
+    for role in witnesses.values():
+        if type(role) is not dict:
+            return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        floor_source=role.get("floor_source")
+        finish_source=role.get("finish_source")
+        if type(floor_source) is not dict or type(finish_source) is not dict:
+            return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        floor_id=floor_source.get("identity")
+        finish_id=finish_source.get("identity")
+        if (type(floor_id) is not str or type(finish_id) is not str
+                or floor_id not in floor_ids or finish_id not in finish_ids):
+            return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        if floor_id in seen_floor or finish_id in seen_finish:
+            return {**base,"first_failure":
+                    "original_registration_witness_identity_alias_conflict"}
+        seen_floor.add(floor_id)
+        seen_finish.add(finish_id)
     floor_ring=_single_ring(floor_graph)
     finish_ring=_single_ring(finish_graph)
     if not floor_ring or not finish_ring:
         return {**base,"first_failure":"physical_floor_or_finish_source_ring_open"}
+    # A ring must use exactly the independently issued original native
+    # source edges. Equal ring side counts do not prove source membership.
+    for ring,issued_ids in ((floor_ring,floor_ids),(finish_ring,finish_ids)):
+        ring_ids=ring.get("source_edge_ids")
+        if (type(ring_ids) is not tuple
+                or len(ring_ids)!=len(issued_ids)
+                or any(type(i) is not str for i in ring_ids)
+                or len(set(ring_ids))!=len(ring_ids)
+                or set(ring_ids)!=issued_ids):
+            return {**base,"first_failure":
+                    "original_cross_sheet_edge_membership_count_conflict"}
     dx,dy=translation_pdf_pts
-    transferred={(round(x+dx,3),round(y+dy,3))
-                 for x,y in floor_ring["vertices_pdf_pts"]}
-    received={tuple(v) for v in finish_ring["vertices_pdf_pts"]}
-    if transferred != received or len(transferred)!=len(received):
+    # Equal source vertex sets can describe NON-equal wall cycles. Compare
+    # every independently extracted native boundary side, including closure.
+    # Stroke order/reversal and cyclic starting vertex have no authority.
+    translated_edges=_source_cyclic_ring_edges_native(
+        floor_ring.get("vertices_pdf_pts"),translation=(dx,dy))
+    received_edges=_source_cyclic_ring_edges_native(
+        finish_ring.get("vertices_pdf_pts"))
+    if (not translated_edges or not received_edges
+            or translated_edges!=received_edges):
         return {**base,"first_failure":"competing_cross_sheet_original_perimeter"}
     # Vertex equality alone is insufficient: source perimeter must have the
     # same number of actual independently issued original source side edges.
