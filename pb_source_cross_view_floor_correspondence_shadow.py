@@ -57,6 +57,7 @@ MARK_TOO_CLOSE_TO_BOX_SIDE = "mark_too_close_to_box_side"
 MARK_IN_UNREGISTERED_REGION = "mark_in_unregistered_region"
 SOURCE_FINISH_MARK_IDENTITY_INVALID = "source_finish_mark_identity_invalid"
 SOURCE_MEASURED_FLOOR_BOX_INVALID = "source_measured_floor_box_invalid"
+SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID = "source_physical_floor_identity_invalid"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
 MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX = "multiple_same_code_finish_marks_in_box"
 NO_FINISH_MARK_IN_BOX = "no_finish_mark_in_box"
@@ -92,8 +93,17 @@ D4 = {
 Lines = dict  # {"H": {coord: [(lo, hi), ...]}, "V": {...}}
 
 
-def _clean(val: Any) -> str:
-    return str(val or "").strip()
+def _native_source_identity(value: Any) -> tuple[str, bool]:
+    """Keep an original physical/source ID verbatim; never coerce its type.
+
+    A missing ID is already an object-local abstention. A supplied but
+    malformed ID makes the complete measured-owner universe untrustworthy.
+    """
+    if value is None or (type(value) is str and value == ""):
+        return "", False
+    if type(value) is str and value == value.strip() and value.isprintable():
+        return value, False
+    return "", True
 
 
 def merge_intervals(intervals: Iterable[Sequence[float]]) -> list[tuple[float, float]]:
@@ -890,17 +900,33 @@ class SourceCrossViewFloorCorrespondenceProducer:
             "canonical_floor_id", "physical_room_id",
             "source_room_face_record_id",
         )
+        native_identities = [
+            {
+                field_name: _native_source_identity(item.get(field_name))
+                for field_name in identity_fields
+            }
+            for item, _ in checked_boxes
+        ]
+        # A malformed rival can conceal a physical identity collision. Keep
+        # all diagnostic rows, but never let another valid-looking row become
+        # a unique source-owner candidate from that incomplete ID universe.
+        invalid_identity_universe = any(
+            malformed
+            for identities in native_identities
+            for _, malformed in identities.values()
+        )
         identity_counts = collections.Counter(
             (field_name, value)
-            for item, _ in checked_boxes
-            for field_name in identity_fields
-            if (value := _clean(item.get(field_name)))
+            for identities in native_identities
+            for field_name, (value, _) in identities.items()
+            if value
         )
 
         for box_index, (item, box_sup) in enumerate(checked_boxes):
-            canonical_floor_id = _clean(item.get("canonical_floor_id"))
-            physical_room_id = _clean(item.get("physical_room_id"))
-            source_room_face_record_id = _clean(item.get("source_room_face_record_id"))
+            identities = native_identities[box_index]
+            canonical_floor_id = identities["canonical_floor_id"][0]
+            physical_room_id = identities["physical_room_id"][0]
+            source_room_face_record_id = identities["source_room_face_record_id"][0]
 
             corr = box_correspondence(
                 box_sup,
@@ -963,6 +989,15 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 classified["reason_codes"] = tuple(dict.fromkeys((
                     *classified["reason_codes"],
                     SOURCE_MEASURED_FLOOR_BOX_INVALID,
+                )))
+                if classified["status"] is EvidenceResolutionStatus.CANDIDATE:
+                    classified["status"] = EvidenceResolutionStatus.ABSTAINED
+                    classified["authority_blockers"] = ()
+
+            if invalid_identity_universe:
+                classified["reason_codes"] = tuple(dict.fromkeys((
+                    *classified["reason_codes"],
+                    SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
                 )))
                 if classified["status"] is EvidenceResolutionStatus.CANDIDATE:
                     classified["status"] = EvidenceResolutionStatus.ABSTAINED
