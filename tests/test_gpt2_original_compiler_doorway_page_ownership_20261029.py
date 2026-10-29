@@ -17,10 +17,43 @@ SOURCE_SHA = "a" * 64
 
 
 def _ring(page=7, *, status="source_jamb_bound_open_door_perimeter_candidate_only"):
+    dx = 0 if page == 7 else 10
     return {
         "status": status,
         "original_source_sha256": SOURCE_SHA,
         "original_page_1_based": page,
+        "original_source_perimeter_side_ids": ("d0i0", "d1i0", "d2i0"),
+        "source_ink_ring_with_explicit_virtual_door_gap_pdf_pts": (
+            (dx, 0), (dx, 100), (dx + 100, 100), (dx + 100, 0),
+        ),
+        "source_virtual_door_connector_pdf_pts": (
+            (dx + 100, 0), (dx, 0),
+        ),
+        "source_only_native_polygon_area_pdf_pt2_not_m2": 10000.0,
+        "source_jamb_roles_same_sha_rechecked": True,
+        "source_wall_and_jamb_geometry_independently_recomputed": True,
+    }
+
+
+def _graph(page=7):
+    dx = 0 if page == 7 else 10
+    points = ((dx, 0), (dx, 100), (dx + 100, 100), (dx + 100, 0))
+    return {
+        "source_sha256": SOURCE_SHA,
+        "page_1_based": page,
+        "original_native_edge_ids": ("d0i0", "d1i0", "d2i0"),
+        "original_native_edges": tuple(
+            {"source_id": f"d{i}i0", "endpoints_pdf_pts": (points[i], points[i + 1])}
+            for i in range(3)
+        ),
+        "native_components": ({
+            "source_simple_ring_candidate": None,
+            "native_endpoint_degrees": tuple(
+                {"point_pdf_pt": p, "degree": 1 if i in (0, 3) else 2}
+                for i, p in enumerate(points)
+            ),
+        },),
+        "interior_stroke_intersections_and_overlaps": (),
     }
 
 
@@ -53,6 +86,14 @@ def _invoke(monkeypatch, *, floor_page=7, finish_page=11,
 
     monkeypatch.setattr(
         GPT2OriginalSourceGeometryBridge,"_source_revision",decoded_source)
+    def native_graph(self, *, revision_id, page_1_based, original_source_edge_ids):
+        calls.append(("native-graph", page_1_based))
+        assert revision_id == "original-rev"
+        assert original_source_edge_ids == ("d0i0", "d1i0", "d2i0")
+        return _graph(page_1_based)
+
+    monkeypatch.setattr(
+        GPT2OriginalSourceGeometryBridge, "original_room_ink_graph", native_graph)
     monkeypatch.setattr(
         compiler,"audit_gpt2_original_doorway_bound_floor_finish_correspondence",
         candidate_registration)
@@ -133,6 +174,8 @@ def test_valid_original_page_pair_reaches_source_only_issuers_but_never_firm(mon
     assert calls==[
         ("decoded",7),
         ("decoded",11),
+        ("native-graph",7),
+        ("native-graph",11),
         ("source-geometric-issuer",),
         ("source-material-issuer",),
     ]
@@ -141,3 +184,62 @@ def test_valid_original_page_pair_reaches_source_only_issuers_but_never_firm(mon
     assert outcome["customer_floor_finish_area_issued"] is False
     assert outcome["source_virtual_door_connectors_are_structural"] is False
     assert outcome["original_source_sha256"]==SOURCE_SHA
+
+
+@pytest.mark.parametrize("field, replacement", [
+    ("source_jamb_roles_same_sha_rechecked", "yes"),
+    ("source_wall_and_jamb_geometry_independently_recomputed", 1),
+    ("original_source_perimeter_side_ids", ("d0i0", "d0i0", "d2i0")),
+    ("original_source_perimeter_side_ids", ("d0i0", "d1i0", "d999i0")),
+    ("source_ink_ring_with_explicit_virtual_door_gap_pdf_pts",
+     ((0, 0), (0, 100), (100, 101), (100, 0))),
+    ("source_virtual_door_connector_pdf_pts", ((100, 0), (1, 0))),
+    ("source_only_native_polygon_area_pdf_pt2_not_m2", 12345.0),
+    ("source_only_native_polygon_area_pdf_pt2_not_m2", 10**1000),
+])
+def test_copied_sha_page_cannot_bypass_reissued_original_native_perimeter(
+    monkeypatch, field, replacement,
+):
+    forged = _ring(7)
+    forged[field] = replacement
+    run, calls = _invoke(monkeypatch, floor=forged)
+    with pytest.raises(
+        ValueError, match="original_source_doorway_compiler_native_perimeter_receipt_conflict"
+    ):
+        run()
+    assert not any(name[0].endswith("issuer") for name in calls)
+
+
+def test_original_graph_with_competing_open_perimeters_cannot_be_silently_selected(
+    monkeypatch,
+):
+    run, calls = _invoke(monkeypatch)
+    def competing_graph(self, *, revision_id, page_1_based, original_source_edge_ids):
+        calls.append(("native-graph", page_1_based))
+        graph = _graph(page_1_based)
+        graph["native_components"] = (
+            graph["native_components"][0], graph["native_components"][0]
+        )
+        return graph
+    monkeypatch.setattr(
+        GPT2OriginalSourceGeometryBridge, "original_room_ink_graph", competing_graph
+    )
+    with pytest.raises(
+        ValueError, match="original_source_doorway_compiler_native_perimeter_receipt_conflict"
+    ):
+        run()
+    assert not any(name[0].endswith("issuer") for name in calls)
+
+
+def test_native_source_graph_exception_is_typed_compiler_abstention(monkeypatch):
+    run, calls = _invoke(monkeypatch)
+    def unavailable_graph(self, *, revision_id, page_1_based, original_source_edge_ids):
+        raise ValueError("original_graph_nonorthogonal_or_zero_source_edge")
+    monkeypatch.setattr(
+        GPT2OriginalSourceGeometryBridge, "original_room_ink_graph", unavailable_graph
+    )
+    with pytest.raises(
+        ValueError, match="original_source_doorway_compiler_native_perimeter_receipt_conflict"
+    ):
+        run()
+    assert not any(name[0].endswith("issuer") for name in calls)

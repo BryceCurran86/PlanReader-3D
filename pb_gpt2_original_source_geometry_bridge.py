@@ -46,6 +46,118 @@ from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
 )
 
 
+
+def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict) -> bool:
+    """Prove a caller's perimeter vertices/IDs against SHA-page-native strokes.
+
+    This is a negative-only source integrity gate. The jamb receipt and W4
+    physical wall/room authority remain separate, never inferred here.
+    """
+    import math
+    import re
+
+    def point(value):
+        if type(value) not in (tuple, list) or len(value) != 2:
+            return None
+        out = []
+        for coordinate in value:
+            if type(coordinate) not in (int, float):
+                return None
+            if type(coordinate) is int and abs(coordinate) > 2**53:
+                return None
+            try:
+                number = float(coordinate)
+            except (ValueError, OverflowError):
+                return None
+            if not math.isfinite(number):
+                return None
+            out.append(number)
+        return tuple(out)
+
+    if type(ring) is not dict or type(graph) is not dict:
+        return False
+    if (ring.get("source_jamb_roles_same_sha_rechecked") is not True
+            or ring.get("source_wall_and_jamb_geometry_independently_recomputed") is not True
+            or graph.get("source_sha256") != ring.get("original_source_sha256")
+            or graph.get("page_1_based") != ring.get("original_page_1_based")):
+        return False
+    ids = ring.get("original_source_perimeter_side_ids")
+    if (type(ids) is not tuple or not 2 <= len(ids) <= 120000
+            or any(type(ident) is not str
+                   or re.fullmatch(r"d(0|[1-9][0-9]*)i(0|[1-9][0-9]*)", ident) is None
+                   for ident in ids)
+            or len(set(ids)) != len(ids)
+            or tuple(sorted(ids)) != graph.get("original_native_edge_ids")):
+        return False
+    components = graph.get("native_components")
+    if (type(components) not in (tuple, list) or len(components) != 1
+            or graph.get("interior_stroke_intersections_and_overlaps")
+            or components[0].get("source_simple_ring_candidate") is not None):
+        return False
+    edges = graph.get("original_native_edges")
+    if type(edges) not in (tuple, list) or len(edges) != len(ids):
+        return False
+    native = {}
+    for row in edges:
+        if type(row) is not dict or row.get("source_id") not in ids:
+            return False
+        ends = row.get("endpoints_pdf_pts")
+        if type(ends) not in (tuple, list) or len(ends) != 2:
+            return False
+        a, b = point(ends[0]), point(ends[1])
+        if a is None or b is None or a == b or row["source_id"] in native:
+            return False
+        native[row["source_id"]] = frozenset((a, b))
+    if len(native) != len(ids):
+        return False
+    vertices = ring.get("source_ink_ring_with_explicit_virtual_door_gap_pdf_pts")
+    if type(vertices) not in (tuple, list) or len(vertices) != len(ids) + 1:
+        return False
+    chain = [point(vertex) for vertex in vertices]
+    if any(vertex is None for vertex in chain) or len(set(chain)) != len(chain):
+        return False
+    actual_edges = [frozenset((a, b)) for a, b in zip(chain, chain[1:])]
+    if any(len(edge) != 2 for edge in actual_edges):
+        return False
+    if sorted(actual_edges, key=lambda x: sorted(x)) != sorted(native.values(), key=lambda x: sorted(x)):
+        return False
+    gap = ring.get("source_virtual_door_connector_pdf_pts")
+    if type(gap) not in (tuple, list) or len(gap) != 2:
+        return False
+    if point(gap[0]) != chain[-1] or point(gap[1]) != chain[0]:
+        return False
+    degrees = components[0].get("native_endpoint_degrees")
+    if type(degrees) not in (tuple, list):
+        return False
+    open_ends = []
+    for row in degrees:
+        if type(row) is not dict or type(row.get("degree")) is not int:
+            return False
+        coordinate = point(row.get("point_pdf_pt"))
+        if coordinate is None or row["degree"] not in (1, 2):
+            return False
+        if row["degree"] == 1:
+            open_ends.append(coordinate)
+    if len(open_ends) != 2 or set(open_ends) != {chain[0], chain[-1]}:
+        return False
+    area = ring.get("source_only_native_polygon_area_pdf_pt2_not_m2")
+    if type(area) not in (int, float):
+        return False
+    try:
+        expected_area = float(area)
+    except (OverflowError, ValueError):
+        return False
+    shoelace = abs(sum(
+        a[0] * b[1] - b[0] * a[1]
+        for a, b in zip(chain, chain[1:] + chain[:1])
+    )) / 2.0
+    return (math.isfinite(expected_area) and expected_area > 0
+            and math.isfinite(shoelace)
+            and math.isclose(expected_area, shoelace, rel_tol=1e-12, abs_tol=1e-8))
+
+
+
+
 class GPT2OriginalSourceGeometryBridge:
     """Read-only source publisher, bound to an existing visibility producer."""
 
@@ -437,6 +549,29 @@ class GPT2OriginalSourceGeometryBridge:
                     for row in (original_floor_doorway_ring,
                                 original_finish_doorway_ring))):
             raise ValueError("original_source_doorway_handoff_revision_root_conflict")
+        # A page number and SHA copied into a caller dictionary are not
+        # proof that its side IDs and polygon are the original printed ink.
+        # Reissue BOTH open perimeters from the sealed original PDF, then
+        # require exact native side/vertex/gap correspondence before joining.
+        for candidate, page in (
+            (original_floor_doorway_ring, floor_page_1_based),
+            (original_finish_doorway_ring, finish_page_1_based),
+        ):
+            ids = candidate.get("original_source_perimeter_side_ids")
+            if (type(ids) is not tuple or len(ids) < 2
+                    or len(ids) > 120000 or any(type(v) is not str for v in ids)):
+                raise ValueError("original_source_doorway_compiler_native_perimeter_receipt_conflict")
+            try:
+                graph = self.original_room_ink_graph(
+                    revision_id=revision_id, page_1_based=page,
+                    original_source_edge_ids=ids,
+                )
+            except (ValueError, TypeError, KeyError, IndexError, OverflowError, AttributeError):
+                raise ValueError(
+                    "original_source_doorway_compiler_native_perimeter_receipt_conflict"
+                ) from None
+            if not _original_doorway_ring_matches_reissued_native_graph(candidate, graph):
+                raise ValueError("original_source_doorway_compiler_native_perimeter_receipt_conflict")
         joining=audit_gpt2_original_doorway_bound_floor_finish_correspondence(
             original_floor_doorway_ring,original_finish_doorway_ring,
             source_registration=independent_cross_sheet_registration,
