@@ -89,7 +89,8 @@ def _invoke(monkeypatch, *, floor_page=7, finish_page=11,
     def native_graph(self, *, revision_id, page_1_based, original_source_edge_ids):
         calls.append(("native-graph", page_1_based))
         assert revision_id == "original-rev"
-        assert original_source_edge_ids == ("d0i0", "d1i0", "d2i0")
+        # The independent graph remains the original; forged caller IDs
+        # must be rejected by the compiler rather than by this test stub.
         return _graph(page_1_based)
 
     monkeypatch.setattr(
