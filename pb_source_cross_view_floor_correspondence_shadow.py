@@ -55,6 +55,7 @@ DUPLICATE_PHYSICAL_FLOOR_IDENTITY = "duplicate_physical_floor_identity"
 MISSING_PHYSICAL_FLOOR_IDENTITY = "missing_physical_floor_identity"
 MARK_TOO_CLOSE_TO_BOX_SIDE = "mark_too_close_to_box_side"
 MARK_IN_UNREGISTERED_REGION = "mark_in_unregistered_region"
+SOURCE_FINISH_MARK_IDENTITY_INVALID = "source_finish_mark_identity_invalid"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
 MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX = "multiple_same_code_finish_marks_in_box"
 NO_FINISH_MARK_IN_BOX = "no_finish_mark_in_box"
@@ -437,8 +438,31 @@ def classify_floor(
     min_margin_pt: float = 5.0,
     authority_blockers: Sequence[str] = STANDING_AUTHORITY_BLOCKERS,
 ) -> dict[str, Any]:
+    # A caller's glyph/mark receipt is not a typed source identity merely
+    # because a matching finish code can be read from another mark.  Reject
+    # malformed or unbounded mark universes before counting any candidates.
+    if type(marks_inside) not in (tuple, list) or len(marks_inside) > 20000:
+        return {
+            "status": EvidenceResolutionStatus.ABSTAINED,
+            "reason_codes": (SOURCE_FINISH_MARK_IDENTITY_INVALID,),
+            "finish_codes_in_box": {},
+            "authority_blockers": (),
+            "authenticated_physical_wall_face_equivalence": False,
+        }
     reasons: list[str] = []
-    codes = collections.Counter(m["code"] for m in marks_inside)
+    codes: collections.Counter[str] = collections.Counter()
+    invalid_mark_identity = False
+    for mark in marks_inside:
+        if not isinstance(mark, Mapping):
+            invalid_mark_identity = True
+            continue
+        code = mark.get("code")
+        if type(code) is not str or not code or code != code.strip():
+            invalid_mark_identity = True
+            continue
+        codes[code] += 1
+    if invalid_mark_identity:
+        reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
     if registration_unique is not True:
         reasons.append(REGISTRATION_NOT_UNIQUE)
     if correspondence["wall_bounded_on_both_sheets"] is not True:
@@ -462,6 +486,8 @@ def classify_floor(
         minimum = math.nan
 
     def valid_margin(mark: Mapping[str, Any]) -> bool:
+        if not isinstance(mark, Mapping):
+            return False
         raw = mark.get("margin_pt")
         if type(raw) not in (int, float):
             return False
@@ -478,7 +504,8 @@ def classify_floor(
     ):
         reasons.append(MARK_TOO_CLOSE_TO_BOX_SIDE)
     # Registration is an explicit source fact, not a truthy caller hint.
-    if any(mark.get("registered_region") is not True for mark in marks_inside):
+    if any(not isinstance(mark, Mapping)
+           or mark.get("registered_region") is not True for mark in marks_inside):
         reasons.append(MARK_IN_UNREGISTERED_REGION)
 
     if len(codes) > 1:
@@ -487,7 +514,7 @@ def classify_floor(
     elif not codes:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons.append(NO_FINISH_MARK_IN_BOX)
-    elif material_code not in codes:
+    elif type(material_code) is not str or material_code not in codes:
         status = EvidenceResolutionStatus.ABSTAINED
         reasons.append(BOX_OWNED_BY_OTHER_FINISH_CODE)
     elif sum(codes.values()) != 1:
