@@ -1043,9 +1043,14 @@ class SourceCrossViewFloorCorrespondenceProducer:
             not _valid_source_wall_segment_universe(support_segments)
             or not _valid_source_wall_segment_universe(target_segments)
         ):
+            reasons = [SOURCE_WALL_SEGMENT_UNIVERSE_INVALID]
+            if invalid_mark_universe:
+                reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            if invalid_box_universe:
+                reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=(SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,),
+                reason_codes=tuple(reasons),
                 records=(),
             )
 
