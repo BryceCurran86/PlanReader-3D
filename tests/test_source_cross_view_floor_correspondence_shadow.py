@@ -1492,8 +1492,8 @@ def test_full_measured_box_overlap_index_handles_20000_disjoint_and_dense():
 ])
 @pytest.mark.parametrize("bad_identity", [
     123, True, ["source-face-first"], {"id": "source-face-first"},
-    " source-face-first", "source-face-first ", "\\tsource-face-first",
-    "source-face-first\\n", b"source-face-first", float("nan"),
+    " source-face-first", "source-face-first ", "\tsource-face-first",
+    "source-face-first\n", b"source-face-first", float("nan"),
 ])
 @pytest.mark.parametrize("reverse", [False, True])
 def test_malformed_original_floor_identity_vetoes_complete_owner_universe(
