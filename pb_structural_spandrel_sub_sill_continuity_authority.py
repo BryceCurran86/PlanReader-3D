@@ -13,7 +13,7 @@ Engineering rationale:
   falsely concluding that no window opening exists and obliterating the aperture candidate.
 - In reverse errors, ignoring the spandrel wall fails to quantify the solid wall area beneath the
   sill (A_spandrel = W_clear * h_sill), creating deficient takeoff wall quantities.
-- Structural Spandrel Sub-Sill Authority confirms the glazed aperture, validates vertical level
+- Structural Spandrel Sub-Sill shadow evaluates an unverified aperture candidate and vertical level
   ordering (0 < h_sill < h_head), and computes both transparent glazing aperture area and solid
   sub-sill infill area bound to the continuous through-wall frame.
 
@@ -47,7 +47,9 @@ MAX_HEAD_HEIGHT_MM = 4000.0
 class SpandrelSubSillClassification(str, Enum):
     """Classification outcome for window over sub-sill spandrel wall."""
 
-    SPANDREL_SUB_SILL_CONFIRMED = "spandrel_sub_sill_confirmed"
+    SPANDREL_SUB_SILL_CONFIRMED = "spandrel_sub_sill_confirmed"  # reserved for future source-backed receipt
+    GEOMETRIC_CANDIDATE = "geometric_candidate"
+    ABSTAINED_UNVERIFIED_SCALE = "abstained_unverified_scale"
     ABSTAINED_INVALID_VERTICAL_LEVELS = "abstained_invalid_vertical_levels"
     ABSTAINED_DEGENERATE_SPAN = "abstained_degenerate_span"
 
@@ -61,13 +63,13 @@ class SpandrelSubSillRecord:
     jamb_left: tuple[float, float]
     jamb_right: tuple[float, float]
     clear_span_pt: float
-    clear_span_m: float
+    clear_span_m: float | None
     sill_height_mm: float
     head_height_mm: float
-    glazing_height_mm: float
-    glazing_aperture_area_sqm: float
-    spandrel_wall_area_sqm: float
-    total_wall_opening_area_sqm: float
+    glazing_height_mm: float | None
+    glazing_aperture_area_sqm: float | None
+    spandrel_wall_area_sqm: float | None
+    total_wall_opening_area_sqm: float | None
     host_through_wall_id: str
     status: EvidenceResolutionStatus
     first_remaining_gate: str | None = None
@@ -77,6 +79,9 @@ class SpandrelSubSillRecord:
     shadow_only: bool = True
 
     def to_dict(self) -> Mapping[str, Any]:
+        def _round_optional(value: float | None, places: int) -> float | None:
+            return None if value is None else round(value, places)
+
         return {
             "schema_version": SCHEMA_VERSION,
             "contract_id": self.contract_id,
@@ -84,13 +89,13 @@ class SpandrelSubSillRecord:
             "jamb_left": [round(c, 2) for c in self.jamb_left],
             "jamb_right": [round(c, 2) for c in self.jamb_right],
             "clear_span_pt": round(self.clear_span_pt, 2),
-            "clear_span_m": round(self.clear_span_m, 4),
+            "clear_span_m": _round_optional(self.clear_span_m, 4),
             "sill_height_mm": round(self.sill_height_mm, 1),
             "head_height_mm": round(self.head_height_mm, 1),
-            "glazing_height_mm": round(self.glazing_height_mm, 1),
-            "glazing_aperture_area_sqm": round(self.glazing_aperture_area_sqm, 4),
-            "spandrel_wall_area_sqm": round(self.spandrel_wall_area_sqm, 4),
-            "total_wall_opening_area_sqm": round(self.total_wall_opening_area_sqm, 4),
+            "glazing_height_mm": _round_optional(self.glazing_height_mm, 1),
+            "glazing_aperture_area_sqm": _round_optional(self.glazing_aperture_area_sqm, 4),
+            "spandrel_wall_area_sqm": _round_optional(self.spandrel_wall_area_sqm, 4),
+            "total_wall_opening_area_sqm": _round_optional(self.total_wall_opening_area_sqm, 4),
             "host_through_wall_id": self.host_through_wall_id,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
@@ -120,15 +125,76 @@ class StructuralSpandrelSubSillContinuityAuthority:
         sill_height_mm: float,
         head_height_mm: float,
         host_through_wall_id: str,
-        scale_ratio: float = 0.01764,
+        scale_ratio: float | None = None,
         context_label: str = "SPANDREL_WINDOW",
     ) -> SpandrelSubSillRecord:
         """Evaluates clear span and vertical levels, computing glazing and sub-sill wall areas."""
+        # Source-free inputs must never mint a metric or a confirmed opening.
+        # In particular, int values too large to convert to float must abstain
+        # rather than leaking an OverflowError through the shadow consumer.
+        def _finite_real(value: object) -> bool:
+            if type(value) not in (int, float):
+                return False
+            try:
+                return math.isfinite(float(value))
+            except (OverflowError, ValueError):
+                return False
+
+        for name, value in (("sill_height_mm", sill_height_mm),
+                            ("head_height_mm", head_height_mm)):
+            if not _finite_real(value):
+                raise ValueError(f"{name} must be finite real")
+        if scale_ratio is not None:
+            if not _finite_real(scale_ratio):
+                raise ValueError("scale_ratio must be finite real")
+            if scale_ratio <= 0:
+                raise ValueError("scale_ratio must be positive")
+        if not isinstance(host_through_wall_id, str) or not host_through_wall_id.strip():
+            raise ValueError("nonblank physical host identity required")
+        if not isinstance(context_label, str) or not context_label.strip():
+            raise ValueError("nonblank context identity required")
+        for name, point in (("jamb_a", jamb_a), ("jamb_b", jamb_b)):
+            if not isinstance(point, (tuple, list)) or len(point) != 2:
+                raise ValueError(f"{name} must contain two coordinates")
+            if any(not _finite_real(v) for v in point):
+                raise ValueError(f"{name} must contain finite real coordinates")
         jamb_left, jamb_right = self._order_jambs(jamb_a, jamb_b)
-        dx = jamb_right[0] - jamb_left[0]
-        dy = jamb_right[1] - jamb_left[1]
+        dx = float(jamb_right[0]) - float(jamb_left[0])
+        dy = float(jamb_right[1]) - float(jamb_left[1])
         clear_span_pt = math.hypot(dx, dy)
+        if not math.isfinite(clear_span_pt):
+            raise ValueError("nonfinite geometric span")
+        if scale_ratio is None:
+            # A typed abstention is essential at the existing shadow record
+            # seam. Null metric fields are unknown, never zero quantities.
+            contract_id = stable_contract_id(
+                f"SPANDREL_SUB_SILL_{context_label}",
+                (host_through_wall_id,
+                 *(float(v).hex() for v in (*jamb_left, *jamb_right)),
+                 float(sill_height_mm).hex(), float(head_height_mm).hex(),
+                 "source_scale_unverified"),
+            )
+            return SpandrelSubSillRecord(
+                contract_id=contract_id,
+                classification=SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE,
+                jamb_left=jamb_left,
+                jamb_right=jamb_right,
+                clear_span_pt=clear_span_pt,
+                clear_span_m=None,
+                sill_height_mm=sill_height_mm,
+                head_height_mm=head_height_mm,
+                glazing_height_mm=None,
+                glazing_aperture_area_sqm=None,
+                spandrel_wall_area_sqm=None,
+                total_wall_opening_area_sqm=None,
+                host_through_wall_id=host_through_wall_id,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                first_remaining_gate="original_source_scale_authority_unverified",
+                notes="Source scale absent; no metric opening or wall area.",
+            )
         clear_span_m = clear_span_pt * scale_ratio
+        if not math.isfinite(clear_span_m):
+            raise ValueError("nonfinite metric conversion")
 
         glazing_height_mm = max(0.0, head_height_mm - sill_height_mm)
         glazing_height_m = glazing_height_mm / 1000.0
@@ -137,18 +203,19 @@ class StructuralSpandrelSubSillContinuityAuthority:
 
         glazing_area_sqm = clear_span_m * glazing_height_m
         spandrel_area_sqm = clear_span_m * sill_height_m
-        total_opening_area_sqm = clear_span_m * head_height_m
+        # Solid sub-sill wall is not an opening deduction.
+        total_opening_area_sqm = glazing_area_sqm
+        if not all(math.isfinite(v) for v in (glazing_area_sqm, spandrel_area_sqm)):
+            raise ValueError("nonfinite hypothetical area")
 
         contract_id = stable_contract_id(
             f"SPANDREL_SUB_SILL_{context_label}",
             (
                 host_through_wall_id,
-                round(jamb_left[0], 2),
-                round(jamb_left[1], 2),
-                round(jamb_right[0], 2),
-                round(jamb_right[1], 2),
-                round(sill_height_mm, 1),
-                round(head_height_mm, 1),
+                *(float(v).hex() for v in (*jamb_left, *jamb_right)),
+                float(sill_height_mm).hex(),
+                float(head_height_mm).hex(),
+                float(scale_ratio).hex(),
             ),
         )
 
@@ -160,13 +227,13 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 jamb_left=jamb_left,
                 jamb_right=jamb_right,
                 clear_span_pt=clear_span_pt,
-                clear_span_m=clear_span_m,
+                clear_span_m=None,
                 sill_height_mm=sill_height_mm,
                 head_height_mm=head_height_mm,
-                glazing_height_mm=glazing_height_mm,
-                glazing_aperture_area_sqm=glazing_area_sqm,
-                spandrel_wall_area_sqm=spandrel_area_sqm,
-                total_wall_opening_area_sqm=total_opening_area_sqm,
+                glazing_height_mm=None,
+                glazing_aperture_area_sqm=None,
+                spandrel_wall_area_sqm=None,
+                total_wall_opening_area_sqm=None,
                 host_through_wall_id=host_through_wall_id,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="clear_span_out_of_bounds",
@@ -185,23 +252,23 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 jamb_left=jamb_left,
                 jamb_right=jamb_right,
                 clear_span_pt=clear_span_pt,
-                clear_span_m=clear_span_m,
+                clear_span_m=None,
                 sill_height_mm=sill_height_mm,
                 head_height_mm=head_height_mm,
-                glazing_height_mm=0.0,
-                glazing_aperture_area_sqm=0.0,
-                spandrel_wall_area_sqm=0.0,
-                total_wall_opening_area_sqm=0.0,
+                glazing_height_mm=None,
+                glazing_aperture_area_sqm=None,
+                spandrel_wall_area_sqm=None,
+                total_wall_opening_area_sqm=None,
                 host_through_wall_id=host_through_wall_id,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="vertical_levels_inverted_or_negative",
                 notes=f"Invalid vertical levels: sill={sill_height_mm:.1f}mm >= head={head_height_mm:.1f}mm.",
             )
 
-        # Pass: Spandrel sub-sill confirmed
+        # Shadow candidate only: physical opening and source scale unproven
         return SpandrelSubSillRecord(
             contract_id=contract_id,
-            classification=SpandrelSubSillClassification.SPANDREL_SUB_SILL_CONFIRMED,
+            classification=SpandrelSubSillClassification.GEOMETRIC_CANDIDATE,
             jamb_left=jamb_left,
             jamb_right=jamb_right,
             clear_span_pt=clear_span_pt,
@@ -214,9 +281,9 @@ class StructuralSpandrelSubSillContinuityAuthority:
             total_wall_opening_area_sqm=total_opening_area_sqm,
             host_through_wall_id=host_through_wall_id,
             status=EvidenceResolutionStatus.CANDIDATE,
-            first_remaining_gate="spandrel_sub_sill_shadow_authenticated",
+            first_remaining_gate="original_source_spandrel_host_scale_levels_unverified",
             notes=(
-                f"Window confirmed over sub-sill spandrel wall: "
+                f"Unverified geometry only, NOT a source-authenticated opening: "
                 f"glazing area={glazing_area_sqm:.2f}sqm, spandrel area={spandrel_area_sqm:.2f}sqm."
             ),
         )
