@@ -1446,3 +1446,67 @@ def test_transverse_obstruction_snapshot_detaches_mutable_endpoint_lists():
         transverse_wall_segments=((tuple(before[0]), tuple(before[1])),),
     )
     assert (first, first_piers) == (second, second_piers)
+
+
+def test_dense_transverse_obstruction_budget_fails_before_shadow_records():
+    """A complete valid universe cannot require hundreds of millions of scans."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (2000.0, 0.0), 20.0)
+    openings = tuple(
+        ApertureHostCandidateInput(f"opening-{i}", (4.0 * i, 0.0), (4.0 * i + 1.0, 0.0))
+        for i in range(501)
+    )
+    # Each valid transverse segment is unrelated to the wall band. A naive
+    # implementation still loops through all 250,500 pairs before finding none.
+    transverse = tuple(
+        ((float(i), 100.0), (float(i), 120.0)) for i in range(500)
+    )
+    authority = _authority()
+    original_openings = tuple(openings)
+    original_transverse = tuple(transverse)
+    for candidates in (openings, openings[::-1]):
+        with pytest.raises(ValueError, match="transverse_wall_intersection_budget_exceeded"):
+            authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=candidates,
+                transverse_wall_segments=transverse,
+            )
+    assert openings == original_openings and transverse == original_transverse
+    # No partial CANDIDATE/ABSTAINED record or invented pier is returned.
+
+
+def test_transverse_work_budget_boundary_and_small_positive_are_fail_closed():
+    """Exact budget is accepted; budget is not a physical geometry tolerance."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (2000.0, 0.0), 20.0)
+    # All openings are outside the wall band, so the exact 500x500 boundary
+    # exercises the preflight without spending 250k geometric intersections.
+    invalid_openings = tuple(
+        ApertureHostCandidateInput(f"far-{i}", (4.0 * i, 100.0), (4.0 * i + 1.0, 100.0))
+        for i in range(500)
+    )
+    transverse = tuple(
+        ((float(i), 100.0), (float(i), 120.0)) for i in range(500)
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=invalid_openings,
+        transverse_wall_segments=transverse,
+    )
+    assert len(records) == 500 and piers == ()
+    assert all(record.status is S.ABSTAINED for record in records)
+    assert all(record.first_remaining_gate == "aperture_outside_host_wall_band"
+               for record in records)
+    assert all(record.shadow_only and not record.takeoff_eligible
+               and not record.commercial_projection_allowed for record in records)
+    # A small actual transverse obstruction still blocks the same physical
+    # candidate, and an unrelated one cannot silently erase that veto.
+    opening = ApertureHostCandidateInput("real", (20.0, 0.0), (40.0, 0.0))
+    crossing = ((30.0, -30.0), (30.0, 30.0))
+    unrelated = ((50.0, 100.0), (50.0, 120.0))
+    for obstructions in ((crossing,), (unrelated, crossing), (crossing, unrelated)):
+        actual, actual_piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=obstructions,
+        )
+        assert len(actual) == 1 and not actual_piers
+        assert actual[0].status is S.ABSTAINED
+        assert actual[0].first_remaining_gate == "host_through_wall_obstructed"
+        assert not actual[0].commercial_projection_allowed

@@ -28,6 +28,9 @@ from pb_migration_contracts import (
 )
 
 DEFAULT_SNAP_TOLERANCE_PT = 2.5
+# Bounded shadow-only candidate work: 20k primitives must not imply 400m
+# opening/obstruction intersection tests. This is NOT a geometry threshold.
+_MAX_TRANSVERSE_INTERSECTION_CHECKS = 250_000
 _ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
 _COORD_TOL = 1e-4
 
@@ -289,6 +292,13 @@ class StructuralThroughWallApertureHostAuthority:
                 tuple(float(value) for value in segment[1]),
             ))
         transverse_wall_segments = tuple(frozen_transverse_segments)
+        # The naive crossing loop below is O(openings * transverse segments).
+        # Refuse an oversized COMPLETE universe before returning any partial
+        # candidate, pier or commercial-adjacent record. Do not truncate,
+        # sample, choose the first obstruction or silently drop evidence.
+        if (len(openings) * len(transverse_wall_segments)
+                > _MAX_TRANSVERSE_INTERSECTION_CHECKS):
+            raise ValueError("transverse_wall_intersection_budget_exceeded")
         if not openings:
             return ((), ())
 
