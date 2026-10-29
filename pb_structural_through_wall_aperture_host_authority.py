@@ -258,9 +258,23 @@ class StructuralThroughWallApertureHostAuthority:
         if (not _finite_real(snap_tolerance_pt)
                 or not 0.0 <= snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
             raise ValueError("snap_tolerance_pt must be finite and within the 2.5pt cap")
+        # These universes are read repeatedly (geometry, ownership, obstruction).
+        # A one-shot iterator is exhausted by validation and can silently hide
+        # a real crossing or a competing opening. Accept only complete,
+        # replayable built-in containers and freeze their membership now.
+        if type(openings) not in (list, tuple):
+            raise ValueError("openings must be a complete list/tuple candidate universe")
+        if type(transverse_wall_segments) not in (list, tuple):
+            raise ValueError(
+                "transverse_wall_segments must be a complete list/tuple obstruction universe"
+            )
+        openings = tuple(openings)
+        if any(type(opening) is not ApertureHostCandidateInput for opening in openings):
+            raise ValueError("openings must contain ApertureHostCandidateInput records")
         # Every supplied transverse obstruction belongs to the candidate universe.
         # A malformed/NaN crossing cannot be silently treated as "no obstruction".
         # Validate even when there are no openings, so bad evidence never disappears.
+        frozen_transverse_segments = []
         for segment in transverse_wall_segments:
             if (type(segment) not in (tuple, list) or len(segment) != 2
                     or not _finite_point(segment[0]) or not _finite_point(segment[1])):
@@ -270,6 +284,11 @@ class StructuralThroughWallApertureHostAuthority:
             distance = math.hypot(dx, dy)
             if not math.isfinite(distance) or distance <= _COORD_TOL:
                 raise ValueError("transverse_wall_segments require distinct finite endpoints")
+            frozen_transverse_segments.append((
+                tuple(float(value) for value in segment[0]),
+                tuple(float(value) for value in segment[1]),
+            ))
+        transverse_wall_segments = tuple(frozen_transverse_segments)
         if not openings:
             return ((), ())
 

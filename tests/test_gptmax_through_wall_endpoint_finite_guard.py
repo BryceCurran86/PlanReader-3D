@@ -1370,3 +1370,79 @@ def test_dense_oblique_rejected_candidates_cannot_mint_unproven_piers():
             baseline = evidence
         else:
             assert evidence == baseline
+
+
+def test_single_pass_transverse_obstruction_cannot_disappear_after_validation():
+    """Validation must not consume the only copy of a real crossing."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0))
+    crossing = ((30.0, -30.0), (30.0, 30.0))
+    one_shot = iter((crossing,))
+    with pytest.raises(ValueError, match="transverse_wall_segments must be a complete"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+            transverse_wall_segments=one_shot,
+        )
+    # Reject before consuming or silently losing any source obstruction.
+    assert next(one_shot) == crossing
+    for replayable in ((crossing,), [list(map(list, crossing))]):
+        records, piers = _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=[opening],
+            transverse_wall_segments=replayable,
+        )
+        assert len(records) == 1 and not piers
+        assert records[0].status is S.ABSTAINED
+        assert records[0].first_remaining_gate == "host_through_wall_obstructed"
+        assert records[0].shadow_only and not records[0].takeoff_eligible
+        assert not records[0].commercial_projection_allowed
+
+
+def test_single_pass_opening_universe_cannot_hide_competing_native_jambs():
+    """The ownership pass must see every opening that geometry already saw."""
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    a = ApertureHostCandidateInput("A", (20.0, 0.0), (30.0, 0.0), ("shared",))
+    b = ApertureHostCandidateInput("B", (40.0, 0.0), (50.0, 0.0), ("shared",))
+    one_shot = iter((a, b))
+    with pytest.raises(ValueError, match="openings must be a complete"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=one_shot,
+        )
+    assert next(one_shot) is a
+    for replayable in ((a, b), [a, b]):
+        records, piers = _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=replayable,
+        )
+        assert len(records) == 2 and not piers
+        assert all(r.status is S.ABSTAINED for r in records)
+        assert all(r.first_remaining_gate ==
+                   "aperture_terminal_jamb_observation_conflict" for r in records)
+        assert all(r.shadow_only and not r.takeoff_eligible
+                   and not r.commercial_projection_allowed for r in records)
+
+
+@pytest.mark.parametrize("bad_openings", [None, "A", {"A": "B"}, (None,), ["raw"]])
+def test_incomplete_or_untyped_opening_universe_fails_before_projection(bad_openings):
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    with pytest.raises(ValueError, match="openings must"):
+        _authority().bind_openings_to_through_wall(
+            through_wall=wall, openings=bad_openings,
+        )
+
+
+def test_transverse_obstruction_snapshot_detaches_mutable_endpoint_lists():
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    opening = ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0))
+    mutable_crossing = [[30.0, -30.0], [30.0, 30.0]]
+    before = [point.copy() for point in mutable_crossing]
+    first, first_piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=[opening],
+        transverse_wall_segments=[mutable_crossing],
+    )
+    assert mutable_crossing == before
+    assert first[0].first_remaining_gate == "host_through_wall_obstructed"
+    assert not first_piers
+    second, second_piers = _authority().bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+        transverse_wall_segments=((tuple(before[0]), tuple(before[1])),),
+    )
+    assert (first, first_piers) == (second, second_piers)
