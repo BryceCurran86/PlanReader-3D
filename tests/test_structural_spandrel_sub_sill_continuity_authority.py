@@ -302,3 +302,64 @@ def test_frozen_shadow_receipt_does_not_alias_mutated_caller_lists(authority):
     assert record.jamb_left == (100.0, 200.0)
     assert record.jamb_right == (200.0, 200.0)
     assert not record.takeoff_eligible and not record.commercial_projection_allowed
+
+
+def test_serialized_spandrel_jamb_and_level_preserve_exact_source_hypotheses(authority):
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    base = authority.evaluate_spandrel_sub_sill(**kwargs)
+    shifted = authority.evaluate_spandrel_sub_sill(
+        **(kwargs | {"jamb_b": (200.001, 200.0)})
+    )
+    raised = authority.evaluate_spandrel_sub_sill(
+        **(kwargs | {"head_height_mm": 2100.01})
+    )
+    assert base.contract_id != shifted.contract_id
+    assert base.to_dict()["jamb_right"] != shifted.to_dict()["jamb_right"]
+    assert shifted.to_dict()["jamb_right"] == [200.001, 200.0]
+    assert base.to_dict()["clear_span_pt"] != shifted.to_dict()["clear_span_pt"]
+    assert base.contract_id != raised.contract_id
+    assert base.to_dict()["head_height_mm"] != raised.to_dict()["head_height_mm"]
+    assert raised.to_dict()["head_height_mm"] == 2100.01
+    for rec in (base, shifted, raised):
+        assert rec.classification == SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+        assert rec.shadow_only and not rec.takeoff_eligible
+        assert not rec.commercial_projection_allowed
+
+
+def test_serialized_spandrel_metric_preserves_close_scale_hypotheses(authority):
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    base = authority.evaluate_spandrel_sub_sill(**kwargs)
+    close = authority.evaluate_spandrel_sub_sill(
+        **(kwargs | {"scale_ratio": 0.017640001})
+    )
+    assert base.contract_id != close.contract_id
+    for key in ("clear_span_m", "glazing_aperture_area_sqm",
+                "spandrel_wall_area_sqm", "total_wall_opening_area_sqm"):
+        assert base.to_dict()[key] != close.to_dict()[key]
+        assert base.to_dict()[key] == getattr(base, key)
+        assert close.to_dict()[key] == getattr(close, key)
+    assert not base.takeoff_eligible and not close.takeoff_eligible
+
+
+def test_serialized_spandrel_abstention_keeps_native_geometry_and_null_metrics(authority):
+    record = authority.evaluate_spandrel_sub_sill(
+        jamb_a=(100.0, 200.0), jamb_b=(200.001, 200.0),
+        sill_height_mm=900.01, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=None,
+    )
+    payload = record.to_dict()
+    assert record.status == EvidenceResolutionStatus.ABSTAINED
+    assert payload["jamb_right"] == [200.001, 200.0]
+    assert payload["sill_height_mm"] == 900.01
+    assert payload["clear_span_m"] is None
+    assert payload["glazing_aperture_area_sqm"] is None
+    assert payload["spandrel_wall_area_sqm"] is None
+    assert payload["shadow_only"] and not payload["takeoff_eligible"]

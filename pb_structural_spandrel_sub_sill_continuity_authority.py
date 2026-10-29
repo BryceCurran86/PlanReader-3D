@@ -79,27 +79,22 @@ class SpandrelSubSillRecord:
     shadow_only: bool = True
 
     def to_dict(self) -> Mapping[str, Any]:
-        def _round_optional(value: float | None, places: int) -> float | None:
-            if value is None:
-                return None
-            rounded = round(value, places)
-            # Presentation rounding cannot invent a zero for positive evidence.
-            return value if rounded == 0 and value != 0 else rounded
-
+        # Retain full native/candidate evidence precision. The stable ID binds
+        # these exact values; rounding would alias distinct shadow hypotheses.
         return {
             "schema_version": SCHEMA_VERSION,
             "contract_id": self.contract_id,
             "classification": self.classification.value,
-            "jamb_left": [round(c, 2) for c in self.jamb_left],
-            "jamb_right": [round(c, 2) for c in self.jamb_right],
-            "clear_span_pt": round(self.clear_span_pt, 2),
-            "clear_span_m": _round_optional(self.clear_span_m, 4),
-            "sill_height_mm": round(self.sill_height_mm, 1),
-            "head_height_mm": round(self.head_height_mm, 1),
-            "glazing_height_mm": _round_optional(self.glazing_height_mm, 1),
-            "glazing_aperture_area_sqm": _round_optional(self.glazing_aperture_area_sqm, 4),
-            "spandrel_wall_area_sqm": _round_optional(self.spandrel_wall_area_sqm, 4),
-            "total_wall_opening_area_sqm": _round_optional(self.total_wall_opening_area_sqm, 4),
+            "jamb_left": list(self.jamb_left),
+            "jamb_right": list(self.jamb_right),
+            "clear_span_pt": self.clear_span_pt,
+            "clear_span_m": self.clear_span_m,
+            "sill_height_mm": self.sill_height_mm,
+            "head_height_mm": self.head_height_mm,
+            "glazing_height_mm": self.glazing_height_mm,
+            "glazing_aperture_area_sqm": self.glazing_aperture_area_sqm,
+            "spandrel_wall_area_sqm": self.spandrel_wall_area_sqm,
+            "total_wall_opening_area_sqm": self.total_wall_opening_area_sqm,
             "host_through_wall_id": self.host_through_wall_id,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
@@ -255,7 +250,7 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 host_through_wall_id=host_through_wall_id,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="clear_span_out_of_bounds",
-                notes=f"Clear span {clear_span_pt:.2f}pt outside bounds [{MIN_CLEAR_SPAN_PT}, {MAX_CLEAR_SPAN_PT}]pt.",
+                notes=f"Clear span {clear_span_pt!r}pt outside bounds [{MIN_CLEAR_SPAN_PT}, {MAX_CLEAR_SPAN_PT}]pt.",
             )
 
         # Gate 2: Vertical levels validation
@@ -302,6 +297,6 @@ class StructuralSpandrelSubSillContinuityAuthority:
             first_remaining_gate="original_source_spandrel_host_scale_levels_unverified",
             notes=(
                 f"Unverified geometry only, NOT a source-authenticated opening: "
-                f"glazing area={glazing_area_sqm:.2f}sqm, spandrel area={spandrel_area_sqm:.2f}sqm."
+                f"glazing area={glazing_area_sqm!r}sqm, spandrel area={spandrel_area_sqm!r}sqm."
             ),
         )
