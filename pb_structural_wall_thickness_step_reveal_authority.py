@@ -110,6 +110,13 @@ def _finite_real(value: object) -> bool:
         return False
 
 
+def _finite_source_coordinate(value: object) -> bool:
+    # Preserve the existing inclusive 2**53 native source-point identity
+    # boundary for floats as well as ints. Non-coordinate metric and datum
+    # scalars retain their independent finite validation.
+    return _finite_real(value) and abs(value) <= 2**53
+
+
 class StructuralWallThicknessStepRevealAuthority:
     """Source-free, noncommercial geometric candidate and typed abstention producer."""
 
@@ -135,7 +142,7 @@ class StructuralWallThicknessStepRevealAuthority:
         for name, point in (("jamb_datum_a", jamb_datum_a), ("jamb_datum_b", jamb_datum_b)):
             if not isinstance(point, (tuple, list)) or len(point) != 2:
                 raise ValueError(f"{name} requires exactly two coordinates")
-            if any(not _finite_real(v) for v in point):
+            if any(not _finite_source_coordinate(v) for v in point):
                 raise ValueError(f"{name} requires finite real coordinates")
         for name, value in (
             ("left_thickness_pt", left_thickness_pt),

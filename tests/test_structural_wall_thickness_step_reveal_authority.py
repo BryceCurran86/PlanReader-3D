@@ -307,3 +307,32 @@ def test_shadow_serialized_coordinate_lists_cannot_mutate_frozen_record(authorit
     assert record.to_dict()["jamb_left_datum"] == [100.0, 200.0]
     assert record.to_dict()["jamb_right_datum"] == [200.0, 200.0]
     assert_shadow(record)
+
+
+@pytest.mark.parametrize("field", ["jamb_datum_a", "jamb_datum_b"])
+@pytest.mark.parametrize("huge", [float(2**53) + 2.0, -(float(2**53) + 2.0)])
+def test_oversized_float_jamb_coordinates_rejected_before_shadow_identity(authority, field, huge):
+    # Oversized native floats can alias distinct source coordinates.
+    point = [huge, 200.0]
+    with pytest.raises(ValueError, match=f"{field} requires finite real coordinates"):
+        authority.evaluate_stepped_wall_aperture(**inputs(**{field: point}))
+    assert point == [huge, 200.0]
+
+
+def test_inclusive_float_coordinate_identity_boundary_is_shadow_only(authority):
+    kwargs = inputs(
+        jamb_datum_a=(float(2**53) - 100.0, 200.0),
+        jamb_datum_b=(float(2**53), 200.0),
+        scale_ratio=None,
+    )
+    before = dict(kwargs)
+    first = authority.evaluate_stepped_wall_aperture(**kwargs)
+    second = authority.evaluate_stepped_wall_aperture(**kwargs)
+    assert kwargs == before
+    assert first == second
+    assert first.jamb_right_datum == (float(2**53), 200.0)
+    assert first.clear_span_pt == 100.0
+    assert first.classification == SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+    assert first.first_remaining_gate == "original_source_scale_or_datum_unverified"
+    assert_null_metrics(first)
+    assert_shadow(first)
