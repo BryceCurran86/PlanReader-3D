@@ -62,6 +62,11 @@ SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED = "source_finish_code_summary_budget_
 # entries in the worst case; never attempt a 20k * 20k materialization.
 MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES = 250_000
 SOURCE_WALL_SEGMENT_UNIVERSE_INVALID = "source_wall_segment_universe_invalid"
+SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED = "source_registration_vote_budget_exceeded"
+# Diagnostic work budgets, not PDF primitive, topology snap or quantity limits.
+# Never publish a partial registration if a complete source search is too costly.
+MAX_SOURCE_REGISTRATION_VOTE_PAIRS = 250_000
+MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS = 10_000_000
 SOURCE_MEASURED_FLOOR_BOX_INVALID = "source_measured_floor_box_invalid"
 SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID = "source_physical_floor_identity_invalid"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
@@ -231,16 +236,42 @@ def min_axis_support(src: Lines, dst: LineIndex, dx: float, dy: float, tol: floa
 
 
 def _shift_votes(src: Lines, dst: LineIndex, topn: int, limit: float = 3000.0) -> tuple[list[float], list[float]]:
+    """Complete bounded shift voting; never choose a winner from partial votes.
+
+    The old all-keys Cartesian scan admitted 20k * 20k source/target
+    comparisons per orientation. Sorted destination windows exclude keys
+    outside the exact shift limit, and a preflight bounds all candidate
+    visits BEFORE any vote can be accumulated.
+    """
+    windows: dict[str, list[tuple[float, list[tuple[float, float]], int, int]]] = {
+        "H": [], "V": [],
+    }
+    visits = 0
+    for o in "HV":
+        keys = dst.keys[o]
+        for k, ivs in src[o].items():
+            # Expand one ULP to preserve the original abs(k2-k) <= limit
+            # predicate at floating-point subtraction boundaries.
+            lo = bisect.bisect_left(keys, math.nextafter(k - limit, -math.inf))
+            hi = bisect.bisect_right(keys, math.nextafter(k + limit, math.inf))
+            visits += hi - lo
+            if visits > MAX_SOURCE_REGISTRATION_VOTE_PAIRS:
+                raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
+            windows[o].append((k, ivs, lo, hi))
     votes = {"H": collections.Counter(), "V": collections.Counter()}
     for o in "HV":
-        for k, ivs in src[o].items():
-            t_src = sum(hi - lo for lo, hi in ivs)
-            for k2 in dst.keys[o]:
+        keys = dst.keys[o]
+        dst_lengths = {
+            k2: sum(hi - lo for lo, hi in dst.lines[o][k2])
+            for k2 in keys
+        }
+        for k, ivs, lo, hi in windows[o]:
+            t_src = sum(end - start for start, end in ivs)
+            for k2 in keys[lo:hi]:
                 d = k2 - k
                 if abs(d) > limit:
                     continue
-                t_dst = sum(hi - lo for lo, hi in dst.lines[o][k2])
-                votes[o][round(d / 0.04) * 0.04] += min(t_src, t_dst)
+                votes[o][round(d / 0.04) * 0.04] += min(t_src, dst_lengths[k2])
     xs = [x for x, _ in sorted(votes["V"].items(), key=lambda kv: (-kv[1], kv[0]))[:topn]]
     ys = [y for y, _ in sorted(votes["H"].items(), key=lambda kv: (-kv[1], kv[0]))[:topn]]
     return xs, ys
@@ -258,6 +289,7 @@ def rank_registrations(
 ) -> list[dict[str, Any]]:
     index = LineIndex(dst)
     rows: list[dict[str, Any]] = []
+    support_key_visits = 0
     for name, mat in orientations.items():
         if identity_only and name != "identity":
             continue
@@ -265,6 +297,16 @@ def rank_registrations(
         for scale in scales:
             moved = orient_lines(src, tuple(scale * v for v in mat))
             xs, ys = _shift_votes(moved, index, topn)
+            if not xs or not ys:
+                continue
+            # Bound the subsequent complete Cartesian translation scoring
+            # and local refinement, not just the shift-vote candidate search.
+            support_key_visits += (
+                (len(xs) * len(ys) + 3 * 25)
+                * (len(moved["H"]) + len(moved["V"]))
+            )
+            if support_key_visits > MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS:
+                raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
             pool = sorted(
                 ((*min_axis_support(moved, index, dx, dy, tol), dx, dy) for dx in xs for dy in ys),
                 key=lambda r: (-r[0], r[3], r[4]),
@@ -1013,37 +1055,26 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 invalid_box_universe = True
                 continue
             checked_boxes.append((item, box))
-        if invalid_box_universe and not checked_boxes:
-            return SourceCrossViewFloorCorrespondenceResult(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=(SOURCE_MEASURED_FLOOR_BOX_INVALID,),
-                records=(),
-            )
-        # A 20k-by-20k high-cardinality source universe is input-bounded but
-        # not output-bounded. Fail closed BEFORE registration or Fenwick work;
-        # do not silently truncate finish codes or choose a physical owner.
-        if _finish_code_summary_exceeds_budget(checked_marks, len(checked_boxes)):
-            # Keep independently observed malformed rival evidence in the
-            # typed refusal; a resource veto must not erase earlier negatives.
-            reasons = [SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED]
-            if invalid_mark_universe:
-                reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
-            if invalid_box_universe:
-                reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
-            return SourceCrossViewFloorCorrespondenceResult(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=tuple(reasons),
-                records=(),
-            )
-
-        # Fail closed on the COMPLETE wall universe on either sheet. A bad
-        # competing source segment cannot be dropped to manufacture unique
-        # registration or physical-room correspondence.
-        if (
+        # Collect independent typed negatives BEFORE any early return.
+        # A wholly invalid box universe must not hide malformed finish marks
+        # or a competing native wall on either sheet.
+        invalid_wall_universe = (
             not _valid_source_wall_segment_universe(support_segments)
             or not _valid_source_wall_segment_universe(target_segments)
+        )
+        summary_over_budget = _finish_code_summary_exceeds_budget(
+            checked_marks, len(checked_boxes)
+        )
+        if (
+            invalid_wall_universe
+            or summary_over_budget
+            or (invalid_box_universe and not checked_boxes)
         ):
-            reasons = [SOURCE_WALL_SEGMENT_UNIVERSE_INVALID]
+            reasons = []
+            if invalid_wall_universe:
+                reasons.append(SOURCE_WALL_SEGMENT_UNIVERSE_INVALID)
+            if summary_over_budget:
+                reasons.append(SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED)
             if invalid_mark_universe:
                 reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
             if invalid_box_universe:
@@ -1057,7 +1088,21 @@ class SourceCrossViewFloorCorrespondenceProducer:
         lines_sup = build_lines(support_segments)
         lines_tgt = build_lines(target_segments)
 
-        ranked = rank_registrations(lines_sup, lines_tgt)
+        try:
+            ranked = rank_registrations(lines_sup, lines_tgt)
+        except ValueError as exc:
+            if str(exc) != SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED:
+                raise
+            reasons = [SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED]
+            if invalid_mark_universe:
+                reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            if invalid_box_universe:
+                reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=tuple(reasons),
+                records=(),
+            )
         if not ranked:
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
