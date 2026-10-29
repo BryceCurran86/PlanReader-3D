@@ -253,3 +253,52 @@ def test_rejected_aperture_never_serializes_hypothetical_metric_quantity(
     assert positive.classification == SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
     assert positive.glazing_aperture_area_sqm is not None
     assert not positive.takeoff_eligible and not positive.commercial_projection_allowed
+
+
+def test_distinct_large_integer_source_inputs_cannot_alias_shadow_id(authority):
+    kw = dict(jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+              sill_height_mm=900.0, head_height_mm=2100.0,
+              host_through_wall_id="HOST", scale_ratio=0.01764)
+    for field in ("jamb_a", "sill_height_mm", "head_height_mm", "scale_ratio"):
+        for huge in (2**53 + 1, 2**53 + 2):
+            changed = (huge, 200.0) if field == "jamb_a" else huge
+            with pytest.raises(ValueError):
+                authority.evaluate_spandrel_sub_sill(**(kw | {field: changed}))
+
+
+def test_positive_subround_metric_receipts_never_serialize_as_zero(authority):
+    record = authority.evaluate_spandrel_sub_sill(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=1e-8,
+    )
+    assert record.classification == SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    for field in ("clear_span_m", "glazing_aperture_area_sqm",
+                  "spandrel_wall_area_sqm", "total_wall_opening_area_sqm"):
+        assert getattr(record, field) > 0
+        assert record.to_dict()[field] > 0
+    assert not record.takeoff_eligible and not record.commercial_projection_allowed
+
+
+def test_positive_vertical_metric_underflow_is_rejected(authority):
+    with pytest.raises(ValueError, match="underflowed positive vertical"):
+        authority.evaluate_spandrel_sub_sill(
+            jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+            sill_height_mm=5e-324, head_height_mm=1e-323,
+            host_through_wall_id="HOST", scale_ratio=0.01764,
+        )
+
+
+def test_frozen_shadow_receipt_does_not_alias_mutated_caller_lists(authority):
+    a, b = [100.0, 200.0], [200.0, 200.0]
+    record = authority.evaluate_spandrel_sub_sill(
+        jamb_a=a, jamb_b=b, sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    before = record.to_dict()
+    a[0] = 999.0
+    b[0] = 888.0
+    assert record.to_dict() == before
+    assert record.jamb_left == (100.0, 200.0)
+    assert record.jamb_right == (200.0, 200.0)
+    assert not record.takeoff_eligible and not record.commercial_projection_allowed

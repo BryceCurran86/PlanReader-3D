@@ -80,7 +80,11 @@ class SpandrelSubSillRecord:
 
     def to_dict(self) -> Mapping[str, Any]:
         def _round_optional(value: float | None, places: int) -> float | None:
-            return None if value is None else round(value, places)
+            if value is None:
+                return None
+            rounded = round(value, places)
+            # Presentation rounding cannot invent a zero for positive evidence.
+            return value if rounded == 0 and value != 0 else rounded
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -135,6 +139,9 @@ class StructuralSpandrelSubSillContinuityAuthority:
         def _finite_real(value: object) -> bool:
             if type(value) not in (int, float):
                 return False
+            # Distinct source integer hypotheses must not alias after float conversion.
+            if type(value) is int and abs(value) > 2**53:
+                return False
             try:
                 return math.isfinite(float(value))
             except (OverflowError, ValueError):
@@ -158,7 +165,11 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 raise ValueError(f"{name} must contain two coordinates")
             if any(not _finite_real(v) for v in point):
                 raise ValueError(f"{name} must contain finite real coordinates")
-        jamb_left, jamb_right = self._order_jambs(jamb_a, jamb_b)
+        # Detach caller-owned lists before storing geometry in frozen receipts.
+        jamb_left, jamb_right = self._order_jambs(
+            tuple(float(v) for v in jamb_a),
+            tuple(float(v) for v in jamb_b),
+        )
         dx = float(jamb_right[0]) - float(jamb_left[0])
         dy = float(jamb_right[1]) - float(jamb_left[1])
         clear_span_pt = math.hypot(dx, dy)
@@ -193,13 +204,17 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 notes="Source scale absent; no metric opening or wall area.",
             )
         clear_span_m = clear_span_pt * scale_ratio
-        if not math.isfinite(clear_span_m):
-            raise ValueError("nonfinite metric conversion")
+        if not math.isfinite(clear_span_m) or (clear_span_pt > 0 and clear_span_m == 0):
+            raise ValueError("nonfinite or underflowed metric conversion")
 
         glazing_height_mm = max(0.0, head_height_mm - sill_height_mm)
         glazing_height_m = glazing_height_mm / 1000.0
         sill_height_m = sill_height_mm / 1000.0
         head_height_m = head_height_mm / 1000.0
+        if ((glazing_height_mm > 0 and glazing_height_m == 0)
+                or (sill_height_mm > 0 and sill_height_m == 0)
+                or (head_height_mm > 0 and head_height_m == 0)):
+            raise ValueError("underflowed positive vertical measurement")
 
         glazing_area_sqm = clear_span_m * glazing_height_m
         spandrel_area_sqm = clear_span_m * sill_height_m
@@ -207,6 +222,9 @@ class StructuralSpandrelSubSillContinuityAuthority:
         total_opening_area_sqm = glazing_area_sqm
         if not all(math.isfinite(v) for v in (glazing_area_sqm, spandrel_area_sqm)):
             raise ValueError("nonfinite hypothetical area")
+        if ((glazing_height_mm > 0 and glazing_area_sqm == 0)
+                or (sill_height_mm > 0 and spandrel_area_sqm == 0)):
+            raise ValueError("underflowed positive hypothetical area")
 
         contract_id = stable_contract_id(
             f"SPANDREL_SUB_SILL_{context_label}",
