@@ -715,6 +715,148 @@ def _overlapping_measured_box_flags(
     return marked
 
 
+
+def _indexed_marks_in_boxes(
+    checked_marks: Sequence[tuple[float, float, Mapping[str, Any]]],
+    boxes: Sequence[tuple[float, float, float, float]],
+) -> list[tuple[list[dict[str, Any]], dict[str, int]]]:
+    """Lossless classifier-predicate summary of *all* marks in each closed box.
+
+    Offline x sweep and y Fenwick aggregates avoid O(boxes * marks) scanning.
+    Each returned synthetic classifier input represents complete source counts,
+    malformed codes, unregistered marks and exact five-point margin failures.
+    The synthetic inputs are NOT new source receipts or measurement authority.
+    The separately returned code counts preserve every source occurrence.
+    """
+    if not boxes:
+        return []
+    if not checked_marks:
+        return [([], {}) for _ in boxes]
+
+    xs = sorted({x for x, _, _ in checked_marks})
+    ys = sorted({y for _, y, _ in checked_marks})
+    y_of = {y: i + 1 for i, y in enumerate(ys)}
+    tree: list[collections.Counter[tuple[str, str]]] = [
+        collections.Counter() for _ in range(len(ys) + 1)
+    ]
+    totals = [0] * (len(ys) + 1)
+    # x, phase (0 before marks, 1 add mark, 2 after marks),
+    # source index, outer/inner query, sign, inclusive y-low/high indices.
+    events: list[tuple[float, int, int, int, int, int, int]] = []
+    outer = [collections.Counter() for _ in boxes]
+    inner = [0] * len(boxes)
+
+    def margin_limits(coords: list[float], low: float, high: float) -> tuple[float, float] | None:
+        # Binary search the ORIGINAL subtraction predicate. Computing
+        # low+5 or high-5 can round across a fractional native-PDF boundary.
+        lo, hi = 0, len(coords)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if coords[mid] - low >= 5.0:
+                hi = mid
+            else:
+                lo = mid + 1
+        first = lo
+        lo, hi = 0, len(coords)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if high - coords[mid] >= 5.0:
+                lo = mid + 1
+            else:
+                hi = mid
+        last = lo - 1
+        return (coords[first], coords[last]) if first <= last and first < len(coords) else None
+
+    def add_rectangle(index: int, kind: int, rect: tuple[float, float, float, float]) -> None:
+        x0, y0, x1, y1 = rect
+        y_low = bisect.bisect_left(ys, y0) + 1
+        y_high = bisect.bisect_right(ys, y1)
+        if x0 > x1 or y_low > y_high:
+            return
+        events.append((x0, 0, index, kind, -1, y_low, y_high))
+        events.append((x1, 2, index, kind, 1, y_low, y_high))
+
+    for index, (x0, y0, x1, y1) in enumerate(boxes):
+        add_rectangle(index, 0, (x0, y0, x1, y1))
+        x_bounds = margin_limits(xs, x0, x1)
+        y_bounds = margin_limits(ys, y0, y1)
+        if x_bounds is not None and y_bounds is not None:
+            add_rectangle(index, 1, (*x_bounds[:1], *y_bounds[:1], *x_bounds[1:], *y_bounds[1:]))
+    for index, (x, _, _) in enumerate(checked_marks):
+        events.append((x, 1, index, 0, 0, 0, 0))
+
+    def prefix(index: int, owner: collections.Counter | None, sign: int) -> int:
+        count = 0
+        while index:
+            count += totals[index]
+            if owner is not None:
+                for key, value in tree[index].items():
+                    owner[key] += sign * value
+            index -= index & -index
+        return count
+
+    for _, phase, index, kind, sign, y_low, y_high in sorted(events):
+        if phase == 1:
+            _, y, mark = checked_marks[index]
+            code = mark.get("code")
+            valid = type(code) is str and bool(code) and code == code.strip()
+            keys = [("code", code)] if valid else [("invalid", "")]
+            if mark.get("registered_region") is not True:
+                keys.append(("unregistered", ""))
+            pos = y_of[y]
+            while pos < len(totals):
+                totals[pos] += 1
+                for key in keys:
+                    tree[pos][key] += 1
+                pos += pos & -pos
+        else:
+            owner = outer[index] if kind == 0 else None
+            count = (
+                prefix(y_high, owner, sign)
+                - prefix(y_low - 1, owner, -sign)
+            )
+            if kind == 0:
+                outer[index][("total", "")] += sign * count
+            else:
+                inner[index] += sign * count
+
+    summaries: list[tuple[list[dict[str, Any]], dict[str, int]]] = []
+    for index, (x0, y0, x1, y1) in enumerate(boxes):
+        counts = {
+            code: count
+            for (kind, code), count in outer[index].items()
+            if kind == "code" and count > 0
+        }
+        invalid = outer[index][("invalid", "")] > 0
+        unregistered = outer[index][("unregistered", "")] > 0
+        total = outer[index][("total", "")]
+        # Non-finite width is not a valid finite native margin; conservative
+        # abstention prevents a giant finite-coordinate box granting authority.
+        bad_margin = (
+            total != inner[index]
+            or not math.isfinite(x1 - x0)
+            or not math.isfinite(y1 - y0)
+        )
+        # Preserve every decision predicate without materializing potentially
+        # 400m box/mark pairs. classify_floor still decides CONFLICT/ABSTAIN.
+        compressed = [
+            {"code": code, "margin_pt": 5.0, "registered_region": True}
+            for code in sorted(counts)
+        ]
+        repeated = next((code for code in sorted(counts) if counts[code] > 1), None)
+        if repeated is not None:
+            compressed.append({"code": repeated, "margin_pt": 5.0, "registered_region": True})
+        if invalid:
+            compressed.append({"code": None, "margin_pt": 5.0, "registered_region": True})
+        if compressed:
+            if bad_margin:
+                compressed[0]["margin_pt"] = 0.0
+            if unregistered:
+                compressed[0]["registered_region"] = False
+        summaries.append((compressed, counts))
+    return summaries
+
+
 class SourceCrossViewFloorCorrespondenceProducer:
     """Producer-owned shadow authority for cross-sheet plan correspondence."""
 
@@ -893,6 +1035,12 @@ class SourceCrossViewFloorCorrespondenceProducer:
             [box for _, box in checked_boxes]
         )
 
+        # Index all original mark occurrences once. A dense source universe
+        # must not require up to 400m repeated box/mark containment checks.
+        indexed_marks = _indexed_marks_in_boxes(
+            checked_marks, [box for _, box in checked_boxes]
+        )
+
         # Derive identity collisions from the *entire* measured-box universe,
         # not from caller hints or spatial overlap alone. Two disjoint boxes
         # may still assert one physical floor, room face or canonical floor.
@@ -936,17 +1084,9 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 translation=(top["dx"], top["dy"]),
             )
 
-            # Find marks inside this box
-            inside_marks = []
-            for mx, my, mark in checked_marks:
-                margin = min(mx - box_sup[0], box_sup[2] - mx, my - box_sup[1], box_sup[3] - my)
-                if margin >= 0:
-                    inside_marks.append({
-                        "code": mark.get("code"),
-                        "margin_pt": margin,
-                        "registered_region": mark.get("registered_region"),
-                    })
-
+            # Complete source counts and all negative predicates are retained
+            # without expanding the same marks across overlapping boxes.
+            inside_marks, exact_code_counts = indexed_marks[box_index]
             classified = classify_floor(
                 corr,
                 registration_unique=is_unique,
@@ -970,6 +1110,10 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     if value
                 ),
             )
+            # The compressed classifier input is decision-equivalent, while
+            # the published diagnostic retains exact source-code multiplicity.
+            classified["finish_codes_in_box"] = exact_code_counts
+
             # A malformed or unlocatable rival cannot be silently filtered
             # away to make a surviving mark uniquely authoritative. Keep
             # genuine FT2/FT3 conflicts while withholding all candidates.
