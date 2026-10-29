@@ -126,13 +126,45 @@ def test_to_dict_schema_invariants(
     assert isinstance(d["jamb_right"], list)
 
 
-@pytest.mark.parametrize("ratio", [None, float("nan"), float("inf"), -1.0, 0.0, True])
+@pytest.mark.parametrize("ratio", [float("nan"), float("inf"), -1.0, 0.0, True])
 def test_unverified_or_invalid_scale_never_creates_metric_claim(authority, ratio):
     with pytest.raises(ValueError):
         authority.evaluate_spandrel_sub_sill(
             jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
             sill_height_mm=900.0, head_height_mm=2100.0,
             host_through_wall_id="HOST", scale_ratio=ratio)
+
+
+def test_missing_scale_returns_typed_abstention_with_null_metrics(authority):
+    kw = dict(jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+              sill_height_mm=900.0, head_height_mm=2100.0,
+              host_through_wall_id="HOST", scale_ratio=None)
+    record = authority.evaluate_spandrel_sub_sill(**kw)
+    assert record.classification == SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE
+    assert record.status == EvidenceResolutionStatus.ABSTAINED
+    assert record.first_remaining_gate == "original_source_scale_authority_unverified"
+    assert record.clear_span_pt == pytest.approx(100.0)
+    for name in ("clear_span_m", "glazing_height_mm", "glazing_aperture_area_sqm",
+                 "spandrel_wall_area_sqm", "total_wall_opening_area_sqm"):
+        assert getattr(record, name) is None
+        assert record.to_dict()[name] is None
+    assert record.shadow_only and not record.takeoff_eligible
+    assert not record.commercial_projection_allowed
+    assert record.contract_id == authority.evaluate_spandrel_sub_sill(**kw).contract_id
+    assert record.contract_id == authority.evaluate_spandrel_sub_sill(
+        **(kw | dict(jamb_a=kw["jamb_b"], jamb_b=kw["jamb_a"]))).contract_id
+    assert record.contract_id != authority.evaluate_spandrel_sub_sill(
+        **(kw | dict(jamb_b=(200.001, 200.0)))).contract_id
+
+
+@pytest.mark.parametrize("field", ["scale_ratio", "sill_height_mm", "head_height_mm", "jamb_a"])
+def test_extremely_large_integer_cannot_bypass_finite_validation(authority, field):
+    kw = dict(jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+              sill_height_mm=900.0, head_height_mm=2100.0,
+              host_through_wall_id="HOST", scale_ratio=0.01764)
+    kw[field] = (10 ** 1000, 200.0) if field == "jamb_a" else 10 ** 1000
+    with pytest.raises(ValueError):
+        authority.evaluate_spandrel_sub_sill(**kw)
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), True, "bad"])
