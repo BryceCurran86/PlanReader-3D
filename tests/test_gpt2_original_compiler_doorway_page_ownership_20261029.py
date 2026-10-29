@@ -49,7 +49,12 @@ def _graph(page=7):
         "native_components": ({
             "source_simple_ring_candidate": None,
             "native_endpoint_degrees": tuple(
-                {"point_pdf_pt": p, "degree": 1 if i in (0, 3) else 2}
+                {"point_pdf_pt": p, "degree": 1 if i in (0, 3) else 2,
+                 "original_source_edge_ids": (
+                     (f"d{i}i0",) if i == 0 else
+                     (f"d{i-1}i0",) if i == len(points) - 1 else
+                     (f"d{i-1}i0", f"d{i}i0")
+                 )}
                 for i, p in enumerate(points)
             ),
         },),
@@ -358,7 +363,12 @@ def test_large_native_perimeter_id_membership_is_exact_and_fail_closed():
             "source_simple_ring_candidate": None,
             "native_endpoint_degrees": tuple(
                 {"point_pdf_pt": point,
-                 "degree": 1 if i in (0, len(points) - 1) else 2}
+                 "degree": 1 if i in (0, len(points) - 1) else 2,
+                 "original_source_edge_ids": (
+                     (ids[i],) if i == 0 else
+                     (ids[i-1],) if i == len(points) - 1 else
+                     (ids[i-1], ids[i])
+                 )}
                 for i, point in enumerate(points)
             ),
         },),
@@ -380,3 +390,55 @@ def test_large_native_perimeter_id_membership_is_exact_and_fail_closed():
     # No producer-owned receipt is mutated by the validation.
     assert graph["original_native_edges"] == edges
     assert ring["original_source_perimeter_side_ids"] == ids
+
+
+@pytest.mark.parametrize("corruption", [
+    "missing_interior", "duplicated_interior", "foreign_vertex",
+    "false_interior_degree", "wrong_incident_source", "duplicate_source_owner",
+    "missing_incident_source_ids",
+])
+def test_reissued_original_graph_requires_complete_native_endpoint_owners(corruption):
+    # The independent graph's degree table must account for every native
+    # endpoint AND every incident source edge; two open ends are insufficient.
+    # No forged/malformed graph may reach the source-only geometry issuer.
+    ring = _ring(7)
+    graph = _graph(7)
+    component = dict(graph["native_components"][0])
+    rows = [dict(row) for row in component["native_endpoint_degrees"]]
+    if corruption == "missing_interior":
+        rows.pop(1)
+    elif corruption == "duplicated_interior":
+        rows.append(dict(rows[1]))
+    elif corruption == "foreign_vertex":
+        rows[1]["point_pdf_pt"] = (200, 200)
+    elif corruption == "false_interior_degree":
+        rows[1]["degree"] = 1
+        rows[1]["original_source_edge_ids"] = ("d0i0",)
+    elif corruption == "wrong_incident_source":
+        rows[1]["original_source_edge_ids"] = ("d0i0", "d2i0")
+    elif corruption == "duplicate_source_owner":
+        rows[1]["original_source_edge_ids"] = ("d0i0", "d0i0")
+    else:
+        del rows[1]["original_source_edge_ids"]
+    component["native_endpoint_degrees"] = tuple(rows)
+    graph["native_components"] = (component,)
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph
+    )
+    # The genuine native edge and caller-ring inputs were not modified.
+    assert ring == _ring(7)
+    assert graph["original_native_edges"] == _graph(7)["original_native_edges"]
+
+
+def test_native_endpoint_owner_receipt_is_order_independent():
+    # Owner order is not physical evidence: a complete, differently ordered
+    # native receipt remains a candidate, never a commercial quantity.
+    ring = _ring(7)
+    graph = _graph(7)
+    component = dict(graph["native_components"][0])
+    component["native_endpoint_degrees"] = tuple(
+        {**row, "original_source_edge_ids": tuple(reversed(row["original_source_edge_ids"]))}
+        for row in reversed(component["native_endpoint_degrees"])
+    )
+    graph["native_components"] = (component,)
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph)
