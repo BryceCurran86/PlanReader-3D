@@ -335,7 +335,8 @@ def build_live_floor_finish_area_source_traces(
         else:
             scale_id = metadata.get("resolved_scale_id")
             scale_status = metadata.get("scale_status")
-            scale_conflicts = metadata.get("scale_conflicts", ())
+            # Missing source census is not proof of zero competing scales.
+            scale_conflicts = metadata.get("scale_conflicts")
             if (
                 type(scale_id) is not str or not scale_id
                 or scale_id != scale_id.strip()
