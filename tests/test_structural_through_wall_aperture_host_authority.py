@@ -98,8 +98,8 @@ def test_synthetic_positive_multi_opening_through_wall_facade(
         through_wall=wall, openings=(op1, op2, op3)
     )
     assert len(records) == 3
-    assert all(r.status is EvidenceResolutionStatus.CORROBORATED for r in records)
-    assert all(r.first_remaining_gate == "none" for r in records)
+    assert all(r.status is EvidenceResolutionStatus.CANDIDATE for r in records)
+    assert all(r.first_remaining_gate == "original_source_host_unverified" for r in records)
 
     # Check two inter-aperture piers discovered
     assert len(piers) == 2
@@ -139,7 +139,7 @@ def test_maryborough_p7_east_wall_regression(
         openings=(w05, w03, w02),
     )
     assert len(records) == 3
-    assert all(r.status is EvidenceResolutionStatus.CORROBORATED for r in records)
+    assert all(r.status is EvidenceResolutionStatus.CANDIDATE for r in records)
     assert all(r.host_wall_id == "wall_mary_east_facade" for r in records)
 
     # Check stations
@@ -321,5 +321,5 @@ def test_empty_and_single_opening_handling(
         through_wall=wall, openings=(op,)
     )
     assert len(r_single) == 1
-    assert r_single[0].status is EvidenceResolutionStatus.CORROBORATED
+    assert r_single[0].status is EvidenceResolutionStatus.CANDIDATE
     assert p_single == ()  # No adjacent piers with single opening

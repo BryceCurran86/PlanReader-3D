@@ -1,14 +1,14 @@
 """Autonomous structural opening accuracy recovery — Milestone 3.
 
-Source-authenticated continuous through-wall aperture hosting and host frame authority.
+Source-neutral through-wall aperture hosting hypotheses; not original-source authority.
 Reconciles whole-opening apertures (e.g. Maryborough W05, W03/W01, W02) with continuous
 loadbearing through-walls and narrow inter-aperture structural dividing piers.
 
 Enforces:
 1. Through-wall continuity: Openings are hosted in continuous structural walls without
    destroying through-wall continuity or fragmenting the parent wall into severed stubs.
-2. Narrow inter-aperture pier reconciliation: Solid structural piers (e.g. 7.44 pt pier
-   between Maryborough W03 and W02) are authenticated as structural wall elements.
+2. Narrow inter-aperture pier hypotheses: a geometric gap cannot authenticate a solid
+   structural pier without independent original-source wall evidence.
 3. Strict fail-closed geometric validation: Fails closed on transverse wall crossings,
    angular misalignment (> 1°), or transverse displacements exceeding wall half-thickness.
 4. Strict shadow isolation: commercial_projection_allowed=False, takeoff_eligible=False.
@@ -35,9 +35,11 @@ def _finite_real(value: object) -> bool:
     """Reject non-numeric, Boolean, nonfinite and unrepresentably large coordinates."""
     if type(value) not in (int, float):
         return False
+    if type(value) is int and abs(value) > 2**53:
+        return False  # distinct source integers would alias on float conversion
     try:
-        return math.isfinite(value)
-    except OverflowError:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
         return False
 
 
@@ -105,7 +107,9 @@ class InterAperturePierRecord:
     pier_width_pt: float
     left_opening_id: str
     right_opening_id: str
-    is_structural_masonry_pier: bool = True
+    is_structural_masonry_pier: bool | None = None
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+    first_remaining_gate: str = "original_source_structural_pier_unverified"
 
 
 @dataclass(frozen=True)
@@ -466,14 +470,14 @@ class StructuralThroughWallApertureHostAuthority:
                     "revision_id": self._producer.revision_id,
                     "source_sha256": self._producer.source_sha256,
                     "host_wall_id": through_wall.wall_id,
-                    "host_start_pt": tuple(round(v, 4) for v in through_wall.start_pt),
-                    "host_end_pt": tuple(round(v, 4) for v in through_wall.end_pt),
-                    "host_thickness_pt": round(through_wall.thickness_pt, 4),
+                    "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
+                    "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
+                    "host_thickness_pt": float(through_wall.thickness_pt).hex(),
                     "left_opening_id": curr["op"].physical_opening_id,
                     "right_opening_id": nxt["op"].physical_opening_id,
-                    "start_station": round(curr["u_max"], 2),
-                    "end_station": round(nxt["u_min"], 2),
-                    "width_pt": round(gap, 2),
+                    "start_station": float(curr["u_max"]).hex(),
+                    "end_station": float(nxt["u_min"]).hex(),
+                    "width_pt": float(gap).hex(),
                 }
                 pier_id = stable_contract_id(
                     "inter_aperture_pier", pier_payload, digest_chars=32
@@ -485,7 +489,7 @@ class StructuralThroughWallApertureHostAuthority:
                     pier_width_pt=gap,
                     left_opening_id=curr["op"].physical_opening_id,
                     right_opening_id=nxt["op"].physical_opening_id,
-                    is_structural_masonry_pier=True,
+                    is_structural_masonry_pier=None,
                 )
                 piers.append(pier_rec)
                 pier_ids_by_opening.setdefault(
@@ -509,8 +513,8 @@ class StructuralThroughWallApertureHostAuthority:
                     through_wall,
                     item["u_min"],
                     item["u_max"],
-                    EvidenceResolutionStatus.CORROBORATED,
-                    "none",
+                    EvidenceResolutionStatus.CANDIDATE,
+                    "original_source_host_unverified",
                     adjacent_piers=adjacent_piers,
                 )
                 final_records.append(rec)
@@ -533,11 +537,11 @@ class StructuralThroughWallApertureHostAuthority:
             "source_sha256": self._producer.source_sha256,
             "physical_opening_id": opening_id,
             "host_wall_id": through_wall.wall_id,
-            "host_start_pt": tuple(round(v, 4) for v in through_wall.start_pt),
-            "host_end_pt": tuple(round(v, 4) for v in through_wall.end_pt),
-            "host_thickness_pt": round(through_wall.thickness_pt, 4),
-            "u0_pt": round(u0, 4),
-            "u1_pt": round(u1, 4),
+            "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
+            "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
+            "host_thickness_pt": float(through_wall.thickness_pt).hex(),
+            "u0_pt": float(u0).hex(),
+            "u1_pt": float(u1).hex(),
             "status": status.value,
             "first_remaining_gate": gate,
         }
@@ -548,10 +552,10 @@ class StructuralThroughWallApertureHostAuthority:
             hosting_record_id=rec_id,
             physical_opening_id=opening_id,
             host_wall_id=through_wall.wall_id,
-            u0_pt=round(u0, 4),
-            u1_pt=round(u1, 4),
-            whole_wall_length_pt=round(through_wall.length_pt, 4),
-            wall_thickness_pt=round(through_wall.thickness_pt, 4),
+            u0_pt=u0,
+            u1_pt=u1,
+            whole_wall_length_pt=through_wall.length_pt,
+            wall_thickness_pt=through_wall.thickness_pt,
             axis_unit=through_wall.axis_unit,
             normal_unit=through_wall.normal_unit,
             origin_pt=through_wall.origin_pt,

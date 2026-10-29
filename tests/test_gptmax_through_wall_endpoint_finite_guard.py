@@ -75,8 +75,8 @@ def test_genuine_in_band_long_oblique_opening_retains_shadow_positive():
     first, _ = authority.bind_openings_to_through_wall(through_wall=wall, openings=(opening,))
     second, _ = authority.bind_openings_to_through_wall(through_wall=wall, openings=(opening,))
     assert first == second
-    assert first[0].status is S.CORROBORATED
-    assert first[0].first_remaining_gate == "none"
+    assert first[0].status is S.CANDIDATE
+    assert first[0].first_remaining_gate == "original_source_host_unverified"
     assert first[0].commercial_projection_allowed is False
 
 
@@ -119,7 +119,7 @@ def test_zero_and_fixed_snap_are_accepted_with_explicit_difference():
         through_wall=wall, openings=(opening,), snap_tolerance_pt=2.5,
     )
     assert strict[0].status is S.ABSTAINED
-    assert allowed[0].status is S.CORROBORATED
+    assert allowed[0].status is S.CANDIDATE
 
 
 @pytest.mark.parametrize("bad_segment", [
@@ -148,7 +148,7 @@ def test_malformed_transverse_wall_evidence_never_disappears(bad_segment):
     records, piers = authority.bind_openings_to_through_wall(
         through_wall=wall, openings=(opening,),
     )
-    assert records[0].status is S.CORROBORATED and not piers
+    assert records[0].status is S.CANDIDATE and not piers
 
 
 def test_valid_transverse_obstruction_still_vetoes_host_and_unrelated_wall_does_not():
@@ -159,7 +159,7 @@ def test_valid_transverse_obstruction_still_vetoes_host_and_unrelated_wall_does_
     unrelated = ((90.0, -30.0), (90.0, 30.0))
     for segment, expected_status, expected_gate in (
         (crossed, S.ABSTAINED, "host_through_wall_obstructed"),
-        (unrelated, S.CORROBORATED, "none"),
+        (unrelated, S.CANDIDATE, "original_source_host_unverified"),
     ):
         records, piers = authority.bind_openings_to_through_wall(
             through_wall=wall, openings=(opening,),
@@ -214,9 +214,9 @@ def test_extended_finite_obstruction_crosses_opening_interior(angle, shift, reve
 
 
 @pytest.mark.parametrize("segment,expected_status", [
-    (((10.0, 30.0), (90.0, 40.0)), S.CORROBORATED),  # above wall band
-    (((85.0, -30.0), (95.0, 30.0)), S.CORROBORATED),  # outside opening
-    (((22.5, -30.0), (22.5, 30.0)), S.CORROBORATED),  # touches excluded edge only
+    (((10.0, 30.0), (90.0, 40.0)), S.CANDIDATE),  # above wall band
+    (((85.0, -30.0), (95.0, 30.0)), S.CANDIDATE),  # outside opening
+    (((22.5, -30.0), (22.5, 30.0)), S.CANDIDATE),  # touches excluded edge only
     (((22.50001, -30.0), (22.50001, 30.0)), S.ABSTAINED),
     (((10.0, 0.0), (90.0, 0.0)), S.ABSTAINED),  # collinear obstruction
 ])
@@ -228,7 +228,7 @@ def test_finite_obstruction_interior_vs_nonintersection(segment, expected_status
     )
     assert records[0].status is expected_status
     assert records[0].first_remaining_gate == (
-        "host_through_wall_obstructed" if expected_status is S.ABSTAINED else "none"
+        "host_through_wall_obstructed" if expected_status is S.ABSTAINED else "original_source_host_unverified"
     )
     assert records[0].commercial_projection_allowed is False
 
@@ -331,8 +331,8 @@ def test_ambiguous_intervals_do_not_create_pier_across_their_gap():
         through_wall=wall, openings=openings,
     )
     by_id = {r.physical_opening_id: r for r in records}
-    assert by_id["left"].status is S.CORROBORATED
-    assert by_id["right"].status is S.CORROBORATED
+    assert by_id["left"].status is S.CANDIDATE
+    assert by_id["right"].status is S.CANDIDATE
     assert by_id["A"].status is S.ABSTAINED
     assert by_id["B"].status is S.ABSTAINED
     assert piers == ()
@@ -349,8 +349,8 @@ def test_touching_and_disjoint_apertures_preserve_shadow_positive(gap, expected_
     records, piers = _authority().bind_openings_to_through_wall(
         through_wall=wall, openings=openings,
     )
-    assert all(r.status is S.CORROBORATED for r in records)
-    assert all(r.first_remaining_gate == "none" for r in records)
+    assert all(r.status is S.CANDIDATE for r in records)
+    assert all(r.first_remaining_gate == "original_source_host_unverified" for r in records)
     assert len(piers) == expected_piers
     assert all(r.shadow_only and not r.takeoff_eligible for r in records)
 
@@ -395,7 +395,7 @@ def test_host_and_pier_ids_do_not_alias_different_source_revisions_or_host_geome
             through_wall=wall, openings=openings[::-1] if reverse else openings,
         )
         assert len(records) == 2 and len(piers) == 1
-        assert all(r.status is S.CORROBORATED for r in records)
+        assert all(r.status is S.CANDIDATE for r in records)
         assert all(r.shadow_only and not r.takeoff_eligible
                    and not r.commercial_projection_allowed for r in records)
         return {r.physical_opening_id: r.hosting_record_id for r in records}, piers[0].pier_id
@@ -461,8 +461,8 @@ def test_partial_endpoint_straddles_retain_real_positive_host_overlap(span, expe
         through_wall=wall, openings=(opening,),
     )
     assert len(records) == 1 and piers == ()
-    assert records[0].status is S.CORROBORATED
-    assert records[0].first_remaining_gate == "none"
+    assert records[0].status is S.CANDIDATE
+    assert records[0].first_remaining_gate == "original_source_host_unverified"
     assert (records[0].u0_pt, records[0].u1_pt) == expected
     assert records[0].shadow_only and not records[0].takeoff_eligible
     assert not records[0].commercial_projection_allowed
@@ -483,8 +483,8 @@ def test_external_endpoint_candidate_cannot_be_a_pier_neighbor():
         by_id = {r.physical_opening_id: r for r in records}
         assert by_id["outside"].status is S.ABSTAINED
         assert by_id["outside"].adjacent_pier_ids == ()
-        assert by_id["A"].status is S.CORROBORATED
-        assert by_id["B"].status is S.CORROBORATED
+        assert by_id["A"].status is S.CANDIDATE
+        assert by_id["B"].status is S.CANDIDATE
         assert len(piers) == 1
         assert (piers[0].left_opening_id, piers[0].right_opening_id) == ("A", "B")
         assert "outside" not in (piers[0].left_opening_id, piers[0].right_opening_id)
@@ -534,7 +534,7 @@ def test_repeated_physical_identity_including_abstained_candidate_vetoes_valid(
                       ))
         assert all(r.status is S.ABSTAINED for r in records
                    if r.physical_opening_id == "A")
-        assert all(r.status is S.CORROBORATED for r in records
+        assert all(r.status is S.CANDIDATE for r in records
                    if r.physical_opening_id in ("B", "C"))
         assert len(piers) == 1
         assert (piers[0].left_opening_id, piers[0].right_opening_id) == ("B", "C")
@@ -567,7 +567,7 @@ def test_unrelated_invalid_identity_does_not_veto_genuine_valid_pier_neighbors()
     by_id = {r.physical_opening_id: r for r in records}
     assert by_id["D"].status is S.ABSTAINED
     assert by_id["D"].first_remaining_gate == "aperture_outside_host_wall_band"
-    assert all(by_id[k].status is S.CORROBORATED for k in ("A", "B", "C"))
+    assert all(by_id[k].status is S.CANDIDATE for k in ("A", "B", "C"))
     assert len(piers) == 2
     assert [(p.left_opening_id, p.right_opening_id) for p in piers] == [
         ("A", "B"), ("B", "C"),
@@ -622,8 +622,8 @@ def test_narrow_aperture_crossing_is_never_erased_by_snap(width, angle, shift, r
                 transverse_wall_segments=segments, snap_tolerance_pt=snap,
             )
             assert len(records) == 1 and piers == ()
-            assert records[0].status is S.CORROBORATED
-            assert records[0].first_remaining_gate == "none"
+            assert records[0].status is S.CANDIDATE
+            assert records[0].first_remaining_gate == "original_source_host_unverified"
             assert records[0].shadow_only and not records[0].takeoff_eligible
             assert not records[0].commercial_projection_allowed
 
@@ -634,7 +634,7 @@ def test_finite_extreme_source_points_cannot_overflow_into_full_wall_host(revers
     # finite. Subtracting opposite ~1e308 origins overflows to infinity;
     # multiplying by the zero normal component then creates NaN. Without
     # projection validation, NaN skips both host-band and extent checks,
-    # and min/max silently turn it into a CORROBORATED whole-wall interval.
+    # and min/max silently turn it into a CANDIDATE whole-wall interval.
     step = 2e292
     wall = ContinuousThroughWallCandidate(
         "huge-host", (-1e308, -1e308), (-1e308 + step, -1e308), 20.0,
@@ -668,7 +668,74 @@ def test_finite_projection_veto_preserves_normal_host_and_commercial_isolation()
     )
     records, piers = result
     assert len(records) == 1 and piers == ()
-    assert records[0].status is S.CORROBORATED
+    assert records[0].status is S.CANDIDATE
     assert records[0].shadow_only is True
     assert records[0].takeoff_eligible is False
     assert records[0].commercial_projection_allowed is False
+
+
+def test_source_neutral_host_and_pier_cannot_claim_original_authority():
+    """A caller-provided source hash is a label, not verified source geometry."""
+    wall = ContinuousThroughWallCandidate("shadow-wall", (0.0, 0.0), (100.0, 0.0), 20.0)
+    openings = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("B", (50.0, 0.0), (70.0, 0.0)),
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(records) == 2 and len(piers) == 1
+    assert all(r.status is S.CANDIDATE for r in records)
+    assert all(r.first_remaining_gate == "original_source_host_unverified" for r in records)
+    assert all(r.shadow_only and not r.takeoff_eligible
+               and not r.commercial_projection_allowed for r in records)
+    assert piers[0].is_structural_masonry_pier is None
+    assert piers[0].status is S.CANDIDATE
+    assert piers[0].first_remaining_gate == "original_source_structural_pier_unverified"
+    reverse, reverse_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings[::-1],
+    )
+    assert {r.physical_opening_id: r for r in reverse} == {
+        r.physical_opening_id: r for r in records
+    }
+    assert reverse_piers == piers
+
+
+def test_source_precision_preserves_distinct_host_and_pier_hypotheses():
+    """Sub-0.01pt changes must not alias identities or serialized stations."""
+    authority = _authority()
+
+    def evaluate(offset=0.0, end_a=40.0, thickness=20.0):
+        wall = ContinuousThroughWallCandidate(
+            "same-wall", (offset, 0.0), (100.0 + offset, 0.0), thickness,
+        )
+        openings = (
+            ApertureHostCandidateInput("A", (20.0 + offset, 0.0), (end_a + offset, 0.0)),
+            ApertureHostCandidateInput("B", (50.0 + offset, 0.0), (70.0 + offset, 0.0)),
+        )
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings,
+        )
+        assert len(piers) == 1 and all(r.status is S.CANDIDATE for r in records)
+        return records, piers[0]
+
+    base_records, base_pier = evaluate()
+    moved_records, moved_pier = evaluate(offset=0.00001)
+    shifted_records, shifted_pier = evaluate(end_a=40.00001)
+    thick_records, thick_pier = evaluate(thickness=20.00001)
+    assert base_records[0].hosting_record_id != moved_records[0].hosting_record_id
+    assert base_records[0].hosting_record_id != shifted_records[0].hosting_record_id
+    assert base_records[0].hosting_record_id != thick_records[0].hosting_record_id
+    assert len({base_pier.pier_id, moved_pier.pier_id,
+                shifted_pier.pier_id, thick_pier.pier_id}) == 4
+    assert shifted_pier.pier_width_pt != base_pier.pier_width_pt
+    assert shifted_records[0].to_dict()["u1_pt"] != base_records[0].to_dict()["u1_pt"]
+
+
+@pytest.mark.parametrize("bad", [2**53 + 1, -(2**53 + 1), 10**400])
+def test_lossy_large_integer_source_coordinates_are_rejected(bad):
+    with pytest.raises(ValueError, match="finite coordinates"):
+        ContinuousThroughWallCandidate("host", (bad, 0), (100.0, 0.0), 20.0)
+    with pytest.raises(ValueError, match="finite coordinates"):
+        ApertureHostCandidateInput("opening", (0.0, 0.0), (bad, 0.0))
