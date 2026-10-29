@@ -1228,3 +1228,26 @@ def test_valid_original_finish_code_still_remains_source_only_candidate():
     assert result["status"] is EvidenceResolutionStatus.CANDIDATE
     assert result["authority_blockers"] == STANDING_AUTHORITY_BLOCKERS
     assert result["authenticated_physical_wall_face_equivalence"] is False
+
+
+def test_end_to_end_unhashable_original_finish_mark_never_reaches_candidate():
+    # Exercise the actual shadow producer, not only classify_floor directly.
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{"x": 327.8, "y": 1437.5, "code": ["FT3"],
+                "registered_region": True}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.records[0].reason_codes
+    assert result.records[0].commercial_projection_allowed is False
+    assert result.records[0].takeoff_eligible is False
