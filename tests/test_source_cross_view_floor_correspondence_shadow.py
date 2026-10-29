@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 import math
+import random
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -26,6 +27,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SOURCE_FINISH_MARK_IDENTITY_INVALID,
     SOURCE_MEASURED_FLOOR_BOX_INVALID,
     OVERLAPPING_MEASURED_BOXES,
+    _overlapping_measured_box_flags,
     DUPLICATE_PHYSICAL_FLOOR_IDENTITY,
     MISSING_PHYSICAL_FLOOR_IDENTITY,
     REGISTRATION_NOT_UNIQUE,
@@ -1415,3 +1417,67 @@ def test_complete_valid_measured_boxes_retain_source_only_candidates():
                for row in result.records)
     assert all(not row.takeoff_eligible and not row.commercial_projection_allowed
                for row in result.records)
+
+
+def test_full_measured_box_overlap_index_matches_exhaustive_random_oracle():
+    # A positive-area rectangle intersection is symmetric; no first/nearest
+    # source owner is selected, and all competing boxes must be vetoed.
+    rng = random.Random(20261029)
+    for _ in range(80):
+        boxes = []
+        for _ in range(32):
+            x0, y0 = rng.randrange(-30, 30), rng.randrange(-30, 30)
+            boxes.append((
+                float(x0), float(y0),
+                float(x0 + rng.randrange(1, 18)),
+                float(y0 + rng.randrange(1, 18)),
+            ))
+        expected = [False] * len(boxes)
+        for i, a in enumerate(boxes):
+            for j in range(i + 1, len(boxes)):
+                b = boxes[j]
+                if (
+                    min(a[2], b[2]) > max(a[0], b[0])
+                    and min(a[3], b[3]) > max(a[1], b[1])
+                ):
+                    expected[i] = expected[j] = True
+        original = copy.deepcopy(boxes)
+        assert _overlapping_measured_box_flags(boxes) == expected
+        order = list(range(len(boxes)))
+        rng.shuffle(order)
+        assert _overlapping_measured_box_flags([boxes[i] for i in order]) == [
+            expected[i] for i in order
+        ]
+        assert boxes == original
+
+
+def test_full_measured_box_overlap_index_keeps_touching_edges_unmarked():
+    boxes = [
+        (0.0, 0.0, 2.0, 2.0),
+        (2.0, 0.0, 4.0, 2.0),
+        (0.0, 2.0, 2.0, 4.0),
+        (2.0, 2.0, 4.0, 4.0),
+        (5.0, 5.0, 7.0, 7.0),
+    ]
+    assert _overlapping_measured_box_flags(boxes) == [False] * len(boxes)
+    # Both enclosing and enclosed owners must be vetoed, not just the
+    # later source record or the one with the smaller area.
+    assert _overlapping_measured_box_flags([
+        (0.0, 0.0, 100.0, 100.0),
+        (10.0, 10.0, 11.0, 11.0),
+        (20.0, 20.0, 21.0, 21.0),
+        (101.0, 0.0, 102.0, 1.0),
+    ]) == [True, True, True, False]
+
+
+def test_full_measured_box_overlap_index_handles_20000_disjoint_and_dense():
+    # Public, source-neutral upper-bound stress: the former pairwise loop
+    # performed 199,990,000 checks for each of these 20k-box universes.
+    disjoint = [(float(2*i), 0.0, float(2*i+1), 1.0)
+                for i in range(20000)]
+    dense = [(0.0, 0.0, 10.0, 10.0)] * 20000
+    edge_touching = [(float(i), 0.0, float(i+1), 1.0)
+                     for i in range(20000)]
+    assert not any(_overlapping_measured_box_flags(disjoint))
+    assert all(_overlapping_measured_box_flags(dense))
+    assert not any(_overlapping_measured_box_flags(edge_touching))
