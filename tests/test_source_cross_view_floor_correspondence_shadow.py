@@ -25,6 +25,8 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     MARK_TOO_CLOSE_TO_BOX_SIDE,
     MARK_IN_UNREGISTERED_REGION,
     SOURCE_FINISH_MARK_IDENTITY_INVALID,
+    SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,
+    MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES,
     SOURCE_MEASURED_FLOOR_BOX_INVALID,
     SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
     OVERLAPPING_MEASURED_BOXES,
@@ -1711,3 +1713,77 @@ def test_full_producer_dense_marks_are_counted_without_commercial_promotion():
                and OVERLAPPING_MEASURED_BOXES in row.reason_codes
                and not row.takeoff_eligible and not row.commercial_projection_allowed
                for row in result.records)
+
+
+# High-cardinality source code universes must never allocate a full
+# 20,000-box x 20,000-code Counter or iterate all keys per Fenwick prefix.
+# These are source-neutral safety tests, not original-plan quantity evidence.
+def test_high_cardinality_20000_by_20000_mark_index_abstains_before_allocation():
+    marks = [
+        (10.0, 10.0, {"code": f"FT-{i:05d}", "registered_region": True})
+        for i in range(20000)
+    ]
+    boxes = [(0.0, 0.0, 20.0, 20.0)] * 20000
+    assert len(marks) == len(boxes) == 20000
+    assert len({mark["code"] for _, _, mark in marks}) == 20000
+    assert len(boxes) * len(marks) > MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES
+    with pytest.raises(ValueError, match=SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED):
+        _indexed_marks_in_boxes(marks, boxes)
+    # Direct helper must not modify its source evidence on refusal.
+    assert marks[0][2]["code"] == "FT-00000"
+    assert marks[-1][2]["code"] == "FT-19999"
+    assert boxes[0] == boxes[-1] == (0.0, 0.0, 20.0, 20.0)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_high_cardinality_full_producer_typed_abstain_without_registration(reverse):
+    boxes = [
+        {"dimension_box_pdf_pts": (0.0, 0.0, 20.0, 20.0),
+         "canonical_floor_id": f"floor-{i}",
+         "physical_room_id": f"room-{i}",
+         "source_room_face_record_id": f"face-{i}"}
+        for i in range(20000)
+    ]
+    marks = [
+        {"x": 10.0, "y": 10.0, "code": f"FT-{i:05d}",
+         "registered_region": True}
+        for i in range(20000)
+    ]
+    if reverse:
+        boxes.reverse()
+        marks.reverse()
+    # No support or target geometry: resource veto must precede registration.
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=[], target_segments=[],
+        measured_boxes=boxes, marks=marks,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,)
+    assert result.records == ()
+    assert result.winning_registration is None
+    assert boxes[0]["dimension_box_pdf_pts"] == (0.0, 0.0, 20.0, 20.0)
+    assert marks[0]["registered_region"] is True
+    assert marks[0]["code"] == ("FT-19999" if reverse else "FT-00000")
+
+
+def test_small_multi_code_source_universe_preserves_exact_counts_and_conflict():
+    marks = [
+        (10.0, 10.0, {"code": "FT3", "registered_region": True}),
+        (11.0, 11.0, {"code": "FT2", "registered_region": True}),
+    ]
+    boxes = [(0.0, 0.0, 20.0, 20.0)] * 2
+    assert len(boxes) * 2 <= MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES
+    indexed = _indexed_marks_in_boxes(marks, boxes)
+    assert len(indexed) == 2
+    for compressed, counts in indexed:
+        assert counts == {"FT2": 1, "FT3": 1}
+        classified = classify_floor(
+            _fully_supported_correspondence(),
+            registration_unique=True,
+            marks_inside=compressed,
+            other_labelled_boxes_overlapping=0,
+            material_code="FT3",
+        )
+        assert classified["status"] is EvidenceResolutionStatus.CONFLICT
+        assert COMPETING_FINISH_CODES_IN_BOX in classified["reason_codes"]
+        assert classified["finish_codes_in_box"] == counts
