@@ -63,7 +63,9 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
         for coordinate in value:
             if type(coordinate) not in (int, float):
                 return None
-            if type(coordinate) is int and abs(coordinate) > 2**53:
+            # Native PDF endpoints above the binary64 exact integer range
+            # cannot retain distinct physical point identity as floats.
+            if abs(coordinate) > 2**53:
                 return None
             try:
                 number = float(coordinate)
