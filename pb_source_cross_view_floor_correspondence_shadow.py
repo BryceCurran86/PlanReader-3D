@@ -624,6 +624,40 @@ class SourceCrossViewFloorCorrespondenceProducer:
         trials: int = 60,
     ) -> SourceCrossViewFloorCorrespondenceResult:
         """Pure geometric evaluation using in-memory segments and boxes."""
+        # Validate the complete mark universe BEFORE spatial filtering. An
+        # unlocatable or untyped original mark may occupy any measured box;
+        # dropping it would falsely make a surviving FT2/FT3 mark unique.
+        if type(marks) not in (tuple, list) or len(marks) > 20000:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_FINISH_MARK_IDENTITY_INVALID,),
+                records=(),
+            )
+        checked_marks: list[tuple[float, float, Mapping[str, Any]]] = []
+        invalid_mark_universe = False
+        for mark in marks:
+            if not isinstance(mark, Mapping):
+                invalid_mark_universe = True
+                continue
+            raw_x, raw_y = mark.get("x"), mark.get("y")
+            if type(raw_x) not in (int, float) or type(raw_y) not in (int, float):
+                invalid_mark_universe = True
+                continue
+            try:
+                mx, my = float(raw_x), float(raw_y)
+            except (ValueError, OverflowError):
+                invalid_mark_universe = True
+                continue
+            if not (math.isfinite(mx) and math.isfinite(my)):
+                invalid_mark_universe = True
+                continue
+            code = mark.get("code")
+            if type(code) is not str or not code or code != code.strip():
+                invalid_mark_universe = True
+            # Preserve invalid codes with known coordinates so classify_floor
+            # can retain the original competing mark as a typed negative.
+            checked_marks.append((mx, my, mark))
+
         lines_sup = build_lines(support_segments)
         lines_tgt = build_lines(target_segments)
 
@@ -735,12 +769,11 @@ class SourceCrossViewFloorCorrespondenceProducer:
 
             # Find marks inside this box
             inside_marks = []
-            for mark in marks:
-                mx, my = float(mark["x"]), float(mark["y"])
+            for mx, my, mark in checked_marks:
                 margin = min(mx - box_sup[0], box_sup[2] - mx, my - box_sup[1], box_sup[3] - my)
                 if margin >= 0:
                     inside_marks.append({
-                        "code": mark["code"],
+                        "code": mark.get("code"),
                         "margin_pt": margin,
                         "registered_region": mark.get("registered_region"),
                     })
@@ -768,6 +801,18 @@ class SourceCrossViewFloorCorrespondenceProducer:
                     if value
                 ),
             )
+            # A malformed or unlocatable rival cannot be silently filtered
+            # away to make a surviving mark uniquely authoritative. Keep
+            # genuine FT2/FT3 conflicts while withholding all candidates.
+            if invalid_mark_universe:
+                classified["reason_codes"] = tuple(dict.fromkeys((
+                    *classified["reason_codes"],
+                    SOURCE_FINISH_MARK_IDENTITY_INVALID,
+                )))
+                if classified["status"] is EvidenceResolutionStatus.CANDIDATE:
+                    classified["status"] = EvidenceResolutionStatus.ABSTAINED
+                    classified["authority_blockers"] = ()
+
             # Preserve competing-code CONFLICT and every negative; retain
             # both the transform and distinct-translation alias vetoes.
             extra_reasons = (

@@ -1251,3 +1251,103 @@ def test_end_to_end_unhashable_original_finish_mark_never_reaches_candidate():
     assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.records[0].reason_codes
     assert result.records[0].commercial_projection_allowed is False
     assert result.records[0].takeoff_eligible is False
+
+
+# GPT2: validate the complete original mark universe at the producer boundary,
+# before mark['code'] and coordinate conversion can bypass classify_floor.
+def _producer_with_original_marks(marks):
+    return SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=marks,
+    )
+
+
+@pytest.mark.parametrize("bad_mark", [
+    {"x": 335.8, "y": 1447.5, "registered_region": True},
+    {"x": 335.8, "y": 1447.5, "code": None, "registered_region": True},
+    {"x": 335.8, "y": 1447.5, "code": ["FT2"], "registered_region": True},
+    {"x": 335.8, "y": 1447.5, "code": " FT2 ", "registered_region": True},
+    {"x": "335.8", "y": 1447.5, "code": "FT2", "registered_region": True},
+    {"x": True, "y": 1447.5, "code": "FT2", "registered_region": True},
+    {"x": float("nan"), "y": 1447.5, "code": "FT2", "registered_region": True},
+    {"x": float("inf"), "y": 1447.5, "code": "FT2", "registered_region": True},
+    {"x": 10 ** 1000, "y": 1447.5, "code": "FT2", "registered_region": True},
+    {"x": 335.8, "y": float("-inf"), "code": "FT2", "registered_region": True},
+    {"x": 335.8, "code": "FT2", "registered_region": True},
+    None,
+    "FT2",
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_producer_malformed_original_mark_never_lends_unique_ft3_owner(
+    bad_mark, reverse,
+):
+    valid = {"x": 327.8, "y": 1437.5, "code": "FT3",
+             "registered_region": True}
+    marks = [valid, bad_mark]
+    if reverse:
+        marks.reverse()
+    result = _producer_with_original_marks(marks)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in record.reason_codes
+    assert record.finish_codes_in_box == {"FT3": 1}
+    assert record.authority_blockers == ()
+    assert record.takeoff_eligible is False
+    assert record.commercial_projection_allowed is False
+
+
+@pytest.mark.parametrize("marks", [
+    None,
+    {"x": 327.8, "y": 1437.5, "code": "FT3"},
+    "FT3",
+    [{"x": 327.8, "y": 1437.5, "code": "FT3"}] * 20001,
+])
+def test_producer_untyped_or_unbounded_original_mark_universe_abstains(marks):
+    result = _producer_with_original_marks(marks)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_FINISH_MARK_IDENTITY_INVALID,)
+    assert result.records == ()
+
+
+def test_producer_valid_outside_mark_does_not_veto_valid_inside_ft3():
+    result = _producer_with_original_marks([
+        {"x": 327.8, "y": 1437.5, "code": "FT3",
+         "registered_region": True},
+        {"x": 10.0, "y": 10.0, "code": "FT2",
+         "registered_region": True},
+    ])
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].finish_codes_in_box == {"FT3": 1}
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
+
+
+def test_producer_competing_valid_codes_still_conflict_with_invalid_rival():
+    result = _producer_with_original_marks([
+        {"x": 327.8, "y": 1437.5, "code": "FT3",
+         "registered_region": True},
+        {"x": 335.8, "y": 1447.5, "code": "FT2",
+         "registered_region": True},
+        {"x": float("nan"), "y": 1447.5, "code": "FT2",
+         "registered_region": True},
+    ])
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert COMPETING_FINISH_CODES_IN_BOX in result.reason_codes
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
+    assert result.records[0].status is EvidenceResolutionStatus.CONFLICT
+    assert result.records[0].finish_codes_in_box == {"FT2": 1, "FT3": 1}
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
