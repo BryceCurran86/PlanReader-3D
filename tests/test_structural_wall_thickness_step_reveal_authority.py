@@ -206,3 +206,37 @@ def test_inputs_are_unchanged_and_record_has_no_commercial_authority(authority):
     assert math.isfinite(first.clear_span_pt)
     assert first.to_dict()["takeoff_eligible"] is False
     assert first.to_dict()["commercial_projection_allowed"] is False
+
+
+def test_subround_positive_shadow_metrics_remain_nonzero_on_serialization(authority):
+    record = authority.evaluate_stepped_wall_aperture(
+        **inputs(scale_ratio=1e-8))
+    assert record.status == EvidenceResolutionStatus.CANDIDATE
+    payload = record.to_dict()
+    for field in METRIC_FIELDS:
+        assert getattr(record, field) > 0
+        assert payload[field] > 0
+        assert payload[field] == getattr(record, field)
+    assert_shadow(record)
+
+
+@pytest.mark.parametrize("coordinate", [2**53 + 1, 2**53 + 2, -(2**53 + 1)])
+def test_unrepresentable_integer_jambs_cannot_alias_shadow_identity(authority, coordinate):
+    with pytest.raises(ValueError, match="finite real coordinates"):
+        authority.evaluate_stepped_wall_aperture(
+            **inputs(jamb_datum_a=(coordinate, 200.0)))
+
+
+def test_positive_metric_conversion_underflow_fails_closed(authority):
+    with pytest.raises(ValueError, match="underflow"):
+        authority.evaluate_stepped_wall_aperture(
+            **inputs(left_thickness_pt=5e-324, right_thickness_pt=5e-324))
+
+
+def test_genuine_zero_reveal_remains_zero_without_false_positive(authority):
+    record = authority.evaluate_stepped_wall_aperture(
+        **inputs(left_thickness_pt=5.1, right_thickness_pt=5.1))
+    assert record.status == EvidenceResolutionStatus.CANDIDATE
+    assert record.reveal_depth_pt == 0
+    assert record.to_dict()["reveal_depth_mm"] == 0
+    assert_shadow(record)

@@ -63,7 +63,12 @@ class SteppedWallApertureRecord:
 
     def to_dict(self) -> Mapping[str, Any]:
         def optional_round(value: float | None, places: int) -> float | None:
-            return None if value is None else round(value, places)
+            if value is None:
+                return None
+            rounded = round(value, places)
+            # Presentation rounding must not turn genuine nonzero evidence
+            # into a fabricated zero measurement in the shadow receipt.
+            return value if rounded == 0 and value != 0 else rounded
 
         return {
             "schema_version": SCHEMA_VERSION,
@@ -92,6 +97,10 @@ class SteppedWallApertureRecord:
 
 def _finite_real(value: object) -> bool:
     if type(value) not in (int, float):
+        return False
+    # Float conversion aliases adjacent integers beyond 2**53; reject them
+    # before both geometry and stable-contract identity construction.
+    if type(value) is int and abs(value) > 2**53:
         return False
     try:
         return math.isfinite(float(value))
@@ -234,6 +243,13 @@ class StructuralWallThicknessStepRevealAuthority:
         )
         if not all(math.isfinite(v) for v in metrics):
             raise ValueError("nonfinite hypothetical metric conversion")
+        source_lengths = (
+            clear_span_pt, float(left_thickness_pt),
+            float(right_thickness_pt), reveal_depth_pt,
+        )
+        if any(metric == 0.0 and source > 0.0
+               for metric, source in zip(metrics, source_lengths)):
+            raise ValueError("hypothetical metric conversion underflow")
         return record(
             SteppedWallApertureClassification.GEOMETRIC_CANDIDATE,
             EvidenceResolutionStatus.CANDIDATE,
