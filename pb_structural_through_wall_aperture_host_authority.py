@@ -493,6 +493,24 @@ class StructuralThroughWallApertureHostAuthority:
                 ),
             )
 
+        # A rejected geometric opening can still occupy a plausible host-wall
+        # station interval. Excluding it from valid_items must not silently
+        # make its two surviving neighbors consecutive physical apertures.
+        # Far-off-band observations cannot veto an unrelated pier candidate.
+        unresolved_wall_band_intervals: list[tuple[float, float]] = []
+        for item in intermediate_openings:
+            if item["valid"]:
+                continue
+            low = max(0.0, item["u_min"])
+            high = min(wall_len, item["u_max"])
+            if high <= low:
+                continue
+            rejected = item["rec"]
+            _, p0_perp = project_pt(rejected.opening_start_pt)
+            _, p1_perp = project_pt(rejected.opening_end_pt)
+            if max(abs(p0_perp), abs(p1_perp)) <= half_thick + snap_tolerance_pt:
+                unresolved_wall_band_intervals.append((low, high))
+
         piers: list[InterAperturePierRecord] = []
         pier_ids_by_opening: dict[str, list[str]] = {}
 
@@ -502,6 +520,11 @@ class StructuralThroughWallApertureHostAuthority:
             # Never bridge an ambiguous physical aperture to manufacture a
             # structural pier between otherwise disjoint candidates.
             if not curr["valid"] or not nxt["valid"]:
+                continue
+            # An abstained same-band candidate inside the proposed gap leaves
+            # physical consecutiveness unresolved, so no pier is inferred.
+            if any(low < nxt["u_min"] and high > curr["u_max"]
+                   for low, high in unresolved_wall_band_intervals):
                 continue
             gap = nxt["u_min"] - curr["u_max"]
             if (
