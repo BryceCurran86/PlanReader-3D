@@ -19,3 +19,32 @@ Before customer-row adaptation, for each already-FIRM room quantity, require any
 ## Benchmark separation and untouched paths
 
 No benchmark truth, expected quantities, frozen evaluator, source PDFs, tokens, private receipts, GPT2 physical room/finish/RCP code, GPT MAX opening hosts, GPT3 signing/scoring, original signed/customer bodies, 20,000 raster cap or 2.5pt snap are changed. Do not count this source-integrity correction as FIRM, a frozen score gain or a merged milestone. Require exact-head Python 3.13/3.14 and trusted original-source replay with signed9/Maryborough retention before any merge.
+
+## 2026-10-29 technical-review correction — independently bound room text
+
+**Observed (review #5693737473):** the first negative-only guard rejects
+padded/type-coerced labels but not a different clean room name. The trace
+`room_label` is copied from mutable quantity metadata and cannot corroborate
+that same quantity's `location`. The existing original source-room label
+producer independently publishes `LiveCanonicalRoomObject.room_label`,
+`room_label_binding_record_id`, and `room_label_evidence_ids` for the
+canonical face that the room-area source trace identifies.
+
+**Proposed/implemented:** keep the type-and-whitespace veto; for any supplied
+customer `room_label` or `location`, resolve exactly one canonical room
+from the already authenticated trace `room_entity_id` and require an
+independently issued source label/binding/evidence inventory. Compare the
+literal native customer label to that original semantic label using only the
+existing cross-view case/word-spacing equivalence. Reject clean conflicting
+room names, two mutually agreeing forged quantity labels, and missing label
+authority. If both optional labels are absent, do not fabricate them.
+The test uses a native generated PDF with distinct OFFICE/STUDY rooms,
+original source metric/trace, commercial projector, and sealed verifier.
+
+**Inference/limitation:** canonical source-room label binding is trusted only
+within the existing producer/source-closed contract; this does not recreate
+private original text observations from mutable caller objects, and does not
+prove original Maryborough physical room ownership. No new quantity or
+customer authority is minted. Full SHA-verified original-source replay and
+signed9/Mary3 retention remain mandatory before merge. Benchmark values,
+private PDFs/tokens, other lanes, frozen truth, raster cap and snap are untouched.

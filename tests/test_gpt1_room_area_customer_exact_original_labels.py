@@ -115,6 +115,82 @@ def test_source_valid_metric_cannot_launder_original_room_customer_label(
     assert _firm(original_claim) == original
 
 
+def _source_bound_room(claim):
+    source = _firm(claim)
+    floor = next(
+        floor for floor in claim.canonical_floors
+        if floor.metric_area_quantity_id == source.quantity_id
+    )
+    return next(
+        room for room in claim.canonical_rooms
+        if room.canonical_room_id == floor.room_entity_id
+    )
+
+
+@pytest.mark.parametrize("field", ("room_label", "location"))
+def test_clean_different_room_name_cannot_borrow_original_area(original_claim, field):
+    original = _firm(original_claim)
+    room = _source_bound_room(original_claim)
+    assert room.room_label and room.room_label_binding_record_id
+    assert room.room_label_evidence_ids
+    assert room.room_label.casefold() != "study"
+    forged = _alter(original_claim, field, "STUDY")
+    # The metric and source floor/room lineage still validate; the semantic
+    # source label is an independent producer receipt, not the mutable trace.
+    assert original.quantity_id in build_live_room_area_source_traces(
+        forged, workspace_id=7, project_id="original-room-source",
+    )
+    before = forged.room_area_quantity_evidence
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match=f"room-area customer original {field} conflicts with source-bound room label",
+    ):
+        _customer(forged)
+    assert forged.room_area_quantity_evidence == before
+    assert _firm(original_claim) == original
+
+
+def test_two_mutated_clean_labels_cannot_corroborate_each_other(original_claim):
+    original = _firm(original_claim)
+    metadata = {**dict(original.metadata), "room_label": "STUDY", "location": "STUDY"}
+    forged_quantity = replace(original, metadata=metadata)
+    forged = replace(
+        original_claim,
+        room_area_quantity_evidence=tuple(
+            forged_quantity if q.quantity_id == original.quantity_id else q
+            for q in original_claim.room_area_quantity_evidence
+        ),
+    )
+    assert original.quantity_id in build_live_room_area_source_traces(
+        forged, workspace_id=7, project_id="original-room-source",
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="source-bound room label"):
+        _customer(forged)
+
+
+def test_missing_independent_room_label_receipt_cannot_authorize_location(original_claim):
+    original = _firm(original_claim)
+    room = _source_bound_room(original_claim)
+    assert room.room_label_binding_record_id
+    unbound = replace(room, room_label_binding_record_id=None)
+    forged = replace(
+        original_claim,
+        canonical_rooms=tuple(
+            unbound if item.canonical_room_id == room.canonical_room_id else item
+            for item in original_claim.canonical_rooms
+        ),
+    )
+    # Geometry/area are still valid, but there is no longer a separately
+    # authenticated source label for commercial presentation.
+    assert original.quantity_id in build_live_room_area_source_traces(
+        forged, workspace_id=7, project_id="original-room-source",
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError, match="original room label authority unavailable",
+    ):
+        _customer(forged)
+
+
 def test_missing_optional_room_labels_are_not_invented(original_claim):
     source = _firm(original_claim)
     metadata = dict(source.metadata)
