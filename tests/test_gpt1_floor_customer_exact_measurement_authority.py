@@ -173,12 +173,14 @@ def test_exact_pdf_scaled_method_retains_existing_explicit_scale_checks(original
             "resolved_scale_id": "source-scale:1",
             "scale_status": "resolved",
             "scale_conflicts": (),
+            "scale_fingerprint": "scale-fingerprint:1",
         },
     )
     authority = _measurement_authority(scaled)
     assert authority is not None
     assert authority.method == "scaled_geometry"
     assert authority.resolved_scale_id == "source-scale:1"
+    assert authority.metadata["scale_fingerprint"] == "scale-fingerprint:1"
     conflicted = replace(
         scaled, metadata={**scaled.metadata, "scale_conflicts": ("rival-scale",)},
     )
@@ -199,3 +201,48 @@ def test_abstained_original_area_cannot_become_customer_row(original_claim):
         ),
     )
     assert _customer(claim) == ()
+
+
+@pytest.mark.parametrize("fingerprint", (
+    " scale-fingerprint:1",
+    "scale-fingerprint:1 ",
+    "",
+    ImportedAuthority("scale-fingerprint:1"),
+    True,
+    1,
+    ("scale-fingerprint:1",),
+))
+def test_scaled_original_fingerprint_alias_cannot_be_repaired_at_customer(original_claim, fingerprint):
+    source = _original_room_quantity(original_claim)
+    metadata = {
+        **dict(source.metadata),
+        "resolved_scale_id": "source-scale:1",
+        "scale_status": "resolved",
+        "scale_conflicts": (),
+        "scale_fingerprint": fingerprint,
+    }
+    # Final gate sees original typed source metadata before any serializer
+    # could repair a str subclass, boolean or iterable into a plausible ID.
+    original = dict(metadata)
+    replay = SimpleNamespace(
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        metadata=metadata,
+        quantity_id=source.quantity_id,
+    )
+    assert _measurement_authority(replay) is None
+    assert metadata == original
+
+
+def test_scaled_original_fingerprint_remains_optional_when_absent(original_claim):
+    source = _original_room_quantity(original_claim)
+    metadata = {
+        **dict(source.metadata),
+        "resolved_scale_id": "source-scale:1",
+        "scale_status": "resolved",
+        "scale_conflicts": (),
+    }
+    metadata.pop("scale_fingerprint", None)
+    scaled = replace(source, authority=MeasurementAuthorityType.PDF_SCALED.value, metadata=metadata)
+    authority = _measurement_authority(scaled)
+    assert authority is not None
+    assert authority.metadata["scale_fingerprint"] == ""
