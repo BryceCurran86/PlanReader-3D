@@ -4,6 +4,7 @@ Generated native-PDF positive and adversarial original-token negatives. No
 owner-private source or frozen benchmark is read; no new FIRM is minted.
 """
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -146,7 +147,17 @@ def test_final_floor_customer_authority_never_guesses_from_aliases(original_clai
         "scale_status": "resolved",
         "scale_conflicts": (),
     })
-    replay = replace(source, authority=method, metadata=metadata)
+    if method is None:
+        # The real QuantityEvidence constructor already rejects an absent
+        # authority. Exercise the final fail-closed guard separately without
+        # weakening that upstream contract or inventing a FIRM quantity.
+        with pytest.raises(ValueError, match="authority must be a non-empty string"):
+            replace(source, authority=method, metadata=metadata)
+        replay = SimpleNamespace(
+            authority=method, metadata=metadata, quantity_id=source.quantity_id,
+        )
+    else:
+        replay = replace(source, authority=method, metadata=metadata)
     # Direct final-gate test: invalid methods cannot borrow otherwise
     # well-formed dimension/scale metadata to mint a commercial authority.
     assert _measurement_authority(replay) is None
