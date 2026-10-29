@@ -29,6 +29,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
     OVERLAPPING_MEASURED_BOXES,
     _overlapping_measured_box_flags,
+    _indexed_marks_in_boxes,
     DUPLICATE_PHYSICAL_FLOOR_IDENTITY,
     MISSING_PHYSICAL_FLOOR_IDENTITY,
     REGISTRATION_NOT_UNIQUE,
@@ -1558,3 +1559,155 @@ def test_malformed_identity_does_not_erase_real_competing_finish_conflict():
     assert COMPETING_FINISH_CODES_IN_BOX in row.reason_codes
     assert SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID in row.reason_codes
     assert not row.takeoff_eligible and not row.commercial_projection_allowed
+
+
+
+def _mark_index_oracle(boxes, marks):
+    """Original exhaustive producer loop and public classifier as an oracle."""
+    expected = []
+    for x0, y0, x1, y1 in boxes:
+        inside = []
+        for x, y, mark in marks:
+            margin = min(x - x0, x1 - x, y - y0, y1 - y)
+            if margin >= 0:
+                inside.append({
+                    "code": mark.get("code"),
+                    "margin_pt": margin,
+                    "registered_region": mark.get("registered_region"),
+                })
+        expected.append(classify_floor(
+            _fully_supported_correspondence(),
+            registration_unique=True,
+            marks_inside=inside,
+            other_labelled_boxes_overlapping=0,
+            material_code="FT3",
+        ))
+    return expected
+
+
+def test_full_mark_containment_index_matches_exhaustive_classifier_oracle():
+    # Compare *all* classifier predicates, not just candidate counts:
+    # malformed code, duplicate same code, competing FT2/FT3, registration,
+    # exact five-point margin, inclusive edges and no-mark cases.
+    rng = random.Random(20261030)
+    for _ in range(85):
+        boxes = []
+        for _ in range(rng.randrange(1, 28)):
+            x0 = rng.randrange(-50, 50) / 2.0
+            y0 = rng.randrange(-50, 50) / 2.0
+            boxes.append((x0, y0, x0 + rng.randrange(1, 30) / 2.0,
+                          y0 + rng.randrange(1, 30) / 2.0))
+        marks = []
+        for _ in range(rng.randrange(0, 90)):
+            x = rng.randrange(-80, 100) / 2.0
+            y = rng.randrange(-80, 100) / 2.0
+            marks.append((x, y, {
+                "code": rng.choice(("FT2", "FT3", None, " FT3")),
+                "registered_region": rng.choice((True, False, "true", None)),
+            }))
+        original = copy.deepcopy((boxes, marks))
+        indexed = _indexed_marks_in_boxes(marks, boxes)
+        expected = _mark_index_oracle(boxes, marks)
+        assert len(indexed) == len(expected)
+        for (compressed, counts), oracle in zip(indexed, expected):
+            actual = classify_floor(
+                _fully_supported_correspondence(),
+                registration_unique=True,
+                marks_inside=compressed,
+                other_labelled_boxes_overlapping=0,
+                material_code="FT3",
+            )
+            actual["finish_codes_in_box"] = counts
+            assert actual == oracle
+        assert (boxes, marks) == original
+
+
+def test_full_mark_index_preserves_fractional_margin_and_boundary_predicates():
+    edge = math.nextafter(5.0, 0.0)
+    outer = (0.0, 0.0, 20.0, 20.0)
+    cases = [
+        [(5.0, 10.0, {"code": "FT3", "registered_region": True})],
+        [(edge, 10.0, {"code": "FT3", "registered_region": True})],
+        [(0.0, 10.0, {"code": "FT3", "registered_region": True})],
+        [(20.0, 10.0, {"code": "FT3", "registered_region": True})],
+        [(20.01, 10.0, {"code": "FT3", "registered_region": True})],
+        [(5.0, 10.0, {"code": "FT3", "registered_region": True}),
+         (10.0, 10.0, {"code": "FT2", "registered_region": False})],
+    ]
+    for marks in cases:
+        original = copy.deepcopy(marks)
+        compressed, counts = _indexed_marks_in_boxes(marks, [outer])[0]
+        actual = classify_floor(
+            _fully_supported_correspondence(),
+            registration_unique=True,
+            marks_inside=compressed,
+            other_labelled_boxes_overlapping=0,
+            material_code="FT3",
+        )
+        actual["finish_codes_in_box"] = counts
+        assert actual == _mark_index_oracle([outer], marks)[0]
+        assert marks == original
+
+
+def test_full_mark_index_handles_20000_disjoint_and_dense_source_universes():
+    # The former full producer performed 400,000,000 containment checks.
+    # Verify exact code multiplicities and no first/nearest mark selection.
+    marks = [
+        (float(3 * i + 10), 20.0, {"code": "FT3", "registered_region": True})
+        for i in range(20000)
+    ]
+    disjoint = [
+        (float(3 * i), 0.0, float(3 * i + 20), 40.0)
+        for i in range(20000)
+    ]
+    # Overlapping disjoint x ranges are intentional: check exact multiplicity
+    # against a small local geometric oracle at several positions.
+    out = _indexed_marks_in_boxes(marks, disjoint)
+    assert len(out) == 20000
+    for i in (0, 1, 200, 19999):
+        expected = sum(
+            3 * i <= x <= 3 * i + 20 and 0 <= y <= 40
+            for x, y, _ in marks
+        )
+        assert out[i][1] == {"FT3": expected}
+        assert len(out[i][0]) == (2 if expected > 1 else 1)
+    dense = [(0.0, 0.0, 60020.0, 40.0)] * 20000
+    dense_out = _indexed_marks_in_boxes(marks, dense)
+    assert len(dense_out) == 20000
+    assert all(counts == {"FT3": 20000} and len(comp) == 2
+               for comp, counts in dense_out)
+
+
+def test_full_producer_dense_marks_are_counted_without_commercial_promotion():
+    # End-to-end source-neutral producer path, not merely the helper.
+    boxes = [
+        {
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": f"floor-{i}",
+            "physical_room_id": f"room-{i}",
+            "source_room_face_record_id": f"face-{i}",
+        }
+        for i in range(1024)
+    ]
+    marks = [
+        {"x": 300.0 + i * 0.01, "y": 1437.5,
+         "code": "FT3", "registered_region": True}
+        for i in range(1024)
+    ]
+    original = copy.deepcopy((boxes, marks))
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=boxes,
+        marks=marks,
+    )
+    assert (boxes, marks) == original
+    assert len(result.records) == 1024
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert all(row.finish_codes_in_box == {"FT3": 1024}
+               and row.status is EvidenceResolutionStatus.ABSTAINED
+               and MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX in row.reason_codes
+               and OVERLAPPING_MEASURED_BOXES in row.reason_codes
+               and not row.takeoff_eligible and not row.commercial_projection_allowed
+               for row in result.records)
