@@ -329,3 +329,26 @@ def test_original_registration_transform_receipt_invalid_shapes_abstain():
         assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
         assert result["first_failure"]=="original_registration_issuer_or_scope_missing"
         assert result["new_firm_quantities"]==0
+
+
+def test_original_direct_translation_argument_overflow_and_invalid_types_abstain():
+    # The caller's direct transform must fail closed as strictly as the
+    # nested original-source registration witness, including huge Python ints.
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for shift in (
+        None, False, [], "10,7", (10.,), (10.,7.,0.),
+        (True,7.), (float("nan"),7.), (float("inf"),7.),
+        (10**1000,7.), (-10**1000,7.),
+    ):
+        rejected=compare(floor,finish,original_source_registration=receipt,
+                         translation_pdf_pts=shift)
+        assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert rejected["first_failure"]=="original_registration_transform_invalid"
+        assert rejected["physical_room_identity_proven"] is False
+        assert rejected["new_firm_quantities"]==0
+    accepted=compare(floor,finish,original_source_registration=receipt,
+                     translation_pdf_pts=(10.,7.))
+    assert accepted["status"]=="original_source_ink_ring_translation_candidate"
+    assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
+    assert accepted["physical_room_identity_proven"] is False
+    assert accepted["new_firm_quantities"]==0

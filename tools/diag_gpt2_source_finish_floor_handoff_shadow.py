@@ -81,8 +81,16 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
             or sha!=finish_graph.get("source_sha256")):
         return {**base,"first_failure":"original_source_pdf_root_mismatch"}
     if (type(translation_pdf_pts) is not tuple or len(translation_pdf_pts)!=2
-            or any(type(z) not in (int,float) or not math.isfinite(z)
+            or any(type(z) not in (int,float)
                    for z in translation_pdf_pts)):
+        return {**base,"first_failure":"original_registration_transform_invalid"}
+    # Python's isfinite() raises OverflowError on extremely large integers.
+    # Caller-supplied transforms must fail closed just like source receipts.
+    try:
+        finite_translation=all(math.isfinite(z) for z in translation_pdf_pts)
+    except OverflowError:
+        finite_translation=False
+    if not finite_translation:
         return {**base,"first_failure":"original_registration_transform_invalid"}
     reg=original_source_registration
     # Malformed caller receipts abstain, never raise or coerce a
