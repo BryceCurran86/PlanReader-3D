@@ -520,3 +520,29 @@ def test_original_code_glyphs_follow_native_reading_direction(rotation):
     assert not result.physical_ceiling_zone_authorized
     assert not result.metric_area_authorized
     assert not result.firm_ceiling_quantity_authorized
+
+
+@pytest.mark.parametrize("bad_bbox", (
+    None, False, [], "100,100,500,500",
+    (100,100,500), (100,100,500,500,600),
+    (True,100,500,500), (100,100,False,500),
+    (100,100,float("nan"),500), (100,float("inf"),500,500),
+    (100,100,10**1000,500), (-10**1000,100,500,500),
+))
+def test_original_rcp_candidate_bbox_malformed_or_overflow_fails_typed(bad_bbox):
+    source=_fixture()
+    original_sha=sha256(source).hexdigest()
+    with pytest.raises(ValueError, match="finite original plan BBOX candidate"):
+        _go(source,(0,0,0),bbox=bad_bbox)
+    assert sha256(source).hexdigest()==original_sha
+
+
+def test_original_rcp_finite_bbox_native_pdf_positive_stays_lexical_only():
+    source,address=_native_code_paint_case()
+    candidate=_go(source,address,bbox=(0.,0.,700.,700.))
+    assert candidate.original_source_role=="SOURCE_CEILING_CODE_WORD_CANDIDATE"
+    assert candidate.original_ceiling_code_visible_ink_verified
+    assert not candidate.original_plan_viewport_authorized
+    assert not candidate.physical_ceiling_zone_authorized
+    assert not candidate.metric_area_authorized
+    assert not candidate.firm_ceiling_quantity_authorized

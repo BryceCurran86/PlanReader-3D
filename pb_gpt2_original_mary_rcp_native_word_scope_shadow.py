@@ -213,8 +213,19 @@ def inspect_original_mary_rcp_word_scope_shadow(
 ) -> NativeRcpWordScopeShadow:
     if type(pdf_bytes) is not bytes or not pdf_bytes or sha256(pdf_bytes).hexdigest()!=expected_source_sha256:
         raise ValueError('original RCP PDF SHA mismatch')
-    if (type(candidate_plan_bbox_pdf_pt) is not tuple or len(candidate_plan_bbox_pdf_pt)!=4
-            or any(type(x) not in (float,int) or not isfinite(x) for x in candidate_plan_bbox_pdf_pt)
+    # A caller can supply an arbitrarily large Python int; isfinite()
+    # raises OverflowError during implicit float conversion. Invalid source
+    # bounds must fail with the same typed veto, not crash an original audit.
+    bbox_typed=(type(candidate_plan_bbox_pdf_pt) is tuple
+                and len(candidate_plan_bbox_pdf_pt)==4
+                and all(type(x) in (float,int)
+                        for x in candidate_plan_bbox_pdf_pt))
+    try:
+        bbox_finite=(bbox_typed and all(
+            isfinite(x) for x in candidate_plan_bbox_pdf_pt))
+    except OverflowError:
+        bbox_finite=False
+    if (not bbox_finite
             or not candidate_plan_bbox_pdf_pt[0]<candidate_plan_bbox_pdf_pt[2]
             or not candidate_plan_bbox_pdf_pt[1]<candidate_plan_bbox_pdf_pt[3]):
         raise ValueError('a finite original plan BBOX candidate is required, not a viewport grant')
