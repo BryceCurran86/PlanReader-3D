@@ -265,3 +265,67 @@ def test_original_source_ring_cyclic_rotation_reversal_and_deterministic_replay(
         assert first==second
         assert first["status"]=="original_source_ink_ring_translation_candidate"
         assert first["new_firm_quantities"]==0
+
+
+def test_original_registration_witnesses_fail_closed_on_malformed_nested_receipts():
+    # All source roles must be typed original-edge identities. Malformed
+    # nested receipts must ABSTAIN, not crash or become a source candidate.
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    bad_roles=(
+        None, [], "untrusted", 42,
+        {"floor_source":None,"finish_source":{"identity":"d0i0"}},
+        {"floor_source":{"identity":"d0i0"},"finish_source":None},
+        {"floor_source":{"identity":["d0i0"]},
+         "finish_source":{"identity":"d0i0"}},
+        {"floor_source":{"identity":"d0i0"},
+         "finish_source":{"identity":{"id":"d0i0"}}},
+        {"floor_source":{"identity":"unknown"},
+         "finish_source":{"identity":"d0i0"}},
+    )
+    for role in bad_roles:
+        receipt=deepcopy(registration)
+        receipt["original_witnesses"]={"native-side":role}
+        result=compare(floor,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]=="unjoined_source_wall_ancestry"
+        assert result["new_firm_quantities"]==0
+
+
+def test_original_registration_reused_wall_witness_is_not_independent_proof():
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    receipt=deepcopy(registration)
+    receipt["original_witnesses"]["duplicate-side"]=deepcopy(
+        receipt["original_witnesses"]["registered-native-side"])
+    result=compare(floor,finish,original_source_registration=receipt,
+                   translation_pdf_pts=(10.0,7.0))
+    assert result["first_failure"]=="original_registration_witness_identity_alias_conflict"
+    assert result["new_firm_quantities"]==0
+    # Two genuinely distinct native source identities remain candidates only.
+    receipt["original_witnesses"]["duplicate-side"]={
+        "floor_source":{"identity":"d1i0"},
+        "finish_source":{"identity":"d1i0"},
+    }
+    candidate=compare(floor,finish,original_source_registration=receipt,
+                      translation_pdf_pts=(10.0,7.0))
+    assert candidate["status"]=="original_source_ink_ring_translation_candidate"
+    assert candidate["physical_room_identity_proven"] is False
+    assert candidate["new_firm_quantities"]==0
+
+
+def test_original_registration_transform_receipt_invalid_shapes_abstain():
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    for shift in (None,False,0,"10,7",{"x":10,"y":7},
+                  (10.,), (10.,7.,0.), (True,7.),
+                  (float("nan"),7.), (float("inf"),7.),
+                  (10**1000,7.)):
+        receipt=deepcopy(registration)
+        receipt["source_translation_candidate_pdf_pts"]=shift
+        result=compare(floor,finish,original_source_registration=receipt,
+                       translation_pdf_pts=(10.0,7.0))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]=="original_registration_issuer_or_scope_missing"
+        assert result["new_firm_quantities"]==0

@@ -85,25 +85,48 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
                    for z in translation_pdf_pts)):
         return {**base,"first_failure":"original_registration_transform_invalid"}
     reg=original_source_registration
-    if (type(reg) is not dict or reg.get("status") !=
+    # Malformed caller receipts abstain, never raise or coerce a
+    # source registration. The source producer owns the page-pair transform.
+    reg_shift=(reg.get("source_translation_candidate_pdf_pts")
+               if type(reg) is dict else None)
+    if (type(reg_shift) not in (tuple,list) or len(reg_shift)!=2
+            or any(type(z) not in (int,float) for z in reg_shift)):
+        return {**base,"first_failure":"original_registration_issuer_or_scope_missing"}
+    try:
+        finite_shift=all(math.isfinite(z) for z in reg_shift)
+    except OverflowError:
+        finite_shift=False
+    if (not finite_shift or type(reg) is not dict or reg.get("status") !=
             "original_four_edge_ink_correspondence_with_unclosed_doorway"
             or reg.get("original_source_sha256")!=sha
             or reg.get("original_floor_page_id")!=floor_graph.get("page_1_based")
             or reg.get("original_finish_page_id")!=finish_graph.get("page_1_based")
-            or tuple(reg.get("source_translation_candidate_pdf_pts",()))!=
-                tuple(translation_pdf_pts)):
+            or tuple(reg_shift)!=tuple(translation_pdf_pts)):
         return {**base,"first_failure":"original_registration_issuer_or_scope_missing"}
     witnesses=reg.get("original_witnesses")
     if type(witnesses) is not dict or not witnesses:
         return {**base,"first_failure":"original_registration_witnesses_missing"}
     floor_ids=set(floor_graph.get("original_native_edge_ids",()))
     finish_ids=set(finish_graph.get("original_native_edge_ids",()))
-    if any(
-        role.get("floor_source",{}).get("identity") not in floor_ids
-        or role.get("finish_source",{}).get("identity") not in finish_ids
-        for role in witnesses.values()
-    ):
-        return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+    seen_floor=set()
+    seen_finish=set()
+    for role in witnesses.values():
+        if type(role) is not dict:
+            return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        floor_source=role.get("floor_source")
+        finish_source=role.get("finish_source")
+        if type(floor_source) is not dict or type(finish_source) is not dict:
+            return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        floor_id=floor_source.get("identity")
+        finish_id=finish_source.get("identity")
+        if (type(floor_id) is not str or type(finish_id) is not str
+                or floor_id not in floor_ids or finish_id not in finish_ids):
+            return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        if floor_id in seen_floor or finish_id in seen_finish:
+            return {**base,"first_failure":
+                    "original_registration_witness_identity_alias_conflict"}
+        seen_floor.add(floor_id)
+        seen_finish.add(finish_id)
     floor_ring=_single_ring(floor_graph)
     finish_ring=_single_ring(finish_graph)
     if not floor_ring or not finish_ring:
