@@ -1055,7 +1055,9 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 continue
             if any(
                 type(v) not in (int, float)
-                or (type(v) is int and abs(v) > 2**53)
+                # Apply the same exact-coordinate bound to native floats
+                # and integers. Oversized floats can alias PDF endpoints.
+                or abs(v) > 2**53
                 for v in raw_box
             ):
                 invalid_box_universe = True
