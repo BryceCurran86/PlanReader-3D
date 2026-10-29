@@ -15,3 +15,8 @@ Add original native generated-PDF producer→floor publisher→source trace→cu
 
 ## Explicit exclusions and release gates
 No GPT2 physical rooms, FT2/FT3, doorway/RCP source; GPT MAX/Claude hosts/glazing; GPT3 signing/scoring; other GPT1 drafts; source PDFs/tokens; frozen V2 truth/evaluator; original signed nine Lot16 bodies; verified Maryborough inputs; 20k raster cap or 2.5pt snap are modified. No FIRM/score/merged milestone claim. Draft only until exact-head Python3.13/3.14 CI, technical diff review, trusted original-source producer→real issuer→sealed/customer replay, and byte-exact signed/customer retention are verified.
+
+
+## Follow-up: optional original scale fingerprint literal identity (2026-10-29)
+
+**Observed:** The original scaled room-area producer carries a `scale_fingerprint` in source metadata; the final floor customer method projected it through `_clean`, allowing whitespace/type repair of a supplied calibration identity. The commercial projection fingerprint does not bind this optional descriptive authority metadata. **Inference:** an imported or malformed calibration receipt could be presented as a plausible customer provenance label even though no independent source proof was added. **Change:** fail closed when a *supplied* fingerprint is not a native nonblank unpadded string, and copy valid strings verbatim. Missing optional fingerprints retain the prior empty customer metadata field; numeric m², source scale selection, FIRM gates and ABSTAIN are unchanged. Add direct adversarial typed/padded/empty receipt tests, a verbatim positive and absent-field compatibility check. These are source-neutral checks, not owner-original source replay. Existing draft and trusted original-source/customer preservation release gates remain mandatory.
