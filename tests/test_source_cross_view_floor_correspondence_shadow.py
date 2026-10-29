@@ -27,6 +27,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SOURCE_FINISH_MARK_IDENTITY_INVALID,
     SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,
     MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES,
+    SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
     SOURCE_MEASURED_FLOOR_BOX_INVALID,
     SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
     OVERLAPPING_MEASURED_BOXES,
@@ -1817,3 +1818,92 @@ def test_cardinality_refusal_preserves_malformed_mark_and_box_universe_negatives
     assert result.records == ()
     assert marks[-1] == {"x": 10.0, "y": 10.0, "registered_region": True}
     assert boxes[-1]["dimension_box_pdf_pts"] == (0.0, 0.0, 0.0, 20.0)
+
+
+# GPT2: wall-source completeness must be proved before any geometric
+# registration; silently dropping a malformed competing wall is unsafe.
+def _wall_universe_shadow_result(support, target):
+    return SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support,
+        target_segments=target,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "office-floor",
+            "physical_room_id": "office-room",
+            "source_room_face_record_id": "office-face",
+        }],
+        marks=[{
+            "x": 327.8, "y": 1437.5,
+            "code": "FT3", "registered_region": True,
+        }],
+    )
+
+
+@pytest.mark.parametrize("sheet", ["support", "target"])
+@pytest.mark.parametrize("bad_segment", [
+    None,
+    "not-a-native-segment",
+    {"x1": 0.0, "y1": 0.0, "x2": 1.0},  # missing endpoint
+    {"x1": 0.0, "y1": 0.0, "x2": True, "y2": 1.0},
+    {"x1": 0.0, "y1": 0.0, "x2": "1.0", "y2": 1.0},
+    {"x1": 0.0, "y1": 0.0, "x2": float("nan"), "y2": 1.0},
+    {"x1": 0.0, "y1": 0.0, "x2": float("inf"), "y2": 1.0},
+    {"x1": 0.0, "y1": 0.0, "x2": -float("inf"), "y2": 1.0},
+    {"x1": 0.0, "y1": 0.0, "x2": 2**53 + 1, "y2": 1.0},
+    {"x1": 0.0, "y1": 0.0, "x2": 1e100, "y2": 1.0},
+])
+@pytest.mark.parametrize("prepend", [False, True])
+def test_complete_wall_universe_rejects_malformed_competing_segment(
+    sheet, bad_segment, prepend
+):
+    support = support_sheet()
+    target = list(TARGET_SHEET)
+    chosen = support if sheet == "support" else target
+    if prepend:
+        chosen.insert(0, copy.deepcopy(bad_segment))
+    else:
+        chosen.append(copy.deepcopy(bad_segment))
+    before = repr((support, target))
+    result = _wall_universe_shadow_result(support, target)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,)
+    assert result.records == ()
+    assert repr((support, target)) == before
+
+
+@pytest.mark.parametrize("sheet", ["support", "target"])
+def test_complete_wall_universe_rejects_more_than_20000_segments(sheet):
+    support = support_sheet()
+    target = list(TARGET_SHEET)
+    oversized = [seg(0, 0, 100, 0)] * 20_001
+    if sheet == "support":
+        support = oversized
+    else:
+        target = oversized
+    result = _wall_universe_shadow_result(support, target)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,)
+    assert result.records == ()
+
+
+@pytest.mark.parametrize("sheet", ["support", "target"])
+def test_complete_wall_universe_rejects_unbounded_or_untyped_container(sheet):
+    support = support_sheet()
+    target = list(TARGET_SHEET)
+    if sheet == "support":
+        support = iter(support)
+    else:
+        target = "not-a-native-segment-sequence"
+    result = _wall_universe_shadow_result(support, target)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,)
+    assert result.records == ()
+
+
+def test_valid_native_wall_universe_preserves_shadow_candidate_only():
+    result = _wall_universe_shadow_result(support_sheet(), list(TARGET_SHEET))
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].commercial_projection_allowed is False
