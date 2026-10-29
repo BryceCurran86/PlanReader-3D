@@ -90,10 +90,16 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
             or tuple(sorted(ids)) != graph.get("original_native_edge_ids")):
         return False
     components = graph.get("native_components")
+    intersections = graph.get("interior_stroke_intersections_and_overlaps")
+    # The native producer explicitly emits a tuple of every intersecting or
+    # overlapping stroke. Missing/None/False is NOT proof of zero conflicts.
+    # Likewise, the component must explicitly report whether it has a closed
+    # simple ring; an omitted field cannot stand in for an open doorway.
     if (type(components) not in (tuple, list) or len(components) != 1
             or type(components[0]) is not dict
-            or graph.get("interior_stroke_intersections_and_overlaps")
-            or components[0].get("source_simple_ring_candidate") is not None):
+            or "source_simple_ring_candidate" not in components[0]
+            or type(intersections) is not tuple or intersections
+            or components[0]["source_simple_ring_candidate"] is not None):
         return False
     edges = graph.get("original_native_edges")
     if type(edges) not in (tuple, list) or len(edges) != len(ids):
