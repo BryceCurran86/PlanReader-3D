@@ -240,3 +240,70 @@ def test_genuine_zero_reveal_remains_zero_without_false_positive(authority):
     assert record.reveal_depth_pt == 0
     assert record.to_dict()["reveal_depth_mm"] == 0
     assert_shadow(record)
+
+
+def test_shadow_receipt_retains_full_precision_native_and_metric_evidence(authority):
+    """Distinct exact-ID hypotheses must not serialize as the same evidence."""
+    original = authority.evaluate_stepped_wall_aperture(**inputs())
+    original_payload = original.to_dict()
+    assert original_payload["jamb_right_datum"] == [200.0, 200.0]
+    assert original_payload["datum_offset_pt"] == 0.0
+    assert original_payload["scale_ratio"] == 0.01764
+    assert original_payload["context_label"] == "STEPPED_WALL_OPENING"
+
+    for change in (
+        {"jamb_datum_b": (200.000001, 200.0)},
+        {"left_thickness_pt": 13.600001},
+        {"right_thickness_pt": 5.100001},
+        {"scale_ratio": 0.017640000001},
+        {"datum_offset_pt": 0.000001},
+        {"context_label": "STEPPED_WALL_OPENING_OTHER"},
+    ):
+        distinct = authority.evaluate_stepped_wall_aperture(**inputs(**change))
+        assert distinct.contract_id != original.contract_id
+        assert distinct.to_dict() != original_payload
+        assert distinct.to_dict()["commercial_projection_allowed"] is False
+        assert distinct.to_dict()["takeoff_eligible"] is False
+
+
+def test_shadow_serialization_keeps_small_nonzero_values_and_true_zero(authority):
+    first = authority.evaluate_stepped_wall_aperture(
+        **inputs(left_thickness_pt=5.10000001, right_thickness_pt=5.1,
+                 scale_ratio=1e-8))
+    serialized = first.to_dict()
+    assert serialized["reveal_depth_pt"] == first.reveal_depth_pt > 0
+    assert serialized["centerline_step_offset_pt"] == first.centerline_step_offset_pt > 0
+    assert serialized["reveal_depth_mm"] == first.reveal_depth_mm > 0
+    assert serialized["clear_span_m"] == first.clear_span_m > 0
+    assert serialized["left_wall_thickness_mm"] == first.left_wall_thickness_mm > 0
+    assert serialized["right_wall_thickness_mm"] == first.right_wall_thickness_mm > 0
+    assert_shadow(first)
+
+    zero = authority.evaluate_stepped_wall_aperture(
+        **inputs(left_thickness_pt=5.1, right_thickness_pt=5.1))
+    assert zero.to_dict()["reveal_depth_pt"] == 0
+    assert zero.to_dict()["reveal_depth_mm"] == 0
+
+
+def test_abstention_receipt_preserves_missing_inputs_without_metrics(authority):
+    record = authority.evaluate_stepped_wall_aperture(
+        **inputs(scale_ratio=None, datum_offset_pt=None, datum_alignment=None))
+    payload = record.to_dict()
+    assert record.status == EvidenceResolutionStatus.ABSTAINED
+    assert payload["scale_ratio"] is None
+    assert payload["datum_offset_pt"] is None
+    assert payload["datum_alignment"] is None
+    assert_null_metrics(record)
+    assert_shadow(record)
+
+
+def test_shadow_serialized_coordinate_lists_cannot_mutate_frozen_record(authority):
+    record = authority.evaluate_stepped_wall_aperture(**inputs())
+    before = record.to_dict()
+    before["jamb_left_datum"][0] = -12345.0
+    before["jamb_right_datum"][1] = -12345.0
+    assert record.jamb_left_datum == (100.0, 200.0)
+    assert record.jamb_right_datum == (200.0, 200.0)
+    assert record.to_dict()["jamb_left_datum"] == [100.0, 200.0]
+    assert record.to_dict()["jamb_right_datum"] == [200.0, 200.0]
+    assert_shadow(record)

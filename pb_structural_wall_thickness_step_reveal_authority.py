@@ -57,35 +57,37 @@ class SteppedWallApertureRecord:
     status: EvidenceResolutionStatus
     first_remaining_gate: str | None = None
     notes: str = ""
+    # Identity-bound shadow inputs must remain auditable after serialization.
+    # They are caller hypotheses, NOT source-verified measurement authority.
+    context_label: str = "STEPPED_WALL_OPENING"
+    datum_offset_pt: float | None = None
+    scale_ratio: float | None = None
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
     shadow_only: bool = True
 
     def to_dict(self) -> Mapping[str, Any]:
-        def optional_round(value: float | None, places: int) -> float | None:
-            if value is None:
-                return None
-            rounded = round(value, places)
-            # Presentation rounding must not turn genuine nonzero evidence
-            # into a fabricated zero measurement in the shadow receipt.
-            return value if rounded == 0 and value != 0 else rounded
-
         return {
             "schema_version": SCHEMA_VERSION,
             "contract_id": self.contract_id,
             "classification": self.classification.value,
-            "jamb_left_datum": [round(c, 2) for c in self.jamb_left_datum],
-            "jamb_right_datum": [round(c, 2) for c in self.jamb_right_datum],
-            "clear_span_pt": round(self.clear_span_pt, 2),
-            "clear_span_m": optional_round(self.clear_span_m, 4),
-            "left_wall_thickness_pt": round(self.left_wall_thickness_pt, 2),
-            "left_wall_thickness_mm": optional_round(self.left_wall_thickness_mm, 1),
-            "right_wall_thickness_pt": round(self.right_wall_thickness_pt, 2),
-            "right_wall_thickness_mm": optional_round(self.right_wall_thickness_mm, 1),
-            "reveal_depth_pt": round(self.reveal_depth_pt, 2),
-            "reveal_depth_mm": optional_round(self.reveal_depth_mm, 1),
-            "centerline_step_offset_pt": round(self.centerline_step_offset_pt, 2),
+            # Lossless native and hypothetical metric evidence: rounding here
+            # previously made different stable-ID hypotheses indistinguishable.
+            "jamb_left_datum": list(self.jamb_left_datum),
+            "jamb_right_datum": list(self.jamb_right_datum),
+            "clear_span_pt": self.clear_span_pt,
+            "clear_span_m": self.clear_span_m,
+            "left_wall_thickness_pt": self.left_wall_thickness_pt,
+            "left_wall_thickness_mm": self.left_wall_thickness_mm,
+            "right_wall_thickness_pt": self.right_wall_thickness_pt,
+            "right_wall_thickness_mm": self.right_wall_thickness_mm,
+            "reveal_depth_pt": self.reveal_depth_pt,
+            "reveal_depth_mm": self.reveal_depth_mm,
+            "centerline_step_offset_pt": self.centerline_step_offset_pt,
             "datum_alignment": None if self.datum_alignment is None else self.datum_alignment.value,
+            "context_label": self.context_label,
+            "datum_offset_pt": self.datum_offset_pt,
+            "scale_ratio": self.scale_ratio,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
             "notes": self.notes,
@@ -201,6 +203,9 @@ class StructuralWallThicknessStepRevealAuthority:
                 status=status,
                 first_remaining_gate=gate,
                 notes=notes,
+                context_label=context_label,
+                datum_offset_pt=None if datum_offset_pt is None else float(datum_offset_pt),
+                scale_ratio=None if scale_ratio is None else float(scale_ratio),
             )
 
         if scale_ratio is None or datum_offset_pt is None or datum_alignment is None:
