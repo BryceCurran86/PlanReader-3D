@@ -480,3 +480,56 @@ def test_native_overlap_census_missing_field_and_component_proof_abstain():
     assert compiler._original_doorway_ring_matches_reissued_native_graph(
         _ring(), graph
     )
+
+
+@pytest.mark.parametrize("axis", ("x", "y"))
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_oversized_float_native_doorway_graph_endpoint_abstains(axis, sign):
+    """Matching reissued edges cannot authenticate imprecise PDF coordinates.
+
+    The caller's ring and the independent native graph deliberately agree
+    on an oversized float; agreement is not source endpoint identity.
+    """
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(
+        _ring(), _graph()
+    )
+    ring = _ring()
+    graph = _graph()
+    huge = float(sign * (2**53 + 2))
+
+    def transformed(point):
+        x, y = point
+        return (
+            huge if axis == "x" and x == 100 else x,
+            huge if axis == "y" and y == 100 else y,
+        )
+
+    ring["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"] = tuple(
+        transformed(p) for p in ring["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"]
+    )
+    ring["source_virtual_door_connector_pdf_pts"] = tuple(
+        transformed(p) for p in ring["source_virtual_door_connector_pdf_pts"]
+    )
+    ring["source_only_native_polygon_area_pdf_pt2_not_m2"] = abs(huge) * 100.0
+    graph["original_native_edges"] = tuple(
+        {
+            **edge,
+            "endpoints_pdf_pts": tuple(
+                transformed(p) for p in edge["endpoints_pdf_pts"]
+            ),
+        }
+        for edge in graph["original_native_edges"]
+    )
+    graph["native_components"] = tuple(
+        {
+            **component,
+            "native_endpoint_degrees": tuple(
+                {**row, "point_pdf_pt": transformed(row["point_pdf_pt"])}
+                for row in component["native_endpoint_degrees"]
+            ),
+        }
+        for component in graph["native_components"]
+    )
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph
+    )
