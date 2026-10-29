@@ -28,6 +28,8 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,
     MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES,
     SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
+    SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED,
+    MAX_SOURCE_REGISTRATION_VOTE_PAIRS,
     SOURCE_MEASURED_FLOOR_BOX_INVALID,
     SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
     OVERLAPPING_MEASURED_BOXES,
@@ -39,6 +41,8 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     REGISTRATION_TRANSLATION_ALIAS,
     STANDING_AUTHORITY_BLOCKERS,
     build_lines,
+    LineIndex,
+    _shift_votes,
     rank_registrations,
     box_correspondence,
     side_evidence,
@@ -1923,6 +1927,116 @@ def test_wall_veto_preserves_independent_malformed_mark_and_box_evidence():
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == (
         SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+    )
+    assert result.records == ()
+
+
+def test_all_invalid_boxes_preserve_independent_mark_negative_with_valid_walls():
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=list(TARGET_SHEET),
+        measured_boxes=[{"dimension_box_pdf_pts": (0.0, 0.0, 0.0, 1.0)}],
+        marks=[{"x": float("nan"), "y": 100.0, "code": "FT3"}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+    )
+    assert result.records == ()
+
+
+def test_registration_shift_window_matches_original_complete_vote_oracle():
+    import collections
+
+    rng = random.Random(20261030)
+    for _ in range(40):
+        source = {
+            o: {
+                float(i * 1000 + rng.randint(-100, 100)): [
+                    (float(i), float(i + rng.randint(3, 50)))
+                ]
+                for i in range(12)
+            }
+            for o in "HV"
+        }
+        target = {
+            o: {
+                float(i * 1000 + rng.randint(-100, 100)): [
+                    (float(i), float(i + rng.randint(3, 50)))
+                ]
+                for i in range(12)
+            }
+            for o in "HV"
+        }
+        index = LineIndex(target)
+        before = repr((source, target))
+        expected_votes = {"H": collections.Counter(), "V": collections.Counter()}
+        for o in "HV":
+            for k, intervals in source[o].items():
+                source_length = sum(hi - lo for lo, hi in intervals)
+                for k2 in index.keys[o]:
+                    d = k2 - k
+                    if abs(d) > 3000.0:
+                        continue
+                    target_length = sum(hi - lo for lo, hi in target[o][k2])
+                    expected_votes[o][round(d / 0.04) * 0.04] += min(
+                        source_length, target_length
+                    )
+        expected = (
+            [d for d, _ in sorted(
+                expected_votes["V"].items(), key=lambda kv: (-kv[1], kv[0])
+            )[:7]],
+            [d for d, _ in sorted(
+                expected_votes["H"].items(), key=lambda kv: (-kv[1], kv[0])
+            )[:7]],
+        )
+        assert _shift_votes(source, index, 7) == expected
+        assert repr((source, target)) == before
+
+
+def test_registration_vote_budget_abstains_on_complete_dense_native_universe():
+    # Valid 20k native axis keys on each page: the old Cartesian vote scan
+    # would attempt 400m comparisons for one orientation. No partial votes.
+    segments = [seg(i / 10, 0, i / 10, 100) for i in range(20_000)]
+    before = repr(segments)
+    with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
+        rank_registrations(build_lines(segments), build_lines(segments))
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=segments,
+        target_segments=segments,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (10.0, 10.0, 100.0, 100.0),
+            "canonical_floor_id": "source-only-room",
+        }],
+        marks=[{"x": 50.0, "y": 50.0, "code": "FT3", "registered_region": True}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED,)
+    assert result.records == ()
+    assert repr(segments) == before
+    assert MAX_SOURCE_REGISTRATION_VOTE_PAIRS < 20_000 * 20_000
+
+
+def test_registration_vote_budget_preserves_independent_invalid_mark_and_box():
+    segments = [seg(i / 10, 0, i / 10, 100) for i in range(2_000)]
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=segments,
+        target_segments=segments,
+        measured_boxes=[
+            {"dimension_box_pdf_pts": (10.0, 10.0, 100.0, 100.0)},
+            {"dimension_box_pdf_pts": (0.0, 0.0, 0.0, 1.0)},
+        ],
+        marks=[{"x": float("nan"), "y": 20.0, "code": "FT3"}],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED,
         SOURCE_FINISH_MARK_IDENTITY_INVALID,
         SOURCE_MEASURED_FLOOR_BOX_INVALID,
     )
