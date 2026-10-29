@@ -319,6 +319,32 @@ def build_live_ceiling_lining_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        # A canonical room and its original physical room are source-owned
+        # identity receipts, not display labels.  The earlier lookup is
+        # deliberately retained for membership, but its _clean() conversion
+        # cannot authorize an otherwise FIRM ceiling quantity.  Require the
+        # producer, ceiling and quantity to agree on the exact native IDs.
+        original_canonical_room_id = metadata.get("canonical_room_id")
+        original_physical_room_id = metadata.get("physical_room_id")
+        if (
+            type(room.canonical_room_id) is not str
+            or not room.canonical_room_id
+            or room.canonical_room_id != room.canonical_room_id.strip()
+            or type(room.physical_room_id) is not str
+            or not room.physical_room_id
+            or room.physical_room_id != room.physical_room_id.strip()
+            or type(original_canonical_room_id) is not str
+            or original_canonical_room_id != room.canonical_room_id
+            or type(original_physical_room_id) is not str
+            or original_physical_room_id != room.physical_room_id
+            or type(ceiling.room_entity_id) is not str
+            or ceiling.room_entity_id != room.canonical_room_id
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity lacks exact original room identity: "
+                f"{quantity.quantity_id}"
+            )
+
         # A source room-face is a producer-owned physical geometry receipt.
         # Normalizing both sides allowed two missing, padded or type-coerced
         # receipts to agree and inherit the original room's ceiling m².
