@@ -243,3 +243,77 @@ def test_native_source_graph_exception_is_typed_compiler_abstention(monkeypatch)
     ):
         run()
     assert not any(name[0].endswith("issuer") for name in calls)
+
+
+def test_real_generated_native_pdf_edges_are_reissued_before_compiler_candidate(
+    monkeypatch,
+):
+    # A generated two-page PDF exercises the actual SHA/page-native graph
+    # issuer; the source producer itself remains stubbed, and the result is
+    # still a shadow-only candidate rather than original-client authority.
+    import hashlib
+    import fitz
+
+    doc = fitz.open()
+    for dx in (0, 10):
+        page = doc.new_page(width=300, height=300)
+        page.draw_line((40 + dx, 40), (40 + dx, 140))
+        page.draw_line((40 + dx, 140), (140 + dx, 140))
+        page.draw_line((140 + dx, 140), (140 + dx, 40))
+    raw = doc.tobytes()
+    doc.close()
+    sha = hashlib.sha256(raw).hexdigest()
+    floor = _ring(7)
+    finish = _ring(11)
+    for row, page in ((floor, 1), (finish, 2)):
+        row["original_source_sha256"] = sha
+        row["original_page_1_based"] = page
+        dx = 0 if page == 1 else 10
+        row["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"] = (
+            (40 + dx, 40), (40 + dx, 140),
+            (140 + dx, 140), (140 + dx, 40),
+        )
+        row["source_virtual_door_connector_pdf_pts"] = (
+            (140 + dx, 40), (40 + dx, 40),
+        )
+
+    def sealed_revision(self, revision_id, *, page_1_based):
+        assert revision_id == "native-test-rev"
+        assert page_1_based in (1, 2)
+        return SimpleNamespace(
+            revision=SimpleNamespace(source_sha256=sha, document_id="native-test"),
+            snapshot=SimpleNamespace(snapshot_id="native-snapshot"),
+        ), raw
+
+    calls = []
+    monkeypatch.setattr(
+        GPT2OriginalSourceGeometryBridge, "_source_revision", sealed_revision
+    )
+    monkeypatch.setattr(
+        compiler, "audit_gpt2_original_doorway_bound_floor_finish_correspondence",
+        lambda *args, **kwargs: calls.append("source-geometry") or
+        {"status": "original_source_ink_ring_translation_candidate"},
+    )
+    monkeypatch.setattr(
+        compiler, "audit_gpt2_source_material_floor_handoff",
+        lambda *args, **kwargs: calls.append("source-material") or
+        {"status": "source_finished_floor_material_handoff_abstained"},
+    )
+    bridge = object.__new__(GPT2OriginalSourceGeometryBridge)
+    result = bridge.original_doorway_bound_floor_finish_handoff(
+        revision_id="native-test-rev",
+        floor_page_1_based=1,
+        finish_page_1_based=2,
+        original_floor_doorway_ring=floor,
+        original_finish_doorway_ring=finish,
+        independent_cross_sheet_registration={},
+        original_translation_pdf_pts=(10.0, 0.0),
+        material_authority=None,
+        source_definition_selector=None,
+        source_occurrence_selector=None,
+        source_finish_code="FT3",
+    )
+    assert calls == ["source-geometry", "source-material"]
+    assert result["new_firm_quantities"] == 0
+    assert result["customer_floor_finish_area_issued"] is False
+    assert hashlib.sha256(raw).hexdigest() == sha

@@ -91,6 +91,7 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
         return False
     components = graph.get("native_components")
     if (type(components) not in (tuple, list) or len(components) != 1
+            or type(components[0]) is not dict
             or graph.get("interior_stroke_intersections_and_overlaps")
             or components[0].get("source_simple_ring_candidate") is not None):
         return False
