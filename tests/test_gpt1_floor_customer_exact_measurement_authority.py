@@ -6,8 +6,10 @@ owner-private source or frozen benchmark is read; no new FIRM is minted.
 from dataclasses import replace
 from types import SimpleNamespace
 
+import fitz
 import pytest
 
+from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_live_floor_area_customer_projection import (
@@ -21,7 +23,10 @@ from pb_live_floor_area_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
-from tests.test_live_room_area_source_closed_export import _cross_view_room_area_pdf
+from tests.test_live_room_area_source_closed_export import (
+    _cross_view_room_area_pdf,
+    _framed_cross_view_room_area_pdf,
+)
 
 
 class ImportedAuthority(str):
@@ -34,6 +39,58 @@ def original_claim(tmp_path):
     path.write_bytes(_cross_view_room_area_pdf())
     return collect_live_physical_net_wall_claim(
         path, pages=(0,), room_area_support_pages=(1,),
+    )
+
+
+@pytest.fixture
+def framed_original_claim(tmp_path):
+    """A real generated-PDF floor-plan viewport, never a fabricated scale."""
+    path = tmp_path / "framed-source-method-native.pdf"
+    path.write_bytes(_framed_cross_view_room_area_pdf())
+    with fitz.open(path) as document:
+        native_viewports = tuple(
+            view for view in authoritative_floor_plan_viewports(
+                document[0], page_number=1,
+            )
+            if view.bounding_box is not None
+        )
+    assert len(native_viewports) == 1
+    native_viewport_id = str(native_viewports[0].view_id)
+    assert native_viewport_id
+
+    claim = collect_live_physical_net_wall_claim(
+        path, pages=(0,), room_area_support_pages=(1,),
+    )
+    source = _original_room_quantity(claim)
+    floor = _source_floor(claim, source)
+    rooms = tuple(
+        room for room in claim.canonical_rooms
+        if room.canonical_room_id == floor.room_entity_id
+    )
+    assert len(rooms) == 1
+    room = rooms[0]
+    # The original documented-area producer independently recognizes the
+    # native floor-plan viewport. Canonical room/floor objects can predate
+    # this fallback binding; attach ONLY that independently observed ID for
+    # this synthetic scaled-contract test, never a guessed viewport or scale.
+    assert source.metadata["viewport_id"] == native_viewport_id
+    assert room.viewport_id in (None, native_viewport_id)
+    assert floor.viewport_id in (None, native_viewport_id)
+    assert room.source_sha256 == floor.source_sha256
+    assert room.revision_id == floor.revision_id
+    assert room.page_id == floor.page_id
+    return replace(
+        claim,
+        canonical_rooms=tuple(
+            replace(item, viewport_id=native_viewport_id)
+            if item.canonical_room_id == room.canonical_room_id else item
+            for item in claim.canonical_rooms
+        ),
+        canonical_floors=tuple(
+            replace(item, viewport_id=native_viewport_id)
+            if item.canonical_floor_id == floor.canonical_floor_id else item
+            for item in claim.canonical_floors
+        ),
     )
 
 
@@ -329,8 +386,8 @@ def _synthetic_scaled_source_identity_claim(original_claim):
     return claim
 
 
-def test_id_consistent_synthetic_scaled_source_reaches_sealed_customer(original_claim):
-    claim = _synthetic_scaled_source_identity_claim(original_claim)
+def test_id_consistent_synthetic_scaled_source_reaches_sealed_customer(framed_original_claim):
+    claim = _synthetic_scaled_source_identity_claim(framed_original_claim)
     published = publish_live_floor_area_quantities(claim)
     assert len(published) == 1
     rows = _customer(claim)
@@ -350,11 +407,11 @@ def test_id_consistent_synthetic_scaled_source_reaches_sealed_customer(original_
     ("ring_signature", "f" * 64),
 ))
 def test_different_clean_original_scaled_receipt_cannot_borrow_original_id(
-    original_claim, field, new_value,
+    framed_original_claim, field, new_value,
 ):
     from pb_source_closed_run_export import SourceClosedRunConflictError
 
-    claim = _synthetic_scaled_source_identity_claim(original_claim)
+    claim = _synthetic_scaled_source_identity_claim(framed_original_claim)
     original = _original_room_quantity(claim)
     forged = replace(
         original, metadata={**dict(original.metadata), field: new_value},
@@ -379,10 +436,10 @@ def test_different_clean_original_scaled_receipt_cannot_borrow_original_id(
     assert _customer(claim) == _customer(claim)
 
 
-def test_scaled_customer_requires_reconstructible_original_room_source(original_claim):
+def test_scaled_customer_requires_reconstructible_original_room_source(framed_original_claim):
     from pb_source_closed_run_export import SourceClosedRunConflictError
 
-    claim = _synthetic_scaled_source_identity_claim(original_claim)
+    claim = _synthetic_scaled_source_identity_claim(framed_original_claim)
     original = _original_room_quantity(claim)
     missing = replace(
         original,
