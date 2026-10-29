@@ -438,3 +438,35 @@ def test_serialized_abstention_retains_exact_geometry_without_metric(authority):
     assert payload["total_girth_m"] is None
     assert payload["leg_a"]["leg_span_m"] is None
     assert payload["shadow_only"] and not payload["takeoff_eligible"]
+
+
+def test_same_host_wall_cannot_create_dual_host_corner_candidate(authority):
+    """Two orthogonal legs with one host identity must abstain, not mint girth."""
+    kwargs = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="SAME_WALL", host_wall_b_id="SAME_WALL",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    first = authority.evaluate_corner_aperture(**kwargs)
+    reversed_legs = authority.evaluate_corner_aperture(**(
+        kwargs | {"jamb_a": kwargs["jamb_b"], "jamb_b": kwargs["jamb_a"]}
+    ))
+    for record in (first, reversed_legs):
+        assert record.classification == CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+        assert record.status == EvidenceResolutionStatus.ABSTAINED
+        assert record.first_remaining_gate == "distinct_corner_host_walls_unverified"
+        assert record.total_girth_m is None
+        assert record.leg_a.leg_span_m is None
+        assert record.leg_b.leg_span_m is None
+        assert record.to_dict()["total_girth_m"] is None
+        assert record.shadow_only and not record.takeoff_eligible
+        assert not record.commercial_projection_allowed
+        assert record.total_girth_pt == 140.0
+    assert first.contract_id == reversed_legs.contract_id
+    distinct = authority.evaluate_corner_aperture(**(
+        kwargs | {"host_wall_b_id": "SECOND_WALL"}
+    ))
+    assert distinct.classification == CornerApertureClassification.GEOMETRIC_CANDIDATE
+    assert distinct.total_girth_m is not None
+    assert distinct.contract_id != first.contract_id

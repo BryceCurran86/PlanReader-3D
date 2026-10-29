@@ -265,6 +265,16 @@ class StructuralCornerApertureContinuityAuthority:
                 "original_source_scale_or_post_unverified",
                 "Missing scale or post receipt; no metric corner aperture.",
             )
+        # Two legs cannot be independently hosted by the same physical wall ID.
+        # Preserve the native geometry but abstain before a dual-host candidate
+        # or hypothetical metric girth can be inferred from duplicate identity.
+        if host_a == host_b:
+            return record(
+                CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+                EvidenceResolutionStatus.ABSTAINED,
+                "distinct_corner_host_walls_unverified",
+                "Both legs claim the same host wall; distinct physical hosts unverified.",
+            )
         # A caller's post dimension is not an original-source post receipt.
         # Preserve the numeric hypothesis, but never assert a physical post.
         post = CornerPostCondition.UNRESOLVED_CORNER_CONDITION
