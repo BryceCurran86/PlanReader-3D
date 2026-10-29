@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 
 from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
@@ -37,18 +38,15 @@ def _measurement_authority(
     quantity: QuantityEvidence,
 ) -> CommercialMeasurementAuthority | None:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    authority = (
-        _clean(quantity.authority)
-        .lower()
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
+    # This is the final commercial measurement-method authority boundary.
+    # The original room-area producer has only two permitted source methods;
+    # never turn a padded, imported, or substring-matching method token into
+    # a source-authenticated customer measurement.
+    authority = quantity.authority
+    if type(authority) is not str:
+        return None
 
-    if authority in {
-        "documented_dimension",
-        "figured_dimension",
-        "documented/figured",
-    } or "figured" in authority:
+    if authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
         raw_ids = metadata.get("figured_dimension_ids")
         if (
             not isinstance(raw_ids, (tuple, list))
@@ -75,7 +73,7 @@ def _measurement_authority(
             },
         )
 
-    if "scale" in authority or "geometry" in authority:
+    if authority == MeasurementAuthorityType.PDF_SCALED.value:
         scale_id = metadata.get("resolved_scale_id")
         scale_status = metadata.get("scale_status")
         raw_conflicts = metadata.get("scale_conflicts", ())
