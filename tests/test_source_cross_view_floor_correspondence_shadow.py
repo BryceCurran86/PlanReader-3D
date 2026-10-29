@@ -2041,3 +2041,94 @@ def test_registration_vote_budget_preserves_independent_invalid_mark_and_box():
         SOURCE_MEASURED_FLOOR_BOX_INVALID,
     )
     assert result.records == ()
+
+
+@pytest.mark.parametrize(
+    "bad_mark",
+    [
+        {"x": float("nan"), "y": 20.0, "code": "FT3", "registered_region": True},
+        {"x": 20.0, "y": 20.0, "code": " FT3", "registered_region": True},
+        {"x": 20.0, "y": 20.0, "code": 3, "registered_region": True},
+    ],
+)
+def test_no_registration_retains_independent_invalid_mark_and_box_reasons(bad_mark):
+    """No transform cannot erase a malformed FT occurrence or sibling room."""
+    good_mark = {"x": 50.0, "y": 50.0, "code": "FT3", "registered_region": True}
+    boxes = [
+        {"dimension_box_pdf_pts": (0.0, 0.0, 100.0, 100.0)},
+        {"dimension_box_pdf_pts": (0.0, 0.0, 0.0, 100.0)},
+    ]
+    for marks in ([good_mark, bad_mark], [bad_mark, good_mark]):
+        before = repr((marks, boxes))
+        result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+            selector=sample_selector(),
+            support_segments=[],
+            target_segments=[],
+            measured_boxes=boxes,
+            marks=marks,
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.reason_codes == (
+            REGISTRATION_NOT_UNIQUE,
+            SOURCE_FINISH_MARK_IDENTITY_INVALID,
+            SOURCE_MEASURED_FLOOR_BOX_INVALID,
+        )
+        assert result.records == ()
+        assert repr((marks, boxes)) == before
+
+
+@pytest.mark.parametrize(
+    "bad_boxes",
+    [
+        None,
+        {"dimension_box_pdf_pts": (0.0, 0.0, 100.0, 100.0)},
+        [None] * 20_001,
+    ],
+)
+def test_invalid_box_container_retains_independent_mark_and_wall_negatives(bad_boxes):
+    """Container preflight must retain independent source defects, never FIRM."""
+    bad_wall = {"x1": "not-native", "y1": 0.0, "x2": 10.0, "y2": 0.0}
+    marks = [
+        {"x": 50.0, "y": 50.0, "code": "FT3", "registered_region": True},
+        {"x": float("nan"), "y": 20.0, "code": "FT3", "registered_region": True},
+    ]
+    for source, target in (([bad_wall], []), ([], [bad_wall])):
+        for order in (marks, list(reversed(marks))):
+            before = repr((source, target, bad_boxes, order))
+            result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+                selector=sample_selector(),
+                support_segments=source,
+                target_segments=target,
+                measured_boxes=bad_boxes,
+                marks=order,
+            )
+            assert result.status is EvidenceResolutionStatus.ABSTAINED
+            assert result.reason_codes == (
+                SOURCE_WALL_SEGMENT_UNIVERSE_INVALID,
+                SOURCE_FINISH_MARK_IDENTITY_INVALID,
+                SOURCE_MEASURED_FLOOR_BOX_INVALID,
+            )
+            assert result.records == ()
+            assert repr((source, target, bad_boxes, order)) == before
+
+
+def test_no_registration_and_invalid_box_container_clean_negative_controls():
+    producer = SourceCrossViewFloorCorrespondenceProducer()
+    clean_mark = [{"x": 50.0, "y": 50.0, "code": "FT3", "registered_region": True}]
+    base = dict(
+        selector=sample_selector(),
+        support_segments=[],
+        target_segments=[],
+        marks=clean_mark,
+    )
+    no_registration = producer.evaluate_synthetic(
+        **base,
+        measured_boxes=[{"dimension_box_pdf_pts": (0.0, 0.0, 100.0, 100.0)}],
+    )
+    assert no_registration.status is EvidenceResolutionStatus.ABSTAINED
+    assert no_registration.reason_codes == (REGISTRATION_NOT_UNIQUE,)
+    assert no_registration.records == ()
+    invalid_container = producer.evaluate_synthetic(**base, measured_boxes=None)
+    assert invalid_container.status is EvidenceResolutionStatus.ABSTAINED
+    assert invalid_container.reason_codes == (SOURCE_MEASURED_FLOOR_BOX_INVALID,)
+    assert invalid_container.records == ()
