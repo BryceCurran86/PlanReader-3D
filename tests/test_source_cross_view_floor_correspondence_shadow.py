@@ -2132,3 +2132,51 @@ def test_no_registration_and_invalid_box_container_clean_negative_controls():
     assert invalid_container.status is EvidenceResolutionStatus.ABSTAINED
     assert invalid_container.reason_codes == (SOURCE_MEASURED_FLOOR_BOX_INVALID,)
     assert invalid_container.records == ()
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("invalid_coordinate", [2**53 + 1, -(2**53 + 1), 1e100, -1e100])
+@pytest.mark.parametrize("prepend", [False, True])
+def test_non_lossless_original_mark_coordinate_vetoes_complete_owner_universe(
+    axis, invalid_coordinate, prepend
+):
+    """Distinct native positions must not alias on binary64 conversion."""
+    good = {
+        "x": 327.8, "y": 1437.5,
+        "code": "FT3", "registered_region": True,
+    }
+    bad = dict(good)
+    bad[axis] = invalid_coordinate
+    marks = [bad, good] if prepend else [good, bad]
+    boxes = [{
+        "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+        "canonical_floor_id": "office-floor",
+        "physical_room_id": "office-room",
+        "source_room_face_record_id": "office-face",
+    }]
+    support, target = support_sheet(), list(TARGET_SHEET)
+    before = repr((support, target, boxes, marks))
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support,
+        target_segments=target,
+        measured_boxes=boxes,
+        marks=marks,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert len(result.records) == 1
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.records[0].reason_codes
+    assert result.records[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records[0].commercial_projection_allowed is False
+    assert result.records[0].takeoff_eligible is False
+    assert repr((support, target, boxes, marks)) == before
+
+
+def test_exact_native_mark_coordinate_limit_preserves_existing_clean_candidate():
+    """The new source-integrity veto must not remove a normal valid mark."""
+    result = _wall_universe_shadow_result(support_sheet(), list(TARGET_SHEET))
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 1
+    assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert result.records[0].takeoff_eligible is False
