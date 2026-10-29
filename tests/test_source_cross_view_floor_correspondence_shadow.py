@@ -2180,6 +2180,8 @@ def test_exact_native_mark_coordinate_limit_preserves_existing_clean_candidate()
     assert len(result.records) == 1
     assert result.records[0].status is EvidenceResolutionStatus.CANDIDATE
     assert result.records[0].takeoff_eligible is False
+
+
 @pytest.mark.parametrize("axis", (0, 1, 2, 3))
 @pytest.mark.parametrize("reverse_boxes", (False, True))
 def test_oversized_native_float_floor_box_coordinates_fail_closed(axis, reverse_boxes):
