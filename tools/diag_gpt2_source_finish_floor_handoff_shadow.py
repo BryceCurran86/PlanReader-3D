@@ -71,13 +71,14 @@ def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0),
 
 
 
-def _original_issued_native_ring_edges(graph: dict):
+def _original_issued_native_ring_edges(graph: dict, *,
+                                       receipt_key="original_native_edges"):
     """Reconcile candidate ring sides with the native PDF edge issuer.
 
     A ring's copied source IDs alone cannot prove that its polygon actually
     follows those original painted endpoints. No W4 or metric authority.
     """
-    raw=graph.get("original_native_edges")
+    raw=graph.get(receipt_key)
     issued_ids=graph.get("original_native_edge_ids")
     if (type(raw) is not tuple or type(issued_ids) is not tuple
             or len(raw)!=len(issued_ids) or not raw):
@@ -255,22 +256,31 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     native_by_page=[]
     for graph,ring in ((floor_graph,floor_ring),(finish_graph,finish_ring)):
         native_edges=_original_issued_native_ring_edges(graph)
-        # Same-page original-ink ancestry is literal: rounding would reject
-        # genuine PyMuPDF fractional endpoints or conceal a tiny forged edge.
+        literal_edges=_original_issued_native_ring_edges(
+            graph,receipt_key="original_literal_native_edges")
+        # The graph's 0.001pt topology and literal PyMuPDF source receipt
+        # must have identical path-item owners and consistent coordinates.
         ring_edges=_source_cyclic_ring_edges_native(
             ring.get("vertices_pdf_pts"),quantize_pdf_pts=False)
         if (not native_edges or not ring_edges
                 or frozenset(native_edges.values())!=ring_edges):
             return {**base,"first_failure":
                     "original_native_edge_endpoint_ancestry_conflict"}
+        if (not literal_edges or set(literal_edges)!=set(native_edges)
+                or any(frozenset(
+                    tuple(round(v,3) for v in point)
+                    for point in literal_edges[ident])!=native_edges[ident]
+                       for ident in native_edges)):
+            return {**base,"first_failure":
+                    "original_literal_native_edge_ancestry_conflict"}
         native_by_page.append(native_edges)
     floor_native,finish_native=native_by_page
     # A source ID alone is not a matched original-ink witness: each of the
     # four issuer-signed endpoint pairs must agree with its OWN native graph
     # edge and with the independently registered opposite-page paint.
     for floor_id,finish_id,floor_ends,finish_ends in witness_receipts:
-        # Literal same-page issuer equality precedes the deliberately
-        # quantized 0.001pt cross-sheet translation comparison.
+        # Same-page witness equality uses the graph's 0.001pt topology.
+        # Raw native ink is retained and checked independently above.
         floor_witness=_original_source_witness_edge(
             floor_ends,quantize_pdf_pts=False)
         finish_witness=_original_source_witness_edge(

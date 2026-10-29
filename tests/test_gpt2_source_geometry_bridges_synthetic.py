@@ -264,21 +264,51 @@ def test_original_source_cyclic_ring_matches_translated_natively_extracted_edges
 
 
 def test_original_fractional_native_pdf_edges_match_literal_same_page_issuer():
-    # PyMuPDF retains fractional native coordinates beyond 0.001pt.
-    # A literal ring/issuer match must not be compared to a rounded ring,
-    # even though the independent cross-page translation uses 0.001pt.
+    # Preserve literal PyMuPDF ink separately from 0.001pt graph topology.
+    # The independent cross-page registration keeps its existing precision.
     fractional=tuple((x+.123456,y+.654321) for x,y in _RING_A)
     floor,finish,registration=_two_original_source_rings(
         fractional,floor_vertices=fractional)
-    native=tuple(p for edge in floor["original_native_edges"]
+    native=tuple(p for edge in floor["original_literal_native_edges"]
                  for p in edge["endpoints_pdf_pts"])
+    rounded=tuple(p for edge in floor["original_native_edges"]
+                  for p in edge["endpoints_pdf_pts"])
     assert any(abs(v-round(v,3))>0.00001 for p in native for v in p)
+    assert all(v==round(v,3) for p in rounded for v in p)
     accepted=compare(floor,finish,original_source_registration=registration,
                      translation_pdf_pts=(10.0,7.0))
     assert accepted["status"]=="original_source_ink_ring_translation_candidate"
     assert accepted["first_failure"]=="W4_structural_wall_and_physical_room_identity"
     assert accepted["new_firm_quantities"]==0
     assert accepted["physical_room_identity_proven"] is False
+
+
+def test_original_literal_native_source_receipt_missing_or_forged_abstains():
+    from copy import deepcopy
+    floor,finish,registration=_two_original_source_rings(_RING_A)
+    for mutation in ("missing", "displaced", "nonfinite", "duplicate"):
+        forged=deepcopy(floor)
+        if mutation=="missing":
+            forged.pop("original_literal_native_edges")
+        else:
+            edges=list(forged["original_literal_native_edges"])
+            first=dict(edges[0])
+            if mutation=="displaced":
+                pts=list(first["endpoints_pdf_pts"])
+                pts[0]=(pts[0][0]+.002,pts[0][1])
+                first["endpoints_pdf_pts"]=tuple(pts)
+            elif mutation=="nonfinite":
+                first["endpoints_pdf_pts"]=((float("nan"),0.),(1.,0.))
+            else:
+                first["source_id"]=edges[1]["source_id"]
+            edges[0]=first
+            forged["original_literal_native_edges"]=tuple(edges)
+        rejected=compare(forged,finish,
+                         original_source_registration=registration,
+                         translation_pdf_pts=(10.0,7.0))
+        assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert rejected["first_failure"]=="original_literal_native_edge_ancestry_conflict"
+        assert rejected["new_firm_quantities"]==0
 
 
 def test_original_submillipt_ring_endpoint_tamper_cannot_borrow_native_ids():
