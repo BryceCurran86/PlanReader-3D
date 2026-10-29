@@ -24,6 +24,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     MARK_TOO_CLOSE_TO_BOX_SIDE,
     MARK_IN_UNREGISTERED_REGION,
     SOURCE_FINISH_MARK_IDENTITY_INVALID,
+    SOURCE_MEASURED_FLOOR_BOX_INVALID,
     OVERLAPPING_MEASURED_BOXES,
     DUPLICATE_PHYSICAL_FLOOR_IDENTITY,
     MISSING_PHYSICAL_FLOOR_IDENTITY,
@@ -1351,3 +1352,66 @@ def test_producer_competing_valid_codes_still_conflict_with_invalid_rival():
     assert result.records[0].finish_codes_in_box == {"FT2": 1, "FT3": 1}
     assert result.records[0].takeoff_eligible is False
     assert result.records[0].commercial_projection_allowed is False
+
+# GPT2: the complete original measured-floor box universe must be safe before
+# geometry registration. An invalid rival never disappears to make FT3 unique.
+@pytest.mark.parametrize("bad_box", [
+    None,
+    "floor-not-a-source-box",
+    {},
+    {"dimension_box_pdf_pts": "251,1382,395,1585"},
+    {"dimension_box_pdf_pts": (251.04, 1382.72, 394.80)},
+    {"dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04, 7.0)},
+    {"dimension_box_pdf_pts": (True, 1382.72, 394.80, 1585.04)},
+    {"dimension_box_pdf_pts": ("251.04", 1382.72, 394.80, 1585.04)},
+    {"dimension_box_pdf_pts": (float("nan"), 1382.72, 394.80, 1585.04)},
+    {"dimension_box_pdf_pts": (251.04, float("inf"), 394.80, 1585.04)},
+    {"dimension_box_pdf_pts": (251.04, 1382.72, float("-inf"), 1585.04)},
+    {"dimension_box_pdf_pts": (10**1000, 1382.72, 394.80, 1585.04)},
+    {"dimension_box_pdf_pts": (251.04, 1382.72, 251.04, 1585.04)},
+    {"dimension_box_pdf_pts": (394.80, 1382.72, 251.04, 1585.04)},
+    {"dimension_box_pdf_pts": (251.04, 1585.04, 394.80, 1382.72)},
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_malformed_measured_box_vetoes_surviving_ft3_owner(bad_box, reverse):
+    boxes = _two_separated_floor_boxes()
+    if reverse:
+        boxes.insert(0, bad_box)
+    else:
+        boxes.append(bad_box)
+    result = _two_floor_result(boxes)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert SOURCE_MEASURED_FLOOR_BOX_INVALID in result.reason_codes
+    assert len(result.records) == 2  # Retain both valid diagnostic owners.
+    assert all(row.status is EvidenceResolutionStatus.ABSTAINED
+               for row in result.records)
+    assert all(SOURCE_MEASURED_FLOOR_BOX_INVALID in row.reason_codes
+               for row in result.records)
+    assert all(row.authority_blockers == () for row in result.records)
+    assert all(not row.takeoff_eligible and not row.commercial_projection_allowed
+               for row in result.records)
+
+
+@pytest.mark.parametrize("boxes", [
+    None,
+    "a floor, not a universe",
+    {"dimension_box_pdf_pts": (1, 2, 3, 4)},
+    [None],
+    [{"dimension_box_pdf_pts": (1, 2, 3)}],
+    [_two_separated_floor_boxes()[0]] * 20001,
+])
+def test_untyped_or_unbounded_measured_box_universe_abstains(boxes):
+    result = _two_floor_result(boxes)
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (SOURCE_MEASURED_FLOOR_BOX_INVALID,)
+    assert result.records == ()
+
+
+def test_complete_valid_measured_boxes_retain_source_only_candidates():
+    result = _two_floor_result(_two_separated_floor_boxes())
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 2
+    assert all(row.status is EvidenceResolutionStatus.CANDIDATE
+               for row in result.records)
+    assert all(not row.takeoff_eligible and not row.commercial_projection_allowed
+               for row in result.records)

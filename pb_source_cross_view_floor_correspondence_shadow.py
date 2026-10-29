@@ -56,6 +56,7 @@ MISSING_PHYSICAL_FLOOR_IDENTITY = "missing_physical_floor_identity"
 MARK_TOO_CLOSE_TO_BOX_SIDE = "mark_too_close_to_box_side"
 MARK_IN_UNREGISTERED_REGION = "mark_in_unregistered_region"
 SOURCE_FINISH_MARK_IDENTITY_INVALID = "source_finish_mark_identity_invalid"
+SOURCE_MEASURED_FLOOR_BOX_INVALID = "source_measured_floor_box_invalid"
 COMPETING_FINISH_CODES_IN_BOX = "competing_finish_codes_in_box"
 MULTIPLE_SAME_CODE_FINISH_MARKS_IN_BOX = "multiple_same_code_finish_marks_in_box"
 NO_FINISH_MARK_IN_BOX = "no_finish_mark_in_box"
@@ -658,6 +659,51 @@ class SourceCrossViewFloorCorrespondenceProducer:
             # can retain the original competing mark as a typed negative.
             checked_marks.append((mx, my, mark))
 
+        # Inspect the COMPLETE measured-box universe before registration.
+        # A malformed competing room could overlap a valid FT mark, so
+        # dropping it must never leave a surviving source-owner candidate.
+        if type(measured_boxes) not in (tuple, list) or len(measured_boxes) > 20000:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_MEASURED_FLOOR_BOX_INVALID,),
+                records=(),
+            )
+        checked_boxes: list[tuple[dict[str, Any], tuple[float, float, float, float]]] = []
+        invalid_box_universe = False
+        for item in measured_boxes:
+            if type(item) is not dict:
+                invalid_box_universe = True
+                continue
+            raw_box = item.get("dimension_box_pdf_pts")
+            if type(raw_box) not in (tuple, list) or len(raw_box) != 4:
+                invalid_box_universe = True
+                continue
+            if any(
+                type(v) not in (int, float)
+                or (type(v) is int and abs(v) > 2**53)
+                for v in raw_box
+            ):
+                invalid_box_universe = True
+                continue
+            try:
+                box = tuple(float(v) for v in raw_box)
+            except (ValueError, OverflowError):
+                invalid_box_universe = True
+                continue
+            if not all(math.isfinite(v) for v in box):
+                invalid_box_universe = True
+                continue
+            if box[0] >= box[2] or box[1] >= box[3]:
+                invalid_box_universe = True
+                continue
+            checked_boxes.append((item, box))
+        if invalid_box_universe and not checked_boxes:
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(SOURCE_MEASURED_FLOOR_BOX_INVALID,),
+                records=(),
+            )
+
         lines_sup = build_lines(support_segments)
         lines_tgt = build_lines(target_segments)
 
@@ -665,7 +711,11 @@ class SourceCrossViewFloorCorrespondenceProducer:
         if not ranked:
             return SourceCrossViewFloorCorrespondenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
-                reason_codes=(REGISTRATION_NOT_UNIQUE,),
+                reason_codes=tuple(dict.fromkeys((
+                    REGISTRATION_NOT_UNIQUE,
+                    *([SOURCE_MEASURED_FLOOR_BOX_INVALID]
+                      if invalid_box_universe else []),
+                ))),
                 records=(),
             )
 
@@ -724,10 +774,7 @@ class SourceCrossViewFloorCorrespondenceProducer:
 
         # Derive overlapping measured-floor regions from the full input
         # universe; a missing caller hint cannot confer unique mark ownership.
-        box_bounds = [
-            tuple(float(v) for v in item["dimension_box_pdf_pts"])
-            for item in measured_boxes
-        ]
+        box_bounds = [box for _, box in checked_boxes]
         overlap_counts = [0] * len(box_bounds)
         for i, first in enumerate(box_bounds):
             for j in range(i + 1, len(box_bounds)):
@@ -748,13 +795,12 @@ class SourceCrossViewFloorCorrespondenceProducer:
         )
         identity_counts = collections.Counter(
             (field_name, value)
-            for item in measured_boxes
+            for item, _ in checked_boxes
             for field_name in identity_fields
             if (value := _clean(item.get(field_name)))
         )
 
-        for box_index, item in enumerate(measured_boxes):
-            box_sup = box_bounds[box_index]
+        for box_index, (item, box_sup) in enumerate(checked_boxes):
             canonical_floor_id = _clean(item.get("canonical_floor_id"))
             physical_room_id = _clean(item.get("physical_room_id"))
             source_room_face_record_id = _clean(item.get("source_room_face_record_id"))
@@ -808,6 +854,18 @@ class SourceCrossViewFloorCorrespondenceProducer:
                 classified["reason_codes"] = tuple(dict.fromkeys((
                     *classified["reason_codes"],
                     SOURCE_FINISH_MARK_IDENTITY_INVALID,
+                )))
+                if classified["status"] is EvidenceResolutionStatus.CANDIDATE:
+                    classified["status"] = EvidenceResolutionStatus.ABSTAINED
+                    classified["authority_blockers"] = ()
+
+            # An unlocated or malformed sibling box may own a mark or
+            # overlap this room. Keep valid diagnostic rows, but veto all
+            # physical-owner candidates from an incomplete source universe.
+            if invalid_box_universe:
+                classified["reason_codes"] = tuple(dict.fromkeys((
+                    *classified["reason_codes"],
+                    SOURCE_MEASURED_FLOOR_BOX_INVALID,
                 )))
                 if classified["status"] is EvidenceResolutionStatus.CANDIDATE:
                     classified["status"] = EvidenceResolutionStatus.ABSTAINED
