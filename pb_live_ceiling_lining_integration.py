@@ -167,17 +167,22 @@ def _tag_for_descriptor(descriptor: str) -> str:
 
 
 def _selected_page_indices(page_count: int, pages: Optional[Sequence[int]]) -> tuple[int, ...]:
+    """Preserve the complete explicitly requested original PDF page universe.
+
+    Never coerce a foreign page token or silently discard an invalid sibling:
+    the source producer must see the exact selected pages or fail before ingest.
+    """
     if pages is None:
         return tuple(range(page_count))
-    return tuple(
-        sorted(
-            {
-                int(index)
-                for index in pages
-                if not isinstance(index, bool) and 0 <= int(index) < page_count
-            }
-        )
-    )
+    if isinstance(pages, (str, bytes, bytearray)) or not isinstance(pages, Sequence):
+        raise ValueError("original ceiling page selection requires an integer sequence")
+    indices = tuple(pages)
+    if any(
+        type(index) is not int or index < 0 or index >= page_count
+        for index in indices
+    ):
+        raise ValueError("original ceiling page selection contains an invalid page index")
+    return tuple(sorted(set(indices)))
 
 
 def _claim_from_quantity(
