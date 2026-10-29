@@ -118,8 +118,10 @@ def _measurement_authority(
 
 
 def _require_original_scaled_room_area_identity(
-    claim: LivePhysicalNetWallClaim,
     quantity: QuantityEvidence,
+    *,
+    originals_by_id: Mapping[str, QuantityEvidence],
+    rooms_by_id: Mapping[str, tuple[object, ...]],
 ) -> None:
     """Negative-only source-ID reproof; never issues geometry or a scale.
 
@@ -132,22 +134,15 @@ def _require_original_scaled_room_area_identity(
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     source_id = metadata.get("upstream_room_area_quantity_id")
     room_id = metadata.get("room_entity_id")
-    originals = tuple(
-        source for source in claim.room_area_quantity_evidence
-        if type(source) is QuantityEvidence and source.quantity_id == source_id
-    )
-    rooms = tuple(
-        room for room in claim.canonical_rooms
-        if room.canonical_room_id == room_id
-    )
+    source = originals_by_id.get(source_id) if type(source_id) is str else None
+    rooms = rooms_by_id.get(room_id, ()) if type(room_id) is str else ()
     if (
         type(source_id) is not str or not source_id
-        or len(originals) != 1 or len(rooms) != 1
+        or source is None or len(rooms) != 1
     ):
         raise SourceClosedRunConflictError(
             "scaled floor original source/room identity missing or ambiguous"
         )
-    source = originals[0]
     room = rooms[0]
     original = source.metadata if isinstance(source.metadata, Mapping) else {}
     fingerprint = original.get("scale_fingerprint")
@@ -220,6 +215,7 @@ def project_live_floor_area_customer_rows(
     # survived the FIRM floor filter. Mirror the source-closed exporter's
     # original family and exact-ID census before the empty-return path.
     original_room_area_ids: set[str] = set()
+    original_by_id: dict[str, QuantityEvidence] = {}
     for source in claim.room_area_quantity_evidence:
         if not isinstance(source, QuantityEvidence):
             raise TypeError("room_area_quantity_evidence must contain QuantityEvidence")
@@ -238,6 +234,7 @@ def project_live_floor_area_customer_rows(
                 f"duplicate or invalid original room-area source ID in customer projection: {source_id}"
             )
         original_room_area_ids.add(source_id)
+        original_by_id[source_id] = source
 
         # This customer boundary returns early when no FIRM floor survives.
         # Retain contradictory original numeric FIRM source blockers instead
@@ -272,10 +269,19 @@ def project_live_floor_area_customer_rows(
         workspace_id=workspace_id,
         project_id=project_id,
     )
+    # Index the complete original room universe ONCE; repeated scans of
+    # 20k original rooms for each floor would exceed the primitive budget.
+    rooms_by_id: dict[str, list[object]] = {}
+    for room in claim.canonical_rooms:
+        rooms_by_id.setdefault(room.canonical_room_id, []).append(room)
+    original_room_index = {key: tuple(value) for key, value in rooms_by_id.items()}
     # Reprove the producer's original scaled quantity identity before any
     # customer method can borrow the publisher's copied calibration label.
     for quantity in quantities:
-        _require_original_scaled_room_area_identity(claim, quantity)
+        _require_original_scaled_room_area_identity(
+            quantity, originals_by_id=original_by_id,
+            rooms_by_id=original_room_index,
+        )
     authorities = {
         quantity.quantity_id: authority
         for quantity in quantities
