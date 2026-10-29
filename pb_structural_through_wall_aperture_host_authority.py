@@ -73,6 +73,9 @@ class ContinuousThroughWallCandidate:
         distance = math.hypot(dx, dy)
         if not math.isfinite(distance) or distance <= _COORD_TOL:
             raise ValueError("Through-wall start and end points must be distinct and finite")
+        # A frozen record cannot retain mutable caller-owned endpoint lists.
+        object.__setattr__(self, "start_pt", tuple(float(v) for v in self.start_pt))
+        object.__setattr__(self, "end_pt", tuple(float(v) for v in self.end_pt))
 
     @property
     def length_pt(self) -> float:
@@ -131,6 +134,14 @@ class ApertureHostCandidateInput:
         distance = math.hypot(dx, dy)
         if not math.isfinite(distance) or distance <= _COORD_TOL:
             raise ValueError("Aperture start and end points must be distinct and finite")
+        observations = self.terminal_jamb_observation_ids
+        if (type(observations) not in (tuple, list)
+                or any(not isinstance(v, str) or not v.strip() for v in observations)
+                or len(set(observations)) != len(observations)):
+            raise ValueError("terminal_jamb_observation_ids must be distinct nonblank strings")
+        object.__setattr__(self, "start_pt", tuple(float(v) for v in self.start_pt))
+        object.__setattr__(self, "end_pt", tuple(float(v) for v in self.end_pt))
+        object.__setattr__(self, "terminal_jamb_observation_ids", tuple(sorted(observations)))
 
 
 @dataclass(frozen=True)
@@ -147,6 +158,9 @@ class ThroughWallHostedOpeningRecord:
     axis_unit: tuple[float, float]
     normal_unit: tuple[float, float]
     origin_pt: tuple[float, float]
+    opening_start_pt: tuple[float, float]
+    opening_end_pt: tuple[float, float]
+    terminal_jamb_observation_ids: tuple[str, ...]
     status: EvidenceResolutionStatus
     first_remaining_gate: str
     adjacent_pier_ids: tuple[str, ...] = ()
@@ -159,6 +173,9 @@ class ThroughWallHostedOpeningRecord:
             "hosting_record_id": self.hosting_record_id,
             "physical_opening_id": self.physical_opening_id,
             "host_wall_id": self.host_wall_id,
+            "opening_start_pt": list(self.opening_start_pt),
+            "opening_end_pt": list(self.opening_end_pt),
+            "terminal_jamb_observation_ids": list(self.terminal_jamb_observation_ids),
             "u0_pt": self.u0_pt,
             "u1_pt": self.u1_pt,
             "whole_wall_length_pt": self.whole_wall_length_pt,
@@ -284,7 +301,7 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_wall_axis_misaligned"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -300,7 +317,7 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_outside_host_wall_band"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -312,7 +329,7 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_extends_beyond_wall_extent"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -326,7 +343,7 @@ class StructuralThroughWallApertureHostAuthority:
             clipped_u_max = min(wall_len, u_max)
             if clipped_u_max - clipped_u_min <= _COORD_TOL:
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max,
+                    op, through_wall, u_min, u_max,
                     EvidenceResolutionStatus.ABSTAINED,
                     "aperture_no_host_wall_overlap",
                 )
@@ -381,7 +398,7 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "host_through_wall_obstructed"
                 rec = self._make_record(
-                    op.physical_opening_id, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -443,7 +460,7 @@ class StructuralThroughWallApertureHostAuthority:
             item = valid_items[index]
             item["valid"] = False
             item["rec"] = self._make_record(
-                item["op"].physical_opening_id,
+                item["op"],
                 through_wall,
                 item["u_min"],
                 item["u_max"],
@@ -475,6 +492,16 @@ class StructuralThroughWallApertureHostAuthority:
                     "host_thickness_pt": float(through_wall.thickness_pt).hex(),
                     "left_opening_id": curr["op"].physical_opening_id,
                     "right_opening_id": nxt["op"].physical_opening_id,
+                    "left_jamb_endpoints": tuple(sorted(
+                        tuple(float(v).hex() for v in p)
+                        for p in (curr["op"].start_pt, curr["op"].end_pt)
+                    )),
+                    "right_jamb_endpoints": tuple(sorted(
+                        tuple(float(v).hex() for v in p)
+                        for p in (nxt["op"].start_pt, nxt["op"].end_pt)
+                    )),
+                    "left_jamb_observations": curr["op"].terminal_jamb_observation_ids,
+                    "right_jamb_observations": nxt["op"].terminal_jamb_observation_ids,
                     "start_station": float(curr["u_max"]).hex(),
                     "end_station": float(nxt["u_min"]).hex(),
                     "width_pt": float(gap).hex(),
@@ -509,7 +536,7 @@ class StructuralThroughWallApertureHostAuthority:
                 op_id = op.physical_opening_id
                 adjacent_piers = tuple(pier_ids_by_opening.get(op_id, ()))
                 rec = self._make_record(
-                    op_id,
+                    op,
                     through_wall,
                     item["u_min"],
                     item["u_max"],
@@ -523,7 +550,7 @@ class StructuralThroughWallApertureHostAuthority:
 
     def _make_record(
         self,
-        opening_id: str,
+        opening: ApertureHostCandidateInput,
         through_wall: ContinuousThroughWallCandidate,
         u0: float,
         u1: float,
@@ -531,12 +558,17 @@ class StructuralThroughWallApertureHostAuthority:
         gate: str,
         adjacent_piers: tuple[str, ...] = (),
     ) -> ThroughWallHostedOpeningRecord:
+        # Projected stations alone alias transversely shifted or clipped jambs.
+        opening_start, opening_end = sorted((opening.start_pt, opening.end_pt))
         payload = {
             "document_id": self._producer.document_id,
             "revision_id": self._producer.revision_id,
             "source_sha256": self._producer.source_sha256,
-            "physical_opening_id": opening_id,
+            "physical_opening_id": opening.physical_opening_id,
             "host_wall_id": through_wall.wall_id,
+            "opening_start_pt": tuple(float(v).hex() for v in opening_start),
+            "opening_end_pt": tuple(float(v).hex() for v in opening_end),
+            "terminal_jamb_observation_ids": opening.terminal_jamb_observation_ids,
             "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
             "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
             "host_thickness_pt": float(through_wall.thickness_pt).hex(),
@@ -550,8 +582,11 @@ class StructuralThroughWallApertureHostAuthority:
         )
         return ThroughWallHostedOpeningRecord(
             hosting_record_id=rec_id,
-            physical_opening_id=opening_id,
+            physical_opening_id=opening.physical_opening_id,
             host_wall_id=through_wall.wall_id,
+            opening_start_pt=opening_start,
+            opening_end_pt=opening_end,
+            terminal_jamb_observation_ids=opening.terminal_jamb_observation_ids,
             u0_pt=u0,
             u1_pt=u1,
             whole_wall_length_pt=through_wall.length_pt,

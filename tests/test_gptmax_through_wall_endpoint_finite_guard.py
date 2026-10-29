@@ -739,3 +739,99 @@ def test_lossy_large_integer_source_coordinates_are_rejected(bad):
         ContinuousThroughWallCandidate("host", (bad, 0), (100.0, 0.0), 20.0)
     with pytest.raises(ValueError, match="finite coordinates"):
         ApertureHostCandidateInput("opening", (0.0, 0.0), (bad, 0.0))
+
+
+def test_transverse_shift_and_clipped_jambs_do_not_alias_host_receipts():
+    authority = _authority()
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    variants = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("A", (20.0, 1.0), (40.0, 1.0)),
+        ApertureHostCandidateInput("A", (-1.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("A", (0.0, 0.0), (40.0, 0.0)),
+    )
+    records = [
+        authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=(opening,),
+        )[0][0]
+        for opening in variants
+    ]
+    assert all(r.status is S.CANDIDATE for r in records)
+    assert records[0].u0_pt == records[1].u0_pt == 20.0
+    assert records[0].u1_pt == records[1].u1_pt == 40.0
+    assert records[2].u0_pt == records[3].u0_pt == 0.0
+    assert records[2].u1_pt == records[3].u1_pt == 40.0
+    assert len({r.hosting_record_id for r in records}) == 4
+    assert records[0].to_dict()["opening_start_pt"] != records[1].to_dict()["opening_start_pt"]
+    assert all(r.shadow_only and not r.takeoff_eligible
+               and not r.commercial_projection_allowed for r in records)
+
+
+def test_jamb_endpoint_and_observation_order_invariance_with_mutable_input_detachment():
+    wall_start, wall_end = [0.0, 0.0], [100.0, 0.0]
+    jamb_start, jamb_end = [20.0, 0.0], [40.0, 0.0]
+    observations = ["right", "left"]
+    wall = ContinuousThroughWallCandidate("host", wall_start, wall_end, 20.0)
+    opening = ApertureHostCandidateInput(
+        "A", jamb_start, jamb_end, observations,
+    )
+    assert opening.terminal_jamb_observation_ids == ("left", "right")
+    assert isinstance(opening.start_pt, tuple) and isinstance(wall.start_pt, tuple)
+    authority = _authority()
+    first, _ = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    wall_start[0] = -500.0
+    wall_end[0] = 500.0
+    jamb_start[0] = -500.0
+    jamb_end[0] = 500.0
+    observations.append("forged")
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )[0] == first
+    reversed_opening = ApertureHostCandidateInput(
+        "A", (40.0, 0.0), (20.0, 0.0), ("left", "right"),
+    )
+    reverse, _ = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(reversed_opening,),
+    )
+    assert reverse == first
+    assert first[0].to_dict()["terminal_jamb_observation_ids"] == ["left", "right"]
+
+
+def test_distinct_transverse_pier_sources_cannot_share_pier_identity():
+    wall = ContinuousThroughWallCandidate("host", (0.0, 0.0), (100.0, 0.0), 20.0)
+    authority = _authority()
+
+    def evaluate(y, observations):
+        openings = (
+            ApertureHostCandidateInput("A", (20.0, y), (40.0, y), observations),
+            ApertureHostCandidateInput("B", (50.0, 0.0), (70.0, 0.0)),
+        )
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings,
+        )
+        assert len(piers) == 1 and all(r.status is S.CANDIDATE for r in records)
+        return records, piers[0]
+
+    original, first_pier = evaluate(0.0, ("jamb-left",))
+    shifted, second_pier = evaluate(1.0, ("jamb-left",))
+    retagged, third_pier = evaluate(0.0, ("jamb-new",))
+    assert original[0].u0_pt == shifted[0].u0_pt
+    assert first_pier.pier_width_pt == second_pier.pier_width_pt
+    assert len({first_pier.pier_id, second_pier.pier_id, third_pier.pier_id}) == 3
+    assert len({original[0].hosting_record_id, shifted[0].hosting_record_id,
+                retagged[0].hosting_record_id}) == 3
+    assert all(p.is_structural_masonry_pier is None
+               and p.status is S.CANDIDATE
+               for p in (first_pier, second_pier, third_pier))
+
+
+@pytest.mark.parametrize("bad", [
+    ("",), ("duplicate", "duplicate"), (True,), "not-an-observation-list",
+])
+def test_invalid_terminal_observation_universe_rejected(bad):
+    with pytest.raises(ValueError, match="terminal_jamb_observation_ids"):
+        ApertureHostCandidateInput(
+            "A", (20.0, 0.0), (40.0, 0.0), bad,
+        )
