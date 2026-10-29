@@ -10,7 +10,7 @@ import math
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from pb_geometry_takeoff_model import AuthorityStatus
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
@@ -237,7 +237,19 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish quantity references unknown canonical floor: {floor_id}"
             )
-        if _clean(quantity.authority) != _clean(floor.metric_area_authority):
+        # Both receipts must preserve the exact producer measurement method.
+        # Normalizing two padded/imported aliases into agreement can otherwise
+        # seal a FIRM floor finish that the later customer issuer would refuse.
+        original_method = quantity.authority
+        if (
+            type(original_method) is not str
+            or original_method not in (
+                MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
+            )
+            or type(floor.metric_area_authority) is not str
+            or floor.metric_area_authority != original_method
+        ):
             raise SourceClosedRunConflictError(
                 "floor-finish metric authority disagrees with canonical floor: "
                 f"{quantity.quantity_id}"
@@ -301,6 +313,41 @@ def build_live_floor_finish_area_source_traces(
         metadata = (
             quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
         )
+        # A direct source-closed seal is an independent public boundary; it
+        # must not rely on the later customer projection to discover that
+        # the original measurement axes or physical scale are missing.
+        if original_method == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
+            figured_ids = metadata.get("figured_dimension_ids")
+            if (
+                type(figured_ids) not in (tuple, list)
+                or len(figured_ids) != 2
+                or any(
+                    type(value) is not str or not value
+                    or value != value.strip()
+                    for value in figured_ids
+                )
+                or len(set(figured_ids)) != 2
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original measurement lacks exact figured "
+                    f"dimension pair: {quantity.quantity_id}"
+                )
+        else:
+            scale_id = metadata.get("resolved_scale_id")
+            scale_status = metadata.get("scale_status")
+            scale_conflicts = metadata.get("scale_conflicts", ())
+            if (
+                type(scale_id) is not str or not scale_id
+                or scale_id != scale_id.strip()
+                or type(scale_status) is not str
+                or scale_status not in ("resolved", "verified")
+                or type(scale_conflicts) not in (tuple, list)
+                or bool(scale_conflicts)
+            ):
+                raise SourceClosedRunConflictError(
+                    "floor-finish original measurement lacks exact resolved "
+                    f"physical scale without conflicts: {quantity.quantity_id}"
+                )
         if _clean(metadata.get("canonical_floor_id")) != floor_id:
             raise SourceClosedRunConflictError(
                 "floor-finish canonical identity metadata mismatch: "
