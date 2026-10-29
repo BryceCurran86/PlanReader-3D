@@ -26,6 +26,7 @@ from pb_source_closed_run_export import SourceClosedRunConflictError
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     CommercialTakeoffConflictError,
+    CommercialTakeoffSourceTrace,
     quantity_evidence_to_takeoff_output_row,
 )
 
