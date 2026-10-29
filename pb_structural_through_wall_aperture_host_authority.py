@@ -507,19 +507,42 @@ class StructuralThroughWallApertureHostAuthority:
         # A rejected geometric opening can still occupy a plausible host-wall
         # station interval. Excluding it from valid_items must not silently
         # make its two surviving neighbors consecutive physical apertures.
-        # Far-off-band observations cannot veto an unrelated pier candidate.
+        # Clip its WHOLE finite segment to the host band: an oblique rejected
+        # aperture may cross the wall while one/both jambs lie outside it.
+        # Far-off-band observations and boundary-only touches cannot veto a pier.
         unresolved_wall_band_intervals: list[tuple[float, float]] = []
+        band = half_thick + snap_tolerance_pt
         for item in intermediate_openings:
             if item["valid"]:
                 continue
-            low = max(0.0, item["u_min"])
-            high = min(wall_len, item["u_max"])
+            rejected = item["rec"]
+            p0_along, p0_perp = project_pt(rejected.opening_start_pt)
+            p1_along, p1_perp = project_pt(rejected.opening_end_pt)
+            if min(p0_perp, p1_perp) > band or max(p0_perp, p1_perp) < -band:
+                continue
+            low = max(0.0, min(p0_along, p1_along))
+            high = min(wall_len, max(p0_along, p1_along))
             if high <= low:
                 continue
-            rejected = item["rec"]
-            _, p0_perp = project_pt(rejected.opening_start_pt)
-            _, p1_perp = project_pt(rejected.opening_end_pt)
-            if max(abs(p0_perp), abs(p1_perp)) <= half_thick + snap_tolerance_pt:
+            if not (-band <= p0_perp <= band and -band <= p1_perp <= band):
+                delta_perp = p1_perp - p0_perp
+                delta_along = p1_along - p0_along
+                if (math.isfinite(delta_perp) and delta_perp != 0.0
+                        and math.isfinite(delta_along)):
+                    t_enter = (-band - p0_perp) / delta_perp
+                    t_leave = (band - p0_perp) / delta_perp
+                    t_low = max(0.0, min(t_enter, t_leave))
+                    t_high = min(1.0, max(t_enter, t_leave))
+                    if t_low >= t_high:
+                        continue  # a boundary point is not a physical interval
+                    clipped_start = p0_along + t_low * delta_along
+                    clipped_end = p0_along + t_high * delta_along
+                    if math.isfinite(clipped_start) and math.isfinite(clipped_end):
+                        low = max(0.0, min(clipped_start, clipped_end))
+                        high = min(wall_len, max(clipped_start, clipped_end))
+                # If finite endpoints overflow in the subtraction/interpolation,
+                # retain the entire projected station interval conservatively.
+            if high > low:
                 unresolved_wall_band_intervals.append((low, high))
 
         # An in-band rejected aperture blocks a gap iff its low station is

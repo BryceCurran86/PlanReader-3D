@@ -1270,3 +1270,103 @@ def test_clean_distinct_source_observations_preserve_shadow_replay_and_no_mutati
         and not r.commercial_projection_allowed
         for r in first
     )
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (300.0, -250.0)),
+    (math.pi, (-400.0, 600.0)),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("mode,expected_piers", [
+    ("crosses-band", 0),
+    ("off-band", 1),
+    ("boundary-touch", 1),
+    ("crosses-away-from-gap", 1),
+])
+def test_rejected_aperture_segment_band_clipping_preserves_pier_uncertainty(
+    angle, shift, reverse, mode, expected_piers,
+):
+    """A rejected oblique aperture crossing the host band is not absent evidence."""
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    left = ApertureHostCandidateInput(
+        "left", tr((20.0, 0.0)), tr((30.0, 0.0)),
+    )
+    right = ApertureHostCandidateInput(
+        "right", tr((40.0, 0.0)), tr((50.0, 0.0)),
+    )
+    rejected_segments = {
+        "crosses-band": ((33.0, 0.0), (37.0, 30.0)),
+        "off-band": ((33.0, 30.0), (37.0, 35.0)),
+        "boundary-touch": ((33.0, 30.0), (37.0, 12.5)),
+        "crosses-away-from-gap": ((0.0, 0.0), (20.0, 30.0)),
+    }
+    p0, p1 = rejected_segments[mode]
+    unreviewed = ApertureHostCandidateInput(
+        "unreviewed", tr(p0), tr(p1),
+    )
+    openings = (left, unreviewed, right)
+    if reverse:
+        openings = tuple(reversed(openings))
+    original = tuple((op.start_pt, op.end_pt) for op in openings)
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    by_id = {record.physical_opening_id: record for record in records}
+    assert tuple((op.start_pt, op.end_pt) for op in openings) == original
+    assert by_id["unreviewed"].status is S.ABSTAINED
+    assert by_id["unreviewed"].first_remaining_gate == "aperture_wall_axis_misaligned"
+    assert all(by_id[name].status is S.CANDIDATE for name in ("left", "right"))
+    assert len(piers) == expected_piers
+    assert all(p.status is S.CANDIDATE and p.is_structural_masonry_pier is None
+               for p in piers)
+    assert all(len(by_id[name].adjacent_pier_ids) == expected_piers
+               for name in ("left", "right"))
+    assert all(r.shadow_only and not r.takeoff_eligible
+               and not r.commercial_projection_allowed for r in records)
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    ) == (records, piers)
+
+
+def test_dense_oblique_rejected_candidates_cannot_mint_unproven_piers():
+    """The clipped interval index stays deterministic without pairwise gap scans."""
+    count = 512
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (count * 10.0 + 10.0, 0.0), 20.0,
+    )
+    openings = []
+    for i in range(count):
+        station = i * 10.0
+        openings.append(ApertureHostCandidateInput(
+            f"valid-{i}", (station + 1.0, 0.0), (station + 3.0, 0.0),
+        ))
+        if i < count - 1:
+            openings.append(ApertureHostCandidateInput(
+                f"oblique-{i}", (station + 5.0, 0.0),
+                (station + 7.0, 30.0),
+            ))
+    authority = _authority()
+    baseline = None
+    for ordered in (tuple(openings), tuple(reversed(openings))):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordered,
+        )
+        assert len(records) == 2 * count - 1 and piers == ()
+        by_id = {r.physical_opening_id: r for r in records}
+        assert all(by_id[f"valid-{i}"].status is S.CANDIDATE
+                   and not by_id[f"valid-{i}"].adjacent_pier_ids
+                   for i in range(count))
+        assert all(by_id[f"oblique-{i}"].status is S.ABSTAINED
+                   for i in range(count - 1))
+        assert all(r.shadow_only and not r.takeoff_eligible
+                   and not r.commercial_projection_allowed for r in records)
+        evidence = {key: (rec.hosting_record_id, rec.first_remaining_gate)
+                    for key, rec in by_id.items()}
+        if baseline is None:
+            baseline = evidence
+        else:
+            assert evidence == baseline
