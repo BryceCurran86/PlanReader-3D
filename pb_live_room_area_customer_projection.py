@@ -21,6 +21,7 @@ from pb_live_room_area_source_closed_export import (
     _firm_room_area_quantities as _source_firm_room_area_quantities,
 )
 from pb_migration_contracts import QuantityEvidence
+from pb_source_closed_run_export import SourceClosedRunConflictError
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     CommercialTakeoffConflictError,
