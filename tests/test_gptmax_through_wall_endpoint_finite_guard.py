@@ -1579,3 +1579,59 @@ def test_complete_primitive_cap_counts_host_and_both_universes():
     assert records[0].first_remaining_gate == "original_source_host_unverified"
     assert records[0].shadow_only and not records[0].takeoff_eligible
     assert not records[0].commercial_projection_allowed
+
+
+def test_complete_transverse_projection_rejects_hidden_overflow_in_both_orders():
+    # Native finite endpoints can overflow only when converted to coordinates
+    # relative to a distant but finite host origin. A first valid crossing
+    # must not hide the second invalid obstruction by short-circuiting.
+    wall = ContinuousThroughWallCandidate(
+        "host", (-1e308, 0.0), (-1e308 + 1e294, 0.0), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "opening", (-1e308 + 2e293, 0.0), (-1e308 + 4e293, 0.0),
+    )
+    crossing_x = -1e308 + 3e293
+    crossing = ((crossing_x, -30.0), (crossing_x, 30.0))
+    distant = ((1e308, -30.0), (1e308, 30.0))
+    authority = _authority()
+    for segments in ((crossing, distant), (distant, crossing)):
+        original = tuple(segments)
+        with pytest.raises(ValueError, match="aperture projection must remain finite"):
+            authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=(opening,),
+                transverse_wall_segments=segments,
+            )
+        assert segments == original
+
+    # The legitimate crossing still vetoes a candidate without the invalid
+    # second segment. It never creates a firm or commercial host.
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+        transverse_wall_segments=(crossing,),
+    )
+    assert len(records) == 1 and piers == ()
+    assert records[0].status is S.ABSTAINED
+    assert records[0].first_remaining_gate == "host_through_wall_obstructed"
+    assert records[0].shadow_only
+    assert not records[0].takeoff_eligible
+    assert not records[0].commercial_projection_allowed
+
+
+def test_empty_opening_universe_still_validates_all_host_relative_obstructions():
+    wall = ContinuousThroughWallCandidate(
+        "host", (-1e308, 0.0), (-1e308 + 1e294, 0.0), 20.0,
+    )
+    distant = ((1e308, -30.0), (1e308, 30.0))
+    authority = _authority()
+    for segments in ((distant,), [distant]):
+        with pytest.raises(ValueError, match="aperture projection must remain finite"):
+            authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=(),
+                transverse_wall_segments=segments,
+            )
+    # An empty, complete and finite obstruction universe remains a clean
+    # shadow-only empty result; no inferred opening is minted.
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(), transverse_wall_segments=(),
+    ) == ((), ())

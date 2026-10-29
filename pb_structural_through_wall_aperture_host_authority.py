@@ -309,9 +309,6 @@ class StructuralThroughWallApertureHostAuthority:
         if (len(openings) * len(transverse_wall_segments)
                 > _MAX_TRANSVERSE_INTERSECTION_CHECKS):
             raise ValueError("transverse_wall_intersection_budget_exceeded")
-        if not openings:
-            return ((), ())
-
         wall_len = through_wall.length_pt
         ax, ay = through_wall.axis_unit
         nx, ny = through_wall.normal_unit
@@ -331,6 +328,17 @@ class StructuralThroughWallApertureHostAuthority:
             if not math.isfinite(along) or not math.isfinite(perp):
                 raise ValueError("aperture projection must remain finite")
             return along, perp
+
+        # Project the COMPLETE obstruction universe before testing any opening.
+        # Otherwise an early obstructing segment can hide a later segment whose
+        # finite native endpoints overflow relative to this host's origin.
+        # That would make candidate authority depend on obstruction input order.
+        projected_transverse_segments = tuple(
+            (project_pt(start), project_pt(end))
+            for start, end in transverse_wall_segments
+        )
+        if not openings:
+            return ((), ())
 
         intermediate_openings: list[dict[str, Any]] = []
 
@@ -404,9 +412,7 @@ class StructuralThroughWallApertureHostAuthority:
 
             # 4. Check transverse wall crossings obstructing the opening
             obstructed = False
-            for t_start, t_end in transverse_wall_segments:
-                t1_along, t1_perp = project_pt(t_start)
-                t2_along, t2_perp = project_pt(t_end)
+            for (t1_along, t1_perp), (t2_along, t2_perp) in projected_transverse_segments:
                 # Clip the WHOLE finite segment against the open interior of
                 # the opening's wall band. Both obstacle endpoints may lie
                 # outside the opening while the segment crosses its centre.
