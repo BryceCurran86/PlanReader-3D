@@ -397,3 +397,68 @@ def test_original_native_graph_ids_reject_unhashable_and_duplicate_receipts():
         assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
         assert result["first_failure"]=="unjoined_source_wall_ancestry"
         assert result["new_firm_quantities"]==0
+
+
+def test_original_native_edge_endpoints_must_match_ring_source_geometry():
+    # A forged ring may reuse every genuine source ID and remain cross-sheet
+    # geometrically identical, while disagreeing with the original PDF ink.
+    # Original producer endpoints are the independent ancestry witness.
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    good=compare(floor,finish,original_source_registration=receipt,
+                 translation_pdf_pts=(10.0,7.0))
+    assert good["status"]=="original_source_ink_ring_translation_candidate"
+    for side in ("floor","finish"):
+        for mutation in ("shift_endpoint","foreign_id","duplicate_id",
+                         "missing_edges","unhashable_endpoint",
+                         "nonfinite_endpoint","huge_integer_endpoint"):
+            a,b=deepcopy(floor),deepcopy(finish)
+            graph_side=a if side=="floor" else b
+            native=list(graph_side["original_native_edges"])
+            if mutation=="missing_edges":
+                graph_side["original_native_edges"]=None
+            else:
+                first=dict(native[0])
+                if mutation=="foreign_id":
+                    first["source_id"]="d999i0"
+                elif mutation=="duplicate_id":
+                    first["source_id"]=native[1]["source_id"]
+                else:
+                    ends=list(first["endpoints_pdf_pts"])
+                    if mutation=="shift_endpoint":
+                        ends[0]=(ends[0][0]+1.0,ends[0][1])
+                    elif mutation=="unhashable_endpoint":
+                        ends[0]=([ends[0][0]],ends[0][1])
+                    elif mutation=="nonfinite_endpoint":
+                        ends[0]=(float("nan"),ends[0][1])
+                    elif mutation=="huge_integer_endpoint":
+                        ends[0]=(10**1000,ends[0][1])
+                    first["endpoints_pdf_pts"]=tuple(ends)
+                native[0]=first
+                graph_side["original_native_edges"]=tuple(native)
+            rejected=compare(a,b,original_source_registration=receipt,
+                             translation_pdf_pts=(10.0,7.0))
+            assert rejected["status"]=="source_floor_finish_ring_correspondence_abstained"
+            assert rejected["first_failure"]=="original_native_edge_endpoint_ancestry_conflict"
+            assert rejected["physical_room_identity_proven"] is False
+            assert rejected["new_firm_quantities"]==0
+
+
+def test_coherently_replaced_source_rings_cannot_borrow_original_edge_ids():
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    a,b=deepcopy(floor),deepcopy(finish)
+    a["native_components"][0]["source_simple_ring_candidate"][
+        "vertices_pdf_pts"]=_RING_RIVAL
+    b["native_components"][0]["source_simple_ring_candidate"][
+        "vertices_pdf_pts"]=tuple((x+10.,y+7.) for x,y in _RING_RIVAL)
+    # The altered polygons match EACH OTHER and preserve every native ID;
+    # only the actual original endpoint receipt can detect this forgery.
+    rejected=compare(a,b,original_source_registration=receipt,
+                     translation_pdf_pts=(10.0,7.0))
+    assert rejected["first_failure"]=="original_native_edge_endpoint_ancestry_conflict"
+    assert rejected["new_firm_quantities"]==0
+    assert rejected["physical_room_identity_proven"] is False
+    assert compare(floor,finish,original_source_registration=receipt,
+                   translation_pdf_pts=(10.0,7.0))["status"]==(
+                       "original_source_ink_ring_translation_candidate")

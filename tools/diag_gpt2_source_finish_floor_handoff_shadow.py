@@ -65,6 +65,51 @@ def _source_cyclic_ring_edges_native(vertices, *, translation=(0.0, 0.0)):
         return None
 
 
+
+def _original_issued_native_ring_edges(graph: dict):
+    """Reconcile candidate ring sides with the native PDF edge issuer.
+
+    A ring's copied source IDs alone cannot prove that its polygon actually
+    follows those original painted endpoints. No W4 or metric authority.
+    """
+    raw=graph.get("original_native_edges")
+    issued_ids=graph.get("original_native_edge_ids")
+    if (type(raw) is not tuple or type(issued_ids) is not tuple
+            or len(raw)!=len(issued_ids) or not raw):
+        return None
+    by_id={}
+    for item in raw:
+        if type(item) is not dict:
+            return None
+        ident=item.get("source_id")
+        ends=item.get("endpoints_pdf_pts")
+        if (type(ident) is not str or ident not in issued_ids
+                or ident in by_id or type(ends) not in (tuple,list)
+                or len(ends)!=2):
+            return None
+        points=[]
+        for point in ends:
+            if (type(point) not in (tuple,list) or len(point)!=2
+                    or any(type(v) not in (int,float) for v in point)):
+                return None
+            try:
+                coords=tuple(float(v) for v in point)
+            except (TypeError,ValueError,OverflowError):
+                return None
+            if not all(math.isfinite(v) for v in coords):
+                return None
+            points.append(coords)
+        if (points[0]==points[1]
+                or (points[0][0]!=points[1][0]
+                    and points[0][1]!=points[1][1])):
+            return None
+        by_id[ident]=frozenset(points)
+    if (set(by_id)!=set(issued_ids)
+            or len(set(by_id.values()))!=len(issued_ids)):
+        return None
+    return frozenset(by_id.values())
+
+
 def audit_gpt2_original_cross_sheet_ring_correspondence(
     floor_graph: dict, finish_graph: dict, *,
     original_source_registration: dict,
@@ -162,6 +207,16 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
                 or set(ring_ids)!=issued_ids):
             return {**base,"first_failure":
                     "original_cross_sheet_edge_membership_count_conflict"}
+    # Native source ID membership is insufficient if a copied ring's vertex
+    # geometry no longer follows the actual PDF edge endpoints. Compare both
+    # independent producer receipts before cross-sheet translation.
+    for graph,ring in ((floor_graph,floor_ring),(finish_graph,finish_ring)):
+        native_edges=_original_issued_native_ring_edges(graph)
+        ring_edges=_source_cyclic_ring_edges_native(
+            ring.get("vertices_pdf_pts"))
+        if (not native_edges or not ring_edges or native_edges!=ring_edges):
+            return {**base,"first_failure":
+                    "original_native_edge_endpoint_ancestry_conflict"}
     dx,dy=translation_pdf_pts
     # Equal source vertex sets can describe NON-equal wall cycles. Compare
     # every independently extracted native boundary side, including closure.
