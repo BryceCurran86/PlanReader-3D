@@ -246,3 +246,142 @@ def test_scaled_original_fingerprint_remains_optional_when_absent(original_claim
     authority = _measurement_authority(scaled)
     assert authority is not None
     assert authority.metadata["scale_fingerprint"] == ""
+
+
+def _synthetic_scaled_source_identity_claim(original_claim):
+    """Construct an ID-consistent scaled contract for a native PDF ring.
+
+    This exercises the ID/lineage guard, NOT a claim of a trusted source scale
+    or an owner-original metric/FIRM quantity.
+    """
+    import hashlib
+    from pb_migration_contracts import canonical_contract_json, stable_contract_id
+    from pb_room_area_quantity import _canonical_ring
+
+    source = _original_room_quantity(original_claim)
+    floor = _source_floor(original_claim, source)
+    rooms = tuple(
+        room for room in original_claim.canonical_rooms
+        if room.canonical_room_id == floor.room_entity_id
+    )
+    assert len(rooms) == 1
+    room = rooms[0]
+    ring = _canonical_ring(room.polygon_pdf_pts)
+    assert ring
+    fingerprint = "synthetic-scale-binding-receipt:1"
+    ring_signature = hashlib.sha256(
+        canonical_contract_json(ring).encode("utf-8")
+    ).hexdigest()
+    metadata = {
+        **dict(source.metadata),
+        "scale_fingerprint": fingerprint,
+        "ring_signature": ring_signature,
+        "resolved_scale_id": "synthetic-scale:1",
+        "scale_status": "resolved",
+        "scale_conflicts": (),
+        "figured_dimension_ids": (),
+    }
+    source_id = stable_contract_id("qty", {
+        "family": "room_area",
+        "room_id": source.input_entity_ids[0],
+        "value_m2": source.value,
+        "scale_fingerprint": fingerprint,
+        "ring": ring,
+        "source_sha256": metadata["source_sha256"],
+        "revision_id": metadata["revision_id"],
+        "viewport_id": metadata["viewport_id"],
+    })
+    scaled = replace(
+        source,
+        quantity_id=source_id,
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        formula="shoelace_polygon_area / trusted_px_per_m^2",
+        metadata=metadata,
+    )
+    scaled_floor = replace(
+        floor, metric_area_quantity_id=source_id,
+        metric_area_authority=MeasurementAuthorityType.PDF_SCALED.value,
+    )
+    claim = replace(
+        original_claim,
+        room_area_quantity_evidence=tuple(
+            scaled if item.quantity_id == source.quantity_id else item
+            for item in original_claim.room_area_quantity_evidence
+        ),
+        canonical_floors=tuple(
+            scaled_floor if item.canonical_floor_id == floor.canonical_floor_id else item
+            for item in original_claim.canonical_floors
+        ),
+    )
+    return claim
+
+
+def test_id_consistent_synthetic_scaled_source_reaches_sealed_customer(original_claim):
+    claim = _synthetic_scaled_source_identity_claim(original_claim)
+    published = publish_live_floor_area_quantities(claim)
+    assert len(published) == 1
+    rows = _customer(claim)
+    assert len(rows) == 1
+    assert rows[0]["measurement_method"] == "scaled_geometry"
+    assert rows == _customer(claim)
+    sealed = seal_live_floor_area_run(
+        claim, workspace_id=7, project_id="original-floor-method",
+    )
+    assert verify_sealed_customer_output(
+        sealed, rows,
+    ).verified_quantity_ids == (published[0].quantity_id,)
+
+
+@pytest.mark.parametrize("field,new_value", (
+    ("scale_fingerprint", "synthetic-scale-binding-receipt:2"),
+    ("ring_signature", "f" * 64),
+))
+def test_different_clean_original_scaled_receipt_cannot_borrow_original_id(
+    original_claim, field, new_value,
+):
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    claim = _synthetic_scaled_source_identity_claim(original_claim)
+    original = _original_room_quantity(claim)
+    forged = replace(
+        original, metadata={**dict(original.metadata), field: new_value},
+    )
+    replay = replace(
+        claim,
+        room_area_quantity_evidence=tuple(
+            forged if item.quantity_id == original.quantity_id else item
+            for item in claim.room_area_quantity_evidence
+        ),
+    )
+    # The actual floor publisher and trace accept the unchanged numeric
+    # source ID; only the final independent producer-ID proof rejects it.
+    assert len(publish_live_floor_area_quantities(replay)) == 1
+    assert len(build_live_floor_area_source_traces(
+        replay, workspace_id=7, project_id="original-floor-method",
+    )) == 1
+    before = (replay.room_area_quantity_evidence, replay.canonical_floors)
+    with pytest.raises(SourceClosedRunConflictError, match="scaled floor original"):
+        _customer(replay)
+    assert (replay.room_area_quantity_evidence, replay.canonical_floors) == before
+    assert _customer(claim) == _customer(claim)
+
+
+def test_scaled_customer_requires_reconstructible_original_room_source(original_claim):
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    claim = _synthetic_scaled_source_identity_claim(original_claim)
+    original = _original_room_quantity(claim)
+    missing = replace(
+        original,
+        metadata={key: value for key, value in original.metadata.items()
+                  if key != "ring_signature"},
+    )
+    replay = replace(
+        claim,
+        room_area_quantity_evidence=tuple(
+            missing if item.quantity_id == original.quantity_id else item
+            for item in claim.room_area_quantity_evidence
+        ),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="room-ring receipt"):
+        _customer(replay)
