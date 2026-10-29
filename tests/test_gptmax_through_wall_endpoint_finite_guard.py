@@ -1175,3 +1175,98 @@ def test_rejected_wall_band_interval_edge_touch_does_not_veto_pier():
             canonical = evidence
         else:
             assert evidence == canonical
+
+
+@pytest.mark.parametrize("bad", [
+    "", " ", " jamb-1", "jamb-1 ", "jamb-1\n", "jamb-1\t",
+    1, True, None, ["jamb-1"], {"id": "jamb-1"},
+])
+def test_source_identity_boundaries_reject_aliases_without_coercion(bad):
+    """Native source ownership is not a trimmed or stringified caller label."""
+    with pytest.raises(ValueError, match="wall_id required"):
+        ContinuousThroughWallCandidate(bad, (0.0, 0.0), (100.0, 0.0), 20.0)
+    with pytest.raises(ValueError, match="physical_opening_id required"):
+        ApertureHostCandidateInput(bad, (20.0, 0.0), (30.0, 0.0))
+    with pytest.raises(ValueError, match="terminal_jamb_observation_ids"):
+        ApertureHostCandidateInput(
+            "A", (20.0, 0.0), (30.0, 0.0),
+            terminal_jamb_observation_ids=("jamb-2", bad),
+        )
+    for field in ("document_id", "revision_id", "source_sha256"):
+        kwargs = dict(document_id="doc", revision_id="v1", source_sha256="0" * 64)
+        kwargs[field] = bad
+        with pytest.raises(ValueError, match=f"{field} required"):
+            StructuralThroughWallApertureHostProducer(**kwargs)
+
+
+def test_exact_native_jamb_ownership_cannot_be_double_spent_by_distinct_apertures():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    # A padded alias must be rejected at the input boundary rather than
+    # evading the complete-universe reused-observation conflict check.
+    with pytest.raises(ValueError, match="terminal_jamb_observation_ids"):
+        ApertureHostCandidateInput(
+            "B", (40.0, 0.0), (50.0, 0.0),
+            terminal_jamb_observation_ids=(" jamb-shared ",),
+        )
+    a = ApertureHostCandidateInput(
+        "A", (20.0, 0.0), (30.0, 0.0),
+        terminal_jamb_observation_ids=("jamb-shared",),
+    )
+    b = ApertureHostCandidateInput(
+        "B", (40.0, 0.0), (50.0, 0.0),
+        terminal_jamb_observation_ids=("jamb-shared",),
+    )
+    authority = _authority()
+    for ordered in ((a, b), (b, a)):
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=ordered,
+        )
+        assert piers == ()
+        assert {r.physical_opening_id for r in records} == {"A", "B"}
+        assert all(
+            r.status is S.ABSTAINED
+            and r.first_remaining_gate == "aperture_terminal_jamb_observation_conflict"
+            and r.shadow_only
+            and not r.takeoff_eligible
+            and not r.commercial_projection_allowed
+            for r in records
+        )
+
+
+def test_clean_distinct_source_observations_preserve_shadow_replay_and_no_mutation():
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    original_observations = ["jamb-A"]
+    a = ApertureHostCandidateInput(
+        "A", (20.0, 0.0), (30.0, 0.0),
+        terminal_jamb_observation_ids=original_observations,
+    )
+    original_observations.append("injected")
+    b = ApertureHostCandidateInput(
+        "B", (40.0, 0.0), (50.0, 0.0),
+        terminal_jamb_observation_ids=("jamb-B",),
+    )
+    assert a.terminal_jamb_observation_ids == ("jamb-A",)
+    authority = _authority()
+    first, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(a, b),
+    )
+    replay, reversed_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(b, a),
+    )
+    assert len(piers) == len(reversed_piers) == 1
+    assert piers == reversed_piers
+    assert {r.physical_opening_id: r for r in first} == {
+        r.physical_opening_id: r for r in replay
+    }
+    assert all(
+        r.status is S.CANDIDATE
+        and r.first_remaining_gate == "original_source_host_unverified"
+        and r.shadow_only
+        and not r.takeoff_eligible
+        and not r.commercial_projection_allowed
+        for r in first
+    )

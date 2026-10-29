@@ -32,6 +32,16 @@ _ALIGNMENT_COS_TOL = 0.9995  # ~1.8 degrees tolerance
 _COORD_TOL = 1e-4
 
 
+def _native_source_identity(value: object) -> bool:
+    """Preserve literal source identities; never trim, coerce or alias observations."""
+    return (
+        type(value) is str
+        and bool(value)
+        and value == value.strip()
+        and value.isprintable()
+    )
+
+
 def _finite_real(value: object) -> bool:
     """Reject non-numeric, Boolean, nonfinite and unrepresentably large coordinates."""
     if type(value) not in (int, float):
@@ -63,7 +73,7 @@ class ContinuousThroughWallCandidate:
     thickness_pt: float
 
     def __post_init__(self) -> None:
-        if not self.wall_id.strip():
+        if not _native_source_identity(self.wall_id):
             raise ValueError("wall_id required")
         if (not _finite_real(self.thickness_pt) or self.thickness_pt <= 0.0):
             raise ValueError("thickness_pt must be positive and finite")
@@ -126,7 +136,7 @@ class ApertureHostCandidateInput:
     terminal_jamb_observation_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.physical_opening_id.strip():
+        if not _native_source_identity(self.physical_opening_id):
             raise ValueError("physical_opening_id required")
         if not _finite_point(self.start_pt) or not _finite_point(self.end_pt):
             raise ValueError("Aperture endpoints must have finite coordinates")
@@ -137,7 +147,7 @@ class ApertureHostCandidateInput:
             raise ValueError("Aperture start and end points must be distinct and finite")
         observations = self.terminal_jamb_observation_ids
         if (type(observations) not in (tuple, list)
-                or any(not isinstance(v, str) or not v.strip() for v in observations)
+                or any(not _native_source_identity(v) for v in observations)
                 or len(set(observations)) != len(observations)):
             raise ValueError("terminal_jamb_observation_ids must be distinct nonblank strings")
         object.__setattr__(self, "start_pt", tuple(float(v) for v in self.start_pt))
@@ -203,11 +213,11 @@ class StructuralThroughWallApertureHostProducer:
         revision_id: str,
         source_sha256: str,
     ) -> None:
-        if not document_id.strip():
+        if not _native_source_identity(document_id):
             raise ValueError("document_id required")
-        if not revision_id.strip():
+        if not _native_source_identity(revision_id):
             raise ValueError("revision_id required")
-        if not source_sha256.strip():
+        if not _native_source_identity(source_sha256):
             raise ValueError("source_sha256 required")
         self._document_id = document_id
         self._revision_id = revision_id
