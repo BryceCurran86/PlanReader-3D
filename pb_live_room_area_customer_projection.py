@@ -168,6 +168,26 @@ def _measurement_authority(
     return _scaled_measurement_authority(quantity)
 
 
+
+def _require_exact_original_customer_labels(quantity: QuantityEvidence) -> None:
+    """Never repair source-owned room labels at the final customer boundary.
+
+    The source-closed issuer independently authenticates the quantity and
+    physical room/floor lineage. This negative-only check retains the exact
+    original labels if supplied; absent optional labels are not invented.
+    """
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    for field in ("room_label", "location"):
+        if field not in metadata:
+            continue
+        value = metadata[field]
+        if type(value) is not str or not value or value != value.strip():
+            raise SourceClosedRunConflictError(
+                f"room-area customer original {field} is not exact native source text: "
+                f"{quantity.quantity_id}"
+            )
+
+
 def project_live_room_area_customer_rows(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -209,6 +229,7 @@ def project_live_room_area_customer_rows(
             raise ValueError(
                 f"missing live room-area source trace: {quantity.quantity_id}"
             )
+        _require_exact_original_customer_labels(quantity)
         authority = _measurement_authority(quantity)
         if authority is None:
             continue
