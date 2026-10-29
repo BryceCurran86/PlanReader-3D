@@ -210,18 +210,44 @@ def _two_original_source_rings(finish_vertices, *, shift=(10.0,7.0)):
     assert floor["native_candidate_ring_count"]==1, floor["status"]
     assert finish["native_candidate_ring_count"]==1, finish["status"]
     assert floor["original_native_edge_ids"]==finish["original_native_edge_ids"]
+
+    def native_key(ends, translation=(0.,0.)):
+        return frozenset((round(float(p[0])+translation[0],3),
+                          round(float(p[1])+translation[1],3))
+                         for p in ends)
+
+    finish_by_edge={native_key(edge["endpoints_pdf_pts"]):edge
+                    for edge in finish["original_native_edges"]}
+    matching=[]
+    for edge in floor["original_native_edges"]:
+        partner=finish_by_edge.get(native_key(edge["endpoints_pdf_pts"],shift))
+        if partner is not None:
+            matching.append((edge,partner))
+    # Even the competing simple ring shares four real ink strokes; those
+    # witnesses do not prove that its remaining perimeter is equivalent.
+    assert len(matching)>=4
+    roles=("left","right","bottom","top_partial")
+    witnesses={}
+    for role,(floor_edge,finish_edge) in zip(roles,matching[:4]):
+        witnesses[role]={
+            "floor_source":{
+                "identity":floor_edge["source_id"],
+                "ends":floor_edge["endpoints_pdf_pts"],
+            },
+            "finish_source":{
+                "identity":finish_edge["source_id"],
+                "ends":finish_edge["endpoints_pdf_pts"],
+            },
+            "matched_original_ink_only":True,
+            "physical_wall_role_proven":False,
+        }
     registration={
         "status":"original_four_edge_ink_correspondence_with_unclosed_doorway",
         "original_source_sha256":digest,
         "original_floor_page_id":1,
         "original_finish_page_id":2,
         "source_translation_candidate_pdf_pts":shift,
-        "original_witnesses":{
-            "registered-native-side":{
-                "floor_source":{"identity":ids[0]},
-                "finish_source":{"identity":ids[0]},
-            }
-        },
+        "original_witnesses":witnesses,
     }
     return floor,finish,registration
 
@@ -285,7 +311,7 @@ def test_original_registration_witnesses_fail_closed_on_malformed_nested_receipt
     )
     for role in bad_roles:
         receipt=deepcopy(registration)
-        receipt["original_witnesses"]={"native-side":role}
+        receipt["original_witnesses"]["left"]=role
         result=compare(floor,finish,original_source_registration=receipt,
                        translation_pdf_pts=(10.0,7.0))
         assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
@@ -297,17 +323,15 @@ def test_original_registration_reused_wall_witness_is_not_independent_proof():
     from copy import deepcopy
     floor,finish,registration=_two_original_source_rings(_RING_A)
     receipt=deepcopy(registration)
-    receipt["original_witnesses"]["duplicate-side"]=deepcopy(
-        receipt["original_witnesses"]["registered-native-side"])
+    receipt["original_witnesses"]["right"]=deepcopy(
+        receipt["original_witnesses"]["left"])
     result=compare(floor,finish,original_source_registration=receipt,
                    translation_pdf_pts=(10.0,7.0))
     assert result["first_failure"]=="original_registration_witness_identity_alias_conflict"
     assert result["new_firm_quantities"]==0
     # Two genuinely distinct native source identities remain candidates only.
-    receipt["original_witnesses"]["duplicate-side"]={
-        "floor_source":{"identity":"d1i0"},
-        "finish_source":{"identity":"d1i0"},
-    }
+    receipt["original_witnesses"]["right"]=deepcopy(
+        registration["original_witnesses"]["right"])
     candidate=compare(floor,finish,original_source_registration=receipt,
                       translation_pdf_pts=(10.0,7.0))
     assert candidate["status"]=="original_source_ink_ring_translation_candidate"
@@ -461,4 +485,74 @@ def test_coherently_replaced_source_rings_cannot_borrow_original_edge_ids():
     assert rejected["physical_room_identity_proven"] is False
     assert compare(floor,finish,original_source_registration=receipt,
                    translation_pdf_pts=(10.0,7.0))["status"]==(
+                       "original_source_ink_ring_translation_candidate")
+
+
+def test_original_four_side_issuer_roles_and_ink_proof_are_mandatory():
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for mutation in ("missing_role","extra_role","missing_proof",
+                     "false_proof","untyped_role","untyped_witnesses"):
+        bad=deepcopy(receipt)
+        witnesses=bad["original_witnesses"]
+        if mutation=="missing_role":
+            witnesses.pop("bottom")
+        elif mutation=="extra_role":
+            witnesses["unregistered"]=deepcopy(witnesses["left"])
+        elif mutation=="missing_proof":
+            witnesses["left"].pop("matched_original_ink_only")
+        elif mutation=="false_proof":
+            witnesses["left"]["matched_original_ink_only"]=False
+        elif mutation=="untyped_role":
+            witnesses["left"]=None
+        else:
+            bad["original_witnesses"]=["left","right","bottom","top_partial"]
+        result=compare(floor,finish,original_source_registration=bad,
+                       translation_pdf_pts=(10.,7.))
+        assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+        assert result["first_failure"]==(
+            "original_registration_ink_witness_unproven"
+            if mutation in ("missing_proof","false_proof") else
+            "unjoined_source_wall_ancestry" if mutation=="untyped_role" else
+            "original_registration_four_side_witnesses_missing")
+        assert result["new_firm_quantities"]==0
+    assert compare(floor,finish,original_source_registration=receipt,
+                   translation_pdf_pts=(10.,7.))["status"]==(
+                       "original_source_ink_ring_translation_candidate")
+
+
+def test_original_four_side_witness_endpoints_must_match_both_native_issuers():
+    from copy import deepcopy
+    floor,finish,receipt=_two_original_source_rings(_RING_A)
+    for side in ("floor_source","finish_source"):
+        for mutation in ("missing_ends","shift_ends","wrong_native_edge",
+                         "nonfinite","huge_integer","unhashable"):
+            bad=deepcopy(receipt)
+            witness=bad["original_witnesses"]["left"][side]
+            if mutation=="missing_ends":
+                witness.pop("ends")
+            elif mutation=="wrong_native_edge":
+                witness["ends"]=deepcopy(
+                    receipt["original_witnesses"]["right"][side]["ends"])
+            else:
+                ends=list(witness["ends"])
+                first=list(ends[0])
+                if mutation=="shift_ends":
+                    first[0]+=1.
+                elif mutation=="nonfinite":
+                    first[0]=float("nan")
+                elif mutation=="huge_integer":
+                    first[0]=10**1000
+                else:
+                    first[0]=[first[0]]
+                ends[0]=tuple(first)
+                witness["ends"]=tuple(ends)
+            result=compare(floor,finish,original_source_registration=bad,
+                           translation_pdf_pts=(10.,7.))
+            assert result["status"]=="source_floor_finish_ring_correspondence_abstained"
+            assert result["first_failure"]=="original_registration_witness_geometry_conflict"
+            assert result["physical_room_identity_proven"] is False
+            assert result["new_firm_quantities"]==0
+    assert compare(floor,finish,original_source_registration=receipt,
+                   translation_pdf_pts=(10.,7.))["status"]==(
                        "original_source_ink_ring_translation_candidate")
