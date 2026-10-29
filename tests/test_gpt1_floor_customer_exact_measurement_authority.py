@@ -272,8 +272,21 @@ def _synthetic_scaled_source_identity_claim(original_claim):
     ring_signature = hashlib.sha256(
         canonical_contract_json(ring).encode("utf-8")
     ).hexdigest()
+    # The input is a documented cross-view area: its measurement-support
+    # metadata is NOT a PDF-scaled room producer's source receipt. Rebuild the
+    # synthetic scaled receipt from the independently owned canonical room,
+    # without changing the production source-lineage guard to fit this test.
+    assert room.source_sha256 == floor.source_sha256
+    assert room.revision_id == floor.revision_id
+    assert room.viewport_id == floor.viewport_id
+    assert room.page_id == floor.page_id
+    assert type(room.viewport_id) is str and room.viewport_id
     metadata = {
         **dict(source.metadata),
+        "source_sha256": room.source_sha256,
+        "revision_id": room.revision_id,
+        "viewport_id": room.viewport_id,
+        "page_no": int(room.page_id),
         "scale_fingerprint": fingerprint,
         "ring_signature": ring_signature,
         "resolved_scale_id": "synthetic-scale:1",
