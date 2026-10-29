@@ -2402,3 +2402,112 @@ def test_invalid_null_trials_survive_early_malformed_container_abstain(
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == expected_reasons
     assert result.records == ()
+
+
+def _exhaustive_outward_second_face_oracle(box, lines, band):
+    """Independent original full-key scan, including every outward competitor."""
+    x0, y0, x1, y1 = box
+    answer = {}
+    for name, orient, coord, lo, hi, sign in (
+        ("x0", "V", x0, y0, y1, -1),
+        ("x1", "V", x1, y0, y1, 1),
+        ("y0", "H", y0, x0, x1, -1),
+        ("y1", "H", y1, x0, x1, 1),
+    ):
+        length = hi - lo
+        faces, intervals = [], []
+        for key in sorted(lines[orient]):
+            signed = (key - coord) * sign
+            if band[0] <= signed <= band[1]:
+                covered = merge_intervals(
+                    (max(a, lo), min(b, hi))
+                    for a, b in lines[orient][key]
+                    if min(b, hi) > max(a, lo)
+                )
+                coverage = sum(b - a for a, b in covered) / length if length > 0 else 0.0
+                if coverage >= 0.50:
+                    offset = round(signed, 2)
+                    faces.append((offset, round(coverage, 3)))
+                    intervals.append((
+                        offset,
+                        [(round(a, 2), round(b, 2)) for a, b in covered],
+                    ))
+        answer[name] = (faces, intervals)
+    return answer
+
+
+@pytest.mark.parametrize("seed", range(25))
+def test_outward_wall_band_index_matches_exhaustive_source_key_oracle(seed):
+    rng = random.Random(20261030 + seed)
+    x0, y0 = rng.uniform(-30, 30), rng.uniform(-30, 30)
+    box = (x0, y0, x0 + 80.0, y0 + 90.0)
+    band = (3.0, 15.0) if seed % 2 else (0.125, 3.75)
+    lines = {"H": {}, "V": {}}
+    for orient, left, right in (
+        ("H", y0, y0 + 90.0),
+        ("V", x0, x0 + 80.0),
+    ):
+        keys = [rng.uniform(-70, 150) for _ in range(45)]
+        # Every side, both signs, both inclusive boundaries and their
+        # immediate floating-point neighbours are retained by the oracle.
+        for coord in (left, right):
+            for sign in (-1, 1):
+                for distance in band:
+                    boundary = coord + sign * distance
+                    keys.extend((
+                        math.nextafter(boundary, -math.inf),
+                        boundary,
+                        math.nextafter(boundary, math.inf),
+                    ))
+        for key in keys:
+            lo = (x0 if orient == "H" else y0) - 8.0
+            hi = (x0 + 80.0 if orient == "H" else y0 + 90.0) + 8.0
+            lines[orient][key] = [(lo, hi), (lo + 25.0, hi - 10.0)]
+    before = repr((box, lines))
+    indexed = side_evidence(box, lines, band=band)
+    oracle = _exhaustive_outward_second_face_oracle(box, lines, band)
+    for name in ("x0", "x1", "y0", "y1"):
+        assert indexed[name]["second_face"] == oracle[name][0]
+        assert indexed[name]["second_face_intervals"] == oracle[name][1]
+    assert repr((box, lines)) == before
+    assert side_evidence(box, lines, band=band) == indexed
+
+
+def test_outward_wall_band_index_large_exact_native_coordinates():
+    # Precision and signed outwardness must survive near the source
+    # binary64 exact-coordinate ceiling, not merely at page-scale origin.
+    origin = float(2**53 - 256)
+    box = (origin, origin, origin + 100.0, origin + 100.0)
+    lines = {
+        orient: {
+            origin + offset: [(origin - 20.0, origin + 120.0)]
+            for offset in (-20.0, -15.0, -3.0, 0.0, 3.0, 15.0, 20.0, 100.0, 103.0, 115.0, 120.0)
+        }
+        for orient in "HV"
+    }
+    indexed = side_evidence(box, lines)
+    oracle = _exhaustive_outward_second_face_oracle(box, lines, (3.0, 15.0))
+    for name in ("x0", "x1", "y0", "y1"):
+        assert indexed[name]["second_face"] == oracle[name][0]
+        assert indexed[name]["second_face_intervals"] == oracle[name][1]
+
+
+def test_outward_wall_band_index_20000_native_keys_many_boxes():
+    # A valid complete 20k-key universe and 2k measured boxes used to
+    # require 160 million unrelated full-key comparisons across four sides.
+    # Assert complete source output, not a fragile wall-clock threshold.
+    keys = [float(i * 2) for i in range(20_000)]
+    lines = {
+        "H": {key: [(0.0, 40_000.0)] for key in keys},
+        "V": {key: [(0.0, 40_000.0)] for key in keys},
+    }
+    before = (len(lines["H"]), len(lines["V"]))
+    for i in range(2_000):
+        offset = float(i * 2 + 40)
+        box = (offset, offset, offset + 50.0, offset + 50.0)
+        evidence = side_evidence(box, lines)
+        assert all(
+            evidence[side]["second_face"]
+            for side in ("x0", "x1", "y0", "y1")
+        )
+    assert (len(lines["H"]), len(lines["V"])) == before
