@@ -166,6 +166,10 @@ def test_real_original_page9_native_source_rivals_if_available():
         'SOURCE_NON_CEILING_CODE_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
     assert grid.original_text == 'GRID'
     assert grid.original_source_role == _expected_ceiling_lexical_role(grid, 'GRID')
+    # Actual p9 CAD fonts include native advance/bearing margins. The
+    # original painted mark must survive the ink veto without being promoted
+    # to a physical ceiling zone or a measured quantity.
+    assert grid.original_ceiling_code_visible_ink_verified
     assert height.original_text == '2400'
     assert height.original_source_role in (
         'SOURCE_NUMERIC_CALLOUT_WORD', 'SOURCE_GENERAL_NOTE_OR_MIXED_TEXT')
@@ -180,6 +184,7 @@ def test_real_original_page9_native_source_rivals_if_available():
         mixed_ipf1, 'IPF1')
     assert isolated_ipf1.original_source_role == _expected_ceiling_lexical_role(
         isolated_ipf1, 'IPF1')
+    assert isolated_ipf1.original_ceiling_code_visible_ink_verified
     assert grid.original_word_address != legend_grid.original_word_address
     assert mixed_ipf1.original_word_address != isolated_ipf1.original_word_address
 
@@ -256,3 +261,288 @@ def test_one_source_code_with_one_height_word_remains_lexical_only():
     assert result.original_source_role=="SOURCE_CEILING_CODE_WORD_CANDIDATE"
     assert not result.metric_area_authorized
     assert not result.firm_ceiling_quantity_authorized
+
+
+def _native_code_paint_case(*, render_mode=0, colour=(0, 0, 0),
+                            full_cover=False, partial_cover=False,
+                            unrelated_cover=False, double_paint=False,
+                            translate=(0., 0.), stroke_cover_colour=None,
+                            unrelated_stroke=False):
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    x, y = 180. + translate[0], 250. + translate[1]
+    page.insert_text((x, y), "GRID", fontsize=10, color=colour,
+                     render_mode=render_mode)
+    if double_paint:
+        page.insert_text((x, y), "GRID", fontsize=10)
+    if full_cover:
+        page.draw_rect(fitz.Rect(x - 12, y - 22, x + 66, y + 9),
+                       color=None, fill=(1, 1, 1))
+    if partial_cover:
+        page.draw_rect(fitz.Rect(x + 6, y - 10, x + 12, y - 1),
+                       color=None, fill=(1, 1, 1))
+    if unrelated_cover:
+        page.draw_rect(fitz.Rect(410, 400, 490, 490),
+                       color=None, fill=(1, 1, 1))
+    if stroke_cover_colour is not None:
+        # Later opaque STROKE (not fill-path) can erase original text ink.
+        page.draw_line((x - 12, y - 6), (x + 65, y - 6),
+                       color=stroke_cover_colour, width=24)
+    if unrelated_stroke:
+        page.draw_line((410, 400), (490, 400), color=(1, 1, 1), width=24)
+    data = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=data, filetype="pdf") as original:
+        candidates = [w for w in original[0].get_text("words") if w[4] == "GRID"]
+    assert len(candidates) == (2 if double_paint else 1)
+    return data, tuple(candidates[0][5:8])
+
+
+@pytest.mark.parametrize("style", [
+    {"render_mode": 3},
+    {"colour": (1, 1, 1)},
+    {"full_cover": True},
+    {"partial_cover": True},
+    {"double_paint": True},
+])
+def test_unpainted_occluded_or_duplicate_native_grid_never_lexically_wins(style):
+    source, address = _native_code_paint_case(**style)
+    unchanged = sha256(source).hexdigest()
+    result = _go(source, address)
+    assert sha256(source).hexdigest() == unchanged
+    assert result.original_text == "GRID"
+    assert result.original_source_role == "SOURCE_CEILING_CODE_INK_UNRESOLVED"
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.original_material_definition_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("translation", [(0.,0.), (25.,13.), (48.,-8.)])
+def test_original_visible_grid_glyph_survives_translation_and_unrelated_paint(translation):
+    source, address = _native_code_paint_case(
+        translate=translation, unrelated_cover=True,
+    )
+    result = _go(source, address)
+    assert result.original_source_role == "SOURCE_CEILING_CODE_WORD_CANDIDATE"
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
+
+def test_native_font_advance_margin_does_not_hide_complete_visible_source_ink():
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    original, _ = _native_code_paint_case()
+    with fitz.open(stream=original, filetype="pdf") as pdf:
+        word = list(pdf[0].get_text("words")[0])
+        # A source word may include a bearing margin larger than the
+        # painted glyph's left edge; the glyph remains fully source-owned.
+        word[0] -= .75
+        assert _visible_native_ceiling_code_ink(pdf[0], tuple(word))
+
+
+@pytest.mark.parametrize('stroke_colour', [(1, 1, 1), (0, 0, 0)])
+def test_later_opaque_stroke_path_over_grid_glyph_abstains(stroke_colour):
+    source, address = _native_code_paint_case(stroke_cover_colour=stroke_colour)
+    digest = sha256(source).hexdigest()
+    result = _go(source, address)
+    assert sha256(source).hexdigest() == digest
+    assert result.original_text == 'GRID'
+    assert result.original_source_role == 'SOURCE_CEILING_CODE_INK_UNRESOLVED'
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+def test_unrelated_later_stroke_path_preserves_visible_grid_candidate():
+    source, address = _native_code_paint_case(unrelated_stroke=True)
+    result = _go(source, address)
+    assert result.original_source_role == 'SOURCE_CEILING_CODE_WORD_CANDIDATE'
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
+@pytest.mark.parametrize("tamper", ("character_paint_order", "glyph_spatial_order"))
+def test_permuted_native_glyph_paint_never_authenticates_same_letter_multiset(
+    monkeypatch, tamper,
+):
+    # The PDF extractor still reports the exact native word GRID, but the
+    # painted trace has DIRG or glyph boxes in an incompatible visual order.
+    # Both would have passed the previous Counter-based equality.
+    source, address = _native_code_paint_case()
+    original_get_texttrace = fitz.Page.get_texttrace
+
+    def altered_get_texttrace(page):
+        traces = list(original_get_texttrace(page))
+        changed = 0
+        for index, trace in enumerate(traces):
+            chars = list(trace.get("chars") or ())
+            if "".join(chr(char[0]) for char in chars) != "GRID":
+                continue
+            if tamper == "character_paint_order":
+                chars[0], chars[1] = chars[1], chars[0]
+            else:
+                first, second = chars[:2]
+                chars[0] = (first[0], first[1], second[2], second[3])
+                chars[1] = (second[0], second[1], first[2], first[3])
+            traces[index] = {**trace, "chars": tuple(chars)}
+            changed += 1
+        assert changed == 1
+        return traces
+
+    monkeypatch.setattr(fitz.Page, "get_texttrace", altered_get_texttrace)
+    result = _go(source, address)
+    assert result.original_text == "GRID"
+    assert result.original_source_role == "SOURCE_CEILING_CODE_INK_UNRESOLVED"
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.original_material_definition_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("rotation", (0, 90))
+@pytest.mark.parametrize("later_colour", ((1, 1, 1), (0, 0, 0)))
+def test_later_native_text_glyph_edge_overlap_vetoes_original_grid(
+    rotation, later_colour,
+):
+    # The later M has a painted bbox overlapping G, but its glyph CENTRE
+    # is outside GRID's source word. Word-centre selection alone missed it.
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
+    page.insert_text((173, 250), "M", fontsize=10, color=later_colour)
+    page.set_rotation(rotation)
+    source = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        page = original[0]
+        grid = next(w for w in page.get_text("words") if w[4] == "GRID")
+        later = next(t for t in page.get_texttrace()
+                     if ''.join(chr(c[0]) for c in t["chars"]) == "M")
+        painted = later["chars"][0][3]
+        assert (painted[0] + painted[2]) / 2 < grid[0] - .1
+        assert painted[2] > grid[0] and painted[0] < grid[2]
+        assert not _visible_native_ceiling_code_ink(page, grid)
+    result = _go(source, tuple(grid[5:8]))
+    assert result.original_source_role == "SOURCE_CEILING_CODE_INK_UNRESOLVED"
+    assert not result.original_ceiling_code_visible_ink_verified
+    assert not result.firm_ceiling_quantity_authorized
+    assert not result.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("later", (False, True))
+def test_unrelated_or_earlier_native_text_does_not_erase_grid_ink(later):
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    if not later:
+        # A distinct earlier source line overlaps the future G ink, but
+        # cannot erase later GRID; offset baseline avoids lexical merging.
+        page.insert_text((173, 239), "M", fontsize=10, color=(1, 1, 1))
+    page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
+    if later:
+        page.insert_text((310, 250), "M", fontsize=10, color=(1, 1, 1))
+    source = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        page = original[0]
+        grid = next(w for w in page.get_text("words") if w[4] == "GRID")
+        assert _visible_native_ceiling_code_ink(page, grid)
+    result = _go(source, tuple(grid[5:8]))
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
+def test_later_native_text_whitespace_advance_is_not_painted_overprint():
+    from pb_gpt2_original_mary_rcp_native_word_scope_shadow import (
+        _visible_native_ceiling_code_ink,
+    )
+    pdf = fitz.open()
+    page = pdf.new_page(width=700, height=700)
+    page.insert_text((180, 250), "GRID", fontsize=10, color=(0, 0, 0))
+    page.insert_text((110, 250), "M" + " " * 35 + "M",
+                     fontsize=10, color=(1, 1, 1))
+    source = pdf.tobytes()
+    pdf.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        page = original[0]
+        grid = next(w for w in page.get_text("words") if w[4] == "GRID")
+        later = page.get_texttrace()[-1]
+        assert later["bbox"][0] < grid[0] < grid[2] < later["bbox"][2]
+        assert all(
+            glyph[3][2] <= grid[0] or glyph[3][0] >= grid[2]
+            for glyph in later["chars"] if not chr(glyph[0]).isspace()
+        )
+        assert any(
+            glyph[3][0] <= grid[0] <= glyph[3][2]
+            or grid[0] <= (glyph[3][0] + glyph[3][2]) / 2 <= grid[2]
+            for glyph in later["chars"] if chr(glyph[0]).isspace()
+        )
+        assert _visible_native_ceiling_code_ink(page, grid)
+    result = _go(source, tuple(grid[5:8]))
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.original_material_definition_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
+@pytest.mark.parametrize("rotation", (0, 90, 180, 270))
+def test_original_code_glyphs_follow_native_reading_direction(rotation):
+    doc = fitz.open()
+    page = doc.new_page(width=700, height=700)
+    page.insert_text((250, 250), "GRID", fontsize=10, rotate=rotation)
+    source = doc.tobytes()
+    doc.close()
+    with fitz.open(stream=source, filetype="pdf") as original:
+        words = [w for w in original[0].get_text("words") if w[4] == "GRID"]
+    assert len(words) == 1
+    result = _go(source, tuple(words[0][5:8]))
+    assert result.original_source_role == "SOURCE_CEILING_CODE_WORD_CANDIDATE"
+    assert result.original_ceiling_code_visible_ink_verified
+    assert not result.physical_ceiling_zone_authorized
+    assert not result.metric_area_authorized
+    assert not result.firm_ceiling_quantity_authorized
+
+
+@pytest.mark.parametrize("bad_bbox", (
+    None, False, [], "100,100,500,500",
+    (100,100,500), (100,100,500,500,600),
+    (True,100,500,500), (100,100,False,500),
+    (100,100,float("nan"),500), (100,float("inf"),500,500),
+    (100,100,10**1000,500), (-10**1000,100,500,500),
+))
+def test_original_rcp_candidate_bbox_malformed_or_overflow_fails_typed(bad_bbox):
+    source=_fixture()
+    original_sha=sha256(source).hexdigest()
+    with pytest.raises(ValueError, match="finite original plan BBOX candidate"):
+        _go(source,(0,0,0),bbox=bad_bbox)
+    assert sha256(source).hexdigest()==original_sha
+
+
+def test_original_rcp_finite_bbox_native_pdf_positive_stays_lexical_only():
+    source,address=_native_code_paint_case()
+    candidate=_go(source,address,bbox=(0.,0.,700.,700.))
+    assert candidate.original_source_role=="SOURCE_CEILING_CODE_WORD_CANDIDATE"
+    assert candidate.original_ceiling_code_visible_ink_verified
+    assert not candidate.original_plan_viewport_authorized
+    assert not candidate.physical_ceiling_zone_authorized
+    assert not candidate.metric_area_authorized
+    assert not candidate.firm_ceiling_quantity_authorized
