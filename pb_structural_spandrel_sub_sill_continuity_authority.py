@@ -142,6 +142,12 @@ class StructuralSpandrelSubSillContinuityAuthority:
             except (OverflowError, ValueError):
                 return False
 
+        def _finite_source_coordinate(value: object) -> bool:
+            # Binary64 cannot preserve distinct native source-point identities
+            # beyond the same inclusive 2**53 limit already used for ints.
+            # Scalar heights and scales retain their separate validation.
+            return _finite_real(value) and abs(value) <= 2**53
+
         for name, value in (("sill_height_mm", sill_height_mm),
                             ("head_height_mm", head_height_mm)):
             if not _finite_real(value):
@@ -158,7 +164,7 @@ class StructuralSpandrelSubSillContinuityAuthority:
         for name, point in (("jamb_a", jamb_a), ("jamb_b", jamb_b)):
             if not isinstance(point, (tuple, list)) or len(point) != 2:
                 raise ValueError(f"{name} must contain two coordinates")
-            if any(not _finite_real(v) for v in point):
+            if any(not _finite_source_coordinate(v) for v in point):
                 raise ValueError(f"{name} must contain finite real coordinates")
         # Detach caller-owned lists before storing geometry in frozen receipts.
         jamb_left, jamb_right = self._order_jambs(

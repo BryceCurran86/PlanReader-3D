@@ -451,3 +451,41 @@ def test_positive_subsill_height_retains_only_shadow_geometric_candidate(authori
     assert record.shadow_only
     assert not record.commercial_projection_allowed
     assert not record.takeoff_eligible
+
+
+@pytest.mark.parametrize("jamb_field", ["jamb_a", "jamb_b"])
+@pytest.mark.parametrize("huge", [float(2**53) + 2.0, -(float(2**53) + 2.0)])
+def test_oversized_native_float_jambs_cannot_alias_shadow_identity(authority, jamb_field, huge):
+    # Native floats above the exact source-coordinate boundary cannot be
+    # authenticated as distinct source points after binary64 conversion.
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    caller_point = [huge, 200.0]
+    with pytest.raises(ValueError, match=f"{jamb_field} must contain finite real coordinates"):
+        authority.evaluate_spandrel_sub_sill(**(kwargs | {jamb_field: caller_point}))
+    assert caller_point == [huge, 200.0]
+    # Invalid input cannot create a source-free commercial receipt.
+
+
+def test_inclusive_source_coordinate_boundary_preserves_shadow_only_receipt(authority):
+    # Exactly 2**53 is the established inclusive native coordinate boundary.
+    kwargs = dict(
+        jamb_a=(float(2**53) - 100.0, 200.0),
+        jamb_b=(float(2**53), 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=None,
+    )
+    first = authority.evaluate_spandrel_sub_sill(**kwargs)
+    second = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert first == second
+    assert first.jamb_right == (float(2**53), 200.0)
+    assert first.classification == SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE
+    assert first.clear_span_pt == 100.0
+    assert first.clear_span_m is None
+    assert first.glazing_aperture_area_sqm is None
+    assert first.spandrel_wall_area_sqm is None
+    assert first.shadow_only and not first.takeoff_eligible
+    assert not first.commercial_projection_allowed
