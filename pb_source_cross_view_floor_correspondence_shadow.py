@@ -388,7 +388,25 @@ def side_evidence(
         cov = sum(b - a for a, b in covered) / length if length > 0 else 0.0
         second = []
         second_intervals = []
-        for k in index.keys[orient]:
+        # The outward paired wall face must lie within the signed thickness
+        # band.  A complete 20k-key native line universe cannot be scanned
+        # for every side of every measured floor box.  Search only sorted
+        # keys in the inclusive outward band; preserve the original signed
+        # predicate and inspect EVERY key in that band (never nearest/first).
+        low = coord + sign * band[0]
+        high = coord + sign * band[1]
+        keys = index.keys[orient]
+        # Expand the binary-search window by two representable neighbours.
+        # This conservatively covers addition/subtraction rounding at exact
+        # band boundaries; the predicate below remains the source of truth.
+        lower = min(low, high)
+        upper = max(low, high)
+        for _ in range(2):
+            lower = math.nextafter(lower, -math.inf)
+            upper = math.nextafter(upper, math.inf)
+        first = bisect.bisect_left(keys, lower)
+        last = bisect.bisect_right(keys, upper)
+        for k in keys[first:last]:
             signed = (k - coord) * sign
             # A measured floor uses the room-facing wall face; its paired
             # wall face must lie outward, not across the room interior.
