@@ -14,6 +14,7 @@ from pb_cross_view_ceiling_quantity_authority import (
     publish_cross_view_ceiling_quantities,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_room_area_quantity import _evidence_fingerprint
 from tests.test_cross_view_ceiling_quantity_authority import (
     _bridge, _finish, _room, _rooms,
 )
@@ -35,10 +36,20 @@ def _two_room_args(*, same_mark: bool):
         area_page_pts2=4200.,
     )
     first_bridge = _bridge()
+    first_atom = first_bridge.original_area_evidence_receipts[0][1]
+    second_atom = replace(
+        first_atom,
+        evidence_id="explicit-area-evidence-face-2",
+        normalized_value=7.0,
+        metadata={
+            **first_atom.metadata,
+            "figured_dimension_ids": ["second-room-dim-h", "second-room-dim-v"],
+        },
+    )
     second_entity = replace(
         first_bridge.entities[0],
         candidate_entity_id="source-room-2",
-        evidence_ids=("face-2", "room-geometry-evidence-2"),
+        evidence_ids=("face-2", "room-geometry-evidence-2", second_atom.evidence_id),
         metadata={
             **first_bridge.entities[0].metadata,
             "source_room_index_id": "room-index-2",
@@ -50,17 +61,24 @@ def _two_room_args(*, same_mark: bool):
         semantic_key="room_area:source-room-2",
         input_entity_ids=("source-room-2",),
         value=7.0,
-        evidence_ids=("face-2", "room-geometry-evidence-2"),
+        evidence_ids=("face-2", "room-geometry-evidence-2", second_atom.evidence_id),
         metadata={
             **first_bridge.quantities[0].metadata,
             "room_label": "OTHER ROOM",
             "figured_dimension_ids": ["second-room-dim-h", "second-room-dim-v"],
+            "explicit_area_evidence_id": second_atom.evidence_id,
+            "explicit_area_evidence_fingerprint": _evidence_fingerprint(second_atom),
         },
     )
     second_bridge = replace(
         first_bridge,
         entities=(second_entity,),
         quantities=(second_area,),
+        document=replace(
+            first_bridge.document,
+            evidence_ids=("face-2", "room-geometry-evidence-2", second_atom.evidence_id),
+        ),
+        original_area_evidence_receipts=(("source-room-2", second_atom),),
     )
     first = _finish().records[0]
     second = replace(
