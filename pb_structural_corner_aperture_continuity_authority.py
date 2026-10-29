@@ -270,11 +270,9 @@ class StructuralCornerApertureContinuityAuthority:
                 "original_source_scale_or_post_unverified",
                 "Missing scale or post receipt; no metric corner aperture.",
             )
-        post = (
-            CornerPostCondition.STRUCTURAL_CORNER_POST
-            if post_dimension_pt > 2.0
-            else CornerPostCondition.POSTLESS_BUTT_JOINT
-        )
+        # A caller's post dimension is not an original-source post receipt.
+        # Preserve the numeric hypothesis, but never assert a physical post.
+        post = CornerPostCondition.UNRESOLVED_CORNER_CONDITION
         return record(
             CornerApertureClassification.GEOMETRIC_CANDIDATE,
             EvidenceResolutionStatus.CANDIDATE,

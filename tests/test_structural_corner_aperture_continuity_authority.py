@@ -36,7 +36,7 @@ def test_positive_postless_butt_joint_corner_aperture(
     assert (
         record.classification == CornerApertureClassification.GEOMETRIC_CANDIDATE
     )
-    assert record.post_condition == CornerPostCondition.POSTLESS_BUTT_JOINT
+    assert record.post_condition == CornerPostCondition.UNRESOLVED_CORNER_CONDITION
     assert record.total_girth_pt == pytest.approx(140.0, abs=0.01)
     assert record.diagonal_chord_pt == pytest.approx(
         100.0, abs=0.01
@@ -66,7 +66,7 @@ def test_positive_structural_corner_post(
     assert (
         record.classification == CornerApertureClassification.GEOMETRIC_CANDIDATE
     )
-    assert record.post_condition == CornerPostCondition.STRUCTURAL_CORNER_POST
+    assert record.post_condition == CornerPostCondition.UNRESOLVED_CORNER_CONDITION
     assert record.post_dimension_pt == pytest.approx(5.0, abs=0.01)
     assert record.status == EvidenceResolutionStatus.CANDIDATE
 
@@ -361,3 +361,18 @@ def test_input_arguments_are_not_mutated_and_shadow_never_publishes(authority):
     assert vertex == [200.0, 300.0]
     assert first.to_dict()["commercial_projection_allowed"] is False
     assert first.to_dict()["takeoff_eligible"] is False
+
+
+def test_explicit_post_dimension_cannot_authenticate_physical_post(authority):
+    for dimension in (0.0, 2.0, 5.0):
+        record = authority.evaluate_corner_aperture(
+            jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+            corner_vertex=(200.0, 300.0),
+            host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+            post_dimension_pt=dimension, scale_ratio=0.01764,
+        )
+        assert record.classification == CornerApertureClassification.GEOMETRIC_CANDIDATE
+        assert record.post_condition == CornerPostCondition.UNRESOLVED_CORNER_CONDITION
+        assert record.status == EvidenceResolutionStatus.CANDIDATE
+        assert record.first_remaining_gate == "original_source_corner_host_frame_unverified"
+        assert not record.commercial_projection_allowed and not record.takeoff_eligible
