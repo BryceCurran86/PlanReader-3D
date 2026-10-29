@@ -107,7 +107,30 @@ def _original_issued_native_ring_edges(graph: dict):
     if (set(by_id)!=set(issued_ids)
             or len(set(by_id.values()))!=len(issued_ids)):
         return None
-    return frozenset(by_id.values())
+    return by_id
+
+
+def _original_source_witness_edge(ends, *, translation=(0.0, 0.0)):
+    """Validate a four-side issuer's literal native PDF endpoint receipt."""
+    if type(ends) not in (tuple, list) or len(ends) != 2:
+        return None
+    points = []
+    try:
+        for point in ends:
+            if (type(point) not in (tuple, list) or len(point) != 2
+                    or any(type(v) not in (int, float) for v in point)):
+                return None
+            x, y = (float(v) for v in point)
+            if not math.isfinite(x) or not math.isfinite(y):
+                return None
+            shifted = (round(x + translation[0], 3),
+                       round(y + translation[1], 3))
+            if not all(math.isfinite(v) for v in shifted):
+                return None
+            points.append(shifted)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return frozenset(points) if len(set(points)) == 2 else None
 
 
 def audit_gpt2_original_cross_sheet_ring_correspondence(
@@ -157,8 +180,13 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
             or tuple(reg_shift)!=tuple(translation_pdf_pts)):
         return {**base,"first_failure":"original_registration_issuer_or_scope_missing"}
     witnesses=reg.get("original_witnesses")
-    if type(witnesses) is not dict or not witnesses:
-        return {**base,"first_failure":"original_registration_witnesses_missing"}
+    # The independently executed original PDF registration issuer always
+    # authenticates four named, distinct painted sides; a caller's subset is
+    # not evidence of the complete original room wall registration.
+    original_roles=("left","right","bottom","top_partial")
+    if type(witnesses) is not dict or set(witnesses)!=set(original_roles):
+        return {**base,"first_failure":
+                "original_registration_four_side_witnesses_missing"}
     # A native graph issuer emits bounded, unique, typed path IDs. Do not
     # let malformed receipts crash set construction or supply false ancestry.
     raw_floor_ids=floor_graph.get("original_native_edge_ids")
@@ -175,9 +203,14 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     finish_ids=set(raw_finish_ids)
     seen_floor=set()
     seen_finish=set()
-    for role in witnesses.values():
+    witness_receipts=[]
+    for role_name in original_roles:
+        role=witnesses[role_name]
         if type(role) is not dict:
             return {**base,"first_failure":"unjoined_source_wall_ancestry"}
+        if role.get("matched_original_ink_only") is not True:
+            return {**base,"first_failure":
+                    "original_registration_ink_witness_unproven"}
         floor_source=role.get("floor_source")
         finish_source=role.get("finish_source")
         if type(floor_source) is not dict or type(finish_source) is not dict:
@@ -192,6 +225,9 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
                     "original_registration_witness_identity_alias_conflict"}
         seen_floor.add(floor_id)
         seen_finish.add(finish_id)
+        witness_receipts.append((floor_id,finish_id,
+                                 floor_source.get("ends"),
+                                 finish_source.get("ends")))
     floor_ring=_single_ring(floor_graph)
     finish_ring=_single_ring(finish_graph)
     if not floor_ring or not finish_ring:
@@ -210,13 +246,31 @@ def audit_gpt2_original_cross_sheet_ring_correspondence(
     # Native source ID membership is insufficient if a copied ring's vertex
     # geometry no longer follows the actual PDF edge endpoints. Compare both
     # independent producer receipts before cross-sheet translation.
+    native_by_page=[]
     for graph,ring in ((floor_graph,floor_ring),(finish_graph,finish_ring)):
         native_edges=_original_issued_native_ring_edges(graph)
         ring_edges=_source_cyclic_ring_edges_native(
             ring.get("vertices_pdf_pts"))
-        if (not native_edges or not ring_edges or native_edges!=ring_edges):
+        if (not native_edges or not ring_edges
+                or frozenset(native_edges.values())!=ring_edges):
             return {**base,"first_failure":
                     "original_native_edge_endpoint_ancestry_conflict"}
+        native_by_page.append(native_edges)
+    floor_native,finish_native=native_by_page
+    # A source ID alone is not a matched original-ink witness: each of the
+    # four issuer-signed endpoint pairs must agree with its OWN native graph
+    # edge and with the independently registered opposite-page paint.
+    for floor_id,finish_id,floor_ends,finish_ends in witness_receipts:
+        floor_witness=_original_source_witness_edge(floor_ends)
+        finish_witness=_original_source_witness_edge(finish_ends)
+        translated_witness=_original_source_witness_edge(
+            floor_ends,translation=translation_pdf_pts)
+        if (floor_witness is None or finish_witness is None
+                or floor_witness!=floor_native[floor_id]
+                or finish_witness!=finish_native[finish_id]
+                or translated_witness!=finish_witness):
+            return {**base,"first_failure":
+                    "original_registration_witness_geometry_conflict"}
     dx,dy=translation_pdf_pts
     # Equal source vertex sets can describe NON-equal wall cycles. Compare
     # every independently extracted native boundary side, including closure.
