@@ -1016,3 +1016,76 @@ def test_conflicting_neighbor_cannot_change_isolated_host_identity_or_create_pie
         assert all(record.shadow_only and not record.takeoff_eligible
                    and not record.commercial_projection_allowed
                    for record in records)
+
+
+@pytest.mark.parametrize("mode,gate,expected_piers", [
+    ("misaligned", "aperture_wall_axis_misaligned", 0),
+    ("obstructed", "host_through_wall_obstructed", 0),
+    ("far_off_band", "aperture_outside_host_wall_band", 1),
+])
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (250.0, -130.0)),
+])
+def test_rejected_in_band_opening_cannot_be_skipped_for_pier_adjacency(
+    mode, gate, expected_piers, angle, shift,
+):
+    """An unreviewed footprint between hosts cannot prove a physical pier."""
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    a = ApertureHostCandidateInput("A", tr((20.0, 0.0)), tr((30.0, 0.0)))
+    c = ApertureHostCandidateInput("C", tr((40.0, 0.0)), tr((50.0, 0.0)))
+    if mode == "misaligned":
+        middle = ApertureHostCandidateInput(
+            "unreviewed", tr((34.0, 0.0)), tr((36.0, 4.0)),
+        )
+        transverse = ()
+    elif mode == "obstructed":
+        middle = ApertureHostCandidateInput(
+            "unreviewed", tr((33.0, 0.0)), tr((37.0, 0.0)),
+        )
+        transverse = ((tr((35.0, -30.0)), tr((35.0, 30.0))),)
+    else:
+        middle = ApertureHostCandidateInput(
+            "unreviewed", tr((34.0, 40.0)), tr((36.0, 40.0)),
+        )
+        transverse = ()
+
+    authority = _authority()
+    canonical = None
+    for openings in ((a, middle, c), (c, middle, a)):
+        original_points = tuple((op.start_pt, op.end_pt) for op in openings)
+        records, piers = authority.bind_openings_to_through_wall(
+            through_wall=wall,
+            openings=openings,
+            transverse_wall_segments=transverse,
+        )
+        assert tuple((op.start_pt, op.end_pt) for op in openings) == original_points
+        assert len(records) == 3
+        by_id = {record.physical_opening_id: record for record in records}
+        assert by_id["unreviewed"].status is S.ABSTAINED
+        assert by_id["unreviewed"].first_remaining_gate == gate
+        assert all(by_id[k].status is S.CANDIDATE for k in ("A", "C"))
+        assert len(piers) == expected_piers
+        assert all(p.status is S.CANDIDATE and p.is_structural_masonry_pier is None
+                   for p in piers)
+        assert all(record.shadow_only and not record.takeoff_eligible
+                   and not record.commercial_projection_allowed
+                   for record in records)
+        assert all(len(by_id[k].adjacent_pier_ids) == expected_piers
+                   for k in ("A", "C"))
+        observed = (
+            {key: (record.hosting_record_id, record.status, record.first_remaining_gate,
+                   record.adjacent_pier_ids) for key, record in by_id.items()},
+            tuple(piers),
+        )
+        if canonical is None:
+            canonical = observed
+        else:
+            assert observed == canonical
+        assert authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=openings,
+            transverse_wall_segments=transverse,
+        ) == (records, piers)
