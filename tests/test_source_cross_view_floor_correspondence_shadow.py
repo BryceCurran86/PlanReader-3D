@@ -26,6 +26,7 @@ from pb_source_cross_view_floor_correspondence_shadow import (
     MARK_IN_UNREGISTERED_REGION,
     SOURCE_FINISH_MARK_IDENTITY_INVALID,
     SOURCE_MEASURED_FLOOR_BOX_INVALID,
+    SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
     OVERLAPPING_MEASURED_BOXES,
     _overlapping_measured_box_flags,
     DUPLICATE_PHYSICAL_FLOOR_IDENTITY,
@@ -1481,3 +1482,79 @@ def test_full_measured_box_overlap_index_handles_20000_disjoint_and_dense():
     assert not any(_overlapping_measured_box_flags(disjoint))
     assert all(_overlapping_measured_box_flags(dense))
     assert not any(_overlapping_measured_box_flags(edge_touching))
+
+
+# GPT2: source-room/canonical identities are original evidence, not display text.
+# A padded, type-coerced or unprintable source ID must never acquire an
+# apparently valid physical-room identity or silently alias another owner.
+@pytest.mark.parametrize("field_name", [
+    "canonical_floor_id", "physical_room_id", "source_room_face_record_id",
+])
+@pytest.mark.parametrize("bad_identity", [
+    123, True, ["source-face-first"], {"id": "source-face-first"},
+    " source-face-first", "source-face-first ", "\\tsource-face-first",
+    "source-face-first\\n", b"source-face-first", float("nan"),
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_malformed_original_floor_identity_vetoes_complete_owner_universe(
+    field_name, bad_identity, reverse,
+):
+    boxes = _two_separated_floor_boxes()
+    boxes[0][field_name] = bad_identity
+    if reverse:
+        boxes.reverse()
+    original = copy.deepcopy(boxes)
+    result = _two_floor_result(boxes)
+    assert boxes == original
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert len(result.records) == 2
+    assert len({row.record_id for row in result.records}) == 2
+    for row in result.records:
+        assert row.status is EvidenceResolutionStatus.ABSTAINED
+        assert SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID in row.reason_codes
+        assert row.authority_blockers == ()
+        assert not row.takeoff_eligible
+        assert not row.commercial_projection_allowed
+    bad_row = result.records[1 if reverse else 0]
+    assert getattr(bad_row, field_name) == ""
+    assert SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID in result.reason_codes
+
+
+def test_original_native_floor_identity_remains_verbatim_and_shadow_only():
+    boxes = _two_separated_floor_boxes()
+    boxes[0]["source_room_face_record_id"] = "source:face/first#1"
+    before = copy.deepcopy(boxes)
+    result = _two_floor_result(boxes)
+    assert boxes == before
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 2
+    assert result.records[0].source_room_face_record_id == "source:face/first#1"
+    assert all(row.status is EvidenceResolutionStatus.CANDIDATE
+               for row in result.records)
+    assert all(not row.takeoff_eligible and not row.commercial_projection_allowed
+               for row in result.records)
+
+
+def test_malformed_identity_does_not_erase_real_competing_finish_conflict():
+    boxes = _two_separated_floor_boxes()[:1]
+    boxes[0]["physical_room_id"] = {"untrusted": "room"}
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=boxes,
+        marks=[
+            {"x": 327.8, "y": 1437.5, "code": "FT3",
+             "registered_region": True},
+            {"x": 335.8, "y": 1447.5, "code": "FT2",
+             "registered_region": True},
+        ],
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert len(result.records) == 1
+    row = result.records[0]
+    assert row.status is EvidenceResolutionStatus.CONFLICT
+    assert row.physical_room_id == ""
+    assert COMPETING_FINISH_CODES_IN_BOX in row.reason_codes
+    assert SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID in row.reason_codes
+    assert not row.takeoff_eligible and not row.commercial_projection_allowed
