@@ -1787,3 +1787,33 @@ def test_small_multi_code_source_universe_preserves_exact_counts_and_conflict():
         assert classified["status"] is EvidenceResolutionStatus.CONFLICT
         assert COMPETING_FINISH_CODES_IN_BOX in classified["reason_codes"]
         assert classified["finish_codes_in_box"] == counts
+
+
+def test_cardinality_refusal_preserves_malformed_mark_and_box_universe_negatives():
+    marks = [
+        {"x": 10.0, "y": 10.0, "code": f"FT-{i}",
+         "registered_region": True}
+        for i in range(1000)
+    ]
+    marks.append({"x": 10.0, "y": 10.0, "registered_region": True})
+    boxes = [
+        {"dimension_box_pdf_pts": (0.0, 0.0, 20.0, 20.0),
+         "canonical_floor_id": f"floor-{i}",
+         "physical_room_id": f"room-{i}",
+         "source_room_face_record_id": f"face-{i}"}
+        for i in range(300)
+    ]
+    boxes.append({"dimension_box_pdf_pts": (0.0, 0.0, 0.0, 20.0)})
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(), support_segments=[], target_segments=[],
+        measured_boxes=boxes, marks=marks,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (
+        SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED,
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+    )
+    assert result.records == ()
+    assert marks[-1] == {"x": 10.0, "y": 10.0, "registered_region": True}
+    assert boxes[-1]["dimension_box_pdf_pts"] == (0.0, 0.0, 0.0, 20.0)
