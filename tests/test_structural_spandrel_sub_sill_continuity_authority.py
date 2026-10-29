@@ -213,3 +213,43 @@ def test_shadow_identity_binds_scale_subcentipoint_and_host(authority):
     assert base.total_wall_opening_area_sqm == base.glazing_aperture_area_sqm
     assert base.spandrel_wall_area_sqm > 0
     assert not base.takeoff_eligible and not base.commercial_projection_allowed
+
+
+@pytest.mark.parametrize(
+    "levels, right_jamb, expected_class, expected_gate",
+    [
+        ((2100.0, 900.0), (200.0, 200.0),
+         SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS,
+         "vertical_levels_inverted_or_negative"),
+        ((900.0, 2100.0), (110.0, 200.0),
+         SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN,
+         "clear_span_out_of_bounds"),
+    ],
+)
+def test_rejected_aperture_never_serializes_hypothetical_metric_quantity(
+    authority, levels, right_jamb, expected_class, expected_gate
+):
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=right_jamb,
+        sill_height_mm=levels[0], head_height_mm=levels[1],
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    rejected = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert rejected.classification == expected_class
+    assert rejected.status == EvidenceResolutionStatus.ABSTAINED
+    assert rejected.first_remaining_gate == expected_gate
+    for field in ("clear_span_m", "glazing_height_mm",
+                  "glazing_aperture_area_sqm", "spandrel_wall_area_sqm",
+                  "total_wall_opening_area_sqm"):
+        assert getattr(rejected, field) is None
+        assert rejected.to_dict()[field] is None
+    assert rejected.contract_id == authority.evaluate_spandrel_sub_sill(
+        **(kwargs | dict(jamb_a=right_jamb, jamb_b=kwargs["jamb_a"]))).contract_id
+    assert rejected.shadow_only and not rejected.takeoff_eligible
+    assert not rejected.commercial_projection_allowed
+    positive = authority.evaluate_spandrel_sub_sill(
+        **(kwargs | dict(jamb_b=(200.0, 200.0),
+                        sill_height_mm=900.0, head_height_mm=2100.0)))
+    assert positive.classification == SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    assert positive.glazing_aperture_area_sqm is not None
+    assert not positive.takeoff_eligible and not positive.commercial_projection_allowed
