@@ -176,8 +176,12 @@ class StructuralCornerApertureContinuityAuthority:
             ("host_wall_b_id", host_wall_b_id),
             ("context_label", context_label),
         ):
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{name} must be a nonblank string")
+            # A padded or nonprintable caller identity is not a second
+            # source wall. Reject it before dual-host comparison and stable ID
+            # construction rather than silently aliasing physical ownership.
+            if (type(value) is not str or not value
+                    or value != value.strip() or not value.isprintable()):
+                raise ValueError(f"{name} must be an exact printable source identity")
 
         a = (float(jamb_a[0]), float(jamb_a[1]))
         b = (float(jamb_b[0]), float(jamb_b[1]))
