@@ -126,6 +126,8 @@ class StructuralCornerApertureRecord:
     total_girth_m: float | None
     diagonal_chord_pt: float
     status: EvidenceResolutionStatus
+    context_label: str
+    scale_ratio: float | None
     post_dimension_pt: float | None = None
     first_remaining_gate: str | None = None
     notes: str = ""
@@ -212,11 +214,63 @@ class StructuralCornerApertureRecord:
                 or not math.isclose(self.diagonal_chord_pt, expected_chord,
                                     rel_tol=1e-12, abs_tol=1e-9)):
             raise ValueError("corner record numeric evidence conflicts with leg geometry")
+        # Producer identity is a receipt, not an arbitrary caller label.
+        # Reconstruct it from exact native points, ordered hosts, context,
+        # post and the explicitly supplied *hypothetical* scale. This does
+        # not authenticate any of those inputs as original source evidence.
+        identities = (self.context_label, self.leg_a.host_wall_id,
+                      self.leg_b.host_wall_id)
+        if any(type(value) is not str or not value
+               or value != value.strip() or not value.isprintable()
+               for value in identities):
+            raise ValueError("corner identity receipt requires exact printable source identity")
+        if (self.scale_ratio is not None and
+                (not _finite_real(self.scale_ratio) or self.scale_ratio <= 0)):
+            raise ValueError("corner hypothetical scale receipt must be finite and positive")
+        if ((self.leg_a.host_wall_id, self.leg_a.terminal_jamb)
+                > (self.leg_b.host_wall_id, self.leg_b.terminal_jamb)):
+            raise ValueError("corner identity receipt has noncanonical leg ordering")
+        expected_id = _corner_contract_id(
+            self.context_label, self.corner_vertex,
+            self.leg_a.terminal_jamb, self.leg_b.terminal_jamb,
+            self.leg_a.host_wall_id, self.leg_b.host_wall_id,
+            self.post_dimension_pt, self.scale_ratio,
+        )
+        if (type(self.contract_id) is not str or self.contract_id != expected_id
+                or type(self.leg_a.leg_id) is not str
+                or self.leg_a.leg_id != f"{expected_id}:LEG_A"
+                or type(self.leg_b.leg_id) is not str
+                or self.leg_b.leg_id != f"{expected_id}:LEG_B"):
+            raise ValueError("corner identity receipt conflicts with producer geometry")
+        if self.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE:
+            if (self.scale_ratio is None or self.post_dimension_pt is None
+                    or self.post_dimension_pt > MAX_CORNER_POST_DIM_PT
+                    or self.leg_a.host_wall_id == self.leg_b.host_wall_id
+                    or not MIN_LEG_SPAN_PT <= self.leg_a.leg_span_pt <= MAX_LEG_SPAN_PT
+                    or not MIN_LEG_SPAN_PT <= self.leg_b.leg_span_pt <= MAX_LEG_SPAN_PT
+                    or not MIN_CORNER_ANGLE_DEG <= self.corner_angle_deg <= MAX_CORNER_ANGLE_DEG):
+                raise ValueError("corner geometric candidate exceeds source-neutral bounds")
+            expected_metric = (
+                self.leg_a.leg_span_pt * self.scale_ratio,
+                self.leg_b.leg_span_pt * self.scale_ratio,
+                self.total_girth_pt * self.scale_ratio,
+            )
+            recorded_metric = (
+                self.leg_a.leg_span_m, self.leg_b.leg_span_m, self.total_girth_m,
+            )
+            if any(not math.isfinite(expected) or expected <= 0
+                   or recorded is None
+                   or not math.isclose(recorded, expected,
+                                       rel_tol=1e-12, abs_tol=0.0)
+                   for recorded, expected in zip(recorded_metric, expected_metric)):
+                raise ValueError("corner hypothetical metric evidence conflicts with scale")
 
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "contract_id": self.contract_id,
+            "context_label": self.context_label,
+            "scale_ratio": self.scale_ratio,
             "classification": self.classification.value,
             "leg_a": self.leg_a.to_dict(),
             "leg_b": self.leg_b.to_dict(),
@@ -252,6 +306,29 @@ def _finite_source_coordinate(value: object) -> bool:
     # Match the existing inclusive 2**53 native source-point identity limit
     # for floats and ints, without constraining independent scale/post scalars.
     return _finite_real(value) and abs(value) <= 2**53
+
+
+
+def _corner_contract_id(
+    context_label: str,
+    vertex: tuple[float, float],
+    jamb_a: tuple[float, float],
+    jamb_b: tuple[float, float],
+    host_a: str,
+    host_b: str,
+    post_dimension_pt: float | None,
+    scale_ratio: float | None,
+) -> str:
+    """Producer-equivalent exact identity for unverified corner hypotheses."""
+    return stable_contract_id(
+        f"CORNER_APERTURE_{context_label}",
+        (
+            *(float(value).hex() for value in (*vertex, *jamb_a, *jamb_b)),
+            host_a, host_b,
+            "missing_post" if post_dimension_pt is None else float(post_dimension_pt).hex(),
+            "missing_scale" if scale_ratio is None else float(scale_ratio).hex(),
+        ),
+    )
 
 
 class StructuralCornerApertureContinuityAuthority:
@@ -321,14 +398,9 @@ class StructuralCornerApertureContinuityAuthority:
 
         # Full-precision identity includes source-neutral scale, post, host and
         # geometry; sorting makes input-order swaps invariant.
-        contract_id = stable_contract_id(
-            f"CORNER_APERTURE_{context_label}",
-            (
-                *(v.hex() for v in (*vertex, *a, *b)),
-                host_a, host_b,
-                "missing_post" if post_dimension_pt is None else float(post_dimension_pt).hex(),
-                "missing_scale" if scale_ratio is None else float(scale_ratio).hex(),
-            ),
+        contract_id = _corner_contract_id(
+            context_label, vertex, a, b, host_a, host_b,
+            post_dimension_pt, scale_ratio,
         )
 
         def record(
@@ -361,6 +433,7 @@ class StructuralCornerApertureContinuityAuthority:
                 corner_angle_deg=angle, post_condition=post,
                 total_girth_pt=total_pt, total_girth_m=metric_lengths[2],
                 diagonal_chord_pt=chord_pt, status=status,
+                context_label=context_label, scale_ratio=scale_ratio,
                 post_dimension_pt=post_dimension_pt,
                 first_remaining_gate=gate, notes=notes,
             )
