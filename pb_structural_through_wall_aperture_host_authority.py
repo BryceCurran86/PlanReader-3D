@@ -134,6 +134,18 @@ class InterAperturePierRecord:
     pier_width_pt: float
     left_opening_id: str
     right_opening_id: str
+    # Immutable source-neutral receipt for the exact pier identity.
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    host_wall_id: str
+    host_start_pt: tuple[float, float]
+    host_end_pt: tuple[float, float]
+    host_thickness_pt: float
+    left_jamb_endpoints: tuple[tuple[float, float], tuple[float, float]]
+    right_jamb_endpoints: tuple[tuple[float, float], tuple[float, float]]
+    left_jamb_observations: tuple[str, ...]
+    right_jamb_observations: tuple[str, ...]
     is_structural_masonry_pier: bool | None = None
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     first_remaining_gate: str = "original_source_structural_pier_unverified"
@@ -160,6 +172,84 @@ class InterAperturePierRecord:
                 or not math.isclose(self.pier_width_pt, gap,
                                     rel_tol=1e-12, abs_tol=1e-9)):
             raise ValueError("pier numeric evidence conflicts with stations")
+        # Frozen records may be directly constructed or dataclasses.replace'd.
+        # Reconstruct the producer's complete source/host/jamb identity before
+        # accepting a geometric pier. This does not grant original-source proof.
+        if not 0.5 <= gap <= 60.0:
+            raise ValueError("pier numeric evidence outside candidate gap range")
+        if any(not _native_source_identity(value) for value in (
+                self.document_id, self.revision_id, self.source_sha256,
+                self.host_wall_id)):
+            raise ValueError("pier source identity receipt must be exact")
+        if (not _finite_point(self.host_start_pt)
+                or not _finite_point(self.host_end_pt)
+                or not _finite_real(self.host_thickness_pt)
+                or self.host_thickness_pt <= 0):
+            raise ValueError("pier host geometry receipt must be finite and physical")
+        wall_dx = self.host_end_pt[0] - self.host_start_pt[0]
+        wall_dy = self.host_end_pt[1] - self.host_start_pt[1]
+        wall_length = math.hypot(wall_dx, wall_dy)
+        if not math.isfinite(wall_length) or wall_length <= _COORD_TOL:
+            raise ValueError("pier host geometry receipt requires a distinct wall")
+        ax, ay = wall_dx / wall_length, wall_dy / wall_length
+        for endpoints, observations in (
+            (self.left_jamb_endpoints, self.left_jamb_observations),
+            (self.right_jamb_endpoints, self.right_jamb_observations),
+        ):
+            if (type(endpoints) is not tuple or len(endpoints) != 2
+                    or any(type(point) is not tuple or not _finite_point(point)
+                           for point in endpoints)
+                    or endpoints[0] == endpoints[1]):
+                raise ValueError("pier jamb geometry receipt must contain two native points")
+            if (type(observations) is not tuple
+                    or len(observations) > _MAX_GEOMETRIC_PRIMITIVES
+                    or any(not _native_source_identity(v) for v in observations)
+                    or len(set(observations)) != len(observations)
+                    or observations != tuple(sorted(observations))):
+                raise ValueError("pier jamb observation receipt must be exact and bounded")
+        def station(point: tuple[float, float]) -> float:
+            dx = point[0] - self.host_start_pt[0]
+            dy = point[1] - self.host_start_pt[1]
+            projected = dx * ax + dy * ay
+            if not math.isfinite(projected):
+                raise ValueError("pier jamb station receipt must remain finite")
+            return projected
+        left_station = min(
+            wall_length, max(0.0, max(station(p) for p in self.left_jamb_endpoints))
+        )
+        right_station = max(
+            0.0, min(wall_length, min(station(p) for p in self.right_jamb_endpoints))
+        )
+        if (self.pier_start_station != left_station
+                or self.pier_end_station != right_station):
+            raise ValueError("pier numeric evidence conflicts with owned jamb stations")
+        pier_payload = {
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "host_wall_id": self.host_wall_id,
+            "host_start_pt": tuple(float(v).hex() for v in self.host_start_pt),
+            "host_end_pt": tuple(float(v).hex() for v in self.host_end_pt),
+            "host_thickness_pt": float(self.host_thickness_pt).hex(),
+            "left_opening_id": self.left_opening_id,
+            "right_opening_id": self.right_opening_id,
+            "left_jamb_endpoints": tuple(sorted(
+                tuple(float(v).hex() for v in point)
+                for point in self.left_jamb_endpoints
+            )),
+            "right_jamb_endpoints": tuple(sorted(
+                tuple(float(v).hex() for v in point)
+                for point in self.right_jamb_endpoints
+            )),
+            "left_jamb_observations": self.left_jamb_observations,
+            "right_jamb_observations": self.right_jamb_observations,
+            "start_station": float(self.pier_start_station).hex(),
+            "end_station": float(self.pier_end_station).hex(),
+            "width_pt": float(self.pier_width_pt).hex(),
+        }
+        if self.pier_id != stable_contract_id(
+                "inter_aperture_pier", pier_payload, digest_chars=32):
+            raise ValueError("pier stable identity conflicts with source or geometry receipt")
 
 
 @dataclass(frozen=True)
@@ -929,6 +1019,21 @@ class StructuralThroughWallApertureHostAuthority:
                     pier_width_pt=gap,
                     left_opening_id=curr["op"].physical_opening_id,
                     right_opening_id=nxt["op"].physical_opening_id,
+                    document_id=self._producer.document_id,
+                    revision_id=self._producer.revision_id,
+                    source_sha256=self._producer.source_sha256,
+                    host_wall_id=through_wall.wall_id,
+                    host_start_pt=through_wall.start_pt,
+                    host_end_pt=through_wall.end_pt,
+                    host_thickness_pt=through_wall.thickness_pt,
+                    left_jamb_endpoints=tuple(sorted((
+                        curr["op"].start_pt, curr["op"].end_pt,
+                    ))),
+                    right_jamb_endpoints=tuple(sorted((
+                        nxt["op"].start_pt, nxt["op"].end_pt,
+                    ))),
+                    left_jamb_observations=curr["op"].terminal_jamb_observation_ids,
+                    right_jamb_observations=nxt["op"].terminal_jamb_observation_ids,
                     is_structural_masonry_pier=None,
                 )
                 piers.append(pier_rec)

@@ -2364,3 +2364,94 @@ def test_frozen_host_source_geometry_receipt_rotates_without_id_drift(angle, shi
     assert first[0][0].host_end_pt == wall.end_pt
     assert not first[0][0].takeoff_eligible
     assert not first[0][0].commercial_projection_allowed
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2.0, (250.0, -120.0)),
+    (math.pi / 3.0, (-300.0, 80.0)),
+])
+def test_frozen_pier_source_and_jamb_receipt_refuses_stale_identity(angle, shift):
+    """A jointly coherent new pier gap cannot inherit the previous source-bound ID."""
+    from dataclasses import replace
+
+    tr = lambda p: _rotated(p, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "pier-host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    left = ApertureHostCandidateInput(
+        "pier-left", tr((10.0, 0.0)), tr((30.0, 0.0)),
+        ("left-jamb-a", "left-jamb-b"),
+    )
+    right = ApertureHostCandidateInput(
+        "pier-right", tr((45.0, 0.0)), tr((65.0, 0.0)),
+        ("right-jamb-a", "right-jamb-b"),
+    )
+    original = (wall, left, right)
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(left, right),
+    )
+    assert len(piers) == 1
+    pier = piers[0]
+    assert pier.status is S.CANDIDATE
+    assert pier.is_structural_masonry_pier is None
+    assert replace(pier) == pier
+    assert pier.document_id == "synthetic"
+    assert pier.host_start_pt == wall.start_pt
+    assert pier.host_end_pt == wall.end_pt
+    assert pier.left_jamb_observations == left.terminal_jamb_observation_ids
+    assert pier.right_jamb_observations == right.terminal_jamb_observation_ids
+    with pytest.raises(ValueError, match="owned jamb stations"):
+        replace(pier, pier_start_station=pier.pier_start_station + 1.0,
+                pier_end_station=pier.pier_end_station + 1.0)
+    with pytest.raises(ValueError, match="owned jamb stations"):
+        replace(pier, pier_start_station=pier.pier_start_station + 1.0,
+                pier_width_pt=pier.pier_width_pt - 1.0)
+
+    # Both modified jamb and matching gap are geometric candidates, but
+    # their original-source-neutral identity must differ.
+    new_left = tuple(sorted((tr((11.0, 0.0)), tr((31.0, 0.0)))))
+    ax, ay = wall.axis_unit
+    new_start = max(
+        (p[0] - wall.start_pt[0]) * ax + (p[1] - wall.start_pt[1]) * ay
+        for p in new_left
+    )
+    with pytest.raises(ValueError, match="pier stable identity"):
+        replace(pier, left_jamb_endpoints=new_left,
+                pier_start_station=new_start,
+                pier_width_pt=pier.pier_end_station - new_start)
+    for changes in (
+        {"left_opening_id": "different-opening"},
+        {"right_opening_id": "different-opening"},
+        {"document_id": "different-document"},
+        {"revision_id": "different-revision"},
+        {"source_sha256": "different-source"},
+        {"host_wall_id": "different-wall"},
+        {"host_thickness_pt": 22.0},
+        {"left_jamb_observations": ("new-left-jamb",)},
+        {"right_jamb_observations": ("new-right-jamb",)},
+    ):
+        with pytest.raises(ValueError, match="pier stable identity"):
+            replace(pier, **changes)
+    for bad in ("", " padded ", None, 123):
+        with pytest.raises(ValueError, match="pier source identity"):
+            replace(pier, document_id=bad)
+    for bad in (float("nan"), float("inf"), True):
+        with pytest.raises(ValueError, match="pier host geometry"):
+            replace(pier, host_thickness_pt=bad)
+    with pytest.raises(ValueError, match="pier jamb geometry"):
+        replace(pier, left_jamb_endpoints=((0.0, 0.0), (float("nan"), 0.0)))
+    with pytest.raises(ValueError, match="pier jamb observation"):
+        replace(pier, left_jamb_observations=("duplicate", "duplicate"))
+
+    again = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(left, right),
+    )
+    reversed_order = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(right, left),
+    )
+    assert again == (records, piers)
+    assert reversed_order == (tuple(reversed(records)), piers)
+    assert (wall, left, right) == original
+    assert all(r.shadow_only and not r.takeoff_eligible
+               and not r.commercial_projection_allowed for r in records)
