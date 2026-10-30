@@ -84,6 +84,9 @@ class SpandrelSubSillRecord:
     status: EvidenceResolutionStatus
     first_remaining_gate: str | None = None
     notes: str = ""
+    # Unverified source-hypothesis inputs retained for immutable identity.
+    context_label: str = "SPANDREL_WINDOW"
+    scale_ratio: float | None = None
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
     shadow_only: bool = True
@@ -129,6 +132,8 @@ class SpandrelSubSillRecord:
         def finite_real(value: object) -> bool:
             if type(value) not in (int, float):
                 return False
+            if type(value) is int and abs(value) > 2**53:
+                return False
             try:
                 return math.isfinite(float(value))
             except (OverflowError, ValueError):
@@ -150,6 +155,17 @@ class SpandrelSubSillRecord:
                            self.total_wall_opening_area_sqm,
                        ))):
             raise ValueError("spandrel numeric evidence must be finite and physical")
+        if (not _native_source_identity(self.host_through_wall_id)
+                or not _native_source_identity(self.context_label)):
+            raise ValueError("spandrel exact host and context identity required")
+        if self.jamb_left > self.jamb_right:
+            raise ValueError("spandrel jamb ordering conflicts with producer")
+        if (self.scale_ratio is not None
+                and (not finite_real(self.scale_ratio) or self.scale_ratio <= 0)):
+            raise ValueError("spandrel scale must be finite and positive")
+        if ((self.classification is SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE)
+                != (self.scale_ratio is None)):
+            raise ValueError("spandrel scale receipt conflicts with source gate")
         expected_span = math.hypot(
             self.jamb_right[0] - self.jamb_left[0],
             self.jamb_right[1] - self.jamb_left[1],
@@ -180,6 +196,12 @@ class SpandrelSubSillRecord:
                                         self.total_wall_opening_area_sqm,
                                         rel_tol=1e-12, abs_tol=1e-12)):
                 raise ValueError("spandrel numeric evidence conflicts with candidate geometry")
+            expected_metric_span = self.clear_span_pt * self.scale_ratio
+            if (not math.isfinite(expected_metric_span)
+                    or expected_metric_span <= 0
+                    or not math.isclose(self.clear_span_m, expected_metric_span,
+                                        rel_tol=1e-12, abs_tol=1e-12)):
+                raise ValueError("spandrel metric span conflicts with scale receipt")
             # Public frozen records can be replaced after production. The
             # positive hypothetical areas must still equal their owned
             # span and vertical axes, not arbitrary caller-supplied m².
@@ -196,6 +218,17 @@ class SpandrelSubSillRecord:
                                         expected_spandrel,
                                         rel_tol=1e-12, abs_tol=1e-12)):
                 raise ValueError("spandrel numeric evidence conflicts with metric area axes")
+
+        # A public frozen record cannot retain a previous physical-host or
+        # geometry identity after a coherent direct replacement. Source-neutral
+        # identities do not establish source-backed measurement authority.
+        expected_id = _spandrel_identity(
+            self.context_label, self.host_through_wall_id,
+            self.jamb_left, self.jamb_right,
+            self.sill_height_mm, self.head_height_mm, self.scale_ratio,
+        )
+        if type(self.contract_id) is not str or self.contract_id != expected_id:
+            raise ValueError("spandrel stable identity conflicts with source-neutral inputs")
 
     def to_dict(self) -> Mapping[str, Any]:
         # Retain full native/candidate evidence precision. The stable ID binds
@@ -215,6 +248,8 @@ class SpandrelSubSillRecord:
             "spandrel_wall_area_sqm": self.spandrel_wall_area_sqm,
             "total_wall_opening_area_sqm": self.total_wall_opening_area_sqm,
             "host_through_wall_id": self.host_through_wall_id,
+            "context_label": self.context_label,
+            "scale_ratio": self.scale_ratio,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
             "notes": self.notes,
@@ -222,6 +257,29 @@ class SpandrelSubSillRecord:
             "takeoff_eligible": self.takeoff_eligible,
             "shadow_only": self.shadow_only,
         }
+
+
+
+def _spandrel_identity(
+    context_label: str,
+    host_through_wall_id: str,
+    jamb_left: tuple[float, float],
+    jamb_right: tuple[float, float],
+    sill_height_mm: float,
+    head_height_mm: float,
+    scale_ratio: float | None,
+) -> str:
+    """Producer/frozen-record exact geometric hypothesis identity."""
+    return stable_contract_id(
+        f"SPANDREL_SUB_SILL_{context_label}",
+        (
+            host_through_wall_id,
+            *(float(v).hex() for v in (*jamb_left, *jamb_right)),
+            float(sill_height_mm).hex(),
+            float(head_height_mm).hex(),
+            "source_scale_unverified" if scale_ratio is None else float(scale_ratio).hex(),
+        ),
+    )
 
 
 class StructuralSpandrelSubSillContinuityAuthority:
@@ -300,12 +358,9 @@ class StructuralSpandrelSubSillContinuityAuthority:
         if scale_ratio is None:
             # A typed abstention is essential at the existing shadow record
             # seam. Null metric fields are unknown, never zero quantities.
-            contract_id = stable_contract_id(
-                f"SPANDREL_SUB_SILL_{context_label}",
-                (host_through_wall_id,
-                 *(float(v).hex() for v in (*jamb_left, *jamb_right)),
-                 float(sill_height_mm).hex(), float(head_height_mm).hex(),
-                 "source_scale_unverified"),
+            contract_id = _spandrel_identity(
+                context_label, host_through_wall_id, jamb_left, jamb_right,
+                sill_height_mm, head_height_mm, None,
             )
             return SpandrelSubSillRecord(
                 contract_id=contract_id,
@@ -321,20 +376,16 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 spandrel_wall_area_sqm=None,
                 total_wall_opening_area_sqm=None,
                 host_through_wall_id=host_through_wall_id,
+                context_label=context_label,
+                scale_ratio=scale_ratio,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="original_source_scale_authority_unverified",
                 notes="Source scale absent; no metric opening or wall area.",
             )
 
-        contract_id = stable_contract_id(
-            f"SPANDREL_SUB_SILL_{context_label}",
-            (
-                host_through_wall_id,
-                *(float(v).hex() for v in (*jamb_left, *jamb_right)),
-                float(sill_height_mm).hex(),
-                float(head_height_mm).hex(),
-                float(scale_ratio).hex(),
-            ),
+        contract_id = _spandrel_identity(
+            context_label, host_through_wall_id, jamb_left, jamb_right,
+            sill_height_mm, head_height_mm, scale_ratio,
         )
 
         # Gate 1: Clear span bounds
@@ -353,6 +404,8 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 spandrel_wall_area_sqm=None,
                 total_wall_opening_area_sqm=None,
                 host_through_wall_id=host_through_wall_id,
+                context_label=context_label,
+                scale_ratio=scale_ratio,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="clear_span_out_of_bounds",
                 notes=f"Clear span {clear_span_pt!r}pt outside bounds [{MIN_CLEAR_SPAN_PT}, {MAX_CLEAR_SPAN_PT}]pt.",
@@ -378,6 +431,8 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 spandrel_wall_area_sqm=None,
                 total_wall_opening_area_sqm=None,
                 host_through_wall_id=host_through_wall_id,
+                context_label=context_label,
+                scale_ratio=scale_ratio,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 first_remaining_gate="vertical_levels_inverted_or_negative",
                 notes=f"Invalid vertical levels: sill={sill_height_mm:.1f}mm >= head={head_height_mm:.1f}mm.",
@@ -424,6 +479,8 @@ class StructuralSpandrelSubSillContinuityAuthority:
             spandrel_wall_area_sqm=spandrel_area_sqm,
             total_wall_opening_area_sqm=total_opening_area_sqm,
             host_through_wall_id=host_through_wall_id,
+            context_label=context_label,
+            scale_ratio=scale_ratio,
             status=EvidenceResolutionStatus.CANDIDATE,
             first_remaining_gate="original_source_spandrel_host_scale_levels_unverified",
             notes=(
