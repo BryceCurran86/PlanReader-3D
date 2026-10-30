@@ -510,3 +510,89 @@ def test_inclusive_corner_source_coordinate_boundary_is_shadow_only(authority):
     assert first.leg_b.leg_span_m is None
     assert first.shadow_only and not first.takeoff_eligible
     assert not first.commercial_projection_allowed
+
+
+def _source_identity_corner_kwargs():
+    return dict(
+        jamb_a=[200.0, 380.0],
+        jamb_b=[260.0, 300.0],
+        corner_vertex=[200.0, 300.0],
+        host_wall_a_id="WALL_A",
+        host_wall_b_id="WALL_B",
+        context_label="CORNER_APERTURE",
+        post_dimension_pt=0.0,
+        scale_ratio=0.01764,
+    )
+
+
+def test_padded_corner_host_alias_cannot_evade_distinct_wall_gate(authority):
+    """A padded spelling of the same physical wall must not mint two hosts."""
+    kw = _source_identity_corner_kwargs()
+    kw["host_wall_b_id"] = "WALL_A"
+    same = authority.evaluate_corner_aperture(**kw)
+    assert same.status is EvidenceResolutionStatus.ABSTAINED
+    assert same.first_remaining_gate == "distinct_corner_host_walls_unverified"
+    assert same.total_girth_m is None
+    for alias in ("WALL_A ", " WALL_A", "\tWALL_A", "WALL_A\n"):
+        before = tuple(kw["jamb_a"]), tuple(kw["jamb_b"]), tuple(kw["corner_vertex"])
+        with pytest.raises(ValueError, match="exact printable source identity"):
+            authority.evaluate_corner_aperture(**(kw | {"host_wall_b_id": alias}))
+        assert before == (tuple(kw["jamb_a"]), tuple(kw["jamb_b"]),
+                          tuple(kw["corner_vertex"]))
+    assert same.shadow_only and not same.takeoff_eligible
+    assert not same.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("field", [
+    "host_wall_a_id", "host_wall_b_id", "context_label",
+])
+@pytest.mark.parametrize("bad", [
+    "", " ", " WALL_A", "WALL_A ", "WALL\nA", "WALL\tA",
+    "WALL\x00A", "WALL\u200bA", True, None, 123,
+])
+def test_corner_source_identity_must_be_exact_and_printable(
+    authority, field, bad,
+):
+    kw = _source_identity_corner_kwargs()
+    with pytest.raises(ValueError, match="exact printable source identity"):
+        authority.evaluate_corner_aperture(**(kw | {field: bad}))
+    assert kw["jamb_a"] == [200.0, 380.0]
+    assert kw["jamb_b"] == [260.0, 300.0]
+    assert kw["corner_vertex"] == [200.0, 300.0]
+
+
+def test_distinct_exact_corner_hosts_keep_shadow_candidate_and_order_replay(
+    authority,
+):
+    kw = _source_identity_corner_kwargs()
+    first = authority.evaluate_corner_aperture(**kw)
+    second = authority.evaluate_corner_aperture(**kw)
+    swapped = authority.evaluate_corner_aperture(**(
+        kw | dict(
+            jamb_a=kw["jamb_b"], jamb_b=kw["jamb_a"],
+            host_wall_a_id=kw["host_wall_b_id"],
+            host_wall_b_id=kw["host_wall_a_id"],
+        )
+    ))
+    assert first == second
+    assert first.contract_id == swapped.contract_id
+    assert first.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE
+    assert first.first_remaining_gate == "original_source_corner_host_frame_unverified"
+    assert first.leg_a.host_wall_id != first.leg_b.host_wall_id
+    assert first.to_dict()["leg_a"]["host_wall_id"] in ("WALL_A", "WALL_B")
+    assert first.to_dict()["commercial_projection_allowed"] is False
+    assert first.to_dict()["takeoff_eligible"] is False
+    assert kw["jamb_a"] == [200.0, 380.0]
+    assert kw["jamb_b"] == [260.0, 300.0]
+    assert kw["corner_vertex"] == [200.0, 300.0]
+
+
+def test_corner_host_identity_rejects_string_subclass(authority):
+    class Impostor(str):
+        pass
+
+    kw = _source_identity_corner_kwargs()
+    with pytest.raises(ValueError, match="exact printable source identity"):
+        authority.evaluate_corner_aperture(**(
+            kw | {"host_wall_a_id": Impostor("WALL_A")}
+        ))
