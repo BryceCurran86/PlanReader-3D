@@ -142,6 +142,7 @@ class InterAperturePierRecord:
     host_start_pt: tuple[float, float]
     host_end_pt: tuple[float, float]
     host_thickness_pt: float
+    snap_tolerance_pt: float
     left_jamb_endpoints: tuple[tuple[float, float], tuple[float, float]]
     right_jamb_endpoints: tuple[tuple[float, float], tuple[float, float]]
     left_jamb_observations: tuple[str, ...]
@@ -184,7 +185,9 @@ class InterAperturePierRecord:
         if (not _finite_point(self.host_start_pt)
                 or not _finite_point(self.host_end_pt)
                 or not _finite_real(self.host_thickness_pt)
-                or self.host_thickness_pt <= 0):
+                or self.host_thickness_pt <= 0
+                or not _finite_real(self.snap_tolerance_pt)
+                or not 0.0 <= self.snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT):
             raise ValueError("pier host geometry receipt must be finite and physical")
         wall_dx = self.host_end_pt[0] - self.host_start_pt[0]
         wall_dy = self.host_end_pt[1] - self.host_start_pt[1]
@@ -218,8 +221,8 @@ class InterAperturePierRecord:
         # Recompute those host-band and axis predicates at the public frozen
         # record seam. Matching projected stations and a freshly recomputed
         # stable ID alone cannot authenticate transversely displaced or
-        # oblique jambs. The maximum existing 2.5pt snap is conservative here:
-        # the pier receipt does not independently claim a smaller snap.
+        # oblique jambs. Use the exact producer-owned snap receipt, never
+        # silently widen a stricter per-run tolerance to the 2.5pt maximum.
         for endpoints in (self.left_jamb_endpoints, self.right_jamb_endpoints):
             p0, p1 = endpoints
             opening_dx = p1[0] - p0[0]
@@ -237,10 +240,10 @@ class InterAperturePierRecord:
                 rel_y = point[1] - self.host_start_pt[1]
                 normal = -rel_x * ay + rel_y * ax
                 if (not math.isfinite(normal)
-                        or along < -DEFAULT_SNAP_TOLERANCE_PT
-                        or along > wall_length + DEFAULT_SNAP_TOLERANCE_PT
+                        or along < -self.snap_tolerance_pt
+                        or along > wall_length + self.snap_tolerance_pt
                         or abs(normal) > self.host_thickness_pt / 2.0
-                        + DEFAULT_SNAP_TOLERANCE_PT):
+                        + self.snap_tolerance_pt):
                     raise ValueError("pier jamb geometry conflicts with host wall band or extent")
                 jamb_stations.append(along)
             if (min(wall_length, max(jamb_stations))
@@ -263,6 +266,7 @@ class InterAperturePierRecord:
             "host_start_pt": tuple(float(v).hex() for v in self.host_start_pt),
             "host_end_pt": tuple(float(v).hex() for v in self.host_end_pt),
             "host_thickness_pt": float(self.host_thickness_pt).hex(),
+            "snap_tolerance_pt": float(self.snap_tolerance_pt).hex(),
             "left_opening_id": self.left_opening_id,
             "right_opening_id": self.right_opening_id,
             "left_jamb_endpoints": tuple(sorted(
@@ -1025,6 +1029,7 @@ class StructuralThroughWallApertureHostAuthority:
                     "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
                     "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
                     "host_thickness_pt": float(through_wall.thickness_pt).hex(),
+                    "snap_tolerance_pt": float(snap_tolerance_pt).hex(),
                     "left_opening_id": curr["op"].physical_opening_id,
                     "right_opening_id": nxt["op"].physical_opening_id,
                     "left_jamb_endpoints": tuple(sorted(
@@ -1058,6 +1063,7 @@ class StructuralThroughWallApertureHostAuthority:
                     host_start_pt=through_wall.start_pt,
                     host_end_pt=through_wall.end_pt,
                     host_thickness_pt=through_wall.thickness_pt,
+                    snap_tolerance_pt=snap_tolerance_pt,
                     left_jamb_endpoints=tuple(sorted((
                         curr["op"].start_pt, curr["op"].end_pt,
                     ))),
