@@ -95,3 +95,37 @@ Only `pb_live_ceiling_lining_integration.py`, one new focused test file and this
 **Narrow change:** Fail closed for the entire selected live ceiling collection on a per-viewport source producer exception. Return typed `ABSTAINED`, `live_ceiling_lining_unavailable` and `live_ceiling_lining_source_viewport_failure`, with zero claims, canonical objects and issuer evidence. No guessed replacement viewport, source dimensions, defaults or changed source authority. The existing fully successful path is untouched.
 
 **Proof and limits:** The generated native-PDF regression first establishes a real source-positive ceiling via the unmodified producer, then injects a second independently identified viewport that fails before or after the valid viewport. Both orders and deterministic replays must abstain at the collector, real FIRM issuer and customer projection. These tests do not authenticate any private original PDF, signed customer preservation or frozen V2 score; those release gates remain mandatory before merge. GPT2 physical FT/RCP, GPT MAX/Claude host/glazing, GPT3 signing/scoring, source PDFs/tokens, frozen evaluator, 20k cap and 2.5pt snap remain untouched.
+
+
+## 2026-10-30 19:23 AEST — canonical room presence before live claim
+
+**OBSERVED:** In `collect_live_ceiling_lining_claims`, `_claim_from_quantity`
+authenticates provisional source-owned metric/material receipts, but the collector
+previously appended the descriptor claim row and source quantity **before**
+`canonical_ceiling_from_shadow_quantity` checked the producer-owned room index
+and polygon. If the room index/room polygon was absent, the live provisional
+claim survived with no corresponding canonical physical ceiling. The later
+`publish_live_ceiling_area_quantities` requires a canonical/source pair, but
+the earlier claim boundary remained inconsistent.
+
+**INFERENCE:** An incomplete physical room-index replay can produce misleading
+live provisional ceiling totals even while the FIRM issuer correctly abstains.
+This is an integrity gate, not evidence that the original Maryborough RCP
+contains an authenticated area or material.
+
+**PROPOSED AND IMPLEMENTED:** Require a non-None source-owned canonical ceiling
+object before retaining a descriptor row or source quantity. Existing
+canonical-identity and quantity-ID conflict revocations still apply. Keep
+independent supported objects and all abstentions; do not create polygons,
+metrics, materials, FIRM status or customer rows.
+
+**TEST PLAN:** Generated native-PDF positive producer baseline and deterministic
+adversarial replay with a missing source-owned room index; verify no provisional
+claim, canonical object, issuer quantity or customer row, with original producer
+inputs unchanged. Exact-head Python 3.13/3.14 and trusted SHA-verified original
+source→issuer→sealed/customer replay (Lot16 nine, Maryborough three preserved)
+remain release gates. No frozen V2 score or FIRM improvement is asserted.
+
+**FILES UNTOUCHED:** GPT2 FT/RCP physical source interpretation, GPT MAX/Claude
+opening hosts, GPT3 signing/scoring, original PDFs/tokens, signed fixtures,
+frozen evaluator, 20,000 primitive cap and 2.5pt snap.

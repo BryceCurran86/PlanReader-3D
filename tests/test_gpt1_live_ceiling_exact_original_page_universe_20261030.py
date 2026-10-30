@@ -757,3 +757,65 @@ def test_failed_original_ceiling_viewport_revokes_complete_source_universe(
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-incomplete-ceiling-universe"
     ) == ()
+
+
+def test_missing_original_ceiling_room_index_never_emits_unbacked_live_claim(
+    tmp_path, monkeypatch
+):
+    """A real source-owned metric needs its physical canonical room geometry.
+
+    Generated PDF only; this is not original Maryborough source acceptance.
+    """
+    from dataclasses import replace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    original_indices = []
+
+    def lose_physical_room_index(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        original_index = result.pipeline.room_area_bridge.room_index
+        assert original_index is not None
+        original_indices.append(original_index)
+        # Simulate a missing producer-owned physical room index AFTER the
+        # original quantity passed its separate metric/material gate.
+        # Keep upstream source quantities and their IDs untouched.
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                room_area_bridge=replace(
+                    result.pipeline.room_area_bridge, room_index=None,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        lose_physical_room_index,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(original_indices) == 2
+    assert original_indices[0] == original_indices[1]
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-missing-ceiling-room",
+    ) == ()

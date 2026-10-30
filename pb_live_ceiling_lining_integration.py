@@ -642,6 +642,19 @@ def collect_live_ceiling_lining_claims(
                         measurement_authority,
                         figured_dimension_ids,
                     ) = resolved
+                    # A source metric without its producer-owned physical room
+                    # polygon is not a live ceiling claim. The real issuer may
+                    # already reject the absent canonical object, but the
+                    # earlier provisional claim must fail closed as well.
+                    ceiling_object = canonical_ceiling_from_shadow_quantity(
+                        quantity=quantity,
+                        source_result=result,
+                        page_no=page_no,
+                        viewport_id=viewport_id,
+                    )
+                    if ceiling_object is None:
+                        continue
+
                     validated_quantities[quantity.quantity_id] = quantity
                     by_descriptor.setdefault(descriptor, []).append(
                         (
@@ -659,22 +672,15 @@ def collect_live_ceiling_lining_claims(
                         )
                     )
 
-                    ceiling_object = canonical_ceiling_from_shadow_quantity(
-                        quantity=quantity,
-                        source_result=result,
-                        page_no=page_no,
-                        viewport_id=viewport_id,
-                    )
-                    if ceiling_object is not None:
-                        canonical_id = ceiling_object.canonical_ceiling_id
-                        canonical_quantity_ids_by_id.setdefault(
-                            canonical_id, set()
-                        ).add(quantity.quantity_id)
-                        prior = canonical_ceilings_by_id.get(canonical_id)
-                        if prior is not None and prior != ceiling_object:
-                            canonical_conflicts.add(canonical_id)
-                        else:
-                            canonical_ceilings_by_id[canonical_id] = ceiling_object
+                    canonical_id = ceiling_object.canonical_ceiling_id
+                    canonical_quantity_ids_by_id.setdefault(
+                        canonical_id, set()
+                    ).add(quantity.quantity_id)
+                    prior = canonical_ceilings_by_id.get(canonical_id)
+                    if prior is not None and prior != ceiling_object:
+                        canonical_conflicts.add(canonical_id)
+                    else:
+                        canonical_ceilings_by_id[canonical_id] = ceiling_object
 
         canonical_conflict_quantity_ids = {
             quantity_id
