@@ -530,3 +530,114 @@ def test_public_reveal_candidate_metric_axes_cannot_be_forged(authority, jamb_b)
     assert zero_reveal.reveal_depth_mm == 0.0
     assert replace(zero_reveal) == zero_reveal
     assert authority.evaluate_stepped_wall_aperture(**kw) == candidate
+
+
+@pytest.mark.parametrize("changes", [
+    {"context_label": "ANOTHER_CONTEXT"},
+    {"context_label": " PADDED"},
+    {"context_label": "TRAILING "},
+    {"context_label": "CONTROL\nLINE"},
+    {"context_label": ""},
+    {"context_label": True},
+    {"contract_id": "stale-or-forged"},
+    {"contract_id": 123},
+])
+def test_public_reveal_frozen_context_and_contract_id_fail_closed(
+    authority, changes,
+):
+    """Producer checks cannot be bypassed through dataclasses.replace."""
+    from dataclasses import replace
+
+    original_inputs = inputs()
+    candidate = authority.evaluate_stepped_wall_aperture(**original_inputs)
+    abstained = authority.evaluate_stepped_wall_aperture(
+        **inputs(scale_ratio=None)
+    )
+    for record in (candidate, abstained):
+        assert replace(record) == record
+        with pytest.raises(ValueError, match="context|stable identity"):
+            replace(record, **changes)
+        assert_shadow(record)
+    assert original_inputs == inputs()
+    assert authority.evaluate_stepped_wall_aperture(**original_inputs) == candidate
+
+
+def test_public_reveal_jointly_valid_geometry_must_rebind_identity(authority):
+    """Even coherent native/metric changes cannot reuse an earlier record ID."""
+    from dataclasses import replace
+
+    original_inputs = inputs()
+    candidate = authority.evaluate_stepped_wall_aperture(**original_inputs)
+    rotated = authority.evaluate_stepped_wall_aperture(
+        **inputs(jamb_datum_b=(160.0, 280.0))
+    )
+    assert candidate.clear_span_pt == pytest.approx(rotated.clear_span_pt)
+    assert candidate.clear_span_m == pytest.approx(rotated.clear_span_m)
+    assert candidate.contract_id != rotated.contract_id
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(candidate, jamb_right_datum=rotated.jamb_right_datum)
+    assert replace(
+        candidate, jamb_right_datum=rotated.jamb_right_datum,
+        contract_id=rotated.contract_id,
+    ) == rotated
+
+    changed = authority.evaluate_stepped_wall_aperture(**inputs(
+        left_thickness_pt=12.0, right_thickness_pt=4.0,
+    ))
+    coherent_fields = {
+        "left_wall_thickness_pt": changed.left_wall_thickness_pt,
+        "right_wall_thickness_pt": changed.right_wall_thickness_pt,
+        "left_wall_thickness_mm": changed.left_wall_thickness_mm,
+        "right_wall_thickness_mm": changed.right_wall_thickness_mm,
+        "reveal_depth_pt": changed.reveal_depth_pt,
+        "reveal_depth_mm": changed.reveal_depth_mm,
+        "centerline_step_offset_pt": changed.centerline_step_offset_pt,
+    }
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(candidate, **coherent_fields)
+    assert replace(
+        candidate, contract_id=changed.contract_id, **coherent_fields
+    ) == changed
+    assert_shadow(candidate)
+    assert_shadow(rotated)
+    assert_shadow(changed)
+    assert original_inputs == inputs()
+    assert authority.evaluate_stepped_wall_aperture(**original_inputs) == candidate
+
+
+def test_public_reveal_context_and_abstained_identity_replay(authority):
+    from dataclasses import replace
+
+    candidate = authority.evaluate_stepped_wall_aperture(**inputs())
+    other = authority.evaluate_stepped_wall_aperture(
+        **inputs(context_label="OTHER_CONTEXT")
+    )
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(candidate, context_label="OTHER_CONTEXT")
+    assert replace(
+        candidate, context_label="OTHER_CONTEXT", contract_id=other.contract_id
+    ) == other
+
+    abstained = authority.evaluate_stepped_wall_aperture(
+        **inputs(scale_ratio=None)
+    )
+    other_abstained = authority.evaluate_stepped_wall_aperture(
+        **inputs(scale_ratio=None, context_label="OTHER_CONTEXT")
+    )
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(abstained, context_label="OTHER_CONTEXT")
+    assert replace(
+        abstained, context_label="OTHER_CONTEXT",
+        contract_id=other_abstained.contract_id,
+    ) == other_abstained
+    swapped = authority.evaluate_stepped_wall_aperture(**inputs(
+        jamb_datum_a=(200.0, 200.0), jamb_datum_b=(100.0, 200.0),
+    ))
+    assert swapped.contract_id == candidate.contract_id
+    assert swapped == candidate
+    with pytest.raises(ValueError, match="jamb ordering"):
+        replace(candidate, jamb_left_datum=candidate.jamb_right_datum,
+                jamb_right_datum=candidate.jamb_left_datum)
+    for record in (candidate, other, abstained, other_abstained, swapped):
+        assert_shadow(record)
+    assert authority.evaluate_stepped_wall_aperture(**inputs()) == candidate
