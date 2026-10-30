@@ -699,3 +699,54 @@ def test_spandrel_candidate_area_axes_cannot_be_forged(authority, jamb_b):
     assert authority.evaluate_spandrel_sub_sill(
         **common, scale_ratio=0.01764,
     ) == candidate
+
+
+@pytest.mark.parametrize("span", [1.0, 19.999, 300.001, 500.0])
+def test_spandrel_frozen_candidate_cannot_bypass_producer_span_bounds(authority, span):
+    """Direct/replace candidate records obey the same 20..300pt producer gate."""
+    from dataclasses import replace
+
+    kwargs = dict(
+        jamb_a=(0.0, 0.0), jamb_b=(100.0, 0.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="UNVERIFIED_SPANDREL", scale_ratio=0.01764,
+    )
+    positive = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert positive.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    original = positive.to_dict()
+    span_m = span * 0.01764
+    with pytest.raises(ValueError, match="candidate span outside producer bounds"):
+        replace(
+            positive,
+            jamb_left=(0.0, 0.0), jamb_right=(span, 0.0),
+            clear_span_pt=span, clear_span_m=span_m,
+            glazing_aperture_area_sqm=span_m * 1.2,
+            spandrel_wall_area_sqm=span_m * 0.9,
+            total_wall_opening_area_sqm=span_m * 1.2,
+        )
+    rejected = authority.evaluate_spandrel_sub_sill(
+        **(kwargs | {"jamb_b": (span, 0.0)}),
+    )
+    assert rejected.classification is SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN
+    assert rejected.status is EvidenceResolutionStatus.ABSTAINED
+    assert rejected.clear_span_m is None and rejected.glazing_aperture_area_sqm is None
+    assert replace(rejected) == rejected
+    assert positive.to_dict() == original
+    assert authority.evaluate_spandrel_sub_sill(**kwargs) == positive
+    assert positive.shadow_only and not positive.takeoff_eligible
+    assert not positive.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("span", [20.0, 300.0])
+def test_spandrel_exact_span_boundaries_remain_shadow_candidates(authority, span):
+    kwargs = dict(
+        jamb_a=(0.0, 0.0), jamb_b=(span, 0.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="UNVERIFIED_SPANDREL", scale_ratio=0.01764,
+    )
+    result = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert result.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.first_remaining_gate == "original_source_spandrel_host_scale_levels_unverified"
+    assert result.shadow_only and not result.commercial_projection_allowed
+    assert authority.evaluate_spandrel_sub_sill(**kwargs) == result

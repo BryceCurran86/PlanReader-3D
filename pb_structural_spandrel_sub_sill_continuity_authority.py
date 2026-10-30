@@ -159,6 +159,12 @@ class SpandrelSubSillRecord:
                                     rel_tol=1e-12, abs_tol=1e-9)):
             raise ValueError("spandrel numeric evidence conflicts with jamb geometry")
         if self.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE:
+            # Direct construction and dataclasses.replace must honor the
+            # same geometric bounds as evaluate_spandrel_sub_sill. A 1pt or
+            # 301pt span cannot become CANDIDATE merely because its area
+            # fields are internally consistent; it must remain abstained.
+            if not MIN_CLEAR_SPAN_PT <= self.clear_span_pt <= MAX_CLEAR_SPAN_PT:
+                raise ValueError("spandrel candidate span outside producer bounds")
             if (self.sill_height_mm <= 0
                     or self.head_height_mm <= self.sill_height_mm
                     or any(value is None for value in (
