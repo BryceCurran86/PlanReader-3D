@@ -78,10 +78,24 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
 
     if type(ring) is not dict or type(graph) is not dict:
         return False
+    # Equality of two absent roots (None == None), or numeric page aliases
+    # (7.0 == 7, True == 1), is NOT original-source authentication. Require
+    # complete typed source roots on BOTH independently supplied witnesses
+    # before comparing their values or accepting any native edge geometry.
+    ring_sha = ring.get("original_source_sha256")
+    graph_sha = graph.get("source_sha256")
+    ring_page = ring.get("original_page_1_based")
+    graph_page = graph.get("page_1_based")
+    if (any(type(sha) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+            for sha in (ring_sha, graph_sha))
+            or any(type(page) is not int or page < 1
+                   for page in (ring_page, graph_page))):
+        return False
     if (ring.get("source_jamb_roles_same_sha_rechecked") is not True
             or ring.get("source_wall_and_jamb_geometry_independently_recomputed") is not True
-            or graph.get("source_sha256") != ring.get("original_source_sha256")
-            or graph.get("page_1_based") != ring.get("original_page_1_based")):
+            or graph_sha != ring_sha
+            or graph_page != ring_page):
         return False
     ids = ring.get("original_source_perimeter_side_ids")
     if (type(ids) is not tuple or not 2 <= len(ids) <= 120000
