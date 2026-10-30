@@ -1929,3 +1929,97 @@ def test_generated_pdf_original_ceiling_viewport_alias_abstains_at_real_customer
         assert project_live_ceiling_area_customer_rows(
             first, workspace_id=1, project_id="synthetic-viewport-receipt",
         ) == ()
+
+
+class _SourceF07ViewportStringSubclass(str):
+    """A foreign string-like identity must not be accepted as source native."""
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["blank", "none", "numeric", "padded", "string_subclass", "spoofed"],
+)
+@pytest.mark.parametrize("sibling_position", ["first", "last"])
+def test_generated_original_f07_malformed_sibling_revokes_complete_ceiling_run(
+    tmp_path, monkeypatch, variant, sibling_position
+):
+    """An invalid authoritative F.07 sibling cannot leave earlier claims live."""
+    from types import SimpleNamespace
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    original_viewports = ceiling.authoritative_floor_plan_viewports
+    seen = []
+
+    def with_untrusted_sibling(page, *, page_number):
+        native = tuple(original_viewports(page, page_number=page_number))
+        assert native
+        authentic = native[0]
+        valid_id = authentic.view_id
+
+        class SpoofedViewport:
+            def __str__(self):
+                return valid_id
+
+        bad_id = {
+            "blank": "",
+            "none": None,
+            "numeric": 7,
+            "padded": f" {valid_id} ",
+            "string_subclass": _SourceF07ViewportStringSubclass(valid_id),
+            "spoofed": SpoofedViewport(),
+        }[variant]
+        sibling = SimpleNamespace(
+            view_id=bad_id,
+            bounding_box=authentic.bounding_box,
+            confidence=authentic.confidence,
+        )
+        seen.append((page_number, sibling_position))
+        return (sibling, *native) if sibling_position == "first" else (*native, sibling)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", with_untrusted_sibling,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert seen == [(1, sibling_position), (1, sibling_position)]
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-f07-viewport-sibling",
+    ) == ()
+    assert path.read_bytes() == original_pdf
+
+
+def test_generated_original_f07_native_viewport_keeps_real_issuer_output(tmp_path):
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(first.claims) == 1
+    assert len(first.canonical_ceilings) == 1
+    assert len(publish_live_ceiling_area_quantities(first)) == 1
+    assert path.read_bytes() == original_pdf
