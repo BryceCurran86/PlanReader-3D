@@ -1131,6 +1131,9 @@ def test_original_ceiling_room_area_inventory_id_cannot_alias_source_receipt(for
         ((1000000, -1000000), (1000004, -1000000),
          (1000004, -999998), (1000000, -999998)),
         ((0, 0), (4, 0), (4, 2), (0, 2), (0, 0)),
+        ((0, 0), (6, 0), (6, 5), (3, 2), (0, 5)),
+        ((0, 5), (3, 2), (6, 5), (6, 0), (0, 0)),
+        ((0, 0), (6, 0), (6, 5), (3, 2), (0, 5), (0, 0)),
     ],
 )
 def test_original_ceiling_source_room_polygon_preserves_finite_native_vertices(polygon):
@@ -1157,6 +1160,22 @@ def test_original_ceiling_source_room_polygon_preserves_finite_native_vertices(p
         pytest.param(((0, 0), (1, 0), (10**1000, 1)), id="integer-overflow"),
         pytest.param(((0, 0), (1e308, 0), (0, 1e308)), id="cross-product-overflow"),
         pytest.param(((0, 0), (1, 0), (1, 1, 1)), id="malformed-point"),
+        pytest.param(
+            ((0, 0), (4, 4), (0, 4), (4, 0), (4, 2)),
+            id="crossed-ring-with-nonzero-signed-area",
+        ),
+        pytest.param(
+            ((0, 0), (4, 0), (2, 0), (4, 3), (0, 3)),
+            id="adjacent-backtracking-overlap",
+        ),
+        pytest.param(
+            ((0, 0), (4, 0), (4, 4), (2, 0), (0, 4)),
+            id="nonadjacent-edge-touch",
+        ),
+        pytest.param(
+            ((0, 0), (4, 0), (4, 4), (0, 4), (4, 0)),
+            id="nonclosing-duplicate-vertex",
+        ),
     ],
 )
 def test_invalid_original_room_polygon_abstains_through_real_ceiling_issuer(
@@ -1230,6 +1249,86 @@ def test_invalid_original_room_polygon_abstains_through_real_ceiling_issuer(
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-invalid-source-ring",
     ) == ()
+
+
+@pytest.mark.parametrize(
+    "polygon",
+    [
+        ((0, 0), (6, 0), (6, 5), (3, 2), (0, 5)),
+        ((0, 5), (3, 2), (6, 5), (6, 0), (0, 0)),
+        ((0, 0), (6, 0), (6, 5), (3, 2), (0, 5), (0, 0)),
+    ],
+)
+def test_simple_concave_original_room_ring_preserves_real_ceiling_issuer(
+    tmp_path, monkeypatch, polygon
+):
+    """A valid concave source face is neither repaired nor silently rejected.
+
+    This generated-PDF source-index substitution is a topology regression,
+    not authenticated original-source area, finish, or customer proof.
+    """
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    authentic_results = []
+
+    def substitute_simple_ring(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        authentic_results.append(result)
+        index = result.pipeline.room_area_bridge.room_index
+        assert index is not None
+        room_id = baseline.canonical_ceilings[0].room_entity_id
+
+        def room_lookup(candidate_id):
+            room = index.room(candidate_id)
+            if candidate_id == room_id and room is not None:
+                return SimpleNamespace(polygon_pdf_pts=polygon)
+            return room
+
+        altered_bridge = replace(
+            result.pipeline.room_area_bridge,
+            room_index=SimpleNamespace(index_id=index.index_id, room=room_lookup),
+        )
+        return replace(
+            result, pipeline=replace(result.pipeline, room_area_bridge=altered_bridge),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", substitute_simple_ring,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(authentic_results) == 2
+    assert authentic_results[0] == authentic_results[1]
+    assert path.read_bytes() == original_pdf
+    assert len(first.claims) == 1
+    assert len(first.canonical_ceilings) == 1
+    assert len(first.quantity_evidence) == 1
+    assert first.canonical_ceilings[0].geometry_complete is True
+    assert first.canonical_ceilings[0].polygon_pdf_pts == tuple(
+        (float(x), float(y)) for x, y in polygon
+    )
+    assert len(publish_live_ceiling_area_quantities(first)) == 1
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-simple-ring",
+    ) == project_live_ceiling_area_customer_rows(
+        baseline, workspace_id=1, project_id="synthetic-simple-ring",
+    )
 
 
 @pytest.mark.parametrize(
