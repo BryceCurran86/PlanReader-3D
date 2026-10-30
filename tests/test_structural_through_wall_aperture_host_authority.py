@@ -475,3 +475,83 @@ def test_frozen_pier_binds_exact_per_run_snap_receipt(
     assert strict_piers == authority.bind_openings_to_through_wall(
         through_wall=wall, openings=openings, snap_tolerance_pt=0.1,
     )[1]
+
+
+def test_frozen_pier_rejects_cross_opening_shared_jamb_observations(
+    authority: StructuralThroughWallApertureHostAuthority,
+) -> None:
+    """Re-keyed frozen piers cannot recycle one source jamb for two openings."""
+    wall = ContinuousThroughWallCandidate(
+        "pier_shared_observation_host", (0.0, 0.0), (200.0, 0.0), 10.0,
+    )
+    left = ApertureHostCandidateInput(
+        "left", (20.0, 0.0), (40.0, 0.0),
+        terminal_jamb_observation_ids=("left_obs",),
+    )
+    right = ApertureHostCandidateInput(
+        "right", (45.0, 0.0), (65.0, 0.0),
+        terminal_jamb_observation_ids=("right_obs",),
+    )
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(left, right),
+    )
+    assert len(piers) == 1
+    pier = piers[0]
+    assert pier.status is EvidenceResolutionStatus.CANDIDATE
+    assert pier.is_structural_masonry_pier is None
+    assert all(rec.shadow_only and not rec.takeoff_eligible
+               and not rec.commercial_projection_allowed for rec in records)
+
+    # Both tuples are individually sorted, unique, native and identity-bound.
+    # Their cross-opening overlap is nevertheless not independent evidence.
+    for left_ids, right_ids in (
+        (("shared_obs",), ("shared_obs",)),
+        (("left_obs", "shared_obs"), ("right_obs", "shared_obs")),
+        (("left_obs",), ("left_obs", "right_obs")),
+    ):
+        with pytest.raises(ValueError, match="pier jamb observations"):
+            _construct_pier_with_reissued_identity(
+                pier, left_jamb_observations=left_ids,
+                right_jamb_observations=right_ids,
+            )
+
+    # The complete producer universe already vetoes the same conflict,
+    # including both traversal orders; no invented pier or count survives.
+    conflicting_left = ApertureHostCandidateInput(
+        "left", (20.0, 0.0), (40.0, 0.0),
+        terminal_jamb_observation_ids=("left_obs", "shared_obs"),
+    )
+    conflicting_right = ApertureHostCandidateInput(
+        "right", (45.0, 0.0), (65.0, 0.0),
+        terminal_jamb_observation_ids=("right_obs", "shared_obs"),
+    )
+    for universe in (
+        (conflicting_left, conflicting_right),
+        (conflicting_right, conflicting_left),
+    ):
+        rejected, rejected_piers = authority.bind_openings_to_through_wall(
+            through_wall=wall, openings=universe,
+        )
+        assert rejected_piers == ()
+        assert len(rejected) == 2
+        assert all(rec.status is EvidenceResolutionStatus.ABSTAINED
+                   and rec.first_remaining_gate
+                   == "aperture_terminal_jamb_observation_conflict"
+                   for rec in rejected)
+        assert all(rec.shadow_only and not rec.takeoff_eligible
+                   and not rec.commercial_projection_allowed for rec in rejected)
+
+    # Independent observation receipts remain valid source-neutral geometry.
+    distinct = _construct_pier_with_reissued_identity(
+        pier, left_jamb_observations=("left_obs", "left_obs_2"),
+        right_jamb_observations=("right_obs", "right_obs_2"),
+    )
+    assert distinct.status is EvidenceResolutionStatus.CANDIDATE
+    assert distinct.is_structural_masonry_pier is None
+    assert distinct.pier_id != pier.pier_id
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(right, left),
+    )[1] == piers
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(left, right),
+    ) == (records, piers)

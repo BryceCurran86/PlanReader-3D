@@ -210,6 +210,12 @@ class InterAperturePierRecord:
                     or len(set(observations)) != len(observations)
                     or observations != tuple(sorted(observations))):
                 raise ValueError("pier jamb observation receipt must be exact and bounded")
+        # Two distinct physical openings cannot derive their independent
+        # jamb support from the same original observation. The producer
+        # rejects this across the complete opening universe; the public
+        # frozen pier must retain that veto even after a re-keyed replace.
+        if set(self.left_jamb_observations).intersection(self.right_jamb_observations):
+            raise ValueError("pier jamb observations cannot support two openings")
         def station(point: tuple[float, float]) -> float:
             dx = point[0] - self.host_start_pt[0]
             dy = point[1] - self.host_start_pt[1]
