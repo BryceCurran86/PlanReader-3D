@@ -60,6 +60,9 @@ LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE = (
 LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE = (
     "live_ceiling_lining_source_viewport_failure"
 )
+LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE = (
+    "live_ceiling_lining_source_snapshot_unavailable"
+)
 
 
 @dataclass(frozen=True)
@@ -556,7 +559,18 @@ def collect_live_ceiling_lining_claims(
                     published.revision.revision_id
                 )
                 if current is None:
-                    continue
+                    # A missing revision snapshot is a failure of the complete
+                    # selected original viewport universe, not a skippable view.
+                    # A prior sibling cannot remain publishable on a partial
+                    # source receipt. Do not infer or replace missing evidence.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE,
+                        ),
+                        claims=(),
+                    )
                 context = ProviderContext(
                     run_id=f"live-ceiling:{current.snapshot.snapshot_id}:{viewport_id}",
                     workspace_id="live-extractor",
@@ -880,6 +894,7 @@ __all__ = [
     "LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT",
     "LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE",
     "LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE",
+    "LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
