@@ -130,6 +130,47 @@ def sample_selector() -> SourceCrossViewFloorCorrespondenceSelector:
     )
 
 
+# A page cannot corroborate itself as an independent cross-sheet owner.
+# Keep this earliest selector boundary separate from the downstream original
+# decoded-page gate: synthetic source-shadow callers must fail closed too.
+@pytest.mark.parametrize("page_id", ["7", "11"])
+def test_cross_view_selector_rejects_same_original_page(page_id):
+    base = sample_selector()
+    fields = {
+        name: getattr(base, name)
+        for name in (
+            "document_id", "revision_id", "source_sha256", "snapshot_id",
+            "support_page_id", "target_page_id", "material_code",
+        )
+    }
+    fields.update(support_page_id=page_id, target_page_id=page_id)
+    with pytest.raises(ValueError, match="support and target pages must differ"):
+        SourceCrossViewFloorCorrespondenceSelector(**fields)
+
+
+@pytest.mark.parametrize("field_name", ["support_page_id", "target_page_id"])
+@pytest.mark.parametrize("bad_page_id", [" 7", "7 ", "7\\n", "\\t7", "7\\x00"])
+def test_cross_view_selector_rejects_noncanonical_page_aliases(field_name, bad_page_id):
+    base = sample_selector()
+    fields = {
+        name: getattr(base, name)
+        for name in (
+            "document_id", "revision_id", "source_sha256", "snapshot_id",
+            "support_page_id", "target_page_id", "material_code",
+        )
+    }
+    fields[field_name] = bad_page_id
+    with pytest.raises(ValueError, match=field_name):
+        SourceCrossViewFloorCorrespondenceSelector(**fields)
+
+
+def test_cross_view_selector_keeps_distinct_original_page_ids_verbatim():
+    selector = sample_selector()
+    assert selector.support_page_id == "11"
+    assert selector.target_page_id == "7"
+    assert selector.support_page_id != selector.target_page_id
+
+
 # ==============================================================================
 # Positive Tests
 # ==============================================================================

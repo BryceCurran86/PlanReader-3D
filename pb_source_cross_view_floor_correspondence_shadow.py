@@ -756,6 +756,16 @@ class SourceCrossViewFloorCorrespondenceSelector:
             val = getattr(self, field_name)
             if type(val) is not str or not val.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
+            if field_name in ("support_page_id", "target_page_id") and (
+                val != val.strip() or not val.isprintable()
+            ):
+                raise ValueError(
+                    f"{field_name} must be a canonical printable source page identity"
+                )
+        # A cross-view source-owner candidate requires TWO independent page
+        # identities. Self-registration of one sheet is not corroboration.
+        if self.support_page_id == self.target_page_id:
+            raise ValueError("cross-view support and target pages must differ")
 
 
 @dataclass(frozen=True)
