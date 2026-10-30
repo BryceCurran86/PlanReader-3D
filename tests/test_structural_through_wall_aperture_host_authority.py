@@ -340,6 +340,7 @@ def _construct_pier_with_reissued_identity(
         "host_start_pt": tuple(float(v).hex() for v in values["host_start_pt"]),
         "host_end_pt": tuple(float(v).hex() for v in values["host_end_pt"]),
         "host_thickness_pt": float(values["host_thickness_pt"]).hex(),
+        "snap_tolerance_pt": float(values["snap_tolerance_pt"]).hex(),
         "left_opening_id": values["left_opening_id"],
         "right_opening_id": values["right_opening_id"],
         "left_jamb_endpoints": tuple(sorted(
@@ -422,3 +423,55 @@ def test_frozen_pier_reproves_hosted_jamb_geometry(
     assert rotated_piers[0].is_structural_masonry_pier is None
     assert all(rec.shadow_only and not rec.takeoff_eligible
                for rec in rotated_records)
+
+def test_frozen_pier_binds_exact_per_run_snap_receipt(
+    authority: StructuralThroughWallApertureHostAuthority,
+) -> None:
+    """A smaller caller snap cannot silently become the 2.5pt maximum."""
+    from dataclasses import replace
+
+    wall = ContinuousThroughWallCandidate(
+        "pier_snap_host", (0.0, 0.0), (200.0, 0.0), 10.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("left", (20.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("right", (45.0, 0.0), (65.0, 0.0)),
+    )
+    strict_records, strict_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings, snap_tolerance_pt=0.1,
+    )
+    loose_records, loose_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings, snap_tolerance_pt=2.5,
+    )
+    assert len(strict_piers) == len(loose_piers) == 1
+    strict, loose = strict_piers[0], loose_piers[0]
+    assert strict.snap_tolerance_pt == 0.1
+    assert loose.snap_tolerance_pt == 2.5
+    assert strict.pier_id != loose.pier_id
+    assert strict.status is EvidenceResolutionStatus.CANDIDATE
+    assert strict.is_structural_masonry_pier is None
+    assert all(not rec.takeoff_eligible and not rec.commercial_projection_allowed
+               for rec in strict_records + loose_records)
+    assert replace(strict) == strict
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=tuple(reversed(openings)),
+        snap_tolerance_pt=0.1,
+    )[1] == strict_piers
+
+    # 5.5pt from the wall axis exceeds half-thickness (5pt) + 0.1pt,
+    # but not half-thickness + the global 2.5pt cap. Re-keying the
+    # complete record cannot bypass the caller's narrower receipt.
+    with pytest.raises(ValueError, match="pier jamb geometry"):
+        _construct_pier_with_reissued_identity(
+            strict, left_jamb_endpoints=((20.0, 5.5), (40.0, 5.5)),
+        )
+    with pytest.raises(ValueError, match="pier stable identity"):
+        replace(strict, snap_tolerance_pt=2.5)
+    for invalid_snap in (-0.1, 2.500001, float("nan"), float("inf"), True):
+        with pytest.raises(ValueError, match="pier host geometry"):
+            _construct_pier_with_reissued_identity(
+                strict, snap_tolerance_pt=invalid_snap,
+            )
+    assert strict_piers == authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings, snap_tolerance_pt=0.1,
+    )[1]
