@@ -727,7 +727,7 @@ def test_latest_gpt2_private_replay_pins_match_public_sourcefree_smoke():
     ):
         match = re.search(
             r"(?m)^  " + re.escape(target) +
-            r"\\)\\n(?P<body>.*?)(?=^    ;;)",
+            r"\)\n(?P<body>.*?)(?=^    ;;)",
             guard, flags=re.DOTALL | re.MULTILINE,
         )
         assert match is not None
