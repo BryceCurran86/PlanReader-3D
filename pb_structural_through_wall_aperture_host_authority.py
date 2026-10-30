@@ -211,6 +211,7 @@ class ThroughWallHostedOpeningRecord:
     terminal_jamb_observation_ids: tuple[str, ...]
     status: EvidenceResolutionStatus
     first_remaining_gate: str
+    snap_tolerance_pt: float
     adjacent_pier_ids: tuple[str, ...] = ()
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
@@ -240,8 +241,9 @@ class ThroughWallHostedOpeningRecord:
                 self.hosting_record_id, self.physical_opening_id, self.host_wall_id))
                 or any(not _finite_real(v) for v in (
                     self.u0_pt, self.u1_pt, self.whole_wall_length_pt,
-                    self.wall_thickness_pt,
+                    self.wall_thickness_pt, self.snap_tolerance_pt,
                 ))
+                or not 0.0 <= self.snap_tolerance_pt <= DEFAULT_SNAP_TOLERANCE_PT
                 or self.u0_pt > self.u1_pt
                 or self.whole_wall_length_pt <= 0
                 or self.wall_thickness_pt <= 0):
@@ -272,6 +274,7 @@ class ThroughWallHostedOpeningRecord:
         # different candidate interval via direct construction or replace().
         # This is station identity, not a snap or measurement-authority gate.
         projected_stations = []
+        projected_normals = []
         for point in (self.opening_start_pt, self.opening_end_pt):
             dx = point[0] - self.origin_pt[0]
             dy = point[1] - self.origin_pt[1]
@@ -281,6 +284,10 @@ class ThroughWallHostedOpeningRecord:
             if not math.isfinite(station):
                 raise ValueError("host station projection must remain finite")
             projected_stations.append(station)
+            normal_offset = dx * nx + dy * ny
+            if not math.isfinite(normal_offset):
+                raise ValueError("host normal projection must remain finite")
+            projected_normals.append(normal_offset)
         raw_stations = (min(projected_stations), max(projected_stations))
         clipped_stations = (
             max(0.0, raw_stations[0]),
@@ -296,6 +303,24 @@ class ThroughWallHostedOpeningRecord:
         )
         if (self.u0_pt, self.u1_pt) not in permitted:
             raise ValueError("host numeric evidence conflicts with owned jamb stations")
+        if self.status is EvidenceResolutionStatus.CANDIDATE:
+            # Recheck the producer's actual geometry gate at the public frozen
+            # record seam. Along-axis stations alone cannot prove a wall host:
+            # moving either jamb or the origin normally preserves u0/u1.
+            if (raw_stations[0] < -self.snap_tolerance_pt
+                    or raw_stations[1] > self.whole_wall_length_pt + self.snap_tolerance_pt
+                    or clipped_stations[1] - clipped_stations[0] <= _COORD_TOL
+                    or max(abs(offset) for offset in projected_normals)
+                       > self.wall_thickness_pt / 2.0 + self.snap_tolerance_pt):
+                raise ValueError("candidate host geometry conflicts with wall band or extent")
+            dx = self.opening_end_pt[0] - self.opening_start_pt[0]
+            dy = self.opening_end_pt[1] - self.opening_start_pt[1]
+            aperture_length = math.hypot(dx, dy)
+            if not math.isfinite(aperture_length) or aperture_length <= _COORD_TOL:
+                raise ValueError("candidate host geometry has invalid jamb span")
+            alignment = abs((dx * ax + dy * ay) / aperture_length)
+            if not math.isfinite(alignment) or alignment < _ALIGNMENT_COS_TOL:
+                raise ValueError("candidate host geometry conflicts with wall axis alignment")
         for ids in (self.terminal_jamb_observation_ids, self.adjacent_pier_ids):
             if (type(ids) is not tuple
                     or len(ids) > _MAX_GEOMETRIC_PRIMITIVES
@@ -315,6 +340,7 @@ class ThroughWallHostedOpeningRecord:
             "u1_pt": self.u1_pt,
             "whole_wall_length_pt": self.whole_wall_length_pt,
             "wall_thickness_pt": self.wall_thickness_pt,
+            "snap_tolerance_pt": self.snap_tolerance_pt,
             "axis_unit": list(self.axis_unit),
             "normal_unit": list(self.normal_unit),
             "origin_pt": list(self.origin_pt),
@@ -495,7 +521,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_wall_axis_misaligned"
                 rec = self._make_record(
-                    op, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -511,7 +538,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_outside_host_wall_band"
                 rec = self._make_record(
-                    op, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -523,7 +551,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "aperture_extends_beyond_wall_extent"
                 rec = self._make_record(
-                    op, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -540,6 +569,7 @@ class StructuralThroughWallApertureHostAuthority:
                     op, through_wall, u_min, u_max,
                     EvidenceResolutionStatus.ABSTAINED,
                     "aperture_no_host_wall_overlap",
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -590,7 +620,8 @@ class StructuralThroughWallApertureHostAuthority:
                 status = EvidenceResolutionStatus.ABSTAINED
                 gate = "host_through_wall_obstructed"
                 rec = self._make_record(
-                    op, through_wall, u_min, u_max, status, gate
+                    op, through_wall, u_min, u_max, status, gate,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 intermediate_openings.append(
                     {"rec": rec, "u_min": u_min, "u_max": u_max, "valid": False}
@@ -683,6 +714,7 @@ class StructuralThroughWallApertureHostAuthority:
                     if index in observation_conflicts
                     else "aperture_physical_interval_conflict"
                 ),
+                    snap_tolerance_pt=snap_tolerance_pt,
             )
 
         # A rejected geometric opening can still occupy a plausible host-wall
@@ -876,6 +908,7 @@ class StructuralThroughWallApertureHostAuthority:
                     EvidenceResolutionStatus.CANDIDATE,
                     "original_source_host_unverified",
                     adjacent_piers=adjacent_piers,
+                    snap_tolerance_pt=snap_tolerance_pt,
                 )
                 final_records.append(rec)
 
@@ -889,6 +922,7 @@ class StructuralThroughWallApertureHostAuthority:
         u1: float,
         status: EvidenceResolutionStatus,
         gate: str,
+        snap_tolerance_pt: float,
         adjacent_piers: tuple[str, ...] = (),
     ) -> ThroughWallHostedOpeningRecord:
         # Projected stations alone alias transversely shifted or clipped jambs.
@@ -905,6 +939,7 @@ class StructuralThroughWallApertureHostAuthority:
             "host_start_pt": tuple(float(v).hex() for v in through_wall.start_pt),
             "host_end_pt": tuple(float(v).hex() for v in through_wall.end_pt),
             "host_thickness_pt": float(through_wall.thickness_pt).hex(),
+            "snap_tolerance_pt": float(snap_tolerance_pt).hex(),
             "u0_pt": float(u0).hex(),
             "u1_pt": float(u1).hex(),
             "status": status.value,
@@ -928,6 +963,7 @@ class StructuralThroughWallApertureHostAuthority:
             u1_pt=u1,
             whole_wall_length_pt=through_wall.length_pt,
             wall_thickness_pt=through_wall.thickness_pt,
+            snap_tolerance_pt=snap_tolerance_pt,
             axis_unit=through_wall.axis_unit,
             normal_unit=through_wall.normal_unit,
             origin_pt=through_wall.origin_pt,

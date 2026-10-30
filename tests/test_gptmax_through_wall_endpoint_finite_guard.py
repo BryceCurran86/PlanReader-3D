@@ -2183,3 +2183,79 @@ def test_frozen_host_station_identity_rejects_finite_forged_intervals(angle, shi
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=tuple(reversed(openings)),
     )[0] == tuple(reversed(records))
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 3.0, (250.0, -130.0)),
+    (math.pi / 2.0, (-100.0, 300.0)),
+])
+def test_frozen_candidate_rechecks_normal_band_alignment_and_exact_snap_receipt(angle, shift):
+    """Frozen shadow host cannot inherit valid stations from a displaced jamb."""
+    from dataclasses import replace
+
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "normal-band-host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("valid", tr((20.0, 0.0)), tr((40.0, 0.0))),
+        ApertureHostCandidateInput("off-band", tr((60.0, 30.0)), tr((70.0, 30.0))),
+        ApertureHostCandidateInput("misaligned", tr((75.0, 0.0)), tr((75.0, 5.0))),
+        ApertureHostCandidateInput("clipped", tr((-0.25, 0.0)), tr((10.0, 0.0))),
+    )
+    authority = _authority()
+    original = (wall, openings)
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings, snap_tolerance_pt=0.5,
+    )
+    assert [r.status for r in records] == [
+        S.CANDIDATE, S.ABSTAINED, S.ABSTAINED, S.CANDIDATE,
+    ]
+    host, rejected_band, rejected_angle, clipped = records
+    assert host.snap_tolerance_pt == 0.5
+    assert host.to_dict()["snap_tolerance_pt"] == 0.5
+    assert clipped.u0_pt == 0.0
+    assert all(r.snap_tolerance_pt == 0.5 for r in records)
+    assert replace(host) == host
+    assert replace(rejected_band) == rejected_band
+    assert replace(rejected_angle) == rejected_angle
+    assert replace(clipped) == clipped
+
+    nx, ny = host.normal_unit
+
+    def move(point, offset):
+        return (point[0] + nx * offset, point[1] + ny * offset)
+
+    # Normal translations preserve the along-axis station identity, which
+    # alone is insufficient to establish physical wall-band membership.
+    for changes in (
+        {"opening_start_pt": move(host.opening_start_pt, 30.0),
+         "opening_end_pt": move(host.opening_end_pt, 30.0)},
+        {"opening_start_pt": move(host.opening_start_pt, 30.0)},
+        {"origin_pt": move(host.origin_pt, 30.0)},
+        # 2pt at one jamb is within the 10.5pt wall band but exceeds
+        # the existing angular-alignment gate for a 20pt aperture.
+        {"opening_end_pt": move(host.opening_end_pt, 2.0)},
+    ):
+        with pytest.raises(ValueError, match="candidate host geometry|owned jamb stations"):
+            replace(host, **changes)
+    for invalid_snap in (float("nan"), float("inf"), -1.0, 2.50001, True):
+        with pytest.raises(ValueError, match="host numeric evidence"):
+            replace(host, snap_tolerance_pt=invalid_snap)
+
+    # Preserve source-neutral rejected geometry and complete original input
+    # evidence; never reinterpret an ABSTAINED aperture as a proven host.
+    assert rejected_band.first_remaining_gate == "aperture_outside_host_wall_band"
+    assert rejected_angle.first_remaining_gate == "aperture_wall_axis_misaligned"
+    assert (wall, openings) == original
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings, snap_tolerance_pt=0.5,
+    ) == (records, piers)
+    reversed_records, reversed_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=tuple(reversed(openings)), snap_tolerance_pt=0.5,
+    )
+    assert reversed_records == tuple(reversed(records))
+    assert reversed_piers == piers
+    assert all(r.shadow_only and not r.takeoff_eligible
+               and not r.commercial_projection_allowed for r in records)
