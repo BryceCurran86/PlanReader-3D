@@ -570,3 +570,118 @@ def test_malformed_original_ceiling_finish_receipt_abstains_without_alias(
     assert quantity.metadata == before
     if field == "source_evidence_ids":
         assert quantity.evidence_ids is bad
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+def test_source_ceiling_finite_rows_cannot_overflow_descriptor_claim_or_customer(
+    tmp_path, monkeypatch, overflow
+):
+    """Exercise real PDF collector aggregation with adversarial distinct source rows.
+
+    This is generated-PDF/injected-provider safety proof, NOT an original
+    source-positive ceiling measurement or permission to issue FIRM.
+    """
+    from dataclasses import replace
+
+    from pb_migration_provider_envelope import ProviderResult
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    real_claim = ceiling._claim_from_quantity
+    source_snapshot = []
+
+    def duplicate_source_ids(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        eligible = tuple(
+            item for item in result.ceiling_quantities
+            if real_claim(
+                quantity=item, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        rival = replace(
+            authentic, quantity_id=authentic.quantity_id + "-distinct-synthetic-room",
+        )
+        source_snapshot.append((authentic, dict(authentic.metadata)))
+        rebuilt = ProviderResult.build(
+            descriptor=result.pipeline.ceiling_result.descriptor,
+            context=kwargs["context"],
+            quantities=(authentic, rival),
+            entities=result.pipeline.ceiling_result.entities,
+        )
+        return replace(
+            result, pipeline=replace(result.pipeline, ceiling_result=rebuilt),
+        )
+
+    def source_metric_boundary(*, quantity, source_result, page_no, viewport_id):
+        resolved = real_claim(
+            quantity=quantity, source_result=source_result,
+            page_no=page_no, viewport_id=viewport_id,
+        )
+        if resolved is None:
+            return None
+        metric = 1e308 if overflow else resolved[2]
+        # Simulate two DISTINCT original physical rooms after the upstream
+        # geometry/metric gates; never treat these injected rooms as source proof.
+        return (
+            resolved[0], resolved[1], metric,
+            (quantity.quantity_id,),
+            ("adversarial-room:" + quantity.quantity_id,),
+            resolved[5], resolved[6], resolved[7], resolved[8],
+        )
+
+    def synthetic_distinct_canonical(*, quantity, source_result, page_no, viewport_id):
+        original = baseline.canonical_ceilings[0]
+        metric = 1e308 if overflow else baseline.claims[0].quantity_m2
+        return replace(
+            original,
+            canonical_ceiling_id=original.canonical_ceiling_id + "-" + quantity.quantity_id,
+            room_entity_id="adversarial-room:" + quantity.quantity_id,
+            ceiling_quantity_id=quantity.quantity_id,
+            area_m2=metric,
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", duplicate_source_ids,
+    )
+    monkeypatch.setattr(ceiling, "_claim_from_quantity", source_metric_boundary)
+    monkeypatch.setattr(
+        ceiling, "canonical_ceiling_from_shadow_quantity",
+        synthetic_distinct_canonical,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(source_snapshot) == 2
+    assert all(item.metadata == before for item, before in source_snapshot)
+
+    if overflow:
+        # The pre-fix collector constructed a nonfinite m² claim from these
+        # individually finite positive values. No downstream FIRM or customer
+        # projection can be issued from this conflicted aggregate.
+        assert first.claims == ()
+        assert first.quantity_evidence == ()
+        assert ceiling.LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE in first.reason_codes
+        assert publish_live_ceiling_area_quantities(first) == ()
+        assert project_live_ceiling_area_customer_rows(
+            first, workspace_id=1, project_id="synthetic-ceiling-overflow"
+        ) == ()
+    else:
+        # Finite source values retain the existing sum/claim-ID semantics.
+        assert len(first.claims) == 1
+        assert first.claims[0].quantity_m2 == 2 * baseline.claims[0].quantity_m2
+        assert ceiling.LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE not in first.reason_codes
