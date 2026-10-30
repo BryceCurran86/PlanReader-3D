@@ -913,3 +913,126 @@ def test_frozen_corner_receipts_preserve_order_rotation_and_abstentions(authorit
         assert not record.takeoff_eligible
     assert kw["jamb_a"] == (10.0, 100.0)
     assert kw["jamb_b"] == (-70.0, 20.0)
+
+
+def test_frozen_corner_first_failing_gate_cannot_be_relabelled(authority):
+    """A coherent frozen record cannot conceal an earlier physical failure."""
+    from dataclasses import replace
+
+    common = dict(
+        jamb_a=(0.0, 80.0), jamb_b=(60.0, 0.0),
+        corner_vertex=(0.0, 0.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01,
+        context_label="FIRST_GATE",
+    )
+    # Each forged label is otherwise a permitted ABSTAINED enum/gate pair.
+    # Geometry, order and authority fields are deliberately left untouched.
+    cases = (
+        (
+            {"jamb_a": (0.0, 8.0), "jamb_b": (60.0, 60.0),
+             "post_dimension_pt": 25.0, "scale_ratio": None},
+            CornerApertureClassification.ABSTAINED_DEGENERATE_LEG,
+            "corner_leg_span_out_of_bounds",
+            CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE,
+            "corner_angle_non_orthogonal",
+        ),
+        (
+            {"jamb_b": (60.0, 60.0), "post_dimension_pt": 25.0,
+             "scale_ratio": None},
+            CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE,
+            "corner_angle_non_orthogonal",
+            CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION,
+            "corner_post_dimension_excessive",
+        ),
+        (
+            {"post_dimension_pt": 25.0, "scale_ratio": None},
+            CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION,
+            "corner_post_dimension_excessive",
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+            "original_source_scale_or_post_unverified",
+        ),
+        (
+            {"scale_ratio": None},
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+            "original_source_scale_or_post_unverified",
+            CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION,
+            "corner_post_dimension_excessive",
+        ),
+        (
+            {"post_dimension_pt": None},
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+            "original_source_scale_or_post_unverified",
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+            "distinct_corner_host_walls_unverified",
+        ),
+        (
+            {"host_wall_b_id": "WALL_A"},
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+            "distinct_corner_host_walls_unverified",
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+            "original_source_scale_or_post_unverified",
+        ),
+    )
+    for changed, actual_class, actual_gate, false_class, false_gate in cases:
+        kwargs = common | changed
+        original_kwargs = dict(kwargs)
+        record = authority.evaluate_corner_aperture(**kwargs)
+        assert record.classification is actual_class
+        assert record.first_remaining_gate == actual_gate
+        assert record.status is EvidenceResolutionStatus.ABSTAINED
+        assert replace(record) == record
+        assert record.total_girth_m is None
+        assert record.shadow_only and not record.takeoff_eligible
+        assert not record.commercial_projection_allowed
+        with pytest.raises(ValueError, match="first failing gate"):
+            replace(record, classification=false_class,
+                    first_remaining_gate=false_gate)
+        assert kwargs == original_kwargs
+        assert authority.evaluate_corner_aperture(**kwargs) == record
+
+
+def test_frozen_corner_candidate_cannot_be_relabelled_as_abstained(authority):
+    """No valid geometry may be recast as a different typed source failure."""
+    from dataclasses import replace
+
+    kwargs = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+        context_label="CANDIDATE_GATE",
+    )
+    record = authority.evaluate_corner_aperture(**kwargs)
+    assert record.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE
+    assert replace(record) == record
+    for forged_class, forged_gate in (
+        (CornerApertureClassification.ABSTAINED_DEGENERATE_LEG,
+         "corner_leg_span_out_of_bounds"),
+        (CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE,
+         "corner_angle_non_orthogonal"),
+        (CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION,
+         "corner_post_dimension_excessive"),
+        (CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+         "original_source_scale_or_post_unverified"),
+    ):
+        with pytest.raises(ValueError, match="first failing gate"):
+            replace(
+                record, classification=forged_class,
+                first_remaining_gate=forged_gate,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                leg_a=replace(record.leg_a, leg_span_m=None),
+                leg_b=replace(record.leg_b, leg_span_m=None),
+                total_girth_m=None,
+            )
+    swapped = authority.evaluate_corner_aperture(**(
+        kwargs | {
+            "jamb_a": kwargs["jamb_b"], "jamb_b": kwargs["jamb_a"],
+            "host_wall_a_id": kwargs["host_wall_b_id"],
+            "host_wall_b_id": kwargs["host_wall_a_id"],
+        }
+    ))
+    assert swapped == record
+    assert record.shadow_only and not record.takeoff_eligible
+    assert not record.commercial_projection_allowed
+    assert authority.evaluate_corner_aperture(**kwargs) == record

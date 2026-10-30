@@ -265,6 +265,34 @@ class StructuralCornerApertureRecord:
                    for recorded, expected in zip(recorded_metric, expected_metric)):
                 raise ValueError("corner hypothetical metric evidence conflicts with scale")
 
+        # A caller can directly replace a frozen record without invoking the
+        # producer. Preserve the *first* failing gate, not merely a plausible
+        # enum/status combination: later source reconciliation depends on the
+        # exact reason the geometric hypothesis was withheld.
+        if (not MIN_LEG_SPAN_PT <= self.leg_a.leg_span_pt <= MAX_LEG_SPAN_PT
+                or not MIN_LEG_SPAN_PT <= self.leg_b.leg_span_pt <= MAX_LEG_SPAN_PT):
+            expected_classification = CornerApertureClassification.ABSTAINED_DEGENERATE_LEG
+            expected_gate = "corner_leg_span_out_of_bounds"
+        elif not MIN_CORNER_ANGLE_DEG <= self.corner_angle_deg <= MAX_CORNER_ANGLE_DEG:
+            expected_classification = CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE
+            expected_gate = "corner_angle_non_orthogonal"
+        elif (self.post_dimension_pt is not None
+              and self.post_dimension_pt > MAX_CORNER_POST_DIM_PT):
+            expected_classification = CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION
+            expected_gate = "corner_post_dimension_excessive"
+        elif self.scale_ratio is None or self.post_dimension_pt is None:
+            expected_classification = CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+            expected_gate = "original_source_scale_or_post_unverified"
+        elif self.leg_a.host_wall_id == self.leg_b.host_wall_id:
+            expected_classification = CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+            expected_gate = "distinct_corner_host_walls_unverified"
+        else:
+            expected_classification = CornerApertureClassification.GEOMETRIC_CANDIDATE
+            expected_gate = "original_source_corner_host_frame_unverified"
+        if (self.classification is not expected_classification
+                or self.first_remaining_gate != expected_gate):
+            raise ValueError("corner first failing gate conflicts with frozen geometry")
+
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
