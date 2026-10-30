@@ -641,3 +641,129 @@ def test_public_reveal_context_and_abstained_identity_replay(authority):
     for record in (candidate, other, abstained, other_abstained, swapped):
         assert_shadow(record)
     assert authority.evaluate_stepped_wall_aperture(**inputs()) == candidate
+
+
+@pytest.mark.parametrize("overrides,expected_class", [
+    (
+        {"jamb_datum_b": (110.0, 200.0)},
+        SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN,
+    ),
+    (
+        {"datum_offset_pt": 2.001},
+        SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM,
+    ),
+    (
+        {"left_thickness_pt": 20.11, "right_thickness_pt": 5.1},
+        SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY,
+    ),
+    # The first failing producer gate wins, even when later gates also fail.
+    (
+        {"jamb_datum_b": (110.0, 200.0), "datum_offset_pt": 3.0,
+         "left_thickness_pt": 31.0, "right_thickness_pt": 5.1},
+        SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN,
+    ),
+    (
+        {"datum_offset_pt": 3.0,
+         "left_thickness_pt": 31.0, "right_thickness_pt": 5.1},
+        SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM,
+    ),
+    (
+        {"scale_ratio": None, "jamb_datum_b": (110.0, 200.0),
+         "datum_offset_pt": 3.0},
+        SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+    ),
+])
+def test_frozen_reveal_cannot_relabel_first_failed_gate_as_candidate(
+    authority, overrides, expected_class,
+):
+    """Coherent metrics and the original stable ID do not prove a valid aperture."""
+    from dataclasses import replace
+
+    kw = inputs(**overrides)
+    before = dict(kw)
+    record = authority.evaluate_stepped_wall_aperture(**kw)
+    assert record.classification is expected_class
+    assert record.status is EvidenceResolutionStatus.ABSTAINED
+    assert replace(record) == record
+    scale = record.scale_ratio if record.scale_ratio is not None else 0.01764
+    candidate_fields = {
+        "classification": SteppedWallApertureClassification.GEOMETRIC_CANDIDATE,
+        "status": EvidenceResolutionStatus.CANDIDATE,
+        "first_remaining_gate": "original_source_host_scale_and_reveal_unverified",
+        "clear_span_m": record.clear_span_pt * scale,
+        "left_wall_thickness_mm": record.left_wall_thickness_pt * scale * 1000.0,
+        "right_wall_thickness_mm": record.right_wall_thickness_pt * scale * 1000.0,
+        "reveal_depth_mm": record.reveal_depth_pt * scale * 1000.0,
+    }
+    with pytest.raises(ValueError, match="first-failing geometric gate"):
+        replace(record, **candidate_fields)
+    assert record.to_dict()["takeoff_eligible"] is False
+    assert record.to_dict()["commercial_projection_allowed"] is False
+    assert kw == before
+    assert authority.evaluate_stepped_wall_aperture(**kw) == record
+
+
+@pytest.mark.parametrize("forged_class,forged_gate", [
+    (
+        SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+        "original_source_scale_or_datum_unverified",
+    ),
+    (
+        SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN,
+        "clear_span_out_of_bounds",
+    ),
+    (
+        SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM,
+        "datum_faces_divergent",
+    ),
+    (
+        SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY,
+        "thickness_step_excessive",
+    ),
+])
+def test_frozen_valid_reveal_cannot_be_falsely_abstained(
+    authority, forged_class, forged_gate,
+):
+    from dataclasses import replace
+
+    kw = inputs()
+    original = authority.evaluate_stepped_wall_aperture(**kw)
+    assert original.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE
+    changes = {
+        "classification": forged_class,
+        "status": EvidenceResolutionStatus.ABSTAINED,
+        "first_remaining_gate": forged_gate,
+        "clear_span_m": None,
+        "left_wall_thickness_mm": None,
+        "right_wall_thickness_mm": None,
+        "reveal_depth_mm": None,
+    }
+    with pytest.raises(ValueError, match="first-failing geometric gate"):
+        replace(original, **changes)
+    assert replace(original) == original
+    assert original == authority.evaluate_stepped_wall_aperture(**kw)
+    assert_shadow(original)
+
+
+@pytest.mark.parametrize("span,datum,step,expected", [
+    (20.0, 2.0, 15.0, SteppedWallApertureClassification.GEOMETRIC_CANDIDATE),
+    (300.0, -2.0, 15.0, SteppedWallApertureClassification.GEOMETRIC_CANDIDATE),
+    (19.999, 0.0, 0.0, SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN),
+    (300.001, 0.0, 0.0, SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN),
+])
+def test_frozen_reveal_existing_threshold_boundaries_preserved(
+    authority, span, datum, step, expected,
+):
+    from dataclasses import replace
+
+    kw = inputs(
+        jamb_datum_b=(100.0 + span, 200.0),
+        datum_offset_pt=datum,
+        left_thickness_pt=5.1 + step,
+        right_thickness_pt=5.1,
+    )
+    result = authority.evaluate_stepped_wall_aperture(**kw)
+    assert result.classification is expected
+    assert replace(result) == result
+    assert result == authority.evaluate_stepped_wall_aperture(**kw)
+    assert_shadow(result)
