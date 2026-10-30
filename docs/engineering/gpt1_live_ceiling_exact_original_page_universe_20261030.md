@@ -173,3 +173,53 @@ FIRM ceiling, commercial customer quantity or official frozen120 score rise.
 No changes to GPT2 FT2/FT3/RCP physical ownership, GPT MAX/Claude host/glazing,
 GPT3 signing/scoring, other GPT1 PRs, private PDFs/tokens, frozen truth,
 20,000 raster cap or 2.5pt snap.
+
+
+## GPT1 — post-producer source-root and viewport continuity (2026-10-30)
+
+**OBSERVED on main and draft #4134:** `collect_live_ceiling_lining_claims`
+reads the exact original PDF bytes, publishes a source revision through
+`SourceVisibilityProducer.ingest_native_pdf_bytes`, and creates one
+`ProviderContext` per authenticated F.07 viewport. It calls
+`run_source_owned_ceiling_lining_shadow`, which legitimately replaces ONLY
+`evidence_snapshot_id` when the trusted wall producer advances the source
+snapshot. The collector then used the returned `effective_context` to create
+`LiveCanonicalCeilingSurfaceObject` without checking that its document,
+SHA-256, revision, selected page, viewport, and project/workspace owner still
+matched the collector's original context. Provisional claims used the PDF
+SHA and initial published revision, creating an inconsistent source-root
+handoff if the returned context was substituted.
+
+**INFERRED failure:** a returned provider result with a foreign source root
+could survive the provisional collector and create a canonical ceiling under
+a different source identity. The downstream issuer/customer may independently
+reject it, but that is too late for a source-closed provisional collector.
+The first failing boundary is the post-producer result-context check, not
+floor/ceiling geometry or finish semantics.
+
+**IMPLEMENTED:** `_source_result_context_matches` requires the exact
+`ProviderContext` type and equality with the collector's context except
+for the nonempty, producer-advanced source snapshot ID. A mismatch makes
+the **entire selected source run** ABSTAINED with
+`live_ceiling_lining_source_context_mismatch` and no claims, canonical
+ceilings or quantity evidence. The genuine wall-producer snapshot advance
+remains accepted. No source-derived dimension, room, finish, material, FIRM
+authority, scoring or customer publication is invented.
+
+**TEST DESIGN:** generated native PDF real-source positive; post-producer
+injected foreign document, SHA, revision, page, viewport, owner and blank
+snapshot negatives; before/after ordering of a valid viewport with a
+foreign-source sibling; deterministic replay and original-PDF preservation.
+Check `publish_live_ceiling_area_quantities` and
+`project_live_ceiling_area_customer_rows` return no issued/customer quantities
+for every invalid source context. This is source-neutral regression, **not**
+an original Maryborough/Lot16 source-positive replay.
+
+**RELEASE GATES:** exact-head Python 3.13/3.14 CI, full source-closed
+SHA-verified original producer→real issuer→sealed/customer replay and
+byte-identical preservation of the existing nine Lot16 signed/customer
+quantity bodies and three Maryborough floor inputs are still required.
+Do not merge or count toward accuracy before those checks. The unchanged
+frozen 120-item evaluator, PDFs, credentials, 20k primitive cap and
+2.5pt snap remain untouched. GPT2 owns original FT/RCP physical source
+correspondence, GPT MAX/Claude host/glazing, GPT3 signing/scoring.
