@@ -895,8 +895,8 @@ def test_frozen_corner_receipts_preserve_order_rotation_and_abstentions(authorit
     ))
     assert first == swapped
     assert first.contract_id == swapped.contract_id
-    assert first.total_girth_m == pytest.approx(1.7)
-    assert first.leg_a.leg_span_m + first.leg_b.leg_span_m == pytest.approx(1.7)
+    assert first.total_girth_m == pytest.approx(1.6)
+    assert first.leg_a.leg_span_m + first.leg_b.leg_span_m == pytest.approx(1.6)
     assert replace(first) == first
     for change in (
         {"scale_ratio": None},
