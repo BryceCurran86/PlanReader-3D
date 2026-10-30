@@ -286,8 +286,20 @@ def test_original_ceiling_quantity_id_replays_never_double_count_or_choose_winne
 
     def replay_source_owned_quantity(*args, **kwargs):
         result = original_run(*args, **kwargs)
-        assert len(result.ceiling_quantities) == 1
-        authentic = result.ceiling_quantities[0]
+        # The real producer can retain ABSTAINED/partial siblings alongside
+        # the single publishable source-owned ceiling.  One live claim does
+        # not imply the entire provider quantity universe has one member.
+        eligible = tuple(
+            quantity for quantity in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=quantity,
+                source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
         original_metadata = dict(authentic.metadata)
         altered = replace(
             authentic,
