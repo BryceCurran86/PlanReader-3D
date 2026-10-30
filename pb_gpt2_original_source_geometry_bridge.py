@@ -89,7 +89,7 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
     if (any(type(sha) is not str
             or re.fullmatch(r"[0-9a-f]{64}", sha) is None
             for sha in (ring_sha, graph_sha))
-            or any(type(page) is not int or page < 1
+            or any(type(page) is not int or not 1 <= page <= 2**53
                    for page in (ring_page, graph_page))):
         return False
     if (ring.get("source_jamb_roles_same_sha_rechecked") is not True
