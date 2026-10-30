@@ -1951,3 +1951,69 @@ def test_terminal_jamb_reference_universe_fails_closed_at_existing_work_cap():
     assert len(observations) == 20_001
     assert len(left.terminal_jamb_observation_ids) == 10_000
     assert len(right.terminal_jamb_observation_ids) == 10_000
+
+
+def test_public_frozen_host_and_pier_records_cannot_be_replaced_with_authority():
+    """A direct dataclass replacement must not bypass the source-neutral issuer fence."""
+    from dataclasses import replace
+
+    wall = ContinuousThroughWallCandidate(
+        "typed-host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("B", (50.0, 0.0), (70.0, 0.0)),
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(records) == 2 and len(piers) == 1
+    host, pier = records[0], piers[0]
+    assert replace(host) == host and replace(pier) == pier
+    for changes in (
+        {"commercial_projection_allowed": True},
+        {"commercial_projection_allowed": 1},
+        {"takeoff_eligible": True},
+        {"shadow_only": False},
+        {"status": S.CORROBORATED},
+        {"status": "candidate"},
+    ):
+        with pytest.raises(ValueError, match="cannot grant commercial or source authority"):
+            replace(host, **changes)
+    for changes in (
+        {"first_remaining_gate": "none"},
+        {"first_remaining_gate": ""},
+        {"first_remaining_gate": "caller_asserted_source_verified"},
+    ):
+        with pytest.raises(ValueError, match="requires unresolved source authority gate"):
+            replace(host, **changes)
+    for changes in (
+        {"is_structural_masonry_pier": True},
+        {"is_structural_masonry_pier": False},
+        {"status": S.CORROBORATED},
+        {"status": S.ABSTAINED},
+        {"first_remaining_gate": "none"},
+    ):
+        with pytest.raises(ValueError, match="cannot assert structural source authority"):
+            replace(pier, **changes)
+
+    # Ordinary abstentions still carry their first failing geometry gate,
+    # and neither candidate nor abstained output can enter commercial takeoff.
+    rejected = ApertureHostCandidateInput("off-band", (20.0, 30.0), (40.0, 30.0))
+    abstained, no_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(rejected,),
+    )
+    assert no_piers == ()
+    assert abstained[0].status is S.ABSTAINED
+    assert abstained[0].first_remaining_gate == "aperture_outside_host_wall_band"
+    assert replace(abstained[0]) == abstained[0]
+    for record in (*records, *abstained):
+        assert record.shadow_only is True
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+    assert pier.is_structural_masonry_pier is None
+    assert pier.status is S.CANDIDATE
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings[::-1],
+    ) == (tuple(reversed(records)), piers)

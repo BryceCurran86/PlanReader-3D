@@ -138,6 +138,14 @@ class InterAperturePierRecord:
     status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
     first_remaining_gate: str = "original_source_structural_pier_unverified"
 
+    def __post_init__(self) -> None:
+        # This public record is source-neutral even when directly constructed
+        # or recreated with dataclasses.replace, not only via this producer.
+        if (self.is_structural_masonry_pier is not None
+                or self.status is not EvidenceResolutionStatus.CANDIDATE
+                or self.first_remaining_gate != "original_source_structural_pier_unverified"):
+            raise ValueError("source-neutral pier cannot assert structural source authority")
+
 
 @dataclass(frozen=True)
 class ApertureHostCandidateInput:
@@ -192,6 +200,27 @@ class ThroughWallHostedOpeningRecord:
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
     shadow_only: bool = True
+
+    def __post_init__(self) -> None:
+        # Frozen dataclasses can still be directly instantiated or replaced.
+        # The source-neutral record contract must fail closed at that seam.
+        if (type(self.status) is not EvidenceResolutionStatus
+                or self.status not in (
+                    EvidenceResolutionStatus.CANDIDATE,
+                    EvidenceResolutionStatus.ABSTAINED,
+                )
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral host cannot grant commercial or source authority")
+        if (not _native_source_identity(self.first_remaining_gate)
+                or self.first_remaining_gate == "none"
+                or (self.status is EvidenceResolutionStatus.CANDIDATE
+                    and self.first_remaining_gate != "original_source_host_unverified")):
+            raise ValueError("source-neutral host requires unresolved source authority gate")
 
     def to_dict(self) -> dict[str, Any]:
         return {
