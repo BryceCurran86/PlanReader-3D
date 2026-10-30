@@ -336,3 +336,69 @@ def test_inclusive_float_coordinate_identity_boundary_is_shadow_only(authority):
     assert first.first_remaining_gate == "original_source_scale_or_datum_unverified"
     assert_null_metrics(first)
     assert_shadow(first)
+
+
+@pytest.mark.parametrize("bad", [
+    "", " ", " STEPPED_WALL_OPENING", "STEPPED_WALL_OPENING ",
+    "STEPPED\nWALL", "STEPPED\tWALL", "STEPPED\x00WALL",
+    "STEPPED\u200bWALL", True, None, 123,
+])
+def test_stepped_wall_context_identity_rejects_padding_and_controls(
+    authority, bad,
+):
+    kw = inputs()
+    before = dict(kw)
+    with pytest.raises(ValueError, match="exact printable source identity"):
+        authority.evaluate_stepped_wall_aperture(
+            **(kw | {"context_label": bad})
+        )
+    assert kw == before
+
+
+def test_stepped_wall_context_exact_identity_replay_and_no_commercial(
+    authority,
+):
+    kw = inputs()
+    first = authority.evaluate_stepped_wall_aperture(**kw)
+    second = authority.evaluate_stepped_wall_aperture(**kw)
+    swapped = authority.evaluate_stepped_wall_aperture(**(
+        kw | {
+            "jamb_datum_a": kw["jamb_datum_b"],
+            "jamb_datum_b": kw["jamb_datum_a"],
+        }
+    ))
+    other = authority.evaluate_stepped_wall_aperture(**(
+        kw | {"context_label": "ANOTHER_CONTEXT"}
+    ))
+    assert first == second
+    assert first.contract_id == swapped.contract_id
+    assert first.contract_id != other.contract_id
+    assert first.context_label == "STEPPED_WALL_OPENING"
+    assert first.to_dict()["context_label"] == "STEPPED_WALL_OPENING"
+    assert first.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE
+    assert first.first_remaining_gate == "original_source_host_scale_and_reveal_unverified"
+    assert_shadow(first)
+    assert kw == inputs()
+
+
+def test_stepped_wall_missing_scale_keeps_null_metrics_with_exact_context(
+    authority,
+):
+    result = authority.evaluate_stepped_wall_aperture(
+        **inputs(scale_ratio=None)
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.classification is SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+    assert result.first_remaining_gate == "original_source_scale_or_datum_unverified"
+    assert_null_metrics(result)
+    assert_shadow(result)
+
+
+def test_stepped_wall_context_rejects_string_subclass(authority):
+    class Impostor(str):
+        pass
+
+    with pytest.raises(ValueError, match="exact printable source identity"):
+        authority.evaluate_stepped_wall_aperture(
+            **inputs(context_label=Impostor("STEPPED_WALL_OPENING"))
+        )
