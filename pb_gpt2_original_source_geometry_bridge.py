@@ -287,6 +287,14 @@ class GPT2OriginalSourceGeometryBridge:
             or coverage.document_id != published.revision.document_id
             or coverage.revision_id != revision_id
             or coverage.state not in ("complete", "partial")
+            # A producer's COMPLETE decode receipt must cover the whole
+            # original PDF. A subset marked complete can falsely certify
+            # source-page universe completeness even if the requested page
+            # itself was decoded. PARTIAL retains its separate valid scope.
+            or (coverage.state == "complete" and (
+                bool(failed) or len(decoded) != total
+                or decoded != tuple(range(1, total + 1))
+            ))
             or page_1_based > total or page_1_based not in decoded
         ):
             raise ValueError("original_source_page_outside_producer_coverage")

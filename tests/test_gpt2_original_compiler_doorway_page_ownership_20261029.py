@@ -775,3 +775,35 @@ def test_original_source_revision_rejects_unbounded_page_selector(monkeypatch):
         _invoke_source_revision_with_coverage(
             monkeypatch, requested_page=2**53 + 1,
         )
+
+
+@pytest.mark.parametrize("scope", [
+    {"decoded": (7,), "failed": (), "total": 31, "requested_page": 7},
+    {"decoded": (1, 2, 3), "failed": (), "total": 4, "requested_page": 3},
+    {"decoded": (1, 2, 3), "failed": (4,), "total": 4, "requested_page": 3},
+    {"decoded": (3, 2, 1), "failed": (), "total": 3, "requested_page": 2},
+])
+def test_complete_source_coverage_rejects_missing_or_unordered_original_pages(
+    monkeypatch, scope,
+):
+    # A decoded page alone cannot authenticate a contradictory COMPLETE
+    # producer receipt; this negative check never creates a quantity.
+    with pytest.raises(
+        ValueError, match="original_source_page_outside_producer_coverage"
+    ):
+        _invoke_source_revision_with_coverage(
+            monkeypatch, state="complete", **scope,
+        )
+
+
+def test_complete_source_coverage_accepts_full_original_page_universe(
+    monkeypatch,
+):
+    published, source_bytes = _invoke_source_revision_with_coverage(
+        monkeypatch, decoded=(1, 2, 3), failed=(), total=3,
+        state="complete", requested_page=2,
+    )
+    assert published.coverage.decoded_pages == (1, 2, 3)
+    assert published.coverage.failed_pages == ()
+    assert source_bytes == b"synthetic-private-source"
+    assert not hasattr(published, "new_firm_quantities")
