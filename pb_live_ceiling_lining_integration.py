@@ -174,6 +174,33 @@ def _source_positive_area_m2(value: object) -> Optional[float]:
     return area
 
 
+def _source_viewport_bbox(value: object) -> Optional[tuple[float, float, float, float]]:
+    """Validate the exact source-owned F.07 region without repairing coordinates.
+
+    The F.07 producer normally supplies a native four-tuple. A malformed
+    returned authoritative sibling must not be dropped or converted into an
+    apparently authenticated ceiling viewport. No scale or room is inferred.
+    """
+    if type(value) not in (tuple, list) or len(value) != 4:
+        return None
+    max_exact_native_coordinate = 1 << 53
+    if any(
+        type(item) not in (int, float)
+        or abs(item) > max_exact_native_coordinate
+        for item in value
+    ):
+        return None
+    try:
+        bbox = tuple(float(item) for item in value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(item) for item in bbox):
+        return None
+    if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+        return None
+    return bbox
+
+
 def _exact_source_ceiling_quantity_id(value: object) -> bool:
     """Source quantity IDs are immutable receipts, not display strings."""
     return type(value) is str and bool(value) and value == value.strip()
@@ -745,17 +772,18 @@ def collect_live_ceiling_lining_claims(
             for segmented in authoritative_floor_plan_viewports(
                 page, page_number=page_no
             ):
-                if segmented.bounding_box is None:
-                    continue
-                # F.07 viewport IDs are original source identities, not
-                # display strings. Never stringify, trim or silently skip an
-                # authoritative sibling: that would publish an incomplete
-                # selected viewport universe from earlier valid siblings.
+                # F.07 viewport IDs and bounds are original source receipts.
+                # Never skip a malformed authoritative sibling or coerce its
+                # geometry: earlier ceilings require the complete source view.
                 viewport_id = getattr(segmented, "view_id", None)
+                bbox = _source_viewport_bbox(
+                    getattr(segmented, "bounding_box", None)
+                )
                 if (
                     type(viewport_id) is not str
                     or not viewport_id
                     or viewport_id != viewport_id.strip()
+                    or bbox is None
                 ):
                     return LiveCeilingLiningResult(
                         status=EvidenceResolutionStatus.ABSTAINED,
@@ -765,7 +793,6 @@ def collect_live_ceiling_lining_claims(
                         ),
                         claims=(),
                     )
-                bbox = tuple(float(value) for value in segmented.bounding_box)
                 viewport = ViewportEvidence(
                     viewport_id=viewport_id,
                     document_id=published.revision.document_id,
