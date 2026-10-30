@@ -533,3 +533,38 @@ def test_oversized_float_native_doorway_graph_endpoint_abstains(axis, sign):
     assert not compiler._original_doorway_ring_matches_reissued_native_graph(
         ring, graph
     )
+
+
+@pytest.mark.parametrize(
+    "bad_root",
+    [None, "", "A" * 64, "g" * 64, True, 1, 10 ** 1000],
+)
+def test_native_graph_verifier_rejects_matching_but_untrusted_source_roots(bad_root):
+    """Two equally malformed SHA receipts cannot authenticate original ink."""
+    ring, graph = _ring(7), _graph(7)
+    ring["original_source_sha256"] = bad_root
+    graph["source_sha256"] = bad_root
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph) is False
+    assert _ring(7)["original_source_sha256"] == SOURCE_SHA
+
+
+@pytest.mark.parametrize(
+    "bad_page",
+    [None, False, True, 7.0, "7", "", 0, -7, 10 ** 1000],
+)
+def test_native_graph_verifier_rejects_matching_but_aliased_source_pages(bad_page):
+    """Native page identity is a literal positive integer, not numeric equality."""
+    ring, graph = _ring(7), _graph(7)
+    ring["original_page_1_based"] = bad_page
+    graph["page_1_based"] = bad_page
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph) is False
+
+
+def test_native_graph_verifier_keeps_complete_original_root_positive_and_no_quantity():
+    ring, graph = _ring(7), _graph(7)
+    ring_before, graph_before = repr(ring), repr(graph)
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph) is True
+    assert repr(ring) == ring_before
+    assert repr(graph) == graph_before
+    assert "new_firm_quantities" not in graph
+    assert "customer_floor_finish_area_issued" not in graph
