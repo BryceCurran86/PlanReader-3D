@@ -160,6 +160,7 @@ class ApertureHostCandidateInput:
             raise ValueError("Aperture start and end points must be distinct and finite")
         observations = self.terminal_jamb_observation_ids
         if (type(observations) not in (tuple, list)
+                or len(observations) > _MAX_GEOMETRIC_PRIMITIVES
                 or any(not _native_source_identity(v) for v in observations)
                 or len(set(observations)) != len(observations)):
             raise ValueError("terminal_jamb_observation_ids must be distinct nonblank strings")
@@ -291,6 +292,13 @@ class StructuralThroughWallApertureHostAuthority:
         openings = tuple(openings)
         if any(type(opening) is not ApertureHostCandidateInput for opening in openings):
             raise ValueError("openings must contain ApertureHostCandidateInput records")
+        # Bound the COMPLETE auxiliary jamb-reference universe separately from
+        # geometric primitive counts. One geometric aperture may otherwise
+        # carry unbounded source references through conflict indexing and
+        # stable-ID serialization. Never truncate or select a subset.
+        if (sum(len(op.terminal_jamb_observation_ids) for op in openings)
+                > _MAX_GEOMETRIC_PRIMITIVES):
+            raise ValueError("terminal_jamb_observation_reference_limit_exceeded")
         # Every supplied transverse obstruction belongs to the candidate universe.
         # A malformed/NaN crossing cannot be silently treated as "no obstruction".
         # Validate even when there are no openings, so bad evidence never disappears.

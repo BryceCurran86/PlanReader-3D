@@ -1905,3 +1905,49 @@ def test_rejected_perpendicular_point_station_blocks_pier_but_band_tangent_does_
             ) == (records, piers)
         assert original == (left.start_pt, left.end_pt, right.start_pt,
                             right.end_pt, rejected.start_pt, rejected.end_pt)
+
+
+def test_terminal_jamb_reference_universe_fails_closed_at_existing_work_cap():
+    # The geometric universe is only one host plus three apertures. Its
+    # independent source-observation universe must not grow without bound.
+    observations = tuple(f"jamb-ref-{i:05d}" for i in range(20_001))
+    with pytest.raises(ValueError, match="terminal_jamb_observation_ids"):
+        ApertureHostCandidateInput(
+            "oversized", (10.0, 0.0), (20.0, 0.0), observations,
+        )
+
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    left = ApertureHostCandidateInput(
+        "left", (10.0, 0.0), (20.0, 0.0), observations[:10_000],
+    )
+    right = ApertureHostCandidateInput(
+        "right", (40.0, 0.0), (50.0, 0.0), observations[10_000:20_000],
+    )
+    extra = ApertureHostCandidateInput(
+        "extra", (70.0, 0.0), (80.0, 0.0), observations[20_000:],
+    )
+    authority = _authority()
+    first, first_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(left, right),
+    )
+    second, second_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(left, right),
+    )
+    assert (first, first_piers) == (second, second_piers)
+    assert len(first) == 2 and len(first_piers) == 1
+    assert all(record.status is S.CANDIDATE for record in first)
+    assert all(record.shadow_only and not record.takeoff_eligible
+               and not record.commercial_projection_allowed for record in first)
+    assert first_piers[0].is_structural_masonry_pier is None
+    for candidate_order in ((left, right, extra), (extra, right, left)):
+        with pytest.raises(
+            ValueError, match="terminal_jamb_observation_reference_limit_exceeded",
+        ):
+            authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=candidate_order,
+            )
+    assert len(observations) == 20_001
+    assert len(left.terminal_jamb_observation_ids) == 10_000
+    assert len(right.terminal_jamb_observation_ids) == 10_000
