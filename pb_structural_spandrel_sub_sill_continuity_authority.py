@@ -174,6 +174,25 @@ class SpandrelSubSillRecord:
                 or not math.isclose(self.clear_span_pt, expected_span,
                                     rel_tol=1e-12, abs_tol=1e-9)):
             raise ValueError("spandrel numeric evidence conflicts with jamb geometry")
+        # Reconstruct the producer's ordered first-failure decision from
+        # frozen evidence. Status/gate string coherence alone is insufficient:
+        # direct replacement can otherwise conceal a short span as an invalid
+        # level, or relabel a valid candidate as a rejected hypothesis.
+        if self.scale_ratio is None:
+            expected_classification = (
+                SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE)
+        elif not MIN_CLEAR_SPAN_PT <= self.clear_span_pt <= MAX_CLEAR_SPAN_PT:
+            expected_classification = (
+                SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN)
+        elif (self.sill_height_mm >= self.head_height_mm
+              or self.head_height_mm <= 0 or self.sill_height_mm <= 0):
+            expected_classification = (
+                SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS)
+        else:
+            expected_classification = SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+        if self.classification is not expected_classification:
+            raise ValueError("spandrel frozen first-failing geometric gate conflict")
+
         if self.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE:
             # Direct construction and dataclasses.replace must honor the
             # same geometric bounds as evaluate_spandrel_sub_sill. A 1pt or
