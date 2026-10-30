@@ -190,6 +190,16 @@ class StructuralCornerApertureRecord:
                     (not _finite_real(self.total_girth_m)
                      or self.total_girth_m <= 0))):
             raise ValueError("corner record numeric evidence must be finite and physical")
+        # A frozen record must not claim an angle different from the two
+        # independently validated outward leg axes. A zero-length leg keeps
+        # its producer's zero-axis/typed-abstention angle convention.
+        dot = max(-1.0, min(1.0,
+            self.leg_a.axis_vector[0] * self.leg_b.axis_vector[0]
+            + self.leg_a.axis_vector[1] * self.leg_b.axis_vector[1]))
+        expected_angle = math.degrees(math.acos(dot))
+        if not math.isclose(self.corner_angle_deg, expected_angle,
+                            rel_tol=1e-12, abs_tol=1e-9):
+            raise ValueError("corner record numeric evidence conflicts with leg angle")
         expected_girth = self.leg_a.leg_span_pt + self.leg_b.leg_span_pt
         expected_chord = math.hypot(
             self.leg_a.terminal_jamb[0] - self.leg_b.terminal_jamb[0],
