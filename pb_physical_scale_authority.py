@@ -743,6 +743,7 @@ class PhysicalScaleProducer:
             or published.revision.source_sha256 != selector.source_sha256
             or published.snapshot.snapshot_id != selector.snapshot_id
             or int(selector.page_id) not in tuple(int(value) for value in published.coverage.decoded_pages)
+            or int(selector.page_id) in tuple(int(value) for value in published.coverage.failed_pages)
             or self._source._producer.current_revision_id(selector.document_id) != selector.revision_id
         ):
             return None
@@ -920,16 +921,16 @@ class PhysicalScaleProducer:
     def publish_scope(self, selector: PhysicalScaleSelector) -> PhysicalScaleResult:
         if type(selector) is not PhysicalScaleSelector:
             raise TypeError("selector must be PhysicalScaleSelector")
-        # Published scale evidence is immutable for one exact source/page/viewport
-        # selector. Return producer-owned prior evidence before reopening the PDF,
-        # re-segmenting viewports, and rescanning scale-bar geometry.
-        existing_attempt = self._attempt_cache.get(selector.key)
-        if existing_attempt is not None:
-            return existing_attempt
         inputs = self._revision_inputs(selector)
         if inputs is None:
             return _blocked(EvidenceResolutionStatus.ABSTAINED, PHYSICAL_SCALE_SCOPE_UNAVAILABLE)
         published, source_bytes = inputs
+        # Historical evidence stays immutable, but a cached publication cannot
+        # bypass the current source revision, original bytes or page coverage.
+        # Healthy cache hits still avoid parsing/segmenting/scanning the page.
+        existing_attempt = self._attempt_cache.get(selector.key)
+        if existing_attempt is not None:
+            return existing_attempt
 
         def cache_attempt(result: PhysicalScaleResult) -> PhysicalScaleResult:
             self._attempt_cache[selector.key] = result

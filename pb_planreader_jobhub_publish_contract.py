@@ -114,6 +114,12 @@ class PlanReaderJobHubQuantityRow:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PlanReaderJobHubQuantityRow":
+        # Serialized customer permission must be an exact native Boolean.
+        # bool("false") and bool("0") are True; a typed deserialization
+        # otherwise evades the raw-dict preflight's Boolean requirement.
+        raw_publishable = data.get("is_publishable", False)
+        if type(raw_publishable) is not bool:
+            raise ValueError("Legacy row is_publishable must be an explicit Boolean")
         return cls(
             quantity_id=str(data.get("quantity_id") or ""),
             description=str(data.get("description") or ""),
@@ -129,7 +135,7 @@ class PlanReaderJobHubQuantityRow:
             scale_id=data.get("scale_id"),
             dimension_text_id=data.get("dimension_text_id"),
             benchmark_status=data.get("benchmark_status"),
-            is_publishable=bool(data.get("is_publishable", False)),
+            is_publishable=raw_publishable,
             warnings=list(data.get("warnings") or []),
             blocking_reasons=list(data.get("blocking_reasons") or []),
             approved_by=data.get("approved_by"),
@@ -213,6 +219,11 @@ class PlanReaderJobHubPayload:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PlanReaderJobHubPayload":
+        # The top-level commercial-ready seal is not truthiness-based.
+        # A string "false" must not become a customer approval receipt.
+        raw_commercial_ready = data.get("is_commercial_ready", False)
+        if type(raw_commercial_ready) is not bool:
+            raise ValueError("Legacy is_commercial_ready must be an explicit Boolean")
         quantities = [
             PlanReaderJobHubQuantityRow.from_dict(q)
             for q in (data.get("quantities") or [])
@@ -231,7 +242,7 @@ class PlanReaderJobHubPayload:
             publish_mode=str(data.get("publish_mode") or PublishMode.COMMERCIAL_PUBLISH.value),
             benchmark_status=data.get("benchmark_status"),
             payload_fingerprint=str(data.get("payload_fingerprint") or ""),
-            is_commercial_ready=bool(data.get("is_commercial_ready", False)),
+            is_commercial_ready=raw_commercial_ready,
             notes=str(data.get("notes") or ""),
         )
 
@@ -303,6 +314,11 @@ def run_jobhub_publish_preflight(
 
     blocking_reasons: List[str] = []
     warnings: List[str] = []
+    # Unrecognised modes are never an implicit draft permission. The legacy
+    # code selected draft behavior for *every* value other than commercial,
+    # including typos such as 'commercial_publish ', without any blocker.
+    if p_mode not in {PublishMode.DRAFT_PUBLISH.value, PublishMode.COMMERCIAL_PUBLISH.value}:
+        blocking_reasons.append("Unsupported JobHub publishing mode cannot bypass commercial preflight")
 
     # 1. Project Identity Validation
     if not project_identity or not project_identity.get("project_id"):
@@ -310,6 +326,16 @@ def run_jobhub_publish_preflight(
     elif project_identity.get("identity_confirmed") is False:
         reason = project_identity.get("mismatch_reason") or "Project identity unconfirmed or mismatched"
         blocking_reasons.append(f"Project identity mismatch rejected: {reason}")
+    elif is_commercial and project_identity.get("identity_confirmed") is not True:
+        # Unknown, missing or truthy non-boolean identity is not a source
+        # confirmation. Only an explicit owner/source match can authorize a
+        # commercial JobHub payload; a project_id string is not that proof.
+        blocking_reasons.append(
+            "Commercial publishing requires explicitly confirmed project identity"
+        )
+    elif project_identity.get("identity_confirmed") is not True:
+        # Preserve provisional draft work without inventing source ownership.
+        warnings.append("Draft project identity not explicitly confirmed")
 
     # 2. Drawing Revision Validation
     curr_rev_hash = str(drawing_revision.get("revision_hash") or "")
@@ -319,18 +345,71 @@ def run_jobhub_publish_preflight(
         else:
             warnings.append("Drawing revision hash is unrecorded")
 
+    # A commercial package with no rows is not a verified release.  An
+    # empty list previously returned is_valid=True and could be stamped
+    # is_commercial_ready by build_jobhub_payload.
+    if is_commercial and not rows:
+        blocking_reasons.append("Commercial release requires at least one verified quantity")
+
     # 3. Row-by-Row Gate Validation
     publishable_count = 0
     blocked_count = 0
     provisional_count = 0
+    seen_quantity_ids: set[str] = set()
 
     for idx, raw_row in enumerate(rows):
-        qid = getattr(raw_row, "quantity_id", None) or (raw_row.get("quantity_id") if isinstance(raw_row, dict) else f"ROW-{idx}")
-        
+        raw_quantity_id = (
+            raw_row.get("quantity_id")
+            if isinstance(raw_row, dict)
+            else getattr(raw_row, "quantity_id", None)
+        )
+        # The issuer's quantity_id is the physical quantity identity, not
+        # merely a display label. Two separately hashed rows can still claim
+        # the same measured work and must never both reach commercial JobHub.
+        # Trim only for identity comparison; do not silently rewrite source IDs.
+        physical_id = (
+            raw_quantity_id.strip()
+            if isinstance(raw_quantity_id, str) else ""
+        )
+        qid = physical_id or f"ROW-{idx}"
+        if is_commercial:
+            if not physical_id:
+                blocking_reasons.append(
+                    f"Row {qid}: missing stable physical quantity_id for commercial release"
+                )
+                blocked_count += 1
+                continue
+            if physical_id in seen_quantity_ids:
+                blocking_reasons.append(
+                    f"Row {qid}: duplicate physical quantity_id in commercial payload"
+                )
+                blocked_count += 1
+                continue
+            seen_quantity_ids.add(physical_id)
+        elif not physical_id:
+            warnings.append(
+                f"Draft row {qid}: missing stable physical quantity_id (not commercial authority)"
+            )
+        elif physical_id in seen_quantity_ids:
+            warnings.append(
+                f"Draft row {qid}: duplicate physical quantity_id (not commercial authority)"
+            )
+        else:
+            seen_quantity_ids.add(physical_id)
+
         # Check basic authority metadata
         if isinstance(raw_row, dict):
-            if "authority_status" not in raw_row or "source_type" not in raw_row:
+            if (
+                not str(raw_row.get("authority_status") or "").strip()
+                or not str(raw_row.get("source_type") or "").strip()
+            ):
                 blocking_reasons.append(f"Row {qid}: missing measurement authority metadata")
+                blocked_count += 1
+                continue
+            if is_commercial and type(raw_row.get("is_publishable")) is not bool:
+                blocking_reasons.append(
+                    f"Row {qid}: commercial publishability must be an explicit boolean"
+                )
                 blocked_count += 1
                 continue
             row_obj = PlanReaderJobHubQuantityRow.from_dict(raw_row)
@@ -357,6 +436,92 @@ def run_jobhub_publish_preflight(
             continue
 
         auth_status = row_obj.authority_status.lower()
+        source_type = row_obj.source_type.lower()
+
+        # The issuer's is_publishable flag is not an authority certificate:
+        # serialized, corrected, or externally supplied rows can carry an
+        # inconsistent flag. Re-check the typed status and source at the final
+        # commercial consumer rather than promoting a forged flag to JobHub.
+        if is_commercial:
+            if type(row_obj.is_publishable) is not bool:
+                blocking_reasons.append(
+                    f"Row {qid}: commercial publishability must be an explicit boolean"
+                )
+                blocked_count += 1
+                continue
+            # Preserve the issuer's typed veto and audit reason at the final
+            # commercial boundary. These rows must remain rejected, but a
+            # generic authority error must not hide exclusion or staleness.
+            if auth_status in (
+                AuthorityStatus.EXCLUDED.value,
+                AuthorityStatus.REFERENCE_ONLY.value,
+                AuthorityStatus.BLOCKED.value,
+            ):
+                blocking_reasons.append(
+                    f"Row {qid}: item with status '{auth_status}' cannot enter commercial release"
+                )
+                blocked_count += 1
+                continue
+            if row_obj.blocking_reasons:
+                blocking_reasons.append(
+                    f"Row {qid}: unpublishable item ({', '.join(row_obj.blocking_reasons)})"
+                )
+                blocked_count += 1
+                continue
+            if auth_status not in {
+                AuthorityStatus.FIRM.value,
+                AuthorityStatus.USER_APPROVED.value,
+            }:
+                blocking_reasons.append(
+                    f"Row {qid}: non-firm or unapproved measurement authority ({auth_status})"
+                )
+                blocked_count += 1
+                continue
+            # The upstream issuer never marks raw PDF-scaled, AI-detected or
+            # manual rows commercially publishable. An estimator approval
+            # creates a USER_APPROVED source row instead; a forged FIRM flag
+            # must not bypass that transition.
+            if source_type not in {kind.value for kind in TakeoffSourceType} or source_type in {
+                TakeoffSourceType.EXCLUDED.value,
+                TakeoffSourceType.REFERENCE_ONLY.value,
+                TakeoffSourceType.BLOCKED.value,
+                TakeoffSourceType.PDF_SCALED.value,
+                TakeoffSourceType.AI_DETECTED.value,
+                TakeoffSourceType.MANUAL.value,
+            }:
+                blocking_reasons.append(
+                    f"Row {qid}: excluded, blocked or unknown source authority ({source_type})"
+                )
+                blocked_count += 1
+                continue
+            if (
+                source_type == TakeoffSourceType.DOCUMENTED_DIMENSION.value
+                and (
+                    not (
+                        (row_obj.source_page is not None and str(row_obj.source_page).strip())
+                        or str(row_obj.source_sheet or "").strip()
+                    )
+                    or not str(row_obj.dimension_text_id or "").strip()
+                )
+            ):
+                blocking_reasons.append(
+                    f"Row {qid}: documented dimension lacks source page or figured-dimension trace"
+                )
+                blocked_count += 1
+                continue
+            if (
+                auth_status == AuthorityStatus.USER_APPROVED.value
+                or source_type in {
+                    TakeoffSourceType.MODEL_DERIVED.value,
+                    TakeoffSourceType.USER_CORRECTED.value,
+                    TakeoffSourceType.USER_APPROVED.value,
+                }
+            ) and not str(row_obj.approved_by or "").strip():
+                blocking_reasons.append(
+                    f"Row {qid}: estimator approval required for this measurement authority"
+                )
+                blocked_count += 1
+                continue
 
         # Check revision staleness
         if row_obj.revision_hash and curr_rev_hash and row_obj.revision_hash != curr_rev_hash:
@@ -435,6 +600,11 @@ def build_jobhub_payload(
 ) -> PlanReaderJobHubPayload:
     """Construct a verified PlanReaderJobHubPayload enforcing commercial preflight invariants."""
     p_mode = publish_mode.value if isinstance(publish_mode, PublishMode) else str(publish_mode).lower()
+    # The legacy builder tolerates preflight blockers for explicit DRAFT.
+    # An unknown value must therefore be refused *before* it could be
+    # treated like draft or sealed into a recipient customer payload.
+    if p_mode not in {PublishMode.DRAFT_PUBLISH.value, PublishMode.COMMERCIAL_PUBLISH.value}:
+        raise ValueError("Unsupported JobHub publishing mode cannot construct a payload")
     is_commercial = (p_mode == PublishMode.COMMERCIAL_PUBLISH.value)
 
     preflight = run_jobhub_publish_preflight(

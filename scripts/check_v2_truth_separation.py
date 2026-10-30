@@ -29,6 +29,13 @@ _PRODUCTION_EXCLUDED_PREFIXES = (
 _WORKFLOW_ROOT = ".github/workflows/"
 _WORKFLOW_SUFFIXES = {".yml", ".yaml"}
 _LOCAL_ACTION_ROOT = ".github/actions/"
+# Pytest discovers these configuration files from the repository root or the
+# explicitly targeted tests/ directory. addopts can silently omit signed or
+# original-source tests; config changes are release-execution controls.
+_PYTEST_CONFIG_PATHS = frozenset({
+    "pytest.ini", "tox.ini", "tests/pytest.ini", "tests/tox.ini",
+    "tests/pyproject.toml", "tests/setup.cfg",
+})
 # These root manifests select the interpreter's package/runtime environment for
 # both public CI and the trusted original-source replay. Changing one alongside
 # frozen benchmark inputs is a production-execution change even without a .py
@@ -62,36 +69,46 @@ def _is_root_runtime_manifest(path: str) -> bool:
     )
 
 
-def _normalize(path: str) -> str:
-    normalized = path.replace("\\", "/")
+def _normalize(path: str, *, git_path: bool = False) -> str:
+    # Git -z emits repository-relative POSIX paths. A backslash in one of
+    # those paths is a literal filename character, NOT a directory separator.
+    # Retain historical Windows-path support for non-Git helper callers.
+    normalized = path if git_path else path.replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized
 
 
-def is_v2_truth_file(path: str) -> bool:
-    normalized = _normalize(path)
+def is_v2_truth_file(path: str, *, git_path: bool = False) -> bool:
+    normalized = _normalize(path, git_path=git_path)
     if not normalized.startswith(_V2_ROOT):
         return False
     return PurePosixPath(normalized).name in _V2_TRUTH_FILENAMES
 
 
-def is_benchmark_defining_file(path: str) -> bool:
+def is_benchmark_defining_file(path: str, *, git_path: bool = False) -> bool:
     """Everything that defines or feeds the frozen benchmark: the named truth files, ANY other file in the V2 tree
     (evaluators, reconcilers, identity maps, runners) and the original source PDFs.
 
     ``is_v2_truth_file`` stays the narrow predicate for the six truth filenames; this wider one is what the separation gate uses, so
     scorer code, tolerances or a source PDF cannot change in the same PR as production code.
     """
-    normalized = _normalize(path)
-    if is_v2_truth_file(normalized) or normalized.startswith(_V2_ROOT):
+    normalized = _normalize(path, git_path=git_path)
+    if is_v2_truth_file(normalized, git_path=git_path) or normalized.startswith(_V2_ROOT):
         return True
     lowered = normalized.lower()
     return lowered.startswith(_SOURCE_PDF_ROOT) and PurePosixPath(lowered).suffix == ".pdf"
 
 
-def is_production_code_file(path: str) -> bool:
-    normalized = _normalize(path)
+def is_production_code_file(path: str, *, git_path: bool = False) -> bool:
+    normalized = _normalize(path, git_path=git_path)
+    # Pytest loads every tests/**/conftest.py as executable collection policy.
+    # Unlike ordinary test modules, it can skip or xfail source/signed checks,
+    # so it is a release acceptance control when frozen truth also changes.
+    if normalized.startswith("tests/") and PurePosixPath(normalized).name == "conftest.py":
+        return True
+    if normalized in _PYTEST_CONFIG_PATHS:
+        return True
     if normalized.startswith(_PRODUCTION_EXCLUDED_PREFIXES):
         return False
     if _is_root_runtime_manifest(normalized):
@@ -103,16 +120,24 @@ def is_production_code_file(path: str) -> bool:
     return PurePosixPath(normalized).suffix.lower() in _PRODUCTION_SUFFIXES
 
 
-def find_separation_violation(changed_paths: Sequence[str]) -> tuple[list[str], list[str]]:
-    truth_files = sorted({p for p in changed_paths if is_benchmark_defining_file(p)})
-    production_files = sorted({p for p in changed_paths if is_production_code_file(p)})
+def find_separation_violation(
+    changed_paths: Sequence[str], *, git_path: bool = False,
+) -> tuple[list[str], list[str]]:
+    truth_files = sorted({
+        p for p in changed_paths if is_benchmark_defining_file(p, git_path=git_path)
+    })
+    production_files = sorted({
+        p for p in changed_paths if is_production_code_file(p, git_path=git_path)
+    })
     if truth_files and production_files:
         return truth_files, production_files
     return [], []
 
 
-def check_paths(changed_paths: Sequence[str]) -> None:
-    truth_files, production_files = find_separation_violation(changed_paths)
+def check_paths(changed_paths: Sequence[str], *, git_path: bool = False) -> None:
+    truth_files, production_files = find_separation_violation(
+        changed_paths, git_path=git_path,
+    )
     if not truth_files:
         return
     raise SystemExit(
@@ -166,7 +191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         changed_paths = _stdin_paths_from_bytes(
             sys.stdin.buffer.read(), require_nul=args.nul,
         )
-        check_paths(changed_paths)
+        check_paths(changed_paths, git_path=args.nul)
     except (ValueError, UnicodeError) as exc:
         print(f"Full Plan V2 truth / production separation input invalid: {exc}", file=sys.stderr)
         return 1

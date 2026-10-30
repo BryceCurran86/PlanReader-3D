@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   original:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     name: Original Lot16 8+9 sealed customer (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 95
@@ -26,8 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          approved_base=db5dd0a6182dfd83d889303be7de6a107ae08b42
-          approved_head=f2e7c7492f151be6c34880f81025ffc2c204a364
+          approved_base=a8d0fa5ef2dc0db3e1171ab8e8558bf9448f1e94
+          approved_head=296f48e8d89496afd96b4eda5a2e65f18285227b
           git fetch --no-tags --depth=1 origin "$approved_base" "$approved_head"
           observed="$(git diff --name-only "$approved_base" "$approved_head" | LC_ALL=C sort)"
           expected="$(cat <<'APPROVED_SOURCE_TEST_PATHS' | LC_ALL=C sort
@@ -41,6 +41,7 @@ jobs:
           .github/workflows/test-gpt3-v1-unsigned-scope-wire.yml
           .github/workflows/test-gpt3-v2-opening-kind-consistency.yml
           .github/workflows/test-gpt3-v2-source-floor-finish-trade.yml
+          docs/engineering/gptmax_append_only_diagnostic_scope_replay_20261029.md
           pb_customer_output_verification.py
           pb_live_opening_customer_projection.py
           pb_live_opening_source_closed_export.py
