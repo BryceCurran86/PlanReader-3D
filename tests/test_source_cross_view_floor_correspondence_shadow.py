@@ -149,7 +149,7 @@ def test_cross_view_selector_rejects_same_original_page(page_id):
 
 
 @pytest.mark.parametrize("field_name", ["support_page_id", "target_page_id"])
-@pytest.mark.parametrize("bad_page_id", [" 7", "7 ", "7\\n", "\\t7", "7\\x00"])
+@pytest.mark.parametrize("bad_page_id", [" 7","7 ","7\n","\t7","7\u0000"])
 def test_cross_view_selector_rejects_noncanonical_page_aliases(field_name, bad_page_id):
     base = sample_selector()
     fields = {
