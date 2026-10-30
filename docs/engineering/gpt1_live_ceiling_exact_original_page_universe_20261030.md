@@ -223,3 +223,14 @@ Do not merge or count toward accuracy before those checks. The unchanged
 frozen 120-item evaluator, PDFs, credentials, 20k primitive cap and
 2.5pt snap remain untouched. GPT2 owns original FT/RCP physical source
 correspondence, GPT MAX/Claude host/glazing, GPT3 signing/scoring.
+
+
+## Follow-up source room-polygon geometry completeness gate (2026-10-30)
+
+**OBSERVED:** Exact head `a82788ae2ab2e879abc46411ea303a7755a900a9`; live producer `collect_live_ceiling_lining_claims` validates a provisional ceiling metric via `_claim_from_quantity`, then `canonical_ceiling_from_shadow_quantity` reads `source_result.pipeline.room_area_bridge.room_index.room(room_id).polygon_pdf_pts`. Only `len >= 3` is checked before unguarded `float(point[0/1])` conversion and `geometry_complete=True`. Invalid native coordinates (bool/text aliases, NaN/Infinity, huge-int overflow) or zero-area collinear polygons can therefore either crash or be labelled physically complete. `publish_live_ceiling_area_quantities` trusts the canonical geometry-complete flag and does not independently reconstruct the source polygon; source-closed export/customer follow the published QuantityEvidence. This is the FIRST failing source geometry gate, independent of GPT2's original physical-room/W4 ownership.
+
+**INFERRED:** A canonical ceiling must not assert source-room geometry completeness from a malformed/nonphysical polygon. Source-native 2D points must be finite real numbers (not bool or numeric text); the polygon must have a finite, nonzero signed area. Rejecting this input cannot create new area, room ownership or material authority.
+
+**PROPOSED:** In the existing GPT1 integration only, validate each point's native type and finite conversion, compute finite nonzero twice-signed area using origin-relative triangle fan and `math.fsum`, return `None` before canonical creation on invalid source geometry. Preserve the exact ordered point tuple for legitimate original source polygons. The test will use the existing generated native PDF and real source producer, replace only its room-index geometry receipt with adversarial rings, and assert deterministic ABSTAIN through live claims, canonical objects, real QuantityEvidence issuer and customer projection. Include positive finite source polygon and no-input-mutation checks. No new source measurements or benchmark values, no PDF/tokens, no 20k/2.5pt change.
+
+**RELEASE:** This is a source-integrity candidate, not a FIRM/score improvement. Exact-head Python3.13/3.14 tests and owner-only SHA-verified original-source replay with immutable Lot16 nine and Maryborough three signed/customer bodies remain required before merge. Exclusive coordination claim #4135 comment 6524458042 and tracker #2017 comment 6524459362.
