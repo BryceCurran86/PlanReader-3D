@@ -1134,6 +1134,9 @@ def test_original_ceiling_room_area_inventory_id_cannot_alias_source_receipt(for
         ((0, 0), (6, 0), (6, 5), (3, 2), (0, 5)),
         ((0, 5), (3, 2), (6, 5), (6, 0), (0, 0)),
         ((0, 0), (6, 0), (6, 5), (3, 2), (0, 5), (0, 0)),
+        # Inclusive exact-integer boundary is safe; origin-relative fan area
+        # stays finite without shifting or rescaling the source vertices.
+        ((2**53 - 2, 0), (2**53, 0), (2**53, 2), (2**53 - 2, 2)),
     ],
 )
 def test_original_ceiling_source_room_polygon_preserves_finite_native_vertices(polygon):
@@ -1158,6 +1161,26 @@ def test_original_ceiling_source_room_polygon_preserves_finite_native_vertices(p
         pytest.param(((0, 0), (1, 0), ("1", 1)), id="text-alias"),
         pytest.param(((0, 0), (1, 0), (object(), 1)), id="object-alias"),
         pytest.param(((0, 0), (1, 0), (10**1000, 1)), id="integer-overflow"),
+        pytest.param(
+            ((2**53 + 1, 0), (2**53 + 4, 0),
+             (2**53 + 4, 2), (2**53 + 1, 2)),
+            id="positive-native-integer-coordinate-alias",
+        ),
+        pytest.param(
+            ((-(2**53 + 1), 0), (-(2**53 + 4), 0),
+             (-(2**53 + 4), 2), (-(2**53 + 1), 2)),
+            id="negative-native-integer-coordinate-alias",
+        ),
+        pytest.param(
+            ((float(2**53 + 2), 0), (float(2**53 + 4), 0),
+             (float(2**53 + 4), 2), (float(2**53 + 2), 2)),
+            id="oversized-native-float-coordinate",
+        ),
+        pytest.param(
+            ((0, 0), (2, 0), (2, -float(2**53 + 2)),
+             (0, -float(2**53 + 2))),
+            id="oversized-negative-native-float-y-coordinate",
+        ),
         pytest.param(((0, 0), (1e308, 0), (0, 1e308)), id="cross-product-overflow"),
         pytest.param(((0, 0), (1, 0), (1, 1, 1)), id="malformed-point"),
         pytest.param(
