@@ -413,3 +413,16 @@ def test_distinct_source_ceiling_ids_cannot_publish_one_conflicted_canonical_roo
     assert first.quantity_evidence == ()
     assert ceiling.LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT in first.reason_codes
     assert ceiling.LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT not in first.reason_codes
+    # Trace the real canonical issuer and customer consumer: neither may
+    # promote a ceiling whose original physical canonical identity failed.
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="source-neutral-ceiling-conflict"
+    ) == ()
