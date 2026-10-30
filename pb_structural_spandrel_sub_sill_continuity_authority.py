@@ -174,6 +174,22 @@ class SpandrelSubSillRecord:
                                         self.total_wall_opening_area_sqm,
                                         rel_tol=1e-12, abs_tol=1e-12)):
                 raise ValueError("spandrel numeric evidence conflicts with candidate geometry")
+            # Public frozen records can be replaced after production. The
+            # positive hypothetical areas must still equal their owned
+            # span and vertical axes, not arbitrary caller-supplied m².
+            expected_glazing = self.clear_span_m * (self.glazing_height_mm / 1000.0)
+            expected_spandrel = self.clear_span_m * (self.sill_height_mm / 1000.0)
+            if (not math.isfinite(expected_glazing)
+                    or not math.isfinite(expected_spandrel)
+                    or expected_glazing <= 0
+                    or expected_spandrel <= 0
+                    or not math.isclose(self.glazing_aperture_area_sqm,
+                                        expected_glazing,
+                                        rel_tol=1e-12, abs_tol=1e-12)
+                    or not math.isclose(self.spandrel_wall_area_sqm,
+                                        expected_spandrel,
+                                        rel_tol=1e-12, abs_tol=1e-12)):
+                raise ValueError("spandrel numeric evidence conflicts with metric area axes")
 
     def to_dict(self) -> Mapping[str, Any]:
         # Retain full native/candidate evidence precision. The stable ID binds

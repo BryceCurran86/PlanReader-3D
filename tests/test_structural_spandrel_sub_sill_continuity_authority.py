@@ -659,3 +659,43 @@ def test_spandrel_public_numeric_replacement_rejected_without_changing_abstentio
     assert candidate.shadow_only and not candidate.takeoff_eligible
     assert abstained.shadow_only and not abstained.commercial_projection_allowed
     assert authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764) == candidate
+
+
+@pytest.mark.parametrize("jamb_b", [
+    (200.0, 200.0),
+    (160.0, 280.0),  # same 100pt span, rotated 3-4-5 frame
+])
+def test_spandrel_candidate_area_axes_cannot_be_forged(authority, jamb_b):
+    """Source-neutral m² must remain the product of the candidate's own axes."""
+    from dataclasses import replace
+
+    common = dict(
+        jamb_a=(100.0, 200.0), jamb_b=jamb_b,
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="SHADOW_SPANDREL",
+    )
+    candidate = authority.evaluate_spandrel_sub_sill(
+        **common, scale_ratio=0.01764,
+    )
+    abstained = authority.evaluate_spandrel_sub_sill(**common)
+    assert replace(candidate) == candidate
+    assert replace(abstained) == abstained
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert candidate.shadow_only and not candidate.takeoff_eligible
+    assert not candidate.commercial_projection_allowed
+    for changes in (
+        {"glazing_aperture_area_sqm": candidate.glazing_aperture_area_sqm + 0.1,
+         "total_wall_opening_area_sqm": candidate.total_wall_opening_area_sqm + 0.1},
+        {"spandrel_wall_area_sqm": candidate.spandrel_wall_area_sqm + 0.1},
+        {"clear_span_m": candidate.clear_span_m * 2.0},
+        {"sill_height_mm": 850.0},
+        {"clear_span_m": 1e308},
+    ):
+        with pytest.raises(ValueError, match="metric area axes|candidate geometry"):
+            replace(candidate, **changes)
+    assert abstained.clear_span_m is None
+    assert abstained.glazing_aperture_area_sqm is None
+    assert abstained.spandrel_wall_area_sqm is None
+    assert authority.evaluate_spandrel_sub_sill(
+        **common, scale_ratio=0.01764,
+    ) == candidate
