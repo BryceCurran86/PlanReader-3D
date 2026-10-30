@@ -57,6 +57,9 @@ LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT = "live_ceiling_quantity_identity_confli
 LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE = (
     "live_ceiling_lining_metric_aggregate_nonfinite"
 )
+LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE = (
+    "live_ceiling_lining_source_viewport_failure"
+)
 
 
 @dataclass(frozen=True)
@@ -594,7 +597,19 @@ def collect_live_ceiling_lining_claims(
                         ),
                     )
                 except Exception:
-                    continue
+                    # An unavailable original source viewport is negative
+                    # evidence against the COMPLETE selected viewport universe.
+                    # Never publish an earlier sibling's ceiling as though all
+                    # physical views were inspected successfully. Do not leak
+                    # exception details or mint a fallback area.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
 
                 for quantity in result.ceiling_quantities:
                     quantity_id = quantity.quantity_id
@@ -858,6 +873,7 @@ __all__ = [
     "LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT",
     "LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT",
     "LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE",
+    "LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",

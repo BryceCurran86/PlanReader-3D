@@ -685,3 +685,75 @@ def test_source_ceiling_finite_rows_cannot_overflow_descriptor_claim_or_customer
         assert len(first.claims) == 1
         assert first.claims[0].quantity_m2 == 2 * baseline.claims[0].quantity_m2
         assert ceiling.LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE not in first.reason_codes
+
+
+@pytest.mark.parametrize("failed_first", [False, True])
+def test_failed_original_ceiling_viewport_revokes_complete_source_universe(
+    tmp_path, monkeypatch, failed_first
+):
+    """One failed source-owned viewport cannot leave a sibling's customer m²."""
+    from types import SimpleNamespace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+
+    real_viewports = ceiling.authoritative_floor_plan_viewports
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    failures = []
+    successes = []
+    synthetic_suffix = "-source-viewport-failure"
+
+    def source_viewports_with_failed_sibling(page, *, page_number):
+        original = tuple(real_viewports(page, page_number=page_number))
+        assert original
+        good = original[0]
+        bad = SimpleNamespace(
+            view_id=good.view_id + synthetic_suffix,
+            bounding_box=good.bounding_box,
+            confidence=good.confidence,
+        )
+        return (bad, good) if failed_first else (good, bad)
+
+    def fail_one_source_viewport(*args, **kwargs):
+        viewport_id = kwargs["viewport"].viewport_id
+        if viewport_id.endswith(synthetic_suffix):
+            failures.append(viewport_id)
+            raise RuntimeError("synthetic source-viewport producer failure")
+        successes.append(viewport_id)
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports",
+        source_viewports_with_failed_sibling,
+    )
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        fail_one_source_viewport,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(failures) == 2
+    assert len(successes) == (0 if failed_first else 2)
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-incomplete-ceiling-universe"
+    ) == ()
