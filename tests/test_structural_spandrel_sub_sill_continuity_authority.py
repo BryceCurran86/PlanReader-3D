@@ -832,3 +832,102 @@ def test_frozen_spandrel_joint_geometry_scale_and_abstained_rebind(authority):
     assert candidate.to_dict()["context_label"] == "SPANDREL_WINDOW"
     assert candidate.to_dict()["scale_ratio"] == 0.01764
     assert authority.evaluate_spandrel_sub_sill(**kw) == candidate
+
+
+def test_frozen_spandrel_rejects_forged_first_failing_gate_on_valid_candidate(authority):
+    """A valid geometric hypothesis cannot be relabelled as a rejected one."""
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    original = authority.evaluate_spandrel_sub_sill(**kwargs)
+    before = original.to_dict()
+    assert original.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    null_metrics = dict(
+        clear_span_m=None, glazing_height_mm=None,
+        glazing_aperture_area_sqm=None, spandrel_wall_area_sqm=None,
+        total_wall_opening_area_sqm=None,
+    )
+    for forged, gate in (
+        (SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN,
+         "clear_span_out_of_bounds"),
+        (SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS,
+         "vertical_levels_inverted_or_negative"),
+    ):
+        with pytest.raises(ValueError, match="first-failing geometric gate"):
+            replace(
+                original, classification=forged,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                first_remaining_gate=gate, **null_metrics,
+            )
+    assert original.to_dict() == before
+    assert authority.evaluate_spandrel_sub_sill(**kwargs) == original
+    assert not original.takeoff_eligible
+    assert not original.commercial_projection_allowed
+
+
+@pytest.mark.parametrize(
+    "changes, forged_class, forged_gate",
+    [
+        (
+            {"jamb_b": (110.0, 200.0)},
+            SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS,
+            "vertical_levels_inverted_or_negative",
+        ),
+        (
+            {"sill_height_mm": 2100.0, "head_height_mm": 900.0},
+            SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN,
+            "clear_span_out_of_bounds",
+        ),
+        (
+            {
+                "jamb_b": (110.0, 200.0),
+                "sill_height_mm": 2100.0,
+                "head_height_mm": 900.0,
+            },
+            SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS,
+            "vertical_levels_inverted_or_negative",
+        ),
+    ],
+)
+def test_frozen_spandrel_abstention_cannot_mask_earlier_gate(
+    authority, changes, forged_class, forged_gate,
+):
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="HOST", scale_ratio=0.01764,
+    )
+    kwargs.update(changes)
+    original = authority.evaluate_spandrel_sub_sill(**kwargs)
+    before = original.to_dict()
+    assert original.status is EvidenceResolutionStatus.ABSTAINED
+    assert original.clear_span_m is None
+    with pytest.raises(ValueError, match="first-failing geometric gate"):
+        replace(
+            original, classification=forged_class,
+            first_remaining_gate=forged_gate,
+        )
+    assert original.to_dict() == before
+    assert authority.evaluate_spandrel_sub_sill(**kwargs) == original
+    assert original.to_dict()["shadow_only"] is True
+    assert original.to_dict()["takeoff_eligible"] is False
+
+
+def test_spandrel_missing_scale_still_precedes_invalid_geometry(authority):
+    kwargs = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(110.0, 200.0),
+        sill_height_mm=2100.0, head_height_mm=900.0,
+        host_through_wall_id="HOST", scale_ratio=None,
+    )
+    original = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert original.classification is SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE
+    assert original.first_remaining_gate == "original_source_scale_authority_unverified"
+    assert original.clear_span_m is None
+    assert original.glazing_aperture_area_sqm is None
+    assert original.spandrel_wall_area_sqm is None
+    assert authority.evaluate_spandrel_sub_sill(
+        **(kwargs | {"jamb_a": kwargs["jamb_b"], "jamb_b": kwargs["jamb_a"]})
+    ).contract_id == original.contract_id
+    assert original.shadow_only and not original.commercial_projection_allowed
