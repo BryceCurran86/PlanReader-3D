@@ -285,3 +285,14 @@ correspondence, GPT MAX/Claude host/glazing, GPT3 signing/scoring.
 **PROPOSED:** Require `type(meta.get('viewport_id')) is str`, nonempty, exact unpadded equality to the source-selected `viewport_id` before a live claim can be formed. Reject aliases, never normalize, infer, or choose a different physical viewport. Prove the native positive, malformed negatives, deterministic/no-mutation and generated-PDF producer → canonical → real quantity issuer/customer abstention. Do not modify the final issuer, customer projection or frozen evaluator.
 
 **BENCHMARK OBSERVATIONS EXCLUDED FROM IMPLEMENTATION:** the frozen four-project 120-item denominator and existing signed Lot16 nine / Maryborough three bodies cannot supply viewport identities or acceptance thresholds. Original SHA-verified production replay and immutable signed/customer preservation remain release gates; source-neutral tests and green public CI alone do not authorize merge, FIRM or score claims.
+
+
+## GPT1 original F.07 source viewport identity — 2026-10-31
+
+**OBSERVED FIRST FAILING GATE:** collect_live_ceiling_lining_claims accepts F.07-authoritative segmented.view_id via _clean, which strips whitespace and converts arbitrary objects into strings, while blank identities are silently skipped. A malformed later authoritative viewport can be dropped after an earlier valid ceiling was accepted. The existing exact _claim_from_quantity metadata check compares against the already-normalized selector, so it cannot repair this upstream defect.
+
+**INFERRED:** The selected original viewport universe must not quietly lose or rename an authoritative source-owned viewport. This is an integrity risk, not proof of a new measurement or wrong original customer quantity.
+
+**PROPOSED NARROW CHANGE:** At first F.07 consumption, require a built-in, nonempty, unpadded native string ID. Any malformed authoritative viewport aborts the entire selected ceiling run using existing source-viewport-failure abstention, including earlier sibling claims. Valid native IDs remain unchanged. Do not invent a viewport, infer scale, repair IDs or modify downstream issuer, seal, benchmark or source PDF.
+
+**PROOF SCOPE:** Generated original-like PDF with injected malformed authoritative sibling in both traversal orders; native positive, typed/blank/padded aliases, deterministic replay, no mutation, real publish_live_ceiling_area_quantities and project_live_ceiling_area_customer_rows abstention. Generated source is not SHA-verified original authority. Exact-head Python 3.13/3.14 CI and owner-trusted original-source to issuer to signed/customer replay preserving existing Lot16 nine and Maryborough three bodies remain mandatory before merge. Frozen 120-item gold and expected quantities are excluded from implementation.
