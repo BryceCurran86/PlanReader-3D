@@ -2017,3 +2017,63 @@ def test_public_frozen_host_and_pier_records_cannot_be_replaced_with_authority()
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=openings[::-1],
     ) == (tuple(reversed(records)), piers)
+
+
+def test_public_through_wall_numeric_record_replacements_fail_closed():
+    from dataclasses import replace
+
+    wall = ContinuousThroughWallCandidate(
+        "host-numeric", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("left", (10.0, 0.0), (30.0, 0.0)),
+        ApertureHostCandidateInput("right", (40.0, 0.0), (60.0, 0.0)),
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(records) == 2 and len(piers) == 1
+    host, pier = records[0], piers[0]
+    assert replace(host) == host and replace(pier) == pier
+    for field in ("pier_start_station", "pier_end_station", "pier_width_pt"):
+        for bad in (float("nan"), float("inf")):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(pier, **{field: bad})
+    for changes in (
+        {"pier_width_pt": -1.0},
+        {"pier_end_station": pier.pier_start_station},
+        {"pier_width_pt": pier.pier_width_pt + 1.0},
+    ):
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(pier, **changes)
+    for field in ("u0_pt", "u1_pt", "whole_wall_length_pt", "wall_thickness_pt"):
+        for bad in (float("nan"), float("inf")):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(host, **{field: bad})
+    for changes in (
+        {"u0_pt": host.u1_pt + 1.0},
+        {"whole_wall_length_pt": 0.0},
+        {"wall_thickness_pt": -1.0},
+        {"opening_start_pt": (float("nan"), 0.0)},
+        {"origin_pt": (float(2**53) + 2.0, 0.0)},
+        {"axis_unit": (float("inf"), 0.0)},
+        {"normal_unit": (2.0, 0.0)},
+    ):
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(host, **changes)
+    with pytest.raises(ValueError, match="evidence references"):
+        replace(host, terminal_jamb_observation_ids=("duplicate", "duplicate"))
+    rejected = ApertureHostCandidateInput(
+        "off-band", (20.0, 30.0), (40.0, 30.0),
+    )
+    abstained, no_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(rejected,),
+    )
+    assert no_piers == () and abstained[0].status is S.ABSTAINED
+    assert replace(abstained[0]) == abstained[0]
+    assert all(not r.takeoff_eligible and not r.commercial_projection_allowed
+               and r.shadow_only for r in (*records, *abstained))
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings[::-1],
+    )[1] == piers

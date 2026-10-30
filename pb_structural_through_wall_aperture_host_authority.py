@@ -145,6 +145,21 @@ class InterAperturePierRecord:
                 or self.status is not EvidenceResolutionStatus.CANDIDATE
                 or self.first_remaining_gate != "original_source_structural_pier_unverified"):
             raise ValueError("source-neutral pier cannot assert structural source authority")
+        if (any(not _native_source_identity(v) for v in (
+                self.pier_id, self.left_opening_id, self.right_opening_id))
+                or self.left_opening_id == self.right_opening_id
+                or any(not _finite_real(v) for v in (
+                    self.pier_start_station, self.pier_end_station,
+                    self.pier_width_pt,
+                ))
+                or self.pier_end_station <= self.pier_start_station
+                or self.pier_width_pt <= 0):
+            raise ValueError("pier numeric evidence must be finite and physical")
+        gap = self.pier_end_station - self.pier_start_station
+        if (not math.isfinite(gap)
+                or not math.isclose(self.pier_width_pt, gap,
+                                    rel_tol=1e-12, abs_tol=1e-9)):
+            raise ValueError("pier numeric evidence conflicts with stations")
 
 
 @dataclass(frozen=True)
@@ -221,6 +236,31 @@ class ThroughWallHostedOpeningRecord:
                 or (self.status is EvidenceResolutionStatus.CANDIDATE
                     and self.first_remaining_gate != "original_source_host_unverified")):
             raise ValueError("source-neutral host requires unresolved source authority gate")
+        if (any(not _native_source_identity(v) for v in (
+                self.hosting_record_id, self.physical_opening_id, self.host_wall_id))
+                or any(not _finite_real(v) for v in (
+                    self.u0_pt, self.u1_pt, self.whole_wall_length_pt,
+                    self.wall_thickness_pt,
+                ))
+                or self.u0_pt > self.u1_pt
+                or self.whole_wall_length_pt <= 0
+                or self.wall_thickness_pt <= 0):
+            raise ValueError("host numeric evidence must be finite and physical")
+        for point in (
+            self.axis_unit, self.normal_unit, self.origin_pt,
+            self.opening_start_pt, self.opening_end_pt,
+        ):
+            if (type(point) is not tuple or len(point) != 2
+                    or not _finite_point(point)):
+                raise ValueError("host numeric evidence must be finite and physical")
+        if any(abs(v) > 1.0 for v in (*self.axis_unit, *self.normal_unit)):
+            raise ValueError("host numeric evidence must be finite and physical")
+        for ids in (self.terminal_jamb_observation_ids, self.adjacent_pier_ids):
+            if (type(ids) is not tuple
+                    or len(ids) > _MAX_GEOMETRIC_PRIMITIVES
+                    or any(not _native_source_identity(v) for v in ids)
+                    or len(set(ids)) != len(ids)):
+                raise ValueError("host evidence references must be bounded and distinct")
 
     def to_dict(self) -> dict[str, Any]:
         return {
