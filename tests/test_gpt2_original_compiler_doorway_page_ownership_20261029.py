@@ -695,3 +695,83 @@ def test_virtual_connector_collinear_overlap_is_not_only_an_endpoint_touch():
         ring, graph,
     )
     assert (ring, graph) == before
+
+
+# Source-coverage identity is independent of the doorway receipt's own page.
+# These synthetic producer snapshots are NOT original PDF or quantity proof.
+def _invoke_source_revision_with_coverage(
+    monkeypatch, *, decoded=(7,), failed=(), total=31, state="partial",
+    coverage_revision="original-rev", coverage_document="source-doc",
+    requested_page=7,
+):
+    published = SimpleNamespace(
+        revision=SimpleNamespace(
+            document_id="source-doc", revision_id="original-rev",
+            source_sha256=SOURCE_SHA,
+        ),
+        coverage=SimpleNamespace(
+            document_id=coverage_document, revision_id=coverage_revision,
+            total_pages=total, decoded_pages=decoded, failed_pages=failed,
+            state=state,
+        ),
+    )
+    class StubProducer:
+        def published_snapshot_for_revision(self, revision_id):
+            assert revision_id == "original-rev"
+            return published
+
+    producer = StubProducer()
+    monkeypatch.setattr(
+        compiler, "_source_bytes",
+        lambda source, revision_id: (
+            b"synthetic-private-source" if source is producer
+            and revision_id == "original-rev" else None
+        ),
+    )
+    bridge = object.__new__(GPT2OriginalSourceGeometryBridge)
+    bridge._source = producer
+    return bridge._source_revision(
+        "original-rev", page_1_based=requested_page,
+    )
+
+
+def test_original_source_revision_accepts_exact_partial_coverage_without_promoting_quantity(
+    monkeypatch,
+):
+    published, source_bytes = _invoke_source_revision_with_coverage(
+        monkeypatch, decoded=(7, 11), failed=(9,), total=31,
+    )
+    assert published.coverage.decoded_pages == (7, 11)
+    assert published.coverage.failed_pages == (9,)
+    assert source_bytes == b"synthetic-private-source"
+
+
+@pytest.mark.parametrize("changes", [
+    {"decoded": (7.0,)}, {"decoded": ("7",)}, {"decoded": (True,)},
+    {"decoded": (7, 7)}, {"decoded": (7, None)},
+    {"decoded": (7, float("nan"))}, {"decoded": (10**1000,)},
+    {"decoded": [7]}, {"decoded": (7,), "failed": (7,)},
+    {"decoded": (7,), "failed": (True,)},
+    {"decoded": (7,), "failed": (7, 7)},
+    {"failed": [9]}, {"total": True}, {"total": 6},
+    {"total": 2**53 + 1}, {"state": "failed"},
+    {"coverage_revision": "other-revision"},
+    {"coverage_document": "other-document"},
+    {"requested_page": 8},
+])
+def test_original_source_revision_rejects_malformed_or_contradictory_coverage(
+    monkeypatch, changes,
+):
+    with pytest.raises(
+        ValueError, match="original_source_page_outside_producer_coverage"
+    ):
+        _invoke_source_revision_with_coverage(monkeypatch, **changes)
+
+
+def test_original_source_revision_rejects_unbounded_page_selector(monkeypatch):
+    with pytest.raises(
+        ValueError, match="source_revision_and_page_selector_required"
+    ):
+        _invoke_source_revision_with_coverage(
+            monkeypatch, requested_page=2**53 + 1,
+        )

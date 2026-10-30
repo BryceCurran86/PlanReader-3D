@@ -262,15 +262,33 @@ class GPT2OriginalSourceGeometryBridge:
 
     def _source_revision(self, revision_id: str, *, page_1_based: int):
         if type(revision_id) is not str or not revision_id or (
-            type(page_1_based) is not int or page_1_based<1
+            type(page_1_based) is not int or not 1 <= page_1_based <= 2**53
         ):
             raise ValueError("source_revision_and_page_selector_required")
         published=self._source.published_snapshot_for_revision(revision_id)
         raw=_source_bytes(self._source,revision_id)
         if published is None or raw is None:
             raise ValueError("original_source_revision_sha_or_bytes_unavailable")
-        decoded={int(v) for v in published.coverage.decoded_pages}
-        if page_1_based not in decoded:
+        # Original-page identity is producer-owned. int(v) silently turns
+        # True, 7.0 and "7" into the same page; malformed values may raise.
+        # A page listed as both decoded and failed is never authenticated.
+        coverage = published.coverage
+        total = coverage.total_pages
+        decoded = coverage.decoded_pages
+        failed = coverage.failed_pages
+        if (
+            type(total) is not int or not 1 <= total <= 2**53
+            or type(decoded) is not tuple or type(failed) is not tuple
+            or any(type(v) is not int or not 1 <= v <= total
+                   for v in (*decoded, *failed))
+            or len(set(decoded)) != len(decoded)
+            or len(set(failed)) != len(failed)
+            or not set(decoded).isdisjoint(failed)
+            or coverage.document_id != published.revision.document_id
+            or coverage.revision_id != revision_id
+            or coverage.state not in ("complete", "partial")
+            or page_1_based > total or page_1_based not in decoded
+        ):
             raise ValueError("original_source_page_outside_producer_coverage")
         return published,raw
 
