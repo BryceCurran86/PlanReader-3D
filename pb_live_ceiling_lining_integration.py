@@ -18,7 +18,7 @@ No benchmark ID, expected quantity, filename, project name or BOQ mapping is use
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import math
 import re
@@ -62,6 +62,9 @@ LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE = (
 )
 LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE = (
     "live_ceiling_lining_source_snapshot_unavailable"
+)
+LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH = (
+    "live_ceiling_lining_source_context_mismatch"
 )
 
 
@@ -465,6 +468,23 @@ def canonical_ceiling_from_shadow_quantity(
     )
 
 
+def _source_result_context_matches(*, result, expected: ProviderContext) -> bool:
+    """Verify the source producer did not substitute a different page/run root.
+
+    The trusted wall build may advance ONLY the source snapshot receipt. Every
+    other document/revision/page/viewport/owner field must remain identical.
+    """
+    actual = getattr(result, "effective_context", None)
+    return (
+        type(actual) is ProviderContext
+        and type(actual.evidence_snapshot_id) is str
+        and bool(actual.evidence_snapshot_id)
+        and actual == replace(
+            expected, evidence_snapshot_id=actual.evidence_snapshot_id
+        )
+    )
+
+
 def collect_live_ceiling_lining_claims(
     pdf_path: Path | str,
     *,
@@ -621,6 +641,23 @@ def collect_live_ceiling_lining_claims(
                         reason_codes=(
                             LIVE_CEILING_LINING_UNAVAILABLE,
                             LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
+
+                if not _source_result_context_matches(
+                    result=result, expected=context,
+                ):
+                    # A source-owned ceiling result may advance its snapshot
+                    # during wall derivation, but must never switch the source
+                    # root, revision, selected page or physical viewport.
+                    # Reject the whole selected universe so a valid earlier
+                    # sibling cannot survive a substituted later result.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH,
                         ),
                         claims=(),
                     )
@@ -895,6 +932,7 @@ __all__ = [
     "LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE",
     "LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE",
     "LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE",
+    "LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
