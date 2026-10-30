@@ -2621,10 +2621,10 @@ def test_registration_budgets_actual_destination_key_matches(monkeypatch):
 
     src, dst = _dense_support_lines()
     original_src, original_dst = copy.deepcopy(src), copy.deepcopy(dst)
-    # Coarse preflight: (1 candidate + 75 refinements) * 2 source
-    # coordinates = 152 visits, under 500. Actual near-key matches
-    # exceed 500 across the candidate and refinement evaluations.
-    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 500)
+    # Coarse preflight reserves (1 candidate + 3*25 possible refinements)
+    # * 2 source keys = 152 visits. The actual one-candidate/25-refinement
+    # path exceeds 200 cumulative near-key matches (and interval work).
+    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 200)
     with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
         shadow.rank_registrations(
             src, dst, orientations={"identity": (1.0, 0.0, 0.0, 1.0)},
@@ -2691,4 +2691,54 @@ def test_sparse_registration_and_null_support_remain_source_only():
     assert result[0]["scale"] == 1.0
     null = shadow.null_support(src, dst, trials=60, span=(0.0, 0.0))
     assert null["max"] == 100.0
+    assert (src, dst) == before
+
+
+def test_source_interval_overlap_work_budget_and_exact_positive(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as shadow
+
+    # One native key can hold many disjoint intervals. A key-only budget
+    # would count a single match even though _overlap scans both lists.
+    intervals = [(float(i * 2), float(i * 2 + 1)) for i in range(250)]
+    src = {"H": {0.0: intervals}, "V": {0.0: intervals}}
+    dst = copy.deepcopy(src)
+    before = copy.deepcopy((src, dst))
+    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 300)
+    with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
+        shadow.axis_support(src, shadow.LineIndex(dst), "H", 0.0, 0.0,
+                            _visit_budget=[0])
+    assert (src, dst) == before
+
+    # With sufficient budget, no interval, overlap value or input changes.
+    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 100_000)
+    budget = [0]
+    assert shadow.axis_support(src, shadow.LineIndex(dst), "H", 0.0, 0.0,
+                               _visit_budget=budget) == 250.0
+    assert budget == [751]
+    ranked = shadow.rank_registrations(
+        src, dst, orientations={"identity": (1.0, 0.0, 0.0, 1.0)},
+        identity_scales=(1.0,), topn=1, identity_only=True,
+    )
+    assert ranked and ranked[0]["min_support_pt"] == 250.0
+    assert shadow.null_support(src, dst, trials=60, span=(0.0, 0.0))["max"] == 250.0
+    assert (src, dst) == before
+
+
+def test_interval_heavy_null_and_registration_abstain_before_partial_score(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as shadow
+
+    intervals = [(float(i * 2), float(i * 2 + 1)) for i in range(250)]
+    src = {"H": {0.0: intervals}, "V": {0.0: intervals}}
+    dst = copy.deepcopy(src)
+    before = copy.deepcopy((src, dst))
+    # The coarse rank preflight is only 152 key visits, but actual
+    # interval work exceeds 2,000 across the complete refinement/null run.
+    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 2_000)
+    with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
+        shadow.rank_registrations(
+            src, dst, orientations={"identity": (1.0, 0.0, 0.0, 1.0)},
+            identity_scales=(1.0,), topn=1, identity_only=True,
+        )
+    with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
+        shadow.null_support(src, dst, trials=60, span=(0.0, 0.0))
     assert (src, dst) == before

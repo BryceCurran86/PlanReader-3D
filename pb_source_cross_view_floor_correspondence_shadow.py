@@ -231,17 +231,29 @@ def axis_support(
     shift_c, shift_a = (dy, dx) if orient == "H" else (dx, dy)
     total = 0.0
     for k, ivs in src[orient].items():
+        # A near-key count alone does not bound the two-pointer overlap scan:
+        # one native line key can hold thousands of disjoint source intervals.
+        # Account for constructing shifted intervals before doing that work.
+        if _visit_budget is not None:
+            _visit_budget[0] += len(ivs)
+            if _visit_budget[0] > MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS:
+                raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
         shifted = [(lo + shift_a, hi + shift_a) for lo, hi in ivs]
         nearby = dst.near(orient, k + shift_c, tol)
-        # The coarse source-key budget cannot bound many destination keys
-        # within one tolerance band. Meter every actual overlap comparison
-        # across the whole registration/null trial before computing a score.
         if _visit_budget is not None:
             _visit_budget[0] += len(nearby)
             if _visit_budget[0] > MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS:
                 raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
         for k2 in nearby:
-            total += _overlap(shifted, dst.lines[orient][k2])
+            target_intervals = dst.lines[orient][k2]
+            # _overlap runs in O(len(source) + len(target)) per matched
+            # native key. Conservatively meter both interval lists BEFORE
+            # scanning, cumulatively across registration and null trials.
+            if _visit_budget is not None:
+                _visit_budget[0] += len(shifted) + len(target_intervals)
+                if _visit_budget[0] > MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS:
+                    raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
+            total += _overlap(shifted, target_intervals)
     return total
 
 
