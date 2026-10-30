@@ -2026,3 +2026,113 @@ def test_generated_original_f07_native_viewport_keeps_real_issuer_output(tmp_pat
     assert len(first.canonical_ceilings) == 1
     assert len(publish_live_ceiling_area_quantities(first)) == 1
     assert path.read_bytes() == original_pdf
+
+
+@pytest.mark.parametrize(
+    "native_bbox",
+    [
+        (0, 0, 10, 20),
+        (0.0, -4.5, 10.0, 20.0),
+        [0.0, 0.0, 10.0, 20.0],
+        (0, 0, 1 << 53, 20),
+    ],
+)
+def test_original_f07_native_bbox_is_exact_and_deterministic(native_bbox):
+    original = tuple(native_bbox)
+    first = ceiling._source_viewport_bbox(native_bbox)
+    second = ceiling._source_viewport_bbox(native_bbox)
+    assert first == second
+    assert first == tuple(float(item) for item in original)
+    assert tuple(native_bbox) == original
+
+
+class _SourceF07FloatSubclass(float):
+    """A source-coordinate alias must not be silently coerced."""
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "none", "missing", "short", "long", "boolean", "string",
+        "float_subclass", "nan", "infinity", "zero_width", "zero_height",
+        "inverted_x", "inverted_y", "oversized_int", "oversized_float",
+        "huge_int", "non_iterable",
+    ],
+)
+@pytest.mark.parametrize("sibling_position", ["first", "last"])
+def test_generated_original_f07_invalid_bbox_revokes_whole_ceiling_run(
+    tmp_path, monkeypatch, variant, sibling_position
+):
+    """Malformed source bounds cannot leave a valid sibling's ceiling live."""
+    from types import SimpleNamespace
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+
+    original_viewports = ceiling.authoritative_floor_plan_viewports
+    seen = []
+
+    def with_invalid_source_bbox(page, *, page_number):
+        native = tuple(original_viewports(page, page_number=page_number))
+        assert native
+        authentic = native[0]
+        x0, y0, x1, y1 = authentic.bounding_box
+        bad_bbox = {
+            "none": None,
+            "missing": None,
+            "short": (x0, y0, x1),
+            "long": (x0, y0, x1, y1, y1),
+            "boolean": (True, y0, x1, y1),
+            "string": (str(x0), y0, x1, y1),
+            "float_subclass": (_SourceF07FloatSubclass(x0), y0, x1, y1),
+            "nan": (x0, y0, float("nan"), y1),
+            "infinity": (x0, y0, float("inf"), y1),
+            "zero_width": (x0, y0, x0, y1),
+            "zero_height": (x0, y0, x1, y0),
+            "inverted_x": (x1, y0, x0, y1),
+            "inverted_y": (x0, y1, x1, y0),
+            "oversized_int": (x0, y0, (1 << 53) + 1, y1),
+            "oversized_float": (x0, y0, float(1 << 54), y1),
+            "huge_int": (x0, y0, 10**1000, y1),
+            "non_iterable": object(),
+        }[variant]
+        sibling = SimpleNamespace(
+            view_id=f"{authentic.view_id}-untrusted-bbox",
+            bounding_box=bad_bbox,
+            confidence=authentic.confidence,
+        )
+        if variant == "missing":
+            del sibling.bounding_box
+        seen.append((page_number, sibling_position))
+        return (sibling, *native) if sibling_position == "first" else (*native, sibling)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", with_invalid_source_bbox,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert seen == [(1, sibling_position), (1, sibling_position)]
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-f07-bbox",
+    ) == ()
+    assert path.read_bytes() == original_pdf
