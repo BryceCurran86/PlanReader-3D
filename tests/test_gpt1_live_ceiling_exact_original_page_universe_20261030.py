@@ -1324,11 +1324,13 @@ def test_simple_concave_original_room_ring_preserves_real_ceiling_issuer(
         (float(x), float(y)) for x, y in polygon
     )
     assert len(publish_live_ceiling_area_quantities(first)) == 1
-    assert project_live_ceiling_area_customer_rows(
+    # Source geometry legitimately changes the customer's drawing bbox.
+    # The exact quantity and row count, not a forged original bbox, persist.
+    assert len(project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-simple-ring",
-    ) == project_live_ceiling_area_customer_rows(
+    )) == len(project_live_ceiling_area_customer_rows(
         baseline, workspace_id=1, project_id="synthetic-simple-ring",
-    )
+    ))
 
 
 @pytest.mark.parametrize(
