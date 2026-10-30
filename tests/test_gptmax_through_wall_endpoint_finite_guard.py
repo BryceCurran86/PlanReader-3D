@@ -1838,3 +1838,70 @@ def test_pier_gap_crossing_is_strict_and_preserves_mutable_input(
         through_wall=wall, openings=openings,
         transverse_wall_segments=mutable,
     ) == (records, piers)
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (250.0, -130.0)),
+])
+def test_rejected_perpendicular_point_station_blocks_pier_but_band_tangent_does_not(
+    angle, shift,
+):
+    """A transverse candidate has physical wall-band extent even at one station.
+
+    Rejecting its aperture alignment must not erase that station from the
+    complete unresolved source universe. Mere outer-band tangency does not
+    cross the physical wall interior and must not suppress a valid gap.
+    """
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    left = ApertureHostCandidateInput(
+        "left", tr((20.0, 0.0)), tr((30.0, 0.0)),
+    )
+    right = ApertureHostCandidateInput(
+        "right", tr((40.0, 0.0)), tr((50.0, 0.0)),
+    )
+    through_band = ApertureHostCandidateInput(
+        "unresolved", tr((35.0, -15.0)), tr((35.0, 15.0)),
+    )
+    outer_tangent = ApertureHostCandidateInput(
+        "unresolved", tr((35.0, 12.5)), tr((35.0, 16.0)),
+    )
+    authority = _authority()
+    for rejected, expected_piers in ((through_band, 0), (outer_tangent, 1)):
+        original = (left.start_pt, left.end_pt, right.start_pt, right.end_pt,
+                    rejected.start_pt, rejected.end_pt)
+        canonical = None
+        for openings in ((left, rejected, right), (right, left, rejected)):
+            records, piers = authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=openings,
+            )
+            by_id = {record.physical_opening_id: record for record in records}
+            assert set(by_id) == {"left", "right", "unresolved"}
+            assert by_id["unresolved"].status is S.ABSTAINED
+            assert by_id["unresolved"].first_remaining_gate == (
+                "aperture_wall_axis_misaligned"
+            )
+            assert by_id["left"].status is S.CANDIDATE
+            assert by_id["right"].status is S.CANDIDATE
+            assert len(piers) == expected_piers
+            assert all(pier.status is S.CANDIDATE
+                       and pier.is_structural_masonry_pier is None for pier in piers)
+            assert all(record.shadow_only and not record.takeoff_eligible
+                       and not record.commercial_projection_allowed
+                       for record in records)
+            evidence = (
+                {key: record.to_dict() for key, record in by_id.items()},
+                piers,
+            )
+            if canonical is None:
+                canonical = evidence
+            else:
+                assert evidence == canonical
+            assert authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=openings,
+            ) == (records, piers)
+        assert original == (left.start_pt, left.end_pt, right.start_pt,
+                            right.end_pt, rejected.start_pt, rejected.end_pt)

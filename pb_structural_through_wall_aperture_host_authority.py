@@ -581,11 +581,14 @@ class StructuralThroughWallApertureHostAuthority:
             rejected = item["rec"]
             p0_along, p0_perp = project_pt(rejected.opening_start_pt)
             p1_along, p1_perp = project_pt(rejected.opening_end_pt)
-            if min(p0_perp, p1_perp) > band or max(p0_perp, p1_perp) < -band:
+            # Boundary-only contact does not occupy the open wall band.
+            # A perpendicular rejected observation may nevertheless occupy
+            # one physical station (low == high) inside the band.
+            if min(p0_perp, p1_perp) >= band or max(p0_perp, p1_perp) <= -band:
                 continue
             low = max(0.0, min(p0_along, p1_along))
             high = min(wall_len, max(p0_along, p1_along))
-            if high <= low:
+            if high < low:
                 continue
             if not (-band <= p0_perp <= band and -band <= p1_perp <= band):
                 delta_perp = p1_perp - p0_perp
@@ -605,7 +608,11 @@ class StructuralThroughWallApertureHostAuthority:
                         high = min(wall_len, max(clipped_start, clipped_end))
                 # If finite endpoints overflow in the subtraction/interpolation,
                 # retain the entire projected station interval conservatively.
-            if high > low:
+            # A zero-station-width transverse candidate still crosses a
+            # positive-length wall-band interior. Keep it as a point
+            # blocker: low < next_start and high > previous_end detect
+            # that station strictly inside a proposed pier gap.
+            if high >= low:
                 unresolved_wall_band_intervals.append((low, high))
 
         # An in-band rejected aperture blocks a gap iff its low station is
