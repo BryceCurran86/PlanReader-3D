@@ -691,7 +691,7 @@ def test_spandrel_candidate_area_axes_cannot_be_forged(authority, jamb_b):
         {"sill_height_mm": 850.0},
         {"clear_span_m": 1e308},
     ):
-        with pytest.raises(ValueError, match="metric area axes|candidate geometry"):
+        with pytest.raises(ValueError, match="metric area axes|metric span|candidate geometry"):
             replace(candidate, **changes)
     assert abstained.clear_span_m is None
     assert abstained.glazing_aperture_area_sqm is None
@@ -750,3 +750,85 @@ def test_spandrel_exact_span_boundaries_remain_shadow_candidates(authority, span
     assert result.first_remaining_gate == "original_source_spandrel_host_scale_levels_unverified"
     assert result.shadow_only and not result.commercial_projection_allowed
     assert authority.evaluate_spandrel_sub_sill(**kwargs) == result
+
+
+@pytest.mark.parametrize("changes", [
+    {"host_through_wall_id": "OTHER_HOST"},
+    {"host_through_wall_id": " PADDED"},
+    {"context_label": "OTHER_CONTEXT"},
+    {"context_label": " PADDED"},
+    {"context_label": True},
+    {"contract_id": "forged"},
+])
+def test_frozen_spandrel_host_context_identity_fail_closed(authority, changes):
+    from dataclasses import replace
+
+    kw = dict(jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+              sill_height_mm=900.0, head_height_mm=2100.0,
+              host_through_wall_id="SOURCE_NEUTRAL_HOST", scale_ratio=0.01764)
+    candidate = authority.evaluate_spandrel_sub_sill(**kw)
+    abstained = authority.evaluate_spandrel_sub_sill(**(kw | {"scale_ratio": None}))
+    for record in (candidate, abstained):
+        assert replace(record) == record
+        with pytest.raises(ValueError, match="exact host|stable identity"):
+            replace(record, **changes)
+        assert record.shadow_only and not record.commercial_projection_allowed
+    assert authority.evaluate_spandrel_sub_sill(**kw) == candidate
+
+
+def test_frozen_spandrel_joint_geometry_scale_and_abstained_rebind(authority):
+    from dataclasses import replace
+
+    kw = dict(jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+              sill_height_mm=900.0, head_height_mm=2100.0,
+              host_through_wall_id="SOURCE_NEUTRAL_HOST", scale_ratio=0.01764)
+    candidate = authority.evaluate_spandrel_sub_sill(**kw)
+    rotated = authority.evaluate_spandrel_sub_sill(
+        **(kw | {"jamb_b": (160.0, 280.0)}))
+    assert rotated.clear_span_pt == pytest.approx(candidate.clear_span_pt)
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(candidate, jamb_right=rotated.jamb_right)
+    assert replace(candidate, jamb_right=rotated.jamb_right,
+                   contract_id=rotated.contract_id) == rotated
+
+    other = authority.evaluate_spandrel_sub_sill(
+        **(kw | {"scale_ratio": 0.02}))
+    fields = dict(scale_ratio=other.scale_ratio, clear_span_m=other.clear_span_m,
+                  glazing_aperture_area_sqm=other.glazing_aperture_area_sqm,
+                  spandrel_wall_area_sqm=other.spandrel_wall_area_sqm,
+                  total_wall_opening_area_sqm=other.total_wall_opening_area_sqm,
+                  notes=other.notes)
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(candidate, **fields)
+    assert replace(candidate, contract_id=other.contract_id, **fields) == other
+    with pytest.raises(ValueError, match="metric span"):
+        replace(candidate, scale_ratio=0.02)
+
+    foreign = authority.evaluate_spandrel_sub_sill(
+        **(kw | {"host_through_wall_id": "OTHER_HOST"}))
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(candidate, host_through_wall_id="OTHER_HOST")
+    assert replace(candidate, host_through_wall_id="OTHER_HOST",
+                   contract_id=foreign.contract_id) == foreign
+
+    missing = authority.evaluate_spandrel_sub_sill(
+        **(kw | {"scale_ratio": None}))
+    changed = authority.evaluate_spandrel_sub_sill(
+        **(kw | {"scale_ratio": None, "context_label": "OTHER_CONTEXT"}))
+    with pytest.raises(ValueError, match="stable identity"):
+        replace(missing, context_label="OTHER_CONTEXT")
+    assert replace(missing, context_label="OTHER_CONTEXT",
+                   contract_id=changed.contract_id) == changed
+    with pytest.raises(ValueError, match="scale receipt"):
+        replace(missing, scale_ratio=0.01764)
+    swapped = authority.evaluate_spandrel_sub_sill(
+        **(kw | {"jamb_a": kw["jamb_b"], "jamb_b": kw["jamb_a"]}))
+    assert swapped == candidate
+    with pytest.raises(ValueError, match="jamb ordering"):
+        replace(candidate, jamb_left=candidate.jamb_right,
+                jamb_right=candidate.jamb_left)
+    for record in (candidate, rotated, other, foreign, missing, changed):
+        assert record.shadow_only and not record.takeoff_eligible
+    assert candidate.to_dict()["context_label"] == "SPANDREL_WINDOW"
+    assert candidate.to_dict()["scale_ratio"] == 0.01764
+    assert authority.evaluate_spandrel_sub_sill(**kw) == candidate
