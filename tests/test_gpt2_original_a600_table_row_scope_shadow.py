@@ -817,3 +817,107 @@ def test_private_original_a110_plan_to_a600_schedule_same_snapshot_if_provisione
                not row.customer_quantity_authorized for row in result.pairs)
     assert result.new_opening_counts==result.new_opening_area_quantities==0
     assert result.frozen_benchmark_accuracy is None
+
+
+@pytest.mark.parametrize(("field", "bad"), (
+    ("decoded_pages", (True, 2)),
+    ("decoded_pages", (1.0, 2)),
+    ("decoded_pages", ("1", 2)),
+    ("decoded_pages", (1, 2, 2)),
+    ("decoded_pages", (1, 3)),
+    ("decoded_pages", [1, 2]),
+    ("decoded_pages", (1, [2])),
+    ("failed_pages", (1,)),
+    ("failed_pages", (2.0,)),
+    ("failed_pages", [1]),
+    ("total_pages", True),
+    ("total_pages", 2.0),
+    ("total_pages", 0),
+    ("state", "unknown"),
+    ("document_id", "foreign-document"),
+    ("revision_id", "foreign-revision"),
+))
+def test_plan_schedule_rejects_aliased_source_coverage(
+    monkeypatch, field, bad,
+):
+    """Malformed decoded page identity cannot authenticate a printed Dxx pair."""
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    source, published = _published_synthetic_original_source(
+        monkeypatch, _original_like_words(),
+    )
+    coverage = replace(published.coverage, **{field: bad})
+    source._published_by_revision[published.revision.revision_id] = replace(
+        published, coverage=coverage,
+    )
+    with pytest.raises(ValueError, match="decode coverage not authentic"):
+        inspect_published_plan_and_schedule_door_codes(
+            source, revision_id=published.revision.revision_id,
+            plan_page_id="2", schedule_page_id="1",
+        )
+
+
+@pytest.mark.parametrize(("decoded", "failed", "state"), (
+    ((1,), (), "complete"),
+    ((1, 2), (2,), "complete"),
+    ((1, 2), (2,), "partial"),
+))
+def test_plan_schedule_rejects_false_complete_or_overlap(
+    monkeypatch, decoded, failed, state,
+):
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    source, published = _published_synthetic_original_source(
+        monkeypatch, _original_like_words(),
+    )
+    coverage = replace(
+        published.coverage, decoded_pages=decoded,
+        failed_pages=failed, state=state,
+    )
+    source._published_by_revision[published.revision.revision_id] = replace(
+        published, coverage=coverage,
+    )
+    with pytest.raises(ValueError, match="decode coverage not authentic"):
+        inspect_published_plan_and_schedule_door_codes(
+            source, revision_id=published.revision.revision_id,
+            plan_page_id="2", schedule_page_id="1",
+        )
+
+
+@pytest.mark.parametrize(("plan", "schedule"), (
+    ("02", "1"), ("2", "01"), ("٢", "1"), ("2", "1" * 5000),
+))
+def test_plan_schedule_rejects_noncanonical_page_selectors(
+    monkeypatch, plan, schedule,
+):
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    source, published = _published_synthetic_original_source(
+        monkeypatch, _original_like_words(),
+    )
+    with pytest.raises(ValueError, match="page not in published coverage"):
+        inspect_published_plan_and_schedule_door_codes(
+            source, revision_id=published.revision.revision_id,
+            plan_page_id=plan, schedule_page_id=schedule,
+        )
+
+
+def test_plan_schedule_accepts_real_partial_decoded_page_scope(monkeypatch):
+    from pb_source_plan_door_correspondence_authority import (
+        inspect_published_plan_and_schedule_door_codes,
+    )
+    source, published = _published_synthetic_original_source(
+        monkeypatch, _original_like_words(),
+    )
+    assert published.coverage.state == "partial"
+    result = inspect_published_plan_and_schedule_door_codes(
+        source, revision_id=published.revision.revision_id,
+        plan_page_id="2", schedule_page_id="1",
+    )
+    assert result.source_plan_observation_universe_complete
+    assert result.source_schedule_observation_universe_complete
+    assert result.new_opening_counts == result.new_opening_area_quantities == 0
+    assert all(not row.customer_quantity_authorized for row in result.pairs)

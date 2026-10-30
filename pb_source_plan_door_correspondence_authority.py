@@ -220,11 +220,32 @@ def inspect_published_plan_and_schedule_door_codes(
     published = producer.published_snapshot_for_revision(revision_id)
     if published is None:
         raise ValueError("source revision missing from active producer")
+    # Original page coverage is an immutable producer receipt. Coercing
+    # bool/float/string aliases with int() could falsely authenticate pages.
+    coverage = published.coverage
+    total, decoded, failed = (
+        coverage.total_pages, coverage.decoded_pages, coverage.failed_pages
+    )
+    if (
+        coverage.document_id != published.revision.document_id
+        or coverage.revision_id != published.revision.revision_id
+        or type(total) is not int or not 1 <= total <= 2**53
+        or type(decoded) is not tuple or type(failed) is not tuple
+        or any(type(x) is not int or not 1 <= x <= total
+               for x in (*decoded, *failed))
+        or len(set(decoded)) != len(decoded)
+        or len(set(failed)) != len(failed)
+        or not set(decoded).isdisjoint(failed)
+        or coverage.state not in ("complete", "partial")
+        or (coverage.state == "complete"
+            and (len(decoded) != total or bool(failed)))
+    ):
+        raise ValueError("source plan/schedule decode coverage not authentic")
     for page_id in (plan_page_id, schedule_page_id):
         if (
-            type(page_id) is not str or not page_id.isdecimal()
-            or page_id != str(int(page_id)) or int(page_id) < 1
-            or int(page_id) not in {int(x) for x in published.coverage.decoded_pages}
+            type(page_id) is not str or not page_id.isascii()
+            or not page_id.isdecimal() or len(page_id) > 16
+            or page_id != str(int(page_id)) or int(page_id) not in decoded
         ):
             raise ValueError("source plan or schedule page not in published coverage")
     if plan_page_id == schedule_page_id:
