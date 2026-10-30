@@ -66,6 +66,9 @@ LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE = (
 LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH = (
     "live_ceiling_lining_source_context_mismatch"
 )
+LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS = (
+    "live_ceiling_lining_upstream_area_scope_alias"
+)
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,61 @@ def _source_positive_area_m2(value: object) -> Optional[float]:
     if not math.isfinite(area) or area <= 0.0:
         return None
     return area
+
+
+def _upstream_room_area_scope(
+    area: object,
+    *,
+    source_sha256: str,
+    revision_id: str,
+    viewport_id: str,
+    page_no: int,
+) -> str:
+    """Classify caller-owned original area scope without repairing receipts.
+
+    Foreign source areas remain outside this viewport. A normalized-match
+    alias is negative evidence for the *complete* selected ceiling run; it
+    cannot be silently discarded while a valid sibling is published.
+    """
+    meta = getattr(area, "metadata", None)
+    if not isinstance(meta, dict):
+        return "foreign"
+    raw_sha = meta.get("source_sha256")
+    raw_revision = meta.get("revision_id")
+    raw_viewport = meta.get("viewport_id")
+    raw_page = meta.get("page_no")
+    try:
+        root_matches = (
+            _clean(raw_sha).lower() == source_sha256.lower()
+            and _clean(raw_revision) == revision_id
+            and _clean(raw_viewport) == viewport_id
+        )
+        page_matches = (
+            _clean(raw_page) == str(page_no)
+            or (
+                type(raw_page) in (bool, int, float)
+                and raw_page == page_no
+            )
+        )
+    except (TypeError, ValueError, OverflowError):
+        return "alias"
+    if not root_matches or not page_matches:
+        return "foreign"
+    if (
+        type(raw_sha) is not str
+        or raw_sha != raw_sha.strip()
+        or raw_sha.lower() != source_sha256.lower()
+        or type(raw_revision) is not str
+        or raw_revision != revision_id
+        or type(raw_viewport) is not str
+        or raw_viewport != viewport_id
+        or not (
+            (type(raw_page) is int and raw_page == page_no)
+            or (type(raw_page) is str and raw_page == str(page_no))
+        )
+    ):
+        return "alias"
+    return "exact"
 
 
 def _source_viewport_bbox(value: object) -> Optional[tuple[float, float, float, float]]:
@@ -834,19 +892,29 @@ def collect_live_ceiling_lining_claims(
                     viewport_page_ownership=((viewport_id, page_no),),
                 )
 
-                scoped_room_areas = tuple(
-                    area
-                    for area in upstream_room_areas
-                    if (
-                        isinstance(area.metadata, dict)
-                        and _clean(area.metadata.get("source_sha256")).lower()
-                        == current.revision.source_sha256.lower()
-                        and _clean(area.metadata.get("revision_id"))
-                        == current.revision.revision_id
-                        and _clean(area.metadata.get("viewport_id")) == viewport_id
-                        and _clean(area.metadata.get("page_no")) == str(page_no)
+                scoped_room_areas = []
+                for area in upstream_room_areas:
+                    area_scope = _upstream_room_area_scope(
+                        area,
+                        source_sha256=current.revision.source_sha256,
+                        revision_id=current.revision.revision_id,
+                        viewport_id=viewport_id,
+                        page_no=page_no,
                     )
-                )
+                    if area_scope == "alias":
+                        # A caller-supplied FIRM area with a repaired source
+                        # scope is not original authority. Keep its negative
+                        # evidence by revoking every earlier sibling too.
+                        return LiveCeilingLiningResult(
+                            status=EvidenceResolutionStatus.ABSTAINED,
+                            reason_codes=(
+                                LIVE_CEILING_LINING_UNAVAILABLE,
+                                LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS,
+                            ),
+                            claims=(),
+                        )
+                    if area_scope == "exact":
+                        scoped_room_areas.append(area)
 
                 try:
                     result = run_source_owned_ceiling_lining_shadow(
@@ -855,7 +923,7 @@ def collect_live_ceiling_lining_claims(
                         viewport=viewport,
                         page_no=page_no,
                         authoritative_area_quantities=(
-                            scoped_room_areas if scoped_room_areas else None
+                            tuple(scoped_room_areas) if scoped_room_areas else None
                         ),
                     )
                 except Exception:
@@ -1163,6 +1231,7 @@ __all__ = [
     "LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE",
     "LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE",
     "LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH",
+    "LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
