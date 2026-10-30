@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from stat import S_ISREG
 import tempfile
 from typing import Callable, Iterable
 
@@ -31,6 +32,42 @@ def preflight_new_diagnostic(
             raise ValueError("original-source diagnostic may not overwrite protected evidence")
     if output.exists():
         raise FileExistsError("original-source diagnostic output must be a new path")
+
+
+
+def _assert_published_report_unchanged(
+    output: Path, staged_path: Path, expected_bytes: bytes,
+) -> None:
+    """Bind the published path, opened descriptor and bytes to one stable inode.
+
+    A separate samefile() followed by Path.read_bytes() permits a same-byte
+    path replacement between those operations to masquerade as our report.
+    Do not follow a raced symlink or trust a byte match from another inode.
+    """
+    fields = ("st_dev", "st_ino", "st_mode", "st_nlink",
+              "st_size", "st_mtime_ns", "st_ctime_ns")
+    try:
+        staged = staged_path.lstat()
+        before = output.lstat()
+        if not S_ISREG(staged.st_mode) or not S_ISREG(before.st_mode):
+            raise ValueError("original-source diagnostic output changed during publication")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(output, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if not S_ISREG(opened.st_mode):
+                raise ValueError("original-source diagnostic output changed during publication")
+            actual = stream.read(len(expected_bytes) + 1)
+            completed = os.fstat(stream.fileno())
+        after = output.lstat()
+        staged_after = staged_path.lstat()
+    except OSError as exc:
+        raise ValueError("original-source diagnostic output changed during publication") from exc
+    if actual != expected_bytes or any(
+        getattr(snapshot, field) != getattr(staged, field)
+        for snapshot in (before, opened, completed, after, staged_after)
+        for field in fields
+    ):
+        raise ValueError("original-source diagnostic output changed during publication")
 
 
 def write_new_diagnostic(
@@ -68,6 +105,10 @@ def write_new_diagnostic(
         our_output_created = True
         if verify_inputs is not None:
             verify_inputs()
+        # Attest path identity and exact bytes through the SAME no-follow
+        # descriptor; two independent path operations can accept a same-byte
+        # replacement between their identity and content checks.
+        _assert_published_report_unchanged(output, temp, encoded.encode("utf-8"))
     except BaseException:
         if our_output_created and temp is not None:
             # Retain another writer's output if it replaced ours after link.

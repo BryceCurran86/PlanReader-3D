@@ -12,6 +12,7 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+from stat import S_ISLNK, S_ISREG
 from typing import Any
 
 import importlib
@@ -22,6 +23,7 @@ from scripts.report_full_plan_v2_readiness import _parse_evidence_json
 from tools.gpt3_safe_original_report_output import (
     preflight_new_diagnostic, write_new_diagnostic,
 )
+from tools.gpt3_original_source_preflight import _stable_original_digest
 from pb_customer_output_verification import (
     _customer_quantity_id,
     verify_sealed_customer_output,
@@ -196,27 +198,44 @@ def _enforce_mapped_production_family_trade(
 def _resolve_original_paths(
     source_dir: Path, project_id: str, source_documents: tuple,
 ) -> tuple[list[Path], list[str]]:
-    """Allow SHA-checked flat or project-scoped original packages.
+    """Select genuine flat/scoped sources without silently hiding unsafe files.
 
-    If both contain distinct source bytes for one manifest document, refuse
-    to select either. No candidate is preferred by file order or filename.
+    Only a proven FileNotFoundError permits an absent alternative. Do not use
+    Path.is_file(), Path.resolve() or ordinary stat/open on source candidates:
+    those may suppress an I/O failure or follow a source symlink. Two separate
+    regular paths are interchangeable ONLY when stable no-follow source bytes
+    match. This early ledger guard also protects direct Python callers; the
+    CLI's later publication snapshot remains an independent final guard.
     """
     selected: list[Path] = []
     conflicts: list[str] = []
     for doc in source_documents:
         scoped = source_dir / project_id / doc.name
         flat = source_dir / doc.name
-        if scoped.is_file() and flat.is_file() and scoped.resolve() != flat.resolve():
+        try:
+            scoped_kind = _publication_input_path_kind(scoped)
+            flat_kind = _publication_input_path_kind(flat)
+        except OSError:
+            conflicts.append("unsafe_original_source_path:" + doc.name)
+            selected.append(flat)
+            continue
+        if scoped_kind not in {"file", "missing"} or flat_kind not in {"file", "missing"}:
+            conflicts.append("unsafe_original_source_path:" + doc.name)
+            selected.append(flat)
+            continue
+        if scoped_kind == "file" and flat_kind == "file":
             try:
                 same = (
-                    scoped.stat().st_size == flat.stat().st_size
-                    and _sha256(scoped) == _sha256(flat)
+                    _stable_original_digest(scoped)[0]
+                    == _stable_original_digest(flat)[0]
                 )
-            except OSError:
-                same = False
+            except (OSError, ValueError):
+                conflicts.append("unsafe_original_source_path:" + doc.name)
+                selected.append(flat)
+                continue
             if not same:
                 conflicts.append("conflicting_flat_and_scoped_original:" + doc.name)
-        selected.append(scoped if scoped.is_file() else flat)
+        selected.append(scoped if scoped_kind == "file" else flat)
     return selected, conflicts
 
 
@@ -476,15 +495,33 @@ def build_four_project_evidence_ledger(
     return result
 
 
+def _publication_input_path_kind(path: Path) -> str:
+    """Classify without pathlib status predicates that can suppress OSError.
+
+    Only FileNotFoundError means missing. Permission errors, invalid parent
+    components and other I/O failures must never become missing receipts.
+    lstat also exposes dangling symlinks rather than following them.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return "missing"
+    if S_ISLNK(mode):
+        return "symlink"
+    if S_ISREG(mode):
+        return "file"
+    return "other"
+
+
 def _snapshot_four_project_publication_inputs(
     *, source_dir: Path, sealed_dir: Path,
     identity_map_dir: Path, customer_dir: Path,
-) -> tuple[tuple[Path, str | None], ...]:
-    """Content-address every source the official suite publication depends on.
+) -> tuple[tuple[Path, tuple[str, tuple[int, ...]] | None], ...]:
+    """Bind source SHA and physical inode identity across report publication.
 
-    None is an explicit missing-file receipt: an original PDF or signed
-    output appearing halfway through scoring cannot silently turn an
-    incomplete previous evaluation into a current published report.
+    None records a genuinely absent input. A same-byte replacement of a
+    present signed/customer/original/frozen file must invalidate the ledger,
+    not merely pass a repeated SHA check. Identities stay private in memory.
     """
     required: list[Path] = [FROZEN_ROOT / "manifest.json"]
     manifests = load_suite_manifests(FROZEN_ROOT)
@@ -518,16 +555,23 @@ def _snapshot_four_project_publication_inputs(
             customer_dir / f"{project_id}.customer_rows.json",
         ))
     seen: set[Path] = set()
-    receipts: list[tuple[Path, str | None]] = []
+    receipts: list[tuple[Path, tuple[str, tuple[int, ...]] | None]] = []
     for source in required:
         if source in seen:
             continue
         seen.add(source)
-        if source.is_symlink():
+        try:
+            kind = _publication_input_path_kind(source)
+        except OSError as exc:
+            raise ValueError("publication input path cannot be inspected") from exc
+        if kind == "symlink":
             raise ValueError("original or signed publication source is a symlink")
-        if source.is_file():
-            receipts.append((source, _sha256(source)))
-        elif not source.exists():
+        if kind == "file":
+            try:
+                receipts.append((source, _stable_original_digest(source)))
+            except (OSError, ValueError) as exc:
+                raise ValueError("publication input changed during snapshot") from exc
+        elif kind == "missing":
             receipts.append((source, None))
         else:
             raise ValueError("publication input path is not a regular file")
@@ -535,18 +579,25 @@ def _snapshot_four_project_publication_inputs(
 
 
 def _assert_four_project_publication_inputs_stable(
-    expected: tuple[tuple[Path, str | None], ...],
+    expected: tuple[tuple[Path, tuple[str, tuple[int, ...]] | None], ...],
 ) -> None:
-    for path, expected_hash in expected:
-        if path.is_symlink():
-            raise ValueError("four-project input changed during report publication")
+    for path, expected_witness in expected:
         try:
-            actual = _sha256(path) if path.is_file() else None
-        except OSError as exc:
+            kind = _publication_input_path_kind(path)
+            if expected_witness is None:
+                # Missing remains missing only if lstat proves it absent.
+                # Python 3.14 status predicates can hide permission errors.
+                if kind != "missing":
+                    raise ValueError("four-project input changed during report publication")
+                continue
+            if kind != "file":
+                raise ValueError("four-project input changed during report publication")
+            actual = _stable_original_digest(path)
+        except (OSError, ValueError) as exc:
             raise ValueError(
                 "four-project input changed during report publication"
             ) from exc
-        if actual != expected_hash:
+        if actual != expected_witness:
             raise ValueError("four-project input changed during report publication")
 
 

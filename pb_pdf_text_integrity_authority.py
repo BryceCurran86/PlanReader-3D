@@ -503,6 +503,15 @@ def _glyph_unicode_consistency_reasons(
     """
 
     if source_symbol_font_chain_shadow:
+        # The source chain EXTENDS the default proof; it never replaces it. A
+        # font whose own embedded Unicode cmap already verifies every rendered
+        # glyph stays verified, and a contradiction from that cmap stays a
+        # contradiction. Only a glyph the default proof cannot decide at all
+        # (no embedded Unicode cmap, as in subset CAD fonts) is handed to the
+        # independent source-byte -> ToUnicode -> symbol-GID chain.
+        default_reasons = _glyph_unicode_consistency_reasons(page, span, font)
+        if not default_reasons or TEXT_GLYPH_UNICODE_MISMATCH in default_reasons:
+            return default_reasons
         return _source_embedded_symbol_byte_glyph_reasons(page, span, font)
     font_view = _font_for_glyph_validation(page, font)
     if font_view is None:

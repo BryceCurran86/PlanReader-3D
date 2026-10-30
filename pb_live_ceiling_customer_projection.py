@@ -12,7 +12,7 @@ from pb_live_ceiling_lining_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     quantities_to_takeoff_output_rows,
@@ -59,6 +59,38 @@ def project_live_ceiling_customer_rows(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
+
+    # Validate the ORIGINAL ceiling inventory before filtering blocked or
+    # ABSTAINED records. A broken source family/identity must never be
+    # laundered into a valid-looking empty customer result.
+    seen_original_ids: set[str] = set()
+    for original in claim.ceiling_lining_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            raise TypeError("ceiling customer source inventory requires QuantityEvidence")
+        if original.family != "ceiling_lining":
+            raise SourceClosedRunConflictError(
+                "non-ceiling original quantity reached ceiling customer inventory"
+            )
+        source_id = original.quantity_id
+        if (
+            type(source_id) is not str
+            or not source_id
+            or source_id != source_id.strip()
+            or source_id in seen_original_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid original ceiling customer quantity id: {source_id}"
+            )
+        seen_original_ids.add(source_id)
+        if (
+            not original.abstained
+            and original.value is not None
+            and original.blocking_reasons
+        ):
+            raise SourceClosedRunConflictError(
+                "numeric ceiling source quantity retains unresolved blockers: "
+                f"{source_id}"
+            )
 
     quantities = tuple(
         quantity

@@ -647,3 +647,322 @@ def test_floor_finish_canonical_page_rejects_untyped_or_trimmed_aliases(alias):
             workspace_id=1,
             project_id="project-1",
         )
+
+
+@pytest.mark.parametrize("stolen_identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+def test_original_abstained_source_claim_cannot_fund_new_firm_floor_finish(
+    stolen_identity,
+):
+    """A failed physical claimant still owns a competing original source mark."""
+    firm = _quantity()
+    rival_meta = dict(firm.metadata)
+    other_key = (
+        "finish_occurrence_evidence_id"
+        if stolen_identity == "finish_occurrence_record_id"
+        else "finish_occurrence_record_id"
+    )
+    rival_meta[other_key] = "originally-independent-source-receipt"
+    denied = replace(
+        firm, quantity_id="floor-finish-original-abstained-rival",
+        abstained=True, value=None,
+        blocking_reasons=("original_room_identity_ambiguous",),
+        metadata=rival_meta,
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(firm, denied),
+    )
+    for produce in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original material source owner contested by an abstained quantity",
+        ):
+            produce(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("foreign_field,foreign_value", (
+    ("source_sha256", "b"*64),
+    ("revision_id", "independent-original-revision"),
+))
+def test_foreign_source_abstained_receipt_not_a_false_finish_collision(
+    foreign_field, foreign_value,
+):
+    firm = _quantity()
+    rival = replace(
+        firm, quantity_id="independent-foreign-source-rival",
+        abstained=True, value=None,
+        blocking_reasons=("foreign_source_unmeasured",),
+        metadata={**dict(firm.metadata), foreign_field: foreign_value},
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(rival,firm),
+    )
+    sealed=seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(sealed.quantities)==1
+    rows=project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(rows)==1
+    assert rows[0]["quantity_id"]==firm.quantity_id
+
+
+def test_different_abstained_original_material_mark_keeps_signed_floor():
+    firm=_quantity()
+    denied=replace(
+        firm,quantity_id="independent-abstained-material",
+        abstained=True,value=None,
+        blocking_reasons=("unproven_other_floor",),
+        metadata={
+            **dict(firm.metadata),
+            "finish_occurrence_record_id":"independent-mark",
+            "finish_occurrence_evidence_id":"independent-native-word",
+        },
+    )
+    claim=replace(_claim(),floor_finish_quantity_evidence=(firm,denied))
+    assert len(seal_live_floor_finish_area_run(
+        claim,workspace_id=1,project_id="project-1"
+    ).quantities)==1
+    assert len(project_live_floor_finish_customer_rows(
+        claim,workspace_id=1,project_id="project-1"
+    ))==1
+
+
+@pytest.mark.parametrize("bad_root", (
+    {"source_sha256": None},
+    {"source_sha256": "not-a-sha"},
+    {"revision_id": None},
+    {"revision_id": " unresolved-revision "},
+))
+@pytest.mark.parametrize("stolen_identity", (
+    "finish_occurrence_record_id", "finish_occurrence_evidence_id",
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_unresolved_source_root_must_not_hide_abstained_original_finish_rival(
+    bad_root, stolen_identity, reverse,
+):
+    """Unknown PDF/revision is not proof a reused native mark is foreign."""
+    firm = _quantity()
+    metadata = dict(firm.metadata)
+    metadata.update(bad_root)
+    other = (
+        "finish_occurrence_evidence_id"
+        if stolen_identity == "finish_occurrence_record_id"
+        else "finish_occurrence_record_id"
+    )
+    metadata[other] = "independently-owned-other-source-identity"
+    rival = replace(
+        firm,
+        quantity_id="unresolved-original-floor-finish-rival",
+        value=None,
+        abstained=True,
+        blocking_reasons=("source_original_root_unavailable",),
+        metadata=metadata,
+    )
+    original = (rival, firm) if reverse else (firm, rival)
+    claim = replace(_claim(), floor_finish_quantity_evidence=original)
+    for output in (seal_live_floor_finish_area_run,
+                   project_live_floor_finish_customer_rows):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="original material source owner contested by an abstained quantity",
+        ):
+            output(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("unresolved_root", (
+    {"source_sha256": None},
+    {"revision_id": None},
+))
+def test_unresolved_root_unrelated_original_mark_does_not_veto_firm(
+    unresolved_root,
+):
+    firm = _quantity()
+    unrelated = replace(
+        firm,
+        quantity_id="unresolved-but-distinct-mark",
+        value=None,
+        abstained=True,
+        blocking_reasons=("source_root_not_verified",),
+        metadata={
+            **dict(firm.metadata),
+            **unresolved_root,
+            "finish_occurrence_record_id": "independent-occurrence",
+            "finish_occurrence_evidence_id": "independent-evidence",
+        },
+    )
+    claim = replace(
+        _claim(), floor_finish_quantity_evidence=(unrelated, firm)
+    )
+    signed = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert len(signed.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == firm.quantity_id
+
+def _two_original_floor_finish_claims(
+    *,
+    second_sha: str = "a" * 64,
+    second_revision: str = "rev-1",
+    second_occurrence: str = "occ-1",
+    second_observation: str = "ev-occ",
+) -> LivePhysicalNetWallClaim:
+    """Two distinct canonical floors; local PDF IDs may legitimately repeat."""
+    first_floor = _floor()
+    second_floor = replace(
+        first_floor,
+        canonical_floor_id="floor-2",
+        physical_floor_surface_id="floor-2",
+        room_entity_id="room-2",
+        document_id=(
+            "doc-2"
+            if (second_sha, second_revision)
+            != (first_floor.source_sha256, first_floor.revision_id)
+            else "doc-1"
+        ),
+        revision_id=second_revision,
+        source_sha256=second_sha,
+        source_room_face_record_id="face-2",
+        evidence_ids=("ev-room", "ev-area", second_observation, "ev-def"),
+    )
+    first = _quantity()
+    second = replace(
+        first,
+        quantity_id="floor-finish-q2",
+        semantic_key="floor_finish_area:floor-2:FT1:tile",
+        input_entity_ids=("floor-2",),
+        evidence_ids=("ev-area", second_observation, "ev-def"),
+        metadata={
+            **dict(first.metadata),
+            "source_sha256": second_sha,
+            "revision_id": second_revision,
+            "canonical_floor_id": "floor-2",
+            "physical_floor_surface_id": "floor-2",
+            "source_room_face_record_id": "face-2",
+            "finish_occurrence_record_id": second_occurrence,
+            "finish_occurrence_evidence_id": second_observation,
+        },
+    )
+    return replace(
+        _claim(),
+        canonical_floors=(first_floor, second_floor),
+        floor_finish_quantity_evidence=(first, second),
+    )
+
+
+@pytest.mark.parametrize("source_root", (
+    ("b" * 64, "rev-1"),
+    ("a" * 64, "rev-2"),
+    ("b" * 64, "rev-2"),
+))
+@pytest.mark.parametrize("reverse", (False, True))
+def test_independent_original_source_local_finish_marks_seal_both_customer_rows(
+    source_root, reverse,
+):
+    """A foreign verified SHA/revision is not a rival for local mark IDs."""
+    claim = _two_original_floor_finish_claims(
+        second_sha=source_root[0], second_revision=source_root[1],
+    )
+    if reverse:
+        claim = replace(
+            claim,
+            canonical_floors=tuple(reversed(claim.canonical_floors)),
+            floor_finish_quantity_evidence=tuple(
+                reversed(claim.floor_finish_quantity_evidence)
+            ),
+        )
+    run = seal_live_floor_finish_area_run(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1",
+    )
+    assert {q.quantity_id for q in run.quantities} == {
+        "floor-finish-q1", "floor-finish-q2",
+    }
+    assert {r["quantity_id"] for r in rows} == {
+        "floor-finish-q1", "floor-finish-q2",
+    }
+    verified = verify_sealed_customer_output(run, rows)
+    assert verified.valid_quantity_count == 2
+    assert verified.customer_row_count == 2
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+@pytest.mark.parametrize("second_occurrence,second_observation,expected", (
+    ("occ-1", "ev-occ", "source occurrence has competing physical floors"),
+    ("independent-occ", "ev-occ", "original observation has competing physical floors"),
+    ("occ-1", "independent-ev", "source occurrence has competing physical floors"),
+))
+def test_same_original_source_finish_owner_rivals_remain_blocked(
+    reverse, second_occurrence, second_observation, expected,
+):
+    claim = _two_original_floor_finish_claims(
+        second_occurrence=second_occurrence,
+        second_observation=second_observation,
+    )
+    if reverse:
+        claim = replace(
+            claim,
+            canonical_floors=tuple(reversed(claim.canonical_floors)),
+            floor_finish_quantity_evidence=tuple(
+                reversed(claim.floor_finish_quantity_evidence)
+            ),
+        )
+    for output in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(SourceClosedRunConflictError, match=expected):
+            output(claim, workspace_id=1, project_id="project-1")
+
+
+@pytest.mark.parametrize("invalid_revision", ("", " rev-2 ", None, True))
+def test_unproved_revision_never_licenses_independent_original_mark(
+    invalid_revision,
+):
+    claim = _two_original_floor_finish_claims(
+        second_sha="b" * 64, second_revision=invalid_revision,
+    )
+    for output in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(SourceClosedRunConflictError, match="revision mismatch"):
+            output(claim, workspace_id=1, project_id="project-1")
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_same_document_cannot_mix_source_revisions_even_when_mark_roots_differ(
+    reverse,
+):
+    """The downstream sealed-run document snapshot veto must remain intact."""
+    claim = _two_original_floor_finish_claims(
+        second_sha="a" * 64, second_revision="rev-2",
+    )
+    second = replace(claim.canonical_floors[1], document_id="doc-1")
+    claim = replace(claim, canonical_floors=(claim.canonical_floors[0], second))
+    if reverse:
+        claim = replace(
+            claim,
+            canonical_floors=tuple(reversed(claim.canonical_floors)),
+            floor_finish_quantity_evidence=tuple(
+                reversed(claim.floor_finish_quantity_evidence)
+            ),
+        )
+    for output in (
+        seal_live_floor_finish_area_run,
+        project_live_floor_finish_customer_rows,
+    ):
+        with pytest.raises(
+            SourceClosedRunConflictError,
+            match="conflicting sealed source revisions or snapshots",
+        ):
+            output(claim, workspace_id=1, project_id="project-1")

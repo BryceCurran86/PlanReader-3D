@@ -15,10 +15,14 @@ permissions:
 
 jobs:
   provision:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Provision every frozen original
         id: provision
@@ -43,11 +47,22 @@ jobs:
         env:
           COMPANION_REPOSITORY: ${{ vars.ORIGINAL_SOURCES_REPOSITORY }}
         run: |
+          # An expected denial emits ::error::. Keep that text PRIVATE to
+          # this negative check instead of a misleading red UI annotation.
+          denial_log="${RUNNER_TEMP}/expected-no-token-denial.log"
           set +e
           ORIGINAL_SOURCES_TOKEN= python3 .github/actions/provision-original-sources/provision.py \
             --destination "${RUNNER_TEMP}/empty-sources" \
-            --repository "${COMPANION_REPOSITORY}"
+            --repository "${COMPANION_REPOSITORY}" > "${denial_log}" 2>&1
           rc=$?
           set -e
           test "${rc}" -eq 1
+          grep -Fq 'original sources NOT provisioned:' "${denial_log}"
+          grep -Fq 'no ORIGINAL_SOURCES_TOKEN is available' "${denial_log}"
           test ! -e "${RUNNER_TEMP}/empty-sources" || test -z "$(ls -A "${RUNNER_TEMP}/empty-sources")"
+          rm -f "${denial_log}"
+          echo "Verified expected no-token refusal; no files downloaded."
+
+      - name: Destroy verified private PDFs
+        if: always()
+        run: rm -rf documents/sources
