@@ -489,3 +489,79 @@ def test_inclusive_source_coordinate_boundary_preserves_shadow_only_receipt(auth
     assert first.spandrel_wall_area_sqm is None
     assert first.shadow_only and not first.takeoff_eligible
     assert not first.commercial_projection_allowed
+
+
+def _spandrel_identity_kwargs():
+    return dict(
+        jamb_a=[100.0, 200.0],
+        jamb_b=[200.0, 200.0],
+        sill_height_mm=900.0,
+        head_height_mm=2100.0,
+        host_through_wall_id="HOST_A",
+        context_label="SPANDREL_WINDOW",
+        scale_ratio=0.01764,
+    )
+
+
+@pytest.mark.parametrize("field", ["host_through_wall_id", "context_label"])
+@pytest.mark.parametrize("bad", [
+    "", " ", " HOST_A", "HOST_A ", "HOST\nA", "HOST\tA",
+    "HOST\x00A", "HOST\u200bA", True, None, 123,
+])
+def test_spandrel_host_identity_rejects_padded_and_control_aliases(
+    authority, field, bad,
+):
+    kw = _spandrel_identity_kwargs()
+    before = (tuple(kw["jamb_a"]), tuple(kw["jamb_b"]))
+    with pytest.raises(ValueError, match="exact printable"):
+        authority.evaluate_spandrel_sub_sill(**(kw | {field: bad}))
+    assert before == (tuple(kw["jamb_a"]), tuple(kw["jamb_b"]))
+
+
+def test_spandrel_exact_host_identity_is_stable_and_noncommercial(authority):
+    kw = _spandrel_identity_kwargs()
+    first = authority.evaluate_spandrel_sub_sill(**kw)
+    second = authority.evaluate_spandrel_sub_sill(**kw)
+    swapped = authority.evaluate_spandrel_sub_sill(**(
+        kw | {"jamb_a": kw["jamb_b"], "jamb_b": kw["jamb_a"]}
+    ))
+    other = authority.evaluate_spandrel_sub_sill(**(
+        kw | {"host_through_wall_id": "HOST_B"}
+    ))
+    assert first == second
+    assert first.contract_id == swapped.contract_id
+    assert first.contract_id != other.contract_id
+    assert first.host_through_wall_id == "HOST_A"
+    assert first.to_dict()["host_through_wall_id"] == "HOST_A"
+    assert first.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    assert first.first_remaining_gate == "original_source_spandrel_host_scale_levels_unverified"
+    assert first.status is EvidenceResolutionStatus.CANDIDATE
+    assert first.shadow_only and not first.takeoff_eligible
+    assert not first.commercial_projection_allowed
+    assert kw["jamb_a"] == [100.0, 200.0]
+    assert kw["jamb_b"] == [200.0, 200.0]
+
+
+def test_spandrel_missing_scale_keeps_null_metric_after_identity_guard(authority):
+    kw = _spandrel_identity_kwargs()
+    kw["scale_ratio"] = None
+    result = authority.evaluate_spandrel_sub_sill(**kw)
+    assert result.classification is SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.clear_span_m is None
+    assert result.glazing_aperture_area_sqm is None
+    assert result.spandrel_wall_area_sqm is None
+    assert result.to_dict()["total_wall_opening_area_sqm"] is None
+    assert result.shadow_only and not result.takeoff_eligible
+    assert not result.commercial_projection_allowed
+
+
+def test_spandrel_identity_rejects_string_subclass(authority):
+    class Impostor(str):
+        pass
+
+    kw = _spandrel_identity_kwargs()
+    with pytest.raises(ValueError, match="exact printable"):
+        authority.evaluate_spandrel_sub_sill(**(
+            kw | {"host_through_wall_id": Impostor("HOST_A")}
+        ))
