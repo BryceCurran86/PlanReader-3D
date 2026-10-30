@@ -174,6 +174,11 @@ def _source_positive_area_m2(value: object) -> Optional[float]:
     return area
 
 
+def _exact_source_ceiling_quantity_id(value: object) -> bool:
+    """Source quantity IDs are immutable receipts, not display strings."""
+    return type(value) is str and bool(value) and value == value.strip()
+
+
 def _source_room_polygon_pdf_pts(
     points: object,
 ) -> Optional[tuple[tuple[float, float], ...]]:
@@ -290,6 +295,9 @@ def _claim_from_quantity(
         or quantity.authority != MeasurementAuthorityType.MODEL_DERIVED.value
         or quantity.blocking_reasons
         or len(quantity.input_entity_ids) != 1
+        # A source-owned ceiling quantity ID is an exact evidence receipt.
+        # Do not accept padded or foreign-string aliases as a live identity.
+        or not _exact_source_ceiling_quantity_id(quantity.quantity_id)
     ):
         return None
 
@@ -739,7 +747,9 @@ def collect_live_ceiling_lining_claims(
 
                 for quantity in result.ceiling_quantities:
                     quantity_id = quantity.quantity_id
-                    if not isinstance(quantity_id, str) or not quantity_id.strip():
+                    if not _exact_source_ceiling_quantity_id(quantity_id):
+                        # Reject invalid producer IDs before replay tracking;
+                        # never trim/repair an original ceiling identity.
                         continue
                     source_scope = (page_no, viewport_id)
                     prior = seen_ceiling_quantity_ids.get(quantity_id)
