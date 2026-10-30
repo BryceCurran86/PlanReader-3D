@@ -174,6 +174,57 @@ def _source_positive_area_m2(value: object) -> Optional[float]:
     return area
 
 
+def _source_room_polygon_pdf_pts(
+    points: object,
+) -> Optional[tuple[tuple[float, float], ...]]:
+    """Require a finite, nondegenerate source room ring before canonicalizing.
+
+    The room-area measurement is independently source-owned; this gate only
+    prevents malformed physical geometry from being marked complete. Do not
+    repair, snap, reorder, or infer missing original source vertices.
+    """
+    if type(points) not in (tuple, list) or len(points) < 3:
+        return None
+    polygon: list[tuple[float, float]] = []
+    for point in points:
+        if (
+            type(point) not in (tuple, list)
+            or len(point) != 2
+            or type(point[0]) not in (int, float)
+            or type(point[1]) not in (int, float)
+        ):
+            return None
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(x) or not math.isfinite(y):
+            return None
+        polygon.append((x, y))
+
+    # Origin-relative triangle fan avoids avoidable cancellation for ordinary
+    # translated PDF polygons. A collinear/zero-area ring is not a physical
+    # room face; a nonfinite intermediate is not a valid source measurement.
+    origin_x, origin_y = polygon[0]
+    double_area_terms: list[float] = []
+    for index in range(1, len(polygon) - 1):
+        ax = polygon[index][0] - origin_x
+        ay = polygon[index][1] - origin_y
+        bx = polygon[index + 1][0] - origin_x
+        by = polygon[index + 1][1] - origin_y
+        term = ax * by - ay * bx
+        if not math.isfinite(term):
+            return None
+        double_area_terms.append(term)
+    try:
+        double_area = math.fsum(double_area_terms)
+    except (ValueError, OverflowError):
+        return None
+    if not math.isfinite(double_area) or double_area == 0.0:
+        return None
+    return tuple(polygon)
+
+
 def _tag_for_descriptor(descriptor: str) -> str:
     """Return a generic material-family tag derived only from source finish text."""
     text = _norm(descriptor)
@@ -427,7 +478,10 @@ def canonical_ceiling_from_shadow_quantity(
         return None
     room_id = room_ids[0]
     room = room_index.room(room_id)
-    if room is None or len(room.polygon_pdf_pts) < 3:
+    if room is None:
+        return None
+    source_polygon = _source_room_polygon_pdf_pts(room.polygon_pdf_pts)
+    if source_polygon is None:
         return None
 
     quantity_meta = (
@@ -468,10 +522,7 @@ def canonical_ceiling_from_shadow_quantity(
         viewport_id=viewport_id,
         source_sha256=source_sha256,
         revision_id=revision_id,
-        polygon_pdf_pts=tuple(
-            (float(point[0]), float(point[1]))
-            for point in room.polygon_pdf_pts
-        ),
+        polygon_pdf_pts=source_polygon,
         area_m2=float(value),
         finish_descriptor=descriptor,
         room_area_quantity_id=upstream_area_id,
