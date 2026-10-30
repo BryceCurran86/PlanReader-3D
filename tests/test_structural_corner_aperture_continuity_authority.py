@@ -696,3 +696,63 @@ def test_public_corner_numeric_record_replacements_fail_closed(authority):
     assert candidate.shadow_only and not candidate.takeoff_eligible
     assert abstained.shadow_only and not abstained.commercial_projection_allowed
     assert authority.evaluate_corner_aperture(**kw) == candidate
+
+
+@pytest.mark.parametrize("jamb_a,jamb_b", [
+    ((200.0, 380.0), (260.0, 300.0)),
+    ((140.0, 300.0), (200.0, 380.0)),
+])
+def test_corner_leg_direct_replacement_requires_owned_axis_and_span(
+    authority, jamb_a, jamb_b,
+):
+    """Each nested leg must own its span and outward unit axis."""
+    from dataclasses import replace
+
+    kw = dict(
+        jamb_a=jamb_a, jamb_b=jamb_b, corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    candidate = authority.evaluate_corner_aperture(**kw)
+    abstained = authority.evaluate_corner_aperture(**(kw | {"scale_ratio": None}))
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert abstained.status is EvidenceResolutionStatus.ABSTAINED
+    assert replace(candidate) == candidate and replace(abstained) == abstained
+    for record in (candidate, abstained):
+        assert record.shadow_only and not record.takeoff_eligible
+        assert not record.commercial_projection_allowed
+        for leg in (record.leg_a, record.leg_b):
+            assert replace(leg) == leg
+            ax, ay = leg.axis_vector
+            for changes in (
+                {"axis_vector": (0.0, 0.0)},
+                {"axis_vector": (0.5, 0.0)},
+                {"axis_vector": (-ax, -ay)},
+                {"axis_vector": (-ay, ax)},
+                {"leg_span_pt": leg.leg_span_pt + 1.0},
+            ):
+                with pytest.raises(ValueError, match="corner leg .*geometry"):
+                    replace(leg, **changes)
+    assert authority.evaluate_corner_aperture(**kw) == candidate
+
+
+def test_zero_span_corner_leg_retains_abstention_but_cannot_forge_axis(authority):
+    """A degenerate source leg has no unit axis and cannot be promoted."""
+    from dataclasses import replace
+
+    record = authority.evaluate_corner_aperture(
+        jamb_a=(200.0, 300.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    assert record.classification is CornerApertureClassification.ABSTAINED_DEGENERATE_LEG
+    zero = next(leg for leg in (record.leg_a, record.leg_b) if leg.leg_span_pt == 0)
+    assert zero.axis_vector == (0.0, 0.0)
+    assert replace(zero) == zero
+    with pytest.raises(ValueError, match="axis conflicts"):
+        replace(zero, axis_vector=(1.0, 0.0))
+    with pytest.raises(ValueError, match="conflicts with geometry"):
+        replace(zero, leg_span_pt=1.0)
+    assert record.total_girth_m is None
+    assert record.shadow_only and not record.takeoff_eligible

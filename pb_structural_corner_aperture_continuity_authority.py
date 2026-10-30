@@ -76,6 +76,26 @@ class CornerOpeningLegRecord:
                 or (self.leg_span_m is not None and
                     (not _finite_real(self.leg_span_m) or self.leg_span_m <= 0))):
             raise ValueError("corner leg numeric evidence must be finite and physical")
+        # Direct dataclass replacement cannot substitute an unrelated wall
+        # direction or span. A genuinely degenerate source leg has zero axis
+        # and stays a typed abstention at the parent record, never a host.
+        dx = self.terminal_jamb[0] - self.corner_vertex[0]
+        dy = self.terminal_jamb[1] - self.corner_vertex[1]
+        span = math.hypot(dx, dy)
+        if (not math.isfinite(span)
+                or not math.isclose(self.leg_span_pt, span,
+                                    rel_tol=1e-12, abs_tol=1e-9)):
+            raise ValueError("corner leg numeric evidence conflicts with geometry")
+        if span == 0.0:
+            if self.axis_vector != (0.0, 0.0):
+                raise ValueError("corner leg axis conflicts with degenerate geometry")
+        elif (not math.isclose(math.hypot(*self.axis_vector), 1.0,
+                               rel_tol=0.0, abs_tol=1e-12)
+              or not math.isclose(self.axis_vector[0], dx / span,
+                                  rel_tol=0.0, abs_tol=1e-12)
+              or not math.isclose(self.axis_vector[1], dy / span,
+                                  rel_tol=0.0, abs_tol=1e-12)):
+            raise ValueError("corner leg axis conflicts with geometry")
 
     def to_dict(self) -> Mapping[str, Any]:
         # Native shadow evidence must retain the coordinates used by contract_id.
