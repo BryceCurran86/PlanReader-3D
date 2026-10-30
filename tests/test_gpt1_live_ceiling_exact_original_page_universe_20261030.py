@@ -222,3 +222,116 @@ def test_original_ceiling_quantity_page_aliases_abstain_without_crashing(bad_pag
     assert first is None
     assert second is None
     assert quantity.metadata == original_meta
+
+
+def _generated_source_owned_ceiling_pdf(tmp_path):
+    """Public-safe framed native PDF that exercises the real ceiling producer."""
+    from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
+
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=460, height=320)
+        page.draw_rect(fitz.Rect(30, 25, 370, 230), color=(0, 0, 0), width=1)
+        page.insert_text(fitz.Point(120, 48), "GROUND FLOOR PLAN", fontsize=8)
+        for first, second in (
+            ((70, 70), (330, 70)),
+            ((330, 70), (330, 175)),
+            ((330, 175), (70, 175)),
+            ((70, 175), (70, 70)),
+            ((200, 70), (200, 175)),
+        ):
+            page.draw_line(fitz.Point(*first), fitz.Point(*second),
+                           color=(0, 0, 0), width=1)
+        page.insert_text(fitz.Point(92, 122), "CEILING FINISH: CHIPBOARD",
+                         fontsize=7)
+        span = POINTS_PER_METRE_AT_1_1 / 100
+        x0, x1, y = 95, 95 + span, 205
+        shape = page.new_shape()
+        shape.draw_line(fitz.Point(x0, y), fitz.Point(x1, y))
+        shape.draw_line(fitz.Point(x0, y - 6), fitz.Point(x0, y + 6))
+        shape.draw_line(fitz.Point(x1, y - 6), fitz.Point(x1, y + 6))
+        shape.finish(width=1)
+        shape.commit()
+        page.insert_text(fitz.Point(x0 - 2, y + 18), "0", fontsize=7)
+        page.insert_text(fitz.Point(x1 - 4, y + 18), "1m", fontsize=7)
+        page.insert_text(fitz.Point(390, 285), "SCALE 1:100", fontsize=7)
+        path = tmp_path / "source-owned-ceiling-quantity-replay.pdf"
+        path.write_bytes(doc.tobytes(garbage=4, deflate=True))
+        return path
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize(
+    "replay",
+    ["identical", "changed_first", "changed_last", "invalid_sibling"],
+)
+def test_original_ceiling_quantity_id_replays_never_double_count_or_choose_winner(
+    tmp_path, monkeypatch, replay
+):
+    from dataclasses import replace
+
+    from pb_migration_provider_envelope import ProviderResult
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+    assert baseline.claims[0].quantity_m2 > 0
+
+    original_run = ceiling.run_source_owned_ceiling_lining_shadow
+    untouched = []
+    calls = []
+
+    def replay_source_owned_quantity(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        assert len(result.ceiling_quantities) == 1
+        authentic = result.ceiling_quantities[0]
+        original_metadata = dict(authentic.metadata)
+        altered = replace(
+            authentic,
+            confidence=(0.25 if authentic.confidence != 0.25 else 0.75),
+        )
+        if replay == "identical":
+            quantities = (authentic, authentic)
+        elif replay == "changed_first":
+            quantities = (altered, authentic)
+        elif replay == "changed_last":
+            quantities = (authentic, altered)
+        else:
+            quantities = (authentic, replace(authentic, value=authentic.value + 1))
+        rebuilt = ProviderResult.build(
+            descriptor=result.pipeline.ceiling_result.descriptor,
+            context=kwargs["context"],
+            quantities=quantities,
+            entities=result.pipeline.ceiling_result.entities,
+        )
+        untouched.append((authentic, original_metadata))
+        calls.append(rebuilt.result_fingerprint)
+        return replace(
+            result,
+            pipeline=replace(result.pipeline, ceiling_result=rebuilt),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        replay_source_owned_quantity,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(calls) == 2
+    assert first == second
+    assert all(q.metadata == metadata for q, metadata in untouched)
+
+    if replay == "identical":
+        # Replaying the exact same original quantity is idempotent, not 2x m².
+        assert first.claims == baseline.claims
+        assert first.canonical_ceilings == baseline.canonical_ceilings
+        assert first.quantity_evidence == baseline.quantity_evidence
+    else:
+        # Every record under a conflicted source ID must abstain together.
+        assert first.claims == ()
+        assert first.canonical_ceilings == ()
+        assert first.quantity_evidence == ()
+        assert ceiling.LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT in first.reason_codes
