@@ -43,6 +43,16 @@ MAX_CLEAR_SPAN_PT = 300.0
 MIN_SILL_HEIGHT_MM = 300.0
 MAX_HEAD_HEIGHT_MM = 4000.0
 
+def _native_source_identity(value: object) -> bool:
+    """Reject padded or control-bearing caller identities before shadow lineage."""
+    return (
+        type(value) is str
+        and bool(value)
+        and value == value.strip()
+        and value.isprintable()
+    )
+
+
 
 class SpandrelSubSillClassification(str, Enum):
     """Classification outcome for window over sub-sill spandrel wall."""
@@ -157,10 +167,12 @@ class StructuralSpandrelSubSillContinuityAuthority:
                 raise ValueError("scale_ratio must be finite real")
             if scale_ratio <= 0:
                 raise ValueError("scale_ratio must be positive")
-        if not isinstance(host_through_wall_id, str) or not host_through_wall_id.strip():
-            raise ValueError("nonblank physical host identity required")
-        if not isinstance(context_label, str) or not context_label.strip():
-            raise ValueError("nonblank context identity required")
+        # Unverified caller IDs are still lineage keys. A padded spelling
+        # must not fragment one physical host into distinct shadow receipts.
+        if not _native_source_identity(host_through_wall_id):
+            raise ValueError("exact printable physical host identity required")
+        if not _native_source_identity(context_label):
+            raise ValueError("exact printable context identity required")
         for name, point in (("jamb_a", jamb_a), ("jamb_b", jamb_b)):
             if not isinstance(point, (tuple, list)) or len(point) != 2:
                 raise ValueError(f"{name} must contain two coordinates")
