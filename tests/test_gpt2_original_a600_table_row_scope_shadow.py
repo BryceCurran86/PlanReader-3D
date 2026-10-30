@@ -905,14 +905,17 @@ def test_plan_schedule_rejects_noncanonical_page_selectors(
         )
 
 
-def test_plan_schedule_accepts_real_partial_decoded_page_scope(monkeypatch):
+def test_plan_schedule_accepts_real_complete_decoded_page_scope(monkeypatch):
     from pb_source_plan_door_correspondence_authority import (
         inspect_published_plan_and_schedule_door_codes,
     )
     source, published = _published_synthetic_original_source(
         monkeypatch, _original_like_words(),
     )
-    assert published.coverage.state == "partial"
+    # The synthetic producer publishes both pages, so its actual receipt is complete.
+    assert published.coverage.state == "complete"
+    assert published.coverage.decoded_pages == (1, 2)
+    assert published.coverage.failed_pages == ()
     result = inspect_published_plan_and_schedule_door_codes(
         source, revision_id=published.revision.revision_id,
         plan_page_id="2", schedule_page_id="1",
