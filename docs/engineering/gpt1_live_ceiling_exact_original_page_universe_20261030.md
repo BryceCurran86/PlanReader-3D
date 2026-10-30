@@ -23,3 +23,13 @@ Use generated public-safe multi-page PDFs and an ingestion spy: valid page/topol
 ## Isolation and benchmark firewall
 
 Only `pb_live_ceiling_lining_integration.py`, one new focused test file and this architecture report are changed. GPT1 #4130 edits `pb_live_physical_net_wall_integration.py` and is separate. GPT2 owns Maryborough physical room/FT2/FT3/RCP; GPT MAX/Claude own hosts/glazing; GPT3 owns signed/customer/frozen scoring. Do not modify private PDFs/tokens, benchmark truth, source snapshots, 20k primitive cap or 2.5 pt snap. No expected BOQ or project name enters prediction. This is an unmerged integrity implementation, not a source-signed FIRM or accuracy gain.
+
+## Follow-up original ceiling quantity page-identity gate (2026-10-30)
+
+**OBSERVED:** After source-owned provisional ceiling quantity shape checks, `_claim_from_quantity` calls `int(meta.get("page_no", -1))`. This can coerce a foreign bool/float/text page token to the source page, or throw for malformed/overflowing tokens. A valid-looking source page alias can therefore pass the quantity-to-canonical-ceiling boundary. This is independent of the entrypoint page-universe repair above.
+
+**INFERRED:** Original PDF page ownership is not safely proven by a coerced metadata token. The correct failure is a missing/invalid ceiling claim (ABSTAIN), not a crash or a guessed page. No new measurement or FIRM authority is implied.
+
+**PROPOSED:** Require `type(meta.get("page_no")) is int` and exact equality to the selected source page before looking up source room/finish/scale evidence. Add source-quantity boundary regressions for valid integer, bool, float, numeric text, NaN/Infinity, object, None and huge values; retain input immutability and deterministic replay. The prior `#4134` source-page entrypoint behavior, legitimate ceiling source claims and commercial isolation remain unchanged.
+
+**RELEASE GATES:** Full exact-head Python 3.13/3.14 CI, trusted SHA-verified original-source producer-to-issuer-to-customer replay, immutable signed Lot16 nine/Maryborough three, and unchanged frozen120 evaluation remain mandatory. The isolated Maryborough original PDF has been SHA-checked, but that alone is not source-positive customer proof. No benchmark or source bytes are committed.
