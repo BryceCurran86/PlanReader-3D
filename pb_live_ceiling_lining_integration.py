@@ -404,7 +404,11 @@ def _claim_from_quantity(
     if (
         meta.get("shadow_only") is not True
         or meta.get("commercial_projection_allowed") is not False
-        or _clean(meta.get("viewport_id")) != viewport_id
+        # Viewport identity is a producer-owned source receipt, not display
+        # text. Never strip or stringify a foreign viewport into this scope.
+        or type(meta.get("viewport_id")) is not str
+        or not meta["viewport_id"]
+        or meta["viewport_id"] != viewport_id
         # Page identity is producer-owned. Never coerce a bool, float or
         # numeric-text alias into an authenticated original PDF page.
         or type(meta.get("page_no")) is not int
