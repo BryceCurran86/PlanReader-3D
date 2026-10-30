@@ -756,3 +756,59 @@ def test_zero_span_corner_leg_retains_abstention_but_cannot_forge_axis(authority
         replace(zero, leg_span_pt=1.0)
     assert record.total_girth_m is None
     assert record.shadow_only and not record.takeoff_eligible
+
+
+@pytest.mark.parametrize("jamb_a,jamb_b", [
+    ((200.0, 380.0), (260.0, 300.0)),
+    ((60.0, 80.0), (-80.0, 60.0)),
+])
+def test_public_corner_angle_must_match_frozen_owned_axes(
+    authority, jamb_a, jamb_b,
+):
+    """Finite 0..180 degrees is not proof of the actual owned leg angle."""
+    from dataclasses import replace
+
+    vertex = (200.0, 300.0) if jamb_a[0] == 200.0 else (0.0, 0.0)
+    kw = dict(jamb_a=jamb_a, jamb_b=jamb_b, corner_vertex=vertex,
+              host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+              post_dimension_pt=0.0, scale_ratio=0.01764)
+    original = dict(kw)
+    candidate = authority.evaluate_corner_aperture(**kw)
+    abstained = authority.evaluate_corner_aperture(
+        **(kw | {"scale_ratio": None}))
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert abstained.status is EvidenceResolutionStatus.ABSTAINED
+    for record in (candidate, abstained):
+        assert replace(record) == record
+        assert record.corner_angle_deg == pytest.approx(90.0)
+        for forged_angle in (0.0, 75.0, 80.0, 105.0, 180.0):
+            with pytest.raises(ValueError, match="leg angle"):
+                replace(record, corner_angle_deg=forged_angle)
+        assert record.shadow_only and not record.takeoff_eligible
+        assert not record.commercial_projection_allowed
+    swapped = authority.evaluate_corner_aperture(**(
+        kw | dict(jamb_a=kw["jamb_b"], jamb_b=kw["jamb_a"],
+                  host_wall_a_id=kw["host_wall_b_id"],
+                  host_wall_b_id=kw["host_wall_a_id"])
+    ))
+    assert swapped == candidate
+    assert kw == original
+    assert authority.evaluate_corner_aperture(**kw) == candidate
+
+
+def test_public_corner_zero_leg_abstention_keeps_producer_angle(authority):
+    from dataclasses import replace
+
+    kw = dict(jamb_a=(200.0, 300.0), jamb_b=(260.0, 300.0),
+              corner_vertex=(200.0, 300.0),
+              host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+              post_dimension_pt=0.0, scale_ratio=0.01764)
+    record = authority.evaluate_corner_aperture(**kw)
+    assert record.classification is CornerApertureClassification.ABSTAINED_DEGENERATE_LEG
+    assert record.corner_angle_deg == pytest.approx(90.0)
+    assert replace(record) == record
+    with pytest.raises(ValueError, match="leg angle"):
+        replace(record, corner_angle_deg=80.0)
+    assert record.total_girth_m is None
+    assert record.shadow_only and not record.commercial_projection_allowed
+    assert authority.evaluate_corner_aperture(**kw) == record
