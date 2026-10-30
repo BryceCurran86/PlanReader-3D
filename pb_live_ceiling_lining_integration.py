@@ -54,6 +54,9 @@ LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT = (
     "live_ceiling_canonical_identity_conflict"
 )
 LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT = "live_ceiling_quantity_identity_conflict"
+LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE = (
+    "live_ceiling_lining_metric_aggregate_nonfinite"
+)
 
 
 @dataclass(frozen=True)
@@ -695,6 +698,7 @@ def collect_live_ceiling_lining_claims(
 
         claims: list[LiveCeilingLiningClaim] = []
         multi_viewport_blocked = False
+        metric_aggregate_nonfinite = False
         for descriptor in sorted(by_descriptor):
             rows = by_descriptor[descriptor]
             viewport_keys = {(row[0], row[1]) for row in rows}
@@ -709,7 +713,13 @@ def collect_live_ceiling_lining_claims(
             if len(tag_values) != 1 or len(scale_ids) != 1:
                 continue
 
+            # Every row is source-validated finite m², but their sum can
+            # overflow to infinity. Keep the existing finite summation/IDs
+            # byte-for-byte; never issue a nonphysical aggregate quantity.
             quantity_m2 = sum(row[3] for row in rows)
+            if not math.isfinite(quantity_m2) or quantity_m2 <= 0.0:
+                metric_aggregate_nonfinite = True
+                continue
             room_quantity_ids = tuple(
                 sorted({qid for row in rows for qid in row[4]})
             )
@@ -812,6 +822,8 @@ def collect_live_ceiling_lining_claims(
                 reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
             if conflicting_ceiling_quantity_ids:
                 reasons.append(LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT)
+            if metric_aggregate_nonfinite:
+                reasons.append(LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE)
             return LiveCeilingLiningResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=tuple(reasons),
@@ -829,6 +841,8 @@ def collect_live_ceiling_lining_claims(
             reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
         if conflicting_ceiling_quantity_ids:
             reasons.append(LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT)
+        if metric_aggregate_nonfinite:
+            reasons.append(LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE)
         return LiveCeilingLiningResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=tuple(reasons),
@@ -843,6 +857,7 @@ def collect_live_ceiling_lining_claims(
 __all__ = [
     "LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT",
     "LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT",
+    "LIVE_CEILING_LINING_METRIC_AGGREGATE_NONFINITE",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
