@@ -823,6 +823,10 @@ def collect_live_ceiling_lining_claims(
         ] = {}
         conflicting_ceiling_quantity_ids: set[str] = set()
         upstream_room_areas = tuple(authoritative_room_area_quantities or ())
+        # An F.07 page/viewport pair names one original source region.
+        # Repeated source identities are not independent physical ceilings,
+        # even when their returned bounding boxes or room IDs differ.
+        seen_source_viewport_keys: set[tuple[int, str]] = set()
 
         for page_index in topology_selected:
             page_no = page_index + 1
@@ -851,6 +855,20 @@ def collect_live_ceiling_lining_claims(
                         ),
                         claims=(),
                     )
+                source_viewport_key = (page_no, viewport_id)
+                if source_viewport_key in seen_source_viewport_keys:
+                    # A duplicate source region revokes all earlier siblings.
+                    # Neither the first nor last duplicate can be selected as
+                    # the uniquely authenticated original physical viewport.
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
+                seen_source_viewport_keys.add(source_viewport_key)
                 viewport = ViewportEvidence(
                     viewport_id=viewport_id,
                     document_id=published.revision.document_id,
