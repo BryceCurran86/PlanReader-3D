@@ -2742,3 +2742,124 @@ def test_interval_heavy_null_and_registration_abstain_before_partial_score(monke
     with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
         shadow.null_support(src, dst, trials=60, span=(0.0, 0.0))
     assert (src, dst) == before
+
+
+# ==============================================================================
+# Cumulative source-side diagnostic work budget (not commercial authority)
+# ==============================================================================
+
+def test_source_side_evidence_budget_counts_native_keys_and_intervals(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as cross
+
+    lines = build_lines(room(100.0, 100.0, 300.0, 300.0))
+    box = (100.0, 100.0, 300.0, 300.0)
+    original = side_evidence(box, lines)
+    budget = [0]
+    monkeypatch.setattr(cross, "MAX_SOURCE_SIDE_EVIDENCE_VISITS", 1)
+    with pytest.raises(ValueError, match=cross.SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED):
+        side_evidence(box, lines, _visit_budget=budget)
+    assert budget[0] > 1
+
+    monkeypatch.setattr(cross, "MAX_SOURCE_SIDE_EVIDENCE_VISITS", 100000)
+    budget = [0]
+    assert side_evidence(box, lines, _visit_budget=budget) == original
+    assert budget[0] > 0
+
+
+def test_source_side_evidence_budget_is_cumulative_across_boxes_and_sheets(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as cross
+
+    sup = build_lines(support_sheet())
+    tgt = build_lines(TARGET_SHEET)
+    box = (251.04, 1382.72, 394.80, 1585.04)
+    arguments = dict(
+        lines_support=sup,
+        lines_target=tgt,
+        orientation="identity",
+        translation=TRUE_T,
+        _support_index=LineIndex(sup),
+        _target_index=LineIndex(tgt),
+    )
+    one_box_visits = [0]
+    original = box_correspondence(box, **arguments)
+    assert box_correspondence(box, _visit_budget=one_box_visits, **arguments) == original
+    assert one_box_visits[0] > 0
+
+    # One complete box fits, but the second box must not silently exceed
+    # the shared budget. Both sheets are charged to the same counter.
+    monkeypatch.setattr(cross, "MAX_SOURCE_SIDE_EVIDENCE_VISITS", one_box_visits[0] + 1)
+    shared = [0]
+    assert box_correspondence(box, _visit_budget=shared, **arguments) == original
+    with pytest.raises(ValueError, match=cross.SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED):
+        box_correspondence(box, _visit_budget=shared, **arguments)
+    assert shared[0] > one_box_visits[0] + 1
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_source_side_budget_exhaustion_abstains_without_partial_records_and_keeps_negatives(
+    monkeypatch, reverse,
+):
+    import pb_source_cross_view_floor_correspondence_shadow as cross
+
+    monkeypatch.setattr(cross, "MAX_SOURCE_SIDE_EVIDENCE_VISITS", 1)
+    support = support_sheet()
+    target = TARGET_SHEET
+    if reverse:
+        support = list(reversed(support))
+        target = list(reversed(target))
+    boxes = [
+        {
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "invalid trailing space ",
+            "physical_room_id": "room-office",
+            "source_room_face_record_id": "face-office",
+        },
+        {"dimension_box_pdf_pts": (1.0, 2.0, 3.0)},
+    ]
+    marks = [
+        {"x": 327.8, "y": 1437.5, "code": "FT3", "registered_region": True},
+        {"x": 327.9, "y": 1437.6, "code": None, "registered_region": True},
+    ]
+    before = copy.deepcopy((support, target, boxes, marks))
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support,
+        target_segments=target,
+        measured_boxes=boxes,
+        marks=marks,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.reason_codes == (
+        cross.SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED,
+        SOURCE_FINISH_MARK_IDENTITY_INVALID,
+        SOURCE_MEASURED_FLOOR_BOX_INVALID,
+        SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID,
+    )
+    assert (support, target, boxes, marks) == before
+
+
+def test_source_side_budget_normal_positive_retains_candidate_and_commercial_isolation(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as cross
+
+    monkeypatch.setattr(cross, "MAX_SOURCE_SIDE_EVIDENCE_VISITS", 100000)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "canonical-floor-office",
+            "physical_room_id": "physical-room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[{
+            "x": 327.8, "y": 1437.5, "code": "FT3",
+            "registered_region": True,
+        }],
+    )
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.records) == 1
+    assert result.records[0].commercial_projection_allowed is False
+    assert result.records[0].takeoff_eligible is False
+    assert result.records[0].authority_blockers == STANDING_AUTHORITY_BLOCKERS
