@@ -648,10 +648,10 @@ def test_office_caps_original_replay_pin_is_immutable_and_source_free():
     assert "secrets." not in public
 
 def test_manual_replay_selects_only_static_reviewed_targets():
-    """A selected original-positive replay must not run eight unrelated targets."""
+    """A selected original-positive replay must run only its reviewed target."""
     document = _load()
     assert document["on"]["workflow_dispatch"]["inputs"]["target"]["options"] == [
-        "all", "finish_page", "office_caps",
+        "all", "a600", "grid", "rcp_ink", "finish_page", "office_caps",
     ]
     job = document["jobs"]["original"]
     matrix = job["strategy"]["matrix"]
