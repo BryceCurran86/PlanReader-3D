@@ -156,6 +156,47 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
         return False
     if point(gap[0]) != chain[-1] or point(gap[1]) != chain[0]:
         return False
+    # The connector is VIRTUAL, so the original native-stroke intersection
+    # census cannot prove that it avoids the other room walls. A crossing,
+    # nonadjacent touch, or overlap would close a self-intersecting room ring.
+    # This is only a veto: an unblocked connector still has no W4, jamb,
+    # physical-room, finish or measurement authority.
+    connector_a, connector_b = chain[-1], chain[0]
+
+    def orient(a, b, c):
+        return ((b[0] - a[0]) * (c[1] - a[1])
+                - (b[1] - a[1]) * (c[0] - a[0]))
+
+    def on_segment(a, b, c):
+        return (min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+                and min(a[1], b[1]) <= c[1] <= max(a[1], b[1]))
+
+    def intersects(a, b, c, d):
+        ab_c, ab_d = orient(a, b, c), orient(a, b, d)
+        cd_a, cd_b = orient(c, d, a), orient(c, d, b)
+        return (ab_c == 0 and on_segment(a, b, c)
+                or ab_d == 0 and on_segment(a, b, d)
+                or cd_a == 0 and on_segment(c, d, a)
+                or cd_b == 0 and on_segment(c, d, b)
+                or ab_c * ab_d < 0 and cd_a * cd_b < 0)
+
+    for index, (a, b) in enumerate(zip(chain, chain[1:])):
+        if index in (0, len(chain) - 2):
+            # The first and last native strokes are permitted to meet the
+            # virtual connector at their own single doorway endpoint only.
+            # Collinear same-ray segments instead share a nonzero span.
+            shared = connector_b if index == 0 else connector_a
+            other_connector = connector_a if index == 0 else connector_b
+            other_native = b if index == 0 else a
+            if orient(shared, other_connector, other_native) == 0 and (
+                (other_connector[0] - shared[0])
+                * (other_native[0] - shared[0])
+                + (other_connector[1] - shared[1])
+                * (other_native[1] - shared[1])
+            ) > 0:
+                return False
+        elif intersects(connector_a, connector_b, a, b):
+            return False
     # Reissued endpoint degrees are evidence only when they account for
     # EVERY native vertex and the exact source IDs incident on that vertex.
     # Two reported open endpoints alone could hide a missing interior node,
