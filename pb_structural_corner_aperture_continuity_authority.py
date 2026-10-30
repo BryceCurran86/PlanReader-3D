@@ -61,6 +61,22 @@ class CornerOpeningLegRecord:
     leg_span_m: float | None
     host_wall_id: str
 
+    def __post_init__(self) -> None:
+        # Public frozen records can be directly constructed or replaced.
+        # Keep their numeric shadow evidence physical before serialization.
+        for point in (self.terminal_jamb, self.corner_vertex, self.axis_vector):
+            if (type(point) is not tuple or len(point) != 2
+                    or any(not _finite_real(v) for v in point)):
+                raise ValueError("corner leg numeric evidence must be finite and physical")
+        if (any(not _finite_source_coordinate(v) for v in
+                (*self.terminal_jamb, *self.corner_vertex))
+                or any(abs(v) > 1.0 for v in self.axis_vector)
+                or not _finite_real(self.leg_span_pt)
+                or self.leg_span_pt < 0
+                or (self.leg_span_m is not None and
+                    (not _finite_real(self.leg_span_m) or self.leg_span_m <= 0))):
+            raise ValueError("corner leg numeric evidence must be finite and physical")
+
     def to_dict(self) -> Mapping[str, Any]:
         # Native shadow evidence must retain the coordinates used by contract_id.
         # Display rounding here would alias distinct source hypotheses.
@@ -134,6 +150,38 @@ class StructuralCornerApertureRecord:
                      and self.leg_b.leg_span_m is None)
         if not valid:
             raise ValueError("source-neutral corner classification and source gate conflict")
+        if (type(self.leg_a) is not CornerOpeningLegRecord
+                or type(self.leg_b) is not CornerOpeningLegRecord
+                or type(self.corner_vertex) is not tuple
+                or len(self.corner_vertex) != 2
+                or any(not _finite_source_coordinate(v) for v in self.corner_vertex)
+                or self.leg_a.corner_vertex != self.corner_vertex
+                or self.leg_b.corner_vertex != self.corner_vertex
+                or not _finite_real(self.corner_angle_deg)
+                or not 0 <= self.corner_angle_deg <= 180
+                or not _finite_real(self.total_girth_pt)
+                or self.total_girth_pt < 0
+                or not _finite_real(self.diagonal_chord_pt)
+                or self.diagonal_chord_pt < 0
+                or (self.post_dimension_pt is not None and
+                    (not _finite_real(self.post_dimension_pt)
+                     or self.post_dimension_pt < 0))
+                or (self.total_girth_m is not None and
+                    (not _finite_real(self.total_girth_m)
+                     or self.total_girth_m <= 0))):
+            raise ValueError("corner record numeric evidence must be finite and physical")
+        expected_girth = self.leg_a.leg_span_pt + self.leg_b.leg_span_pt
+        expected_chord = math.hypot(
+            self.leg_a.terminal_jamb[0] - self.leg_b.terminal_jamb[0],
+            self.leg_a.terminal_jamb[1] - self.leg_b.terminal_jamb[1],
+        )
+        if (not math.isfinite(expected_girth)
+                or not math.isfinite(expected_chord)
+                or not math.isclose(self.total_girth_pt, expected_girth,
+                                    rel_tol=1e-12, abs_tol=1e-9)
+                or not math.isclose(self.diagonal_chord_pt, expected_chord,
+                                    rel_tol=1e-12, abs_tol=1e-9)):
+            raise ValueError("corner record numeric evidence conflicts with leg geometry")
 
     def to_dict(self) -> Mapping[str, Any]:
         return {

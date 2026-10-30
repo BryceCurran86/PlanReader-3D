@@ -647,3 +647,52 @@ def test_public_corner_record_replacement_cannot_mint_post_or_commercial_authori
         assert record.takeoff_eligible is False
         assert record.commercial_projection_allowed is False
     assert authority.evaluate_corner_aperture(**common, scale_ratio=0.01764) == candidate
+
+
+def test_public_corner_numeric_record_replacements_fail_closed(authority):
+    from dataclasses import replace
+
+    kw = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+    )
+    candidate = authority.evaluate_corner_aperture(**kw)
+    abstained = authority.evaluate_corner_aperture(**(kw | {"scale_ratio": None}))
+    for record in (candidate, abstained):
+        assert replace(record) == record
+        for field in ("corner_angle_deg", "total_girth_pt", "diagonal_chord_pt"):
+            for bad in (float("nan"), float("inf"), -1.0):
+                with pytest.raises(ValueError, match="numeric evidence"):
+                    replace(record, **{field: bad})
+        for bad in (float("nan"), float("inf"), -1.0):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(record, post_dimension_pt=bad)
+        for bad in (float("nan"), float("inf"), float(2**53) + 2.0):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(record, corner_vertex=(bad, 300.0))
+        for field in ("leg_a", "leg_b"):
+            leg = getattr(record, field)
+            for bad in (float("nan"), float("inf"), -1.0):
+                with pytest.raises(ValueError, match="numeric evidence"):
+                    replace(leg, leg_span_pt=bad)
+            for bad in (float("nan"), float("inf"), 0.0, -1.0):
+                with pytest.raises(ValueError, match="numeric evidence"):
+                    replace(leg, leg_span_m=bad)
+            for bad in (float("nan"), float("inf"), float(2**53) + 2.0):
+                with pytest.raises(ValueError, match="numeric evidence"):
+                    replace(leg, terminal_jamb=(bad, 300.0))
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(leg, axis_vector=(2.0, 0.0))
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(record, total_girth_pt=record.total_girth_pt + 100.0)
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(record, diagonal_chord_pt=record.diagonal_chord_pt + 100.0)
+    for bad in (float("nan"), float("inf"), 0.0, -1.0):
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(candidate, total_girth_m=bad)
+    assert abstained.total_girth_m is None
+    assert candidate.shadow_only and not candidate.takeoff_eligible
+    assert abstained.shadow_only and not abstained.commercial_projection_allowed
+    assert authority.evaluate_corner_aperture(**kw) == candidate
