@@ -1230,3 +1230,152 @@ def test_invalid_original_room_polygon_abstains_through_real_ceiling_issuer(
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-invalid-source-ring",
     ) == ()
+
+
+@pytest.mark.parametrize(
+    "bad_axes",
+    [
+        ("axis-length ", "axis-width"),
+        ("axis-length", " axis-width"),
+        ("axis-length", ""),
+        ("axis-length", "   "),
+        ("axis-length", b"axis-width"),
+        ("axis-length", 123),
+        ("axis-length", None),
+        ("axis-length", object()),
+    ],
+)
+def test_documented_ceiling_axes_must_keep_exact_source_receipt_ids(bad_axes):
+    """A FIRM documented area cannot repair malformed source axis identities."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    area = source.room_area_quantities[0]
+    area.metadata["figured_dimension_ids"] = bad_axes
+    original_area_metadata = dict(area.metadata)
+    original_quantity_metadata = dict(quantity.metadata)
+    for _ in range(2):
+        assert ceiling._claim_from_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+        assert ceiling.canonical_ceiling_from_shadow_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+    assert area.metadata == original_area_metadata
+    assert quantity.metadata == original_quantity_metadata
+
+
+def test_exact_documented_ceiling_axes_preserve_valid_repeat_and_order():
+    """Identical exact repeats do not fabricate a third figured axis."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    area = source.room_area_quantities[0]
+    area.metadata["figured_dimension_ids"] = (
+        "axis-width", "axis-length", "axis-width",
+    )
+    before = dict(area.metadata)
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first is not None
+    assert first == second
+    assert first[-1] == ("axis-length", "axis-width")
+    assert area.metadata == before
+
+
+@pytest.mark.parametrize(
+    "axis_ids",
+    [
+        ("axis-length", "axis-width"),
+        ("axis-length ", "axis-width"),
+        ("axis-length", " axis-width"),
+        ("axis-length", ""),
+    ],
+)
+def test_generated_pdf_documented_axis_receipts_gate_real_ceiling_customer(
+    tmp_path, monkeypatch, axis_ids
+):
+    """The genuine PDF producer remains intact; only its FIRM axis receipt is varied.
+
+    This is a generated-PDF regression, not a SHA-authenticated original source
+    run and not evidence of a new FIRM or commercial quantity.
+    """
+    from dataclasses import replace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf_bytes = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    authentic_results = []
+
+    def substitute_only_documented_axis_receipt(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        authentic_results.append(result)
+        eligible = tuple(
+            q for q in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=q, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        original_quantity = eligible[0]
+        area_id = original_quantity.metadata["upstream_area_quantity_id"]
+        original_area = next(
+            a for a in result.room_area_quantities if a.quantity_id == area_id
+        )
+        documented = replace(
+            original_area,
+            authority=ceiling.MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            metadata={
+                **original_area.metadata,
+                "figured_dimension_ids": axis_ids,
+            },
+        )
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                authoritative_area_quantities=(documented,),
+            ),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        substitute_only_documented_axis_receipt,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(authentic_results) == 2
+    assert authentic_results[0] == authentic_results[1]
+    assert path.read_bytes() == original_pdf_bytes
+
+    if axis_ids == ("axis-length", "axis-width"):
+        assert len(first.claims) == 1
+        assert len(first.canonical_ceilings) == 1
+        assert first.canonical_ceilings[0].figured_dimension_ids == axis_ids
+        assert len(publish_live_ceiling_area_quantities(first)) == 1
+    else:
+        assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+        assert first.claims == ()
+        assert first.canonical_ceilings == ()
+        assert first.quantity_evidence == ()
+        assert publish_live_ceiling_area_quantities(first) == ()
+        assert project_live_ceiling_area_customer_rows(
+            first, workspace_id=1, project_id="generated-invalid-axes",
+        ) == ()
