@@ -565,3 +565,52 @@ def test_spandrel_identity_rejects_string_subclass(authority):
         authority.evaluate_spandrel_sub_sill(**(
             kw | {"host_through_wall_id": Impostor("HOST_A")}
         ))
+
+
+def test_public_spandrel_record_replacement_cannot_mint_source_or_commercial_authority(
+    authority: StructuralSpandrelSubSillContinuityAuthority,
+) -> None:
+    from dataclasses import replace
+
+    common = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="WALL_SHADOW",
+    )
+    candidate = authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764)
+    abstained = authority.evaluate_spandrel_sub_sill(**common)
+    assert candidate.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert abstained.classification is SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE
+    assert abstained.status is EvidenceResolutionStatus.ABSTAINED
+    assert replace(candidate) == candidate
+    assert replace(abstained) == abstained
+    for changes in (
+        {"classification": SpandrelSubSillClassification.SPANDREL_SUB_SILL_CONFIRMED},
+        {"status": EvidenceResolutionStatus.CORROBORATED},
+        {"commercial_projection_allowed": True},
+        {"takeoff_eligible": True},
+        {"shadow_only": False},
+    ):
+        with pytest.raises(ValueError, match="source-neutral spandrel"):
+            replace(candidate, **changes)
+    for changes in (
+        {"first_remaining_gate": "none"},
+        {"first_remaining_gate": "caller_source_verified"},
+        {"status": EvidenceResolutionStatus.ABSTAINED},
+    ):
+        with pytest.raises(ValueError, match="classification and source gate conflict"):
+            replace(candidate, **changes)
+    for changes in (
+        {"status": EvidenceResolutionStatus.CANDIDATE},
+        {"first_remaining_gate": "none"},
+        {"clear_span_m": 1.764},
+        {"spandrel_wall_area_sqm": 1.5876},
+    ):
+        with pytest.raises(ValueError, match="classification and source gate conflict"):
+            replace(abstained, **changes)
+    for record in (candidate, abstained):
+        assert record.shadow_only is True
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+    assert authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764) == candidate

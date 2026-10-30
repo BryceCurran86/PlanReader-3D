@@ -88,6 +88,43 @@ class SpandrelSubSillRecord:
     takeoff_eligible: bool = False
     shadow_only: bool = True
 
+    def __post_init__(self) -> None:
+        # Source-free record authority must survive direct construction and
+        # dataclasses.replace, not depend solely on the producer's call site.
+        abstained_gates = {
+            SpandrelSubSillClassification.ABSTAINED_UNVERIFIED_SCALE:
+                "original_source_scale_authority_unverified",
+            SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS:
+                "vertical_levels_inverted_or_negative",
+            SpandrelSubSillClassification.ABSTAINED_DEGENERATE_SPAN:
+                "clear_span_out_of_bounds",
+        }
+        if (type(self.classification) is not SpandrelSubSillClassification
+                or type(self.status) is not EvidenceResolutionStatus
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral spandrel cannot grant commercial authority")
+        if self.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE:
+            valid = (self.status is EvidenceResolutionStatus.CANDIDATE
+                     and self.first_remaining_gate
+                     == "original_source_spandrel_host_scale_levels_unverified")
+        else:
+            valid = (self.classification in abstained_gates
+                     and self.status is EvidenceResolutionStatus.ABSTAINED
+                     and self.first_remaining_gate == abstained_gates.get(self.classification)
+                     and all(value is None for value in (
+                         self.clear_span_m, self.glazing_height_mm,
+                         self.glazing_aperture_area_sqm,
+                         self.spandrel_wall_area_sqm,
+                         self.total_wall_opening_area_sqm,
+                     )))
+        if not valid:
+            raise ValueError("source-neutral spandrel classification and source gate conflict")
+
     def to_dict(self) -> Mapping[str, Any]:
         # Retain full native/candidate evidence precision. The stable ID binds
         # these exact values; rounding would alias distinct shadow hypotheses.
