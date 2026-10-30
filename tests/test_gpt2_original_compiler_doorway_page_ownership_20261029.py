@@ -581,3 +581,110 @@ def test_native_graph_verifier_keeps_complete_original_root_positive_and_no_quan
     assert repr(graph) == graph_before
     assert "new_firm_quantities" not in graph
     assert "customer_floor_finish_area_issued" not in graph
+
+
+def _native_chain_receipts_for_virtual_connector(points, *, reverse_rows=False):
+    """Source-neutral open native chain, with an independently stated census."""
+    ids = tuple(f"d{i}i0" for i in range(len(points) - 1))
+    ring = _ring()
+    ring["original_source_perimeter_side_ids"] = ids
+    ring["source_ink_ring_with_explicit_virtual_door_gap_pdf_pts"] = points
+    ring["source_virtual_door_connector_pdf_pts"] = (points[-1], points[0])
+    ring["source_only_native_polygon_area_pdf_pt2_not_m2"] = abs(sum(
+        a[0] * b[1] - b[0] * a[1]
+        for a, b in zip(points, points[1:] + points[:1])
+    )) / 2.0
+    edges = tuple(
+        {"source_id": ids[i], "endpoints_pdf_pts": (points[i], points[i + 1])}
+        for i in range(len(ids))
+    )
+    degrees = tuple(
+        {"point_pdf_pt": p,
+         "degree": 1 if i in (0, len(points) - 1) else 2,
+         "original_source_edge_ids": (
+             (ids[0],) if i == 0 else
+             (ids[-1],) if i == len(points) - 1 else
+             (ids[i - 1], ids[i])
+         )}
+        for i, p in enumerate(points)
+    )
+    graph = _graph()
+    graph["original_native_edge_ids"] = ids
+    graph["original_native_edges"] = edges[::-1] if reverse_rows else edges
+    graph["native_components"] = ({
+        "source_simple_ring_candidate": None,
+        "native_endpoint_degrees": degrees[::-1] if reverse_rows else degrees,
+    },)
+    graph["interior_stroke_intersections_and_overlaps"] = ()
+    return ring, graph
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("translation", [(0, 0), (400, -700)])
+@pytest.mark.parametrize("reverse_rows", [False, True])
+def test_virtual_door_connector_crossing_native_walls_abstains_without_mutation(
+    reverse, translation, reverse_rows,
+):
+    from copy import deepcopy
+
+    # Every native edge forms a simple open orthogonal chain; the native
+    # intersection census is empty and the virtual shoelace area is positive.
+    # But closing last->first crosses THREE nonadjacent native wall strokes.
+    points = (
+        (0, 0), (0, -9), (12, -9), (12, -21),
+        (4, -21), (4, -28), (6, -28), (6, -36),
+    )
+    if reverse:
+        points = points[::-1]
+    points = tuple((x + translation[0], y + translation[1]) for x, y in points)
+    ring, graph = _native_chain_receipts_for_virtual_connector(
+        points, reverse_rows=reverse_rows,
+    )
+    before = deepcopy((ring, graph))
+    assert ring["source_only_native_polygon_area_pdf_pt2_not_m2"] > 0
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph,
+    )
+    assert (ring, graph) == before
+    assert "new_firm_quantities" not in ring
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("translation", [(0, 0), (400, -700)])
+@pytest.mark.parametrize("reverse_rows", [False, True])
+def test_virtual_door_connector_preserves_uncrossed_native_chain_candidate(
+    reverse, translation, reverse_rows,
+):
+    from copy import deepcopy
+
+    # A split, genuine open wall chain has a single virtual doorway gap;
+    # this negative-only guard must not reject its source-geometry candidate.
+    points = ((0, 0), (0, 100), (50, 100), (100, 100), (100, 0))
+    if reverse:
+        points = points[::-1]
+    points = tuple((x + translation[0], y + translation[1]) for x, y in points)
+    ring, graph = _native_chain_receipts_for_virtual_connector(
+        points, reverse_rows=reverse_rows,
+    )
+    before = deepcopy((ring, graph))
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph,
+    )
+    assert (ring, graph) == before
+    assert "new_firm_quantities" not in ring
+
+
+def test_virtual_connector_collinear_overlap_is_not_only_an_endpoint_touch():
+    from copy import deepcopy
+
+    # The last endpoint lies on the first native edge. Even a forged empty
+    # native-only crossing census cannot make the overlapping virtual closure
+    # an authenticated simple room perimeter.
+    points = ((0, 0), (10, 0), (10, 10), (0, 10), (0, 5), (5, 0))
+    ring, graph = _native_chain_receipts_for_virtual_connector(points)
+    before = deepcopy((ring, graph))
+    assert ring["source_only_native_polygon_area_pdf_pt2_not_m2"] > 0
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph,
+    )
+    assert (ring, graph) == before
