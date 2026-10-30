@@ -212,6 +212,13 @@ class ThroughWallHostedOpeningRecord:
     status: EvidenceResolutionStatus
     first_remaining_gate: str
     snap_tolerance_pt: float
+    # Complete source and wall-geometry identity receipt. These fields are
+    # immutable evidence, not original-source authority or a scale assertion.
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    host_start_pt: tuple[float, float]
+    host_end_pt: tuple[float, float]
     adjacent_pier_ids: tuple[str, ...] = ()
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
@@ -327,6 +334,47 @@ class ThroughWallHostedOpeningRecord:
                     or any(not _native_source_identity(v) for v in ids)
                     or len(set(ids)) != len(ids)):
                 raise ValueError("host evidence references must be bounded and distinct")
+        if any(not _native_source_identity(value) for value in (
+                self.document_id, self.revision_id, self.source_sha256)):
+            raise ValueError("host source identity receipt must be exact")
+        if not _finite_point(self.host_start_pt) or not _finite_point(self.host_end_pt):
+            raise ValueError("host numeric evidence requires exact wall endpoints")
+        # The producer's source-bound ID includes the ORIGINAL wall endpoints,
+        # not merely a projected opening interval. Reconstruct their frame
+        # independently before checking that exact ID, including snap and
+        # the complete adjacent-pier universe. A jointly changed valid snap
+        # and moved jamb may still be a geometric candidate, but it must not
+        # reuse the original immutable identity.
+        wall_dx = self.host_end_pt[0] - self.host_start_pt[0]
+        wall_dy = self.host_end_pt[1] - self.host_start_pt[1]
+        wall_length = math.hypot(wall_dx, wall_dy)
+        if (not math.isfinite(wall_length) or wall_length <= _COORD_TOL
+                or self.host_start_pt != self.origin_pt
+                or wall_length != self.whole_wall_length_pt
+                or self.axis_unit != (wall_dx / wall_length, wall_dy / wall_length)):
+            raise ValueError("host numeric evidence conflicts with owned wall frame")
+        identity_payload = {
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "physical_opening_id": self.physical_opening_id,
+            "host_wall_id": self.host_wall_id,
+            "opening_start_pt": tuple(float(v).hex() for v in self.opening_start_pt),
+            "opening_end_pt": tuple(float(v).hex() for v in self.opening_end_pt),
+            "terminal_jamb_observation_ids": self.terminal_jamb_observation_ids,
+            "host_start_pt": tuple(float(v).hex() for v in self.host_start_pt),
+            "host_end_pt": tuple(float(v).hex() for v in self.host_end_pt),
+            "host_thickness_pt": float(self.wall_thickness_pt).hex(),
+            "snap_tolerance_pt": float(self.snap_tolerance_pt).hex(),
+            "u0_pt": float(self.u0_pt).hex(),
+            "u1_pt": float(self.u1_pt).hex(),
+            "status": self.status.value,
+            "first_remaining_gate": self.first_remaining_gate,
+            "adjacent_pier_ids": tuple(sorted(self.adjacent_pier_ids)),
+        }
+        if self.hosting_record_id != stable_contract_id(
+                "through_wall_hosted_opening", identity_payload, digest_chars=32):
+            raise ValueError("host stable identity conflicts with source or geometry receipt")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -964,6 +1012,11 @@ class StructuralThroughWallApertureHostAuthority:
             whole_wall_length_pt=through_wall.length_pt,
             wall_thickness_pt=through_wall.thickness_pt,
             snap_tolerance_pt=snap_tolerance_pt,
+            document_id=self._producer.document_id,
+            revision_id=self._producer.revision_id,
+            source_sha256=self._producer.source_sha256,
+            host_start_pt=through_wall.start_pt,
+            host_end_pt=through_wall.end_pt,
             axis_unit=through_wall.axis_unit,
             normal_unit=through_wall.normal_unit,
             origin_pt=through_wall.origin_pt,
