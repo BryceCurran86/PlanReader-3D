@@ -124,6 +124,56 @@ class SpandrelSubSillRecord:
                      )))
         if not valid:
             raise ValueError("source-neutral spandrel classification and source gate conflict")
+        # Frozen shadow records are public dataclasses: direct construction and
+        # dataclasses.replace must not serialize nonfinite/impossible evidence.
+        def finite_real(value: object) -> bool:
+            if type(value) not in (int, float):
+                return False
+            try:
+                return math.isfinite(float(value))
+            except (OverflowError, ValueError):
+                return False
+
+        for point in (self.jamb_left, self.jamb_right):
+            if (type(point) is not tuple or len(point) != 2
+                    or any(not finite_real(v) or abs(v) > 2**53 for v in point)):
+                raise ValueError("spandrel numeric evidence must be finite and physical")
+        if (not finite_real(self.clear_span_pt) or self.clear_span_pt < 0
+                or not finite_real(self.sill_height_mm)
+                or not finite_real(self.head_height_mm)
+                or any(value is not None and
+                       (not finite_real(value) or value <= 0)
+                       for value in (
+                           self.clear_span_m, self.glazing_height_mm,
+                           self.glazing_aperture_area_sqm,
+                           self.spandrel_wall_area_sqm,
+                           self.total_wall_opening_area_sqm,
+                       ))):
+            raise ValueError("spandrel numeric evidence must be finite and physical")
+        expected_span = math.hypot(
+            self.jamb_right[0] - self.jamb_left[0],
+            self.jamb_right[1] - self.jamb_left[1],
+        )
+        if (not math.isfinite(expected_span)
+                or not math.isclose(self.clear_span_pt, expected_span,
+                                    rel_tol=1e-12, abs_tol=1e-9)):
+            raise ValueError("spandrel numeric evidence conflicts with jamb geometry")
+        if self.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE:
+            if (self.sill_height_mm <= 0
+                    or self.head_height_mm <= self.sill_height_mm
+                    or any(value is None for value in (
+                        self.clear_span_m, self.glazing_height_mm,
+                        self.glazing_aperture_area_sqm,
+                        self.spandrel_wall_area_sqm,
+                        self.total_wall_opening_area_sqm,
+                    ))
+                    or not math.isclose(self.glazing_height_mm,
+                                        self.head_height_mm - self.sill_height_mm,
+                                        rel_tol=1e-12, abs_tol=1e-9)
+                    or not math.isclose(self.glazing_aperture_area_sqm,
+                                        self.total_wall_opening_area_sqm,
+                                        rel_tol=1e-12, abs_tol=1e-12)):
+                raise ValueError("spandrel numeric evidence conflicts with candidate geometry")
 
     def to_dict(self) -> Mapping[str, Any]:
         # Retain full native/candidate evidence precision. The stable ID binds

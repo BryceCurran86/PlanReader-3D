@@ -614,3 +614,48 @@ def test_public_spandrel_record_replacement_cannot_mint_source_or_commercial_aut
         assert record.takeoff_eligible is False
         assert record.commercial_projection_allowed is False
     assert authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764) == candidate
+
+
+def test_spandrel_public_numeric_replacement_rejected_without_changing_abstention(authority):
+    from dataclasses import replace
+
+    common = dict(
+        jamb_a=(100.0, 200.0), jamb_b=(200.0, 200.0),
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="WALL_SHADOW",
+    )
+    candidate = authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764)
+    abstained = authority.evaluate_spandrel_sub_sill(**common)
+    for record in (candidate, abstained):
+        assert replace(record) == record
+        for field in ("clear_span_pt", "sill_height_mm", "head_height_mm"):
+            for bad in (float("nan"), float("inf")):
+                with pytest.raises(ValueError, match="numeric evidence"):
+                    replace(record, **{field: bad})
+        for bad in (float("nan"), float("inf"), float(2**53) + 2.0):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(record, jamb_left=(bad, 200.0))
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(record, clear_span_pt=record.clear_span_pt + 100.0)
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(record, clear_span_pt=-1.0)
+    for field in (
+        "clear_span_m", "glazing_height_mm", "glazing_aperture_area_sqm",
+        "spandrel_wall_area_sqm", "total_wall_opening_area_sqm",
+    ):
+        for bad in (float("nan"), float("inf"), 0.0, -1.0):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(candidate, **{field: bad})
+    with pytest.raises(ValueError, match="numeric evidence"):
+        replace(candidate, sill_height_mm=0.0)
+    with pytest.raises(ValueError, match="numeric evidence"):
+        replace(candidate, glazing_height_mm=candidate.glazing_height_mm + 10.0)
+    invalid = authority.evaluate_spandrel_sub_sill(
+        **(common | {"sill_height_mm": -1.0}), scale_ratio=0.01764,
+    )
+    assert invalid.classification is SpandrelSubSillClassification.ABSTAINED_INVALID_VERTICAL_LEVELS
+    assert invalid.clear_span_m is None
+    assert replace(invalid) == invalid
+    assert candidate.shadow_only and not candidate.takeoff_eligible
+    assert abstained.shadow_only and not abstained.commercial_projection_allowed
+    assert authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764) == candidate
