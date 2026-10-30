@@ -9,7 +9,7 @@ on:
         required: true
         type: choice
         default: all
-        options: [all, finish_page, office_caps]
+        options: [all, a600, grid, rcp_ink, finish_page, office_caps]
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        target: ${{ fromJSON(inputs.target == 'finish_page' && '["finish_page"]' || inputs.target == 'office_caps' && '["office_caps"]' || '["a600","freezer","d15","rcp","grid","rcp_ink","d15_ink","finish_page","office_caps"]') }}
+        target: ${{ fromJSON(inputs.target == 'a600' && '["a600"]' || inputs.target == 'grid' && '["grid"]' || inputs.target == 'rcp_ink' && '["rcp_ink"]' || inputs.target == 'finish_page' && '["finish_page"]' || inputs.target == 'office_caps' && '["office_caps"]' || '["a600","freezer","d15","rcp","grid","rcp_ink","d15_ink","finish_page","office_caps"]') }}
 
     steps:
       - name: Checkout the trusted workflow context
@@ -48,7 +48,9 @@ jobs:
           approved_base=ce322d69bbc9f47b5b2aed001684e01cbe04f48b
           case "$TARGET" in
             a600)
-              approved_head=14d50e0b58c62e624974e481e4805a72bebb1ba7
+              # Current-main exact diff is four reviewed GPT2 source/test blobs.
+              approved_base=65dc4684fbcf1ce36c704457d896fc7c12a651de
+              approved_head=ef1e1328dc3bd2e1ea7d0e2f41393493a4b7a128
               expected_paths='pb_gpt2_original_a600_table_row_scope_shadow.py|pb_source_door_schedule_authority.py|pb_source_plan_door_correspondence_authority.py|tests/test_gpt2_original_a600_table_row_scope_shadow.py'
               original_test=test_original_private_source_publisher_table_census_if_provisioned
               test_path=tests/test_gpt2_original_a600_table_row_scope_shadow.py
@@ -74,15 +76,15 @@ jobs:
             grid)
               # This immutable existing GPT2 source-shadow PR has a distinct
               # approved base; never fetch code from a mutable PR head.
-              approved_base=d66087e6471c1bbdbf8c38617b8b85e646529417
-              approved_head=c4595ce1191502e93decbd4d070924b81814c4a5
+              approved_base=65dc4684fbcf1ce36c704457d896fc7c12a651de
+              approved_head=9b0657d54957061a46148857226250500ad35f57
               expected_paths='pb_gpt2_native_grid_row_membership_shadow.py|tests/test_gpt2_native_grid_row_membership_shadow.py'
               original_test=test_private_original_d02_grid_membership_from_published_source_if_provisioned
               test_path=tests/test_gpt2_native_grid_row_membership_shadow.py
               ;;
             rcp_ink)
-              approved_base=d66087e6471c1bbdbf8c38617b8b85e646529417
-              approved_head=794a114c3b422aa81f044f45d8f099b79b3454f1
+              approved_base=65dc4684fbcf1ce36c704457d896fc7c12a651de
+              approved_head=bd9aff98dd1bc644b14de916e8f88e8f7159cadc
               expected_paths='pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py'
               original_test=test_real_original_page9_native_source_rivals_if_available
               test_path=tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py
