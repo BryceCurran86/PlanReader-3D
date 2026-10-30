@@ -2077,3 +2077,55 @@ def test_public_through_wall_numeric_record_replacements_fail_closed():
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=openings[::-1],
     )[1] == piers
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 3.0, (250.0, -130.0)),
+    (math.pi / 2.0, (-100.0, 300.0)),
+    (math.pi, (300.0, -100.0)),
+])
+def test_public_host_frame_replacement_requires_oriented_orthonormal_basis(angle, shift):
+    """A frozen shadow record cannot be forged with a nonphysical wall frame."""
+    from dataclasses import replace
+
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "rotated-host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    valid = ApertureHostCandidateInput(
+        "valid", tr((20.0, 0.0)), tr((40.0, 0.0)),
+    )
+    rejected = ApertureHostCandidateInput(
+        "off-band", tr((20.0, 30.0)), tr((40.0, 30.0)),
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(valid, rejected),
+    )
+    assert not piers
+    assert records[0].status is S.CANDIDATE
+    assert records[1].status is S.ABSTAINED
+    for record in records:
+        assert replace(record) == record
+        assert math.isclose(math.hypot(*record.axis_unit), 1.0, abs_tol=1e-12)
+        assert math.isclose(math.hypot(*record.normal_unit), 1.0, abs_tol=1e-12)
+        assert not record.takeoff_eligible and not record.commercial_projection_allowed
+        assert record.shadow_only
+        ax, ay = record.axis_unit
+        nx, ny = record.normal_unit
+        for changes in (
+            {"axis_unit": (0.0, 0.0)},
+            {"axis_unit": (0.5, 0.0)},
+            {"axis_unit": (1.0, 1.0)},
+            {"axis_unit": (nx, ny)},  # unit but parallel to the original normal
+            {"normal_unit": (0.0, 0.0)},
+            {"normal_unit": (0.5, 0.5)},
+            {"normal_unit": (ax, ay)},  # unit but parallel to axis
+            {"normal_unit": (-nx, -ny)},  # unit but opposite orientation
+        ):
+            with pytest.raises(ValueError, match="numeric evidence|orthonormal"):
+                replace(record, **changes)
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(valid, rejected),
+    ) == (records, piers)

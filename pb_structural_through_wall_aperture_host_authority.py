@@ -255,6 +255,17 @@ class ThroughWallHostedOpeningRecord:
                 raise ValueError("host numeric evidence must be finite and physical")
         if any(abs(v) > 1.0 for v in (*self.axis_unit, *self.normal_unit)):
             raise ValueError("host numeric evidence must be finite and physical")
+        # This public frozen record is also constructible through dataclasses.replace.
+        # Validate the *frame*, not just its individual finite components:
+        # normal_unit is the +90-degree (counter-clockwise) axis rotation.
+        # This is a numerical identity tolerance, never a geometric snap.
+        ax, ay = self.axis_unit
+        nx, ny = self.normal_unit
+        if (not math.isclose(math.hypot(ax, ay), 1.0, rel_tol=0.0, abs_tol=1e-12)
+                or not math.isclose(math.hypot(nx, ny), 1.0, rel_tol=0.0, abs_tol=1e-12)
+                or not math.isclose(nx, -ay, rel_tol=0.0, abs_tol=1e-12)
+                or not math.isclose(ny, ax, rel_tol=0.0, abs_tol=1e-12)):
+            raise ValueError("host numeric evidence must have an orthonormal oriented frame")
         for ids in (self.terminal_jamb_observation_ids, self.adjacent_pier_ids):
             if (type(ids) is not tuple
                     or len(ids) > _MAX_GEOMETRIC_PRIMITIVES
