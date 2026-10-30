@@ -1,13 +1,15 @@
 """Tests for Milestone 3: Source-authenticated structural through-wall aperture host authority."""
 
 import math
+from dataclasses import fields
 
 import pytest
 
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_structural_through_wall_aperture_host_authority import (
     ApertureHostCandidateInput,
     ContinuousThroughWallCandidate,
+    InterAperturePierRecord,
     StructuralThroughWallApertureHostAuthority,
     StructuralThroughWallApertureHostProducer,
 )
@@ -323,3 +325,100 @@ def test_empty_and_single_opening_handling(
     assert len(r_single) == 1
     assert r_single[0].status is EvidenceResolutionStatus.CANDIDATE
     assert p_single == ()  # No adjacent piers with single opening
+
+def _construct_pier_with_reissued_identity(
+    original: InterAperturePierRecord, **changes,
+) -> InterAperturePierRecord:
+    """Adversarial direct constructor: recompute ID to isolate geometry guard."""
+    values = {field.name: getattr(original, field.name) for field in fields(original)}
+    values.update(changes)
+    payload = {
+        "document_id": values["document_id"],
+        "revision_id": values["revision_id"],
+        "source_sha256": values["source_sha256"],
+        "host_wall_id": values["host_wall_id"],
+        "host_start_pt": tuple(float(v).hex() for v in values["host_start_pt"]),
+        "host_end_pt": tuple(float(v).hex() for v in values["host_end_pt"]),
+        "host_thickness_pt": float(values["host_thickness_pt"]).hex(),
+        "left_opening_id": values["left_opening_id"],
+        "right_opening_id": values["right_opening_id"],
+        "left_jamb_endpoints": tuple(sorted(
+            tuple(float(v).hex() for v in point)
+            for point in values["left_jamb_endpoints"]
+        )),
+        "right_jamb_endpoints": tuple(sorted(
+            tuple(float(v).hex() for v in point)
+            for point in values["right_jamb_endpoints"]
+        )),
+        "left_jamb_observations": values["left_jamb_observations"],
+        "right_jamb_observations": values["right_jamb_observations"],
+        "start_station": float(values["pier_start_station"]).hex(),
+        "end_station": float(values["pier_end_station"]).hex(),
+        "width_pt": float(values["pier_width_pt"]).hex(),
+    }
+    values["pier_id"] = stable_contract_id(
+        "inter_aperture_pier", payload, digest_chars=32,
+    )
+    return InterAperturePierRecord(**values)
+
+
+def test_frozen_pier_reproves_hosted_jamb_geometry(
+    authority: StructuralThroughWallApertureHostAuthority,
+) -> None:
+    """A forged re-keyed pier cannot use off-wall, oblique or overlong jambs."""
+    wall = ContinuousThroughWallCandidate(
+        "pier_host", (0.0, 0.0), (200.0, 0.0), 10.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("left", (20.0, 0.0), (40.0, 0.0)),
+        ApertureHostCandidateInput("right", (45.0, 0.0), (65.0, 0.0)),
+    )
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(piers) == 1
+    pier = piers[0]
+    assert pier.status is EvidenceResolutionStatus.CANDIDATE
+    assert pier.is_structural_masonry_pier is None
+    assert pier.pier_width_pt == 5.0
+    assert all(not rec.takeoff_eligible and not rec.commercial_projection_allowed
+               for rec in records)
+    original = pier
+
+    # Each forged pair preserves the original projected pier start station
+    # (40pt), and each gets its own freshly computed stable ID. Before the
+    # guard, all three could pass the frozen record constructor.
+    for forged_jambs in (
+        ((20.0, 100.0), (40.0, 100.0)),  # displaced from host wall band
+        ((20.0, 0.0), (40.0, 3.0)),      # oblique, but inside wall band
+        ((-100.0, 0.0), (40.0, 0.0)),    # outside wall extent
+    ):
+        with pytest.raises(ValueError, match="pier jamb geometry"):
+            _construct_pier_with_reissued_identity(
+                pier, left_jamb_endpoints=forged_jambs,
+            )
+    assert pier == original
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=tuple(reversed(openings)),
+    )[1] == piers
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    ) == (records, piers)
+
+    # A rigid rotation preserves the valid physical candidate decision.
+    rotated_wall = ContinuousThroughWallCandidate(
+        "pier_host_rotated", (100.0, 0.0), (100.0, 200.0), 10.0,
+    )
+    rotated_openings = (
+        ApertureHostCandidateInput("left", (100.0, 20.0), (100.0, 40.0)),
+        ApertureHostCandidateInput("right", (100.0, 45.0), (100.0, 65.0)),
+    )
+    rotated_records, rotated_piers = authority.bind_openings_to_through_wall(
+        through_wall=rotated_wall, openings=rotated_openings,
+    )
+    assert len(rotated_piers) == 1
+    assert rotated_piers[0].pier_width_pt == pier.pier_width_pt
+    assert rotated_piers[0].status is EvidenceResolutionStatus.CANDIDATE
+    assert rotated_piers[0].is_structural_masonry_pier is None
+    assert all(rec.shadow_only and not rec.takeoff_eligible
+               for rec in rotated_records)
