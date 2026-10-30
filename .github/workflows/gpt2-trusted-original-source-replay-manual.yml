@@ -50,7 +50,7 @@ jobs:
             a600)
               # Current-main exact diff is four reviewed GPT2 source/test blobs.
               approved_base=65dc4684fbcf1ce36c704457d896fc7c12a651de
-              approved_head=ef1e1328dc3bd2e1ea7d0e2f41393493a4b7a128
+              approved_head=f32e01ed58369bf400a7a91a0360fd25963b3d1a
               expected_paths='pb_gpt2_original_a600_table_row_scope_shadow.py|pb_source_door_schedule_authority.py|pb_source_plan_door_correspondence_authority.py|tests/test_gpt2_original_a600_table_row_scope_shadow.py'
               original_test=test_original_private_source_publisher_table_census_if_provisioned
               test_path=tests/test_gpt2_original_a600_table_row_scope_shadow.py

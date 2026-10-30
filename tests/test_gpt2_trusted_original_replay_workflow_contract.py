@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / ".github/workflows/gpt2-trusted-original-source-replay-manual.yml"
 SOURCE = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 HEADS = {
-    "a600": "ef1e1328dc3bd2e1ea7d0e2f41393493a4b7a128",
+    "a600": "f32e01ed58369bf400a7a91a0360fd25963b3d1a",
     "freezer": "2e2e622515db29203f6299d537b1ccb232adea30",
     "d15": "e8700f3030d66121d793f1a1924f20f7e3b2ddb9",
     "rcp": "8db7ef5c931c5f37bf63cdfbbb8b0b7a5fce29a1",
