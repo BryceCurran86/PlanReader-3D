@@ -306,3 +306,41 @@ correspondence, GPT MAX/Claude host/glazing, GPT3 signing/scoring.
 **PROPOSED:** Independently require a native tuple/list of exactly four native int/float values (excluding bool/strings/subclasses), each finite and within inclusive 2**53 before conversion, with x1>x0 and y1>y0. Preserve the original numeric coordinates and valid source bounding boxes; do not repair, reorder, clamp or infer missing bounds. On any malformed returned authoritative F.07 bbox, ABSTAIN for the complete selected run with existing `LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE`, before `ViewportEvidence` or source-owned ceiling producer. Do not modify the upstream F.07 classification or source authority.
 
 **TESTS:** Generated native PDF with an authentic positive viewport and an injected malformed source sibling in both input orders; null, short/long, typed/coerced, NaN/Inf, nonpositive/inverted, oversized and overflow source boxes must all abstain with no canonical, real issuer or customer output; deterministic replay, source bytes unchanged, and valid native positive. Full exact-head Python 3.13/3.14 CI and trusted SHA-verified original-source→issuer→sealed/customer signed Lot16 nine/Maryborough three byte-exact preservation remain mandatory before merge. Frozen 120 evaluator and all truth, private PDFs/tokens, other agent lanes, 20k primitive cap and 2.5pt snap remain untouched. **Integrity-only, not FIRM or score.**
+
+
+## GPT1 original upstream room-area source-scope receipt gate — 2026-10-31
+
+**OBSERVED:** `collect_live_ceiling_lining_claims` currently selects caller-supplied
+`authoritative_room_area_quantities` using `_clean` on source SHA,
+revision, F.07 viewport and page. That helper stringifies and trims foreign
+objects. A padded original source receipt or a typed page alias can be
+mistaken for an exact original area scope before
+`run_source_owned_ceiling_lining_shadow` receives its authoritative area
+override. `_claim_from_quantity` later checks room-area FIRM, value, two
+figured axes/scale, and physical room entity, but does not independently
+authenticate these caller-owned original scope fields.
+
+**INFERRED:** This is a potential source-root substitution/partial-owner
+universe risk at the earliest external FIRM room-area handoff. It is not
+proof that any original Maryborough or Lot16 source area is incorrect.
+
+**PROPOSED:** Distinguish foreign original scopes from exact native source
+receipts and normalized-match aliases. Reject a matched alias for the whole
+selected ceiling run, rather than passing it to the source-owned producer or
+silently discarding its negative evidence. Keep unrelated source documents
+out of the selected viewport. Preserve legitimate native SHA hex case,
+revision/viewport IDs and exact int/canonical decimal-string page numbers.
+
+**Authority trace:** caller-supplied FIRM room-area scope → source-owned
+ceiling producer → `_claim_from_quantity` → canonical ceiling →
+`publish_live_ceiling_area_quantities` → source-closed
+`project_live_ceiling_area_customer_rows` → unchanged frozen evaluator.
+Expected abstentions: padded source SHA/revision/viewport, typed/whitespace
+page aliases in a matched source scope. No positive metric, physical room,
+ceiling finish, FIRM, customer or score authority is granted.
+
+**Untouched:** GPT2 physical FT2/FT3/RCP source, GPT MAX/Claude openings,
+GPT3 signer/scorer, original PDFs/tokens, existing signed Lot16 nine and
+Maryborough three, frozen 120 truth/evaluator, 20,000 primitive cap and
+2.5pt snap. Tests are generated-source negative controls only; owner-trusted
+SHA-verified original production/customer replay remains mandatory.
