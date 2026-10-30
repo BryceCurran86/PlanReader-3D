@@ -1759,3 +1759,82 @@ def test_source_coordinate_boundary_and_independent_scalar_validation():
         "scalar-only", (0.0, 0.0), (100.0, 0.0), float(2**53 + 2),
     )
     assert large_thickness.thickness_pt == float(2**53 + 2)
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 2, (250.0, -130.0)),
+])
+def test_transverse_wall_inside_inter_aperture_gap_vetoes_unproved_pier(angle, shift):
+    """A crossing between two valid openings is not an uninterrupted pier."""
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    a = ApertureHostCandidateInput("A", tr((20.0, 0.0)), tr((30.0, 0.0)))
+    b = ApertureHostCandidateInput("B", tr((50.0, 0.0)), tr((60.0, 0.0)))
+    crossing = (tr((40.0, -30.0)), tr((40.0, 30.0)))
+    unrelated = (tr((90.0, -30.0)), tr((90.0, 30.0)))
+    authority = _authority()
+    for openings in ((a, b), (b, a)):
+        for obstructions in ((crossing, unrelated), (unrelated, crossing)):
+            records, piers = authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=openings,
+                transverse_wall_segments=obstructions,
+            )
+            assert piers == ()
+            assert {r.physical_opening_id for r in records} == {"A", "B"}
+            assert all(r.status is S.CANDIDATE
+                       and r.first_remaining_gate == "original_source_host_unverified"
+                       and r.adjacent_pier_ids == ()
+                       and r.shadow_only and not r.takeoff_eligible
+                       and not r.commercial_projection_allowed for r in records)
+            assert authority.bind_openings_to_through_wall(
+                through_wall=wall, openings=openings,
+                transverse_wall_segments=obstructions,
+            ) == (records, piers)
+    # A crossing outside the proposed gap does not erase a shadow pier.
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(a, b),
+        transverse_wall_segments=(unrelated,),
+    )
+    assert len(piers) == 1 and piers[0].status is S.CANDIDATE
+    assert piers[0].is_structural_masonry_pier is None
+    assert all(r.status is S.CANDIDATE and len(r.adjacent_pier_ids) == 1
+               for r in records)
+
+
+@pytest.mark.parametrize("obstruction,expect_pier", [
+    (((40.0, -30.0), (40.0, 30.0)), False),  # gap interior crossing
+    (((35.0, -30.0), (45.0, 30.0)), False),  # oblique gap crossing
+    (((30.0, -30.0), (30.0, 30.0)), True),   # left edge only
+    (((50.0, -30.0), (50.0, 30.0)), True),   # right edge only
+    (((35.0, 10.0), (45.0, 10.0)), True),    # wall-band tangent
+    (((40.0, 100.0), (40.0, 120.0)), True), # outside wall band
+])
+def test_pier_gap_crossing_is_strict_and_preserves_mutable_input(
+    obstruction, expect_pier,
+):
+    wall = ContinuousThroughWallCandidate(
+        "host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("A", (20.0, 0.0), (30.0, 0.0)),
+        ApertureHostCandidateInput("B", (50.0, 0.0), (60.0, 0.0)),
+    )
+    mutable = [[list(p) for p in obstruction]]
+    before = [[p.copy() for p in segment] for segment in mutable]
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+        transverse_wall_segments=mutable,
+    )
+    assert mutable == before
+    assert bool(piers) is expect_pier
+    assert all(r.status is S.CANDIDATE and r.shadow_only
+               and not r.takeoff_eligible and not r.commercial_projection_allowed
+               for r in records)
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+        transverse_wall_segments=mutable,
+    ) == (records, piers)

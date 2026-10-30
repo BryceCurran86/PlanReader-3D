@@ -622,6 +622,49 @@ class StructuralThroughWallApertureHostAuthority:
             greatest_high = max(greatest_high, high)
             rejected_prefix_highs.append(greatest_high)
 
+        # A transverse structural segment through the proposed BETWEEN-opening
+        # gap leaves an uninterrupted pier unproved, even if neither aperture
+        # itself is obstructed. Clip the complete transverse universe to the
+        # open wall-thickness band once; query its projected station intervals
+        # with a prefix maximum. This preserves the existing pairwise-work cap
+        # rather than adding another O(openings * obstructions) scan.
+        transverse_gap_intervals: list[tuple[float, float]] = []
+        for (a0, p0), (a1, p1) in projected_transverse_segments:
+            if min(p0, p1) >= half_thick or max(p0, p1) <= -half_thick:
+                continue  # wholly outside or tangent to the wall band
+            if (-half_thick < p0 < half_thick
+                    and -half_thick < p1 < half_thick):
+                t_start, t_end = 0.0, 1.0
+            else:
+                delta_perp = p1 - p0  # finite: complete-universe check above
+                if delta_perp == 0.0:
+                    continue
+                enter = (-half_thick - p0) / delta_perp
+                leave = (half_thick - p0) / delta_perp
+                if not math.isfinite(enter) or not math.isfinite(leave):
+                    raise ValueError("transverse pier-band clipping must remain finite")
+                t_start = max(0.0, min(enter, leave))
+                t_end = min(1.0, max(enter, leave))
+                if t_start >= t_end:
+                    continue  # boundary-only contact does not cross the band
+            delta_along = a1 - a0  # finite: complete-universe check above
+            station_start = a0 + t_start * delta_along
+            station_end = a0 + t_end * delta_along
+            if not math.isfinite(station_start) or not math.isfinite(station_end):
+                raise ValueError("transverse pier-band stations must remain finite")
+            transverse_gap_intervals.append((
+                min(station_start, station_end),
+                max(station_start, station_end),
+            ))
+        transverse_gap_intervals.sort()
+        transverse_gap_lows: list[float] = []
+        transverse_gap_prefix_highs: list[float] = []
+        greatest_transverse_high = -math.inf
+        for low, high in transverse_gap_intervals:
+            transverse_gap_lows.append(low)
+            greatest_transverse_high = max(greatest_transverse_high, high)
+            transverse_gap_prefix_highs.append(greatest_transverse_high)
+
         piers: list[InterAperturePierRecord] = []
         pier_ids_by_opening: dict[str, list[str]] = {}
 
@@ -640,9 +683,13 @@ class StructuralThroughWallApertureHostAuthority:
             if cutoff and rejected_prefix_highs[cutoff - 1] > curr["u_max"]:
                 continue
             gap = nxt["u_min"] - curr["u_max"]
-            if (
-                0.5 <= gap <= 60.0
-            ):  # Narrow structural pier (e.g. 7.44 pt in Maryborough)
+            if 0.5 <= gap <= 60.0:
+                # A transverse wall crossing the OPEN gap makes continuous
+                # pier identity ambiguous. Edge-only contact is not a crossing.
+                cutoff = bisect_left(transverse_gap_lows, nxt["u_min"])
+                if (cutoff and transverse_gap_prefix_highs[cutoff - 1]
+                        > curr["u_max"]):
+                    continue
                 pier_payload = {
                     "document_id": self._producer.document_id,
                     "revision_id": self._producer.revision_id,
