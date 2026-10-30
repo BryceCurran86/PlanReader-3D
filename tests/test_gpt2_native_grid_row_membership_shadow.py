@@ -547,3 +547,19 @@ def test_producer_grid_audit_vetoes_original_native_word_omission(monkeypatch):
             page_id="1", original_pdf_bytes=original, scope=scope,
         )
     assert sha256(original).hexdigest() == published.revision.source_sha256
+
+
+@pytest.mark.parametrize("invalid_address", [
+    None, 0, "0,0,0", [0, 0, 0], (0, 0), (0, 0, 0, 0),
+    (0, 0, True), (0, 0, -1), (0, 0, 0.0),
+])
+def test_native_code_address_requires_immutable_literal_integer_triplet(invalid_address):
+    # Source-owned native word identity must not accept coercions, mutable
+    # addresses or a malformed scalar that raises before typed abstention.
+    original, words, scope = _case()
+    assert _audit(original, words, scope).status is EvidenceResolutionStatus.CANDIDATE
+    with pytest.raises(ValueError, match="exact native code word address required"):
+        _audit(original, words, replace(scope, code_address=invalid_address))
+    assert original == bytes(original)
+    assert words == _case()[1]
+    assert scope.code_address == (0, 0, 0)

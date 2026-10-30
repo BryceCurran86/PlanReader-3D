@@ -247,7 +247,11 @@ def inspect_original_native_grid_row_shadow(
             or not .001 <= tolerance_pdf_pt <= .25
             or type(words) is not tuple or not words or len(words) > 25000):
         raise ValueError("invalid original grid row source scope")
-    if (len(scope.code_address) != 3
+    # A frozen scope cannot authenticate a mutable/list or scalar native
+    # address. Check the exact shape before len()/iteration so malformed
+    # caller evidence fails closed instead of raising TypeError.
+    if (type(scope.code_address) is not tuple
+            or len(scope.code_address) != 3
             or any(type(x) is not int or x < 0 for x in scope.code_address)):
         raise ValueError("exact native code word address required")
     with fitz.open(stream=original_pdf_bytes, filetype="pdf") as pdf:
