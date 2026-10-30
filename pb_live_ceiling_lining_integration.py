@@ -246,14 +246,35 @@ def _claim_from_quantity(
     ):
         return None
 
-    finish_descriptor = _clean(meta.get("finish_descriptor"))
-    finish_methods = tuple(_clean(value) for value in (meta.get("finish_source_methods") or ()))
-    finish_ids = tuple(_clean(value) for value in (meta.get("finish_evidence_ids") or ()))
+    # Original finish text-integrity methods and evidence IDs are typed
+    # producer receipts. Stringifying/trimming a foreign object, or iterating
+    # a bare string as individual IDs, cannot authenticate ceiling material.
+    finish_descriptor = meta.get("finish_descriptor")
+    finish_methods = meta.get("finish_source_methods")
+    finish_ids = meta.get("finish_evidence_ids")
+    source_evidence_ids = quantity.evidence_ids
     if (
-        not finish_descriptor
-        or SOURCE_CEILING_FINISH_METHOD not in finish_methods
+        type(finish_descriptor) is not str
+        or not finish_descriptor
+        or finish_descriptor != finish_descriptor.strip()
+        or type(finish_methods) not in (tuple, list)
+        or not finish_methods
+        or type(finish_ids) not in (tuple, list)
         or not finish_ids
-        or not set(finish_ids).issubset(set(quantity.evidence_ids))
+        or type(source_evidence_ids) not in (tuple, list)
+        or not source_evidence_ids
+    ):
+        return None
+    for receipts in (finish_methods, finish_ids, source_evidence_ids):
+        if (
+            any(type(item) is not str or not item or item != item.strip()
+                for item in receipts)
+            or len(set(receipts)) != len(receipts)
+        ):
+            return None
+    if (
+        SOURCE_CEILING_FINISH_METHOD not in finish_methods
+        or not set(finish_ids).issubset(set(source_evidence_ids))
     ):
         return None
 
