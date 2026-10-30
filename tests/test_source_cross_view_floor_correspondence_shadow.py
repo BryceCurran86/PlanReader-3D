@@ -2863,3 +2863,66 @@ def test_source_side_budget_normal_positive_retains_candidate_and_commercial_iso
     assert result.records[0].commercial_projection_allowed is False
     assert result.records[0].takeoff_eligible is False
     assert result.records[0].authority_blockers == STANDING_AUTHORITY_BLOCKERS
+
+
+@pytest.mark.parametrize(
+    "refined_rival, expected_best, expected_second",
+    [
+        (99.0, 100.0, 99.0),   # A nearly equal rival must veto unique ownership.
+        (120.0, 120.0, 100.0), # Refined rival becomes winner; old best is rival.
+        (30.0, 100.0, 79.0),   # Weaker refinement cannot erase raw rival.
+    ],
+)
+def test_registration_retains_refined_distinct_translation_rivals(
+    monkeypatch, refined_rival, expected_best, expected_second,
+):
+    """Every evaluated source-wall refinement competes for physical identity.
+
+    Previously the best translation was refined, but next_distinct_translation
+    was selected from the stale initial pool only. A source room with another
+    locally improving placement could therefore appear uniquely registered.
+    This test controls support scores, not any benchmark or original drawing.
+    """
+    import pb_source_cross_view_floor_correspondence_shadow as floor_shadow
+
+    source = build_lines([seg(0, 0, 100, 0), seg(0, 0, 0, 100)])
+    target = build_lines([seg(0, 0, 100, 0), seg(0, 0, 0, 100)])
+    source_before = copy.deepcopy(source)
+    target_before = copy.deepcopy(target)
+
+    def two_source_translations(*args, **kwargs):
+        return [0.0, 10.0], [0.0]
+
+    def measured_support(src, dst, dx, dy, tol=0.06, *, _visit_budget=None):
+        if abs(dy) < 1e-9 and abs(dx) < 1e-9:
+            score = 100.0
+        elif abs(dy) < 1e-9 and abs(dx - 10.04) < 1e-9:
+            score = refined_rival
+        elif abs(dy) < 1e-9 and abs(dx - 10.0) < 1e-9:
+            score = 79.0
+        else:
+            score = 0.0
+        return score, score, score
+
+    monkeypatch.setattr(floor_shadow, "_shift_votes", two_source_translations)
+    monkeypatch.setattr(floor_shadow, "min_axis_support", measured_support)
+    result = floor_shadow.rank_registrations(
+        source, target,
+        orientations={"identity": (1.0, 0.0, 0.0, 1.0)},
+        identity_scales=(1.0,),
+        identity_only=True,
+        topn=2,
+    )
+
+    assert len(result) == 1
+    row = result[0]
+    assert row["orientation"] == "identity"
+    assert row["scale"] == 1.0
+    assert row["min_support_pt"] == expected_best
+    assert row["next_distinct_min_support_pt"] == expected_second
+    if refined_rival == 99.0:
+        assert not (row["min_support_pt"] > 1.25 * row["next_distinct_min_support_pt"])
+    assert source == source_before
+    assert target == target_before
+    assert "takeoff_eligible" not in row
+    assert "commercial_projection_allowed" not in row
