@@ -224,19 +224,33 @@ class LineIndex:
         return out
 
 
-def axis_support(src: Lines, dst: LineIndex, orient: str, dx: float, dy: float, tol: float = COORD_TOL) -> float:
+def axis_support(
+    src: Lines, dst: LineIndex, orient: str, dx: float, dy: float,
+    tol: float = COORD_TOL, *, _visit_budget: Optional[list[int]] = None,
+) -> float:
     shift_c, shift_a = (dy, dx) if orient == "H" else (dx, dy)
     total = 0.0
     for k, ivs in src[orient].items():
         shifted = [(lo + shift_a, hi + shift_a) for lo, hi in ivs]
-        for k2 in dst.near(orient, k + shift_c, tol):
+        nearby = dst.near(orient, k + shift_c, tol)
+        # The coarse source-key budget cannot bound many destination keys
+        # within one tolerance band. Meter every actual overlap comparison
+        # across the whole registration/null trial before computing a score.
+        if _visit_budget is not None:
+            _visit_budget[0] += len(nearby)
+            if _visit_budget[0] > MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS:
+                raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
+        for k2 in nearby:
             total += _overlap(shifted, dst.lines[orient][k2])
     return total
 
 
-def min_axis_support(src: Lines, dst: LineIndex, dx: float, dy: float, tol: float = COORD_TOL) -> tuple[float, float, float]:
-    h = axis_support(src, dst, "H", dx, dy, tol)
-    v = axis_support(src, dst, "V", dx, dy, tol)
+def min_axis_support(
+    src: Lines, dst: LineIndex, dx: float, dy: float,
+    tol: float = COORD_TOL, *, _visit_budget: Optional[list[int]] = None,
+) -> tuple[float, float, float]:
+    h = axis_support(src, dst, "H", dx, dy, tol, _visit_budget=_visit_budget)
+    v = axis_support(src, dst, "V", dx, dy, tol, _visit_budget=_visit_budget)
     return min(h, v), h, v
 
 
@@ -295,6 +309,7 @@ def rank_registrations(
     index = LineIndex(dst)
     rows: list[dict[str, Any]] = []
     support_key_visits = 0
+    actual_key_visits = [0]
     for name, mat in orientations.items():
         if identity_only and name != "identity":
             continue
@@ -313,7 +328,7 @@ def rank_registrations(
             if support_key_visits > MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS:
                 raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
             pool = sorted(
-                ((*min_axis_support(moved, index, dx, dy, tol), dx, dy) for dx in xs for dy in ys),
+                ((*min_axis_support(moved, index, dx, dy, tol, _visit_budget=actual_key_visits), dx, dy) for dx in xs for dy in ys),
                 key=lambda r: (-r[0], r[3], r[4]),
             )
             if not pool:
@@ -322,7 +337,10 @@ def rank_registrations(
             for s, h, v, dx, dy in pool[:3]:
                 for ddx in (-0.08, -0.04, 0.0, 0.04, 0.08):
                     for ddy in (-0.08, -0.04, 0.0, 0.04, 0.08):
-                        s2, h2, v2 = min_axis_support(moved, index, dx + ddx, dy + ddy, tol)
+                        s2, h2, v2 = min_axis_support(
+                            moved, index, dx + ddx, dy + ddy, tol,
+                            _visit_budget=actual_key_visits,
+                        )
                         if s2 > best[0] + 1e-9:
                             best = (s2, h2, v2, dx + ddx, dy + ddy)
             second = next((p for p in pool if abs(p[3] - best[3]) > 1.0 or abs(p[4] - best[4]) > 1.0), None)
@@ -351,8 +369,13 @@ def null_support(
 ) -> dict[str, float]:
     rng = random.Random(seed)
     index = LineIndex(dst)
+    actual_key_visits = [0]
     vals = sorted(
-        min_axis_support(src, index, rng.uniform(-span[0], span[0]), rng.uniform(-span[1], span[1]))[0]
+        min_axis_support(
+            src, index, rng.uniform(-span[0], span[0]),
+            rng.uniform(-span[1], span[1]),
+            _visit_budget=actual_key_visits,
+        )[0]
         for _ in range(trials)
     )
     return {
@@ -1185,7 +1208,21 @@ class SourceCrossViewFloorCorrespondenceProducer:
             )
 
         top = ranked[0]
-        null_res = null_support(lines_sup, lines_tgt, trials=trials)
+        try:
+            null_res = null_support(lines_sup, lines_tgt, trials=trials)
+        except ValueError as exc:
+            if str(exc) != SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED:
+                raise
+            reasons = [SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED]
+            if invalid_mark_universe:
+                reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+            if invalid_box_universe:
+                reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
+            return SourceCrossViewFloorCorrespondenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=tuple(reasons),
+                records=(),
+            )
         runner_up = ranked[1]["min_support_pt"] if len(ranked) > 1 else 0.0
         # A single orientation/scale may contain several distinct translations.
         # The second translation is not ranked[1]. Require separation from
