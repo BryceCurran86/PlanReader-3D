@@ -355,11 +355,17 @@ def _assert_original_grid_word_inventory(page, scope, words):
     for raw in raw_words:
         if len(raw) < 8:
             raise ValueError("incomplete original grid native word address")
+        # Native block/line/word IDs are source identities, not quantities.
+        # Coercing bool/float/string aliases via int() can make a malformed
+        # original receipt match a different published observation address.
+        if any(type(value) is not int or not 0 <= value <= 2**53
+               for value in raw[5:8]):
+            raise ValueError("invalid original grid native word address")
         try:
             box = tuple(float(value) for value in raw[:4])
-            address = tuple(int(value) for value in raw[5:8])
         except (TypeError, ValueError, OverflowError):
             raise ValueError("malformed original grid native word") from None
+        address = tuple(raw[5:8])
         if (len(box) != 4 or any(not isfinite(value) for value in box)
                 or box[0] >= box[2] or box[1] >= box[3]
                 or any(value < 0 for value in address)):

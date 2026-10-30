@@ -563,3 +563,36 @@ def test_native_code_address_requires_immutable_literal_integer_triplet(invalid_
     assert original == bytes(original)
     assert words == _case()[1]
     assert scope.code_address == (0, 0, 0)
+
+
+@pytest.mark.parametrize("slot", [5, 6, 7])
+@pytest.mark.parametrize("invalid", [True, 0.0, "0", -1, 2**53 + 1])
+def test_original_native_word_inventory_rejects_coerced_source_addresses(slot, invalid):
+    """Raw PyMuPDF source identity must not alias another producer word."""
+    import pb_gpt2_native_grid_row_membership_shadow as grid
+
+    original, words, scope = _native_grid_inventory_case()
+    _check_native_inventory(original, words, scope)  # valid positive
+    with fitz.open(stream=original, filetype="pdf") as pdf:
+        native = list(pdf[0].get_text("words"))
+        position = next(i for i, w in enumerate(native) if w[4] == "D13")
+        changed = list(native[position])
+        changed[slot] = invalid
+        native[position] = tuple(changed)
+
+        class NativePageWithMalformedAddress:
+            def get_drawings(self):
+                return pdf[0].get_drawings()
+
+            def get_text(self, kind):
+                assert kind == "words"
+                return tuple(native)
+
+        with pytest.raises(ValueError, match="native word address"):
+            grid._assert_original_grid_word_inventory(
+                NativePageWithMalformedAddress(), scope, words,
+            )
+    assert sha256(original).hexdigest() == sha256(bytes(original)).hexdigest()
+    assert scope.code_address == (0, 0, 0)
+    assert _audit(original, words, scope).status is EvidenceResolutionStatus.CANDIDATE
+    assert not _audit(original, words, scope).commercial_projection_allowed
