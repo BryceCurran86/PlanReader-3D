@@ -2600,3 +2600,95 @@ def test_producer_reuses_two_source_side_indexes_for_complete_many_box_universe(
     assert all(not record.takeoff_eligible and not record.commercial_projection_allowed
                for record in result.records)
     assert (boxes, marks) == before
+
+
+# Actual-match resource accounting: source-key estimates alone cannot
+# bound many target native lines inside the same 0.06pt tolerance band.
+def _dense_support_lines():
+    src = {
+        "H": {0.0: [(0.0, 100.0)]},
+        "V": {0.0: [(0.0, 100.0)]},
+    }
+    dst = {
+        "H": {round(i * 0.01, 3): [(0.0, 100.0)] for i in range(10)},
+        "V": {round(i * 0.01, 3): [(0.0, 100.0)] for i in range(10)},
+    }
+    return src, dst
+
+
+def test_registration_budgets_actual_destination_key_matches(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as shadow
+
+    src, dst = _dense_support_lines()
+    original_src, original_dst = copy.deepcopy(src), copy.deepcopy(dst)
+    # Coarse preflight: (1 candidate + 75 refinements) * 2 source
+    # coordinates = 152 visits, under 500. Actual near-key matches
+    # exceed 500 across the candidate and refinement evaluations.
+    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 500)
+    with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
+        shadow.rank_registrations(
+            src, dst, orientations={"identity": (1.0, 0.0, 0.0, 1.0)},
+            identity_scales=(1.0,), topn=1, identity_only=True,
+        )
+    assert src == original_src
+    assert dst == original_dst
+
+
+def test_null_trials_budget_actual_destination_key_matches(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as shadow
+
+    src, dst = _dense_support_lines()
+    original_src, original_dst = copy.deepcopy(src), copy.deepcopy(dst)
+    monkeypatch.setattr(shadow, "MAX_SOURCE_REGISTRATION_SUPPORT_KEY_VISITS", 25)
+    with pytest.raises(ValueError, match=SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED):
+        shadow.null_support(src, dst, trials=60, span=(0.0, 0.0))
+    assert src == original_src
+    assert dst == original_dst
+
+
+def test_null_resource_exhaustion_preserves_independent_source_negatives(monkeypatch):
+    import pb_source_cross_view_floor_correspondence_shadow as shadow
+
+    def exhausted_null(*args, **kwargs):
+        raise ValueError(SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED)
+
+    monkeypatch.setattr(shadow, "null_support", exhausted_null)
+    result = SourceCrossViewFloorCorrespondenceProducer().evaluate_synthetic(
+        selector=sample_selector(),
+        support_segments=support_sheet(),
+        target_segments=TARGET_SHEET,
+        measured_boxes=[{
+            "dimension_box_pdf_pts": (251.04, 1382.72, 394.80, 1585.04),
+            "canonical_floor_id": "floor-office",
+            "physical_room_id": "room-office",
+            "source_room_face_record_id": "face-office",
+        }],
+        marks=[
+            {"x": 327.8, "y": 1437.5, "code": "FT3",
+             "registered_region": True},
+            {"x": "unlocated-original-rival", "y": 1437.5,
+             "code": "FT2", "registered_region": True},
+        ],
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED in result.reason_codes
+    assert SOURCE_FINISH_MARK_IDENTITY_INVALID in result.reason_codes
+    assert not result.records
+
+
+def test_sparse_registration_and_null_support_remain_source_only():
+    import pb_source_cross_view_floor_correspondence_shadow as shadow
+
+    src = {"H": {0.0: [(0.0, 100.0)]}, "V": {0.0: [(0.0, 100.0)]}}
+    dst = copy.deepcopy(src)
+    before = copy.deepcopy((src, dst))
+    result = shadow.rank_registrations(
+        src, dst, orientations={"identity": (1.0, 0.0, 0.0, 1.0)},
+        identity_scales=(1.0,), topn=1, identity_only=True,
+    )
+    assert result and result[0]["orientation"] == "identity"
+    assert result[0]["scale"] == 1.0
+    null = shadow.null_support(src, dst, trials=60, span=(0.0, 0.0))
+    assert null["max"] == 100.0
+    assert (src, dst) == before
