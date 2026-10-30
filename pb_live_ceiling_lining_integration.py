@@ -220,7 +220,10 @@ def _claim_from_quantity(
         meta.get("shadow_only") is not True
         or meta.get("commercial_projection_allowed") is not False
         or _clean(meta.get("viewport_id")) != viewport_id
-        or int(meta.get("page_no", -1)) != int(page_no)
+        # Page identity is producer-owned. Never coerce a bool, float or
+        # numeric-text alias into an authenticated original PDF page.
+        or type(meta.get("page_no")) is not int
+        or meta["page_no"] != page_no
     ):
         return None
 
