@@ -759,8 +759,8 @@ def test_frozen_reveal_existing_threshold_boundaries_preserved(
     kw = inputs(
         jamb_datum_b=(100.0 + span, 200.0),
         datum_offset_pt=datum,
-        left_thickness_pt=5.1 + step,
-        right_thickness_pt=5.1,
+        left_thickness_pt=5.0 + step,
+        right_thickness_pt=5.0,
     )
     result = authority.evaluate_stepped_wall_aperture(**kw)
     assert result.classification is expected
