@@ -214,6 +214,38 @@ class InterAperturePierRecord:
             if not math.isfinite(projected):
                 raise ValueError("pier jamb station receipt must remain finite")
             return projected
+        # A pier is emitted only between TWO producer-valid hosted openings.
+        # Recompute those host-band and axis predicates at the public frozen
+        # record seam. Matching projected stations and a freshly recomputed
+        # stable ID alone cannot authenticate transversely displaced or
+        # oblique jambs. The maximum existing 2.5pt snap is conservative here:
+        # the pier receipt does not independently claim a smaller snap.
+        for endpoints in (self.left_jamb_endpoints, self.right_jamb_endpoints):
+            p0, p1 = endpoints
+            opening_dx = p1[0] - p0[0]
+            opening_dy = p1[1] - p0[1]
+            opening_length = math.hypot(opening_dx, opening_dy)
+            if not math.isfinite(opening_length) or opening_length <= _COORD_TOL:
+                raise ValueError("pier jamb geometry requires a physical opening span")
+            alignment = abs((opening_dx * ax + opening_dy * ay) / opening_length)
+            if not math.isfinite(alignment) or alignment < _ALIGNMENT_COS_TOL:
+                raise ValueError("pier jamb geometry conflicts with host wall axis")
+            jamb_stations = []
+            for point in endpoints:
+                along = station(point)
+                rel_x = point[0] - self.host_start_pt[0]
+                rel_y = point[1] - self.host_start_pt[1]
+                normal = -rel_x * ay + rel_y * ax
+                if (not math.isfinite(normal)
+                        or along < -DEFAULT_SNAP_TOLERANCE_PT
+                        or along > wall_length + DEFAULT_SNAP_TOLERANCE_PT
+                        or abs(normal) > self.host_thickness_pt / 2.0
+                        + DEFAULT_SNAP_TOLERANCE_PT):
+                    raise ValueError("pier jamb geometry conflicts with host wall band or extent")
+                jamb_stations.append(along)
+            if (min(wall_length, max(jamb_stations))
+                    - max(0.0, min(jamb_stations)) <= _COORD_TOL):
+                raise ValueError("pier jamb geometry has no physical host wall overlap")
         left_station = min(
             wall_length, max(0.0, max(station(p) for p in self.left_jamb_endpoints))
         )
