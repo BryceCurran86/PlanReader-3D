@@ -382,6 +382,8 @@ def _claim_from_quantity(
 ]:
     if (
         quantity.family != "ceiling_lining"
+        or type(quantity.unit) is not str
+        or quantity.unit != "m2"
         or quantity.abstained
         or quantity.value is None
         or quantity.status != AuthorityStatus.PROVISIONAL.value
@@ -477,6 +479,10 @@ def _claim_from_quantity(
     scope = quantity.input_entity_ids[0]
     if (
         area is None
+        or type(area.family) is not str
+        or area.family != "room_area"
+        or type(area.unit) is not str
+        or area.unit != "m2"
         or area.abstained
         or area.value is None
         or area.status != AuthorityStatus.FIRM.value

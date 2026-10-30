@@ -150,6 +150,8 @@ def _source_owned_ceiling_quantity_with_page(page_token):
     room_id = "original-room-1"
     area = SimpleNamespace(
         quantity_id="source-room-area-1",
+        family="room_area",
+        unit="m2",
         abstained=False,
         value=13.27,
         status=ceiling.AuthorityStatus.FIRM.value,
@@ -160,6 +162,7 @@ def _source_owned_ceiling_quantity_with_page(page_token):
     )
     quantity = SimpleNamespace(
         family="ceiling_lining",
+        unit="m2",
         abstained=False,
         value=13.27,
         status=ceiling.AuthorityStatus.PROVISIONAL.value,
@@ -1645,4 +1648,146 @@ def test_generated_pdf_exact_ceiling_quantity_id_gates_real_issuer_and_customer(
         assert publish_live_ceiling_area_quantities(first) == ()
         assert project_live_ceiling_area_customer_rows(
             first, workspace_id=1, project_id="generated-invalid-ceiling-id",
+        ) == ()
+
+@pytest.mark.parametrize(
+    "target,field,bad",
+    [
+        ("ceiling", "unit", "m"), ("ceiling", "unit", "count"),
+        ("ceiling", "unit", "m²"), ("ceiling", "unit", b"m2"),
+        ("ceiling", "unit", None), ("area", "unit", "m"),
+        ("area", "unit", "count"), ("area", "unit", "m²"),
+        ("area", "unit", b"m2"), ("area", "unit", None),
+        ("area", "family", "wall_length"),
+        ("area", "family", "ceiling_lining"),
+        ("area", "family", b"room_area"), ("area", "family", None),
+    ],
+)
+def test_ceiling_metric_receipt_requires_native_m2_and_room_area_family(
+    target, field, bad
+):
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    area = source.room_area_quantities[0]
+    changed = quantity if target == "ceiling" else area
+    setattr(changed, field, bad)
+    original_quantity_metadata = dict(quantity.metadata)
+    original_area_metadata = dict(area.metadata)
+    for _ in range(2):
+        assert ceiling._claim_from_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+    assert getattr(changed, field) is bad
+    assert quantity.metadata == original_quantity_metadata
+    assert area.metadata == original_area_metadata
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["native", "ceiling_length", "ceiling_count",
+     "area_length", "area_count", "area_wrong_family"],
+)
+def test_generated_pdf_ceiling_metric_dimensionality_reaches_real_customer_gate(
+    tmp_path, monkeypatch, variant
+):
+    from dataclasses import replace
+    from pb_migration_provider_envelope import ProviderResult
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    calls = []
+    authentic_results = []
+
+    def modified_receipt(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        authentic_results.append(result)
+        eligible = tuple(
+            q for q in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=q, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        if variant == "native":
+            calls.append(variant)
+            return result
+        if variant.startswith("ceiling_"):
+            bad_unit = "m" if variant == "ceiling_length" else "count"
+            changed = replace(authentic, unit=bad_unit)
+            rebuilt = ProviderResult.build(
+                descriptor=result.pipeline.ceiling_result.descriptor,
+                context=kwargs["context"],
+                quantities=tuple(
+                    changed if q is authentic else q
+                    for q in result.ceiling_quantities
+                ),
+                entities=result.pipeline.ceiling_result.entities,
+            )
+            calls.append(variant)
+            return replace(
+                result,
+                pipeline=replace(result.pipeline, ceiling_result=rebuilt),
+            )
+        upstream_id = baseline.canonical_ceilings[0].room_area_quantity_id
+        matches = tuple(
+            q for q in result.room_area_quantities if q.quantity_id == upstream_id
+        )
+        assert len(matches) == 1
+        original_area = matches[0]
+        changed_area = (
+            replace(original_area, family="wall_length")
+            if variant == "area_wrong_family"
+            else replace(
+                original_area,
+                unit="m" if variant == "area_length" else "count",
+            )
+        )
+        calls.append(variant)
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                authoritative_area_quantities=tuple(
+                    changed_area if q is original_area else q
+                    for q in result.room_area_quantities
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", modified_receipt,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert calls == [variant, variant]
+    assert len(authentic_results) == 2
+    assert authentic_results[0] == authentic_results[1]
+    assert path.read_bytes() == original_pdf
+    if variant == "native":
+        assert first == baseline
+        assert len(publish_live_ceiling_area_quantities(first)) == 1
+    else:
+        assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+        assert first.claims == ()
+        assert first.canonical_ceilings == ()
+        assert first.quantity_evidence == ()
+        assert publish_live_ceiling_area_quantities(first) == ()
+        assert project_live_ceiling_area_customer_rows(
+            first, workspace_id=1, project_id="synthetic-ceiling-unit",
         ) == ()
