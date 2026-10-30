@@ -191,12 +191,22 @@ def _source_room_polygon_pdf_pts(
     if type(points) not in (tuple, list) or len(points) < 3:
         return None
     polygon: list[tuple[float, float]] = []
+    # Native source vertices are physical identities. Integers above 2**53
+    # can round to a different float point (2**53 + 1 aliases 2**53).
+    # Reject both integer and floating-point oversized coordinates before
+    # conversion; never publish a silently altered room boundary.
+    max_exact_native_coordinate = 1 << 53
     for point in points:
         if (
             type(point) not in (tuple, list)
             or len(point) != 2
             or type(point[0]) not in (int, float)
             or type(point[1]) not in (int, float)
+        ):
+            return None
+        if (
+            abs(point[0]) > max_exact_native_coordinate
+            or abs(point[1]) > max_exact_native_coordinate
         ):
             return None
         try:
