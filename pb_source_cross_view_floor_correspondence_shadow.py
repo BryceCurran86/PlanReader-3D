@@ -63,6 +63,10 @@ SOURCE_FINISH_CODE_SUMMARY_BUDGET_EXCEEDED = "source_finish_code_summary_budget_
 MAX_SOURCE_FINISH_CODE_BOX_SUMMARY_ENTRIES = 250_000
 SOURCE_WALL_SEGMENT_UNIVERSE_INVALID = "source_wall_segment_universe_invalid"
 SOURCE_REGISTRATION_VOTE_BUDGET_EXCEEDED = "source_registration_vote_budget_exceeded"
+SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED = "source_side_evidence_budget_exceeded"
+# Diagnostic only: bound the COMPLETE per-box × per-sheet native side search.
+# This does not change the 20,000 raster primitive limit or 2.5pt snap.
+MAX_SOURCE_SIDE_EVIDENCE_VISITS = 10_000_000
 SOURCE_NULL_SUPPORT_TRIALS_INVALID = "source_null_support_trials_invalid"
 # Preserve the established 60-trial null comparison; a caller cannot shrink
 # the evidence sample or request unbounded source-shadow scoring work.
@@ -404,6 +408,7 @@ def side_evidence(
     tol: float = COORD_TOL,
     band: tuple[float, float] = WALL_BAND,
     _index: Optional[LineIndex] = None,
+    _visit_budget: Optional[list[int]] = None,
 ) -> dict[str, dict[str, Any]]:
     x0, y0, x1, y1 = (float(v) for v in box)
     # Producer-owned reuse: one sorted-key index per immutable sheet, not a
@@ -422,9 +427,18 @@ def side_evidence(
         ("y1", "H", y1, x0, x1, 1),
     ):
         length = hi - lo
+        near_keys = index.near(orient, coord, tol)
+        if _visit_budget is not None:
+            # Meter every inspected native interval before the merge/sort;
+            # a bounded key universe can still contain many disjoint spans.
+            _visit_budget[0] += len(near_keys) + sum(
+                len(lines[orient][k]) for k in near_keys
+            )
+            if _visit_budget[0] > MAX_SOURCE_SIDE_EVIDENCE_VISITS:
+                raise ValueError(SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED)
         covered = merge_intervals(
             (max(a, lo), min(b, hi))
-            for k in index.near(orient, coord, tol)
+            for k in near_keys
             for a, b in lines[orient][k]
             if min(b, hi) > max(a, lo)
         )
@@ -449,7 +463,14 @@ def side_evidence(
             upper = math.nextafter(upper, math.inf)
         first = bisect.bisect_left(keys, lower)
         last = bisect.bisect_right(keys, upper)
-        for k in keys[first:last]:
+        outward_keys = keys[first:last]
+        if _visit_budget is not None:
+            _visit_budget[0] += len(outward_keys) + sum(
+                len(lines[orient][k]) for k in outward_keys
+            )
+            if _visit_budget[0] > MAX_SOURCE_SIDE_EVIDENCE_VISITS:
+                raise ValueError(SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED)
+        for k in outward_keys:
             signed = (k - coord) * sign
             # A measured floor uses the room-facing wall face; its paired
             # wall face must lie outward, not across the room interior.
@@ -530,10 +551,17 @@ def box_correspondence(
     translation: Sequence[float],
     _support_index: Optional[LineIndex] = None,
     _target_index: Optional[LineIndex] = None,
+    _visit_budget: Optional[list[int]] = None,
 ) -> dict[str, Any]:
     box_target = translate_box(box_support, orientation, translation)
-    sup = side_evidence(box_support, lines_support, _index=_support_index)
-    tgt = side_evidence(box_target, lines_target, _index=_target_index)
+    sup = side_evidence(
+        box_support, lines_support, _index=_support_index,
+        _visit_budget=_visit_budget,
+    )
+    tgt = side_evidence(
+        box_target, lines_target, _index=_target_index,
+        _visit_budget=_visit_budget,
+    )
     sides: dict[str, Any] = {}
     for name in sup:
         tgt_name = name
@@ -1333,21 +1361,42 @@ class SourceCrossViewFloorCorrespondenceProducer:
         # identity substitution and no changed geometric predicate.
         support_side_index = LineIndex(lines_sup)
         target_side_index = LineIndex(lines_tgt)
+        # One cumulative budget across BOTH sheets and EVERY measured box.
+        # Exhaustion discards partial records rather than publishing an
+        # incomplete source correspondence universe as a candidate.
+        side_evidence_visits = [0]
         for box_index, (item, box_sup) in enumerate(checked_boxes):
             identities = native_identities[box_index]
             canonical_floor_id = identities["canonical_floor_id"][0]
             physical_room_id = identities["physical_room_id"][0]
             source_room_face_record_id = identities["source_room_face_record_id"][0]
 
-            corr = box_correspondence(
-                box_sup,
-                lines_support=lines_sup,
-                lines_target=lines_tgt,
-                orientation=top["orientation"],
-                translation=(top["dx"], top["dy"]),
-                _support_index=support_side_index,
-                _target_index=target_side_index,
-            )
+            try:
+                corr = box_correspondence(
+                    box_sup,
+                    lines_support=lines_sup,
+                    lines_target=lines_tgt,
+                    orientation=top["orientation"],
+                    translation=(top["dx"], top["dy"]),
+                    _support_index=support_side_index,
+                    _target_index=target_side_index,
+                    _visit_budget=side_evidence_visits,
+                )
+            except ValueError as exc:
+                if str(exc) != SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED:
+                    raise
+                reasons = [SOURCE_SIDE_EVIDENCE_BUDGET_EXCEEDED]
+                if invalid_mark_universe:
+                    reasons.append(SOURCE_FINISH_MARK_IDENTITY_INVALID)
+                if invalid_box_universe:
+                    reasons.append(SOURCE_MEASURED_FLOOR_BOX_INVALID)
+                if invalid_identity_universe:
+                    reasons.append(SOURCE_PHYSICAL_FLOOR_IDENTITY_INVALID)
+                return SourceCrossViewFloorCorrespondenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=tuple(reasons),
+                    records=(),
+                )
 
             # Complete source counts and all negative predicates are retained
             # without expanding the same marks across overlapping boxes.
