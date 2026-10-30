@@ -482,3 +482,91 @@ def test_distinct_source_ceiling_ids_cannot_publish_one_conflicted_canonical_roo
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="source-neutral-ceiling-conflict"
     ) == ()
+
+
+@pytest.mark.parametrize("container", [tuple, list])
+def test_native_original_ceiling_finish_receipts_keep_source_claim(container):
+    """The source producer's typed material methods and receipt IDs remain valid."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    quantity.metadata["finish_source_methods"] = container(
+        (ceiling.SOURCE_CEILING_FINISH_METHOD, "another_producer_method")
+    )
+    quantity.metadata["finish_evidence_ids"] = container(("finish-1",))
+    quantity.evidence_ids = container(("finish-1", "area-receipt"))
+    before = dict(quantity.metadata)
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first is not None
+    assert first == second
+    assert first[1] == "plasterboard"
+    assert first[5] == ("finish-1", "area-receipt")
+    assert quantity.metadata == before
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("finish_descriptor", None),
+        ("finish_descriptor", 123),
+        ("finish_descriptor", b"plasterboard"),
+        ("finish_descriptor", ""),
+        ("finish_descriptor", " plasterboard"),
+        ("finish_descriptor", "plasterboard "),
+        ("finish_source_methods", ceiling.SOURCE_CEILING_FINISH_METHOD),
+        ("finish_source_methods", b"producer_owned_pdf_text_integrity"),
+        ("finish_source_methods", {ceiling.SOURCE_CEILING_FINISH_METHOD: True}),
+        ("finish_source_methods", ()),
+        ("finish_source_methods", (ceiling.SOURCE_CEILING_FINISH_METHOD, True)),
+        ("finish_source_methods", (" " + ceiling.SOURCE_CEILING_FINISH_METHOD,)),
+        ("finish_source_methods", (
+            ceiling.SOURCE_CEILING_FINISH_METHOD,
+            ceiling.SOURCE_CEILING_FINISH_METHOD,
+        )),
+        ("finish_source_methods", object()),
+        ("finish_evidence_ids", "finish-1"),
+        ("finish_evidence_ids", b"finish-1"),
+        ("finish_evidence_ids", {"finish-1": True}),
+        ("finish_evidence_ids", ()),
+        ("finish_evidence_ids", ("finish-1", True)),
+        ("finish_evidence_ids", (" finish-1",)),
+        ("finish_evidence_ids", ("finish-1", "finish-1")),
+        ("finish_evidence_ids", ("foreign-source-receipt",)),
+        ("finish_evidence_ids", object()),
+        ("source_evidence_ids", "finish-1"),
+        ("source_evidence_ids", b"finish-1"),
+        ("source_evidence_ids", ()),
+        ("source_evidence_ids", ("finish-1", True)),
+        ("source_evidence_ids", (" finish-1",)),
+        ("source_evidence_ids", ("finish-1", "finish-1")),
+        ("source_evidence_ids", object()),
+    ],
+)
+def test_malformed_original_ceiling_finish_receipt_abstains_without_alias(
+    field, bad
+):
+    """Malformed material provenance cannot be stringified into a ceiling claim."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    if field == "source_evidence_ids":
+        quantity.evidence_ids = bad
+    else:
+        quantity.metadata[field] = bad
+    before = dict(quantity.metadata)
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first is None
+    assert second is None
+    assert quantity.metadata == before
+    if field == "source_evidence_ids":
+        assert quantity.evidence_ids is bad
