@@ -717,7 +717,7 @@ def test_spandrel_frozen_candidate_cannot_bypass_producer_span_bounds(authority,
     assert positive.classification is SpandrelSubSillClassification.GEOMETRIC_CANDIDATE
     original = positive.to_dict()
     span_m = span * 0.01764
-    with pytest.raises(ValueError, match="candidate span outside producer bounds"):
+    with pytest.raises(ValueError, match="frozen first-failing geometric gate conflict"):
         replace(
             positive,
             jamb_left=(0.0, 0.0), jamb_right=(span, 0.0),
