@@ -550,7 +550,7 @@ def test_native_graph_verifier_rejects_matching_but_untrusted_source_roots(bad_r
 
 @pytest.mark.parametrize(
     "bad_page",
-    [None, False, True, 7.0, "7", "", 0, -7, 10 ** 1000],
+    [None, False, True, 7.0, "7", "", 0, -7, 2**53 + 1, 10 ** 1000],
 )
 def test_native_graph_verifier_rejects_matching_but_aliased_source_pages(bad_page):
     """Native page identity is a literal positive integer, not numeric equality."""
@@ -559,6 +559,19 @@ def test_native_graph_verifier_rejects_matching_but_aliased_source_pages(bad_pag
     graph["page_1_based"] = bad_page
     assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph) is False
 
+
+
+def test_native_graph_verifier_rejects_oversized_matching_page_roots_without_mutation():
+    """Both equally impossible original-page roots must abstain without side effects."""
+    ring, graph = _ring(7), _graph(7)
+    ring["original_page_1_based"] = 2**53 + 1
+    graph["page_1_based"] = 2**53 + 1
+    before_ring, before_graph = repr(ring), repr(graph)
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(ring, graph) is False
+    assert repr(ring) == before_ring
+    assert repr(graph) == before_graph
+    assert "new_firm_quantities" not in ring
+    assert "customer_floor_finish_area_issued" not in graph
 
 def test_native_graph_verifier_keeps_complete_original_root_positive_and_no_quantity():
     ring, graph = _ring(7), _graph(7)
