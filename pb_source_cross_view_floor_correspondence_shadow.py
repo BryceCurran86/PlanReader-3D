@@ -350,6 +350,13 @@ def rank_registrations(
             if not pool:
                 continue
             best = pool[0]
+            # The refined winner is NOT the only locally refined source
+            # hypothesis. A distinct rival may improve from weak shift-vote
+            # support to near-equal wall overlap in the same refinement
+            # window. Retain every evaluated refinement when testing unique
+            # translation ownership; comparing only the unrefined pool can
+            # falsely certify a floor/finish mark as uniquely registered.
+            evaluated = list(pool)
             for s, h, v, dx, dy in pool[:3]:
                 for ddx in (-0.08, -0.04, 0.0, 0.04, 0.08):
                     for ddy in (-0.08, -0.04, 0.0, 0.04, 0.08):
@@ -357,9 +364,14 @@ def rank_registrations(
                             moved, index, dx + ddx, dy + ddy, tol,
                             _visit_budget=actual_key_visits,
                         )
+                        candidate = (s2, h2, v2, dx + ddx, dy + ddy)
+                        evaluated.append(candidate)
                         if s2 > best[0] + 1e-9:
-                            best = (s2, h2, v2, dx + ddx, dy + ddy)
-            second = next((p for p in pool if abs(p[3] - best[3]) > 1.0 or abs(p[4] - best[4]) > 1.0), None)
+                            best = candidate
+            second = next((
+                p for p in sorted(evaluated, key=lambda r: (-r[0], r[3], r[4]))
+                if abs(p[3] - best[3]) > 1.0 or abs(p[4] - best[4]) > 1.0
+            ), None)
             rows.append({
                 "orientation": name,
                 "scale": scale,
