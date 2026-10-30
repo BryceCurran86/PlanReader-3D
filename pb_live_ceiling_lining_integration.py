@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 import re
 from pathlib import Path
 from typing import Optional, Sequence
@@ -148,6 +149,19 @@ def _norm(value: object) -> str:
     return _clean(value).lower().replace("-", "_").replace(" ", "_")
 
 
+def _source_positive_area_m2(value: object) -> Optional[float]:
+    """Validate producer-owned native metric area without coercing source aliases."""
+    if type(value) not in (int, float):
+        return None
+    try:
+        area = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(area) or area <= 0.0:
+        return None
+    return area
+
+
 def _tag_for_descriptor(descriptor: str) -> str:
     """Return a generic material-family tag derived only from source finish text."""
     text = _norm(descriptor)
@@ -216,6 +230,10 @@ def _claim_from_quantity(
     ):
         return None
 
+    metric_value = _source_positive_area_m2(quantity.value)
+    if metric_value is None:
+        return None
+
     meta = quantity.metadata if isinstance(quantity.metadata, dict) else {}
     if (
         meta.get("shadow_only") is not True
@@ -269,7 +287,7 @@ def _claim_from_quantity(
             MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
         }
         or tuple(area.input_entity_ids) != (scope,)
-        or float(area.value) != float(quantity.value)
+        or _source_positive_area_m2(area.value) != metric_value
         or area.blocking_reasons
     ):
         return None
@@ -312,7 +330,7 @@ def _claim_from_quantity(
     return (
         _tag_for_descriptor(finish_descriptor),
         finish_descriptor,
-        float(quantity.value),
+        metric_value,
         (quantity.quantity_id,),
         tuple(quantity.input_entity_ids),
         tuple(quantity.evidence_ids),
