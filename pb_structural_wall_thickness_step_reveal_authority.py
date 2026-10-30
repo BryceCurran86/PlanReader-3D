@@ -149,6 +149,30 @@ class SteppedWallApertureRecord:
                                     expected_reveal / 2.0,
                                     rel_tol=1e-12, abs_tol=1e-9)):
             raise ValueError("reveal numeric evidence conflicts with wall geometry")
+        # Re-evaluate the producer's FIRST failing gate from the frozen
+        # inputs. A caller can otherwise forge a geometric candidate or
+        # mislabel an abstention via dataclasses.replace while preserving
+        # coherent numeric axes and a matching stable identity.
+        # Source absence takes precedence over all geometric gates.
+        if (self.scale_ratio is None or self.datum_offset_pt is None
+                or self.datum_alignment is None):
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE)
+        elif self.clear_span_pt < MIN_CLEAR_SPAN_PT or self.clear_span_pt > MAX_CLEAR_SPAN_PT:
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN)
+        elif abs(self.datum_offset_pt) > MAX_ALLOWABLE_DATUM_OFFSET_PT:
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM)
+        elif self.reveal_depth_pt > MAX_THICKNESS_STEP_PT:
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY)
+        else:
+            expected_classification = (
+                SteppedWallApertureClassification.GEOMETRIC_CANDIDATE)
+        if self.classification is not expected_classification:
+            raise ValueError("reveal frozen first-failing geometric gate conflict")
+
         if self.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE:
             if (any(value is None for value in (
                     self.clear_span_m, self.left_wall_thickness_mm,
