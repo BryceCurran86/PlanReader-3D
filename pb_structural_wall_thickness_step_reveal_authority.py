@@ -156,6 +156,30 @@ class SteppedWallApertureRecord:
                     or self.scale_ratio is None or self.datum_offset_pt is None
                     or self.datum_alignment is None):
                 raise ValueError("reveal numeric evidence lacks candidate inputs")
+            # Public frozen records may be directly replaced. Candidate
+            # metrics must still be consistent with their own unverified
+            # scale and source-neutral geometry; this grants no FIRM status.
+            expected_metrics = (
+                self.clear_span_pt * self.scale_ratio,
+                self.left_wall_thickness_pt * self.scale_ratio * 1000.0,
+                self.right_wall_thickness_pt * self.scale_ratio * 1000.0,
+                self.reveal_depth_pt * self.scale_ratio * 1000.0,
+            )
+            actual_metrics = (
+                self.clear_span_m, self.left_wall_thickness_mm,
+                self.right_wall_thickness_mm, self.reveal_depth_mm,
+            )
+            if (any(not math.isfinite(value) for value in expected_metrics)
+                    or any(expected == 0 and source > 0
+                           for expected, source in zip(
+                               expected_metrics, (
+                                   self.clear_span_pt, self.left_wall_thickness_pt,
+                                   self.right_wall_thickness_pt, self.reveal_depth_pt,
+                               )))
+                    or any(not math.isclose(actual, expected,
+                                            rel_tol=1e-12, abs_tol=1e-12)
+                           for actual, expected in zip(actual_metrics, expected_metrics))):
+                raise ValueError("reveal numeric evidence conflicts with metric axes")
 
     def to_dict(self) -> Mapping[str, Any]:
         return {

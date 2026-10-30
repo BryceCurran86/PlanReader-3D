@@ -491,3 +491,42 @@ def test_public_reveal_numeric_record_replacements_fail_closed(authority):
     assert candidate.shadow_only and not candidate.takeoff_eligible
     assert abstained.shadow_only and not abstained.commercial_projection_allowed
     assert authority.evaluate_stepped_wall_aperture(**inputs()) == candidate
+
+
+@pytest.mark.parametrize("jamb_b", [
+    (200.0, 200.0),
+    (160.0, 280.0),  # rotated 3-4-5 span, same 100pt length
+])
+def test_public_reveal_candidate_metric_axes_cannot_be_forged(authority, jamb_b):
+    """Direct replacement cannot invent m/mm inconsistent with candidate pt axes."""
+    from dataclasses import replace
+
+    kw = inputs(jamb_datum_b=jamb_b)
+    candidate = authority.evaluate_stepped_wall_aperture(**kw)
+    abstained = authority.evaluate_stepped_wall_aperture(
+        **inputs(jamb_datum_b=jamb_b, scale_ratio=None),
+    )
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert replace(candidate) == candidate
+    assert replace(abstained) == abstained
+    assert_null_metrics(abstained)
+    assert_shadow(candidate)
+    assert_shadow(abstained)
+    for changes in (
+        {"clear_span_m": candidate.clear_span_m + 0.1},
+        {"left_wall_thickness_mm": candidate.left_wall_thickness_mm + 0.1},
+        {"right_wall_thickness_mm": candidate.right_wall_thickness_mm + 0.1},
+        {"reveal_depth_mm": candidate.reveal_depth_mm + 0.1},
+        {"scale_ratio": candidate.scale_ratio * 2.0},
+        {"scale_ratio": 1e308},
+    ):
+        with pytest.raises(ValueError, match="metric axes"):
+            replace(candidate, **changes)
+    zero_reveal = authority.evaluate_stepped_wall_aperture(
+        **inputs(jamb_datum_b=jamb_b,
+                 left_thickness_pt=10.0, right_thickness_pt=10.0),
+    )
+    assert zero_reveal.reveal_depth_pt == 0.0
+    assert zero_reveal.reveal_depth_mm == 0.0
+    assert replace(zero_reveal) == zero_reveal
+    assert authority.evaluate_stepped_wall_aperture(**kw) == candidate
