@@ -1121,3 +1121,112 @@ def test_original_ceiling_room_area_inventory_id_cannot_alias_source_receipt(for
         ) is None
     assert quantity.metadata == original_meta
     assert area.quantity_id == forged
+
+
+@pytest.mark.parametrize(
+    "polygon",
+    [
+        ((0, 0), (4, 0), (4, 2), (0, 2)),
+        ((0, 2), (4, 2), (4, 0), (0, 0)),
+        ((1000000, -1000000), (1000004, -1000000),
+         (1000004, -999998), (1000000, -999998)),
+        ((0, 0), (4, 0), (4, 2), (0, 2), (0, 0)),
+    ],
+)
+def test_original_ceiling_source_room_polygon_preserves_finite_native_vertices(polygon):
+    """Orientation, translation and an explicit closing vertex do not change authority."""
+    original = tuple(polygon)
+    first = ceiling._source_room_polygon_pdf_pts(polygon)
+    second = ceiling._source_room_polygon_pdf_pts(polygon)
+    assert first == second
+    assert first == tuple((float(x), float(y)) for x, y in original)
+    assert polygon == original
+
+
+@pytest.mark.parametrize(
+    "bad_polygon",
+    [
+        pytest.param(((0, 0), (1, 1), (2, 2)), id="collinear-ring"),
+        pytest.param(((0, 0), (0, 0), (0, 0)), id="collapsed-ring"),
+        pytest.param(((0, 0), (1, 0), (float("nan"), 1)), id="nan-coordinate"),
+        pytest.param(((0, 0), (1, 0), (float("inf"), 1)), id="inf-coordinate"),
+        pytest.param(((0, 0), (1, 0), (float("-inf"), 1)), id="negative-inf"),
+        pytest.param(((0, 0), (1, 0), (True, 1)), id="boolean-alias"),
+        pytest.param(((0, 0), (1, 0), ("1", 1)), id="text-alias"),
+        pytest.param(((0, 0), (1, 0), (object(), 1)), id="object-alias"),
+        pytest.param(((0, 0), (1, 0), (10**1000, 1)), id="integer-overflow"),
+        pytest.param(((0, 0), (1e308, 0), (0, 1e308)), id="cross-product-overflow"),
+        pytest.param(((0, 0), (1, 0), (1, 1, 1)), id="malformed-point"),
+    ],
+)
+def test_invalid_original_room_polygon_abstains_through_real_ceiling_issuer(
+    tmp_path, monkeypatch, bad_polygon
+):
+    """A source-owned metric cannot turn a malformed room face into customer m².
+
+    The real generated-PDF producer, ceiling quantity, room ID, finish, area and
+    source context are unchanged. Only its room-index polygon receipt is
+    replaced after production; this is not original-plan source acceptance.
+    """
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+    assert baseline.canonical_ceilings[0].geometry_complete is True
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    authentic_results = []
+
+    def source_with_invalid_room_ring(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        authentic_results.append(result)
+        index = result.pipeline.room_area_bridge.room_index
+        assert index is not None
+        room_id = baseline.canonical_ceilings[0].room_entity_id
+        assert index.room(room_id) is not None
+        # Keep the real source-owned room and all quantity evidence immutable.
+        # The wrapper changes only the polygon returned at canonicalization.
+        def room_lookup(candidate_id):
+            room = index.room(candidate_id)
+            if candidate_id == room_id and room is not None:
+                return SimpleNamespace(polygon_pdf_pts=bad_polygon)
+            return room
+
+        altered_index = SimpleNamespace(index_id=index.index_id, room=room_lookup)
+        altered_bridge = replace(
+            result.pipeline.room_area_bridge, room_index=altered_index,
+        )
+        return replace(
+            result,
+            pipeline=replace(result.pipeline, room_area_bridge=altered_bridge),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        source_with_invalid_room_ring,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(authentic_results) == 2
+    assert authentic_results[0] == authentic_results[1]
+    assert path.read_bytes() == original_pdf
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-invalid-source-ring",
+    ) == ()
