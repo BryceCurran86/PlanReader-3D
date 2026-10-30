@@ -819,3 +819,109 @@ def test_missing_original_ceiling_room_index_never_emits_unbacked_live_claim(
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-missing-ceiling-room",
     ) == ()
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+def test_missing_original_revision_snapshot_abstains_entire_ceiling_universe(
+    tmp_path, monkeypatch, missing_first
+):
+    """A missing selected source snapshot cannot leave a sibling ceiling live.
+
+    Uses a generated native PDF and a synthetic missing-snapshot sibling.
+    This is NOT an original Maryborough source-positive measurement.
+    """
+    from types import SimpleNamespace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf_bytes = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+
+    real_viewports = ceiling.authoritative_floor_plan_viewports
+    real_ingest = ceiling.SourceVisibilityProducer.ingest_native_pdf_bytes
+    real_snapshot = ceiling.SourceVisibilityProducer.published_snapshot_for_revision
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    state = {"ingested": False, "snapshot_calls": 0}
+    missing_receipts = []
+    successful_source_runs = []
+    observed_source_viewports = []
+
+    def two_original_viewports(page, *, page_number):
+        originals = tuple(real_viewports(page, page_number=page_number))
+        assert originals
+        good = originals[0]
+        missing = SimpleNamespace(
+            view_id=good.view_id + "-missing-published-snapshot",
+            bounding_box=good.bounding_box,
+            confidence=good.confidence,
+        )
+        observed_source_viewports.append(good)
+        return (missing, good) if missing_first else (good, missing)
+
+    def record_ingest(self, *args, **kwargs):
+        state["ingested"] = False
+        state["snapshot_calls"] = 0
+        published = real_ingest(self, *args, **kwargs)
+        state["ingested"] = True
+        return published
+
+    def one_missing_snapshot(self, revision_id):
+        if state["ingested"]:
+            state["snapshot_calls"] += 1
+            target_call = 1 if missing_first else 2
+            if state["snapshot_calls"] == target_call:
+                missing_receipts.append(revision_id)
+                return None
+        return real_snapshot(self, revision_id)
+
+    def capture_real_source_run(*args, **kwargs):
+        successful_source_runs.append(kwargs["viewport"].viewport_id)
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", two_original_viewports,
+    )
+    monkeypatch.setattr(
+        ceiling.SourceVisibilityProducer, "ingest_native_pdf_bytes", record_ingest,
+    )
+    monkeypatch.setattr(
+        ceiling.SourceVisibilityProducer,
+        "published_snapshot_for_revision",
+        one_missing_snapshot,
+    )
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        capture_real_source_run,
+    )
+
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(missing_receipts) == 2
+    assert missing_receipts[0] == missing_receipts[1]
+    assert len(observed_source_viewports) == 2
+    assert observed_source_viewports[0] == observed_source_viewports[1]
+    assert len(successful_source_runs) == (0 if missing_first else 2)
+    assert path.read_bytes() == original_pdf_bytes
+
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-missing-original-snapshot"
+    ) == ()
