@@ -1379,3 +1379,146 @@ def test_generated_pdf_documented_axis_receipts_gate_real_ceiling_customer(
         assert project_live_ceiling_area_customer_rows(
             first, workspace_id=1, project_id="generated-invalid-axes",
         ) == ()
+
+
+
+@pytest.mark.parametrize(
+    "forged_id",
+    [
+        " source-ceiling-1",
+        "source-ceiling-1 ",
+        " ",
+        "",
+        True,
+        123,
+        b"source-ceiling-1",
+        None,
+        object(),
+    ],
+)
+def test_source_ceiling_quantity_identity_cannot_be_repaired_before_claim(forged_id):
+    """The source's ceiling quantity ID is as strict as its upstream area ID."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    quantity.quantity_id = forged_id
+    before = dict(quantity.metadata)
+    for _ in range(2):
+        assert ceiling._claim_from_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+        assert not ceiling._exact_source_ceiling_quantity_id(forged_id)
+    assert quantity.quantity_id is forged_id
+    assert quantity.metadata == before
+
+
+def test_exact_native_source_ceiling_quantity_id_preserves_provenance_and_replay():
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    before = dict(quantity.metadata)
+    assert ceiling._exact_source_ceiling_quantity_id(quantity.quantity_id)
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first is not None
+    assert first == second
+    assert first[3] == ("source-ceiling-1",)
+    assert quantity.metadata == before
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["exact", "leading", "trailing", "bytes", "boolean", "integer", "subclass"],
+)
+def test_generated_pdf_exact_ceiling_quantity_id_gates_real_issuer_and_customer(
+    tmp_path, monkeypatch, variant
+):
+    """Only a source-owned ceiling ID changes; real producer and source stay intact.
+
+    These are public generated-PDF regressions, NOT original-source proof.
+    """
+    from dataclasses import replace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    class SourceIdSubclass(str):
+        pass
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    source_bytes = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    authentic_results = []
+
+    def with_modified_ceiling_id(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        authentic_results.append(result)
+        eligible = tuple(
+            q for q in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=q, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        original_id = authentic.quantity_id
+        altered_id = {
+            "exact": original_id,
+            "leading": " " + original_id,
+            "trailing": original_id + " ",
+            "bytes": original_id.encode(),
+            "boolean": True,
+            "integer": 123,
+            "subclass": SourceIdSubclass(original_id),
+        }[variant]
+        altered = replace(authentic, quantity_id=altered_id)
+        quantities = tuple(
+            altered if item is authentic else item
+            for item in result.ceiling_quantities
+        )
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                ceiling_result=replace(
+                    result.pipeline.ceiling_result, quantities=quantities,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        with_modified_ceiling_id,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(authentic_results) == 2
+    assert authentic_results[0] == authentic_results[1]
+    assert path.read_bytes() == source_bytes
+    if variant == "exact":
+        assert first == baseline
+        assert len(publish_live_ceiling_area_quantities(first)) == 1
+    else:
+        assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+        assert first.claims == ()
+        assert first.canonical_ceilings == ()
+        assert first.quantity_evidence == ()
+        assert publish_live_ceiling_area_quantities(first) == ()
+        assert project_live_ceiling_area_customer_rows(
+            first, workspace_id=1, project_id="generated-invalid-ceiling-id",
+        ) == ()
