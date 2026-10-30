@@ -330,9 +330,16 @@ def test_large_native_perimeter_id_membership_is_exact_and_fail_closed():
     # checked without choosing an edge, and unhashable foreign IDs ABSTAIN.
     # This is NOT an original drawing, source-positive or commercial test.
     count = 512
+    # The virtual closing connector must not cross the native perimeter.
+    # The former diagonal staircase crossed its own connector, correctly
+    # failing the new intersection veto rather than testing ID membership.
+    # Keep 1,024 distinct edges but place the chain above its connector;
+    # its last edge descends to the sole second doorway endpoint.
     points = [(0, 0)]
+    height = count * 4
     for i in range(count):
-        points.extend(((i + 1, i), (i + 1, i + 1)))
+        points.extend(((i + 1, height),
+                       (i + 1, height + 1 if i < count - 1 else height - 1)))
     ids = tuple(f"d{i}i0" for i in range(2 * count))
     edges = tuple(
         {"source_id": ident,
