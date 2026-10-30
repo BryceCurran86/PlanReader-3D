@@ -402,3 +402,46 @@ def test_stepped_wall_context_rejects_string_subclass(authority):
         authority.evaluate_stepped_wall_aperture(
             **inputs(context_label=Impostor("STEPPED_WALL_OPENING"))
         )
+
+
+def test_public_reveal_record_replacement_cannot_mint_source_or_commercial_authority(
+    authority: StructuralWallThicknessStepRevealAuthority,
+):
+    from dataclasses import replace
+
+    candidate = authority.evaluate_stepped_wall_aperture(**inputs())
+    abstained = authority.evaluate_stepped_wall_aperture(**inputs(scale_ratio=None))
+    assert candidate.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert abstained.classification is SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+    assert abstained.status is EvidenceResolutionStatus.ABSTAINED
+    assert replace(candidate) == candidate and replace(abstained) == abstained
+    for changes in (
+        {"classification": SteppedWallApertureClassification.STEPPED_WALL_APERTURE_CONFIRMED},
+        {"status": EvidenceResolutionStatus.CORROBORATED},
+        {"commercial_projection_allowed": True},
+        {"takeoff_eligible": True},
+        {"shadow_only": False},
+    ):
+        with pytest.raises(ValueError, match="source-neutral reveal"):
+            replace(candidate, **changes)
+    for changes in (
+        {"first_remaining_gate": "none"},
+        {"first_remaining_gate": "source_verified_by_caller"},
+        {"status": EvidenceResolutionStatus.ABSTAINED},
+    ):
+        with pytest.raises(ValueError, match="classification and source gate conflict"):
+            replace(candidate, **changes)
+    for changes in (
+        {"first_remaining_gate": "none"},
+        {"status": EvidenceResolutionStatus.CANDIDATE},
+        {"clear_span_m": 1.764},
+        {"reveal_depth_mm": 149.94},
+    ):
+        with pytest.raises(ValueError, match="classification and source gate conflict"):
+            replace(abstained, **changes)
+    for record in (candidate, abstained):
+        assert record.shadow_only is True
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+    assert authority.evaluate_stepped_wall_aperture(**inputs()) == candidate

@@ -66,6 +66,43 @@ class SteppedWallApertureRecord:
     takeoff_eligible: bool = False
     shadow_only: bool = True
 
+    def __post_init__(self) -> None:
+        # Source-neutral records can be constructed or dataclasses.replace'd
+        # without invoking the producer; keep the same authority boundary.
+        abstained_gates = {
+            SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE:
+                "original_source_scale_or_datum_unverified",
+            SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM:
+                "datum_faces_divergent",
+            SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY:
+                "thickness_step_excessive",
+            SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN:
+                "clear_span_out_of_bounds",
+        }
+        if (type(self.classification) is not SteppedWallApertureClassification
+                or type(self.status) is not EvidenceResolutionStatus
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral reveal cannot grant commercial authority")
+        if self.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE:
+            valid = (self.status is EvidenceResolutionStatus.CANDIDATE
+                     and self.first_remaining_gate
+                     == "original_source_host_scale_and_reveal_unverified")
+        else:
+            valid = (self.classification in abstained_gates
+                     and self.status is EvidenceResolutionStatus.ABSTAINED
+                     and self.first_remaining_gate == abstained_gates.get(self.classification)
+                     and all(value is None for value in (
+                         self.clear_span_m, self.left_wall_thickness_mm,
+                         self.right_wall_thickness_mm, self.reveal_depth_mm,
+                     )))
+        if not valid:
+            raise ValueError("source-neutral reveal classification and source gate conflict")
+
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
