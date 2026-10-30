@@ -747,9 +747,24 @@ def collect_live_ceiling_lining_claims(
             ):
                 if segmented.bounding_box is None:
                     continue
-                viewport_id = _clean(segmented.view_id)
-                if not viewport_id:
-                    continue
+                # F.07 viewport IDs are original source identities, not
+                # display strings. Never stringify, trim or silently skip an
+                # authoritative sibling: that would publish an incomplete
+                # selected viewport universe from earlier valid siblings.
+                viewport_id = segmented.view_id
+                if (
+                    type(viewport_id) is not str
+                    or not viewport_id
+                    or viewport_id != viewport_id.strip()
+                ):
+                    return LiveCeilingLiningResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        reason_codes=(
+                            LIVE_CEILING_LINING_UNAVAILABLE,
+                            LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+                        ),
+                        claims=(),
+                    )
                 bbox = tuple(float(value) for value in segmented.bounding_box)
                 viewport = ViewportEvidence(
                     viewport_id=viewport_id,
