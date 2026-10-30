@@ -2136,3 +2136,157 @@ def test_generated_original_f07_invalid_bbox_revokes_whole_ceiling_run(
         first, workspace_id=1, project_id="synthetic-f07-bbox",
     ) == ()
     assert path.read_bytes() == original_pdf
+
+
+def _original_upstream_scope_fixture():
+    from types import SimpleNamespace
+    metadata = {
+        "source_sha256": "a" * 64,
+        "revision_id": "source-revision",
+        "viewport_id": "source-viewport",
+        "page_no": 1,
+    }
+    return SimpleNamespace(metadata=metadata), metadata
+
+
+@pytest.mark.parametrize("page", [1, "1"])
+def test_exact_native_original_upstream_area_scope_preserved(page):
+    area, metadata = _original_upstream_scope_fixture()
+    metadata["page_no"] = page
+    before = dict(metadata)
+    scope = dict(
+        source_sha256="a" * 64, revision_id="source-revision",
+        viewport_id="source-viewport", page_no=1,
+    )
+    assert ceiling._upstream_room_area_scope(area, **scope) == "exact"
+    assert ceiling._upstream_room_area_scope(area, **scope) == "exact"
+    assert area.metadata == before
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("source_sha256", " " + "a" * 64),
+        ("source_sha256", "a" * 64 + " "),
+        ("revision_id", " source-revision"),
+        ("revision_id", "source-revision "),
+        ("viewport_id", " source-viewport"),
+        ("viewport_id", "source-viewport "),
+        ("page_no", True),
+        ("page_no", 1.0),
+        ("page_no", " 1"),
+        ("page_no", "1 "),
+    ],
+)
+def test_upstream_original_room_area_scope_alias_is_negative_evidence(field, bad):
+    area, metadata = _original_upstream_scope_fixture()
+    metadata[field] = bad
+    before = dict(metadata)
+    scope = dict(
+        source_sha256="a" * 64, revision_id="source-revision",
+        viewport_id="source-viewport", page_no=1,
+    )
+    assert ceiling._upstream_room_area_scope(area, **scope) == "alias"
+    assert ceiling._upstream_room_area_scope(area, **scope) == "alias"
+    assert area.metadata == before
+
+
+def test_foreign_original_room_area_scope_is_not_aliased_into_this_viewport():
+    area, metadata = _original_upstream_scope_fixture()
+    metadata["source_sha256"] = "b" * 64
+    assert ceiling._upstream_room_area_scope(
+        area, source_sha256="a" * 64, revision_id="source-revision",
+        viewport_id="source-viewport", page_no=1,
+    ) == "foreign"
+
+
+@pytest.mark.parametrize(
+    "field,alias",
+    [
+        ("source_sha256", "padded"), ("revision_id", "padded"),
+        ("viewport_id", "padded"), ("page_no", "bool"),
+        ("page_no", "float"), ("page_no", "padded"),
+    ],
+)
+def test_original_upstream_scope_alias_revokes_real_ceiling_issuer_and_customer(
+    tmp_path, monkeypatch, field, alias
+):
+    """Generated source-only PDF, never original source-positive FIRM proof."""
+    from types import SimpleNamespace
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    original_run = ceiling.run_source_owned_ceiling_lining_shadow
+    contexts = []
+
+    def capture_context(*args, **kwargs):
+        contexts.append(kwargs["context"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(ceiling, "run_source_owned_ceiling_lining_shadow", capture_context)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert contexts
+    context = contexts[0]
+    metadata = {
+        "source_sha256": context.source_sha256,
+        "revision_id": context.current_revision_id,
+        "viewport_id": context.owned_viewport_ids[0],
+        "page_no": context.owned_page_numbers[0],
+    }
+    native = SimpleNamespace(metadata=dict(metadata))
+    forwarded = []
+
+    def capture_upstream_scope(*args, **kwargs):
+        forwarded.append(kwargs.get("authoritative_area_quantities"))
+        # Never allow the injected metadata-only fixture to mint FIRM area.
+        safe_kwargs = dict(kwargs)
+        safe_kwargs["authoritative_area_quantities"] = None
+        return original_run(*args, **safe_kwargs)
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", capture_upstream_scope
+    )
+    positive = ceiling.collect_live_ceiling_lining_claims(
+        path, pages=(0,), authoritative_room_area_quantities=(native,)
+    )
+    assert len(positive.claims) == len(baseline.claims)
+    assert forwarded == [(native,)]
+    assert native.metadata == metadata
+
+    corrupted = dict(metadata)
+    if alias == "padded":
+        corrupted[field] = " " + str(corrupted[field])
+    elif alias == "bool":
+        corrupted[field] = True
+    elif alias == "float":
+        corrupted[field] = float(corrupted[field])
+    rival = SimpleNamespace(metadata=corrupted)
+    before = dict(rival.metadata)
+    forwarded.clear()
+    first = ceiling.collect_live_ceiling_lining_claims(
+        path, pages=(0,), authoritative_room_area_quantities=(native, rival)
+    )
+    second = ceiling.collect_live_ceiling_lining_claims(
+        path, pages=(0,), authoritative_room_area_quantities=(rival, native)
+    )
+    assert first == second
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert ceiling.LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS in first.reason_codes
+    assert forwarded == []
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="source-neutral-scope-alias"
+    ) == ()
+    assert native.metadata == metadata
+    assert rival.metadata == before
+    assert path.read_bytes() == original_pdf
