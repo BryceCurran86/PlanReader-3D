@@ -156,8 +156,13 @@ class StructuralWallThicknessStepRevealAuthority:
             raise ValueError("scale_ratio must be positive and finite")
         if datum_alignment is not None and not isinstance(datum_alignment, RevealAlignmentDatum):
             raise ValueError("datum_alignment must be a typed datum")
-        if not isinstance(context_label, str) or not context_label.strip():
-            raise ValueError("context_label must be a nonblank string")
+        # Context is a source-lineage identity in stable_contract_id, not a
+        # display label. Reject padding/control characters rather than
+        # manufacturing a second shadow hypothesis for the same context.
+        if (type(context_label) is not str or not context_label
+                or context_label != context_label.strip()
+                or not context_label.isprintable()):
+            raise ValueError("context_label must be an exact printable source identity")
 
         a = (float(jamb_datum_a[0]), float(jamb_datum_a[1]))
         b = (float(jamb_datum_b[0]), float(jamb_datum_b[1]))
