@@ -195,22 +195,26 @@ def test_new_source_positive_targets_have_fixed_base_tree_and_exact_two_paths():
     guard = next(s for s in _load()["jobs"]["original"]["steps"]
                  if s["name"].startswith("Validate immutable"))
     script = guard["run"]
-    approved_base = "65dc4684fbcf1ce36c704457d896fc7c12a651de"
+    # Each immutable source head is pinned to its own independently reviewed
+    # base tree. RCP includes the already-merged #4136 replay infrastructure;
+    # grid deliberately retains its earlier approved base.
     expected = {
         "grid": (
+            "65dc4684fbcf1ce36c704457d896fc7c12a651de",
             "pb_gpt2_native_grid_row_membership_shadow.py|"
             "tests/test_gpt2_native_grid_row_membership_shadow.py",
             "test_private_original_d02_grid_membership_from_published_source_if_provisioned",
             "tests/test_gpt2_native_grid_row_membership_shadow.py",
         ),
         "rcp_ink": (
+            "837befe133e89db7d5cb5878bff141e1e6d08923",
             "pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
             "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
             "test_real_original_page9_native_source_rivals_if_available",
             "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py",
         ),
     }
-    for target, (paths, original_test, test_path) in expected.items():
+    for target, (approved_base, paths, original_test, test_path) in expected.items():
         matches = re.findall(
             r"(?m)^  " + re.escape(target) +
             r"\)\n(?P<body>.*?)(?=^    ;;)",
