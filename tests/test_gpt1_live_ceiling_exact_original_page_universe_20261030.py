@@ -1937,7 +1937,7 @@ class _SourceF07ViewportStringSubclass(str):
 
 @pytest.mark.parametrize(
     "variant",
-    ["blank", "none", "numeric", "padded", "string_subclass", "spoofed"],
+    ["blank", "none", "missing", "numeric", "padded", "string_subclass", "spoofed"],
 )
 @pytest.mark.parametrize("sibling_position", ["first", "last"])
 def test_generated_original_f07_malformed_sibling_revokes_complete_ceiling_run(
@@ -1974,6 +1974,7 @@ def test_generated_original_f07_malformed_sibling_revokes_complete_ceiling_run(
         bad_id = {
             "blank": "",
             "none": None,
+            "missing": None,
             "numeric": 7,
             "padded": f" {valid_id} ",
             "string_subclass": _SourceF07ViewportStringSubclass(valid_id),
@@ -1984,6 +1985,8 @@ def test_generated_original_f07_malformed_sibling_revokes_complete_ceiling_run(
             bounding_box=authentic.bounding_box,
             confidence=authentic.confidence,
         )
+        if variant == "missing":
+            del sibling.view_id
         seen.append((page_number, sibling_position))
         return (sibling, *native) if sibling_position == "first" else (*native, sibling)
 
