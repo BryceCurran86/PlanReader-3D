@@ -224,6 +224,62 @@ def test_original_ceiling_quantity_page_aliases_abstain_without_crashing(bad_pag
     assert quantity.metadata == original_meta
 
 
+
+@pytest.mark.parametrize("which", ["source_ceiling", "upstream_room"])
+@pytest.mark.parametrize(
+    "bad_metric",
+    [
+        True, False, "13.27", b"13.27", None, 0, -1.0,
+        float("nan"), float("inf"), float("-inf"), 10**1000, object(),
+    ],
+)
+def test_source_owned_ceiling_metric_alias_or_overflow_abstains_before_canonical(
+    which, bad_metric
+):
+    """No invalid original m² can be coerced into a provisional ceiling claim."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    original_quantity_meta = dict(quantity.metadata)
+    original_room_meta = dict(source.room_area_quantities[0].metadata)
+    target = (
+        quantity if which == "source_ceiling"
+        else source.room_area_quantities[0]
+    )
+    target.value = bad_metric
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first is None
+    assert second is None
+    assert target.value is bad_metric
+    assert quantity.metadata == original_quantity_meta
+    assert source.room_area_quantities[0].metadata == original_room_meta
+
+
+@pytest.mark.parametrize("valid_metric", [13, 13.27, 0.004])
+def test_source_owned_native_positive_ceiling_metric_keeps_original_area(valid_metric):
+    """Existing valid native metric inputs keep their quantity and source axes."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    quantity.value = valid_metric
+    source.room_area_quantities[0].value = valid_metric
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first == second
+    assert first is not None
+    assert first[2] == float(valid_metric)
+    assert first[-1] == ("axis-length", "axis-width")
+
+
 def _generated_source_owned_ceiling_pdf(tmp_path):
     """Public-safe framed native PDF that exercises the real ceiling producer."""
     from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
