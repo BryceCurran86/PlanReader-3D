@@ -56,19 +56,19 @@ jobs:
               focused_test=tests/test_raster_opening_cached_source_integrity.py
               ;;
             vertical)
-              # Only the two reviewed source/test paths differ from the
+              # Exactly three reviewed source/test/architecture paths differ from the
               # exact trusted main base; no secret workflow or PDF changes.
-              approved_base=198dc337c06968f97ab1b6e66d55ede8a7c5a9ed
-              approved_head=d43de44b05b70944588c611b02da44a69b4aa533
-              expected_paths='pb_gptmax_raster_tile_seam_shadow.py|tests/test_gptmax_raster_tile_seam_source.py'
+              approved_base=5a3649001830efd119c28c9a40db795ce815f4c2
+              approved_head=f7e2872a56d920f28043af29474f82dfd5a401b4
+              expected_paths='docs/engineering/gptmax_vertical_third_root_ownership_20261029.md|pb_gptmax_raster_tile_seam_shadow.py|tests/test_gptmax_raster_tile_seam_source.py'
               focused_test=tests/test_gptmax_raster_tile_seam_source.py
               ;;
             horizontal)
-              # Source-only horizontal p5 elevation rail: reviewed two-file
+              # Source-only horizontal p5 elevation rail: reviewed three-file
               # subpixel source-placement-gap veto, never a kind/quantity grant.
-              approved_base=96d6c737167c8dcc94e006488c86f47bf573274a
-              approved_head=8dd491793d1624c8eb2aa6fbfd26d20b39f9f9e0
-              expected_paths='pb_gptmax_horizontal_raster_tile_seam_shadow.py|tests/test_gptmax_horizontal_raster_tile_seam_shadow.py'
+              approved_base=fa7b2bd77adaa8ddf3c5af2e2ff80e755f44c512
+              approved_head=98deb79aa5d4f1c45b666d8b7a71a77f82a5c825
+              expected_paths='docs/engineering/gptmax_horizontal_third_root_ownership_20261029.md|pb_gptmax_horizontal_raster_tile_seam_shadow.py|tests/test_gptmax_horizontal_raster_tile_seam_shadow.py'
               focused_test=tests/test_gptmax_horizontal_raster_tile_seam_shadow.py
               ;;
             *)
