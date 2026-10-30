@@ -1791,3 +1791,141 @@ def test_generated_pdf_ceiling_metric_dimensionality_reaches_real_customer_gate(
         assert project_live_ceiling_area_customer_rows(
             first, workspace_id=1, project_id="synthetic-ceiling-unit",
         ) == ()
+
+
+class _OriginalViewportStringAlias:
+    """An untrusted object must not authenticate by rendering as an ID."""
+
+    def __str__(self):
+        return "source-viewport-1"
+
+
+class _OriginalViewportStrSubclass(str):
+    pass
+
+
+@pytest.mark.parametrize(
+    "forged",
+    [
+        " source-viewport-1", "source-viewport-1 ",
+        "foreign-viewport", "", None, 1, b"source-viewport-1",
+        _OriginalViewportStringAlias(),
+        _OriginalViewportStrSubclass("source-viewport-1"),
+    ],
+)
+def test_source_ceiling_viewport_receipt_must_be_exact_native_identity(forged):
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    quantity.metadata["viewport_id"] = forged
+    original_metadata = dict(quantity.metadata)
+    for _ in range(2):
+        assert ceiling._claim_from_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+    assert quantity.metadata == original_metadata
+
+
+def test_native_source_ceiling_viewport_receipt_preserves_claim_and_input():
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    original_metadata = dict(quantity.metadata)
+    first = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    second = ceiling._claim_from_quantity(
+        quantity=quantity, source_result=source,
+        page_no=1, viewport_id="source-viewport-1",
+    )
+    assert first is not None and first == second
+    assert quantity.metadata == original_metadata
+
+
+@pytest.mark.parametrize("variant", ["native", "padded", "foreign", "empty"])
+def test_generated_pdf_original_ceiling_viewport_alias_abstains_at_real_customer(
+    tmp_path, monkeypatch, variant
+):
+    from dataclasses import replace
+    from pb_migration_provider_envelope import ProviderResult
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    authentic_results = []
+    variants_seen = []
+
+    def changed_original_viewport(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        authentic_results.append(result)
+        eligible = tuple(
+            q for q in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=q, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        if variant == "native":
+            variants_seen.append(variant)
+            return result
+        authentic = eligible[0]
+        original_id = authentic.metadata["viewport_id"]
+        forged = {
+            "padded": f" {original_id} ",
+            "foreign": "foreign-original-viewport",
+            "empty": "",
+        }[variant]
+        changed = replace(
+            authentic,
+            metadata={**authentic.metadata, "viewport_id": forged},
+        )
+        rebuilt = ProviderResult.build(
+            descriptor=result.pipeline.ceiling_result.descriptor,
+            context=kwargs["context"],
+            quantities=tuple(
+                changed if q is authentic else q
+                for q in result.ceiling_quantities
+            ),
+            entities=result.pipeline.ceiling_result.entities,
+        )
+        variants_seen.append(variant)
+        return replace(
+            result,
+            pipeline=replace(result.pipeline, ceiling_result=rebuilt),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        changed_original_viewport,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert variants_seen == [variant, variant]
+    assert len(authentic_results) == 2
+    assert authentic_results[0] == authentic_results[1]
+    assert path.read_bytes() == original_pdf
+    if variant == "native":
+        assert first == baseline
+        assert len(publish_live_ceiling_area_quantities(first)) == 1
+    else:
+        assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+        assert first.claims == ()
+        assert first.canonical_ceilings == ()
+        assert first.quantity_evidence == ()
+        assert publish_live_ceiling_area_quantities(first) == ()
+        assert project_live_ceiling_area_customer_rows(
+            first, workspace_id=1, project_id="synthetic-viewport-receipt",
+        ) == ()
