@@ -269,6 +269,23 @@ class GPT2OriginalSourceGeometryBridge:
         raw=_source_bytes(self._source,revision_id)
         if published is None or raw is None:
             raise ValueError("original_source_revision_sha_or_bytes_unavailable")
+        # Coverage, immutable revision and published snapshot must all belong
+        # to the SAME source root. A copied page-coverage receipt cannot
+        # authorize a foreign source snapshot for later original-page joins.
+        snapshot = getattr(published, "snapshot", None)
+        snapshot_id = getattr(snapshot, "snapshot_id", None)
+        if (
+            published.revision.revision_id != revision_id
+            or type(published.revision.document_id) is not str
+            or not published.revision.document_id
+            or getattr(snapshot, "document_id", None) != published.revision.document_id
+            or getattr(snapshot, "revision_id", None) != revision_id
+            or getattr(snapshot, "source_sha256", None) != published.revision.source_sha256
+            or type(snapshot_id) is not str
+            or not snapshot_id
+            or snapshot_id != snapshot_id.strip()
+        ):
+            raise ValueError("original_source_snapshot_lineage_conflict")
         # Original-page identity is producer-owned. int(v) silently turns
         # True, 7.0 and "7" into the same page; malformed values may raise.
         # A page listed as both decoded and failed is never authenticated.

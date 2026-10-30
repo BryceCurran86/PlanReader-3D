@@ -702,11 +702,14 @@ def test_virtual_connector_collinear_overlap_is_not_only_an_endpoint_touch():
 def _invoke_source_revision_with_coverage(
     monkeypatch, *, decoded=(7,), failed=(), total=31, state="partial",
     coverage_revision="original-rev", coverage_document="source-doc",
-    requested_page=7,
+    requested_page=7, revision_revision="original-rev",
+    snapshot_document="source-doc", snapshot_revision="original-rev",
+    snapshot_sha=SOURCE_SHA, snapshot_id="original-snapshot",
+    snapshot_present=True,
 ):
     published = SimpleNamespace(
         revision=SimpleNamespace(
-            document_id="source-doc", revision_id="original-rev",
+            document_id="source-doc", revision_id=revision_revision,
             source_sha256=SOURCE_SHA,
         ),
         coverage=SimpleNamespace(
@@ -714,6 +717,10 @@ def _invoke_source_revision_with_coverage(
             total_pages=total, decoded_pages=decoded, failed_pages=failed,
             state=state,
         ),
+        snapshot=(SimpleNamespace(
+            document_id=snapshot_document, revision_id=snapshot_revision,
+            source_sha256=snapshot_sha, snapshot_id=snapshot_id,
+        ) if snapshot_present else None),
     )
     class StubProducer:
         def published_snapshot_for_revision(self, revision_id):
@@ -764,6 +771,28 @@ def test_original_source_revision_rejects_malformed_or_contradictory_coverage(
 ):
     with pytest.raises(
         ValueError, match="original_source_page_outside_producer_coverage"
+    ):
+        _invoke_source_revision_with_coverage(monkeypatch, **changes)
+
+
+@pytest.mark.parametrize("changes", [
+    {"revision_revision": "foreign-revision"},
+    {"snapshot_document": "foreign-document"},
+    {"snapshot_revision": "foreign-revision"},
+    {"snapshot_sha": "b" * 64},
+    {"snapshot_id": None},
+    {"snapshot_id": True},
+    {"snapshot_id": ""},
+    {"snapshot_id": " other-snapshot "},
+    {"snapshot_present": False},
+])
+def test_original_source_revision_rejects_cross_record_snapshot_lineage(
+    monkeypatch, changes,
+):
+    # Matching page coverage and original bytes do not authenticate a
+    # foreign, missing or aliased snapshot. No commercial quantity is issued.
+    with pytest.raises(
+        ValueError, match="original_source_snapshot_lineage_conflict"
     ):
         _invoke_source_revision_with_coverage(monkeypatch, **changes)
 
