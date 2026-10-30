@@ -412,12 +412,20 @@ def _claim_from_quantity(
         # Source IDs are producer-owned tokens, not freeform human text.
         # Treating a bare string as an iterable would turn "dim-h" into
         # several single-character IDs and falsely satisfy a two-axis gate.
-        if (not isinstance(raw_figured_ids, (tuple, list))
-                or not all(isinstance(value, str) for value in raw_figured_ids)):
+        # Original figured-axis IDs are exact source receipts. Trimming a
+        # padded token or discarding a blank one would silently repair an
+        # untrusted identity into apparently authenticated two-axis evidence.
+        if (
+            type(raw_figured_ids) not in (tuple, list)
+            or any(
+                type(value) is not str
+                or not value
+                or value != value.strip()
+                for value in raw_figured_ids
+            )
+        ):
             return None
-        figured_dimension_ids = tuple(
-            sorted({_clean(value) for value in raw_figured_ids if _clean(value)})
-        )
+        figured_dimension_ids = tuple(sorted(set(raw_figured_ids)))
         # The ceiling must carry both independently source-owned axes of
         # the documented room-area proof. One dimension ID, or repetitions of
         # the same ID, cannot establish a metric plane and must not enter the
