@@ -97,6 +97,44 @@ class StructuralCornerApertureRecord:
     takeoff_eligible: bool = False
     shadow_only: bool = True
 
+    def __post_init__(self) -> None:
+        # Frozen records can be directly constructed/replaced without the
+        # shadow producer. A caller cannot manufacture source or post authority.
+        abstained_gates = {
+            CornerApertureClassification.ABSTAINED_DEGENERATE_LEG:
+                ("corner_leg_span_out_of_bounds",),
+            CornerApertureClassification.ABSTAINED_NON_ORTHOGONAL_ANGLE:
+                ("corner_angle_non_orthogonal",),
+            CornerApertureClassification.ABSTAINED_EXCESSIVE_POST_DIMENSION:
+                ("corner_post_dimension_excessive",),
+            CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE:
+                ("original_source_scale_or_post_unverified",
+                 "distinct_corner_host_walls_unverified"),
+        }
+        if (type(self.classification) is not CornerApertureClassification
+                or type(self.status) is not EvidenceResolutionStatus
+                or self.post_condition is not CornerPostCondition.UNRESOLVED_CORNER_CONDITION
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral corner cannot grant commercial or post authority")
+        if self.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE:
+            valid = (self.status is EvidenceResolutionStatus.CANDIDATE
+                     and self.first_remaining_gate
+                     == "original_source_corner_host_frame_unverified")
+        else:
+            valid = (self.status is EvidenceResolutionStatus.ABSTAINED
+                     and self.first_remaining_gate in abstained_gates.get(
+                         self.classification, ())
+                     and self.total_girth_m is None
+                     and self.leg_a.leg_span_m is None
+                     and self.leg_b.leg_span_m is None)
+        if not valid:
+            raise ValueError("source-neutral corner classification and source gate conflict")
+
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,

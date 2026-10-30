@@ -596,3 +596,54 @@ def test_corner_host_identity_rejects_string_subclass(authority):
         authority.evaluate_corner_aperture(**(
             kw | {"host_wall_a_id": Impostor("WALL_A")}
         ))
+
+
+def test_public_corner_record_replacement_cannot_mint_post_or_commercial_authority(
+    authority: StructuralCornerApertureContinuityAuthority,
+) -> None:
+    from dataclasses import replace
+
+    common = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_SOUTH", host_wall_b_id="WALL_EAST",
+        post_dimension_pt=0.0,
+    )
+    candidate = authority.evaluate_corner_aperture(**common, scale_ratio=0.01764)
+    abstained = authority.evaluate_corner_aperture(**common)
+    assert candidate.classification is CornerApertureClassification.GEOMETRIC_CANDIDATE
+    assert candidate.status is EvidenceResolutionStatus.CANDIDATE
+    assert abstained.classification is CornerApertureClassification.ABSTAINED_UNVERIFIED_SOURCE
+    assert abstained.status is EvidenceResolutionStatus.ABSTAINED
+    assert replace(candidate) == candidate and replace(abstained) == abstained
+    for changes in (
+        {"classification": CornerApertureClassification.CORNER_APERTURE_CONFIRMED},
+        {"status": EvidenceResolutionStatus.CORROBORATED},
+        {"post_condition": CornerPostCondition.STRUCTURAL_CORNER_POST},
+        {"commercial_projection_allowed": True},
+        {"takeoff_eligible": True},
+        {"shadow_only": False},
+    ):
+        with pytest.raises(ValueError, match="source-neutral corner"):
+            replace(candidate, **changes)
+    for changes in (
+        {"first_remaining_gate": "none"},
+        {"first_remaining_gate": "source_verified_by_caller"},
+        {"status": EvidenceResolutionStatus.ABSTAINED},
+    ):
+        with pytest.raises(ValueError, match="classification and source gate conflict"):
+            replace(candidate, **changes)
+    for changes in (
+        {"first_remaining_gate": "none"},
+        {"status": EvidenceResolutionStatus.CANDIDATE},
+        {"total_girth_m": 2.4696},
+        {"leg_a": replace(abstained.leg_a, leg_span_m=1.0)},
+    ):
+        with pytest.raises(ValueError, match="classification and source gate conflict"):
+            replace(abstained, **changes)
+    for record in (candidate, abstained):
+        assert record.post_condition is CornerPostCondition.UNRESOLVED_CORNER_CONDITION
+        assert record.shadow_only is True
+        assert record.takeoff_eligible is False
+        assert record.commercial_projection_allowed is False
+    assert authority.evaluate_corner_aperture(**common, scale_ratio=0.01764) == candidate
