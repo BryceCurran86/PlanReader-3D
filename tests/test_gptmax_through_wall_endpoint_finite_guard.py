@@ -2129,3 +2129,57 @@ def test_public_host_frame_replacement_requires_oriented_orthonormal_basis(angle
     assert authority.bind_openings_to_through_wall(
         through_wall=wall, openings=(valid, rejected),
     ) == (records, piers)
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 3.0, (250.0, -130.0)),
+    (math.pi, (-400.0, 700.0)),
+])
+def test_frozen_host_station_identity_rejects_finite_forged_intervals(angle, shift):
+    """Direct record replacement cannot move a physical jamb along its host."""
+    from dataclasses import replace
+
+    tr = lambda p: _rotated(p, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "station-host", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    openings = (
+        ApertureHostCandidateInput("valid", tr((20.0, 0.0)), tr((40.0, 0.0))),
+        ApertureHostCandidateInput("off-band", tr((60.0, 30.0)), tr((70.0, 30.0))),
+        ApertureHostCandidateInput("out-of-extent", tr((95.0, 0.0)), tr((110.0, 0.0))),
+        ApertureHostCandidateInput("clipped", tr((-1.0, 0.0)), tr((10.0, 0.0))),
+    )
+    authority = _authority()
+    records, piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    )
+    assert len(records) == 4
+    assert records[0].status is S.CANDIDATE
+    assert records[1].status is S.ABSTAINED
+    assert records[2].status is S.ABSTAINED
+    assert records[3].status is S.CANDIDATE
+    assert records[3].u0_pt == 0.0
+    assert records[2].u1_pt > records[2].whole_wall_length_pt
+    for record in records:
+        assert replace(record) == record
+        ax, ay = record.axis_unit
+        x, y = record.opening_start_pt
+        ox, oy = record.origin_pt
+        for changes in (
+            {"u0_pt": record.u0_pt + 1.0},
+            {"u1_pt": record.u1_pt + 1.0},
+            {"opening_start_pt": (x + 3.0 * ax, y + 3.0 * ay)},
+            {"origin_pt": (ox + 2.0 * ax, oy + 2.0 * ay)},
+        ):
+            with pytest.raises(ValueError, match="owned jamb stations"):
+                replace(record, **changes)
+        assert not record.commercial_projection_allowed
+        assert not record.takeoff_eligible
+        assert record.shadow_only
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=openings,
+    ) == (records, piers)
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=tuple(reversed(openings)),
+    )[0] == tuple(reversed(records))

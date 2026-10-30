@@ -266,6 +266,36 @@ class ThroughWallHostedOpeningRecord:
                 or not math.isclose(nx, -ay, rel_tol=0.0, abs_tol=1e-12)
                 or not math.isclose(ny, ax, rel_tol=0.0, abs_tol=1e-12)):
             raise ValueError("host numeric evidence must have an orthonormal oriented frame")
+        # A frozen host record can also be forged with finite but displaced
+        # wall stations. Recompute the native projection from the record's
+        # owned endpoints and oriented frame; a caller cannot substitute a
+        # different candidate interval via direct construction or replace().
+        # This is station identity, not a snap or measurement-authority gate.
+        projected_stations = []
+        for point in (self.opening_start_pt, self.opening_end_pt):
+            dx = point[0] - self.origin_pt[0]
+            dy = point[1] - self.origin_pt[1]
+            if not math.isfinite(dx) or not math.isfinite(dy):
+                raise ValueError("host station projection must remain finite")
+            station = dx * ax + dy * ay
+            if not math.isfinite(station):
+                raise ValueError("host station projection must remain finite")
+            projected_stations.append(station)
+        raw_stations = (min(projected_stations), max(projected_stations))
+        clipped_stations = (
+            max(0.0, raw_stations[0]),
+            min(self.whole_wall_length_pt, raw_stations[1]),
+        )
+        # Geometry-rejected records retain raw projected stations. A later
+        # physical-identity/observation conflict may instead carry the
+        # previously clipped candidate stations while status is ABSTAINED.
+        permitted = (
+            (raw_stations, clipped_stations)
+            if self.status is EvidenceResolutionStatus.ABSTAINED
+            else (clipped_stations,)
+        )
+        if (self.u0_pt, self.u1_pt) not in permitted:
+            raise ValueError("host numeric evidence conflicts with owned jamb stations")
         for ids in (self.terminal_jamb_observation_ids, self.adjacent_pier_ids):
             if (type(ids) is not tuple
                     or len(ids) > _MAX_GEOMETRIC_PRIMITIVES
