@@ -52,6 +52,7 @@ LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT = "live_ceiling_lining_tag_family_confli
 LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT = (
     "live_ceiling_canonical_identity_conflict"
 )
+LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT = "live_ceiling_quantity_identity_conflict"
 
 
 @dataclass(frozen=True)
@@ -472,6 +473,13 @@ def collect_live_ceiling_lining_claims(
         ] = {}
         canonical_conflicts: set[str] = set()
         validated_quantities: dict[str, QuantityEvidence] = {}
+        # One source quantity ID can identify only one physical ceiling in one
+        # original page/viewport. Equal replays are idempotent; changed or
+        # cross-scope reuses revoke every occurrence, never first/last wins.
+        seen_ceiling_quantity_ids: dict[
+            str, tuple[QuantityEvidence, tuple[int, str]]
+        ] = {}
+        conflicting_ceiling_quantity_ids: set[str] = set()
         upstream_room_areas = tuple(authoritative_room_area_quantities or ())
 
         for page_index in topology_selected:
@@ -544,6 +552,17 @@ def collect_live_ceiling_lining_claims(
                     continue
 
                 for quantity in result.ceiling_quantities:
+                    quantity_id = quantity.quantity_id
+                    if not isinstance(quantity_id, str) or not quantity_id.strip():
+                        continue
+                    source_scope = (page_no, viewport_id)
+                    prior = seen_ceiling_quantity_ids.get(quantity_id)
+                    if prior is not None:
+                        if prior != (quantity, source_scope):
+                            conflicting_ceiling_quantity_ids.add(quantity_id)
+                        # Do not add the same source-owned quantity twice.
+                        continue
+                    seen_ceiling_quantity_ids[quantity_id] = (quantity, source_scope)
                     resolved = _claim_from_quantity(
                         quantity=quantity,
                         source_result=result,
@@ -596,6 +615,29 @@ def collect_live_ceiling_lining_claims(
 
         for canonical_id in canonical_conflicts:
             canonical_ceilings_by_id.pop(canonical_id, None)
+
+        if conflicting_ceiling_quantity_ids:
+            # A later conflicting sibling invalidates an earlier accepted
+            # candidate, including its canonical and final issuer evidence.
+            for descriptor, rows in tuple(by_descriptor.items()):
+                retained = [
+                    row for row in rows
+                    if not any(
+                        quantity_id in conflicting_ceiling_quantity_ids
+                        for quantity_id in row[4]
+                    )
+                ]
+                if retained:
+                    by_descriptor[descriptor] = retained
+                else:
+                    by_descriptor.pop(descriptor, None)
+            canonical_ceilings_by_id = {
+                canonical_id: ceiling
+                for canonical_id, ceiling in canonical_ceilings_by_id.items()
+                if ceiling.ceiling_quantity_id not in conflicting_ceiling_quantity_ids
+            }
+            for quantity_id in conflicting_ceiling_quantity_ids:
+                validated_quantities.pop(quantity_id, None)
 
         claims: list[LiveCeilingLiningClaim] = []
         multi_viewport_blocked = False
@@ -714,6 +756,8 @@ def collect_live_ceiling_lining_claims(
                 reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
             if canonical_conflicts:
                 reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
+            if conflicting_ceiling_quantity_ids:
+                reasons.append(LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT)
             return LiveCeilingLiningResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=tuple(reasons),
@@ -729,6 +773,8 @@ def collect_live_ceiling_lining_claims(
             reasons.append(LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT)
         if canonical_conflicts:
             reasons.append(LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT)
+        if conflicting_ceiling_quantity_ids:
+            reasons.append(LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT)
         return LiveCeilingLiningResult(
             status=EvidenceResolutionStatus.ABSTAINED,
             reason_codes=tuple(reasons),
@@ -742,6 +788,7 @@ def collect_live_ceiling_lining_claims(
 
 __all__ = [
     "LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT",
+    "LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
     "LIVE_CEILING_LINING_SCHEMA_VERSION",
