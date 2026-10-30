@@ -648,7 +648,9 @@ def test_spandrel_public_numeric_replacement_rejected_without_changing_abstentio
         for bad in (float("nan"), float("inf"), 0.0, -1.0):
             with pytest.raises(ValueError, match="numeric evidence"):
                 replace(candidate, **{field: bad})
-    with pytest.raises(ValueError, match="numeric evidence"):
+    # Zero is finite: the producer first rejects the invalid vertical levels,
+    # not the earlier nonfinite numeric-evidence gate.
+    with pytest.raises(ValueError, match="first-failing geometric gate conflict"):
         replace(candidate, sill_height_mm=0.0)
     with pytest.raises(ValueError, match="numeric evidence"):
         replace(candidate, glazing_height_mm=candidate.glazing_height_mm + 10.0)
