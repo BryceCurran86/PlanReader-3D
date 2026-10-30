@@ -2290,3 +2290,148 @@ def test_original_upstream_scope_alias_revokes_real_ceiling_issuer_and_customer(
     assert native.metadata == metadata
     assert rival.metadata == before
     assert path.read_bytes() == original_pdf
+
+
+
+@pytest.mark.parametrize("duplicate_bbox", ["same", "shifted"])
+@pytest.mark.parametrize("sibling_position", ["first", "last"])
+def test_original_f07_reused_page_viewport_identity_revokes_real_customer(
+    tmp_path, monkeypatch, duplicate_bbox, sibling_position
+):
+    """One page-owned source viewport cannot count twice under one receipt."""
+    from types import SimpleNamespace
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    original_viewports = ceiling.authoritative_floor_plan_viewports
+    original_run = ceiling.run_source_owned_ceiling_lining_shadow
+    source_calls = []
+    returned_viewports = []
+
+    def repeated_source_viewport(page, *, page_number):
+        native = tuple(original_viewports(page, page_number=page_number))
+        assert len(native) == 1
+        authentic = native[0]
+        x0, y0, x1, y1 = authentic.bounding_box
+        forged_bbox = (
+            authentic.bounding_box if duplicate_bbox == "same"
+            else (x0 + 1.0, y0, x1, y1)
+        )
+        repeated = SimpleNamespace(
+            view_id=authentic.view_id,
+            bounding_box=forged_bbox,
+            confidence=authentic.confidence,
+        )
+        returned_viewports.append(repeated)
+        return (
+            (repeated, authentic)
+            if sibling_position == "first"
+            else (authentic, repeated)
+        )
+
+    def count_source_calls(*args, **kwargs):
+        source_calls.append((kwargs["page_no"], kwargs["viewport"].viewport_id))
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", repeated_source_viewport
+    )
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", count_source_calls
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(returned_viewports) == 2
+    assert len(source_calls) == 2  # one source run, never the duplicate, per replay
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-duplicate-f07",
+    ) == ()
+    assert path.read_bytes() == original_pdf
+    assert all(item.view_id == source_calls[0][1] for item in returned_viewports)
+
+
+@pytest.mark.parametrize("reuse_on_other_page", [False, True])
+def test_original_f07_identity_census_preserves_distinct_source_scopes(
+    tmp_path, monkeypatch, reuse_on_other_page
+):
+    """Different viewport IDs, or the same ID on another page, are not aliases."""
+    from types import SimpleNamespace
+
+    path = _generated_two_page_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    scanned = []
+    original_viewports = (
+        SimpleNamespace(
+            view_id="source-viewport-a", bounding_box=(10, 10, 200, 150),
+            confidence=0.99,
+        ),
+        SimpleNamespace(
+            view_id="source-viewport-b", bounding_box=(10, 10, 200, 150),
+            confidence=0.99,
+        ),
+    )
+
+    def distinct_source_scopes(page, *, page_number):
+        scanned.append(page_number)
+        if reuse_on_other_page:
+            return (original_viewports[0],)
+        return original_viewports if page_number == 1 else ()
+
+    calls = []
+
+    def no_quantity_shadow(*args, **kwargs):
+        calls.append((kwargs["page_no"], kwargs["viewport"].viewport_id))
+        return SimpleNamespace(
+            effective_context=kwargs["context"], ceiling_quantities=(),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", distinct_source_scopes
+    )
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", no_quantity_shadow
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(
+        path, pages=(0, 1), topology_pages=(0, 1),
+    )
+    second = ceiling.collect_live_ceiling_lining_claims(
+        path, pages=(0, 1), topology_pages=(0, 1),
+    )
+    assert first == second
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (ceiling.LIVE_CEILING_LINING_UNAVAILABLE,)
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert len(calls) == 4
+    assert scanned == [1, 2, 1, 2]
+    if reuse_on_other_page:
+        assert calls == [
+            (1, "source-viewport-a"), (2, "source-viewport-a"),
+            (1, "source-viewport-a"), (2, "source-viewport-a"),
+        ]
+    else:
+        assert calls == [
+            (1, "source-viewport-a"), (1, "source-viewport-b"),
+            (1, "source-viewport-a"), (1, "source-viewport-b"),
+        ]
+    assert path.read_bytes() == original_pdf
