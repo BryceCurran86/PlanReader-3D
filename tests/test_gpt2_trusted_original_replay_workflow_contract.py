@@ -721,7 +721,7 @@ def test_latest_gpt2_private_replay_pins_match_public_sourcefree_smoke():
         ("grid", "65dc4684fbcf1ce36c704457d896fc7c12a651de",
          "pb_gpt2_native_grid_row_membership_shadow.py|"
          "tests/test_gpt2_native_grid_row_membership_shadow.py"),
-        ("rcp_ink", "65dc4684fbcf1ce36c704457d896fc7c12a651de",
+        ("rcp_ink", "837befe133e89db7d5cb5878bff141e1e6d08923",
          "pb_gpt2_original_mary_rcp_native_word_scope_shadow.py|"
          "tests/test_gpt2_original_mary_rcp_native_word_scope_shadow.py"),
     ):
