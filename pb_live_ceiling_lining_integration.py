@@ -227,6 +227,89 @@ def _source_room_polygon_pdf_pts(
         return None
     if not math.isfinite(double_area) or double_area == 0.0:
         return None
+
+    # Nonzero signed area does not prove a simple physical room boundary:
+    # crossed edges can cancel only partially. Preserve the source vertices
+    # verbatim; a repeated *closing* vertex is the sole allowed duplicate.
+    ring = polygon[:-1] if polygon[0] == polygon[-1] else polygon
+    count = len(ring)
+    if count < 3:
+        return None
+    for index in range(count):
+        before, vertex, after = (
+            ring[index - 1], ring[index], ring[(index + 1) % count]
+        )
+        if vertex == after:
+            return None
+        # Adjacent collinear edges may continue in the same direction, but
+        # reversing along the same physical segment is an overlapping ring.
+        ax, ay = before[0] - vertex[0], before[1] - vertex[1]
+        bx, by = after[0] - vertex[0], after[1] - vertex[1]
+        turn = ax * by - ay * bx
+        dot = ax * bx + ay * by
+        if not math.isfinite(turn) or not math.isfinite(dot):
+            return None
+        if turn == 0.0 and dot > 0.0:
+            return None
+
+    def orientation(a, b, c):
+        ax, ay = b[0] - a[0], b[1] - a[1]
+        bx, by = c[0] - a[0], c[1] - a[1]
+        return ax * by - ay * bx
+
+    def on_segment(a, b, c):
+        return (
+            min(a[0], b[0]) <= c[0] <= max(a[0], b[0])
+            and min(a[1], b[1]) <= c[1] <= max(a[1], b[1])
+        )
+
+    # Sort by horizontal interval to skip disjoint edges. Cap *actual*
+    # overlapping-x pair visits: a malicious complex source ring must abstain
+    # rather than consume unbounded quadratic work. No geometry is simplified.
+    edges = sorted(
+        (
+            min(ring[i][0], ring[(i + 1) % count][0]),
+            max(ring[i][0], ring[(i + 1) % count][0]),
+            min(ring[i][1], ring[(i + 1) % count][1]),
+            max(ring[i][1], ring[(i + 1) % count][1]),
+            i,
+            ring[i],
+            ring[(i + 1) % count],
+        )
+        for i in range(count)
+    )
+    examined = 0
+    for position, (xmin, xmax, ymin, ymax, i, a, b) in enumerate(edges):
+        for next_position in range(position + 1, len(edges)):
+            oxmin, _oxmax, oymin, oymax, j, c, d = edges[next_position]
+            if oxmin > xmax:
+                break
+            examined += 1
+            if examined > 500_000:
+                return None
+            if oymin > ymax or oymax < ymin:
+                continue
+            # Consecutive edges share one permitted endpoint. Their possible
+            # overlapping backtrack was already rejected above.
+            if abs(i - j) == 1 or {i, j} == {0, count - 1}:
+                continue
+            turns = (
+                orientation(a, b, c), orientation(a, b, d),
+                orientation(c, d, a), orientation(c, d, b),
+            )
+            if not all(math.isfinite(turn) for turn in turns):
+                return None
+            t1, t2, t3, t4 = turns
+            if (
+                (t1 == 0.0 and on_segment(a, b, c))
+                or (t2 == 0.0 and on_segment(a, b, d))
+                or (t3 == 0.0 and on_segment(c, d, a))
+                or (t4 == 0.0 and on_segment(c, d, b))
+                or (t1 != 0.0 and t2 != 0.0 and t3 != 0.0 and t4 != 0.0
+                    and (t1 > 0.0) != (t2 > 0.0)
+                    and (t3 > 0.0) != (t4 > 0.0))
+            ):
+                return None
     return tuple(polygon)
 
 
