@@ -129,3 +129,47 @@ remain release gates. No frozen V2 score or FIRM improvement is asserted.
 **FILES UNTOUCHED:** GPT2 FT/RCP physical source interpretation, GPT MAX/Claude
 opening hosts, GPT3 signing/scoring, original PDFs/tokens, signed fixtures,
 frozen evaluator, 20,000 primitive cap and 2.5pt snap.
+
+
+## 2026-10-30 20:52 AEST — complete original published revision-snapshot universe
+
+**OBSERVED:** After SourceVisibilityProducer.ingest_native_pdf_bytes selects
+the original PDF pages, collect_live_ceiling_lining_claims obtains the
+published revision snapshot separately for every authoritative F.07 viewport.
+Before this change, published_snapshot_for_revision returning None silently
+continued, omitting the missing viewport and leaving any previously accepted
+sibling's ceiling claims, canonical objects and source quantity evidence
+eligible. The earlier source-viewport exception fix did not cover this
+non-exceptional missing-snapshot outcome. This is the FIRST failing source
+snapshot completeness gate before run_source_owned_ceiling_lining_shadow,
+canonical_ceiling_from_shadow_quantity,
+publish_live_ceiling_area_quantities, source-closed customer sealing and
+the unchanged frozen V2 evaluator.
+
+**INFERRED:** A partial published source snapshot is not evidence that the
+unexamined viewport lacks another ceiling or conflicting finish. Continuing
+could expose a plausible but incomplete live ceiling area. No original
+Maryborough source has yet been demonstrated to hit this path.
+
+**IMPLEMENTATION:** Return a complete LiveCeilingLiningResult with
+ABSTAINED, live_ceiling_lining_unavailable and the distinct
+live_ceiling_lining_source_snapshot_unavailable reason immediately on a
+missing published snapshot. Do not keep earlier sibling claims, canonical
+ceilings or issuer quantity evidence. Do not infer source snapshots or change
+any upstream source, physical, metric or finish authority.
+
+**TESTS:** Generate a native PDF with a real source-positive ceiling producer
+baseline, then inject a second selected F.07 viewport whose published revision
+snapshot is unavailable before or after the real one. Assert deterministic
+complete abstention in both orders, original PDF bytes and source viewport
+unchanged, and zero outputs from the real FIRM quantity issuer and source-closed
+customer projection. These are generated-PDF/adversarial safety tests only.
+
+**RELEASE:** New exact-head Python 3.13 and 3.14 CI must pass. Owner-trusted
+SHA-verified original-source producer→issuer→sealed/customer replay and
+immutable nine Lot16 plus three Maryborough signed/customer bodies remain
+mandatory before merge. This is an unmerged integrity candidate, not a new
+FIRM ceiling, commercial customer quantity or official frozen120 score rise.
+No changes to GPT2 FT2/FT3/RCP physical ownership, GPT MAX/Claude host/glazing,
+GPT3 signing/scoring, other GPT1 PRs, private PDFs/tokens, frozen truth,
+20,000 raster cap or 2.5pt snap.
