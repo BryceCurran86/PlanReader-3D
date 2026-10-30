@@ -612,6 +612,12 @@ class GPT2OriginalSourceGeometryBridge:
         source_occurrence_selector,
         source_finish_code: str,
     ) -> dict:
+        # A cross-sheet floor/finish receipt must actually involve two
+        # distinct original pages. Re-reading one native page twice can
+        # never independently authenticate a physical room correspondence.
+        # Keep this fail-closed check before either source graph is issued.
+        if floor_page_1_based == finish_page_1_based:
+            raise ValueError("original_source_floor_finish_distinct_pages_required")
         floor=self.original_room_ink_graph(
             revision_id=revision_id,page_1_based=floor_page_1_based,
             original_source_edge_ids=source_floor_wall_ids)
