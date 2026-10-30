@@ -170,9 +170,11 @@ class SpandrelSubSillRecord:
             self.jamb_right[0] - self.jamb_left[0],
             self.jamb_right[1] - self.jamb_left[1],
         )
+        # Both sides use the producer's exact math.hypot operation. An
+        # isclose tolerance would allow two different frozen span receipts
+        # under the same jamb-bound stable identity after replace().
         if (not math.isfinite(expected_span)
-                or not math.isclose(self.clear_span_pt, expected_span,
-                                    rel_tol=1e-12, abs_tol=1e-9)):
+                or self.clear_span_pt != expected_span):
             raise ValueError("spandrel numeric evidence conflicts with jamb geometry")
         # Reconstruct the producer's ordered first-failure decision from
         # frozen evidence. Status/gate string coherence alone is insufficient:

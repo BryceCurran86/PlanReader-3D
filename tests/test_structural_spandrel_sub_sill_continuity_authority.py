@@ -618,6 +618,34 @@ def test_public_spandrel_record_replacement_cannot_mint_source_or_commercial_aut
     assert authority.evaluate_spandrel_sub_sill(**common, scale_ratio=0.01764) == candidate
 
 
+@pytest.mark.parametrize("scale_ratio", [None, 0.01764])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_frozen_spandrel_span_receipt_is_exact_even_below_old_tolerance(
+    authority, scale_ratio, reverse,
+):
+    # A public frozen record cannot drift by a sub-nanopoint and retain
+    # its original jamb-bound ID, even when scale is unverified.
+    jambs = ((100.0, 200.0), (160.0, 280.0))
+    if reverse:
+        jambs = jambs[::-1]
+    kwargs = dict(
+        jamb_a=jambs[0], jamb_b=jambs[1],
+        sill_height_mm=900.0, head_height_mm=2100.0,
+        host_through_wall_id="WALL_SHADOW", scale_ratio=scale_ratio,
+    )
+    original = authority.evaluate_spandrel_sub_sill(**kwargs)
+    assert replace(original) == original
+    assert authority.evaluate_spandrel_sub_sill(**kwargs) == original
+    before = original.to_dict()
+    changed_span = original.clear_span_pt + 1e-11
+    assert changed_span != original.clear_span_pt
+    with pytest.raises(ValueError, match="numeric evidence conflicts with jamb geometry"):
+        replace(original, clear_span_pt=changed_span)
+    assert original.to_dict() == before
+    assert original.shadow_only and not original.takeoff_eligible
+    assert not original.commercial_projection_allowed
+
+
 def test_spandrel_public_numeric_replacement_rejected_without_changing_abstention(authority):
     from dataclasses import replace
 
