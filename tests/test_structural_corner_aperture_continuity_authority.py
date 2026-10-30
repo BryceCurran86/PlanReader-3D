@@ -812,3 +812,104 @@ def test_public_corner_zero_leg_abstention_keeps_producer_angle(authority):
     assert record.total_girth_m is None
     assert record.shadow_only and not record.commercial_projection_allowed
     assert authority.evaluate_corner_aperture(**kw) == record
+
+
+def test_frozen_corner_metric_and_identity_receipts_fail_closed(authority):
+    """Direct replacement cannot forge m²-equivalent spans or source-neutral IDs."""
+    from dataclasses import replace
+
+    kw = dict(
+        jamb_a=(200.0, 380.0), jamb_b=(260.0, 300.0),
+        corner_vertex=(200.0, 300.0),
+        host_wall_a_id="WALL_A", host_wall_b_id="WALL_B",
+        post_dimension_pt=0.0, scale_ratio=0.01764,
+        context_label="SCOPE_A",
+    )
+    candidate = authority.evaluate_corner_aperture(**kw)
+    abstained = authority.evaluate_corner_aperture(**(kw | {"scale_ratio": None}))
+    assert replace(candidate) == candidate
+    assert replace(abstained) == abstained
+    assert candidate.to_dict()["context_label"] == "SCOPE_A"
+    assert candidate.to_dict()["scale_ratio"] == 0.01764
+    assert abstained.to_dict()["scale_ratio"] is None
+
+    for forged in (
+        {"total_girth_m": 999.0},
+        {"total_girth_m": candidate.total_girth_m * 1.001},
+        {"leg_a": replace(candidate.leg_a, leg_span_m=999.0)},
+        {"leg_b": replace(candidate.leg_b, leg_span_m=999.0)},
+    ):
+        with pytest.raises(ValueError, match="hypothetical metric evidence"):
+            replace(candidate, **forged)
+
+    for forged in (
+        {"contract_id": "STALE_ID"},
+        {"context_label": "SCOPE_B"},
+        {"scale_ratio": 0.018},
+        {"post_dimension_pt": 1.0},
+        {"leg_a": replace(candidate.leg_a, host_wall_id="WALL_X")},
+        {"leg_b": replace(candidate.leg_b, leg_id="OTHER:LEG_B")},
+    ):
+        with pytest.raises(ValueError, match="corner identity receipt"):
+            replace(candidate, **forged)
+    with pytest.raises(ValueError, match="corner identity receipt"):
+        replace(abstained, context_label="SCOPE_B")
+    with pytest.raises(ValueError, match="corner identity receipt"):
+        replace(abstained, scale_ratio=0.01764)
+
+    other = authority.evaluate_corner_aperture(**(
+        kw | {"jamb_a": (200.0, 400.0)}
+    ))
+    assert other.contract_id != candidate.contract_id
+    with pytest.raises(ValueError, match="corner identity receipt"):
+        replace(
+            candidate,
+            leg_a=other.leg_a, leg_b=other.leg_b,
+            total_girth_pt=other.total_girth_pt,
+            diagonal_chord_pt=other.diagonal_chord_pt,
+            corner_angle_deg=other.corner_angle_deg,
+            total_girth_m=other.total_girth_m,
+        )
+    assert authority.evaluate_corner_aperture(**kw) == candidate
+    assert candidate.shadow_only and not candidate.takeoff_eligible
+    assert not candidate.commercial_projection_allowed
+
+
+def test_frozen_corner_receipts_preserve_order_rotation_and_abstentions(authority):
+    from dataclasses import replace
+
+    kw = dict(
+        jamb_a=(10.0, 100.0), jamb_b=(-70.0, 20.0),
+        corner_vertex=(10.0, 20.0),
+        host_wall_a_id="NORTH", host_wall_b_id="WEST",
+        post_dimension_pt=2.0, scale_ratio=0.01,
+        context_label="ROTATED",
+    )
+    first = authority.evaluate_corner_aperture(**kw)
+    swapped = authority.evaluate_corner_aperture(**(
+        kw | {
+            "jamb_a": kw["jamb_b"], "jamb_b": kw["jamb_a"],
+            "host_wall_a_id": kw["host_wall_b_id"],
+            "host_wall_b_id": kw["host_wall_a_id"],
+        }
+    ))
+    assert first == swapped
+    assert first.contract_id == swapped.contract_id
+    assert first.total_girth_m == pytest.approx(1.7)
+    assert first.leg_a.leg_span_m + first.leg_b.leg_span_m == pytest.approx(1.7)
+    assert replace(first) == first
+    for change in (
+        {"scale_ratio": None},
+        {"post_dimension_pt": None},
+        {"host_wall_b_id": "NORTH"},
+        {"jamb_a": (10.0, 22.0)},
+        {"jamb_a": (10.0, 110.0), "scale_ratio": None},
+    ):
+        record = authority.evaluate_corner_aperture(**(kw | change))
+        assert record.status is EvidenceResolutionStatus.ABSTAINED
+        assert replace(record) == record
+        assert record.total_girth_m is None
+        assert record.shadow_only and not record.commercial_projection_allowed
+        assert not record.takeoff_eligible
+    assert kw["jamb_a"] == (10.0, 100.0)
+    assert kw["jamb_b"] == (-70.0, 20.0)
