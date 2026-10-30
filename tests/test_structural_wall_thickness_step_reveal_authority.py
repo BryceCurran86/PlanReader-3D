@@ -445,3 +445,49 @@ def test_public_reveal_record_replacement_cannot_mint_source_or_commercial_autho
         assert record.takeoff_eligible is False
         assert record.commercial_projection_allowed is False
     assert authority.evaluate_stepped_wall_aperture(**inputs()) == candidate
+
+
+def test_public_reveal_numeric_record_replacements_fail_closed(authority):
+    from dataclasses import replace
+
+    candidate = authority.evaluate_stepped_wall_aperture(**inputs())
+    abstained = authority.evaluate_stepped_wall_aperture(**inputs(scale_ratio=None))
+    for record in (candidate, abstained):
+        assert replace(record) == record
+        for field in (
+            "clear_span_pt", "left_wall_thickness_pt", "right_wall_thickness_pt",
+            "reveal_depth_pt", "centerline_step_offset_pt",
+        ):
+            for bad in (float("nan"), float("inf"), -1.0):
+                with pytest.raises(ValueError, match="numeric evidence"):
+                    replace(record, **{field: bad})
+        for bad in (float("nan"), float("inf"), float(2**53) + 2.0):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(record, jamb_left_datum=(bad, 200.0))
+        for bad in (float("nan"), float("inf")):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(record, datum_offset_pt=bad)
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(record, clear_span_pt=record.clear_span_pt + 100.0)
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(record, reveal_depth_pt=record.reveal_depth_pt + 10.0)
+    for field in METRIC_FIELDS:
+        for bad in (float("nan"), float("inf"), -1.0):
+            with pytest.raises(ValueError, match="numeric evidence"):
+                replace(candidate, **{field: bad})
+    for field in ("clear_span_m", "left_wall_thickness_mm", "right_wall_thickness_mm"):
+        with pytest.raises(ValueError, match="numeric evidence"):
+            replace(candidate, **{field: 0.0})
+    with pytest.raises(ValueError, match="numeric evidence"):
+        replace(candidate, scale_ratio=float("nan"))
+    with pytest.raises(ValueError, match="numeric evidence"):
+        replace(candidate, datum_alignment="exterior_flush")
+    zero_reveal = authority.evaluate_stepped_wall_aperture(**inputs(
+        left_thickness_pt=10.0, right_thickness_pt=10.0,
+    ))
+    assert zero_reveal.reveal_depth_pt == 0.0
+    assert zero_reveal.reveal_depth_mm == 0.0
+    assert replace(zero_reveal) == zero_reveal
+    assert candidate.shadow_only and not candidate.takeoff_eligible
+    assert abstained.shadow_only and not abstained.commercial_projection_allowed
+    assert authority.evaluate_stepped_wall_aperture(**inputs()) == candidate

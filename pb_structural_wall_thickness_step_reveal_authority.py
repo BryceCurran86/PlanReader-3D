@@ -102,6 +102,60 @@ class SteppedWallApertureRecord:
                      )))
         if not valid:
             raise ValueError("source-neutral reveal classification and source gate conflict")
+        # Direct dataclass construction/replacement must not inject nonfinite
+        # shadow geometry or hypothetical metric evidence after producer checks.
+        for point in (self.jamb_left_datum, self.jamb_right_datum):
+            if (type(point) is not tuple or len(point) != 2
+                    or any(not _finite_source_coordinate(v) for v in point)):
+                raise ValueError("reveal numeric evidence must be finite and physical")
+        for value in (
+            self.clear_span_pt, self.left_wall_thickness_pt,
+            self.right_wall_thickness_pt, self.reveal_depth_pt,
+            self.centerline_step_offset_pt,
+        ):
+            if not _finite_real(value) or value < 0:
+                raise ValueError("reveal numeric evidence must be finite and physical")
+        if (self.left_wall_thickness_pt <= 0
+                or self.right_wall_thickness_pt <= 0
+                or (self.datum_offset_pt is not None
+                    and not _finite_real(self.datum_offset_pt))
+                or (self.scale_ratio is not None
+                    and (not _finite_real(self.scale_ratio) or self.scale_ratio <= 0))
+                or (self.datum_alignment is not None
+                    and type(self.datum_alignment) is not RevealAlignmentDatum)):
+            raise ValueError("reveal numeric evidence must be finite and physical")
+        for field, allow_zero in (
+            (self.clear_span_m, False),
+            (self.left_wall_thickness_mm, False),
+            (self.right_wall_thickness_mm, False),
+            (self.reveal_depth_mm, True),
+        ):
+            if (field is not None and
+                    (not _finite_real(field) or field < 0
+                     or (not allow_zero and field == 0))):
+                raise ValueError("reveal numeric evidence must be finite and physical")
+        expected_span = math.hypot(
+            self.jamb_right_datum[0] - self.jamb_left_datum[0],
+            self.jamb_right_datum[1] - self.jamb_left_datum[1],
+        )
+        expected_reveal = abs(self.left_wall_thickness_pt - self.right_wall_thickness_pt)
+        if (not math.isfinite(expected_span)
+                or not math.isfinite(expected_reveal)
+                or not math.isclose(self.clear_span_pt, expected_span,
+                                    rel_tol=1e-12, abs_tol=1e-9)
+                or not math.isclose(self.reveal_depth_pt, expected_reveal,
+                                    rel_tol=1e-12, abs_tol=1e-9)
+                or not math.isclose(self.centerline_step_offset_pt,
+                                    expected_reveal / 2.0,
+                                    rel_tol=1e-12, abs_tol=1e-9)):
+            raise ValueError("reveal numeric evidence conflicts with wall geometry")
+        if self.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE:
+            if (any(value is None for value in (
+                    self.clear_span_m, self.left_wall_thickness_mm,
+                    self.right_wall_thickness_mm, self.reveal_depth_mm))
+                    or self.scale_ratio is None or self.datum_offset_pt is None
+                    or self.datum_alignment is None):
+                raise ValueError("reveal numeric evidence lacks candidate inputs")
 
     def to_dict(self) -> Mapping[str, Any]:
         return {
