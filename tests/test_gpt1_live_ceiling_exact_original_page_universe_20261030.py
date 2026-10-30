@@ -933,3 +933,146 @@ def test_missing_original_revision_snapshot_abstains_entire_ceiling_universe(
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-missing-original-snapshot"
     ) == ()
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        {"document_id": "foreign-document"},
+        {"source_sha256": "f" * 64},
+        {"revision_id": "foreign-revision"},
+        {"current_revision_id": "foreign-revision"},
+        {"selected_pages": (1,)},
+        {"owned_page_numbers": (2,)},
+        {"owned_viewport_ids": ("foreign-viewport",)},
+        {"viewport_page_ownership": (("foreign-viewport", 1),)},
+        {"project_id": "foreign-project"},
+        {"evidence_snapshot_id": ""},
+    ],
+)
+def test_original_ceiling_post_producer_context_cannot_switch_source_root(
+    tmp_path, monkeypatch, tamper
+):
+    """A real generated-PDF producer result cannot be rebound to foreign scope.
+
+    The wall producer is permitted to advance the snapshot ID, not to replace
+    the source revision, original page, viewport or customer owner.
+    """
+    from dataclasses import replace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    original_results = []
+
+    def substituted_source_root(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        original_results.append(result)
+        altered_context = replace(result.effective_context, **tamper)
+        return replace(result, effective_context=altered_context)
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        substituted_source_root,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(original_results) == 2
+    assert original_results[0] == original_results[1]
+    assert path.read_bytes() == original_pdf
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-foreign-ceiling-context"
+    ) == ()
+
+
+@pytest.mark.parametrize("foreign_first", [False, True])
+def test_original_ceiling_context_substitution_revokes_earlier_valid_viewport(
+    tmp_path, monkeypatch, foreign_first
+):
+    """An invalid later viewport revokes earlier source-backed provisional m²."""
+    from types import SimpleNamespace
+    from dataclasses import replace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+
+    real_viewports = ceiling.authoritative_floor_plan_viewports
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    processed = []
+    foreign_suffix = "-foreign-source-root"
+
+    def two_viewports(page, *, page_number):
+        real = tuple(real_viewports(page, page_number=page_number))
+        assert real
+        valid = real[0]
+        foreign = SimpleNamespace(
+            view_id=valid.view_id + foreign_suffix,
+            bounding_box=valid.bounding_box,
+            confidence=valid.confidence,
+        )
+        return (foreign, valid) if foreign_first else (valid, foreign)
+
+    def foreign_source_result(*args, **kwargs):
+        view_id = kwargs["viewport"].viewport_id
+        processed.append(view_id)
+        if view_id.endswith(foreign_suffix):
+            return SimpleNamespace(
+                effective_context=replace(
+                    kwargs["context"], source_sha256="f" * 64,
+                ),
+                ceiling_quantities=(),
+            )
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", two_viewports,
+    )
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", foreign_source_result,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert len(processed) == (2 if foreign_first else 4)
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="synthetic-cross-view-ceiling"
+    ) == ()
