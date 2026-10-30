@@ -181,6 +181,22 @@ class SteppedWallApertureRecord:
                            for actual, expected in zip(actual_metrics, expected_metrics))):
                 raise ValueError("reveal numeric evidence conflicts with metric axes")
 
+        # Direct replacement of otherwise valid context, geometry or scale
+        # must not preserve a stale evidence ID. This grants no source authority.
+        if (type(self.context_label) is not str or not self.context_label
+                or self.context_label != self.context_label.strip()
+                or not self.context_label.isprintable()):
+            raise ValueError("reveal context must be an exact printable source identity")
+        if self.jamb_left_datum > self.jamb_right_datum:
+            raise ValueError("reveal jamb ordering conflicts with producer")
+        expected_id = _stepped_wall_identity(
+            self.context_label, self.jamb_left_datum, self.jamb_right_datum,
+            self.left_wall_thickness_pt, self.right_wall_thickness_pt,
+            self.datum_offset_pt, self.datum_alignment, self.scale_ratio,
+        )
+        if type(self.contract_id) is not str or self.contract_id != expected_id:
+            raise ValueError("reveal stable identity conflicts with source-neutral inputs")
+
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
@@ -230,6 +246,31 @@ def _finite_source_coordinate(value: object) -> bool:
     # boundary for floats as well as ints. Non-coordinate metric and datum
     # scalars retain their independent finite validation.
     return _finite_real(value) and abs(value) <= 2**53
+
+
+
+def _stepped_wall_identity(
+    context_label: str,
+    jamb_left: tuple[float, float],
+    jamb_right: tuple[float, float],
+    left_thickness_pt: float,
+    right_thickness_pt: float,
+    datum_offset_pt: float | None,
+    datum_alignment: RevealAlignmentDatum | None,
+    scale_ratio: float | None,
+) -> str:
+    """Exact source-neutral identity shared by producer and frozen-record guard."""
+    return stable_contract_id(
+        f"STEPPED_WALL_{context_label}",
+        (
+            *(float(v).hex() for v in (*jamb_left, *jamb_right)),
+            float(left_thickness_pt).hex(),
+            float(right_thickness_pt).hex(),
+            "missing_datum" if datum_offset_pt is None else float(datum_offset_pt).hex(),
+            "missing_alignment" if datum_alignment is None else datum_alignment.value,
+            "missing_scale" if scale_ratio is None else float(scale_ratio).hex(),
+        ),
+    )
 
 
 class StructuralWallThicknessStepRevealAuthority:
@@ -293,16 +334,9 @@ class StructuralWallThicknessStepRevealAuthority:
 
         # IDs distinguish all source-neutral input hypotheses. Serialization
         # rounding is presentation-only and never used to identify evidence.
-        contract_id = stable_contract_id(
-            f"STEPPED_WALL_{context_label}",
-            (
-                *(v.hex() for v in (*jamb_left, *jamb_right)),
-                float(left_thickness_pt).hex(),
-                float(right_thickness_pt).hex(),
-                "missing_datum" if datum_offset_pt is None else float(datum_offset_pt).hex(),
-                "missing_alignment" if datum_alignment is None else datum_alignment.value,
-                "missing_scale" if scale_ratio is None else float(scale_ratio).hex(),
-            ),
+        contract_id = _stepped_wall_identity(
+            context_label, jamb_left, jamb_right, left_thickness_pt,
+            right_thickness_pt, datum_offset_pt, datum_alignment, scale_ratio,
         )
 
         def record(
