@@ -347,3 +347,69 @@ def test_original_ceiling_quantity_id_replays_never_double_count_or_choose_winne
         assert first.canonical_ceilings == ()
         assert first.quantity_evidence == ()
         assert ceiling.LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT in first.reason_codes
+
+
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_distinct_source_ceiling_ids_cannot_publish_one_conflicted_canonical_room(
+    tmp_path, monkeypatch, reverse_order
+):
+    """A canonical physical ceiling collision revokes both issuer claimants."""
+    from dataclasses import replace
+
+    from pb_migration_provider_envelope import ProviderResult
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(baseline.quantity_evidence) == 1
+
+    original_run = ceiling.run_source_owned_ceiling_lining_shadow
+    untouched = []
+    calls = []
+
+    def duplicate_physical_room(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        eligible = tuple(
+            quantity for quantity in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=quantity,
+                source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        rival = replace(
+            authentic,
+            quantity_id=authentic.quantity_id + "-distinct-source-rival",
+        )
+        quantities = (rival, authentic) if reverse_order else (authentic, rival)
+        rebuilt = ProviderResult.build(
+            descriptor=result.pipeline.ceiling_result.descriptor,
+            context=kwargs["context"],
+            quantities=quantities,
+            entities=result.pipeline.ceiling_result.entities,
+        )
+        untouched.append((authentic, dict(authentic.metadata)))
+        calls.append(rebuilt.result_fingerprint)
+        return replace(
+            result,
+            pipeline=replace(result.pipeline, ceiling_result=rebuilt),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        duplicate_physical_room,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(calls) == 2
+    assert first == second
+    assert all(quantity.metadata == metadata for quantity, metadata in untouched)
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert ceiling.LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT in first.reason_codes
+    assert ceiling.LIVE_CEILING_QUANTITY_IDENTITY_CONFLICT not in first.reason_codes

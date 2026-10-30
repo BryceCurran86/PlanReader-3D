@@ -472,6 +472,9 @@ def collect_live_ceiling_lining_claims(
             str, LiveCanonicalCeilingSurfaceObject
         ] = {}
         canonical_conflicts: set[str] = set()
+        # All source quantity IDs for one disputed physical canonical ceiling
+        # must abstain together, even if their own IDs are distinct.
+        canonical_quantity_ids_by_id: dict[str, set[str]] = {}
         validated_quantities: dict[str, QuantityEvidence] = {}
         # One source quantity ID can identify only one physical ceiling in one
         # original page/viewport. Equal replays are idempotent; changed or
@@ -607,23 +610,35 @@ def collect_live_ceiling_lining_claims(
                     )
                     if ceiling_object is not None:
                         canonical_id = ceiling_object.canonical_ceiling_id
+                        canonical_quantity_ids_by_id.setdefault(
+                            canonical_id, set()
+                        ).add(quantity.quantity_id)
                         prior = canonical_ceilings_by_id.get(canonical_id)
                         if prior is not None and prior != ceiling_object:
                             canonical_conflicts.add(canonical_id)
                         else:
                             canonical_ceilings_by_id[canonical_id] = ceiling_object
 
+        canonical_conflict_quantity_ids = {
+            quantity_id
+            for canonical_id in canonical_conflicts
+            for quantity_id in canonical_quantity_ids_by_id.get(canonical_id, ())
+        }
         for canonical_id in canonical_conflicts:
             canonical_ceilings_by_id.pop(canonical_id, None)
 
-        if conflicting_ceiling_quantity_ids:
-            # A later conflicting sibling invalidates an earlier accepted
-            # candidate, including its canonical and final issuer evidence.
+        revoked_quantity_ids = (
+            conflicting_ceiling_quantity_ids | canonical_conflict_quantity_ids
+        )
+        if revoked_quantity_ids:
+            # A disputed source ID OR physical canonical ceiling revokes every
+            # associated claim row, canonical object and issuer evidence.
+            # A source claim cannot survive its canonical identity failure.
             for descriptor, rows in tuple(by_descriptor.items()):
                 retained = [
                     row for row in rows
                     if not any(
-                        quantity_id in conflicting_ceiling_quantity_ids
+                        quantity_id in revoked_quantity_ids
                         for quantity_id in row[4]
                     )
                 ]
@@ -634,9 +649,9 @@ def collect_live_ceiling_lining_claims(
             canonical_ceilings_by_id = {
                 canonical_id: ceiling
                 for canonical_id, ceiling in canonical_ceilings_by_id.items()
-                if ceiling.ceiling_quantity_id not in conflicting_ceiling_quantity_ids
+                if ceiling.ceiling_quantity_id not in revoked_quantity_ids
             }
-            for quantity_id in conflicting_ceiling_quantity_ids:
+            for quantity_id in revoked_quantity_ids:
                 validated_quantities.pop(quantity_id, None)
 
         claims: list[LiveCeilingLiningClaim] = []
