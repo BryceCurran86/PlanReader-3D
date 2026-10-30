@@ -850,7 +850,7 @@ def test_missing_original_revision_snapshot_abstains_entire_ceiling_universe(
     real_ingest = ceiling.SourceVisibilityProducer.ingest_native_pdf_bytes
     real_snapshot = ceiling.SourceVisibilityProducer.published_snapshot_for_revision
     real_run = ceiling.run_source_owned_ceiling_lining_shadow
-    state = {"ingested": False, "snapshot_calls": 0}
+    state = {"ingested": False, "snapshot_calls": 0, "inside_run": False}
     missing_receipts = []
     successful_source_runs = []
     observed_source_viewports = []
@@ -870,12 +870,16 @@ def test_missing_original_revision_snapshot_abstains_entire_ceiling_universe(
     def record_ingest(self, *args, **kwargs):
         state["ingested"] = False
         state["snapshot_calls"] = 0
+        state["inside_run"] = False
         published = real_ingest(self, *args, **kwargs)
         state["ingested"] = True
         return published
 
     def one_missing_snapshot(self, revision_id):
-        if state["ingested"]:
+        # The source-owned pipeline itself re-reads this snapshot during
+        # legitimate evidence checks. Only intercept the collector boundary;
+        # never corrupt an internal producer proof or count it as a viewport.
+        if state["ingested"] and not state["inside_run"]:
             state["snapshot_calls"] += 1
             target_call = 1 if missing_first else 2
             if state["snapshot_calls"] == target_call:
@@ -885,7 +889,11 @@ def test_missing_original_revision_snapshot_abstains_entire_ceiling_universe(
 
     def capture_real_source_run(*args, **kwargs):
         successful_source_runs.append(kwargs["viewport"].viewport_id)
-        return real_run(*args, **kwargs)
+        state["inside_run"] = True
+        try:
+            return real_run(*args, **kwargs)
+        finally:
+            state["inside_run"] = False
 
     monkeypatch.setattr(
         ceiling, "authoritative_floor_plan_viewports", two_original_viewports,
