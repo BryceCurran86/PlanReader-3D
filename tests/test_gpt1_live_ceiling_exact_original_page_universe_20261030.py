@@ -1076,3 +1076,48 @@ def test_original_ceiling_context_substitution_revokes_earlier_valid_viewport(
     assert project_live_ceiling_area_customer_rows(
         first, workspace_id=1, project_id="synthetic-cross-view-ceiling"
     ) == ()
+
+
+@pytest.mark.parametrize(
+    "forged",
+    [
+        None, True, False, 123, b"source-room-area-1",
+        " source-room-area-1", "source-room-area-1 ", object(),
+    ],
+)
+def test_original_ceiling_upstream_area_id_must_be_exact_typed_source_receipt(forged):
+    """A coerced/padded area ID cannot mint a provisional canonical ceiling."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    quantity.metadata["upstream_area_quantity_id"] = forged
+    before = dict(quantity.metadata)
+    for _ in range(2):
+        assert ceiling._claim_from_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+        # Canonical construction must also stop at the earliest receipt gate,
+        # before attempting to read any room polygon or issuer evidence.
+        assert ceiling.canonical_ceiling_from_shadow_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+    assert quantity.metadata == before
+
+
+@pytest.mark.parametrize(
+    "forged",
+    [True, 123, b"source-room-area-1", " source-room-area-1", "source-room-area-1 "],
+)
+def test_original_ceiling_room_area_inventory_id_cannot_alias_source_receipt(forged):
+    """An untyped FIRM area inventory ID cannot match an exact upstream ID."""
+    quantity, source = _source_owned_ceiling_quantity_with_page(1)
+    original_meta = dict(quantity.metadata)
+    area = source.room_area_quantities[0]
+    area.quantity_id = forged
+    for _ in range(2):
+        assert ceiling._claim_from_quantity(
+            quantity=quantity, source_result=source,
+            page_no=1, viewport_id="source-viewport-1",
+        ) is None
+    assert quantity.metadata == original_meta
+    assert area.quantity_id == forged

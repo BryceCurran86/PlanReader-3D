@@ -290,7 +290,16 @@ def _claim_from_quantity(
     ):
         return None
 
-    upstream_id = _clean(meta.get("upstream_area_quantity_id"))
+    # A producer-owned room-area receipt is an exact identity, not display
+    # text. Coercion/whitespace repair could bind an unrelated FIRM area and
+    # leave a provisional claim that the final canonical issuer rejects.
+    upstream_id = meta.get("upstream_area_quantity_id")
+    if (
+        type(upstream_id) is not str
+        or not upstream_id
+        or upstream_id != upstream_id.strip()
+    ):
+        return None
     # Quantity identity is cryptographic source lineage, never last-writer-wins.
     # A modified record replay with the SAME upstream source quantity ID
     # revokes the entire ID instead of choosing the last candidate. Exact
@@ -298,8 +307,13 @@ def _claim_from_quantity(
     area_by_id = {}
     conflicting_area_ids = set()
     for item in source_result.room_area_quantities:
-        item_id = _clean(item.quantity_id)
-        if not item_id or item_id in conflicting_area_ids:
+        item_id = item.quantity_id
+        if (
+            type(item_id) is not str
+            or not item_id
+            or item_id != item_id.strip()
+            or item_id in conflicting_area_ids
+        ):
             continue
         previous = area_by_id.get(item_id)
         if previous is not None and previous != item:
@@ -419,10 +433,12 @@ def canonical_ceiling_from_shadow_quantity(
     quantity_meta = (
         quantity.metadata if isinstance(quantity.metadata, dict) else {}
     )
-    upstream_area_id = _clean(
-        quantity_meta.get("upstream_area_quantity_id")
-    )
-    if not upstream_area_id:
+    upstream_area_id = quantity_meta.get("upstream_area_quantity_id")
+    if (
+        type(upstream_area_id) is not str
+        or not upstream_area_id
+        or upstream_area_id != upstream_area_id.strip()
+    ):
         return None
 
     context = source_result.effective_context
