@@ -344,3 +344,40 @@ GPT3 signer/scorer, original PDFs/tokens, existing signed Lot16 nine and
 Maryborough three, frozen 120 truth/evaluator, 20,000 primitive cap and
 2.5pt snap. Tests are generated-source negative controls only; owner-trusted
 SHA-verified original production/customer replay remains mandatory.
+
+
+## GPT1 original F.07 same-page viewport identity completeness — 2026-10-31
+
+**OBSERVED:** `collect_live_ceiling_lining_claims` validates each returned F.07
+viewport ID and bounding box independently but does not census a repeated
+`(page_no, viewport_id)` source receipt. Two returned source viewports with
+the same page-owned identity may be processed twice. Existing ceiling quantity
+and canonical identity conflict gates reject only matching quantity/object IDs;
+they do not prove that distinct room IDs from two appearances of one viewport
+represent distinct physical ceilings.
+
+**INFERRED:** A repeated original page/viewport receipt is incomplete physical
+viewport ownership and can permit duplicate metric aggregation or a surviving
+sibling claim. It does not establish an actual original-source error or a
+new floor/ceiling FIRM quantity.
+
+**PROPOSED:** Track exact native `(page_no, viewport_id)` identities across the
+complete selected topology universe and ABSTAIN the entire selected run on a
+second appearance, whether its bounds are identical or conflicting. Preserve
+valid distinct viewport identities and separate-page ownership. No nearest,
+first/last, geometry repair, invented count, scale or material inference.
+
+**Trace and test:** Original PDF → F.07 authoritative viewport roster →
+source-owned ceiling producer → `_claim_from_quantity` → canonical ceiling →
+`publish_live_ceiling_area_quantities` →
+`project_live_ceiling_area_customer_rows` → unchanged frozen V2 evaluator.
+Generated native-PDF positives, duplicate same/different bbox in both orders,
+source-producer call count, deterministic replay, original bytes and input
+preservation, real issuer/customer abstention. Source-neutral regression proof
+is NOT original-source positive acceptance. Exact-head Python 3.13/3.14 and
+trusted SHA-verified original Lot16 signed9/Maryborough signed3 customer
+preservation remain mandatory before merge.
+
+**Untouched:** GPT2 FT2/FT3/RCP room ownership, MAX/Claude Wxx, GPT3 signing,
+source PDFs/tokens, frozen truth/evaluator, 20k cap and 2.5pt snap. This is an
+integrity correction, not a scored accuracy milestone.
