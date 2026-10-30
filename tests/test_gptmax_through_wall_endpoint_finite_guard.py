@@ -2259,3 +2259,108 @@ def test_frozen_candidate_rechecks_normal_band_alignment_and_exact_snap_receipt(
     assert reversed_piers == piers
     assert all(r.shadow_only and not r.takeoff_eligible
                and not r.commercial_projection_allowed for r in records)
+
+
+def test_frozen_host_identity_refuses_jointly_valid_snap_and_jamb_replacement():
+    """A geometrically valid new observation must never inherit the old host ID."""
+    from dataclasses import replace
+
+    wall = ContinuousThroughWallCandidate(
+        "receipt-host", (0.0, 0.0), (100.0, 0.0), 20.0,
+    )
+    original_opening = ApertureHostCandidateInput(
+        "receipt-opening", (20.0, 0.0), (40.0, 0.0),
+        ("jamb-left", "jamb-right"),
+    )
+    authority = _authority()
+    baseline, baseline_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(original_opening,),
+        snap_tolerance_pt=0.5,
+    )
+    assert baseline_piers == ()
+    host = baseline[0]
+    assert host.status is S.CANDIDATE
+    assert replace(host) == host
+    assert host.host_start_pt == wall.start_pt
+    assert host.host_end_pt == wall.end_pt
+    assert host.document_id and host.revision_id and host.source_sha256
+
+    # Both modified records are still perfectly valid geometric candidates:
+    # a 0.25pt transverse move remains inside the wall band and 2.5pt cap.
+    # The old source-bound stable ID must NOT survive their joint replacement.
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(
+            host, snap_tolerance_pt=2.5,
+            opening_start_pt=(20.0, 0.25),
+            opening_end_pt=(40.0, 0.25),
+        )
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(host, snap_tolerance_pt=2.5)
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(host, wall_thickness_pt=22.0)
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(host, document_id="different-document")
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(host, revision_id="different-revision")
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(host, source_sha256="different-source")
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(host, adjacent_pier_ids=("forged-pier",))
+    with pytest.raises(ValueError, match="host stable identity"):
+        replace(
+            host, host_end_pt=(120.0, 0.0),
+            whole_wall_length_pt=120.0,
+        )
+    with pytest.raises(ValueError, match="owned wall frame"):
+        replace(host, host_start_pt=(1.0, 0.0))
+    for bad in ("", " padded ", 17, None):
+        with pytest.raises(ValueError, match="host source identity receipt"):
+            replace(host, document_id=bad)
+
+    alternative, alternative_piers = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(original_opening,),
+        snap_tolerance_pt=2.5,
+    )
+    assert alternative_piers == ()
+    assert alternative[0].status is S.CANDIDATE
+    assert alternative[0].hosting_record_id != host.hosting_record_id
+    assert replace(alternative[0]) == alternative[0]
+    assert (host.snap_tolerance_pt, host.opening_start_pt) == (0.5, (20.0, 0.0))
+    assert authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(original_opening,),
+        snap_tolerance_pt=0.5,
+    ) == (baseline, baseline_piers)
+    assert all(r.shadow_only and not r.takeoff_eligible
+               and not r.commercial_projection_allowed for r in (*baseline, *alternative))
+
+
+@pytest.mark.parametrize("angle,shift", [
+    (0.0, (0.0, 0.0)),
+    (math.pi / 3.0, (250.0, -130.0)),
+    (math.pi, (-200.0, 300.0)),
+])
+def test_frozen_host_source_geometry_receipt_rotates_without_id_drift(angle, shift):
+    from dataclasses import replace
+
+    tr = lambda point: _rotated(point, angle, shift)
+    wall = ContinuousThroughWallCandidate(
+        "receipt-rotated", tr((0.0, 0.0)), tr((100.0, 0.0)), 20.0,
+    )
+    opening = ApertureHostCandidateInput(
+        "receipt-rotated-opening", tr((20.0, 0.0)), tr((40.0, 0.0)),
+    )
+    authority = _authority()
+    first = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    second = authority.bind_openings_to_through_wall(
+        through_wall=wall, openings=(opening,),
+    )
+    assert first == second
+    assert first[1] == ()
+    assert first[0][0].status is S.CANDIDATE
+    assert replace(first[0][0]) == first[0][0]
+    assert first[0][0].host_start_pt == wall.start_pt
+    assert first[0][0].host_end_pt == wall.end_pt
+    assert not first[0][0].takeoff_eligible
+    assert not first[0][0].commercial_projection_allowed
