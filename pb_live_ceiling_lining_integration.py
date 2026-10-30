@@ -751,7 +751,7 @@ def collect_live_ceiling_lining_claims(
                 # display strings. Never stringify, trim or silently skip an
                 # authoritative sibling: that would publish an incomplete
                 # selected viewport universe from earlier valid siblings.
-                viewport_id = segmented.view_id
+                viewport_id = getattr(segmented, "view_id", None)
                 if (
                     type(viewport_id) is not str
                     or not viewport_id
