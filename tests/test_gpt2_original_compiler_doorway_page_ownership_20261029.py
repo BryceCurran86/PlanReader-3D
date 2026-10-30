@@ -836,3 +836,82 @@ def test_complete_source_coverage_accepts_full_original_page_universe(
     assert published.coverage.failed_pages == ()
     assert source_bytes == b"synthetic-private-source"
     assert not hasattr(published, "new_firm_quantities")
+
+
+@pytest.mark.parametrize("same_page", [1, 7, 11, True])
+def test_floor_finish_ink_handoff_rejects_same_original_page_before_graph_issuer(
+    same_page,
+):
+    # A copied same-page graph cannot be called independent cross-sheet ink.
+    # Fail before any original graph, registration, or material issuer executes.
+    def forbidden_source_graph(**kwargs):
+        pytest.fail("same-page source graph must never be issued")
+
+    fake = SimpleNamespace(original_room_ink_graph=forbidden_source_graph)
+    with pytest.raises(
+        ValueError, match="original_source_floor_finish_distinct_pages_required"
+    ):
+        compiler.GPT2OriginalSourceGeometryBridge.original_floor_finish_ink_handoff(
+            fake,
+            revision_id="original-rev",
+            floor_page_1_based=same_page,
+            finish_page_1_based=1 if same_page is True else same_page,
+            source_floor_wall_ids=("d0i0",),
+            source_finish_wall_ids=("d1i0",),
+            independent_cross_sheet_registration={},
+            source_translation_pdf_pts=(0.0, 0.0),
+            material_authority=None,
+            source_definition_selector=None,
+            source_occurrence_selector=None,
+            source_finish_code="FT3",
+        )
+
+
+def test_floor_finish_ink_handoff_distinct_original_pages_remain_shadow_only(
+    monkeypatch,
+):
+    # Positive control is synthetic source wiring, not private PDF authority.
+    called_pages = []
+    floor_ids = ("d0i0",)
+    finish_ids = ("d1i0",)
+
+    def graph(**kwargs):
+        called_pages.append(kwargs["page_1_based"])
+        return {"page": kwargs["page_1_based"], "ids": kwargs["original_source_edge_ids"]}
+
+    def registration(floor, finish, **kwargs):
+        assert floor == {"page": 7, "ids": floor_ids}
+        assert finish == {"page": 11, "ids": finish_ids}
+        assert kwargs["translation_pdf_pts"] == (0.0, 0.0)
+        return {"status": "source_registration_candidate_only"}
+
+    def material(registration_receipt, **kwargs):
+        assert registration_receipt["status"] == "source_registration_candidate_only"
+        assert kwargs["original_finish_code"] == "FT3"
+        return {"status": "source_material_candidate_only"}
+
+    monkeypatch.setattr(
+        compiler, "audit_gpt2_original_cross_sheet_ring_correspondence",
+        registration,
+    )
+    monkeypatch.setattr(compiler, "audit_gpt2_source_material_floor_handoff", material)
+    fake = SimpleNamespace(original_room_ink_graph=graph)
+    result = compiler.GPT2OriginalSourceGeometryBridge.original_floor_finish_ink_handoff(
+        fake,
+        revision_id="original-rev",
+        floor_page_1_based=7,
+        finish_page_1_based=11,
+        source_floor_wall_ids=floor_ids,
+        source_finish_wall_ids=finish_ids,
+        independent_cross_sheet_registration={},
+        source_translation_pdf_pts=(0.0, 0.0),
+        material_authority=None,
+        source_definition_selector=None,
+        source_occurrence_selector=None,
+        source_finish_code="FT3",
+    )
+    assert called_pages == [7, 11]
+    assert result["status"] == "original_source_floor_finish_compilation_shadow_only"
+    assert result["new_firm_quantities"] == 0
+    assert result["physical_floor_or_ceiling_issued"] is False
+    assert result["source_verified_not_customer_verified"] is True
