@@ -1062,6 +1062,52 @@ def test_source_shadow_record_constructor_keeps_valid_replay_and_no_promotion():
     assert replay.commercial_projection_allowed is False
 
 
+@pytest.mark.parametrize("bad_blockers", [
+    (),
+    (STANDING_AUTHORITY_BLOCKERS[0],),
+    (STANDING_AUTHORITY_BLOCKERS[1],),
+    tuple(reversed(STANDING_AUTHORITY_BLOCKERS)),
+    STANDING_AUTHORITY_BLOCKERS + (STANDING_AUTHORITY_BLOCKERS[0],),
+    list(STANDING_AUTHORITY_BLOCKERS),
+    None,
+    "none",
+])
+def test_source_shadow_candidate_cannot_discard_standing_authority_blockers(
+    bad_blockers,
+):
+    original = _source_lineage_record()
+    assert original.status is EvidenceResolutionStatus.CANDIDATE
+    assert original.authority_blockers == STANDING_AUTHORITY_BLOCKERS
+    with pytest.raises(
+        ValueError, match="source_cross_view_floor_shadow_blockers_invalid"
+    ):
+        replace(original, authority_blockers=bad_blockers)
+    assert original.authority_blockers == STANDING_AUTHORITY_BLOCKERS
+    assert original.takeoff_eligible is False
+    assert original.commercial_projection_allowed is False
+
+
+@pytest.mark.parametrize("noncandidate_status", [
+    EvidenceResolutionStatus.ABSTAINED,
+    EvidenceResolutionStatus.CONFLICT,
+])
+def test_source_shadow_noncandidate_never_carries_candidate_blockers(
+    noncandidate_status,
+):
+    original = _source_lineage_record()
+    with pytest.raises(
+        ValueError, match="source_cross_view_floor_shadow_blockers_invalid"
+    ):
+        replace(original, status=noncandidate_status)
+    negative = replace(
+        original, status=noncandidate_status, authority_blockers=(),
+    )
+    assert negative.status is noncandidate_status
+    assert negative.authority_blockers == ()
+    assert negative.takeoff_eligible is False
+    assert negative.commercial_projection_allowed is False
+
+
 def test_shadow_record_id_separates_source_sha_snapshot_and_face_identity():
     selector = sample_selector()
     base = _source_lineage_record(selector=selector)
