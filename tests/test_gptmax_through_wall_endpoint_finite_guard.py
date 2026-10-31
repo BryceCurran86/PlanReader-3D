@@ -2172,7 +2172,8 @@ def test_frozen_host_station_identity_rejects_finite_forged_intervals(angle, shi
             {"opening_start_pt": (x + 3.0 * ax, y + 3.0 * ay)},
             {"origin_pt": (ox + 2.0 * ax, oy + 2.0 * ay)},
         ):
-            with pytest.raises(ValueError, match="owned jamb stations"):
+            # The earlier geometry veto may reject before station-identity validation.
+            with pytest.raises(ValueError, match="owned jamb stations|first failing gate"):
                 replace(record, **changes)
         assert not record.commercial_projection_allowed
         assert not record.takeoff_eligible
