@@ -210,34 +210,27 @@ class SpandrelSubSillRecord:
                         self.spandrel_wall_area_sqm,
                         self.total_wall_opening_area_sqm,
                     ))
-                    or not math.isclose(self.glazing_height_mm,
-                                        self.head_height_mm - self.sill_height_mm,
-                                        rel_tol=1e-12, abs_tol=1e-9)
-                    or not math.isclose(self.glazing_aperture_area_sqm,
-                                        self.total_wall_opening_area_sqm,
-                                        rel_tol=1e-12, abs_tol=1e-12)):
+                    or self.glazing_height_mm != max(
+                        0.0, self.head_height_mm - self.sill_height_mm)
+                    or self.glazing_aperture_area_sqm != self.total_wall_opening_area_sqm):
                 raise ValueError("spandrel numeric evidence conflicts with candidate geometry")
             expected_metric_span = self.clear_span_pt * self.scale_ratio
             if (not math.isfinite(expected_metric_span)
                     or expected_metric_span <= 0
-                    or not math.isclose(self.clear_span_m, expected_metric_span,
-                                        rel_tol=1e-12, abs_tol=1e-12)):
+                    or self.clear_span_m != expected_metric_span):
                 raise ValueError("spandrel metric span conflicts with scale receipt")
-            # Public frozen records can be replaced after production. The
-            # positive hypothetical areas must still equal their owned
-            # span and vertical axes, not arbitrary caller-supplied m².
+            # Frozen derived metrics use the exact same deterministic arithmetic
+            # as the producer. Even sub-tolerance drift must not yield a
+            # second receipt under the same source-neutral stable identity.
+            # These remain hypothetical areas, never source-backed takeoff.
             expected_glazing = self.clear_span_m * (self.glazing_height_mm / 1000.0)
             expected_spandrel = self.clear_span_m * (self.sill_height_mm / 1000.0)
             if (not math.isfinite(expected_glazing)
                     or not math.isfinite(expected_spandrel)
                     or expected_glazing <= 0
                     or expected_spandrel <= 0
-                    or not math.isclose(self.glazing_aperture_area_sqm,
-                                        expected_glazing,
-                                        rel_tol=1e-12, abs_tol=1e-12)
-                    or not math.isclose(self.spandrel_wall_area_sqm,
-                                        expected_spandrel,
-                                        rel_tol=1e-12, abs_tol=1e-12)):
+                    or self.glazing_aperture_area_sqm != expected_glazing
+                    or self.spandrel_wall_area_sqm != expected_spandrel):
                 raise ValueError("spandrel numeric evidence conflicts with metric area axes")
 
         # A public frozen record cannot retain a previous physical-host or

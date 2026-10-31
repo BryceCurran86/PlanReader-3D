@@ -963,3 +963,40 @@ def test_spandrel_missing_scale_still_precedes_invalid_geometry(authority):
         **(kwargs | {"jamb_a": kwargs["jamb_b"], "jamb_b": kwargs["jamb_a"]})
     ).contract_id == original.contract_id
     assert original.shadow_only and not original.commercial_projection_allowed
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    "field, delta",
+    [
+        ("clear_span_m", 1e-13),
+        ("glazing_height_mm", 1e-10),
+        ("glazing_aperture_area_sqm", 1e-13),
+        ("spandrel_wall_area_sqm", 1e-13),
+        ("total_wall_opening_area_sqm", 1e-13),
+    ],
+)
+def test_frozen_spandrel_exact_derived_metric_receipts_reject_sub_tolerance_drift(
+    authority, reverse, field, delta,
+):
+    # The ID owns jambs, heights, scale and host, but not a separate copy of
+    # each computed metric. A directly replaced metric must not drift under
+    # that same ID, even by less than the former isclose absolute tolerance.
+    left, right = (100.0, 200.0), (160.0, 280.0)
+    if reverse:
+        left, right = right, left
+    kwargs = dict(
+        jamb_a=left, jamb_b=right, sill_height_mm=900.0,
+        head_height_mm=2100.0, host_through_wall_id="SHADOW_HOST",
+        scale_ratio=0.01764,
+    )
+    record = authority.evaluate_spandrel_sub_sill(**kwargs)
+    before = record.to_dict()
+    value = getattr(record, field)
+    assert value is not None and value + delta != value
+    with pytest.raises(ValueError, match="candidate geometry|metric span|metric area axes"):
+        replace(record, **{field: value + delta})
+    assert record.to_dict() == before
+    assert authority.evaluate_spandrel_sub_sill(**kwargs) == record
+    assert record.shadow_only and not record.takeoff_eligible
+    assert not record.commercial_projection_allowed
