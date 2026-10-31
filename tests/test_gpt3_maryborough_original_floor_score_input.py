@@ -99,6 +99,41 @@ def test_signed_source_floor_inventory_remains_unmapped_and_unscored():
     } == {"physical-floor-1", "physical-floor-2"}
 
 
+@pytest.mark.parametrize("source_scope", [(), (SHA,)])
+def test_empty_signed_floor_seal_reports_missing_quantities_not_source_conflict(source_scope):
+    sealed, _, verified = _valid()
+    empty = SimpleNamespace(**{
+        **sealed.__dict__,
+        "quantities": (),
+        "source_sha256s": source_scope,
+    })
+    with pytest.raises(ValueError, match="empty Maryborough floor-area source seal"):
+        module._validate_sealed_customer_handoff(empty, (), verified, SHA)
+
+
+@pytest.mark.parametrize("source_scope", [(), ("b" * 64,), (SHA, "b" * 64)])
+def test_nonempty_floor_seal_source_envelope_mismatch_still_fails_closed(source_scope):
+    sealed, rows, verified = _valid()
+    wrong = SimpleNamespace(**{
+        **sealed.__dict__,
+        "source_sha256s": source_scope,
+    })
+    with pytest.raises(ValueError, match="source scope contradicts original PDF"):
+        module._validate_sealed_customer_handoff(wrong, rows, verified, SHA)
+
+
+def test_foreign_project_empty_seal_cannot_hide_as_missing_quantities():
+    sealed, _, verified = _valid()
+    foreign = SimpleNamespace(**{
+        **sealed.__dict__,
+        "project_id": "other-project",
+        "quantities": (),
+        "source_sha256s": (),
+    })
+    with pytest.raises(ValueError, match="source scope contradicts original PDF"):
+        module._validate_sealed_customer_handoff(foreign, (), verified, SHA)
+
+
 def test_duplicate_physical_floor_identity_fails_closed():
     sealed, rows, verified = _valid()
     q1, q2 = sealed.quantities
