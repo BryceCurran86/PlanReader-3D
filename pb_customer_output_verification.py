@@ -232,6 +232,26 @@ def _verify_row_lineage(
             f"customer row {quantity_id!r} is missing measurement authority lineage"
         )
 
+    # The customer-facing finish code is a commercial material identity, not
+    # merely decorative text. The adapter stores the exact displayed value in
+    # persisted QuantityEvidence provenance, but the projection fingerprint
+    # alone cannot detect a later edit to the mutable row display column.
+    # Only the floor-finish family is subject to this new check; historical
+    # opening and bare floor-area receipts retain their existing contract.
+    if sealed.family == "floor_finish_area":
+        qmeta = qprov.get("metadata")
+        if not isinstance(qmeta, Mapping) or type(qmeta.get("finish_system")) is not str:
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} is missing source finish display provenance"
+            )
+        if type(row.get("finish_system")) is not str:
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} has malformed finish_system"
+            )
+        _require_equal(
+            "finish_system", row["finish_system"], qmeta["finish_system"], quantity_id
+        )
+
     # A signed source-closed quantity also authenticates its evidence status,
     # authority and confidence. A row that changes these claims while keeping
     # its quantity ID and value must not pass commercial lineage verification.
