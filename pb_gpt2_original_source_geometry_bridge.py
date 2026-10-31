@@ -773,17 +773,60 @@ class GPT2OriginalSourceGeometryBridge:
         if source_cross_sheet_receipt.get(
                 "source_real_door_ink_gap_virtual_closure_only") is True:
             rival=original_doorway_source_ancestry
-            if (type(rival) is not dict
-                    or rival.get("status")!=
-                        "original_doorway_all_printed_wall_strokes_match_candidate"
-                    or rival.get("original_source_sha256")!=
-                        published.revision.source_sha256
-                    or rival.get("source_revision_id")!=revision_id
-                    or rival.get("source_snapshot_id")!=
-                        published.snapshot.snapshot_id
-                    or rival.get("original_floor_page")!=original_floor_page_1_based
-                    or rival.get("original_other_plan_page")!=
-                        source_cross_sheet_receipt.get("original_finish_page")):
+            # Status and lineage fields are caller data. Reissue BOTH native
+            # doorway stroke inventories from the sealed original PDF before
+            # any material/W4 handoff. Exact original ink is never repaired by
+            # wall snap or a majority vote across alternate source sheets.
+            floor_ids=source_cross_sheet_receipt.get("original_floor_source_ids")
+            finish_ids=source_cross_sheet_receipt.get("original_finish_source_ids")
+            translation=source_cross_sheet_receipt.get(
+                "source_cross_sheet_translation_pdf_pts")
+            finish_page=source_cross_sheet_receipt.get("original_finish_page")
+            valid_scope=(
+                type(finish_page) is int and finish_page!=original_floor_page_1_based
+                and type(floor_ids) is tuple and type(finish_ids) is tuple
+                and all(2<=len(ids)<=120000 and len(set(ids))==len(ids)
+                        and all(type(item) is str and item for item in ids)
+                        for ids in (floor_ids,finish_ids))
+                and type(translation) in (tuple,list) and len(translation)==2
+                and all(type(v) in (int,float) and abs(v)<=2**53
+                        and v==v and v not in (float("inf"),float("-inf"))
+                        for v in translation)
+                and type(rival) is dict
+                and rival.get("status")==
+                    "original_doorway_all_printed_wall_strokes_match_candidate"
+                and rival.get("original_source_sha256")==
+                    published.revision.source_sha256
+                and rival.get("source_document_id")==published.revision.document_id
+                and rival.get("source_revision_id")==revision_id
+                and rival.get("source_snapshot_id")==published.snapshot.snapshot_id
+                and rival.get("original_floor_page")==original_floor_page_1_based
+                and rival.get("original_other_plan_page")==finish_page
+                and type(rival.get("floor_source_graph")) is dict
+                and type(rival.get("second_plan_source_graph")) is dict
+                and rival["floor_source_graph"].get("original_native_edge_ids")
+                    ==tuple(sorted(floor_ids))
+                and rival["second_plan_source_graph"].get("original_native_edge_ids")
+                    ==tuple(sorted(finish_ids))
+                and rival.get("original_translation_pdf_pts")==list(translation)
+            )
+            reissued=None
+            if valid_scope:
+                try:
+                    reissued=self.original_room_doorway_source_ancestry(
+                        revision_id=revision_id,
+                        original_floor_page_1_based=original_floor_page_1_based,
+                        original_second_page_1_based=finish_page,
+                        original_floor_source_edge_ids=floor_ids,
+                        original_second_source_edge_ids=finish_ids,
+                        original_translation_pdf_pts=tuple(translation),
+                    )
+                except (ValueError,TypeError,KeyError,IndexError,
+                        OverflowError,AttributeError,RuntimeError):
+                    pass
+            if (reissued is None or reissued!=rival
+                    or reissued.get("status")!=
+                        "original_doorway_all_printed_wall_strokes_match_candidate"):
                 return {
                     "status":"source_original_doorway_ancestry_conflict",
                     "first_failure":"real_original_doorway_stub_disagrees_across_sheets",
