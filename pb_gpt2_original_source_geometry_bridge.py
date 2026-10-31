@@ -120,7 +120,9 @@ def _original_doorway_gap_native_ink_inventory_complete(
                 or any(type(c) not in (int,float) or not math.isfinite(c)
                        for c in color)):
             return False
-        return any(float(c)<1.0 for c in color)
+        # Even a white stroke can be visible on an inked background; a
+        # separate visibility owner, not an assumed white page, must rule it out.
+        return True
 
     def same_run(item):
         if type(item) is not tuple or len(item)!=3 or item[0]!="l":
