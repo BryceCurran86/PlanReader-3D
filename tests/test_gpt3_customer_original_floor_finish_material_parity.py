@@ -178,6 +178,15 @@ def test_recomputed_customer_fingerprint_cannot_resign_a_foreign_finish_code(
         verify_sealed_customer_output(signed, forged)
 
 
+@pytest.mark.parametrize("malformed", [None, True, False, 3, 0.0, [], {}])
+def test_nonstring_customer_element_never_inherits_signed_ft_code(malformed):
+    signed, rows = _source_coded_element_receipt()
+    forged = deepcopy(rows)
+    forged[0]["element"] = malformed
+    with pytest.raises(CustomerOutputVerificationError, match="element differs"):
+        verify_sealed_customer_output(signed, forged)
+
+
 def test_legacy_original_floor_label_cannot_be_relabelled_as_source_coded():
     signed, rows = _real_floor_finish_receipt()
     assert rows[0]["element"] == "Floor finish area"
