@@ -896,6 +896,9 @@ def _source_member_partition(
     left_ids: Sequence[str],
     right_ids: Sequence[str],
     records_by_id: Mapping[str, SourceObservationRecord],
+    *,
+    left_box: Optional[Sequence[float]] = None,
+    right_box: Optional[Sequence[float]] = None,
 ) -> str:
     """Whether two openings that rest on some of the same source lines are physically apart.
 
@@ -904,10 +907,20 @@ def _source_member_partition(
     gaps (support between two windows in one wall). ``overlapping_extent``: their gaps overlap, so they describe the
     same stretch of wall and are neither the same nor distinct. ``unproven``: anything else (a shared jamb or cap, a
     shared line that enters a gap, a structure with no readable frame, a different face direction). Different record
-    ids alone prove neither identity nor distinctness."""
+    ids alone prove neither identity nor distinctness.
+
+    A record that carries its own source-measured aperture box (the raster framed path) is partitioned by that box
+    instead: boxes that overlap in area are ``overlapping_extent``, boxes that do not are ``partitioned``, and a box
+    on only one side is ``unproven``."""
     shared = set(map(str, left_ids)) & set(map(str, right_ids))
     if not shared:
         return "disjoint"
+    if left_box is not None or right_box is not None:
+        if left_box is None or right_box is None or len(left_box) != 4 or len(right_box) != 4:
+            return "unproven"
+        overlap_x = min(left_box[2], right_box[2]) - max(left_box[0], right_box[0])
+        overlap_y = min(left_box[3], right_box[3]) - max(left_box[1], right_box[1])
+        return "overlapping_extent" if overlap_x > _FRAME_TOL and overlap_y > _FRAME_TOL else "partitioned"
     first = _structure_frame(tuple(map(str, left_ids)), records_by_id)
     second = _structure_frame(tuple(map(str, right_ids)), records_by_id)
     if first is None or second is None:
@@ -5045,11 +5058,16 @@ class PhysicalOpeningAuthority:
         # Different record ids are not distinct openings when the two records rest on some of the same source lines:
         # adjacent openings share the wall support between them, layers of one gap share a face and an extent. Only a
         # physical partition proven from the source separates them.
-        records, failures = self._visible_snapshot_records(left_source)
-        partition = (
-            "unproven" if failures else _source_member_partition(
-                left_record.source_observation_ids, right_record.source_observation_ids,
-                {str(record.observation_id): record for record in records}))
+        boxes = (left_record.aperture_bbox_pt, right_record.aperture_bbox_pt)
+        by_id: dict[str, SourceObservationRecord] = {}
+        if (set(left_record.source_observation_ids) & set(right_record.source_observation_ids)
+                and all(box is None for box in boxes)):
+            records, failures = self._visible_snapshot_records(left_source)
+            if not failures:
+                by_id = {str(record.observation_id): record for record in records}
+        partition = _source_member_partition(
+            left_record.source_observation_ids, right_record.source_observation_ids, by_id,
+            left_box=boxes[0], right_box=boxes[1])
         if partition in {"overlapping_extent", "unproven"}:
             overlapping = partition == "overlapping_extent"
             return PhysicalOpeningIdentityResult(

@@ -112,6 +112,20 @@ def test_the_partition_rule_on_sources_with_nothing_in_common_or_nothing_readabl
     assert _source_member_partition(first, second, by_id) == "partitioned"
 
 
+def test_a_record_that_carries_its_own_source_measured_box_is_partitioned_by_that_box():
+    shared = ("a", "b", "c")
+    own = {"left_ids": ("a", "b", "x"), "right_ids": ("a", "b", "y")}
+    apart = _source_member_partition(**own, records_by_id={}, left_box=(0, 0, 10, 10), right_box=(20, 0, 30, 10))
+    touching = _source_member_partition(**own, records_by_id={}, left_box=(0, 0, 10, 10), right_box=(10, 0, 20, 10))
+    overlapping = _source_member_partition(**own, records_by_id={}, left_box=(0, 0, 10, 10), right_box=(5, 2, 15, 8))
+    contained = _source_member_partition(**own, records_by_id={}, left_box=(0, 0, 10, 10), right_box=(2, 2, 8, 8))
+    one_sided = _source_member_partition(**own, records_by_id={}, left_box=(0, 0, 10, 10), right_box=None)
+    assert (apart, touching, overlapping, contained, one_sided) == (
+        "partitioned", "partitioned", "overlapping_extent", "overlapping_extent", "unproven")
+    assert _source_member_partition(("a", "b"), ("c", "d"), {}, left_box=(0, 0, 10, 10), right_box=(5, 5, 15, 15)) == "disjoint"
+    assert shared
+
+
 def test_a_shared_jamb_is_not_wall_support_even_when_the_gaps_only_touch():
     physical, published, ids, kw = _fixture(SHARED_JAMB)
     members = _ids(ids, SHARED_JAMB, kw)
