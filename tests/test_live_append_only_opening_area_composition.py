@@ -84,6 +84,78 @@ def test_actual_producer_area_appends_through_sealer_and_customer_without_old_dr
     ))
 
 
+def test_append_retains_full_fresh_source_roster_without_publishing_unsupported_sibling(original_claim):
+    _, full = original_claim
+    baseline = subset(full)
+    added = next(o for o in full.canonical_openings
+                 if o.canonical_opening_id != baseline.canonical_openings[0].canonical_opening_id)
+    # A producer's unmeasured, spatially separate source observation still
+    # belongs to the full replay witness. It must not become a signed row.
+    sibling = replace(
+        added, canonical_opening_id="original-unmeasured-candidate",
+        physical_opening_id="original-unmeasured-candidate",
+        representative_observation_id="original-unmeasured-observation",
+        source_observation_ids=("original-unmeasured-observation",),
+        source_lineage_root_ids=("other-original-wall-fragment",),
+        source_geometries=((450.0, 450.0, 475.0, 450.0),),
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+    )
+    fresh_roster = full.canonical_openings + (sibling,)
+    result = _append_reproved_areas(baseline, fresh_roster, full.opening_quantity_evidence)
+    assert result.opening_area_replay_source_inventory == tuple(
+        sorted(fresh_roster, key=lambda o: o.canonical_opening_id)
+    )
+    assert sibling not in result.canonical_openings
+    assert len(result.opening_quantity_evidence) == 2
+    assert result.opening_quantity_evidence[0] is baseline.opening_quantity_evidence[0]
+    assert result.canonical_openings[0] is baseline.canonical_openings[0]
+    sealed = seal_live_opening_area_claim_run(result, workspace_id=1, project_id="source-project")
+    rows = project_live_opening_customer_rows(result, workspace_id=1, project_id="source-project")
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+
+
+@pytest.mark.parametrize("collision", ("same_source_observations", "same_physical_geometry"))
+def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(original_claim, collision):
+    _, full = original_claim
+    baseline = subset(full)
+    added = next(o for o in full.canonical_openings
+                 if o.canonical_opening_id != baseline.canonical_openings[0].canonical_opening_id)
+    sibling = replace(
+        added, canonical_opening_id="fresh-only-unsupported",
+        physical_opening_id="fresh-only-unsupported",
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+        source_observation_ids=(
+            added.source_observation_ids if collision == "same_source_observations"
+            else ("distinct-original-observation",)
+        ),
+        source_geometries=(
+            added.source_geometries if collision == "same_physical_geometry"
+            else ((500.0, 500.0, 550.0, 500.0),)
+        ),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="unmeasured opening rival"):
+        _append_reproved_areas(
+            baseline, full.canonical_openings + (sibling,), full.opening_quantity_evidence
+        )
+
+
+def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
+    _, full = original_claim
+    baseline = subset(full)
+    added = next(o for o in full.canonical_openings
+                 if o.canonical_opening_id != baseline.canonical_openings[0].canonical_opening_id)
+    sibling = replace(
+        added, canonical_opening_id="foreign-source-only",
+        physical_opening_id="foreign-source-only",
+        snapshot_id="different-source-snapshot",
+        area_m2=None, area_basis=None, figured_area_record_id=None,
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="replay source scope"):
+        _append_reproved_areas(
+            baseline, full.canonical_openings + (sibling,), full.opening_quantity_evidence
+        )
+
+
 def test_reissued_old_host_receipts_do_not_replace_original_object_or_quantity(original_claim):
     _, full = original_claim
     baseline = subset(full)
