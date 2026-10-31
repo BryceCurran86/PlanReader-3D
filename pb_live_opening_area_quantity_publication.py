@@ -9,6 +9,7 @@ measurement evidence backing that area is retained on the object.
 from __future__ import annotations
 
 import math
+from typing import Sequence
 
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
@@ -114,8 +115,22 @@ def _opening_quantity(
         or len(set(source_observation_ids)) != len(source_observation_ids)
         or opening.representative_observation_id not in source_observation_ids
         or opening.representative_observation_id not in evidence_ids
+        # The physical existence producer may own several original ink
+        # observations. Every one must survive into the actual commercial
+        # quantity evidence roster, not just the representative witness.
+        or any(observation_id not in evidence_ids
+               for observation_id in source_observation_ids)
     ):
         return None
+    # Producer-owned INSTANCE tags must survive in the commercial evidence.
+    # An adjacent native word or a type-level schedule mark cannot replace it.
+    tag_id = opening.tag_observation_id
+    if tag_id is not None and (
+        type(tag_id) is not str or not tag_id or tag_id != tag_id.strip()
+        or tag_id not in evidence_ids
+    ):
+        return None
+
     # A caller-replayed host string alone cannot certify the physical opening
     # owner. The composer retains each authenticated host binding/frame record
     # on canonical evidence; require that receipt at quantity publication.
@@ -322,23 +337,61 @@ def _opening_quantity(
     )
 
 
-def publish_live_opening_area_quantities(
-    composition: LivePhysicalOpeningVoidComposition,
-) -> tuple[QuantityEvidence, ...]:
-    """Publish one deterministic area quantity per source-proven opening."""
-    if type(composition) is not LivePhysicalOpeningVoidComposition:
-        raise TypeError(
-            "composition must be LivePhysicalOpeningVoidComposition"
-        )
+def _reject_incompatible_elevation_frame_claims(
+    canonical_openings: Sequence[LiveCanonicalOpeningObject],
+) -> None:
+    """Fail closed before either issuer or final claim/customer sealing.
 
+    Repeated physical openings may share one authenticated TYPE-level frame,
+    but a single original frame receipt cannot claim incompatible type marks
+    or door/window kinds, including through an ABSTAIN sibling.
+    """
+    frame_claims: dict[str, tuple[str, str]] = {}
+    for opening in canonical_openings:
+        if type(opening) is not LiveCanonicalOpeningObject:
+            raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
+        if opening.area_basis != "authenticated_elevation_frame":
+            continue
+        frame_id = opening.figured_area_record_id
+        if type(frame_id) is not str or not frame_id or frame_id != frame_id.strip():
+            continue
+        claim = (
+            str(opening.opening_kind or "").strip().lower(),
+            str(opening.type_mark or "").strip().upper(),
+        )
+        prior = frame_claims.get(frame_id)
+        if prior is not None and prior != claim:
+            raise ValueError(
+                "conflicting original elevation frame source receipt "
+                "across opening kind/type"
+            )
+        frame_claims[frame_id] = claim
+
+
+def _validate_canonical_opening_inventory(
+    canonical_openings: Sequence[LiveCanonicalOpeningObject],
+    *,
+    revision_id: str | None,
+) -> None:
+    """Validate the complete physical/source universe before any seal.
+
+    Both composition publication and the final live claim must enforce this
+    exact producer-owned identity and source-snapshot rule, including blocked
+    members that cannot individually produce a quantity.
+    """
     # Check the *whole producer-owned canonical inventory* before narrowing
     # it to quantities. If an unsupported/ABSTAIN opening reuses the physical
     # identity of a FIRM opening, filtering first would silently publish the
     # favourable member and conceal contradictory identity lineage.
     canonical_ids: set[str] = set()
     physical_ids: set[str] = set()
+    # A physical plan-tag observation belongs to one opening instance,
+    # including when a conflicting sibling is not individually publishable.
+    # Repeated Wxx type marks with distinct tag observations remain allowed.
+    instance_tag_owners: dict[str, str] = {}
+    mismatched_identity_pair = False
     source_scope: tuple[str, str, str] | None = None
-    for opening in composition.canonical_openings:
+    for opening in canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
         # One published source-visibility snapshot owns this canonical
@@ -360,24 +413,65 @@ def publish_live_opening_area_quantities(
         # A stale foreign-revision member cannot be filtered out as
         # unsupported while the favourable member becomes a commercial
         # quantity. The canonical composition is revision-scoped.
-        if str(opening.revision_id or "").strip() != str(composition.revision_id or "").strip():
+        if str(opening.revision_id or "").strip() != str(revision_id or "").strip():
             raise ValueError(
                 "canonical opening revision conflicts with quantity composition"
             )
-        canonical_id = str(opening.canonical_opening_id or "").strip()
-        physical_id = str(opening.physical_opening_id or "").strip()
-        if canonical_id and canonical_id in canonical_ids:
+        # The dataclass is not runtime-validated. An unsupported opening
+        # remains part of the original physical inventory: never stringify,
+        # trim or silently discard its source-owned identity before sealing.
+        canonical_id = opening.canonical_opening_id
+        physical_id = opening.physical_opening_id
+        if any(
+            type(value) is not str or not value or value != value.strip()
+            for value in (canonical_id, physical_id)
+        ):
+            raise ValueError(
+                "invalid canonical/physical opening identity in complete quantity inventory"
+            )
+        if canonical_id in canonical_ids:
             raise ValueError(
                 f"duplicate canonical opening identity in quantity publication: {canonical_id}"
             )
-        if physical_id and physical_id in physical_ids:
+        if physical_id in physical_ids:
             raise ValueError(
                 f"duplicate physical opening identity in quantity publication: {physical_id}"
             )
-        if canonical_id:
-            canonical_ids.add(canonical_id)
-        if physical_id:
-            physical_ids.add(physical_id)
+        canonical_ids.add(canonical_id)
+        physical_ids.add(physical_id)
+        tag_id = opening.tag_observation_id
+        if tag_id is not None:
+            if type(tag_id) is not str or not tag_id or tag_id != tag_id.strip():
+                raise ValueError("invalid original instance tag receipt in canonical inventory")
+            prior = instance_tag_owners.get(tag_id)
+            if prior is not None and prior != physical_id:
+                raise ValueError("original instance tag observation shared across physical openings")
+            instance_tag_owners[tag_id] = physical_id
+        if canonical_id != physical_id:
+            mismatched_identity_pair = True
+    # Preserve the more specific duplicate-ID error above when a foreign
+    # physical ID copies a previously observed sibling. A unique but
+    # mismatched pair is still a forbidden physical source identity.
+    if mismatched_identity_pair:
+        raise ValueError(
+            "canonical/physical opening identity mismatch in complete quantity inventory"
+        )
+
+
+def publish_live_opening_area_quantities(
+    composition: LivePhysicalOpeningVoidComposition,
+) -> tuple[QuantityEvidence, ...]:
+    """Publish one deterministic area quantity per source-proven opening."""
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError(
+            "composition must be LivePhysicalOpeningVoidComposition"
+        )
+
+    _validate_canonical_opening_inventory(
+        composition.canonical_openings, revision_id=composition.revision_id,
+    )
+
+    _reject_incompatible_elevation_frame_claims(composition.canonical_openings)
 
     quantities: list[QuantityEvidence] = []
     seen_quantity_ids: set[str] = set()

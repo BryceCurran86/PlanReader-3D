@@ -572,6 +572,7 @@ def _record_candidates_for_page(
     page_id: str,
     published,
     trusted_words: Sequence[_TrustedWord],
+    all_claim_tags: Sequence[tuple[_TrustedWord, str, str]],
 ) -> tuple[OpeningElevationFrameAreaRecord, ...]:
     family, title_ids = _page_family_and_title_ids(trusted_words)
     all_tags = _opening_tags(trusted_words)
@@ -673,13 +674,31 @@ def _record_candidates_for_page(
                 ) > locality_limit:
                     continue
 
-                contained = {
-                    contained_mark
-                    for contained_word, contained_mark, _kind in all_tags
+                # Source observation multiplicity, not normalized tag
+                # multiplicity, proves one explicit opening mark per frame.
+                # A set of tag strings collapses two distinct W1 observations
+                # into {"W1"} and incorrectly authorizes the same frame.
+                # Preserve exact selected-word ownership as well: a different
+                # same-type tag inside the frame cannot stand in for this one.
+                contained_ids = [
+                    contained_word.observation_id
+                    for contained_word, _contained_mark, _kind in all_tags
                     if _inside(_center(contained_word.bbox), frame_bbox)
-                }
-                # Composite assemblies are not one opening's gross frame.
-                if contained != {mark}:
+                ]
+                if contained_ids != [mark_word.observation_id]:
+                    continue
+
+                # Untrusted native tag claims are negative/exclusion evidence.
+                # A second W/D source word inside the same frame may fail
+                # glyph/raster authentication, but its unresolved presence
+                # cannot be discarded to manufacture unique positive title
+                # and frame-area authority from the one trusted mark.
+                raw_claim_ids = [
+                    word.observation_id
+                    for word, _raw_mark, _raw_kind in all_claim_tags
+                    if _inside(_center(word.bbox), frame_bbox)
+                ]
+                if raw_claim_ids != [mark_word.observation_id]:
                     continue
 
                 # A second composite shape occurs when the selected figured
@@ -1522,6 +1541,7 @@ class OpeningElevationFrameAreaProducer:
                             page_id=page_id,
                             published=published,
                             trusted_words=trusted_words,
+                            all_claim_tags=claim_tags,
                         )
                     except Exception:
                         # Candidate-production failure cannot prove the absence of rivals.

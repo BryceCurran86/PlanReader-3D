@@ -24,6 +24,8 @@ def assess_opening_axis_ownership_shadow(
     width_m: float | None,
     height_m: float | None,
     area_m2: float | None,
+    canonical_evidence_ids: Sequence[str] | None = None,
+    geometry_complete: bool | None = None,
 ) -> dict[str, Any]:
     """Classify axis/area readiness; never invent height from width."""
     oid = str(physical_opening_id or "").strip()
@@ -41,13 +43,32 @@ def assess_opening_axis_ownership_shadow(
         a, b = float(values[0]), float(values[1])
         if not math.isclose(a * b / 1_000_000.0, float(area_m2), rel_tol=1e-9):
             gate = "figured_area_product_disagrees_with_pair"
-        elif not axis_order_resolved:
+        elif geometry_complete is not True:
+            gate = "opening_geometry_axis_scope_unavailable"
+        elif (
+            type(width_record_id) is not str or not width_record_id
+            or width_record_id != width_record_id.strip()
+            or type(height_record_id) is not str or not height_record_id
+            or height_record_id != height_record_id.strip()
+            or width_record_id == height_record_id
+            or not (_positive(width_m) and _positive(height_m))
+        ):
             gate = "width_height_axis_authority_unproven"
-        elif not (width_record_id and height_record_id and width_record_id != height_record_id):
-            gate = "width_height_axis_authority_unproven"
-        elif not (_positive(width_m) and _positive(height_m)):
-            gate = "width_height_axis_authority_unproven"
-        elif not math.isclose(float(width_m) * float(height_m), float(area_m2), rel_tol=1e-6):
+        elif (
+            type(canonical_evidence_ids) not in (tuple, list)
+            or width_record_id not in canonical_evidence_ids
+            or height_record_id not in canonical_evidence_ids
+        ):
+            gate = "original_axis_receipts_unbound"
+        # Source-owned independently ordered canonical axes can corroborate an
+        # UNORDERED printed pair, but the actual dimension values must match.
+        # Equal areas from different axis pairs are never identity evidence.
+        elif not all(math.isclose(c, d, rel_tol=1e-8, abs_tol=1e-9)
+                     for c, d in zip(
+                         sorted((float(width_m), float(height_m))),
+                         sorted((a / 1000.0, b / 1000.0)))):
+            gate = "independent_axes_disagree_with_figured_pair"
+        elif not math.isclose(float(width_m) * float(height_m), float(area_m2), rel_tol=1e-8):
             gate = "axis_ordered_area_disagrees_with_figured_product"
         else:
             gate = "independent_gpt1_measurement_validation_required"
@@ -59,6 +80,7 @@ def assess_opening_axis_ownership_shadow(
         "first_remaining_gate": gate,
         "figured_value_count": len(values),
         "axis_order_authenticated": gate == "independent_gpt1_measurement_validation_required",
+        "original_figured_label_order_source_resolved": axis_order_resolved is True,
         "opening_area_publication_allowed": False,
         "invented_second_axis": False,
         "measurement_published": False,

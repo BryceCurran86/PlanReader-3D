@@ -18,6 +18,9 @@ from pb_opening_elevation_frame_area_authority import (
     OpeningElevationFrameAreaProducer,
     OpeningElevationFrameAreaSelector,
     _dimension_is_mixed_opening_assembly_span,
+    _TrustedWord,
+    _opening_tags,
+    _record_candidates_for_page,
     opening_elevation_claim_family,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -25,7 +28,14 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from test_pdf_text_integrity_source_state_v1 import _SYSINFO_DUP, _cmap, _pdf, _stream_obj
 
 
-def _elevation_pdf(*, composite: bool = False, far_width_dimension: bool = False) -> bytes:
+def _elevation_pdf(
+    *,
+    composite: bool = False,
+    far_width_dimension: bool = False,
+    duplicate_same_mark: bool = False,
+    reverse_duplicate_order: bool = False,
+    external_same_mark: bool = False,
+) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=500.0, height=400.0)
@@ -34,7 +44,15 @@ def _elevation_pdf(*, composite: bool = False, far_width_dimension: bool = False
         # Closed source frame: 150pt x 120pt. Figured dimensions are 3000 x
         # 2400, preserving the same aspect ratio without requiring page scale.
         page.draw_rect(fitz.Rect(150.0, 120.0, 300.0, 240.0), width=1.0)
-        page.insert_text((215.0, 185.0), "W1", fontsize=9.0)
+        marks = [(215.0, 185.0)]
+        if duplicate_same_mark:
+            marks.append((258.0, 185.0))
+        if reverse_duplicate_order:
+            marks.reverse()
+        for position in marks:
+            page.insert_text(position, "W1", fontsize=9.0)
+        if external_same_mark:
+            page.insert_text((340.0, 185.0), "W1", fontsize=9.0)
 
         if composite:
             page.insert_text((258.0, 185.0), "D1", fontsize=9.0)
@@ -419,6 +437,34 @@ def test_marked_window_elevation_proves_closed_gross_frame_area() -> None:
     assert record.frame_geometry_ids
 
 
+@pytest.mark.parametrize("reverse_duplicate_order", [False, True])
+def test_two_identical_source_marks_inside_one_frame_must_abstain(
+    reverse_duplicate_order: bool,
+) -> None:
+    # Two separate trusted W1 word observations are not a unique physical
+    # elevation mark, even though their normalized mark strings are equal.
+    # The old set-based test collapsed both words into {"W1"} and emitted
+    # a false positive; reversing PDF insertion order must not change this.
+    published, authority = _authority(
+        _elevation_pdf(
+            duplicate_same_mark=True,
+            reverse_duplicate_order=reverse_duplicate_order,
+        )
+    )
+    result = authority.resolve(_selector(published, "W1"))
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE in result.reason_codes
+
+
+def test_same_type_word_outside_closed_frame_does_not_poison_unique_mark() -> None:
+    published, authority = _authority(_elevation_pdf(external_same_mark=True))
+    result = authority.resolve(_selector(published, "W1"))
+    assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
+    assert result.record is not None
+    assert result.record.area_m2 == pytest.approx(7.2)
+
+
 def test_composite_window_door_outer_frame_cannot_become_single_window_area() -> None:
     published, authority = _authority(_elevation_pdf(composite=True))
 
@@ -448,3 +494,78 @@ def test_unknown_mark_never_inherits_another_elevation_frame() -> None:
 
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
+
+
+def _native_elevation_word_claims(page) -> tuple[_TrustedWord, ...]:
+    # The direct page function test deliberately distinguishes the full raw
+    # source claimant inventory from independently authenticated words.
+    return tuple(
+        _TrustedWord(
+            observation_id=f"native-word-{index}",
+            text=str(raw[4]),
+            bbox=tuple(float(v) for v in raw[:4]),
+            block_no=int(raw[5]),
+            line_no=int(raw[6]),
+            word_no=int(raw[7]),
+            sequence_number=index,
+        )
+        for index, raw in enumerate(page.get_text("words"))
+    )
+
+
+@pytest.mark.parametrize("reverse_claim_order", [False, True])
+def test_untrusted_second_native_tag_inside_frame_blocks_type_area(
+    reverse_claim_order: bool,
+) -> None:
+    payload = _elevation_pdf(composite=True)
+    published, _authority_unused = _authority(payload)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        page = document[0]
+        raw_words = _native_elevation_word_claims(page)
+        # A source-visible D1 is deliberately not in the trusted-positive
+        # word set: it may have failed glyph integrity or raster verification.
+        trusted = tuple(word for word in raw_words if word.text != "D1")
+        raw_claims = _opening_tags(raw_words)
+        if reverse_claim_order:
+            raw_claims = tuple(reversed(raw_claims))
+        records = _record_candidates_for_page(
+            page=page, page_id="1", published=published,
+            trusted_words=trusted, all_claim_tags=raw_claims,
+        )
+    assert records == ()
+
+
+def test_untrusted_native_tag_outside_frame_does_not_poison_inside_mark() -> None:
+    payload = _elevation_pdf(external_same_mark=True)
+    published, _authority_unused = _authority(payload)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        page = document[0]
+        raw_words = _native_elevation_word_claims(page)
+        inside_trusted = tuple(
+            word for word in raw_words
+            if word.text != "W1" or word.bbox[0] < 300.0
+        )
+        records = _record_candidates_for_page(
+            page=page, page_id="1", published=published,
+            trusted_words=inside_trusted,
+            all_claim_tags=_opening_tags(raw_words),
+        )
+    assert len(records) == 1
+    assert records[0].type_mark == "W1"
+    assert records[0].area_m2 == pytest.approx(7.2)
+
+
+def test_complete_raw_tag_claimant_universe_preserves_single_mark_positive() -> None:
+    payload = _elevation_pdf()
+    published, _authority_unused = _authority(payload)
+    with fitz.open(stream=payload, filetype="pdf") as document:
+        page = document[0]
+        raw_words = _native_elevation_word_claims(page)
+        records = _record_candidates_for_page(
+            page=page, page_id="1", published=published,
+            trusted_words=raw_words,
+            all_claim_tags=_opening_tags(raw_words),
+        )
+    assert len(records) == 1
+    assert records[0].type_mark == "W1"
+    assert records[0].area_m2 == pytest.approx(7.2)

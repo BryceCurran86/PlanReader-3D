@@ -1,0 +1,339 @@
+"""Read-only original-plan check of the ACTUAL live window-area consumer.
+
+Native Wxx words alone never certify opening kind, physical wall host, frame,
+signed customer quantities, or a frozen benchmark score.  This instrument
+reads the production claim; it does not create or amend QuantityEvidence.
+"""
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from collections import defaultdict
+from hashlib import sha256
+import inspect
+import json
+from pathlib import Path
+
+from pb_live_physical_net_wall_integration import (
+    LivePhysicalNetWallClaim, collect_live_physical_net_wall_claim,
+)
+from pb_live_physical_opening_void_composition import LiveCanonicalOpeningObject
+from pb_migration_contracts import QuantityEvidence
+from tools.diag_gpt1_source_hex_callout_ink_shadow import (
+    native_line_segments, diagnose_hex_ink_for_text_bbox,
+)
+
+TARGETS = ("W01", "W02", "W05", "W06")
+PLAN_PAGE_INDEX = 6
+ELEVATION_PAGE_INDEX = 28
+
+
+@dataclass(frozen=True)
+class WindowAreaGate:
+    type_mark: str
+    first_missing_gate: str
+    plan_native_occurrences: int
+    elevation_native_occurrences: int
+    physical_opening_id: str | None = None
+    canonical_kind: str | None = None
+    host_binding_record_id: str | None = None
+    area_basis: str | None = None
+    quantity_id: str | None = None
+
+
+def _native_mark_count(page, mark: str) -> int:
+    # Text is diagnostic ONLY; no claim of trusted glyph/clip/plan-mark owner.
+    return sum(
+        word[4].strip(".,:;()").upper() == mark
+        for word in page.get_text("words")
+    )
+
+
+def diagnose_actual_window_area_gates(
+    original_pdf_bytes: bytes,
+    expected_sha256: str,
+    claim: LivePhysicalNetWallClaim,
+) -> dict:
+    """Report first *observed* consumer-side failure; never mint a quantity."""
+    if type(claim) is not LivePhysicalNetWallClaim:
+        raise TypeError("actual LivePhysicalNetWallClaim required")
+    if type(original_pdf_bytes) is not bytes or not original_pdf_bytes:
+        raise ValueError("original source bytes required")
+    digest = sha256(original_pdf_bytes).hexdigest()
+    if type(expected_sha256) is not str or digest != expected_sha256.lower():
+        raise ValueError("original source sha256 mismatch")
+    import fitz
+
+    with fitz.open(stream=original_pdf_bytes, filetype="pdf") as pdf:
+        if len(pdf) <= ELEVATION_PAGE_INDEX:
+            raise ValueError("original source plan/elevation pages missing")
+        plan = pdf[PLAN_PAGE_INDEX]
+        elevation = pdf[ELEVATION_PAGE_INDEX]
+        plan_counts = {k: _native_mark_count(plan, k) for k in TARGETS}
+        elevation_counts = {k: _native_mark_count(elevation, k) for k in TARGETS}
+
+        # Native original six-edge polygon is an independently inspectable
+        # callout-INK witness only. It is NOT a producer-owned tag→aperture,
+        # host, semantic-kind, frame or measurement correspondence.
+        source_lines = native_line_segments(plan)
+        plan_words = plan.get_text("words")
+        original_plan_hex_ink_witnesses = {}
+        for mark in TARGETS:
+            words = [w for w in plan_words if w[4].strip(".,:;()").upper() == mark]
+            original_plan_hex_ink_witnesses[mark] = (
+                diagnose_hex_ink_for_text_bbox(words[0][:4], source_lines)
+                if len(words) == 1
+                else {"status": "ABSTAIN", "reason": "native_tag_missing_or_ambiguous",
+                      "source_seqnos": []}
+            )
+
+    openings = tuple(claim.canonical_openings)
+    if any(type(o) is not LiveCanonicalOpeningObject for o in openings):
+        raise TypeError("untrusted canonical opening in original claim")
+    quantities = tuple(claim.opening_quantity_evidence)
+    if any(type(q) is not QuantityEvidence for q in quantities):
+        raise TypeError("untrusted quantity in original claim")
+    if len({o.physical_opening_id for o in openings}) != len(openings):
+        raise ValueError("duplicate canonical physical opening identity")
+    if len({q.quantity_id for q in quantities}) != len(quantities):
+        raise ValueError("duplicate issued opening quantity identity")
+    # Verify the entire source-owned canonical inventory BEFORE selecting Wxx
+    # targets, so a foreign/unscored opening cannot hide a stolen original
+    # physical tag or representative by being filtered out of the report.
+    tags_by_source = defaultdict(set)
+    representatives_by_source = defaultdict(set)
+    frame_types_by_source = defaultdict(lambda: defaultdict(set))
+    # A window elevation frame and an adjacent door leaf can belong to one
+    # architectural assembly (W06 beside D02), but the SAME metric source
+    # frame record must never certify BOTH filling areas. Keep this proof
+    # separate from legitimate same-type repeated physical windows.
+    frame_filling_kinds_by_source = defaultdict(lambda: defaultdict(set))
+    for opening in openings:
+        # Source observation IDs are local to a published document snapshot.
+        # Foreign revisions may legitimately reuse a local observation ID.
+        source_scope = (
+            opening.document_id, opening.revision_id,
+            opening.source_sha256, opening.snapshot_id,
+        )
+        if opening.tag_observation_id:
+            tags_by_source[(*source_scope, opening.tag_observation_id)].add(
+                opening.physical_opening_id
+            )
+        if opening.representative_observation_id:
+            representatives_by_source[(*source_scope, opening.representative_observation_id)].add(
+                opening.physical_opening_id
+            )
+        if (
+            opening.area_basis == "authenticated_elevation_frame"
+            and opening.figured_area_record_id
+            and opening.opening_kind in {"door", "window"}
+        ):
+            frame_scope = (
+                opening.document_id, opening.revision_id,
+                opening.source_sha256, opening.snapshot_id,
+                opening.figured_area_record_id,
+            )
+            frame_filling_kinds_by_source[frame_scope][
+                opening.opening_kind
+            ].add(opening.physical_opening_id)
+        if (
+            opening.area_basis == "authenticated_elevation_frame"
+            and opening.figured_area_record_id
+            and opening.opening_kind == "window"
+            and opening.type_mark
+        ):
+            frame_types_by_source[(*source_scope, opening.figured_area_record_id)][
+                str(opening.type_mark).strip().upper()
+            ].add(opening.physical_opening_id)
+    reused_plan_tags = {
+        identity for owners in tags_by_source.values() if len(owners) > 1
+        for identity in owners
+    }
+    reused_representatives = {
+        identity for owners in representatives_by_source.values()
+        if len(owners) > 1 for identity in owners
+    }
+    # A source-issued TYPE frame may be reused by multiple physical instances
+    # of the SAME type. It cannot be silently shared across DISTINCT Wxx
+    # types, even if both canonical objects and quantities pass the real issuer.
+    conflicting_frame_types = {
+        identity
+        for type_owners in frame_types_by_source.values()
+        if len(type_owners) > 1
+        for members in type_owners.values()
+        for identity in members
+    }
+    conflicting_frame_filling_kinds = {
+        identity
+        for kind_owners in frame_filling_kinds_by_source.values()
+        if len(kind_owners) > 1
+        for members in kind_owners.values()
+        for identity in members
+    }
+    by_mark = {}
+    for opening in openings:
+        mark = str(opening.type_mark or "").strip().upper()
+        # A different PDF's W01 is not a second original-plan instance.
+        # Same-PDF duplicate type marks remain an explicit conflict.
+        if mark in TARGETS and opening.source_sha256 == digest:
+            by_mark.setdefault(mark, []).append(opening)
+
+    report = []
+    for mark in TARGETS:
+        members = by_mark.get(mark, [])
+        label_count = plan_counts[mark]
+        if label_count != 1 or elevation_counts[mark] < 1:
+            report.append(WindowAreaGate(
+                mark, "original_native_mark_unavailable_or_ambiguous",
+                label_count, elevation_counts[mark]))
+            continue
+        if len(members) != 1:
+            report.append(WindowAreaGate(
+                mark, "physical_type_mark_binding_unavailable"
+                if not members else "physical_type_mark_binding_conflict",
+                label_count, elevation_counts[mark]))
+            continue
+        opening = members[0]
+        physical_id = opening.physical_opening_id
+        reason = None
+        if (
+            opening.source_sha256 != digest
+            or str(opening.page_id) != str(PLAN_PAGE_INDEX + 1)
+            or not opening.viewport_id
+            or opening.canonical_opening_id != physical_id
+        ):
+            reason = "canonical_source_page_or_physical_identity_unbound"
+        elif (
+            type(opening.tag_observation_id) is not str
+            or not opening.tag_observation_id
+            or opening.tag_observation_id not in opening.evidence_ids
+        ):
+            # A native Wxx word somewhere on p7 does NOT bind that word
+            # to this physical aperture. Only the producer-owned original
+            # plan tag receipt carried by the canonical issuer can do so.
+            reason = "source_owned_plan_tag_receipt_unavailable"
+        elif physical_id in reused_plan_tags:
+            reason = "original_plan_tag_shared_across_physical_openings"
+        elif physical_id in reused_representatives:
+            reason = "original_representative_shared_across_physical_openings"
+        elif physical_id in conflicting_frame_types:
+            reason = "original_elevation_frame_shared_across_different_window_types"
+        elif physical_id in conflicting_frame_filling_kinds:
+            reason = "original_elevation_frame_shared_across_door_and_window"
+        elif opening.opening_kind != "window":
+            reason = "independent_window_kind_unavailable"
+        elif not opening.host_wall_id or not (
+            opening.host_binding_record_id or opening.host_frame_record_id
+        ):
+            reason = "structural_host_binding_unavailable"
+        elif (
+            opening.area_basis != "authenticated_elevation_frame"
+            or not opening.figured_area_record_id
+        ):
+            reason = "authenticated_elevation_frame_area_unavailable"
+        matches = [
+            q for q in quantities
+            if q.input_entity_ids == (physical_id,)
+            and q.semantic_key == f"window_area:{physical_id}"
+            and q.metadata.get("area_basis") == "authenticated_elevation_frame"
+            and q.metadata.get("source_sha256") == digest
+            and not q.abstained
+        ]
+        if reason is None and len(matches) != 1:
+            reason = (
+                "live_issued_quantity_unavailable"
+                if not matches else "live_issued_quantity_conflict"
+            )
+        if reason is None and (
+            matches[0].metadata.get("measurement_record_id")
+            != opening.figured_area_record_id
+            or matches[0].metadata.get("snapshot_id") != opening.snapshot_id
+        ):
+            reason = "issued_area_measurement_lineage_mismatch"
+        if reason is None:
+            issued = matches[0]
+            metadata = issued.metadata
+            # The exact real issuer's owner, not a lookalike quantity ID
+            # or a matching numeric area, must remain the same physical
+            # opening, wall, source revision, viewport and original tag.
+            if (
+                metadata.get("document_id") != opening.document_id
+                or metadata.get("revision_id") != opening.revision_id
+                or metadata.get("page_no") != opening.page_id
+                or metadata.get("viewport_id") != opening.viewport_id
+                or metadata.get("physical_opening_id") != physical_id
+                or metadata.get("canonical_opening_id") != physical_id
+                or metadata.get("opening_kind") != "window"
+                or metadata.get("host_wall_id") != opening.host_wall_id
+                or metadata.get("host_binding_record_id") != opening.host_binding_record_id
+                or metadata.get("host_frame_record_id") != opening.host_frame_record_id
+                or opening.tag_observation_id not in issued.evidence_ids
+            ):
+                reason = "issued_area_source_owner_mismatch"
+        report.append(WindowAreaGate(
+            mark, reason or "LIVE_QUANTITY_OBSERVED_NOT_CUSTOMER_SEALED",
+            label_count, elevation_counts[mark], physical_id,
+            opening.opening_kind, opening.host_binding_record_id,
+            opening.area_basis,
+            matches[0].quantity_id if reason is None else None,
+        ))
+
+    from dataclasses import asdict
+    return {
+        "status": "SOURCE_ONLY_LIVE_ISSUER_FIRST_GATE_DIAGNOSTIC",
+        "source_sha256": digest,
+        "physical_opening_inventory": len(openings),
+        "real_issuer_quantity_inventory": len(quantities),
+        "not_source_authority": True,
+        "original_plan_hex_ink_witnesses": original_plan_hex_ink_witnesses,
+        "measurement_published_by_this_tool": False,
+        "customer_seal_granted": False,
+        "benchmark_score_granted": False,
+        "windows": [asdict(item) for item in report],
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pdf", type=Path, required=True)
+    parser.add_argument("--expected-sha256", required=True)
+    parser.add_argument("--native-source-text", action="store_true")
+    args = parser.parse_args()
+    params = inspect.signature(collect_live_physical_net_wall_claim).parameters
+    # Match the actual source-handoff page universe, not a convenient
+    # hand-selected p7/p29 subset that could omit contradictory schedule or
+    # physical source evidence. Do not silently make p7 a topology authority.
+    from tools.run_source_closed_project_handoff import _source_page_scopes
+    topology_pages, support_pages, page_count = _source_page_scopes(args.pdf)
+    if PLAN_PAGE_INDEX not in topology_pages:
+        raise SystemExit(
+            "original p7 not producer-authenticated as a topology page"
+        )
+    kwargs = {
+        "pages": tuple(range(page_count)),
+        "topology_pages": topology_pages,
+        "room_area_support_pages": support_pages or None,
+        # Mirror the COMPLETE source-closed production family_group=all
+        # semantic universe. A p7/p29-only semantic shortcut can suppress
+        # competing source evidence and create a misleading first gate.
+        "surface_semantic_pages": tuple(range(page_count)),
+    }
+    if args.native_source_text:
+        if "source_native_finish_text_shadow" not in params:
+            raise SystemExit(
+                "native source text not wired to live collector; no fallback"
+            )
+        kwargs["source_native_finish_text_shadow"] = True
+    pdf_bytes = args.pdf.read_bytes()
+    if sha256(pdf_bytes).hexdigest() != args.expected_sha256.lower():
+        raise SystemExit("original source SHA mismatch")
+    claim = collect_live_physical_net_wall_claim(args.pdf, **kwargs)
+    report = diagnose_actual_window_area_gates(
+        pdf_bytes, args.expected_sha256, claim,
+    )
+    print(json.dumps(report, sort_keys=True, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

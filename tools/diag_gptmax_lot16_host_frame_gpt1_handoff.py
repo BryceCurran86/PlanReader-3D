@@ -13,6 +13,9 @@ import json
 import math
 from pathlib import Path
 
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_opening_kind_authority import resolve_opening_kind
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
@@ -152,9 +155,29 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 or not row.get("physical_existence_record")
                 or row["physical_existence_record"].get("record_id") != identity):
             raise ValueError("original physical existence source/root mismatch")
+        # The source handoff accepts producer-shaped dictionaries only after
+        # independent original revision/snapshot/page/selector re-proof.
+        # Same-looking record IDs from another source cannot be host authority.
+        physical = row["physical_existence_record"]
+        selector = row.get("attempted_host_selector")
+        if (physical.get("status") is not EvidenceResolutionStatus.CORROBORATED
+                or physical.get("proposition") != PHYSICAL_OPENING_EXISTS
+                or any(physical.get(k) != source_root[k] for k in source_root)
+                or physical.get("page_id") != c["page_id"]
+                or not physical.get("source_observation_ids")
+                or not isinstance(selector, dict)
+                or any(selector.get(k) != source_root[k] for k in source_root)
+                or selector.get("page_id") != c["page_id"]
+                or selector.get("opening_identity_id") != identity
+                or not selector.get("decision_scope_id")):
+            raise ValueError("original physical opening or host selector source/root mismatch")
         host, frame = row["host_record"], row["frame_record"]
         if host is not None and (
-                host.get("record_id") != c.get("host_binding_record_id")
+                any(host.get(k) != source_root[k] for k in source_root)
+                or host.get("page_id") != c["page_id"]
+                or host.get("decision_scope_id") != selector["decision_scope_id"]
+                or not host.get("source_observation_ids")
+                or host.get("record_id") != c.get("host_binding_record_id")
                 or host.get("host_wall_id") != c.get("host_wall_id")
                 or host.get("opening_identity_id") != identity
                 or not host.get("member_wall_candidate_ids")):
@@ -166,6 +189,14 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             raise ValueError("canonical whole-wall frame identity changed")
         if frame_ok and frame["record_id"] != c["host_frame_record_id"]:
             raise ValueError("original frame receipt changed")
+        if frame_ok and (
+            not isinstance(frame.get("selector"), dict)
+            or any(frame["selector"].get(k) != selector.get(k)
+                   for k in ("document_id", "revision_id", "source_sha256",
+                             "snapshot_id", "page_id", "decision_scope_id",
+                             "opening_identity_id"))
+        ):
+            raise ValueError("original frame selector source/root mismatch")
         label = row.get("original_label_dimension_result") or {}
         e = label.get("evidence")
         pair_ok = bool(
@@ -174,6 +205,27 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             and len(e.get("dimension_values_mm") or ()) == 2
             and all(_positive(v) for v in e["dimension_values_mm"])
             and _positive(e.get("area_m2"))
+        )
+        # A numerical pair is not sufficient to bind an original figured
+        # source label to this exact opening. The original producer supplies
+        # the native text witnesses, original page/view, basis and semantic
+        # claim; these must be in the canonical evidence set.
+        figure_words = e.get("source_text_observation_ids") if e else None
+        figured_label_scope_owned = bool(
+            pair_ok
+            and e.get("basis") == "figured_opening_label"
+            and type(e.get("page_id")) is str
+            and e["page_id"] == c["page_id"]
+            and (e.get("viewport_id") is None
+                 or e.get("viewport_id") == c.get("viewport_id"))
+            and e.get("semantic_kind") in (None, c.get("opening_kind"))
+            and type(figure_words) in (tuple, list)
+            and bool(figure_words)
+            and all(type(x) is str and x and x == x.strip()
+                    for x in figure_words)
+            and len(set(figure_words)) == len(figure_words)
+            and type(c.get("evidence_ids")) in (tuple, list)
+            and all(x in c["evidence_ids"] for x in figure_words)
         )
         if pair_ok:
             a, b = e["dimension_values_mm"]
@@ -193,9 +245,54 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 c["width_m"] * c["height_m"], e["area_m2"], rel_tol=1e-8)
         )
         typed = c.get("opening_kind") in ("door", "window")
-        # A source-issued area from an unordered two-number label does NOT
-        # imply width/height order. Review opening AREA independently from
-        # 3D axis geometry; neither review flag signs a quantity.
+        # Re-resolve semantic kind from an ORIGINAL corroborated physical
+        # structural pattern and/or independently authenticated original
+        # native FIGURED label semantic evidence. A copied door/window
+        # string, host geometry or figured numeric pair alone cannot grant
+        # source filling kind to a new review candidate.
+        pattern = physical.get("structural_pattern")
+        structural_owner = (
+            pattern is None
+            or (type(pattern) is str
+                and pattern == c.get("structural_pattern"))
+        )
+        kind_proof = resolve_opening_kind(
+            structural_pattern=pattern if structural_owner else None,
+            label_kind=e.get("semantic_kind") if figured_label_scope_owned else None,
+        )
+        filling_kind_source_reproved = bool(
+            typed and structural_owner
+            and kind_proof.status is EvidenceResolutionStatus.CORROBORATED
+            and kind_proof.opening_kind == c["opening_kind"]
+        )
+        # The actual source-closed opening-area publisher requires every
+        # existing canonical host AND frame receipt to be present in its own
+        # producer evidence roster. A host ID copied onto the canonical row
+        # is not source provenance; a frame that exists but is not in the
+        # evidence roster cannot be used for either AREA or 3D review.
+        issuer_ids = c.get("evidence_ids")
+        receipt_roster_ok = (
+            type(issuer_ids) in (tuple, list)
+            and all(type(v) is str and v and v == v.strip() for v in issuer_ids)
+            and len(set(issuer_ids)) == len(issuer_ids)
+        )
+        host_receipt_bound = bool(
+            host is not None and receipt_roster_ok
+            and type(host.get("record_id")) is str
+            and host["record_id"] in issuer_ids
+        )
+        frame_receipt_bound = bool(
+            frame_ok and receipt_roster_ok
+            and type(frame.get("record_id")) is str
+            and frame["record_id"] in issuer_ids
+        )
+        # A source-issued FIGURED area from an unordered two-number label is
+        # independent of a COMPLETE whole-wall frame. The existing signed
+        # opening-area publisher accepts a source-authenticated host binding
+        # with no host frame; older signed source-proven opening areas exercise
+        # exactly that path. Keep this an AREA-ONLY GPT1 review, not a 3D void,
+        # width/height-order, net-wall deduction or signing authority.
+        # Neither review flag signs a quantity.
         figured_receipt_bound = bool(
             pair_ok and type(c.get("figured_area_record_id")) is str
             and c["figured_area_record_id"]
@@ -203,18 +300,93 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             and type(c.get("evidence_ids")) in (tuple, list)
             and c["figured_area_record_id"] in c["evidence_ids"]
         )
+        # The actual sealed FIGURED-AREA issuer consumes the canonical
+        # metric area and the canonical basis. A correct native label in
+        # isolation cannot make a candidate eligible for publication.
+        canonical_figured_basis = (
+            type(c.get("area_basis")) is str
+            and c["area_basis"] == "figured_opening_label"
+        )
+        canonical_figured_value = bool(
+            canonical_figured_basis and pair_ok
+            and _positive(c.get("area_m2"))
+            and math.isclose(
+                float(c["area_m2"]), float(e["area_m2"]),
+                rel_tol=0.0, abs_tol=1e-6,
+            )
+        )
+        # Source FIGURED gross area and independently complete GEOMETRY
+        # area are distinct signed bases in the real opening publisher.
+        # A fully resolved source-owned 3D opening must not be rejected
+        # merely because its producer correctly chooses geometric area.
+        geometry_void = c.get("opening_void_record_id")
+        canonical_geometry_basis = bool(
+            c.get("area_basis") == "resolved_opening_geometry"
+            and c.get("geometry_complete") is True
+            and type(geometry_void) is str and geometry_void
+            and geometry_void == geometry_void.strip()
+            and receipt_roster_ok and geometry_void in issuer_ids
+        )
+        canonical_3d_basis = canonical_figured_basis or canonical_geometry_basis
+        canonical_3d_value = bool(
+            canonical_figured_value
+            or (canonical_geometry_basis and axis_ok
+                and _positive(c.get("area_m2"))
+                and math.isclose(
+                    float(c["area_m2"]),
+                    float(c["width_m"]) * float(c["height_m"]),
+                    rel_tol=0.0, abs_tol=1e-6,
+                ))
+        )
+        # Publication parity: the exact canonical representative must be
+        # an original physical observation and a member of original
+        # canonical evidence. The re-proven producer physical record must
+        # own the same full observation universe, not a replayed substitute.
+        original_observations = physical.get("source_observation_ids")
+        canonical_observations = c.get("source_observation_ids")
+        representative = c.get("representative_observation_id")
+        canonical_viewport = c.get("viewport_id")
+        source_observations_bound = bool(
+            type(canonical_viewport) is str and canonical_viewport
+            and canonical_viewport == canonical_viewport.strip()
+            and type(representative) is str and representative
+            and representative == representative.strip()
+            and type(canonical_observations) in (tuple, list)
+            and bool(canonical_observations)
+            and all(type(i) is str and i and i == i.strip()
+                    for i in canonical_observations)
+            and len(set(canonical_observations)) == len(canonical_observations)
+            and type(original_observations) in (tuple, list)
+            and set(original_observations) == set(canonical_observations)
+            and representative in original_observations
+            and receipt_roster_ok
+            and representative in issuer_ids
+            and all(i in issuer_ids for i in canonical_observations)
+        )
         if not supported:
             area_gate = "source_owned_floor_plan_unavailable"
         elif host is None:
             area_gate = "structural_host_unavailable"
-        elif not frame_ok:
-            area_gate = "whole_wall_frame_unavailable"
+        elif not host_receipt_bound:
+            area_gate = "original_structural_host_receipt_unbound"
+        elif frame_ok and not frame_receipt_bound:
+            area_gate = "original_host_frame_receipt_unbound"
         elif not typed:
             area_gate = "opening_filling_kind_unproven"
         elif not pair_ok:
             area_gate = "source_figured_dimension_pair_unproven"
         elif not figured_receipt_bound:
             area_gate = "original_figured_area_receipt_unbound"
+        elif not figured_label_scope_owned:
+            area_gate = "original_figured_label_source_scope_unverified"
+        elif not canonical_figured_basis:
+            area_gate = "canonical_figured_area_publication_basis_unproven"
+        elif not canonical_figured_value:
+            area_gate = "canonical_figured_area_value_unproven"
+        elif not source_observations_bound:
+            area_gate = "original_physical_source_observation_receipts_unbound"
+        elif not filling_kind_source_reproved:
+            area_gate = "original_opening_kind_source_authority_unverified"
         elif row.get("quantity_id"):
             area_gate = "original_signed_area_already_retained"
         else:
@@ -226,18 +398,59 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             gate = "source_owned_floor_plan_unavailable"
         elif host is None:
             gate = "structural_host_unavailable"
+        elif not host_receipt_bound:
+            gate = "original_structural_host_receipt_unbound"
         elif not frame_ok:
             gate = "whole_wall_frame_unavailable"
+        elif not frame_receipt_bound:
+            gate = "original_host_frame_receipt_unbound"
         elif not typed:
             gate = "opening_filling_kind_unproven"
         elif not pair_ok:
             gate = "source_figured_dimension_pair_unproven"
+        elif not figured_label_scope_owned:
+            gate = "original_figured_label_source_scope_unverified"
+        elif not canonical_3d_basis:
+            gate = "canonical_geometry_area_publication_basis_unproven"
+        elif not canonical_3d_value:
+            gate = "canonical_geometry_area_value_unproven"
+        elif not source_observations_bound:
+            gate = "original_physical_source_observation_receipts_unbound"
+        elif not filling_kind_source_reproved:
+            gate = "original_opening_kind_source_authority_unverified"
         elif not axis_ok:
             gate = "width_height_axis_authority_unproven"
         else:
             gate = "independent_gpt1_measurement_validation_required"
         assessed.append({
             "physical_opening_id": identity,
+            # Retain original canonical roles independently of later issuer
+            # objects: figured numeric evidence cannot relabel a window as a door
+            # or replay the room/page context under a foreign viewport.
+            # Preserve the ORIGINAL document/revision before any later
+            # issuer rebuild can rekey the same SHA/snapshot under a foreign
+            # source envelope without changing numeric opening evidence.
+            "original_canonical_document_id": c.get("document_id"),
+            "original_canonical_revision_id": c.get("revision_id"),
+            "original_canonical_opening_kind": c.get("opening_kind"),
+            "original_canonical_page_id": c.get("page_id"),
+            "original_canonical_viewport_id": c.get("viewport_id"),
+            # Preserve the producer's exact tag/type/schedule identities
+            # independently of a later typed issuer-compatible area. These
+            # fields are parity receipts only, NOT source authentication.
+            "original_canonical_type_mark": c.get("type_mark"),
+            "original_canonical_tag_observation_id": c.get("tag_observation_id"),
+            "original_canonical_schedule_binding_record_id": c.get("schedule_binding_record_id"),
+            "original_canonical_schedule_page_id": c.get("schedule_page_id"),
+            "original_canonical_schedule_row_observation_ids": tuple(sorted(c.get("schedule_row_observation_ids") or ())),
+            # Source producer's exact physical host/observation/evidence
+            # identities. Later typed objects may not add a forged witness,
+            # drop another observed face, or borrow a different wall while
+            # retaining the same host binding record ID.
+            "original_canonical_host_wall_id": c.get("host_wall_id"),
+            "original_canonical_representative_observation_id": c.get("representative_observation_id"),
+            "original_canonical_source_observation_ids": tuple(sorted(c.get("source_observation_ids") or ())),
+            "original_canonical_evidence_ids": tuple(sorted(c.get("evidence_ids") or ())),
             "source_sha256": c["source_sha256"],
             "snapshot_id": c["snapshot_id"],
             "source_decision_scope_id": row["attempted_host_selector"]["decision_scope_id"],
@@ -248,9 +461,23 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
             "frame_reason_codes": list(row["frame_reason_codes"]),
             "host_reason_codes": list(row["host_reason_codes"]),
             "figured_pair_area_support": pair_ok,
+            "source_figured_area_m2": float(e["area_m2"]) if pair_ok else None,
+            "source_figured_area_record_id": e.get("evidence_id") if pair_ok else None,
+            "original_figured_label_source_scope_bound": figured_label_scope_owned,
+            "canonical_figured_area_publication_basis_bound": canonical_figured_basis,
+            "canonical_figured_area_value_bound": canonical_figured_value,
+            "canonical_3d_area_publication_basis_bound": canonical_3d_basis,
+            "canonical_3d_area_value_bound": canonical_3d_value,
+            "original_physical_source_observation_receipts_bound": source_observations_bound,
+            "original_opening_kind_source_authority_reproved": filling_kind_source_reproved,
+            "original_host_binding_receipt_bound": host_receipt_bound,
+            "original_host_frame_receipt_bound": frame_receipt_bound,
             "figured_area_receipt_bound": figured_receipt_bound,
             "opening_area_first_remaining_gate": area_gate,
             "new_gpt1_area_candidate_handoff": area_review_ready,
+            "figured_area_only_frame_unavailable": bool(
+                area_review_ready and not frame_ok
+            ),
             "axis_order_authenticated": axis_ok,
             "original_figured_label_order_source_resolved": (
                 e.get("axis_order_resolved") is True if pair_ok else False
@@ -260,12 +487,16 @@ def assess_gpt1_opening_candidates(rows: list[dict], canonical: list[dict],
                 if axis_ok else []
             ),
             "independent_axes_agree_with_original_pair": axis_ok,
-            "filling_kind_source_supported": typed,
+            "filling_kind_source_supported": filling_kind_source_reproved,
             "prior_signed_quantity_id": row.get("quantity_id"),
             "first_remaining_gate": gate,
             "new_gpt1_candidate_handoff": bool(
                 supported and host is not None and frame_ok and typed
-                and axis_ok and not row.get("quantity_id")),
+                and host_receipt_bound and frame_receipt_bound
+                and figured_label_scope_owned
+                and canonical_3d_value and source_observations_bound
+                and filling_kind_source_reproved and axis_ok
+                and not row.get("quantity_id")),
             # No output JSON is a signed quantity or a trust-grant token.
             "measurement_published": False,
             "customer_seal_granted": False,

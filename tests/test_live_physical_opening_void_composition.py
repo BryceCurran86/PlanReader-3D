@@ -464,3 +464,71 @@ def test_reason_tuple_of_a_frozenset_does_not_depend_on_the_hash_seed():
     assert len(outputs) == 1
     (only,) = outputs
     assert json.loads(only) == sorted(json.loads(only))
+
+def test_conflicting_kind_cannot_keep_elevation_frame_area_or_evidence(monkeypatch) -> None:
+    """A positive type frame must not outlive contradictory plan semantics."""
+    import pb_live_physical_opening_void_composition as composer
+    from pb_opening_kind_authority import OPENING_KIND_CONFLICT
+
+    source = SourceVisibilityProducer(
+        producer_method="live-opening-kind-frame-conflict-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-opening-kind-frame-conflict",
+        source_bytes=_complete_void_pdf(include_schedule=False),
+        source_locator="memory://live-opening-kind-frame-conflict.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    frame = SimpleNamespace(
+        record_id="frame-positive-only-before-kind-conflict",
+        area_m2=7.2,
+        opening_kind="window",
+        source_observation_ids=("elevation-positive-witness",),
+    )
+    class FakeElevationProducer:
+        @classmethod
+        def from_source_visibility_producer(cls, _source):
+            return SimpleNamespace(
+                authority=lambda: SimpleNamespace(
+                    resolve=lambda _selector: SimpleNamespace(
+                        status=EvidenceResolutionStatus.CORROBORATED,
+                        record=frame,
+                    )
+                )
+            )
+
+    monkeypatch.setattr(composer, "OpeningElevationFrameAreaProducer", FakeElevationProducer)
+    positive = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+    assert len(positive.canonical_openings) == 1
+    good = positive.canonical_openings[0]
+    assert good.opening_kind == "window"
+    assert good.area_basis == "authenticated_elevation_frame"
+    assert good.area_m2 == 7.2
+    assert "elevation-positive-witness" in good.evidence_ids
+
+    # A real kind conflict is independently raised after frame selection;
+    # neither the area nor its elevation witness can remain in the canonical.
+    monkeypatch.setattr(
+        composer, "resolve_opening_kind",
+        lambda **_kwargs: SimpleNamespace(
+            opening_kind="window", reason_codes=(OPENING_KIND_CONFLICT,)
+        ),
+    )
+    conflicting = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+    assert len(conflicting.canonical_openings) == 1
+    rejected = conflicting.canonical_openings[0]
+    assert rejected.opening_kind is None
+    assert rejected.area_basis != "authenticated_elevation_frame"
+    assert rejected.area_m2 != 7.2
+    assert "elevation-positive-witness" not in rejected.evidence_ids

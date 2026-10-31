@@ -774,6 +774,11 @@ def compose_live_physical_opening_voids(
         ):
             kind_conflict_opening_ids.add(opening_id)
             opening_kind = None
+            # The source-typed frame was selected under the now-rejected
+            # semantic kind. Do not carry its positive area into a canonical
+            # opening after independently observed kind evidence conflicts.
+            # This is exclusion-only; no alternative area basis is invented.
+            elevation_frame_record = None
         void_record = void.record
         binding_trace = binding_by_opening.get(opening_id)
         frame_trace = frame_by_opening.get(opening_id)

@@ -10,6 +10,8 @@ on:
       - tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py
       - tests/test_gptmax_lot16_host_frame_gpt1_handoff.py
       - tests/test_gptmax_independent_axes_figured_pair_handoff.py
+      - pb_gpt1_opening_area_actual_issuer_preflight_shadow.py
+      - tests/test_gpt1_opening_area_actual_issuer_preflight_shadow.py
       - docs/engineering/gptmax_lot16_host_frame_dimensions_20261015.md
       - .github/workflows/test-gptmax-lot16-host-frame-gpt1-gate.yml
 permissions:
@@ -32,14 +34,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - run: |
-          PYTHONPATH=. python -m pytest -q             tests/test_gptmax_lot16_host_frame_gpt1_handoff.py             tests/test_gptmax_independent_axes_figured_pair_handoff.py
-          ruff check --select F821,F823             tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py             tests/test_gptmax_lot16_host_frame_gpt1_handoff.py             tests/test_gptmax_independent_axes_figured_pair_handoff.py
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_gptmax_lot16_host_frame_gpt1_handoff.py \
+            tests/test_gptmax_independent_axes_figured_pair_handoff.py \
+            tests/test_gpt1_opening_area_actual_issuer_preflight_shadow.py
+          ruff check --select F821,F823 \
+            tools/diag_gptmax_lot16_host_frame_gpt1_handoff.py \
+            pb_gpt1_opening_area_actual_issuer_preflight_shadow.py \
+            tests/test_gpt1_opening_area_actual_issuer_preflight_shadow.py \
+            tests/test_gptmax_lot16_host_frame_gpt1_handoff.py \
+            tests/test_gptmax_independent_axes_figured_pair_handoff.py
 
   immutable-original-production-replay:
     # Public CI has no client-owned original PDFs. Skipped means NOT VERIFIED,
     # not a pass. Only enable after the private SHA-pinned source has been
     # provisioned through an authorised separate workflow/owner runner.
-    if: ${{ vars.PLANREADER_OWNER_ORIGINAL_SOURCE_READY == 'true' }}
+    # PR-authored executable Python must never see private originals. This
+    # source-positive gate is intentionally disabled in this PR workflow;
+    # skipped is NOT original-source verification. Run the separate hardened,
+    # owner-controlled trusted-main original replay before release/merge.
+    # Readiness variables must not make this PR-head path executable.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -110,7 +125,15 @@ jobs:
             assert x['new_gpt1_area_candidate_handoff'] is True
             assert x['prior_signed_quantity_id'] is None
             assert x['authenticated_host_record_id']
-            assert x['authenticated_frame_record_id']
+            assert x['original_host_binding_receipt_bound']
+            if x['authenticated_frame_record_id']:
+              assert x['original_host_frame_receipt_bound']
+            # Historical source-sealed gross opening AREA may be host-only.
+            # No whole-wall 3D frame, wall deduction, or height is inferred.
+            if not x['authenticated_frame_record_id']:
+              assert x['figured_area_only_frame_unavailable'] is True
+              assert x['first_remaining_gate']=='whole_wall_frame_unavailable'
+              assert not x['new_gpt1_candidate_handoff']
             assert x['filling_kind_source_supported']
             assert x['figured_pair_area_support']
             assert x['figured_area_receipt_bound']
@@ -121,7 +144,9 @@ jobs:
             assert x['new_gpt1_candidate_handoff'] is True
             assert x['prior_signed_quantity_id'] is None
             assert x['authenticated_host_record_id']
+            assert x['original_host_binding_receipt_bound']
             assert x['authenticated_frame_record_id']
+            assert x['original_host_frame_receipt_bound']
             assert x['filling_kind_source_supported']
             assert x['figured_pair_area_support']
             assert x['independent_axes_agree_with_original_pair']
@@ -129,9 +154,3 @@ jobs:
           print('Original source replay and 8 historical ids retained; '
                 'independent new GPT1 reviews:',len(r['gpt1_new_handoff_candidates']))
           PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gptmax-lot16-original-host-frame-dimension-first-gates
-          path: artifacts/gptmax-original-lot16-host-frame-dimension-gate.json
-          retention-days: 21

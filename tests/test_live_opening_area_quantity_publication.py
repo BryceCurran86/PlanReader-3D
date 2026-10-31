@@ -6,6 +6,8 @@ from types import MappingProxyType
 import pytest
 
 from pb_live_opening_source_closed_export import (
+    build_live_opening_area_claim_source_traces,
+    seal_live_opening_area_claim_run,
     build_live_opening_area_source_traces,
     seal_live_opening_area_run,
 )
@@ -17,6 +19,7 @@ from pb_live_opening_area_quantity_publication import (
     _opening_quantity,
     publish_live_opening_area_quantities,
 )
+from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
     LivePhysicalOpeningVoidComposition,
@@ -717,3 +720,414 @@ def test_openings_from_multiple_original_pages_keep_one_document_snapshot():
     quantities = publish_live_opening_area_quantities(_composition(first, second))
     assert len(quantities) == 2
     assert {q.metadata["page_no"] for q in quantities} == {"3", "11"}
+
+
+def _elevation_opening(
+    physical_id: str, *, kind: str = "window",
+    type_mark: str = "W01", frame_id: str = "elevation-frame-1",
+    area_m2: float | None = 7.2,
+) -> LiveCanonicalOpeningObject:
+    return replace(
+        _opening(
+            canonical_id=physical_id, kind=kind, area_m2=area_m2,
+            area_basis="authenticated_elevation_frame",
+            figured_area_record_id=frame_id,
+        ),
+        type_mark=type_mark,
+    )
+
+
+def test_same_original_elevation_frame_can_serve_repeated_same_type_windows():
+    first = _elevation_opening("physical-w01-a")
+    second = _elevation_opening("physical-w01-b")
+    result = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(result) == 2
+    assert {q.input_entity_ids[0] for q in result} == {
+        "physical-w01-a", "physical-w01-b",
+    }
+    assert {q.metadata["measurement_record_id"] for q in result} == {
+        "elevation-frame-1",
+    }
+
+
+@pytest.mark.parametrize(
+    "second_kind,second_type",
+    [("door", "D02"), ("window", "W02"), ("door", "W01")],
+)
+def test_original_elevation_frame_cannot_claim_incompatible_kind_or_type(
+    second_kind, second_type,
+):
+    first = _elevation_opening("physical-w01")
+    second = _elevation_opening(
+        "physical-other", kind=second_kind, type_mark=second_type,
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is not None
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        publish_live_opening_area_quantities(_composition(first, second))
+
+
+def test_unpublishable_conflicting_frame_member_cannot_hide_source_collision():
+    first = _elevation_opening("physical-w01")
+    second = _elevation_opening(
+        "physical-d02", kind="door", type_mark="D02", area_m2=None,
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is None
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        publish_live_opening_area_quantities(_composition(first, second))
+
+
+def test_independent_elevation_frame_receipts_can_serve_different_types():
+    first = _elevation_opening("physical-w01")
+    second = _elevation_opening(
+        "physical-d02", kind="door", type_mark="D02",
+        frame_id="elevation-frame-d02",
+    )
+    result = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(result) == 2
+    assert {q.metadata["opening_kind"] for q in result} == {"window", "door"}
+
+
+def test_figured_label_measurement_receipts_do_not_inherit_elevation_frame_conflict():
+    first = _opening(canonical_id="physical-w01")
+    second = _opening(canonical_id="physical-d02", kind="door")
+    result = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(result) == 2
+
+
+def _opening_area_claim(*openings: LiveCanonicalOpeningObject) -> LivePhysicalNetWallClaim:
+    return LivePhysicalNetWallClaim(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=(), quantity_m2=None, source_pages=(),
+        canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_wall_reason_codes=(), canonical_wall_source_pages=(),
+        unresolved_wall_candidate_ids=(),
+        canonical_openings=tuple(openings),
+        canonical_rooms=(), canonical_floors=(),
+        canonical_floor_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_floor_reason_codes=(), canonical_floor_source_pages=(),
+        canonical_room_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_room_reason_codes=(), canonical_room_source_pages=(),
+        external_wall_ids=(), evidence_ids=(), quantity_id=None,
+        confidence=0.0, publication=None,
+        opening_quantity_evidence=tuple(
+            q for opening in openings if (q := _opening_quantity(opening)) is not None
+        ),
+    )
+
+
+def test_actual_claim_customer_seal_preserves_repeated_same_type_elevation_frame():
+    claim = _opening_area_claim(
+        _elevation_opening("source-w01-a"),
+        _elevation_opening("source-w01-b"),
+    )
+    sealed = seal_live_opening_area_claim_run(
+        claim, workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(q.lineage_ok for q in sealed.quantities)
+    assert {q.object_identity_refs[0] for q in sealed.quantities} == {
+        "source-w01-a", "source-w01-b",
+    }
+
+
+@pytest.mark.parametrize(
+    "kind,type_mark",
+    [("door", "D02"), ("window", "W02")],
+)
+def test_actual_claim_customer_seal_vetoes_foreign_elevation_frame_kind_or_type(
+    kind, type_mark,
+):
+    claim = _opening_area_claim(
+        _elevation_opening("source-w01"),
+        _elevation_opening("source-other", kind=kind, type_mark=type_mark),
+    )
+    assert len(claim.opening_quantity_evidence) == 2
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        build_live_opening_area_claim_source_traces(
+            claim, workspace_id=7, project_id="source-project",
+        )
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_actual_claim_customer_seal_vetoes_unpublishable_source_frame_rival():
+    claim = _opening_area_claim(
+        _elevation_opening("source-w01"),
+        _elevation_opening(
+            "source-d02", kind="door", type_mark="D02", area_m2=None,
+        ),
+    )
+    assert len(claim.opening_quantity_evidence) == 1
+    with pytest.raises(ValueError, match="conflicting original elevation frame"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+@pytest.mark.parametrize("field,foreign", [
+    ("document_id", "another-document"),
+    ("source_sha256", "f" * 64),
+    ("snapshot_id", "another-snapshot"),
+    ("revision_id", "another-revision"),
+])
+@pytest.mark.parametrize("unpublishable", [False, True])
+def test_final_claim_seal_rejects_foreign_source_even_when_unpublishable(
+    field, foreign, unpublishable,
+):
+    first = _elevation_opening("physical-w01", frame_id="frame-w01")
+    second = _elevation_opening("physical-w02", type_mark="W02", frame_id="frame-w02")
+    second = replace(second, **{field: foreign})
+    if unpublishable:
+        second = replace(second, area_m2=None)
+    claim = _opening_area_claim(first, second)
+    assert len(claim.opening_quantity_evidence) == (1 if unpublishable else 2)
+    with pytest.raises(ValueError, match="source snapshot conflicts|revision conflicts"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+@pytest.mark.parametrize("unpublishable", [False, True])
+def test_final_claim_seal_rejects_duplicate_physical_id_with_distinct_canonical(
+    unpublishable,
+):
+    first = _elevation_opening("physical-w01", frame_id="frame-w01")
+    second = replace(
+        _elevation_opening("physical-w02", type_mark="W02", frame_id="frame-w02"),
+        physical_opening_id="physical-w01",
+    )
+    if unpublishable:
+        second = replace(second, area_m2=None)
+    claim = _opening_area_claim(first, second)
+    assert len(claim.opening_quantity_evidence) == 1
+    with pytest.raises(ValueError, match="duplicate physical opening identity"):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_final_claim_seal_preserves_distinct_pages_one_original_source():
+    first = _elevation_opening("physical-w01-a", frame_id="frame-w01")
+    second = replace(
+        _elevation_opening("physical-w01-b", frame_id="frame-w01"),
+        page_id="11",
+    )
+    sealed = seal_live_opening_area_claim_run(
+        _opening_area_claim(first, second),
+        workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(quantity.lineage_ok for quantity in sealed.quantities)
+
+@pytest.mark.parametrize("field,invalid", [
+    ("canonical_opening_id", None),
+    ("canonical_opening_id", ""),
+    ("canonical_opening_id", "  "),
+    ("canonical_opening_id", " unsupported-opening "),
+    ("canonical_opening_id", 42),
+    ("physical_opening_id", None),
+    ("physical_opening_id", ""),
+    ("physical_opening_id", "  "),
+    ("physical_opening_id", " unsupported-opening "),
+    ("physical_opening_id", 42),
+    ("physical_opening_id", "foreign-physical-opening"),
+])
+def test_complete_original_inventory_refuses_invalid_abstained_sibling_identity(
+    field, invalid,
+):
+    firm = _opening(canonical_id="signed-physical-opening")
+    unsupported = replace(
+        _opening(canonical_id="unsupported-opening", area_m2=None),
+        **{field: invalid},
+    )
+    assert _opening_quantity(firm) is not None
+    assert _opening_quantity(unsupported) is None
+    expected = (
+        "canonical/physical opening identity mismatch"
+        if invalid == "foreign-physical-opening"
+        else "invalid canonical/physical opening identity"
+    )
+    with pytest.raises(ValueError, match=expected):
+        publish_live_opening_area_quantities(_composition(firm, unsupported))
+
+
+@pytest.mark.parametrize("field,invalid", [
+    ("canonical_opening_id", None),
+    ("canonical_opening_id", ""),
+    ("canonical_opening_id", "  "),
+    ("canonical_opening_id", " unsupported-opening "),
+    ("canonical_opening_id", 42),
+    ("physical_opening_id", None),
+    ("physical_opening_id", ""),
+    ("physical_opening_id", "  "),
+    ("physical_opening_id", " unsupported-opening "),
+    ("physical_opening_id", 42),
+    ("physical_opening_id", "foreign-physical-opening"),
+])
+def test_customer_claim_seal_refuses_invalid_abstained_sibling_identity(
+    field, invalid,
+):
+    firm = _opening(canonical_id="signed-physical-opening")
+    unsupported = replace(
+        _opening(canonical_id="unsupported-opening", area_m2=None),
+        **{field: invalid},
+    )
+    claim = _opening_area_claim(firm, unsupported)
+    assert len(claim.opening_quantity_evidence) == 1
+    expected = (
+        "canonical/physical opening identity mismatch"
+        if invalid == "foreign-physical-opening"
+        else "invalid canonical/physical opening identity"
+    )
+    with pytest.raises(ValueError, match=expected):
+        seal_live_opening_area_claim_run(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_inventory_preserves_distinct_source_page_and_abstained_sibling():
+    first = _opening(canonical_id="source-opening-p3")
+    second = replace(_opening(canonical_id="source-opening-p11"), page_id="11")
+    unsupported = replace(
+        _opening(canonical_id="source-opening-unresolved"), area_m2=None,
+    )
+    quantities = publish_live_opening_area_quantities(
+        _composition(first, second, unsupported)
+    )
+    assert len(quantities) == 2
+    claim = _opening_area_claim(first, second, unsupported)
+    sealed = seal_live_opening_area_claim_run(
+        claim, workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(quantity.lineage_ok for quantity in sealed.quantities)
+
+
+def test_all_original_physical_source_witnesses_reach_real_quantity_evidence():
+    original = _opening()
+    assert _opening_quantity(original) is not None
+    # The old issuer accepted this forged extra original observation because
+    # only the representative was required in the commercial evidence set.
+    tampered = replace(
+        original,
+        source_observation_ids=original.source_observation_ids + (
+            "unreviewed-second-original-ink",
+        ),
+    )
+    assert _opening_quantity(tampered) is None
+    assert publish_live_opening_area_quantities(_composition(tampered)) == ()
+
+
+def test_complete_original_source_witness_roster_preserves_valid_issuer():
+    original = _opening()
+    complete = replace(
+        original,
+        source_observation_ids=original.source_observation_ids + (
+            "authenticated-second-original-ink",
+        ),
+        evidence_ids=original.evidence_ids + (
+            "authenticated-second-original-ink",
+        ),
+    )
+    published = publish_live_opening_area_quantities(_composition(complete))
+    assert len(published) == 1
+    assert "authenticated-second-original-ink" in published[0].evidence_ids
+    assert published[0].value == pytest.approx(2.172)
+    # Reordering the producer-owned physical source set is not new geometry
+    # or a second quantity, and cannot alter the signed quantity identity.
+    reordered = replace(
+        complete, source_observation_ids=tuple(reversed(complete.source_observation_ids)),
+    )
+    assert publish_live_opening_area_quantities(_composition(reordered)) == published
+
+def _with_original_instance_tag(opening, tag):
+    return replace(
+        opening, tag_observation_id=tag,
+        evidence_ids=opening.evidence_ids + (tag,),
+    )
+
+
+def test_authenticated_instance_tag_survives_real_opening_area_issuer():
+    opening = _with_original_instance_tag(
+        _elevation_opening("physical-w01-original"), "original-w01-plan-tag",
+    )
+    issued = _opening_quantity(opening)
+    assert issued is not None
+    assert "original-w01-plan-tag" in issued.evidence_ids
+
+
+@pytest.mark.parametrize("tag", ["", " ", "unretained-original-tag", 123])
+def test_present_original_instance_tag_requires_exact_issuer_evidence(tag):
+    original = _with_original_instance_tag(
+        _elevation_opening("physical-w01-original"), "original-w01-plan-tag",
+    )
+    assert _opening_quantity(replace(original, tag_observation_id=tag)) is None
+
+
+def test_original_instance_tag_cannot_be_reused_by_abstained_sibling():
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "one-original-w01-tag",
+    )
+    second = _with_original_instance_tag(
+        _elevation_opening("physical-w01-b", area_m2=None), "one-original-w01-tag",
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is None
+    with pytest.raises(ValueError, match="instance tag observation shared"):
+        publish_live_opening_area_quantities(_composition(first, second))
+    with pytest.raises(ValueError, match="instance tag observation shared"):
+        seal_live_opening_area_claim_run(
+            _opening_area_claim(first, second),
+            workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_instance_tag_cannot_be_reused_by_second_issued_window():
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "one-original-w01-tag",
+    )
+    second = _with_original_instance_tag(
+        _elevation_opening("physical-w01-b"), "one-original-w01-tag",
+    )
+    assert _opening_quantity(first) is not None
+    assert _opening_quantity(second) is not None
+    with pytest.raises(ValueError, match="instance tag observation shared"):
+        publish_live_opening_area_quantities(_composition(first, second))
+
+
+def test_repeated_type_frame_with_distinct_original_instance_tags_still_seals():
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "first-original-w01-tag",
+    )
+    second = _with_original_instance_tag(
+        _elevation_opening("physical-w01-b"), "second-original-w01-tag",
+    )
+    published = publish_live_opening_area_quantities(_composition(first, second))
+    assert len(published) == 2
+    assert {q.metadata["measurement_record_id"] for q in published} == {
+        "elevation-frame-1",
+    }
+    sealed = seal_live_opening_area_claim_run(
+        _opening_area_claim(first, second),
+        workspace_id=7, project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(q.lineage_ok for q in sealed.quantities)
+
+
+@pytest.mark.parametrize("invalid", ["", "  ", 17])
+def test_abstained_member_invalid_instance_tag_cannot_hide_from_inventory(invalid):
+    first = _with_original_instance_tag(
+        _elevation_opening("physical-w01-a"), "first-original-w01-tag",
+    )
+    second = replace(
+        _elevation_opening("physical-w01-b", area_m2=None),
+        tag_observation_id=invalid,
+    )
+    with pytest.raises(ValueError, match="invalid original instance tag"):
+        publish_live_opening_area_quantities(_composition(first, second))
