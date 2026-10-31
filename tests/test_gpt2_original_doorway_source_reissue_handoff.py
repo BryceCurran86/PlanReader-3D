@@ -428,6 +428,7 @@ def test_private_original_omitted_same_axis_d15_stub_is_rejected_at_actual_hando
 @pytest.mark.parametrize("rival_style", [
     {"color": (0, 0, 0), "width": 0.50},
     {"color": (1, 0, 0), "width": 0.48},
+    {"color": (1, 1, 1), "width": 0.48},
     {"color": (0.0, 0.5, 0.0), "width": 0.72},
     {"color": (0, 0, 0), "width": 0.48, "dashes": "[2 2] 0"},
     {"color": (0, 0, 0), "width": 0.48, "stroke_opacity": 0.5},
