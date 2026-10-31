@@ -2624,3 +2624,172 @@ def test_original_ceiling_quantity_confidence_alias_abstains_through_customer(
     assert all(authentic.confidence == baseline.claims[0].confidence
                for authentic, _ in injected)
     assert path.read_bytes() == original_pdf
+
+
+class _ForeignPositiveCeilingIdSubclass(str):
+    """A string subclass is not a native source-owned quantity identity."""
+
+
+@pytest.mark.parametrize("bad_id_kind", [
+    "leading", "trailing", "bytes", "boolean", "integer", "subclass",
+])
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_positive_ceiling_idless_sibling_revokes_complete_original_quantity_universe(
+    tmp_path, monkeypatch, bad_id_kind, bad_first
+):
+    """Real generated-PDF producer/issuer/customer; one bad sibling revokes all.
+
+    The genuine source-owned ceiling and generated PDF are not changed. This
+    is a source-neutral negative invariant, NOT original-source FIRM proof.
+    """
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+
+    original_run = ceiling.run_source_owned_ceiling_lining_shadow
+    originals = []
+
+    def add_unidentifiable_positive_source_sibling(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        eligible = tuple(
+            quantity for quantity in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=quantity, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        original_id = authentic.quantity_id
+        bad_id = {
+            "leading": " " + original_id,
+            "trailing": original_id + " ",
+            "bytes": original_id.encode("utf-8"),
+            "boolean": True,
+            "integer": 42,
+            "subclass": _ForeignPositiveCeilingIdSubclass(original_id),
+        }[bad_id_kind]
+        sibling = SimpleNamespace(**{
+            **vars(authentic),
+            "quantity_id": bad_id,
+        })
+        assert not ceiling._exact_source_ceiling_quantity_id(sibling.quantity_id)
+        assert sibling.abstained is False
+        assert sibling.value > 0
+        originals.append((authentic, dict(authentic.metadata), sibling))
+        quantities = (
+            (sibling,) + tuple(result.ceiling_quantities)
+            if bad_first
+            else tuple(result.ceiling_quantities) + (sibling,)
+        )
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                ceiling_result=replace(
+                    result.pipeline.ceiling_result, quantities=quantities,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        add_unidentifiable_positive_source_sibling,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_QUANTITY_ID_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="generated-invalid-positive-id-sibling",
+    ) == ()
+    assert len(originals) == 2
+    assert all(
+        authentic.metadata == metadata and authentic.quantity_id == baseline.quantity_evidence[0].quantity_id
+        and sibling.value == authentic.value
+        for authentic, metadata, sibling in originals
+    )
+    assert path.read_bytes() == original_pdf
+
+
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_abstained_idless_diagnostic_sibling_does_not_revoke_valid_ceiling(
+    tmp_path, monkeypatch, bad_first
+):
+    """An already-abstained empty diagnostic is not a positive source claimant."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    original_run = ceiling.run_source_owned_ceiling_lining_shadow
+
+    def add_abstained_diagnostic(*args, **kwargs):
+        result = original_run(*args, **kwargs)
+        eligible = tuple(
+            quantity for quantity in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=quantity, source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        diagnostic = SimpleNamespace(**{
+            **vars(authentic),
+            "quantity_id": " " + authentic.quantity_id,
+            "abstained": True,
+            "value": None,
+        })
+        quantities = (
+            (diagnostic,) + tuple(result.ceiling_quantities)
+            if bad_first
+            else tuple(result.ceiling_quantities) + (diagnostic,)
+        )
+        return replace(
+            result,
+            pipeline=replace(
+                result.pipeline,
+                ceiling_result=replace(
+                    result.pipeline.ceiling_result, quantities=quantities,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", add_abstained_diagnostic,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second == baseline
+    assert len(publish_live_ceiling_area_quantities(first)) == 1
+    assert path.read_bytes() == original_pdf
