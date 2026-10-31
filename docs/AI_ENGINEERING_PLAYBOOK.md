@@ -143,6 +143,15 @@ PDF page
 
 ## 4. Observed hosted-opening path
 
+The live physical collector's application callers (PDF extractor, workspace
+auto-geometry and source-closed project handoff) opt into
+`recover_supported_opening_areas`. It reuses the existing source-reproved
+append-only area path only for one source-classified floor-plan topology page
+without an already published opening count or net-wall total. Historical objects and quantities
+retain their original bodies; multiple snapshots are never aliased. Default
+collector calls and strict explicit recovery keep their existing behavior.
+Figured area does not establish a complete host frame, metric void or count.
+
 **Correction (verified against current main, not the original PR #275 text):**
 `pb_opening_provenance_graph.py`, `pb_opening_deduction_readiness.py`, and
 `pb_wall_net_area_quantity.py` all **exist** on main — the prior wording

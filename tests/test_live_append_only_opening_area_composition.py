@@ -182,18 +182,20 @@ def test_area_append_cannot_silently_stale_other_opening_dependent_publications(
                                  baseline.opening_quantity_evidence) is baseline
 
 
+@pytest.mark.parametrize("option", ("recover_additional_opening_areas", "recover_supported_opening_areas"))
 @pytest.mark.parametrize("flag", (None, 1, "true", []))
-def test_recovery_flag_never_coerces_truthy_values(original_claim, flag):
+def test_recovery_flag_never_coerces_truthy_values(original_claim, flag, option):
     path, _ = original_claim
     with pytest.raises(ValueError, match="explicit boolean"):
-        collect_live_physical_net_wall_claim(path, pages=(0,), recover_additional_opening_areas=flag)
+        collect_live_physical_net_wall_claim(path, pages=(0,), **{option: flag})
 
 
+@pytest.mark.parametrize("option", ("recover_additional_opening_areas", "recover_supported_opening_areas"))
 @pytest.mark.parametrize("pages", ((True,), (0, 0), (0, 99), ("0",)))
-def test_recovery_never_silently_discards_malformed_page_scope(original_claim, pages):
+def test_recovery_never_silently_discards_malformed_page_scope(original_claim, pages, option):
     path, _ = original_claim
     with pytest.raises(ValueError, match="page indices"):
-        collect_live_physical_net_wall_claim(path, pages=pages, recover_additional_opening_areas=True)
+        collect_live_physical_net_wall_claim(path, pages=pages, **{option: True})
 
 
 def test_default_false_retains_the_existing_source_output(original_claim):
@@ -208,3 +210,86 @@ def test_real_source_recovery_without_new_measurements_keeps_original_claim(orig
         path, pages=(0,), recover_additional_opening_areas=True,
     )
     assert recovered == full
+
+
+def test_supported_native_recovery_keeps_real_issuer_and_customer_output(original_claim):
+    path, full = original_claim
+    recovered = collect_live_physical_net_wall_claim(
+        path, pages=(0,), recover_supported_opening_areas=True,
+    )
+    assert recovered == full
+    sealed = seal_live_opening_area_claim_run(recovered, workspace_id=1, project_id="source-project")
+    rows = project_live_opening_customer_rows(recovered, workspace_id=1, project_id="source-project")
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+
+
+@pytest.mark.parametrize("published_scope", ("count", "net_wall", "zero_net_wall"))
+def test_application_recovery_preserves_scopes_requiring_independent_reproof(
+    original_claim, counted_claim, published_scope, monkeypatch,
+):
+    path, full = original_claim
+    if published_scope == "count":
+        baseline = replace(full, opening_count_quantity_evidence=counted_claim.opening_count_quantity_evidence)
+    else:
+        baseline = replace(full, quantity_m2=0.0 if published_scope == "zero_net_wall" else 12.0)
+    monkeypatch.setattr(
+        "pb_live_physical_net_wall_integration._collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: baseline,
+    )
+
+    def forbidden_replay(*args, **kwargs):
+        pytest.fail("area-only application recovery attempted an independently published scope")
+
+    monkeypatch.setattr("pb_live_append_only_opening_area_composition.recover_source_opening_areas", forbidden_replay)
+    assert collect_live_physical_net_wall_claim(
+        path, pages=(0,), recover_supported_opening_areas=True,
+    ) is baseline
+
+
+def test_application_recovery_keeps_the_entire_multi_page_topology(tmp_path, original_claim, monkeypatch):
+    path, _ = original_claim
+    with fitz.open(path) as doc:
+        doc.new_page()
+        multi = tmp_path / "two-topology-pages.pdf"
+        multi.write_bytes(doc.tobytes())
+    baseline = collect_live_physical_net_wall_claim(multi, pages=(0, 1))
+
+    def forbidden_replay(*args, **kwargs):
+        pytest.fail("application recovery narrowed a multi-page topology universe")
+
+    monkeypatch.setattr("pb_live_append_only_opening_area_composition.recover_source_opening_areas", forbidden_replay)
+    assert collect_live_physical_net_wall_claim(
+        multi, pages=(0, 1), recover_supported_opening_areas=True,
+    ) == baseline
+
+
+def test_strict_and_supported_recovery_cannot_be_combined(original_claim):
+    path, _ = original_claim
+    with pytest.raises(ValueError, match="choose one"):
+        collect_live_physical_net_wall_claim(
+            path, pages=(0,), recover_additional_opening_areas=True,
+            recover_supported_opening_areas=True,
+        )
+
+
+@pytest.mark.parametrize("classification", ("unproven", "unavailable"))
+def test_application_recovery_needs_a_positive_original_floor_plan_role(
+    original_claim, monkeypatch, classification,
+):
+    from types import SimpleNamespace
+
+    path, baseline = original_claim
+
+    def classify(*args, **kwargs):
+        if classification == "unavailable":
+            raise RuntimeError("source classification unavailable")
+        return SimpleNamespace(floor_plan_page_indices=())
+
+    def forbidden_replay(*args, **kwargs):
+        pytest.fail("an unproven source-page role enabled opening recovery")
+
+    monkeypatch.setattr("pb_source_floor_plan_page_scope.source_floor_plan_topology_scope", classify)
+    monkeypatch.setattr("pb_live_append_only_opening_area_composition.recover_source_opening_areas", forbidden_replay)
+    assert collect_live_physical_net_wall_claim(
+        path, pages=(0,), recover_supported_opening_areas=True,
+    ) == baseline
