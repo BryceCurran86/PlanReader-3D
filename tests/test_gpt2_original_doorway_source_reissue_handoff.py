@@ -322,3 +322,83 @@ def test_real_native_pdf_same_axis_ink_inventory_detects_omitted_wall_stub():
     assert not audit(raw,page_1_based=2,original_room_graph=issued(
         ("d0i0","d1i0","d2i0","d3i0","d4i0"),(24,20),
     ))
+
+
+def test_private_original_omitted_same_axis_d15_stub_is_rejected_at_actual_handoff(
+    monkeypatch,
+):
+    """Source-positive on provided original: even a 4-stroke positive is incomplete."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    location=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not location:
+        pytest.skip("owner-private original not configured; SOURCE NOT VERIFIED")
+    original=Path(location)
+    assert original.is_file()
+    raw=original.read_bytes()
+    assert hashlib.sha256(raw).hexdigest()==(
+        "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    )
+    source=SourceVisibilityProducer(
+        producer_method="gpt2-private-omission-negative",
+        producer_version="1",
+    )
+    published=source.ingest_native_pdf_bytes(
+        document_id="private-omitted-doorway-source",
+        source_bytes=raw,
+        source_locator="memory://owner-private-omitted-gap.pdf",
+        page_ids=("7","11"),
+    )
+    bridge=module.GPT2OriginalSourceGeometryBridge.from_source_visibility_producer(
+        source,
+    )
+    # The sole real p7/p11 disagreement is the very short left D15 ink
+    # stub. Intentionally OMIT it on both pages. A selected-subset source
+    # replay can then appear matching, but the full original page has it.
+    floor_ids=("d52239i0","d66216i0","d53725i0","d52625i0")
+    finish_ids=("d2657i0","d3058i0","d2931i0","d2845i0")
+    partial=bridge.original_room_doorway_source_ancestry(
+        revision_id=published.revision.revision_id,
+        original_floor_page_1_based=7,original_second_page_1_based=11,
+        original_floor_source_edge_ids=floor_ids,
+        original_second_source_edge_ids=finish_ids,
+        original_translation_pdf_pts=(78.0,0.0),
+    )
+    assert partial["status"]=="original_doorway_all_printed_wall_strokes_match_candidate"
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=7,original_room_graph=partial["floor_source_graph"],
+    ) is False
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=11,original_room_graph=partial["second_plan_source_graph"],
+    ) is False
+
+    monkeypatch.setattr(
+        module,"audit_gpt2_source_material_floor_handoff",
+        lambda *args,**kwargs: pytest.fail(
+            "omitted real doorway stroke may not reach material issuer"
+        ),
+    )
+    result=bridge.source_closed_original_ft_handoff_for_gpt1(
+        revision_id=published.revision.revision_id,
+        original_floor_page_1_based=7,
+        source_cross_sheet_receipt={
+            "original_source_sha256":published.revision.source_sha256,
+            "original_floor_page":7,"original_finish_page":11,
+            "source_real_door_ink_gap_virtual_closure_only":True,
+            "original_floor_source_ids":tuple(sorted(floor_ids)),
+            "original_finish_source_ids":tuple(sorted(finish_ids)),
+            "source_cross_sheet_translation_pdf_pts":[78.0,0.0],
+        },
+        source_material_receipt={},source_material_authority=None,
+        source_definition_selector=None,source_occurrence_selector=None,
+        original_finish_code="FT3",canonical_rooms=(),physical_room_id="OFFICE",
+        original_doorway_source_ancestry=partial,
+    )
+    assert result["status"]=="source_original_doorway_ancestry_conflict"
+    assert result["first_failure"]=="original_doorway_gap_painted_ink_inventory_incomplete"
+    assert result["new_firm_quantities"]==0
+    assert result["floor_finish_quantity_granted"] is False
