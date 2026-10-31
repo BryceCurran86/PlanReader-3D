@@ -497,6 +497,47 @@ def test_unrelated_coloured_ink_outside_native_doorway_does_not_veto():
     )
 
 
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("inside_gap", [False, True])
+def test_native_door_gap_retains_unselected_stroked_rectangle_edge(
+    vertical, inside_gap,
+):
+    """Native 're' edge rivals cannot disappear from the full ink census."""
+    import fitz
+
+    def turn(point):
+        return (point[1], point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)), ((120,20),(120,140)),
+        ((20,140),(120,140)), ((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    audit=module._original_doorway_gap_native_ink_inventory_complete
+    assert audit(doc.tobytes(),page_1_based=1,original_room_graph=graph)
+    x0,y0,x1,y1=(35,20,45,24) if inside_gap else (145,20,155,24)
+    if vertical:
+        x0,y0,x1,y1=y0,x0,y1,x1
+    page.draw_rect(fitz.Rect(x0,y0,x1,y1),color=(1,0,0),width=0.50)
+    assert page.get_drawings()[-1]["items"][0][0]=="re"
+    raw=doc.tobytes()
+    doc.close()
+    assert audit(raw,page_1_based=1,original_room_graph=graph) is (not inside_gap)
+
+
 def test_private_original_complete_entrance_retains_differently_weighted_jamb_rivals():
     """Original OFFICE p7 has other visible width ink in its open entrance."""
     import hashlib

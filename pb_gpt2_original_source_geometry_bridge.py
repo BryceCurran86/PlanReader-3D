@@ -125,7 +125,21 @@ def _original_doorway_gap_native_ink_inventory_complete(
         return True
 
     def same_run(item):
-        if type(item) is not tuple or len(item)!=3 or item[0]!="l":
+        if type(item) is not tuple or len(item)!=3:
+            return None
+        if item[0]=="re":
+            # Native PDF stroked rectangles are one ('re', Rect, direction)
+            # item, not four 'l' items. An unselected edge on the claimed
+            # doorway axis is rival ink even if its other edges are off-axis.
+            rect=item[1]
+            x0,y0,x1,y1=(round(float(rect.x0),3),round(float(rect.y0),3),
+                          round(float(rect.x1),3),round(float(rect.y1),3))
+            if horizontal and fixed in (y0,y1) and x0!=x1:
+                return tuple(sorted((x0,x1)))
+            if vertical and fixed in (x0,x1) and y0!=y1:
+                return tuple(sorted((y0,y1)))
+            return None
+        if item[0]!="l":
             return None
         _,p,q=item
         x0,y0,x1,y1=(round(float(p.x),3),round(float(p.y),3),
