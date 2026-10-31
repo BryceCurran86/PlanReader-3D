@@ -155,6 +155,67 @@ def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(
         _append_reproved_areas(baseline, roster, full.opening_quantity_evidence)
 
 
+@pytest.mark.parametrize("reverse_inventory", (False, True))
+@pytest.mark.parametrize("source_overlap", (False, True))
+def test_archived_unmeasured_rival_is_checked_against_new_area(
+    original_claim, source_overlap, reverse_inventory,
+):
+    """An old unsupported sibling is not exempt from the fresh source census.
+
+    Replaying its complete exact observation roster must veto the new area
+    when the same original source member is shared. A disjoint old unsupported
+    sibling remains in canonical output and negative inventory, never as a
+    new published quantity. Neither path invents a physical SAME identity.
+    """
+    _, full = original_claim
+    baseline = subset(full)
+    old_qty = baseline.opening_quantity_evidence[0]
+    added_id = next(q.input_entity_ids[0] for q in full.opening_quantity_evidence
+                    if q.quantity_id != old_qty.quantity_id)
+    added = next(o for o in full.canonical_openings
+                 if o.canonical_opening_id == added_id)
+    assert added.source_observation_ids
+    historical_rival = replace(
+        added,
+        canonical_opening_id="archived-unmeasured-opening-rival",
+        physical_opening_id="archived-unmeasured-opening-rival",
+        representative_observation_id="archived-unmeasured-observation",
+        source_observation_ids=(
+            added.source_observation_ids[:1] + ("archived-independent-source-member",)
+            if source_overlap else ("archived-independent-source-member",)
+        ),
+        source_lineage_root_ids=("archived-independent-lineage",),
+        source_geometries=((610.0, 510.0, 655.0, 510.0),),
+        area_m2=None,
+        area_basis=None,
+        figured_area_record_id=None,
+    )
+    baseline = replace(
+        baseline,
+        canonical_openings=baseline.canonical_openings + (historical_rival,),
+    )
+    roster = full.canonical_openings + (historical_rival,)
+    if reverse_inventory:
+        roster = tuple(reversed(roster))
+    if source_overlap:
+        with pytest.raises(SourceClosedRunConflictError, match="unmeasured opening rival"):
+            _append_reproved_areas(baseline, roster, full.opening_quantity_evidence)
+        return
+    result = _append_reproved_areas(baseline, roster, full.opening_quantity_evidence)
+    assert result.canonical_openings[:2] == baseline.canonical_openings
+    assert result.canonical_openings[1] is historical_rival
+    assert result.opening_quantity_evidence[0] is old_qty
+    assert historical_rival in result.opening_area_replay_source_inventory
+    assert len(result.opening_quantity_evidence) == 2
+    sealed = seal_live_opening_area_claim_run(
+        result, workspace_id=1, project_id="source-project",
+    )
+    rows = project_live_opening_customer_rows(
+        result, workspace_id=1, project_id="source-project",
+    )
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 2
+
+
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
     _, full = original_claim
     baseline = subset(full)

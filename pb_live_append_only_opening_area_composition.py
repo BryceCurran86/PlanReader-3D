@@ -129,16 +129,19 @@ def _append_reproved_areas(baseline, openings, quantities):
     # physical partition; neither a different record ID nor a partial roster
     # intersection proves distinct apertures. Other rivals stay in the replay
     # inventory for downstream source-owned identity decisions.
-    fresh_unmeasured = tuple(
+    # An old canonical rival can be unmeasured too. Its presence in the
+    # historical inventory does not certify the new measured aperture as
+    # distinct, so preserve it in this negative-evidence census.
+    unmeasured_rivals = tuple(
         o for oid, o in fresh_objects.items()
-        if oid not in fresh_measured_ids and oid not in old_objects
+        if oid not in fresh_measured_ids
     )
     for quantity in additions:
         oid = quantity.input_entity_ids[0]
         if oid in physical_claims:
             raise SourceClosedRunConflictError("new quantity aliases an already measured physical opening")
         opening = fresh_objects[oid]
-        for sibling in fresh_unmeasured:
+        for sibling in unmeasured_rivals:
             if (sibling.physical_opening_id == opening.physical_opening_id
                     or (
                         sibling.source_observation_ids
@@ -152,7 +155,7 @@ def _append_reproved_areas(baseline, openings, quantities):
                         and sibling.source_geometries == opening.source_geometries
                     )):
                 raise SourceClosedRunConflictError(
-                    "fresh-only unmeasured opening rival aliases a new area"
+                    "unmeasured opening rival aliases a new area"
                 )
         if (opening.document_id, opening.revision_id, opening.source_sha256) not in roots:
             raise SourceClosedRunConflictError("new opening belongs to a foreign source root")
