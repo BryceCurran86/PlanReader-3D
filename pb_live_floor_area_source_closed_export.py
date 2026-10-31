@@ -189,6 +189,9 @@ def build_live_floor_area_source_traces(
             room_owners_by_id.setdefault(room_id, []).append(room)
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # A whole-room physical floor polygon is one source face even when two
+    # canonical rooms/floors have different producer-owned identities.
+    claimed_source_faces: dict[tuple[object, ...], list[tuple[str, object]]] = {}
     for quantity in publish_live_floor_area_quantities(claim):
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("floor quantities must contain QuantityEvidence")
@@ -363,6 +366,41 @@ def build_live_floor_area_source_traces(
                 raise SourceClosedRunConflictError(
                     f"floor original canonical room geometry/source mismatch: {quantity.quantity_id}"
                 )
+
+        # Preserve every independent owner above, then cross-check the
+        # authenticated original *physical* face before sealing. Equal area
+        # or equal bounding boxes alone do NOT establish a collision.
+        face_scope = (
+            floor.document_id,
+            floor.source_sha256.lower(),
+            floor.revision_id,
+            floor.page_id,
+            viewport_id,
+            source_bbox,
+        )
+        try:
+            from shapely.geometry import Polygon
+
+            original_face = Polygon(checked)
+            for other_floor, prior_face in claimed_source_faces.get(
+                face_scope, ()
+            ):
+                if original_face.equals(prior_face):
+                    raise SourceClosedRunConflictError(
+                        "different FIRM floor areas claim the same original "
+                        "physical floor face: "
+                        f"{other_floor}, {physical_id}"
+                    )
+        except SourceClosedRunConflictError:
+            raise
+        except Exception as exc:
+            raise SourceClosedRunConflictError(
+                "original floor source-face comparison failed closed: "
+                f"{quantity.quantity_id}"
+            ) from exc
+        claimed_source_faces.setdefault(face_scope, []).append(
+            (physical_id, original_face)
+        )
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
