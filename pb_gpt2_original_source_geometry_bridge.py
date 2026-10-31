@@ -124,31 +124,49 @@ def _original_doorway_gap_native_ink_inventory_complete(
         # separate visibility owner, not an assumed white page, must rule it out.
         return True
 
-    def same_run(item):
-        if type(item) is not tuple or len(item)!=3:
-            return None
-        if item[0]=="re":
-            # Native PDF stroked rectangles are one ('re', Rect, direction)
-            # item, not four 'l' items. An unselected edge on the claimed
-            # doorway axis is rival ink even if its other edges are off-axis.
-            rect=item[1]
-            x0,y0,x1,y1=(round(float(rect.x0),3),round(float(rect.y0),3),
-                          round(float(rect.x1),3),round(float(rect.y1),3))
-            if horizontal and fixed in (y0,y1) and x0!=x1:
-                return tuple(sorted((x0,x1)))
-            if vertical and fixed in (x0,x1) and y0!=y1:
-                return tuple(sorted((y0,y1)))
-            return None
-        if item[0]!="l":
-            return None
-        _,p,q=item
-        x0,y0,x1,y1=(round(float(p.x),3),round(float(p.y),3),
-                      round(float(q.x),3),round(float(q.y),3))
-        if horizontal and y0==fixed and y1==fixed and x0!=x1:
-            return tuple(sorted((x0,x1)))
-        if vertical and x0==fixed and x1==fixed and y0!=y1:
-            return tuple(sorted((y0,y1)))
-        return None
+    def same_runs(item):
+        # Native PyMuPDF path items are not all 'l': 're' and 'qu' encode
+        # multiple painted edges; 'c' can encode a collinear Bezier run.
+        # Inspect EVERY edge, not merely the first edge or a caller's IDs.
+        if type(item) is not tuple or not item:
+            return ()
+        try:
+            kind=item[0]
+            if kind=="l" and len(item)==3:
+                edges=((item[1],item[2]),)
+            elif kind=="re" and len(item)==3:
+                rect=item[1]
+                corners=(rect.tl,rect.tr,rect.br,rect.bl)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="qu" and len(item)==2:
+                quad=item[1]
+                corners=(quad.ul,quad.ur,quad.lr,quad.ll)
+                edges=tuple(zip(corners,corners[1:]+corners[:1]))
+            elif kind=="c" and len(item)==5:
+                points=tuple(
+                    (round(float(p.x),3),round(float(p.y),3))
+                    for p in item[1:]
+                )
+                if horizontal and all(p[1]==fixed for p in points):
+                    bounds=sorted(p[0] for p in points)
+                elif vertical and all(p[0]==fixed for p in points):
+                    bounds=sorted(p[1] for p in points)
+                else:
+                    return ()
+                return ((bounds[0],bounds[-1]),) if bounds[0]!=bounds[-1] else ()
+            else:
+                return ()
+            spans=[]
+            for p,q in edges:
+                x0,y0=(round(float(p.x),3),round(float(p.y),3))
+                x1,y1=(round(float(q.x),3),round(float(q.y),3))
+                if horizontal and y0==fixed and y1==fixed and x0!=x1:
+                    spans.append(tuple(sorted((x0,x1))))
+                if vertical and x0==fixed and x1==fixed and y0!=y1:
+                    spans.append(tuple(sorted((y0,y1))))
+            return tuple(spans)
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            return ()
 
     # Independently confirm that selected strokes actually border the
     # claimed door gap. These prove the bounds, NOT a style whitelist for
@@ -163,9 +181,10 @@ def _original_doorway_gap_native_ink_inventory_complete(
         if ix>=len(drawings) or j>=len(drawings[ix].get("items",())):
             return False
         row=drawings[ix]
-        span=same_run(row["items"][j])
-        if paint(row) and span is not None and (
-                abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance):
+        if paint(row) and any(
+                abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance
+                for span in same_runs(row["items"][j])
+        ):
             has_selected_ink_at_gap=True
     if not has_selected_ink_at_gap:
         return False
@@ -175,8 +194,10 @@ def _original_doorway_gap_native_ink_inventory_complete(
         for j,item in enumerate(row.get("items",())):
             if f"d{ix}i{j}" in selected:
                 continue
-            span=same_run(item)
-            if span is not None and min(span[1],high)-max(span[0],low)>tolerance:
+            if any(
+                    min(span[1],high)-max(span[0],low)>tolerance
+                    for span in same_runs(item)
+            ):
                 return False
     return True
 
