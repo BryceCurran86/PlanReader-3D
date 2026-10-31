@@ -98,7 +98,7 @@ jobs:
           path=out/"original.json"
           if not path.exists():
               print("Original diagnostic unavailable; details withheld")
-              raise SystemExit(0)
+              raise SystemExit(1)
           report=json.loads(path.read_text())
           fields={
               "original_source_sha256":report.get("pdf_sha256"),
