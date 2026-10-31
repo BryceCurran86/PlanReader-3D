@@ -45,7 +45,8 @@ def _original_ancestry():
     }
 
 
-def _call(monkeypatch, *, cross=None, ancestry=None, actual=None):
+def _call(monkeypatch, *, cross=None, ancestry=None, actual=None,
+          inventory_complete=True):
     calls = []
     class Bridge(module.GPT2OriginalSourceGeometryBridge):
         def __init__(self):
@@ -84,6 +85,17 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None):
         calls.append(("gpt1_shadow",))
         return {"floor_finish_quantity_granted": False}
 
+    def census(original_pdf_bytes, *, page_1_based, original_room_graph):
+        calls.append(("source_ink_inventory", page_1_based))
+        assert original_pdf_bytes == b"sealed-source"
+        assert original_room_graph["original_native_edge_ids"] in (
+            FLOOR_IDS, FINISH_IDS,
+        )
+        return inventory_complete
+
+    monkeypatch.setattr(
+        module, "_original_doorway_gap_native_ink_inventory_complete", census,
+    )
     monkeypatch.setattr(module, "audit_gpt2_source_material_floor_handoff", material)
     monkeypatch.setattr(module, "audit_gpt2_w4_bound_original_floor", w4)
     monkeypatch.setattr(module, "audit_gpt2_w4_material_to_gpt1", to_gpt1)
@@ -110,7 +122,8 @@ def _call(monkeypatch, *, cross=None, ancestry=None, actual=None):
 def test_replayed_original_doorway_reaches_existing_source_only_w4_handoff(monkeypatch):
     result, calls = _call(monkeypatch)
     assert [x[0] for x in calls] == [
-        "source", "source_reissue", "material", "w4", "gpt1_shadow"
+        "source", "source_reissue", "source_ink_inventory",
+        "source_ink_inventory", "material", "w4", "gpt1_shadow"
     ]
     assert result["status"] == "source_W4_FT_handoff_shadow_only"
     assert result["floor_finish_quantity_granted"] is False
@@ -255,3 +268,57 @@ def test_immutable_maryborough_office_d15_mismatch_cannot_spoof_matching_ancestr
     assert hashlib.sha256(original.read_bytes()).hexdigest() == (
         published.revision.source_sha256
     )
+
+
+
+def test_original_source_gap_inventory_prevents_selected_stroke_omission(
+    monkeypatch,
+):
+    result,calls=_call(monkeypatch,inventory_complete=False)
+    assert result["status"]=="source_original_doorway_ancestry_conflict"
+    assert result["first_failure"]=="original_doorway_gap_painted_ink_inventory_incomplete"
+    assert result["new_firm_quantities"]==0
+    assert [r[0] for r in calls]==[
+        "source","source_reissue","source_ink_inventory",
+    ]
+
+
+def test_real_native_pdf_same_axis_ink_inventory_detects_omitted_wall_stub():
+    """Recompute source ink over an unfilled doorway, without caller snapshots."""
+    import fitz
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for p,q in (
+        ((20,20),(20,140)),
+        ((120,20),(120,140)),
+        ((20,140),(120,140)),
+        ((20,20),(24,20)),
+        ((80,20),(120,20)),
+        # Extra drafting outside the physical gap cannot veto a room source.
+        ((142,20),(149,20)),
+    ):
+        page.draw_line(p,q,color=(0,0,0),width=.48)
+    raw=doc.tobytes()
+    doc.close()
+    def issued(ids, start):
+        return {
+            "page_1_based":1,
+            "original_native_edge_ids":ids,
+            "native_components":({
+                "native_endpoint_degrees":(
+                    {"degree":1,"point_pdf_pt":start},
+                    {"degree":1,"point_pdf_pt":(80,20)},
+                )
+            },),
+        }
+    audit=module._original_doorway_gap_native_ink_inventory_complete
+    assert audit(raw,page_1_based=1,original_room_graph=issued(
+        ("d0i0","d1i0","d2i0","d3i0","d4i0"),(24,20),
+    ))
+    assert not audit(raw,page_1_based=1,original_room_graph=issued(
+        ("d0i0","d1i0","d2i0","d4i0"),(20,20),
+    ))
+    assert not audit(raw,page_1_based=2,original_room_graph=issued(
+        ("d0i0","d1i0","d2i0","d3i0","d4i0"),(24,20),
+    ))
