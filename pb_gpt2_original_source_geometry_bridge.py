@@ -112,13 +112,24 @@ def _original_doorway_gap_native_ink_inventory_complete(
         return (
             "s" in str(row.get("type",""))
             and type(width) in (int,float)
-            and math.isfinite(width) and width>0
+            and math.isfinite(width) and width>=0
             and type(opacity) in (int,float)
             and math.isfinite(opacity) and opacity>0
             and type(color) in (tuple,list) and len(color)==3
             and all(type(c) in (int,float) and math.isfinite(c)
                     for c in color)
         )
+
+    def unresolved_stroke_paint(row):
+        # Unknown metadata is not proof of invisible source ink. Reject the
+        # complete source-gap claim rather than silently discard a rival.
+        if "s" not in str(row.get("type","")):
+            return False
+        opacity=row.get("stroke_opacity")
+        if (type(opacity) in (int,float) and math.isfinite(opacity)
+                and opacity==0):
+            return False
+        return not stroke_paint(row)
 
     def fill_paint(row):
         # PDF fill-only ('f') and fill+stroke ('fs') paths can occupy the
@@ -272,6 +283,11 @@ def _original_doorway_gap_native_ink_inventory_complete(
         except (AttributeError,TypeError,ValueError,OverflowError):
             # Invalid source geometry cannot certify a complete gap.
             return True
+
+    # A malformed visible/possibly-visible stroke anywhere on this source
+    # page cannot certify a complete native-ink inventory.
+    if any(unresolved_stroke_paint(row) for row in drawings):
+        return False
 
     # Independently confirm that selected strokes actually border the
     # claimed door gap. These prove the bounds, NOT a style whitelist for

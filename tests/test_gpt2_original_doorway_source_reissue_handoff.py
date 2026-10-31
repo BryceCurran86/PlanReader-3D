@@ -865,3 +865,122 @@ def test_transparent_fill_only_native_path_does_not_veto_door_gap(vertical):
     assert module._original_doorway_gap_native_ink_inventory_complete(
         raw,page_1_based=1,original_room_graph=graph,
     )
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("inside_gap", [False, True])
+@pytest.mark.parametrize("width", [0, 0.5])
+def test_raw_pdf_zero_width_hairline_is_painted_original_door_rival(
+    vertical, selected, inside_gap, width,
+):
+    """Actual PDF 0 w hairline must be counted, not normalized by draw_line."""
+    import fitz
+
+    def turn(point):
+        return (point[1],point[0]) if vertical else point
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=0.48)
+    x=45 if inside_gap else 145
+    a,b=turn((x,10)),turn((x,30))
+    # PyMuPDF draw_line(width=0) emits 1 w, so write the original PDF
+    # operator directly; the source scanner still uses get_drawings().
+    first=(a[0],200-a[1])
+    second=(b[0],200-b[1])
+    prior=page.get_contents()
+    ref=doc.get_new_xref()
+    doc.update_object(ref,"<< >>")
+    doc.update_stream(
+        ref,
+        (f"q 0 0 0 RG {width} w "
+         f"{first[0]} {first[1]} m "
+         f"{second[0]} {second[1]} l S Q").encode(),
+    )
+    doc.xref_set_key(
+        page.xref,"Contents",
+        "["+" ".join(f"{v} 0 R" for v in prior+[ref])+"]",
+    )
+    rival=page.get_drawings()[-1]
+    assert rival["type"]=="s"
+    assert rival["stroke_opacity"]==1
+    assert rival["width"]==width
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(
+            f"d{i}i0" for i in range(6 if selected else 5)
+        ),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    ) is (not inside_gap)
+
+
+@pytest.mark.parametrize("bad_field,bad_value", [
+    ("width",None),
+    ("width",float("nan")),
+    ("stroke_opacity",None),
+    ("stroke_opacity",float("nan")),
+    ("color",None),
+])
+def test_unresolved_original_stroke_metadata_cannot_certify_empty_gap(
+    monkeypatch,bad_field,bad_value,
+):
+    """Malformed native paint evidence must abstain, not disappear."""
+    import fitz
+    from copy import deepcopy
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),
+        ((80,20),(120,20)),((145,10),(145,30)),
+    ):
+        page.draw_line(a,b,color=(0,0,0),width=0.48)
+    drawings=deepcopy(page.get_drawings())
+    drawings[-1][bad_field]=bad_value
+    doc.close()
+
+    class SourcePage:
+        def get_drawings(self):
+            return deepcopy(drawings)
+
+    class SourceDoc:
+        page_count=1
+        def __enter__(self):
+            return self
+        def __exit__(self,*args):
+            return False
+        def __getitem__(self,index):
+            assert index==0
+            return SourcePage()
+
+    monkeypatch.setattr(fitz,"open",lambda **kwargs: SourceDoc())
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":(24,20)},
+                {"degree":1,"point_pdf_pt":(80,20)},
+            ),
+        },),
+    }
+    assert not module._original_doorway_gap_native_ink_inventory_complete(
+        b"synthetic-source",page_1_based=1,original_room_graph=graph,
+    )
