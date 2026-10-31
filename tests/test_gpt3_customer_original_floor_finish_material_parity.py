@@ -99,6 +99,37 @@ def test_source_code_label_tamper_is_rejected(monkeypatch, wrong_display):
         verify_sealed_customer_output(run, forged)
 
 
+def test_original_semantic_display_cannot_be_relabelled_as_coded():
+    run, rows = _real_floor_finish_receipt()
+    assert rows[0]["finish_system"] == "tile"
+    forged = [deepcopy(rows[0])]
+    forged[0]["finish_system"] = "FT1 (tile)"
+    with pytest.raises(CustomerOutputVerificationError, match="finish_system differs"):
+        verify_sealed_customer_output(run, forged)
+
+
+@pytest.mark.parametrize("notes_only", [False, True])
+def test_signed_source_code_cannot_be_replaced_in_provenance(monkeypatch, notes_only):
+    import pb_live_floor_finish_customer_projection as projection
+
+    monkeypatch.setattr(
+        projection, "_source_finish_system",
+        lambda metadata: "{} ({})".format(metadata["finish_code"], metadata["semantic_finish"]),
+    )
+    run, rows = _real_floor_finish_receipt()
+    forged = [deepcopy(rows[0])]
+    forged[0]["finish_system"] = "FT3 (tile)"
+    receipt = deepcopy(forged[0]["commercial_projection_provenance"])
+    receipt["quantity"]["metadata"]["finish_system"] = "FT3 (tile)"
+    forged[0]["notes"] = json.dumps(receipt)
+    if notes_only:
+        forged[0].pop("commercial_projection_provenance")
+    else:
+        forged[0]["commercial_projection_provenance"] = receipt
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(run, forged)
+
+
 def test_extra_customer_fields_do_not_affect_unrelated_original_lot16_eight():
     archive = Path("docs/engineering/lot16_original_signed_eight_row_20261015/production")
     sealed = sealed_source_closed_run_from_dict(
