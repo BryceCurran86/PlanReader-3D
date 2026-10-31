@@ -66,8 +66,19 @@ def test_modified_machine_material_provenance_not_authenticated_by_original_seal
 
 
 def _source_coded_element_receipt():
-    # Reproduce the GPT1 source-coded customer element using the existing
-    # sealed source/adapter provenance contracts, with no change to quantity.
+    """Exercise the REAL GPT1 projector, not a manually forged positive row."""
+    signed, rows = _real_floor_finish_receipt()
+    assert rows[0]["element"] == "Floor finish area (FT1)"
+    assert rows[0]["finish_system"] == "tile"
+    return signed, rows
+
+
+def _legacy_element_receipt():
+    """Reconstruct an authentic old-format row with a matching source receipt.
+
+    Only this regression constructs the historical customer display. The
+    coded-format positives above must go through the actual GPT1 projector.
+    """
     from pb_migration_contracts import QuantityEvidence
     from pb_quantity_takeoff_adapter import (
         CommercialTakeoffSourceTrace,
@@ -78,9 +89,8 @@ def _source_coded_element_receipt():
     signed, rows = _real_floor_finish_receipt()
     source = deepcopy(rows[0])
     provenance = deepcopy(source["commercial_projection_provenance"])
-    source_element = "Floor finish area (FT1)"
-    source["element"] = source_element
-    provenance["quantity"]["metadata"]["element"] = source_element
+    source["element"] = "Floor finish area"
+    provenance["quantity"]["metadata"]["element"] = "Floor finish area"
     source["commercial_projection_provenance"] = provenance
     source["notes"] = json.dumps(provenance)
     source["commercial_projection_fingerprint"] = (
@@ -93,7 +103,6 @@ def _source_coded_element_receipt():
         )
     )
     return signed, [source]
-
 
 def test_original_floor_code_element_passes_without_changing_signed_quantity():
     signed, rows = _source_coded_element_receipt()
@@ -179,8 +188,11 @@ def test_recomputed_customer_fingerprint_cannot_resign_a_foreign_finish_code(
 
 
 def test_legacy_original_floor_label_cannot_be_relabelled_as_source_coded():
-    signed, rows = _real_floor_finish_receipt()
+    signed, rows = _legacy_element_receipt()
     assert rows[0]["element"] == "Floor finish area"
+    assert verify_sealed_customer_output(signed, rows).verified_quantity_ids == (
+        "floor-finish-q1",
+    )
     forged = deepcopy(rows)
     forged[0]["element"] = "Floor finish area (FT1)"
     with pytest.raises(CustomerOutputVerificationError, match="element differs"):
