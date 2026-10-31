@@ -78,9 +78,11 @@ corresponds two strips there (W01 horizontal, W02 vertical); the other four are 
 - Authority output: 821 distinct readings (repeats collapsed), 1,079 discriminated subdivisions. Record ids are not
   unique (`aperture_authority_record_ids_not_unique`): `authority().all_apertures()` would silently drop readings.
 - W01: ABSTAINED. One equal-extent reading (843.6..1047.6) exists but it is `original_terminal_paint_structural_role_unproven`;
-  the two nested runs are cut at both ends by its own discriminated posts and are set aside; no unvetoed rival.
-- W02: ABSTAINED. No reading has the strip's extent. The nearest, a whole-width reading, starts one heavy stroke
-  width (0.96 pt) inside the strip's low end and is nested, with two pane-level readings; none is accounted for.
+  the two nested runs (starting 66.48 and 134.64 pt in, same high end) are cut at both ends by its own two
+  discriminated posts and are set aside; no unvetoed rival.
+- W02: ABSTAINED. No reading has the strip's extent. Three nested readings share its high end: one starts 0.96 pt
+  (one heavy stroke width) inside the strip's low end, the others 76.08 and 153.6 pt inside. All three are
+  `original_terminal_paint_structural_role_unproven` and none is accounted for by a discriminated post.
 - Sensitivity (diagnostic only, NOT an authenticated input and not part of the module): withholding the 2,824
   fill-only edges from the authority gives every nominated strip a proven equal-extent reading. The unstroked fill
   edges are therefore what stops the terminals, and the authority's input carries no paint order with which it could
