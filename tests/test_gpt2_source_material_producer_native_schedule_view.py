@@ -29,7 +29,7 @@ def _source_two_pages():
     return src,pub
 
 
-def test_producer_page_scope_and_default_unchanged_native_multipath_flag(monkeypatch):
+def test_producer_uses_source_connected_cells_without_default_multipath(monkeypatch):
     src,pub=_source_two_pages()
     normal=materials.SourceMaterialSemanticProducer.from_source_visibility_producer(src)
     opted=materials.SourceMaterialSemanticProducer.for_source_native_multipath_schedule_shadow(
@@ -42,11 +42,12 @@ def test_producer_page_scope_and_default_unchanged_native_multipath_flag(monkeyp
         return []
     monkeypatch.setattr(materials,"segment_page_viewports",trace)
     normal.publish(pub.revision.revision_id)
-    assert captured==[(1,{}),(2,{})]
+    assert captured==[(1,{"source_connected_table_cell_shadow":True}),
+                      (2,{"source_connected_table_cell_shadow":True})]
     captured.clear()
     opted.publish(pub.revision.revision_id)
     assert captured==[
-        (1,{}),
+        (1,{"source_connected_table_cell_shadow":True}),
         (2,{"source_connected_table_cell_shadow":True,
             "source_native_multipath_semantic_frame_shadow":True}),
     ]
