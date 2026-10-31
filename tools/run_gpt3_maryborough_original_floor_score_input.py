@@ -67,11 +67,15 @@ def _validate_sealed_customer_handoff(
     verified: Any,
     source_sha: str,
 ) -> dict[str, Any]:
-    if sealed.project_id != PROJECT or tuple(sealed.source_sha256s) != (source_sha,):
+    if sealed.project_id != PROJECT:
         raise ValueError("sealed Maryborough source scope contradicts original PDF")
     quantities = tuple(sealed.quantities)
     if not quantities:
         raise ValueError("empty Maryborough floor-area source seal")
+    # An empty signed run has no quantity-derived source SHA envelope. Keep
+    # that producer/issuer failure distinct from a nonempty wrong-source run.
+    if tuple(sealed.source_sha256s) != (source_sha,):
+        raise ValueError("sealed Maryborough source scope contradicts original PDF")
 
     quantity_ids = [q.quantity_id for q in quantities]
     if (
