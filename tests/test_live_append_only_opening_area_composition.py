@@ -87,8 +87,10 @@ def test_actual_producer_area_appends_through_sealer_and_customer_without_old_dr
 def test_append_retains_full_fresh_source_roster_without_publishing_unsupported_sibling(original_claim):
     _, full = original_claim
     baseline = subset(full)
-    added = next(o for o in full.canonical_openings
-                 if o.canonical_opening_id != baseline.canonical_openings[0].canonical_opening_id)
+    published_old = {q.quantity_id for q in baseline.opening_quantity_evidence}
+    added_id = next(q.input_entity_ids[0] for q in full.opening_quantity_evidence
+                    if q.quantity_id not in published_old)
+    added = next(o for o in full.canonical_openings if o.canonical_opening_id == added_id)
     # A producer's unmeasured, spatially separate source observation still
     # belongs to the full replay witness. It must not become a signed row.
     sibling = replace(
@@ -118,8 +120,10 @@ def test_append_retains_full_fresh_source_roster_without_publishing_unsupported_
 def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(original_claim, collision):
     _, full = original_claim
     baseline = subset(full)
-    added = next(o for o in full.canonical_openings
-                 if o.canonical_opening_id != baseline.canonical_openings[0].canonical_opening_id)
+    published_old = {q.quantity_id for q in baseline.opening_quantity_evidence}
+    added_id = next(q.input_entity_ids[0] for q in full.opening_quantity_evidence
+                    if q.quantity_id not in published_old)
+    added = next(o for o in full.canonical_openings if o.canonical_opening_id == added_id)
     sibling = replace(
         added, canonical_opening_id="fresh-only-unsupported",
         physical_opening_id="fresh-only-unsupported",
@@ -142,8 +146,10 @@ def test_fresh_only_unmeasured_source_rival_cannot_hide_a_new_opening_area(origi
 def test_full_fresh_source_inventory_rejects_a_mixed_snapshot(original_claim):
     _, full = original_claim
     baseline = subset(full)
-    added = next(o for o in full.canonical_openings
-                 if o.canonical_opening_id != baseline.canonical_openings[0].canonical_opening_id)
+    published_old = {q.quantity_id for q in baseline.opening_quantity_evidence}
+    added_id = next(q.input_entity_ids[0] for q in full.opening_quantity_evidence
+                    if q.quantity_id not in published_old)
+    added = next(o for o in full.canonical_openings if o.canonical_opening_id == added_id)
     sibling = replace(
         added, canonical_opening_id="foreign-source-only",
         physical_opening_id="foreign-source-only",
