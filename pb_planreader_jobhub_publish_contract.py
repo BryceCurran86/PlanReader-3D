@@ -120,14 +120,29 @@ class PlanReaderJobHubQuantityRow:
         raw_publishable = data.get("is_publishable", False)
         if type(raw_publishable) is not bool:
             raise ValueError("Legacy row is_publishable must be an explicit Boolean")
+        # The raw-dict commercial gate already refuses missing source and
+        # authority receipts, but a hydrated typed row bypasses that test.
+        # Never manufacture documented/FIRM evidence during deserialization.
+        raw_source = data.get("source_type")
+        raw_authority = data.get("authority_status")
+        missing_receipt = (
+            type(raw_source) is not str
+            or not raw_source.strip()
+            or type(raw_authority) is not str
+            or not raw_authority.strip()
+        )
+        if missing_receipt and raw_publishable:
+            raise ValueError(
+                "Publishable legacy JobHub row requires explicit source_type and authority_status"
+            )
         return cls(
             quantity_id=str(data.get("quantity_id") or ""),
             description=str(data.get("description") or ""),
             value=float(data.get("value") or 0.0),
             unit=str(data.get("unit") or ""),
             trade=str(data.get("trade") or "general"),
-            source_type=str(data.get("source_type") or TakeoffSourceType.DOCUMENTED_DIMENSION.value),
-            authority_status=str(data.get("authority_status") or AuthorityStatus.FIRM.value),
+            source_type=(TakeoffSourceType.BLOCKED.value if missing_receipt else raw_source),
+            authority_status=(AuthorityStatus.BLOCKED.value if missing_receipt else raw_authority),
             confidence=float(data.get("confidence") if data.get("confidence") is not None else 1.0),
             source_page=data.get("source_page"),
             source_sheet=data.get("source_sheet"),
