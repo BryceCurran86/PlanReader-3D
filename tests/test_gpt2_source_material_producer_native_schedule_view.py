@@ -137,3 +137,88 @@ def test_trusted_source_schedule_scopes_carry_immutable_revision_page_and_view()
         assert revision==pub.revision.revision_id
         assert page=="1"
         assert viewport.view_id
+
+
+def test_physical_material_mode_forwards_source_cell_guard(monkeypatch):
+    """The explicit plan path must not bypass the material schedule veto."""
+    src, pub = _source_two_pages()
+    producer = materials.SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
+        src, page_ids=("2",)
+    )
+    calls = []
+
+    def trace(_source, *, revision_id, page_id, physical_plan_view_shadow,
+              source_connected_table_cell_shadow):
+        calls.append((revision_id, page_id, physical_plan_view_shadow,
+                      source_connected_table_cell_shadow))
+        return ()
+
+    monkeypatch.setattr(materials, "segment_source_page_viewports", trace)
+    producer.publish(pub.revision.revision_id)
+    assert calls == [(pub.revision.revision_id, "2", True, True)]
+    assert producer.published_plan_viewports() == ()
+
+
+def test_source_page_wrapper_forwards_only_explicit_material_guard(monkeypatch):
+    import pb_viewport_segmentation as f07
+    import pb_source_plan_view_authority as plan
+
+    src, pub = _source_two_pages()
+    calls = []
+
+    def trace(_source, *, revision_id, page_id, physical_plan_view_shadow,
+              **kwargs):
+        calls.append((revision_id, page_id, physical_plan_view_shadow, kwargs))
+        return []
+
+    monkeypatch.setattr(plan, "source_owned_plan_viewports", trace)
+    common = dict(revision_id=pub.revision.revision_id, page_id="2",
+                  physical_plan_view_shadow=True)
+    assert f07.segment_source_page_viewports(src, **common) == []
+    assert f07.segment_source_page_viewports(
+        src, **common, source_connected_table_cell_shadow=True
+    ) == []
+    assert calls == [
+        (pub.revision.revision_id, "2", True, {}),
+        (pub.revision.revision_id, "2", True,
+         {"source_connected_table_cell_shadow": True}),
+    ]
+
+
+def test_source_owned_plan_reader_applies_guard_to_real_f07(monkeypatch):
+    import pb_source_plan_view_authority as plan
+
+    src, pub = _source_two_pages()
+    calls = []
+
+    def trace(_page, *, page_number, **kwargs):
+        calls.append((page_number, kwargs))
+        return []
+
+    monkeypatch.setattr(plan.f07, "segment_page_viewports", trace)
+    common = dict(revision_id=pub.revision.revision_id, page_id="2",
+                  physical_plan_view_shadow=False)
+    assert plan.source_owned_plan_viewports(src, **common) == []
+    assert plan.source_owned_plan_viewports(
+        src, **common, source_connected_table_cell_shadow=True
+    ) == []
+    assert calls == [
+        (2, {}),
+        (2, {"source_connected_table_cell_shadow": True}),
+    ]
+    assert src.published_snapshot_for_revision(pub.revision.revision_id) is not None
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "true", [], {}])
+def test_material_source_cell_guard_requires_exact_bool(invalid):
+    import pb_viewport_segmentation as f07
+    import pb_source_plan_view_authority as plan
+
+    src, pub = _source_two_pages()
+    kwargs = dict(revision_id=pub.revision.revision_id, page_id="2",
+                  physical_plan_view_shadow=True,
+                  source_connected_table_cell_shadow=invalid)
+    with pytest.raises(ValueError, match="source_table_shadow_requires_explicit_bool"):
+        f07.segment_source_page_viewports(src, **kwargs)
+    with pytest.raises(ValueError, match="source_table_shadow_requires_explicit_bool"):
+        plan.source_owned_plan_viewports(src, **kwargs)
