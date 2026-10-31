@@ -143,6 +143,56 @@ def test_persisted_database_shape_keeps_complete_lineage_in_notes_and_reference(
     assert report.verified_quantity_ids == ("qty-1", "qty-2")
 
 
+def _floor_finish_sealed_and_row():
+    original = quantity("qty-finish-1", "floor-1")
+    finish = replace(
+        original,
+        family="floor_finish_area",
+        semantic_key="floor_finish_area:floor-1:FT1:tile",
+        metadata={
+            **dict(original.metadata),
+            "finish_code": "FT1",
+            "semantic_finish": "tile",
+            "finish_system": "FT1 (tile)",
+        },
+    )
+    source_trace = trace(finish)
+    sealed = seal_source_closed_run(
+        (finish,),
+        project_id="project-7",
+        traces_by_quantity_id={finish.quantity_id: source_trace},
+    )
+    row = adapter.quantity_evidence_to_takeoff_output_row(
+        finish, trace=source_trace, authority=authority()
+    )
+    assert row is not None
+    return sealed, row
+
+
+@pytest.mark.parametrize("notes_only", [False, True])
+def test_floor_finish_display_code_must_match_persisted_producer_receipt(notes_only: bool) -> None:
+    sealed, original = _floor_finish_sealed_and_row()
+    row = dict(original)
+    if notes_only:
+        # Persisted takeoff tables retain notes, not adapter-only columns.
+        row.pop("commercial_projection_provenance")
+        row.pop("commercial_projection_fingerprint")
+        row.pop("quantity_id")
+
+    assert verify_sealed_customer_output(sealed, [row]).valid_quantity_count == 1
+    row["finish_system"] = "FT9 (tile)"
+    with pytest.raises(CustomerOutputVerificationError, match="finish_system mismatch"):
+        verify_sealed_customer_output(sealed, [row])
+
+
+@pytest.mark.parametrize("malformed", [None, 123, ["FT1 (tile)"]])
+def test_floor_finish_display_requires_exact_string(malformed: object) -> None:
+    sealed, original = _floor_finish_sealed_and_row()
+    row = {**original, "finish_system": malformed}
+    with pytest.raises(CustomerOutputVerificationError, match="malformed finish_system"):
+        verify_sealed_customer_output(sealed, [row])
+
+
 def test_tampered_sealed_run_envelope_fails_before_customer_verification() -> None:
     sealed, rows = sealed_and_rows()
     tampered = replace(sealed, run_id="tampered-run")
