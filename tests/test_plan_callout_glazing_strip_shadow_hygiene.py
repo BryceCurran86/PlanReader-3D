@@ -18,6 +18,9 @@ OWN_FILES = {
     "pb_source_plan_glazing_strip_callout_shadow.py",
     "tools/diag_plan_callout_strip_census.py",
 }
+# The one deliberate companion: the opening-occupancy census builds the shadow's `ClaimantOccupancy` input records.
+# Its own hygiene tests pin that only this shadow's opt-in source adapter imports it (function level).
+COMPANION_IMPORTERS = ["pb_plan_tag_opening_occupancy_shadow.py"]
 
 
 def _python_files(*roots: str):
@@ -34,7 +37,7 @@ def test_nothing_in_production_imports_the_shadow():
             continue
         if re.search(rf"^\s*(?:from|import)\s+{MODULE}\b", path.read_text(encoding="utf-8", errors="replace"), re.M):
             importers.append(relative)
-    assert importers == []
+    assert importers == COMPANION_IMPORTERS
 
 
 @pytest.mark.parametrize("relative", sorted(OWN_FILES))
