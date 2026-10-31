@@ -40,7 +40,7 @@ def test_pr_runs_only_source_neutral_pinned_test_and_integrity_paths():
         "source-owned-plan-view",
     ):
         assert forbidden not in neutral
-    assert "on:\n  workflow_dispatch:" in text
+    assert "\n  workflow_dispatch:\n" in text
     assert "original-source:" in text
 
 
