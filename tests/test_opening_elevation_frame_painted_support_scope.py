@@ -110,3 +110,42 @@ def test_replay_is_identical_and_order_independent():
     first = _resolve_all(payload, ("W1", "W2"))
     again = _resolve_all(payload, ("W2", "W1"))
     assert first == again
+
+
+def test_a_failed_claimed_elevation_page_cannot_make_another_page_same_mark_unique(monkeypatch):
+    """A processing failure is unknown rival evidence, never proof that the rival is absent."""
+    payload = _pdf([[(0.0, "W1", "stroke")], [(0.0, "W1", "stroke")]])
+    for function_name in (
+        "extract_dimension_evidence_bundle",
+        "calibrate_dimension_layout",
+        "_record_candidates_for_page",
+    ):
+        original = getattr(authority_module, function_name)
+
+        def fail_second_page(*args, _original=original, **kwargs):
+            page = kwargs["page"] if "page" in kwargs else args[0]
+            if page.number == 1:
+                raise RuntimeError("claimed second elevation page unavailable")
+            return _original(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(authority_module, function_name, fail_second_page)
+            result = _resolve_all(payload, ("W1",))["W1"]
+            assert result.status is S.ABSTAINED and result.record is None, (
+                function_name, result
+            )
+
+
+def test_unrelated_page_without_an_elevation_claim_is_not_a_false_rival(monkeypatch):
+    """Fail-closed candidate processing does not require reading an unrelated blank page."""
+    payload = _pdf([[(0.0, "W1", "stroke")], []])
+    original = authority_module.extract_dimension_evidence_bundle
+
+    def fail_if_called_on_blank_page(*args, **kwargs):
+        page = kwargs["page"] if "page" in kwargs else args[0]
+        if page.number == 1:
+            raise RuntimeError("unrelated blank page should not be processed")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(authority_module, "extract_dimension_evidence_bundle", fail_if_called_on_blank_page)
+    assert _corroborated(_resolve_all(payload, ("W1",))["W1"])
