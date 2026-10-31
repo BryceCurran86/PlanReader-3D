@@ -46,7 +46,7 @@ jobs:
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
 
   original-source:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'BryceCurran86/PlanReader-3D' && github.actor == 'BryceCurran86' && github.triggering_actor == 'BryceCurran86' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == 'BryceCurran86' && github.repository == 'BryceCurran86/PlanReader-3D' && github.triggering_actor == 'BryceCurran86' }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
