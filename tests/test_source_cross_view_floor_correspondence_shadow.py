@@ -164,6 +164,51 @@ def test_cross_view_selector_rejects_noncanonical_page_aliases(field_name, bad_p
         SourceCrossViewFloorCorrespondenceSelector(**fields)
 
 
+# A printable page ID is not necessarily a canonical original PDF page.
+# In particular, "07" and "7" may be the SAME page rather than two sources.
+@pytest.mark.parametrize("field_name", ["support_page_id", "target_page_id"])
+@pytest.mark.parametrize(
+    "bad_page_id",
+    [
+        "00", "01", "07", "007", "011", "000",
+        "+7", "-7", "7.0", "7e0", "7/7",
+        "A7", "Page 7",
+        "７",  # fullwidth decimal seven
+        "٧",  # Arabic-Indic decimal seven
+        "𝟟",  # mathematical double-struck seven
+        "Ⅶ",  # Roman numeral
+        "7\u200b",  # zero-width space
+    ],
+)
+def test_cross_view_selector_rejects_noncanonical_numbered_page_id(
+    field_name, bad_page_id,
+):
+    original = sample_selector()
+    with pytest.raises(ValueError, match=field_name):
+        replace(original, **{field_name: bad_page_id})
+    # Fail closed before any synthetic wall registration or mark promotion,
+    # and leave the authenticated original page selector untouched.
+    assert (original.support_page_id, original.target_page_id) == ("11", "7")
+
+
+@pytest.mark.parametrize(
+    "support_id,target_id",
+    [("7", "07"), ("007", "7"), ("7", "٧"), ("７", "7"), ("11", "011")],
+)
+def test_cross_view_selector_never_treats_page_aliases_as_two_sources(
+    support_id, target_id,
+):
+    with pytest.raises(ValueError, match="source page identity"):
+        replace(sample_selector(), support_page_id=support_id, target_page_id=target_id)
+
+
+def test_cross_view_selector_keeps_zero_index_and_distinct_decimal_pages():
+    selector = replace(sample_selector(), support_page_id="0", target_page_id="7")
+    assert (selector.support_page_id, selector.target_page_id) == ("0", "7")
+    assert selector != sample_selector()
+    assert selector.support_page_id != selector.target_page_id
+
+
 def test_cross_view_selector_keeps_distinct_original_page_ids_verbatim():
     selector = sample_selector()
     assert selector.support_page_id == "11"
