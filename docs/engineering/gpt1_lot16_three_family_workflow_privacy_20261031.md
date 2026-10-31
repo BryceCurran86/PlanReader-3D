@@ -25,3 +25,11 @@ The public PR event has no original PDF and must not obtain its credentials. The
 ## Untouched ownership / benchmark firewall
 
 No changes to any production source module, original PDF, source hash, source credential, signed Lot16 or Maryborough customer rows, V2 frozen gold or evaluator, 20,000 primitive cap, 2.5pt snap, or GPT2/GPT3/GPT MAX branches. This fixes a CI evidence/security boundary; it is not an accuracy milestone and must not be advertised as score improvement.
+
+## Exact-head repository security-census repair (2026-10-31)
+
+**Observed:** Full CI `41152475829` against #4139 `b93207849528f78a4a40be82a68ed6ce191c89d6` failed exactly `tests/test_gpt3_private_original_dynamic_workflow_census.py::test_every_token_workflow_is_guarded_even_if_added_tomorrow` (one failure, 28,814 passes on Python 3.13). The new private `original-source` job used an AND-only owner/manual/main/repository/rerun-owner condition, but placed `github.repository` before `github.actor`. The repository-wide test intentionally uses a closed allowlist of five trusted exact strings; the approved repository+rerun expression puts `github.actor` before `github.repository` and then `github.triggering_actor`.
+
+**Change:** Reorder only the two existing conjuncts into the repository-wide accepted exact expression. Do not broaden the event, owner, repository, main branch, or rerun-owner conditions; do not modify or weaken the GPT3 security census. Pin the exact expression in the GPT1 source-neutral security regression so the cross-workflow contract is explicit.
+
+**Expected negative / required verification:** Any original source token on a PR remains inaccessible. Nonowner/manual/nonmain/foreign rerun remains skipped. No artifacts, logs, copies or original measurements are disclosed; no code affecting the source producer, quantity issuer or benchmark is changed. Require new immutable-head full dual-Python CI and source-neutral companion SUCCESS before merger; earlier green checks do not validate this fix. No source-positive replay, FIRM quantity or frozen-score claim results from guard-order compatibility.
