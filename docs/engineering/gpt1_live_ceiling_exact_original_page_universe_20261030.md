@@ -396,3 +396,47 @@ integrity correction, not a scored accuracy milestone.
 **SYNTHETIC TEST PLAN:** generated native PDF, real producer/issuer positive baseline, native 0/1/0.5 controls, 13 malformed types/bounds in both sibling orders, deterministic replay, input/PDF immutability and real issuer/customer abstention. Not original-source production proof.
 
 **EXCLUSIONS:** No changes to GPT2 FT/RCP correspondence, GPT MAX opening host, GPT3 signing/scoring, original PDF/credentials, signed Lot16 nine/Maryborough three, frozen120, 20k cap or 2.5pt snap. Exact-head Python3.13/3.14 CI and SHA-verified original producer->issuer->sealed/customer preservation remain mandatory before merge. Integrity only; no new FIRM or official score claimed.
+
+## Follow-up source-owned ceiling QUANTITY confidence integrity (2026-10-31)
+
+**OBSERVED:** The genuine F.07 viewport confidence was validated at the source
+boundary, but the subsequent source-owned ceiling `QuantityEvidence.confidence`
+was converted by `float(quantity.confidence)` only after a provisional
+quantity had already passed the room/finish/geometry gates.
+`QuantityEvidence.__post_init__` calls `float(confidence)` to validate the
+range without replacing the original receipt, so bool, numeric text and float
+subclasses can survive as apparently authenticated producer confidence.
+A foreign malformed source quantity may also throw or allow an earlier
+valid sibling to remain published.
+
+**INFERRED:** This is source receipt integrity, not a proven original-plan
+measurement error, a physical ceiling identification, or new FIRM authority.
+
+**PROPOSED / IMPLEMENTED:** Before replay tracking for any ceiling-lining
+quantity, require exact native int/float finite confidence in inclusive
+[0,1], using the same guard as the F.07 source confidence. If malformed,
+revoke the COMPLETE selected source ceiling run with
+`LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE`; do not coerce,
+choose a sibling, or expose a provisional canonical/issuer/customer row.
+Native confidence is retained verbatim as the existing numeric value.
+No area, material, room, scale, authority or geometric thresholds change.
+
+**TRACE:** original PDF -> F.07 viewport -> source-owned ceiling quantity ->
+`collect_live_ceiling_lining_claims` -> canonical ceiling ->
+`publish_live_ceiling_area_quantities` ->
+`project_live_ceiling_area_customer_rows` -> source-closed seal and unchanged
+frozen V2 evaluator (not run here).
+
+**SYNTHETIC REGRESSIONS:** generated native PDF with real source producer and
+positive issuer/customer baseline, native 0/0.5/1 controls, 13 malformed
+confidence variants in both producer quantity orders, deterministic replay,
+source input/PDF preservation, and actual issuer/customer abstention.
+These are source-neutral tests only. No original-source FIRM, new customer
+quantity, or frozen accuracy gain is claimed.
+
+**EXCLUSIONS / RELEASE GATES:** #4139 owns the disjoint Lot16 private-workflow
+security change. No GPT2 FT2/FT3/RCP, GPT MAX/Claude openings, GPT3
+signing/scoring, original PDFs/tokens, frozen truth, signed Lot16 nine or
+Maryborough three, 20k raster cap or 2.5pt snap edits. Exact-head dual-Python
+CI and owner-trusted original-source production -> issuer -> sealed/customer
+preservation proof remain required before merge.

@@ -2518,3 +2518,109 @@ def test_original_f07_confidence_alias_revokes_real_ceiling_customer_universe(
     assert all(item.confidence is bad_confidence for item in injected)
     assert len(shadow_calls) == (0 if bad_first else 2)
     assert path.read_bytes() == original_pdf
+
+
+class _ForeignCeilingQuantityConfidenceFloat(float):
+    """Float subclasses are not native source quantity receipts."""
+
+
+@pytest.mark.parametrize("native_confidence", [0, 0.0, 0.5, 1, 1.0])
+def test_original_ceiling_quantity_native_confidence_is_retained(native_confidence):
+    assert ceiling._source_ceiling_quantity_confidence(
+        native_confidence
+    ) == float(native_confidence)
+
+
+@pytest.mark.parametrize(
+    "bad_confidence",
+    [
+        None, True, False, "0.5", b"0.5", float("nan"),
+        float("inf"), float("-inf"), -0.01, 1.01,
+        10**1000, object(), _ForeignCeilingQuantityConfidenceFloat(0.5),
+    ],
+)
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_original_ceiling_quantity_confidence_alias_abstains_through_customer(
+    tmp_path, monkeypatch, bad_confidence, bad_first
+):
+    """Original-neutral PDF and real producer; only a quantity receipt is forged."""
+    from types import SimpleNamespace
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(baseline.canonical_ceilings) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    injected = []
+    source_calls = []
+
+    class QuantityUniverse:
+        def __init__(self, authentic, quantities):
+            self.authentic = authentic
+            self.ceiling_quantities = quantities
+
+        def __getattr__(self, field):
+            return getattr(self.authentic, field)
+
+    def with_foreign_quantity_confidence(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        eligible = tuple(
+            quantity for quantity in result.ceiling_quantities
+            if ceiling._claim_from_quantity(
+                quantity=quantity,
+                source_result=result,
+                page_no=kwargs["page_no"],
+                viewport_id=kwargs["viewport"].viewport_id,
+            ) is not None
+        )
+        assert len(eligible) == 1
+        authentic = eligible[0]
+        forged = SimpleNamespace(
+            **{
+                **vars(authentic),
+                "quantity_id": authentic.quantity_id + "-foreign-confidence",
+                "confidence": bad_confidence,
+            }
+        )
+        injected.append((authentic, forged))
+        source_calls.append(kwargs["viewport"].viewport_id)
+        quantities = (
+            (forged,) + tuple(result.ceiling_quantities)
+            if bad_first
+            else tuple(result.ceiling_quantities) + (forged,)
+        )
+        return QuantityUniverse(result, quantities)
+
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow",
+        with_foreign_quantity_confidence,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="generated-ceiling-quantity-confidence",
+    ) == ()
+    assert len(source_calls) == 2
+    assert len(injected) == 2
+    assert all(forged.confidence is bad_confidence for _, forged in injected)
+    assert all(authentic.confidence == baseline.claims[0].confidence
+               for authentic, _ in injected)
+    assert path.read_bytes() == original_pdf

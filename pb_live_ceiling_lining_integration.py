@@ -66,6 +66,9 @@ LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE = (
 LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH = (
     "live_ceiling_lining_source_context_mismatch"
 )
+LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE = (
+    "live_ceiling_lining_source_quantity_confidence_failure"
+)
 LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS = (
     "live_ceiling_lining_upstream_area_scope_alias"
 )
@@ -274,6 +277,15 @@ def _source_viewport_confidence(value: object) -> Optional[float]:
     if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
         return None
     return confidence
+
+
+def _source_ceiling_quantity_confidence(value: object) -> Optional[float]:
+    """Check producer-owned quantity confidence without repairing typed receipts.
+
+    The shared native confidence contract applies to both the F.07 viewport
+    and the ceiling quantity. Confidence never grants metric or FIRM authority.
+    """
+    return _source_viewport_confidence(value)
 
 
 def _exact_source_ceiling_quantity_id(value: object) -> bool:
@@ -998,6 +1010,26 @@ def collect_live_ceiling_lining_claims(
                     )
 
                 for quantity in result.ceiling_quantities:
+                    source_quantity_confidence = None
+                    if quantity.family == "ceiling_lining":
+                        source_quantity_confidence = (
+                            _source_ceiling_quantity_confidence(
+                                getattr(quantity, "confidence", None)
+                            )
+                        )
+                        if source_quantity_confidence is None:
+                            # A malformed source-owned quantity confidence is
+                            # negative evidence for the complete selected
+                            # source run. Do not let a valid earlier sibling
+                            # survive, or coerce the foreign receipt to float.
+                            return LiveCeilingLiningResult(
+                                status=EvidenceResolutionStatus.ABSTAINED,
+                                reason_codes=(
+                                    LIVE_CEILING_LINING_UNAVAILABLE,
+                                    LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE,
+                                ),
+                                claims=(),
+                            )
                     quantity_id = quantity.quantity_id
                     if not _exact_source_ceiling_quantity_id(quantity_id):
                         # Reject invalid producer IDs before replay tracking;
@@ -1056,7 +1088,7 @@ def collect_live_ceiling_lining_claims(
                             scale_record_id,
                             measurement_authority,
                             figured_dimension_ids,
-                            float(quantity.confidence),
+                            source_quantity_confidence,
                         )
                     )
 
@@ -1270,6 +1302,7 @@ __all__ = [
     "LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE",
     "LIVE_CEILING_LINING_SOURCE_SNAPSHOT_UNAVAILABLE",
     "LIVE_CEILING_LINING_SOURCE_CONTEXT_MISMATCH",
+    "LIVE_CEILING_LINING_SOURCE_QUANTITY_CONFIDENCE_FAILURE",
     "LIVE_CEILING_LINING_UPSTREAM_AREA_SCOPE_ALIAS",
     "LIVE_CEILING_LINING_MULTI_VIEWPORT_IDENTITY_UNRESOLVED",
     "LIVE_CEILING_LINING_RESOLVED",
