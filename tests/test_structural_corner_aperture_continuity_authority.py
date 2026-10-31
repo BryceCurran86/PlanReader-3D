@@ -1066,7 +1066,8 @@ def test_frozen_corner_exact_arithmetic_rejects_one_ulp_alias(authority, field):
     elif field.startswith("axis_vector_"):
         index = 0 if field.endswith("_x") else 1
         axis = list(leg.axis_vector)
-        axis[index] = math.nextafter(axis[index], math.inf)
+        direction = -math.inf if abs(axis[index]) == 1.0 else math.inf
+        axis[index] = math.nextafter(axis[index], direction)
         with pytest.raises(ValueError, match="axis"):
             replace(leg, axis_vector=tuple(axis))
     elif field in ("leg_a_metric", "leg_b_metric"):
