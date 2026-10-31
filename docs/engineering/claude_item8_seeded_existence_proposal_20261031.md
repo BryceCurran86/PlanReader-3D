@@ -39,7 +39,8 @@ owner can decide, on evidence, whether a caller may name the members of an openi
   anchored at a jamb or running through the gap is not one) and is dropped if it has one; the survivors' layers are
   merged; more than one distinct opening is CONFLICT; wall-face ink that continues into the gap on any face is refused
   whatever the caller names (section 8); any other visible line inside the gap and between the outermost
-  faces must be named by the caller or the proof abstains; then the viewport-scope gate, the annotation and unstroked-fill
+  faces makes the proof abstain (unnamed it is unaccounted; named it is only the caller's assertion of a role, which
+  cannot grant it, section 9); a structure set aside for a stub stays a typed rival (section 9); then the viewport-scope gate, the annotation and unstroked-fill
   opposition and the geometry identity that `prove_existence` applies, and the same record. For a plain opening it
   issues the identical record `prove_existence` issues (tested, plain and producer-owned authority, rotated and
   scaled).
@@ -47,7 +48,8 @@ owner can decide, on evidence, whether a caller may name the members of an openi
 ## 4. Expected abstentions
 
 No structure among the members; a member that is not a visible observation of the selector's page; a selector outside
-the structure; two distinct openings; a stub inside the gap on every layer; wall-face ink continuing into the gap on any face (never excused by naming it); unnamed ink inside the gap; a viewport scope
+the structure; two distinct openings; a stub inside the gap on every layer; wall-face ink continuing into the gap on any face (never excused by naming it); ink inside the gap, unnamed or named
+only by the caller; a competing layer set aside for a stub; a viewport scope
 that is not promotable; annotation or fill opposition; an unresolvable geometry identity.
 
 ## 5. Result on the SHA-verified Maryborough original (private, read-only)
@@ -122,3 +124,28 @@ Standing limits: (i) the proof is deliberately STRICTER than `prove_existence` o
 jamb-anchored line as a possible cap for the annotation checks); a plain opening with such ink is refused here and
 issued there. (ii) Roles are not authenticated: the proof cannot tell window-frame linework on a face from wall, so it
 abstains, which is why both original strips abstain. (iii) Layer stacks are exercised with up to three layers.
+
+## 9. Response to the review of b76f92325 and the owner handoff 6543203174 (2026-10-31)
+
+1. **Candidate retention (review 5722756785).** `prove_seeded_existence` used to drop a same-gap layer that carries an
+   interior stub before the identity census. Every set-aside structure now stays in the answer as a typed opposing
+   `EvidenceAtom` (existing vocabulary: kind `unknown`, status CANDIDATE, polarity opposing) naming the structure's lines,
+   the stub lines and `role_status = unresolved_no_producer_authenticated_role`, in `opposing_evidence_atoms`. The reason
+   `seeded_competing_layer_with_wall_face_stub_unresolved` is added to every refusal beside it, and the proof cannot
+   return CORROBORATED while one exists. A set-aside layer is a competing reading, not a disproved one: nothing
+   authenticates whether the stub is wall or frame linework.
+2. **Caller naming cannot grant a role (owner handoff 6543203174).** Interior ink the caller names in
+   `accounted_observation_ids` ends in `seeded_opening_ink_role_asserted_only_by_caller`, not in a record. The names must
+   still be observations the producer authenticated on this snapshot and page (an unknown id abstains), but they are an
+   assertion of what the caller knows about, not of what the lines are. Consequence, stated plainly: until a producer
+   authenticates ink roles, the proof can issue a record only for an opening with NO interior ink, so it is inert for any
+   real window. That is the fail-closed reading of the owner's rule, not a defect to route around.
+3. **Source-neutral controls added:** poses (identity, scaled, rotated 90 and 180 degrees, mirrored), member order and
+   repetition, replay, a face line beyond the gap (not a rival), foreign-snapshot members, a plain opening with glazing.
+4. **Original (SHA-verified, private, read-only):** the first strip still ABSTAINS, now with both reasons
+   (`wall_face_continues_inside_seeded_opening_gap`, `seeded_competing_layer_with_wall_face_stub_unresolved`) and one
+   rival atom for the glazing layer pair; the second strip is unchanged (no structure).
+5. **`compare_identity` (owner handoff 6543274611):** not touched here. Note for the narrow source-partition veto: a
+   seeded record for merged layers and a page-level record for one of its layer pairs have overlapping
+   `source_observation_ids` and different `record_id`s, so they would compare as DISTINCT today. Left to the authority
+   owner to avoid overlapping edits.

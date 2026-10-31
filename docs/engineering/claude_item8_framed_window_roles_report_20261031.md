@@ -42,6 +42,8 @@ It stops for review. Nothing here changes code, a quantity, a threshold or a ben
 5. **My own #4147 code (a gap, found while tracing).** `prove_seeded_existence` drops a layer pair with an interior stub
    before merging and does not report it; only survivors reach `candidate`. That removes a plausible competing identity
    silently, which "retain all plausible candidates" forbids.
+   **Fixed at `051a07d65`** (set-aside layers are now typed rival atoms and block a unique opening; see the seeded
+   proposal doc, section 9).
 6. **Maryborough first strip, measured read-only on the SHA-verified original** (paint facts from the native page):
    - the nominated glazing strip is 38 single-line paths, painted as ONE contiguous block (38 distinct paint-order
      numbers inside a span of 40); the second strip is the same shape (38 lines, span 40) at another place in the order;
