@@ -1,24 +1,8 @@
-"""Producer-Owned Structural Wall Thickness Step and Opening Reveal Alignment Authority.
+"""Source-neutral structural wall thickness step and opening reveal shadow evidence.
 
-Resolves wall thickness transitions (e.g. 240mm brick veneer to 90mm partition, or stepped insulated
-precast panels) occurring at or across door/window apertures.
-
-Engineering rationale:
-- Walls frequently change thickness along an exterior or interior run while remaining flush
-  along the exterior weatherface datum.
-- Across a thickness transition (T1 != T2), the wall centerline steps transversely by:
-  dy_c = |T1 - T2| / 2 (~1.4 pt to 4.2 pt at 1:100 scale).
-- Standard host binding authorities assume collinear wall centerlines across an opening void
-  (|dy_c| <= 1.0 pt), falsely rejecting valid openings with 'aperture_outside_host_wall_band'
-  or treating the transverse reveal rebate as an unclosed wall break.
-- Structural Wall Thickness Step Authority aligns the aperture via the continuous exterior datum face,
-  reconciles left/right wall depths (T_left, T_right), quantifies the transverse reveal rebate depth
-  (|T_left - T_right|), and binds dual-thickness host wall frames to accurately measure clear spans.
-
-Invariants:
-- Shadow mode only: zero commercial projection, candidate status only, non-publishing.
-- Fails closed on unaligned exterior datums (divergence > 2.0 pt) or excessive thickness steps (> 15.0 pt).
-- Enforces strict 2.5 pt snap compliance and deterministically sorted stable contract IDs.
+A geometric thickness step is not a source-authenticated physical opening.
+No caller-supplied scale, datum or host string alone authorizes a metric quantity.
+This module never publishes to takeoff, issuer or customer consumers.
 """
 
 from __future__ import annotations
@@ -29,24 +13,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from pb_migration_contracts import (
-    EvidenceResolutionStatus,
-    stable_contract_id,
-)
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 
 SCHEMA_VERSION = "1.0.0"
-
-MAX_ALLOWABLE_DATUM_OFFSET_PT = (
-    2.0  # max divergence of exterior face from collinear datum
-)
-MAX_THICKNESS_STEP_PT = 15.0  # ~260 mm max thickness step
+MAX_ALLOWABLE_DATUM_OFFSET_PT = 2.0
+MAX_THICKNESS_STEP_PT = 15.0
 MIN_CLEAR_SPAN_PT = 20.0
 MAX_CLEAR_SPAN_PT = 300.0
 
 
 class RevealAlignmentDatum(str, Enum):
-    """Datum alignment plane across the thickness transition."""
-
     EXTERIOR_FLUSH = "exterior_flush"
     INTERIOR_FLUSH = "interior_flush"
     CENTERLINE_ALIGNED = "centerline_aligned"
@@ -54,58 +30,219 @@ class RevealAlignmentDatum(str, Enum):
 
 
 class SteppedWallApertureClassification(str, Enum):
-    """Classification outcome for stepped wall opening."""
-
-    STEPPED_WALL_APERTURE_CONFIRMED = "stepped_wall_aperture_confirmed"
+    STEPPED_WALL_APERTURE_CONFIRMED = "stepped_wall_aperture_confirmed"  # reserved: source receipt required
+    GEOMETRIC_CANDIDATE = "geometric_candidate"
+    ABSTAINED_UNVERIFIED_SOURCE = "abstained_unverified_source"
     ABSTAINED_UNALIGNED_DATUM = "abstained_unaligned_datum"
-    ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY = (
-        "abstained_excessive_thickness_discrepancy"
-    )
+    ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY = "abstained_excessive_thickness_discrepancy"
     ABSTAINED_DEGENERATE_SPAN = "abstained_degenerate_span"
 
 
 @dataclass(frozen=True)
 class SteppedWallApertureRecord:
-    """Rigorous structural record for an aperture spanning a wall thickness step."""
-
     contract_id: str
     classification: SteppedWallApertureClassification
     jamb_left_datum: tuple[float, float]
     jamb_right_datum: tuple[float, float]
     clear_span_pt: float
-    clear_span_m: float
+    clear_span_m: float | None
     left_wall_thickness_pt: float
-    left_wall_thickness_mm: float
+    left_wall_thickness_mm: float | None
     right_wall_thickness_pt: float
-    right_wall_thickness_mm: float
+    right_wall_thickness_mm: float | None
     reveal_depth_pt: float
-    reveal_depth_mm: float
+    reveal_depth_mm: float | None
     centerline_step_offset_pt: float
-    datum_alignment: RevealAlignmentDatum
+    datum_alignment: RevealAlignmentDatum | None
     status: EvidenceResolutionStatus
     first_remaining_gate: str | None = None
     notes: str = ""
+    # Identity-bound shadow inputs must remain auditable after serialization.
+    # They are caller hypotheses, NOT source-verified measurement authority.
+    context_label: str = "STEPPED_WALL_OPENING"
+    datum_offset_pt: float | None = None
+    scale_ratio: float | None = None
     commercial_projection_allowed: bool = False
     takeoff_eligible: bool = False
     shadow_only: bool = True
+
+    def __post_init__(self) -> None:
+        # Source-neutral records can be constructed or dataclasses.replace'd
+        # without invoking the producer; keep the same authority boundary.
+        abstained_gates = {
+            SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE:
+                "original_source_scale_or_datum_unverified",
+            SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM:
+                "datum_faces_divergent",
+            SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY:
+                "thickness_step_excessive",
+            SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN:
+                "clear_span_out_of_bounds",
+        }
+        if (type(self.classification) is not SteppedWallApertureClassification
+                or type(self.status) is not EvidenceResolutionStatus
+                or type(self.commercial_projection_allowed) is not bool
+                or self.commercial_projection_allowed
+                or type(self.takeoff_eligible) is not bool
+                or self.takeoff_eligible
+                or type(self.shadow_only) is not bool
+                or not self.shadow_only):
+            raise ValueError("source-neutral reveal cannot grant commercial authority")
+        if self.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE:
+            valid = (self.status is EvidenceResolutionStatus.CANDIDATE
+                     and self.first_remaining_gate
+                     == "original_source_host_scale_and_reveal_unverified")
+        else:
+            valid = (self.classification in abstained_gates
+                     and self.status is EvidenceResolutionStatus.ABSTAINED
+                     and self.first_remaining_gate == abstained_gates.get(self.classification)
+                     and all(value is None for value in (
+                         self.clear_span_m, self.left_wall_thickness_mm,
+                         self.right_wall_thickness_mm, self.reveal_depth_mm,
+                     )))
+        if not valid:
+            raise ValueError("source-neutral reveal classification and source gate conflict")
+        # Direct dataclass construction/replacement must not inject nonfinite
+        # shadow geometry or hypothetical metric evidence after producer checks.
+        for point in (self.jamb_left_datum, self.jamb_right_datum):
+            if (type(point) is not tuple or len(point) != 2
+                    or any(not _finite_source_coordinate(v) for v in point)):
+                raise ValueError("reveal numeric evidence must be finite and physical")
+        for value in (
+            self.clear_span_pt, self.left_wall_thickness_pt,
+            self.right_wall_thickness_pt, self.reveal_depth_pt,
+            self.centerline_step_offset_pt,
+        ):
+            if not _finite_real(value) or value < 0:
+                raise ValueError("reveal numeric evidence must be finite and physical")
+        if (self.left_wall_thickness_pt <= 0
+                or self.right_wall_thickness_pt <= 0
+                or (self.datum_offset_pt is not None
+                    and not _finite_real(self.datum_offset_pt))
+                or (self.scale_ratio is not None
+                    and (not _finite_real(self.scale_ratio) or self.scale_ratio <= 0))
+                or (self.datum_alignment is not None
+                    and type(self.datum_alignment) is not RevealAlignmentDatum)):
+            raise ValueError("reveal numeric evidence must be finite and physical")
+        for field, allow_zero in (
+            (self.clear_span_m, False),
+            (self.left_wall_thickness_mm, False),
+            (self.right_wall_thickness_mm, False),
+            (self.reveal_depth_mm, True),
+        ):
+            if (field is not None and
+                    (not _finite_real(field) or field < 0
+                     or (not allow_zero and field == 0))):
+                raise ValueError("reveal numeric evidence must be finite and physical")
+        # These fields are deterministic producer-derived receipts, not fuzzy
+        # geometric matches. An isclose tolerance permits re-keyed frozen
+        # evidence to retain its stable ID after a sub-tolerance mutation.
+        expected_span = math.hypot(
+            self.jamb_right_datum[0] - self.jamb_left_datum[0],
+            self.jamb_right_datum[1] - self.jamb_left_datum[1],
+        )
+        expected_reveal = abs(self.left_wall_thickness_pt - self.right_wall_thickness_pt)
+        if (not math.isfinite(expected_span)
+                or not math.isfinite(expected_reveal)
+                or self.clear_span_pt != expected_span
+                or self.reveal_depth_pt != expected_reveal
+                or self.centerline_step_offset_pt != expected_reveal / 2.0):
+            raise ValueError("reveal numeric evidence conflicts with wall geometry")
+        # Re-evaluate the producer's FIRST failing gate from the frozen
+        # inputs. A caller can otherwise forge a geometric candidate or
+        # mislabel an abstention via dataclasses.replace while preserving
+        # coherent numeric axes and a matching stable identity.
+        # Source absence takes precedence over all geometric gates.
+        if (self.scale_ratio is None or self.datum_offset_pt is None
+                or self.datum_alignment is None):
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE)
+        elif self.clear_span_pt < MIN_CLEAR_SPAN_PT or self.clear_span_pt > MAX_CLEAR_SPAN_PT:
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN)
+        elif abs(self.datum_offset_pt) > MAX_ALLOWABLE_DATUM_OFFSET_PT:
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM)
+        elif self.reveal_depth_pt > MAX_THICKNESS_STEP_PT:
+            expected_classification = (
+                SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY)
+        else:
+            expected_classification = (
+                SteppedWallApertureClassification.GEOMETRIC_CANDIDATE)
+        if self.classification is not expected_classification:
+            raise ValueError("reveal frozen first-failing geometric gate conflict")
+
+        if self.classification is SteppedWallApertureClassification.GEOMETRIC_CANDIDATE:
+            if (any(value is None for value in (
+                    self.clear_span_m, self.left_wall_thickness_mm,
+                    self.right_wall_thickness_mm, self.reveal_depth_mm))
+                    or self.scale_ratio is None or self.datum_offset_pt is None
+                    or self.datum_alignment is None):
+                raise ValueError("reveal numeric evidence lacks candidate inputs")
+            # Public frozen records may be directly replaced. Candidate
+            # metrics must still be consistent with their own unverified
+            # scale and source-neutral geometry; this grants no FIRM status.
+            expected_metrics = (
+                self.clear_span_pt * self.scale_ratio,
+                self.left_wall_thickness_pt * self.scale_ratio * 1000.0,
+                self.right_wall_thickness_pt * self.scale_ratio * 1000.0,
+                self.reveal_depth_pt * self.scale_ratio * 1000.0,
+            )
+            actual_metrics = (
+                self.clear_span_m, self.left_wall_thickness_mm,
+                self.right_wall_thickness_mm, self.reveal_depth_mm,
+            )
+            # Exact arithmetic mirrors the producer's evaluation order; a
+            # changed hypothetical metric cannot retain its old evidence ID.
+            if (any(not math.isfinite(value) for value in expected_metrics)
+                    or any(expected == 0 and source > 0
+                           for expected, source in zip(
+                               expected_metrics, (
+                                   self.clear_span_pt, self.left_wall_thickness_pt,
+                                   self.right_wall_thickness_pt, self.reveal_depth_pt,
+                               )))
+                    or any(actual != expected
+                           for actual, expected in zip(actual_metrics, expected_metrics))):
+                raise ValueError("reveal numeric evidence conflicts with metric axes")
+
+        # Direct replacement of otherwise valid context, geometry or scale
+        # must not preserve a stale evidence ID. This grants no source authority.
+        if (type(self.context_label) is not str or not self.context_label
+                or self.context_label != self.context_label.strip()
+                or not self.context_label.isprintable()):
+            raise ValueError("reveal context must be an exact printable source identity")
+        if self.jamb_left_datum > self.jamb_right_datum:
+            raise ValueError("reveal jamb ordering conflicts with producer")
+        expected_id = _stepped_wall_identity(
+            self.context_label, self.jamb_left_datum, self.jamb_right_datum,
+            self.left_wall_thickness_pt, self.right_wall_thickness_pt,
+            self.datum_offset_pt, self.datum_alignment, self.scale_ratio,
+        )
+        if type(self.contract_id) is not str or self.contract_id != expected_id:
+            raise ValueError("reveal stable identity conflicts with source-neutral inputs")
 
     def to_dict(self) -> Mapping[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "contract_id": self.contract_id,
             "classification": self.classification.value,
-            "jamb_left_datum": [round(c, 2) for c in self.jamb_left_datum],
-            "jamb_right_datum": [round(c, 2) for c in self.jamb_right_datum],
-            "clear_span_pt": round(self.clear_span_pt, 2),
-            "clear_span_m": round(self.clear_span_m, 4),
-            "left_wall_thickness_pt": round(self.left_wall_thickness_pt, 2),
-            "left_wall_thickness_mm": round(self.left_wall_thickness_mm, 1),
-            "right_wall_thickness_pt": round(self.right_wall_thickness_pt, 2),
-            "right_wall_thickness_mm": round(self.right_wall_thickness_mm, 1),
-            "reveal_depth_pt": round(self.reveal_depth_pt, 2),
-            "reveal_depth_mm": round(self.reveal_depth_mm, 1),
-            "centerline_step_offset_pt": round(self.centerline_step_offset_pt, 2),
-            "datum_alignment": self.datum_alignment.value,
+            # Lossless native and hypothetical metric evidence: rounding here
+            # previously made different stable-ID hypotheses indistinguishable.
+            "jamb_left_datum": list(self.jamb_left_datum),
+            "jamb_right_datum": list(self.jamb_right_datum),
+            "clear_span_pt": self.clear_span_pt,
+            "clear_span_m": self.clear_span_m,
+            "left_wall_thickness_pt": self.left_wall_thickness_pt,
+            "left_wall_thickness_mm": self.left_wall_thickness_mm,
+            "right_wall_thickness_pt": self.right_wall_thickness_pt,
+            "right_wall_thickness_mm": self.right_wall_thickness_mm,
+            "reveal_depth_pt": self.reveal_depth_pt,
+            "reveal_depth_mm": self.reveal_depth_mm,
+            "centerline_step_offset_pt": self.centerline_step_offset_pt,
+            "datum_alignment": None if self.datum_alignment is None else self.datum_alignment.value,
+            "context_label": self.context_label,
+            "datum_offset_pt": self.datum_offset_pt,
+            "scale_ratio": self.scale_ratio,
             "status": self.status.value,
             "first_remaining_gate": self.first_remaining_gate,
             "notes": self.notes,
@@ -115,16 +252,59 @@ class SteppedWallApertureRecord:
         }
 
 
+def _finite_real(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    # Float conversion aliases adjacent integers beyond 2**53; reject them
+    # before both geometry and stable-contract identity construction.
+    if type(value) is int and abs(value) > 2**53:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
+def _finite_source_coordinate(value: object) -> bool:
+    # Preserve the existing inclusive 2**53 native source-point identity
+    # boundary for floats as well as ints. Non-coordinate metric and datum
+    # scalars retain their independent finite validation.
+    return _finite_real(value) and abs(value) <= 2**53
+
+
+
+def _stepped_wall_identity(
+    context_label: str,
+    jamb_left: tuple[float, float],
+    jamb_right: tuple[float, float],
+    left_thickness_pt: float,
+    right_thickness_pt: float,
+    datum_offset_pt: float | None,
+    datum_alignment: RevealAlignmentDatum | None,
+    scale_ratio: float | None,
+) -> str:
+    """Exact source-neutral identity shared by producer and frozen-record guard."""
+    return stable_contract_id(
+        f"STEPPED_WALL_{context_label}",
+        (
+            *(float(v).hex() for v in (*jamb_left, *jamb_right)),
+            float(left_thickness_pt).hex(),
+            float(right_thickness_pt).hex(),
+            "missing_datum" if datum_offset_pt is None else float(datum_offset_pt).hex(),
+            "missing_alignment" if datum_alignment is None else datum_alignment.value,
+            "missing_scale" if scale_ratio is None else float(scale_ratio).hex(),
+        ),
+    )
+
+
 class StructuralWallThicknessStepRevealAuthority:
-    """Evaluates openings situated at wall thickness steps and computes reveal rebates."""
+    """Source-free, noncommercial geometric candidate and typed abstention producer."""
 
     @staticmethod
     def _order_datum_jambs(
         p_a: tuple[float, float], p_b: tuple[float, float]
     ) -> tuple[tuple[float, float], tuple[float, float]]:
-        if (p_a[0], p_a[1]) <= (p_b[0], p_b[1]):
-            return p_a, p_b
-        return p_b, p_a
+        return (p_a, p_b) if p_a <= p_b else (p_b, p_a)
 
     def evaluate_stepped_wall_aperture(
         self,
@@ -133,122 +313,137 @@ class StructuralWallThicknessStepRevealAuthority:
         jamb_datum_b: tuple[float, float],
         left_thickness_pt: float,
         right_thickness_pt: float,
-        datum_offset_pt: float = 0.0,
-        datum_alignment: RevealAlignmentDatum = RevealAlignmentDatum.EXTERIOR_FLUSH,
-        scale_ratio: float = 0.01764,
+        datum_offset_pt: float | None = None,
+        datum_alignment: RevealAlignmentDatum | None = None,
+        scale_ratio: float | None = None,
         context_label: str = "STEPPED_WALL_OPENING",
     ) -> SteppedWallApertureRecord:
-        """Evaluates aperture geometry spanning a wall thickness transition."""
-        jamb_left, jamb_right = self._order_datum_jambs(jamb_datum_a, jamb_datum_b)
-        dx = jamb_right[0] - jamb_left[0]
-        dy = jamb_right[1] - jamb_left[1]
-        clear_span_pt = math.hypot(dx, dy)
-        clear_span_m = clear_span_pt * scale_ratio
+        """Evaluate only a shadow hypothesis, never a source-confirmed aperture."""
+        for name, point in (("jamb_datum_a", jamb_datum_a), ("jamb_datum_b", jamb_datum_b)):
+            if not isinstance(point, (tuple, list)) or len(point) != 2:
+                raise ValueError(f"{name} requires exactly two coordinates")
+            if any(not _finite_source_coordinate(v) for v in point):
+                raise ValueError(f"{name} requires finite real coordinates")
+        for name, value in (
+            ("left_thickness_pt", left_thickness_pt),
+            ("right_thickness_pt", right_thickness_pt),
+        ):
+            if not _finite_real(value) or value <= 0:
+                raise ValueError(f"{name} must be positive and finite")
+        if datum_offset_pt is not None and not _finite_real(datum_offset_pt):
+            raise ValueError("datum_offset_pt must be finite real")
+        if scale_ratio is not None and (not _finite_real(scale_ratio) or scale_ratio <= 0):
+            raise ValueError("scale_ratio must be positive and finite")
+        if datum_alignment is not None and not isinstance(datum_alignment, RevealAlignmentDatum):
+            raise ValueError("datum_alignment must be a typed datum")
+        # Context is a source-lineage identity in stable_contract_id, not a
+        # display label. Reject padding/control characters rather than
+        # manufacturing a second shadow hypothesis for the same context.
+        if (type(context_label) is not str or not context_label
+                or context_label != context_label.strip()
+                or not context_label.isprintable()):
+            raise ValueError("context_label must be an exact printable source identity")
 
-        left_thickness_mm = (left_thickness_pt * scale_ratio) * 1000.0
-        right_thickness_mm = (right_thickness_pt * scale_ratio) * 1000.0
-
-        reveal_depth_pt = abs(left_thickness_pt - right_thickness_pt)
-        reveal_depth_mm = (reveal_depth_pt * scale_ratio) * 1000.0
+        a = (float(jamb_datum_a[0]), float(jamb_datum_a[1]))
+        b = (float(jamb_datum_b[0]), float(jamb_datum_b[1]))
+        jamb_left, jamb_right = self._order_datum_jambs(a, b)
+        clear_span_pt = math.hypot(jamb_right[0] - jamb_left[0],
+                                   jamb_right[1] - jamb_left[1])
+        reveal_depth_pt = abs(float(left_thickness_pt) - float(right_thickness_pt))
         centerline_step_pt = reveal_depth_pt / 2.0
+        if not all(math.isfinite(x) for x in (
+            clear_span_pt, reveal_depth_pt, centerline_step_pt
+        )):
+            raise ValueError("nonfinite geometry")
 
-        contract_id = stable_contract_id(
-            f"STEPPED_WALL_{context_label}",
-            (
-                round(jamb_left[0], 2),
-                round(jamb_left[1], 2),
-                round(jamb_right[0], 2),
-                round(jamb_right[1], 2),
-                round(left_thickness_pt, 2),
-                round(right_thickness_pt, 2),
-                round(datum_offset_pt, 2),
-                datum_alignment.value,
-            ),
+        # IDs distinguish all source-neutral input hypotheses. Serialization
+        # rounding is presentation-only and never used to identify evidence.
+        contract_id = _stepped_wall_identity(
+            context_label, jamb_left, jamb_right, left_thickness_pt,
+            right_thickness_pt, datum_offset_pt, datum_alignment, scale_ratio,
         )
 
-        # Gate 1: Clear span bounds check
+        def record(
+            classification: SteppedWallApertureClassification,
+            status: EvidenceResolutionStatus,
+            gate: str,
+            notes: str,
+            metrics: tuple[float, float, float, float] | None = None,
+        ) -> SteppedWallApertureRecord:
+            return SteppedWallApertureRecord(
+                contract_id=contract_id,
+                classification=classification,
+                jamb_left_datum=jamb_left,
+                jamb_right_datum=jamb_right,
+                clear_span_pt=clear_span_pt,
+                clear_span_m=None if metrics is None else metrics[0],
+                left_wall_thickness_pt=float(left_thickness_pt),
+                left_wall_thickness_mm=None if metrics is None else metrics[1],
+                right_wall_thickness_pt=float(right_thickness_pt),
+                right_wall_thickness_mm=None if metrics is None else metrics[2],
+                reveal_depth_pt=reveal_depth_pt,
+                reveal_depth_mm=None if metrics is None else metrics[3],
+                centerline_step_offset_pt=centerline_step_pt,
+                datum_alignment=datum_alignment,
+                status=status,
+                first_remaining_gate=gate,
+                notes=notes,
+                context_label=context_label,
+                datum_offset_pt=None if datum_offset_pt is None else float(datum_offset_pt),
+                scale_ratio=None if scale_ratio is None else float(scale_ratio),
+            )
+
+        if scale_ratio is None or datum_offset_pt is None or datum_alignment is None:
+            return record(
+                SteppedWallApertureClassification.ABSTAINED_UNVERIFIED_SOURCE,
+                EvidenceResolutionStatus.ABSTAINED,
+                "original_source_scale_or_datum_unverified",
+                "Missing scale or face-datum receipt; no metric opening or reveal.",
+            )
+
+        # Keep the pre-existing geometric tolerances; no default can make
+        # a source-free aperture confirmed or commercially publishable.
         if clear_span_pt < MIN_CLEAR_SPAN_PT or clear_span_pt > MAX_CLEAR_SPAN_PT:
-            return SteppedWallApertureRecord(
-                contract_id=contract_id,
-                classification=SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN,
-                jamb_left_datum=jamb_left,
-                jamb_right_datum=jamb_right,
-                clear_span_pt=clear_span_pt,
-                clear_span_m=clear_span_m,
-                left_wall_thickness_pt=left_thickness_pt,
-                left_wall_thickness_mm=left_thickness_mm,
-                right_wall_thickness_pt=right_thickness_pt,
-                right_wall_thickness_mm=right_thickness_mm,
-                reveal_depth_pt=reveal_depth_pt,
-                reveal_depth_mm=reveal_depth_mm,
-                centerline_step_offset_pt=centerline_step_pt,
-                datum_alignment=datum_alignment,
-                status=EvidenceResolutionStatus.ABSTAINED,
-                first_remaining_gate="clear_span_out_of_bounds",
-                notes=f"Clear span {clear_span_pt:.2f}pt outside bounds [{MIN_CLEAR_SPAN_PT}, {MAX_CLEAR_SPAN_PT}]pt.",
+            return record(
+                SteppedWallApertureClassification.ABSTAINED_DEGENERATE_SPAN,
+                EvidenceResolutionStatus.ABSTAINED,
+                "clear_span_out_of_bounds",
+                "Geometric clear span outside existing bounds.",
             )
-
-        # Gate 2: Unaligned datum check (face divergence > 2.0 pt)
         if abs(datum_offset_pt) > MAX_ALLOWABLE_DATUM_OFFSET_PT:
-            return SteppedWallApertureRecord(
-                contract_id=contract_id,
-                classification=SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM,
-                jamb_left_datum=jamb_left,
-                jamb_right_datum=jamb_right,
-                clear_span_pt=clear_span_pt,
-                clear_span_m=clear_span_m,
-                left_wall_thickness_pt=left_thickness_pt,
-                left_wall_thickness_mm=left_thickness_mm,
-                right_wall_thickness_pt=right_thickness_pt,
-                right_wall_thickness_mm=right_thickness_mm,
-                reveal_depth_pt=reveal_depth_pt,
-                reveal_depth_mm=reveal_depth_mm,
-                centerline_step_offset_pt=centerline_step_pt,
-                datum_alignment=datum_alignment,
-                status=EvidenceResolutionStatus.ABSTAINED,
-                first_remaining_gate="datum_faces_divergent",
-                notes=f"Exterior datum offset {datum_offset_pt:.2f}pt exceeds maximum tolerance {MAX_ALLOWABLE_DATUM_OFFSET_PT:.2f}pt.",
+            return record(
+                SteppedWallApertureClassification.ABSTAINED_UNALIGNED_DATUM,
+                EvidenceResolutionStatus.ABSTAINED,
+                "datum_faces_divergent",
+                "Datum faces diverge beyond existing tolerance.",
             )
-
-        # Gate 3: Excessive thickness discrepancy (> 15.0 pt / ~260 mm)
         if reveal_depth_pt > MAX_THICKNESS_STEP_PT:
-            return SteppedWallApertureRecord(
-                contract_id=contract_id,
-                classification=SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY,
-                jamb_left_datum=jamb_left,
-                jamb_right_datum=jamb_right,
-                clear_span_pt=clear_span_pt,
-                clear_span_m=clear_span_m,
-                left_wall_thickness_pt=left_thickness_pt,
-                left_wall_thickness_mm=left_thickness_mm,
-                right_wall_thickness_pt=right_thickness_pt,
-                right_wall_thickness_mm=right_thickness_mm,
-                reveal_depth_pt=reveal_depth_pt,
-                reveal_depth_mm=reveal_depth_mm,
-                centerline_step_offset_pt=centerline_step_pt,
-                datum_alignment=datum_alignment,
-                status=EvidenceResolutionStatus.ABSTAINED,
-                first_remaining_gate="thickness_step_excessive",
-                notes=f"Thickness step {reveal_depth_pt:.2f}pt ({reveal_depth_mm:.1f}mm) exceeds allowable maximum {MAX_THICKNESS_STEP_PT:.2f}pt.",
+            return record(
+                SteppedWallApertureClassification.ABSTAINED_EXCESSIVE_THICKNESS_DISCREPANCY,
+                EvidenceResolutionStatus.ABSTAINED,
+                "thickness_step_excessive",
+                "Wall thickness step exceeds existing limit.",
             )
 
-        # Pass: Stepped wall opening confirmed
-        return SteppedWallApertureRecord(
-            contract_id=contract_id,
-            classification=SteppedWallApertureClassification.STEPPED_WALL_APERTURE_CONFIRMED,
-            jamb_left_datum=jamb_left,
-            jamb_right_datum=jamb_right,
-            clear_span_pt=clear_span_pt,
-            clear_span_m=clear_span_m,
-            left_wall_thickness_pt=left_thickness_pt,
-            left_wall_thickness_mm=left_thickness_mm,
-            right_wall_thickness_pt=right_thickness_pt,
-            right_wall_thickness_mm=right_thickness_mm,
-            reveal_depth_pt=reveal_depth_pt,
-            reveal_depth_mm=reveal_depth_mm,
-            centerline_step_offset_pt=centerline_step_pt,
-            datum_alignment=datum_alignment,
-            status=EvidenceResolutionStatus.CANDIDATE,
-            first_remaining_gate="stepped_wall_aperture_shadow_authenticated",
-            notes=f"Stepped wall opening confirmed: reveal rebate {reveal_depth_mm:.1f}mm (centerline step {centerline_step_pt:.2f}pt) reconciled.",
+        metrics = (
+            clear_span_pt * scale_ratio,
+            float(left_thickness_pt) * scale_ratio * 1000.0,
+            float(right_thickness_pt) * scale_ratio * 1000.0,
+            reveal_depth_pt * scale_ratio * 1000.0,
+        )
+        if not all(math.isfinite(v) for v in metrics):
+            raise ValueError("nonfinite hypothetical metric conversion")
+        source_lengths = (
+            clear_span_pt, float(left_thickness_pt),
+            float(right_thickness_pt), reveal_depth_pt,
+        )
+        if any(metric == 0.0 and source > 0.0
+               for metric, source in zip(metrics, source_lengths)):
+            raise ValueError("hypothetical metric conversion underflow")
+        return record(
+            SteppedWallApertureClassification.GEOMETRIC_CANDIDATE,
+            EvidenceResolutionStatus.CANDIDATE,
+            "original_source_host_scale_and_reveal_unverified",
+            "Unverified geometric hypothesis only; NOT a source-confirmed opening.",
+            metrics,
         )
