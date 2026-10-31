@@ -423,3 +423,105 @@ def test_private_original_omitted_same_axis_d15_stub_is_rejected_at_actual_hando
     assert result["first_failure"]=="original_doorway_gap_painted_ink_inventory_incomplete"
     assert result["new_firm_quantities"]==0
     assert result["floor_finish_quantity_granted"] is False
+
+
+@pytest.mark.parametrize("rival_style", [
+    {"color": (0, 0, 0), "width": 0.50},
+    {"color": (1, 0, 0), "width": 0.48},
+    {"color": (0.0, 0.5, 0.0), "width": 0.72},
+    {"color": (0, 0, 0), "width": 0.48, "dashes": "[2 2] 0"},
+    {"color": (0, 0, 0), "width": 0.48, "stroke_opacity": 0.5},
+])
+def test_native_door_gap_preserves_competing_ink_of_different_paint_styles(
+    rival_style,
+):
+    """No painted different-style doorway rival may evade the native census."""
+    import fitz
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),
+        ((120,20),(120,140)),
+        ((20,140),(120,140)),
+        ((20,20),(24,20)),
+        ((80,20),(120,20)),
+    ):
+        page.draw_line(a,b,color=(0,0,0),width=0.48)
+    source_graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":(24,20)},
+                {"degree":1,"point_pdf_pt":(80,20)},
+            ),
+        },),
+    }
+    audit=module._original_doorway_gap_native_ink_inventory_complete
+    assert audit(doc.tobytes(),page_1_based=1,original_room_graph=source_graph)
+    page.draw_line((35,20),(45,20),**rival_style)
+    source_bytes=doc.tobytes()
+    doc.close()
+    assert not audit(
+        source_bytes,page_1_based=1,original_room_graph=source_graph,
+    )
+
+
+def test_unrelated_coloured_ink_outside_native_doorway_does_not_veto():
+    import fitz
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    for a,b in (
+        ((20,20),(20,140)),((120,20),(120,140)),
+        ((20,140),(120,140)),((20,20),(24,20)),((80,20),(120,20)),
+    ):
+        page.draw_line(a,b,color=(0,0,0),width=0.48)
+    page.draw_line((160,20),(175,20),color=(1,0,0),width=0.50)
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":(24,20)},
+                {"degree":1,"point_pdf_pt":(80,20)},
+            ),
+        },),
+    }
+    payload=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        payload,page_1_based=1,original_room_graph=graph,
+    )
+
+
+def test_private_original_complete_entrance_retains_differently_weighted_jamb_rivals():
+    """Original OFFICE p7 has other visible width ink in its open entrance."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    from tools.diag_gpt2_source_room_graph_shadow import (
+        audit_original_room_edge_graph,
+    )
+
+    configured=os.environ.get("PLANREADER_MARYBOROUGH_ORIGINAL_PDF")
+    if not configured:
+        pytest.skip("private original not configured; source not verified")
+    path=Path(configured)
+    assert path.is_file()
+    raw=path.read_bytes()
+    sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert hashlib.sha256(raw).hexdigest()==sha
+    graph=audit_original_room_edge_graph(
+        raw,source_sha256=sha,page_1_based=7,
+        source_edge_ids=(
+            "d52239i0","d66216i0","d53725i0","d52622i0","d52625i0",
+        ),
+    )
+    # The p7 0.96pt original jamb strokes are inside the 0.48pt wall-gap
+    # run, and without source-owned physical roles they remain rivals.
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=7,original_room_graph=graph,
+    ) is False
