@@ -142,6 +142,42 @@ def test_provenance_and_display_cannot_conspire_to_relabel_signed_finish_code(
         verify_sealed_customer_output(signed, forged)
 
 
+@pytest.mark.parametrize("notes_only", [False, True])
+def test_recomputed_customer_fingerprint_cannot_resign_a_foreign_finish_code(
+    notes_only,
+):
+    from pb_migration_contracts import QuantityEvidence
+    from pb_quantity_takeoff_adapter import (
+        CommercialTakeoffSourceTrace,
+        CommercialMeasurementAuthority,
+        compute_commercial_projection_fingerprint,
+    )
+
+    signed, rows = _source_coded_element_receipt()
+    forged = deepcopy(rows)
+    element = "Floor finish area (FT3)"
+    forged[0]["element"] = element
+    provenance = deepcopy(forged[0]["commercial_projection_provenance"])
+    provenance["quantity"]["metadata"]["element"] = element
+    forged[0]["notes"] = json.dumps(provenance)
+    forged[0]["commercial_projection_fingerprint"] = (
+        compute_commercial_projection_fingerprint(
+            QuantityEvidence(**dict(provenance["quantity"])),
+            trace=CommercialTakeoffSourceTrace(**dict(provenance["source_trace"])),
+            authority=CommercialMeasurementAuthority(
+                **dict(provenance["measurement_authority"])
+            ),
+        )
+    )
+    if notes_only:
+        forged[0].pop("commercial_projection_provenance")
+    else:
+        forged[0]["commercial_projection_provenance"] = provenance
+    # A fresh, internally consistent fingerprint cannot override signed FT1.
+    with pytest.raises(CustomerOutputVerificationError, match="element differs"):
+        verify_sealed_customer_output(signed, forged)
+
+
 def test_legacy_original_floor_label_cannot_be_relabelled_as_source_coded():
     signed, rows = _real_floor_finish_receipt()
     assert rows[0]["element"] == "Floor finish area"
