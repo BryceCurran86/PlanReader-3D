@@ -23,3 +23,14 @@ Frozen Full Plan V2 has 120 immutable denominator objects. No expected BOQ quant
 ## SCOPE / SAFETY
 
 ONLY the legacy JobHub deserializer, dedicated test and this report. No original PDFs, credentials, source producer, receipt ledger, signed Lot16 nine/Maryborough three, customer archives, frozen120, 20,000 raster primitive cap or 2.5pt snap modifications. Do not claim merge, source promotion or commercial proof before exact-head CI and applicable owner-source/customer checks.
+
+
+## Follow-up: direct legacy constructor authority defaults
+
+**Observed:** The separate direct `PlanReaderJobHubQuantityRow(...)` dataclass entry point still defaulted omitted `source_type` to `documented_dimension` and omitted `authority_status` to `firm`. With explicit source-page/dimension-text and a forged `is_publishable=True`, the typed-row branch of `run_jobhub_publish_preflight` accepted this source-neutral constructed object; `build_jobhub_payload` could then issue a commercial-ready legacy package. The `from_dict` fix alone does not cover this path.
+
+**Inference:** Default field values are not original-source measurement evidence. The constructor should not silently mint source or FIRM authority. This is a negative-only customer integrity repair; it does not establish that any original quantity is correct.
+
+**Change:** Direct constructor defaults are now `blocked` / `blocked`. All actual issuer-owned `from_takeoff_output_row` receipts and explicitly supplied source/authority values remain unchanged. Focused regressions exercise missing-one-or-both direct receipts through typed, serialized and hydrated commercial preflight and payload builder, plus valid explicit positive and draft-only negative controls, determinism and no-mutation.
+
+**Authority firewall:** No original PDF was supplied to these synthetic tests. No signed original eight/customer body, frozen V2 gold, denominator, scorer, physical geometry, 20k cap or 2.5pt snap was modified. Source-positive release acceptance for #3796 and full four-project scoring remain independent, blocked gates.
