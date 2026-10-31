@@ -65,6 +65,40 @@ def test_modified_machine_material_provenance_not_authenticated_by_original_seal
         verify_sealed_customer_output(run, forged)
 
 
+def test_signed_source_code_display_matches_customer_provenance(monkeypatch):
+    import pb_live_floor_finish_customer_projection as projection
+
+    monkeypatch.setattr(
+        projection, "_source_finish_system",
+        lambda metadata: "{} ({})".format(metadata["finish_code"], metadata["semantic_finish"]),
+    )
+    run, rows = _real_floor_finish_receipt()
+    assert rows[0]["finish_system"] == "FT1 (tile)"
+    assert verify_sealed_customer_output(run, rows).verified_quantity_ids == (
+        "floor-finish-q1",
+    )
+    stored = deepcopy(rows)
+    stored[0].pop("commercial_projection_provenance")
+    assert verify_sealed_customer_output(run, stored).verified_quantity_ids == (
+        "floor-finish-q1",
+    )
+
+
+@pytest.mark.parametrize("wrong_display", ["FT2 (tile)", "FT3 (tile)", "tile", "FT1 (vinyl)"])
+def test_source_code_label_tamper_is_rejected(monkeypatch, wrong_display):
+    import pb_live_floor_finish_customer_projection as projection
+
+    monkeypatch.setattr(
+        projection, "_source_finish_system",
+        lambda metadata: "{} ({})".format(metadata["finish_code"], metadata["semantic_finish"]),
+    )
+    run, rows = _real_floor_finish_receipt()
+    forged = [deepcopy(rows[0])]
+    forged[0]["finish_system"] = wrong_display
+    with pytest.raises(CustomerOutputVerificationError, match="finish_system differs"):
+        verify_sealed_customer_output(run, forged)
+
+
 def test_extra_customer_fields_do_not_affect_unrelated_original_lot16_eight():
     archive = Path("docs/engineering/lot16_original_signed_eight_row_20261015/production")
     sealed = sealed_source_closed_run_from_dict(
