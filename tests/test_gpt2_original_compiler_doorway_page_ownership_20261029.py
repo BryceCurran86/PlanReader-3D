@@ -697,6 +697,59 @@ def test_virtual_connector_collinear_overlap_is_not_only_an_endpoint_touch():
     assert (ring, graph) == before
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("translation", [(0, 0), (400, -700)])
+@pytest.mark.parametrize("reverse_rows", [False, True])
+def test_native_adjacent_backtrack_cannot_forge_open_wall_perimeter(
+    reverse, translation, reverse_rows,
+):
+    from copy import deepcopy
+
+    # Two native vertical strokes share their endpoint but reverse along
+    # the SAME ray: 0->100 followed by 100->50 physically overpaints 50->100.
+    # The claimed empty source intersection census and complete endpoint
+    # owners are deliberately inconsistent with that native geometry.
+    points = ((0, 0), (0, 100), (0, 50), (100, 50), (100, 0))
+    if reverse:
+        points = points[::-1]
+    points = tuple((x + translation[0], y + translation[1]) for x, y in points)
+    ring, graph = _native_chain_receipts_for_virtual_connector(
+        points, reverse_rows=reverse_rows,
+    )
+    before = deepcopy((ring, graph))
+    assert ring["source_only_native_polygon_area_pdf_pt2_not_m2"] > 0
+    assert not compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph,
+    )
+    assert (ring, graph) == before
+    assert "new_firm_quantities" not in ring
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("translation", [(0, 0), (400, -700)])
+@pytest.mark.parametrize("reverse_rows", [False, True])
+def test_native_collinear_straight_split_stays_source_candidate(
+    reverse, translation, reverse_rows,
+):
+    from copy import deepcopy
+
+    # Collinear native segments meeting at just one shared endpoint are a
+    # valid physical ink split. The negative-only guard must preserve them.
+    points = ((0, 0), (0, 50), (0, 100), (100, 100), (100, 0))
+    if reverse:
+        points = points[::-1]
+    points = tuple((x + translation[0], y + translation[1]) for x, y in points)
+    ring, graph = _native_chain_receipts_for_virtual_connector(
+        points, reverse_rows=reverse_rows,
+    )
+    before = deepcopy((ring, graph))
+    assert compiler._original_doorway_ring_matches_reissued_native_graph(
+        ring, graph,
+    )
+    assert (ring, graph) == before
+    assert "new_firm_quantities" not in ring
+
+
 # Source-coverage identity is independent of the doorway receipt's own page.
 # These synthetic producer snapshots are NOT original PDF or quantity proof.
 def _invoke_source_revision_with_coverage(
