@@ -984,3 +984,52 @@ def test_unresolved_original_stroke_metadata_cannot_certify_empty_gap(
     assert not module._original_doorway_gap_native_ink_inventory_complete(
         b"synthetic-source",page_1_based=1,original_room_graph=graph,
     )
+
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("flank", ["both", "left_only", "right_only", "neither"])
+def test_native_open_doorway_requires_source_ink_on_both_gap_flanks(
+    vertical, flank,
+):
+    """No single-sided wall observation may certify two-sided gap completeness."""
+    import fitz
+
+    def turn(p):
+        return (p[1],p[0]) if vertical else p
+
+    doc=fitz.open()
+    page=doc.new_page(width=200,height=200)
+    base=(
+        ((20,20),(20,140)),
+        ((120,20),(120,140)),
+        ((20,140),(120,140)),
+    )
+    for a,b in base:
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=.48)
+    # In negative cases there is real ink anchored at the gap endpoint
+    # but it is PERPENDICULAR to the missing horizontal wall fragment.
+    # This must not make one witness sufficient for BOTH sides.
+    left=((20,20),(24,20)) if flank in {"both","left_only"} else (
+        (24,20),(24,35)
+    )
+    right=((80,20),(120,20)) if flank in {"both","right_only"} else (
+        (80,20),(80,35)
+    )
+    for a,b in (left,right):
+        page.draw_line(turn(a),turn(b),color=(0,0,0),width=.48)
+    graph={
+        "page_1_based":1,
+        "original_native_edge_ids":tuple(f"d{i}i0" for i in range(5)),
+        "native_components":({
+            "native_endpoint_degrees":(
+                {"degree":1,"point_pdf_pt":turn((24,20))},
+                {"degree":1,"point_pdf_pt":turn((80,20))},
+            ),
+        },),
+    }
+    raw=doc.tobytes()
+    doc.close()
+    assert module._original_doorway_gap_native_ink_inventory_complete(
+        raw,page_1_based=1,original_room_graph=graph,
+    ) is (flank=="both")
