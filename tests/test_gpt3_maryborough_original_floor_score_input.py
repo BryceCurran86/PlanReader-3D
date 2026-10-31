@@ -264,6 +264,79 @@ def test_original_runner_retains_only_unpublished_source_first_gate_on_rejected_
         assert not (output / name).exists()
 
 
+
+@pytest.mark.parametrize(
+    ("first_gate", "failure_type"),
+    (
+        ("seal", module.SourceClosedRunExportError),
+        ("customer_projection", module.CommercialTakeoffProjectionError),
+        ("customer_verification", module.CustomerOutputVerificationError),
+    ),
+)
+@pytest.mark.parametrize("diagnostic_fails", (False, True))
+def test_original_runner_preserves_first_failure_before_receipt_validator(
+    tmp_path, monkeypatch, first_gate, failure_type, diagnostic_fails,
+):
+    claim = object()
+    sealed = SimpleNamespace(project_id=module.PROJECT, quantities=())
+    stage = {
+        "benchmark_accuracy": None,
+        "commercial_estimator_approved": False,
+        "first_unproved_stage_counts": {"physical_floor_area_unproven": 1},
+    }
+    inspected = []
+
+    def reject_at(stage_name, value):
+        if first_gate == stage_name:
+            raise failure_type("first production " + first_gate + " rejection")
+        return value
+
+    def inspect(actual):
+        assert actual is claim
+        inspected.append(actual)
+        if diagnostic_fails:
+            raise RuntimeError("private source diagnostic unavailable")
+        return stage
+
+    monkeypatch.setattr(module, "_verify_original_source", lambda *args: SHA)
+    monkeypatch.setattr(
+        module, "collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: claim,
+    )
+    monkeypatch.setattr(
+        module, "seal_live_floor_area_run",
+        lambda *args, **kwargs: reject_at("seal", sealed),
+    )
+    monkeypatch.setattr(
+        module, "project_live_floor_area_customer_rows",
+        lambda *args, **kwargs: reject_at("customer_projection", ()),
+    )
+    monkeypatch.setattr(
+        module, "verify_sealed_customer_output",
+        lambda *args, **kwargs: reject_at(
+            "customer_verification", SimpleNamespace(verified_quantity_ids=())
+        ),
+    )
+    monkeypatch.setattr(module, "inspect_room_measurement_gates", inspect)
+
+    output = tmp_path / "first-failure-private-run"
+    with pytest.raises(failure_type, match="first production " + first_gate + " rejection"):
+        module.run_original_maryborough_floor_handoff(tmp_path / "unused.pdf", output)
+
+    assert inspected == [claim]
+    diagnostic = output / "source_stage_diagnostic_UNPUBLISHED.json"
+    assert diagnostic.exists() is (not diagnostic_fails)
+    if not diagnostic_fails:
+        assert json.loads(diagnostic.read_text(encoding="utf-8")) == stage
+    for name in (
+        "source_sealed_run.json",
+        "verified_customer_rows.json",
+        "source_stage_diagnostic.json",
+        "source_score_readiness_UNPUBLISHED.json",
+    ):
+        assert not (output / name).exists()
+
+
 def test_source_runner_contains_no_reference_quantity_or_frozen_object_matching():
     source = inspect.getsource(module)
     for forbidden in (
