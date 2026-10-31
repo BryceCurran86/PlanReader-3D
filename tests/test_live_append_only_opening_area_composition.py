@@ -169,22 +169,55 @@ def test_reissued_old_host_receipts_do_not_replace_original_object_or_quantity(o
     _, full = original_claim
     baseline = subset(full)
     old = baseline.canonical_openings[0]
-    fresh = replace(
-        old, snapshot_id="another-real-producer-scope",
-        host_binding_record_id="new-host-receipt",
-        evidence_ids=tuple("new-host-receipt" if x == old.host_binding_record_id else x
-                           for x in old.evidence_ids),
+    # A real source reproof owns ONE fresh snapshot across the entire
+    # canonical roster. Reissue the old host receipt in that coherent scope;
+    # do not fabricate a mixed-snapshot success case.
+    fresh_snapshot = "another-real-producer-scope"
+    objects = tuple(
+        replace(
+            opening,
+            snapshot_id=fresh_snapshot,
+            **({
+                "host_binding_record_id": "new-host-receipt",
+                "evidence_ids": tuple(
+                    "new-host-receipt" if x == old.host_binding_record_id else x
+                    for x in old.evidence_ids
+                ),
+            } if opening.canonical_opening_id == old.canonical_opening_id else {}),
+        )
+        for opening in full.canonical_openings
     )
-    fresh_quantity = _opening_quantity(fresh)
-    assert fresh_quantity is not None and fresh_quantity.to_dict() != baseline.opening_quantity_evidence[0].to_dict()
-    objects = tuple(fresh if o.canonical_opening_id == old.canonical_opening_id else o
-                    for o in full.canonical_openings)
-    quantities = tuple(fresh_quantity if q.quantity_id == fresh_quantity.quantity_id else q
-                       for q in full.opening_quantity_evidence)
+    quantities = tuple(_opening_quantity(opening) for opening in objects)
+    assert all(quantity is not None for quantity in quantities)
+    fresh_old_quantity = next(
+        quantity for quantity in quantities
+        if quantity.input_entity_ids == (old.canonical_opening_id,)
+    )
+    assert fresh_old_quantity.to_dict() != baseline.opening_quantity_evidence[0].to_dict()
     result = _append_reproved_areas(baseline, objects, quantities)
     assert result.canonical_openings[0] is old
     assert result.opening_quantity_evidence[0] is baseline.opening_quantity_evidence[0]
+    assert result.opening_area_replay_source_inventory == tuple(
+        sorted(objects, key=lambda opening: opening.canonical_opening_id)
+    )
+    assert {opening.snapshot_id for opening in result.opening_area_replay_source_inventory} == {
+        fresh_snapshot
+    }
 
+
+def test_reissued_old_host_receipt_cannot_hide_a_mixed_fresh_snapshot(original_claim):
+    _, full = original_claim
+    baseline = subset(full)
+    old = baseline.canonical_openings[0]
+    objects = tuple(
+        replace(opening, snapshot_id="another-real-producer-scope")
+        if opening.canonical_opening_id == old.canonical_opening_id else opening
+        for opening in full.canonical_openings
+    )
+    quantities = tuple(_opening_quantity(opening) for opening in objects)
+    assert all(quantity is not None for quantity in quantities)
+    with pytest.raises(SourceClosedRunConflictError, match="replay source scope"):
+        _append_reproved_areas(baseline, objects, quantities)
 
 @pytest.mark.parametrize("damage", (
     "lost_old", "changed_value", "foreign_revision", "source_support",
