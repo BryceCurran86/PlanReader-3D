@@ -417,6 +417,7 @@ def test_customer_bridge_forwards_only_source_classified_evidence_pages_for_room
         auto._try_physical_net_wall_rows(app, 1, _pages(1, 2, 3, 4), [])
     assert collect.call_args.kwargs == {
         "pages": (0, 1, 2, 3),
+        "recover_supported_opening_areas": True,
         "topology_pages": (0, 1),
         "room_area_support_pages": (2,),
     }
@@ -446,7 +447,10 @@ def test_customer_bridge_passes_only_proven_floor_plan_pages_as_topology(tmp_pat
     )
     with patch(SCOPE_TOOL, return_value=fake), patch(CLAIM_TOOL, return_value=_abstained()) as collect:
         auto._try_physical_net_wall_rows(app, 1, _pages(1, 2, 3), [])
-    assert collect.call_args.kwargs == {"pages": (0, 1, 2), "topology_pages": (2,)}
+    assert collect.call_args.kwargs == {
+        "pages": (0, 1, 2), "topology_pages": (2,),
+        "recover_supported_opening_areas": True,
+    }
     report = app._ag09_family_coverage_by_workspace[1]["source_reports"][0]
     assert report["page_scope"]["floor_plan_page_indices"] == [2]
 
@@ -457,14 +461,18 @@ def test_customer_bridge_does_not_narrow_when_scope_is_unproven(tmp_path: Path, 
     app = _app(tmp_path)
     with patch(SCOPE_TOOL, return_value=scope), patch(CLAIM_TOOL, return_value=_abstained()) as collect:
         auto._try_physical_net_wall_rows(app, 1, _pages(1, 2), [])
-    assert collect.call_args.kwargs == {"pages": (0, 1)}
+    assert collect.call_args.kwargs == {
+        "pages": (0, 1), "recover_supported_opening_areas": True,
+    }
 
 
 def test_customer_bridge_survives_a_failing_scope_classifier(tmp_path: Path) -> None:
     app = _app(tmp_path)
     with patch(SCOPE_TOOL, side_effect=RuntimeError("boom")), patch(CLAIM_TOOL, return_value=_abstained()) as collect:
         auto._try_physical_net_wall_rows(app, 1, _pages(1, 2), [])
-    assert collect.call_args.kwargs == {"pages": (0, 1)}
+    assert collect.call_args.kwargs == {
+        "pages": (0, 1), "recover_supported_opening_areas": True,
+    }
 
 
 def test_scope_module_is_not_imported_at_module_level_by_the_customer_path() -> None:
