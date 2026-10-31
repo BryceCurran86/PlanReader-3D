@@ -58,8 +58,10 @@ class TakeoffOutputRow:
     value: float
     unit: str
     trade: str = "general"
-    source_type: str = TakeoffSourceType.DOCUMENTED_DIMENSION.value
-    authority_status: str = AuthorityStatus.FIRM.value
+    # Direct construction without issuer-supplied evidence is not a
+    # documented measurement or a FIRM commercial authority receipt.
+    source_type: str = TakeoffSourceType.BLOCKED.value
+    authority_status: str = AuthorityStatus.BLOCKED.value
     confidence: float = 1.0
     source_page: Optional[Union[int, str]] = None
     source_sheet: Optional[str] = None
