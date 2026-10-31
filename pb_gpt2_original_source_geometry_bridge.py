@@ -47,6 +47,118 @@ from tools.diag_gpt2_source_finish_floor_handoff_shadow import (
 
 
 
+def _original_doorway_gap_native_ink_inventory_complete(
+    original_pdf_bytes: bytes, *, page_1_based: int, original_room_graph: dict,
+) -> bool:
+    """Veto omitted real painted strokes occupying a caller's claimed door gap.
+
+    Re-scan ALL original native paths, not just the selected W2 source IDs.
+    Same-source ink completeness is only a negative candidate gate: it never
+    issues physical wall, finished face, metric threshold or quantity.
+    """
+    import fitz
+    import math
+    import re
+
+    if (type(original_pdf_bytes) is not bytes or not original_pdf_bytes
+            or type(page_1_based) is not int or page_1_based < 1
+            or type(original_room_graph) is not dict
+            or original_room_graph.get("page_1_based") != page_1_based):
+        return False
+    ids=original_room_graph.get("original_native_edge_ids")
+    components=original_room_graph.get("native_components")
+    if (type(ids) is not tuple or not 2 <= len(ids) <= 120000
+            or type(components) is not tuple or len(components)!=1
+            or any(type(s) is not str or re.fullmatch(r"d\d+i\d+",s) is None
+                   for s in ids)):
+        return False
+    degrees=components[0].get("native_endpoint_degrees")
+    if type(degrees) not in (tuple,list):
+        return False
+    try:
+        ends=[tuple(float(v) for v in row["point_pdf_pt"])
+              for row in degrees if row["degree"]==1]
+    except (TypeError,KeyError,ValueError,OverflowError):
+        return False
+    if (len(ends)!=2 or any(len(p)!=2 or not all(math.isfinite(v) for v in p)
+                            for p in ends)):
+        return False
+    # Existing source diagnostic 0.001pt identity; NEVER construction 2.5pt.
+    a,b=(tuple(round(v,3) for v in p) for p in ends)
+    horizontal=a[1]==b[1] and a[0]!=b[0]
+    vertical=a[0]==b[0] and a[1]!=b[1]
+    if horizontal==vertical:
+        return False
+    low,high=sorted((a[0],b[0]) if horizontal else (a[1],b[1]))
+    fixed=a[1] if horizontal else a[0]
+    tolerance=0.001
+    try:
+        with fitz.open(stream=original_pdf_bytes,filetype="pdf") as doc:
+            if page_1_based>doc.page_count:
+                return False
+            drawings=doc[page_1_based-1].get_drawings()
+    except (ValueError,RuntimeError,TypeError,OverflowError):
+        return False
+    if len(drawings)>120000:
+        return False
+
+    def paint(row):
+        color=row.get("color")
+        width=row.get("width")
+        if (row.get("stroke_opacity")!=1.0
+                or row.get("dashes")!="[] 0"
+                or row.get("fill") is not None
+                or type(width) not in (int,float)
+                or not math.isfinite(width) or width<=0
+                or type(color) not in (tuple,list) or len(color)!=3
+                or any(type(c) not in (int,float) or not math.isfinite(c)
+                       for c in color)):
+            return None
+        return round(float(width),4),tuple(round(float(c),4) for c in color)
+
+    def same_run(item):
+        if type(item) is not tuple or len(item)!=3 or item[0]!="l":
+            return None
+        _,p,q=item
+        x0,y0,x1,y1=(round(float(p.x),3),round(float(p.y),3),
+                      round(float(q.x),3),round(float(q.y),3))
+        if horizontal and y0==fixed and y1==fixed and x0!=x1:
+            return tuple(sorted((x0,x1)))
+        if vertical and x0==fixed and x1==fixed and y0!=y1:
+            return tuple(sorted((y0,y1)))
+        return None
+
+    # Derive ink appearance from the actual selected doorway-side strokes,
+    # not a global black-line assumption or a project-specific style.
+    styles=set()
+    selected=set(ids)
+    for name in selected:
+        match=re.fullmatch(r"d(\d+)i(\d+)",name)
+        if match is None:
+            return False
+        ix,j=(int(x) for x in match.groups())
+        if ix>=len(drawings) or j>=len(drawings[ix].get("items",())):
+            return False
+        row=drawings[ix]
+        span=same_run(row["items"][j])
+        signature=paint(row)
+        if signature is not None and span is not None and (
+                abs(span[1]-low)<=tolerance or abs(span[0]-high)<=tolerance):
+            styles.add(signature)
+    if not styles:
+        return False
+    for ix,row in enumerate(drawings):
+        if paint(row) not in styles:
+            continue
+        for j,item in enumerate(row.get("items",())):
+            if f"d{ix}i{j}" in selected:
+                continue
+            span=same_run(item)
+            if span is not None and min(span[1],high)-max(span[0],low)>tolerance:
+                return False
+    return True
+
+
 def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict) -> bool:
     """Prove a caller's perimeter vertices/IDs against SHA-page-native strokes.
 
@@ -764,7 +876,7 @@ class GPT2OriginalSourceGeometryBridge:
         No caller-provided area, copied wall ID, screenshot, or label can
         mint room ownership or floor-finish quantity authority.
         """
-        published,_=self._source_revision(
+        published,original_source_bytes=self._source_revision(
             revision_id,page_1_based=original_floor_page_1_based)
         if (type(source_cross_sheet_receipt) is not dict or
                 source_cross_sheet_receipt.get("original_source_sha256")!=
@@ -773,21 +885,90 @@ class GPT2OriginalSourceGeometryBridge:
         if source_cross_sheet_receipt.get(
                 "source_real_door_ink_gap_virtual_closure_only") is True:
             rival=original_doorway_source_ancestry
-            if (type(rival) is not dict
-                    or rival.get("status")!=
-                        "original_doorway_all_printed_wall_strokes_match_candidate"
-                    or rival.get("original_source_sha256")!=
-                        published.revision.source_sha256
-                    or rival.get("source_revision_id")!=revision_id
-                    or rival.get("source_snapshot_id")!=
-                        published.snapshot.snapshot_id
-                    or rival.get("original_floor_page")!=original_floor_page_1_based
-                    or rival.get("original_other_plan_page")!=
-                        source_cross_sheet_receipt.get("original_finish_page")):
+            # Status and lineage fields are caller data. Reissue BOTH native
+            # doorway stroke inventories from the sealed original PDF before
+            # any material/W4 handoff. Exact original ink is never repaired by
+            # wall snap or a majority vote across alternate source sheets.
+            floor_ids=source_cross_sheet_receipt.get("original_floor_source_ids")
+            finish_ids=source_cross_sheet_receipt.get("original_finish_source_ids")
+            translation=source_cross_sheet_receipt.get(
+                "source_cross_sheet_translation_pdf_pts")
+            finish_page=source_cross_sheet_receipt.get("original_finish_page")
+            valid_scope=(
+                type(source_cross_sheet_receipt.get("original_floor_page")) is int
+                and source_cross_sheet_receipt["original_floor_page"]==original_floor_page_1_based
+                and type(finish_page) is int and finish_page!=original_floor_page_1_based
+                and type(floor_ids) is tuple and type(finish_ids) is tuple
+                and all(2<=len(ids)<=120000
+                        and all(type(item) is str and item for item in ids)
+                        and len(set(ids))==len(ids)
+                        for ids in (floor_ids,finish_ids))
+                and type(translation) in (tuple,list) and len(translation)==2
+                and all(type(v) in (int,float) and abs(v)<=2**53
+                        and v==v and v not in (float("inf"),float("-inf"))
+                        for v in translation)
+                and type(rival) is dict
+                and rival.get("status")==
+                    "original_doorway_all_printed_wall_strokes_match_candidate"
+                and rival.get("original_source_sha256")==
+                    published.revision.source_sha256
+                and rival.get("source_document_id")==published.revision.document_id
+                and rival.get("source_revision_id")==revision_id
+                and rival.get("source_snapshot_id")==published.snapshot.snapshot_id
+                and rival.get("original_floor_page")==original_floor_page_1_based
+                and rival.get("original_other_plan_page")==finish_page
+                and type(rival.get("floor_source_graph")) is dict
+                and type(rival.get("second_plan_source_graph")) is dict
+                and rival["floor_source_graph"].get("original_native_edge_ids")
+                    ==tuple(sorted(floor_ids))
+                and rival["second_plan_source_graph"].get("original_native_edge_ids")
+                    ==tuple(sorted(finish_ids))
+                and rival.get("original_translation_pdf_pts")==list(translation)
+            )
+            reissued=None
+            if valid_scope:
+                try:
+                    reissued=self.original_room_doorway_source_ancestry(
+                        revision_id=revision_id,
+                        original_floor_page_1_based=original_floor_page_1_based,
+                        original_second_page_1_based=finish_page,
+                        original_floor_source_edge_ids=floor_ids,
+                        original_second_source_edge_ids=finish_ids,
+                        original_translation_pdf_pts=tuple(translation),
+                    )
+                except (ValueError,TypeError,KeyError,IndexError,
+                        OverflowError,AttributeError,RuntimeError):
+                    pass
+            if (reissued is None or reissued!=rival
+                    or reissued.get("status")!=
+                        "original_doorway_all_printed_wall_strokes_match_candidate"):
                 return {
                     "status":"source_original_doorway_ancestry_conflict",
                     "first_failure":"real_original_doorway_stub_disagrees_across_sheets",
                     "original_doorway_source_ancestry":rival,
+                    "floor_finish_quantity_granted":False,
+                    "new_firm_quantities":0,
+                }
+            # The selected path IDs themselves are caller-provided. Reissuing
+            # only that subset is NOT original-source scope completeness: a caller
+            # can hide the disagreeing left-hand wall stub and produce a false
+            # positive open-room ancestry. Reinspect both full original source
+            # pages for same-ink strokes actually occupying the alleged door gap.
+            if not (
+                _original_doorway_gap_native_ink_inventory_complete(
+                    original_source_bytes,
+                    page_1_based=original_floor_page_1_based,
+                    original_room_graph=reissued["floor_source_graph"],
+                )
+                and _original_doorway_gap_native_ink_inventory_complete(
+                    original_source_bytes,
+                    page_1_based=finish_page,
+                    original_room_graph=reissued["second_plan_source_graph"],
+                )
+            ):
+                return {
+                    "status":"source_original_doorway_ancestry_conflict",
+                    "first_failure":"original_doorway_gap_painted_ink_inventory_incomplete",
                     "floor_finish_quantity_granted":False,
                     "new_firm_quantities":0,
                 }
