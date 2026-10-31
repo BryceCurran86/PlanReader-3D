@@ -381,3 +381,18 @@ preservation remain mandatory before merge.
 **Untouched:** GPT2 FT2/FT3/RCP room ownership, MAX/Claude Wxx, GPT3 signing,
 source PDFs/tokens, frozen truth/evaluator, 20k cap and 2.5pt snap. This is an
 integrity correction, not a scored accuracy milestone.
+
+
+## GPT1 2026-10-31 — exact original F.07 viewport confidence receipt
+
+**OBSERVED:** At head `24ac1877b3c2d2ebbde00e66c0882ec4d2330323`, `collect_live_ceiling_lining_claims` validates original viewport ID/bbox but calls `float(segmented.confidence)` outside the source-failure guard. This repairs boolean/string/float-subclass receipts and can throw on missing, nonfinite or overflowing source confidence after valid sibling processing.
+
+**INFERRED:** A malformed original F.07 sibling can interrupt or misrepresent a complete selected ceiling source run; this is NOT evidence of a real original quantity error.
+
+**PROPOSED / IMPLEMENTED:** `_source_viewport_confidence` requires exact built-in int/float, finite inclusive [0,1], before `ViewportEvidence`. Any invalid sibling returns complete selected-run ABSTAIN with existing `LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE`; valid source confidence stays unchanged. Confidence grants no metric or material authority.
+
+**ACTUAL TRACE:** original PDF -> `authoritative_floor_plan_viewports` -> `ViewportEvidence` -> `run_source_owned_ceiling_lining_shadow` -> canonical ceiling -> `publish_live_ceiling_area_quantities` -> `project_live_ceiling_area_customer_rows` -> unchanged frozen V2 boundary.
+
+**SYNTHETIC TEST PLAN:** generated native PDF, real producer/issuer positive baseline, native 0/1/0.5 controls, 13 malformed types/bounds in both sibling orders, deterministic replay, input/PDF immutability and real issuer/customer abstention. Not original-source production proof.
+
+**EXCLUSIONS:** No changes to GPT2 FT/RCP correspondence, GPT MAX opening host, GPT3 signing/scoring, original PDF/credentials, signed Lot16 nine/Maryborough three, frozen120, 20k cap or 2.5pt snap. Exact-head Python3.13/3.14 CI and SHA-verified original producer->issuer->sealed/customer preservation remain mandatory before merge. Integrity only; no new FIRM or official score claimed.

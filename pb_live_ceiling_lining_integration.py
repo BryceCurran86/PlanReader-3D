@@ -259,6 +259,23 @@ def _source_viewport_bbox(value: object) -> Optional[tuple[float, float, float, 
     return bbox
 
 
+def _source_viewport_confidence(value: object) -> Optional[float]:
+    """Require native, finite F.07 confidence before accepting a source viewport.
+
+    Confidence is not measurement authority. A foreign source receipt cannot
+    be silently repaired by float coercion or crash the selected ceiling run.
+    """
+    if type(value) not in (int, float):
+        return None
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        return None
+    return confidence
+
+
 def _exact_source_ceiling_quantity_id(value: object) -> bool:
     """Source quantity IDs are immutable receipts, not display strings."""
     return type(value) is str and bool(value) and value == value.strip()
@@ -841,8 +858,12 @@ def collect_live_ceiling_lining_claims(
                 bbox = _source_viewport_bbox(
                     getattr(segmented, "bounding_box", None)
                 )
+                confidence = _source_viewport_confidence(
+                    getattr(segmented, "confidence", None)
+                )
                 if (
-                    type(viewport_id) is not str
+                    confidence is None
+                    or type(viewport_id) is not str
                     or not viewport_id
                     or viewport_id != viewport_id.strip()
                     or bbox is None
@@ -877,7 +898,7 @@ def collect_live_ceiling_lining_claims(
                     view_type="floor_plan",
                     status=ViewportResolutionStatus.RESOLVED,
                     evidence_ids=(),
-                    confidence=float(segmented.confidence),
+                    confidence=confidence,
                 )
                 current = source.published_snapshot_for_revision(
                     published.revision.revision_id

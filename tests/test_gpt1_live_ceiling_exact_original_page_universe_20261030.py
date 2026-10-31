@@ -2435,3 +2435,86 @@ def test_original_f07_identity_census_preserves_distinct_source_scopes(
             (1, "source-viewport-a"), (1, "source-viewport-b"),
         ]
     assert path.read_bytes() == original_pdf
+
+
+class _ForeignSourceConfidenceFloat(float):
+    """A float subclass is not an exact source-producer receipt."""
+
+
+@pytest.mark.parametrize("value", [0, 1, 0.0, 0.5, 1.0])
+def test_original_f07_native_confidence_controls_preserve_value(value):
+    assert ceiling._source_viewport_confidence(value) == float(value)
+
+
+@pytest.mark.parametrize(
+    "bad_confidence",
+    [
+        None, True, False, "0.9", b"0.9", float("nan"),
+        float("inf"), float("-inf"), -0.01, 1.01,
+        10**1000, object(), _ForeignSourceConfidenceFloat(0.9),
+    ],
+)
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_original_f07_confidence_alias_revokes_real_ceiling_customer_universe(
+    tmp_path, monkeypatch, bad_confidence, bad_first
+):
+    """Generated native PDF + real source producer; malformed sibling only."""
+    from types import SimpleNamespace
+    from pb_live_ceiling_area_quantity_publication import (
+        publish_live_ceiling_area_quantities,
+    )
+    from pb_live_ceiling_area_customer_projection import (
+        project_live_ceiling_area_customer_rows,
+    )
+
+    path = _generated_source_owned_ceiling_pdf(tmp_path)
+    original_pdf = path.read_bytes()
+    baseline = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(baseline.claims) == 1
+    assert len(publish_live_ceiling_area_quantities(baseline)) == 1
+    real_viewports = ceiling.authoritative_floor_plan_viewports
+    real_run = ceiling.run_source_owned_ceiling_lining_shadow
+    shadow_calls = []
+    injected = []
+
+    def with_malformed_confidence(page, *, page_number):
+        native = tuple(real_viewports(page, page_number=page_number))
+        assert len(native) == 1
+        authentic = native[0]
+        forged = SimpleNamespace(
+            view_id=authentic.view_id + "-foreign-confidence",
+            bounding_box=authentic.bounding_box,
+            confidence=bad_confidence,
+        )
+        injected.append(forged)
+        return (forged, authentic) if bad_first else (authentic, forged)
+
+    def count_shadow(*args, **kwargs):
+        shadow_calls.append(kwargs["viewport"].viewport_id)
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ceiling, "authoritative_floor_plan_viewports", with_malformed_confidence,
+    )
+    monkeypatch.setattr(
+        ceiling, "run_source_owned_ceiling_lining_shadow", count_shadow,
+    )
+    first = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    second = ceiling.collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert first == second
+    assert first.status is ceiling.EvidenceResolutionStatus.ABSTAINED
+    assert first.reason_codes == (
+        ceiling.LIVE_CEILING_LINING_UNAVAILABLE,
+        ceiling.LIVE_CEILING_LINING_SOURCE_VIEWPORT_FAILURE,
+    )
+    assert first.claims == ()
+    assert first.canonical_ceilings == ()
+    assert first.quantity_evidence == ()
+    assert publish_live_ceiling_area_quantities(first) == ()
+    assert project_live_ceiling_area_customer_rows(
+        first, workspace_id=1, project_id="generated-f07-confidence-alias",
+    ) == ()
+    assert len(injected) == 2
+    assert all(item.confidence is bad_confidence for item in injected)
+    assert len(shadow_calls) == (0 if bad_first else 2)
+    assert path.read_bytes() == original_pdf
