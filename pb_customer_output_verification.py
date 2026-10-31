@@ -266,9 +266,17 @@ def _verify_row_lineage(
                 raise CustomerOutputVerificationError(
                     f"customer row {quantity_id!r} source finish {field} contradicts signed source"
                 )
+        # Legacy source projection shows only the semantic material (tile).
+        # New source projection shows the signed source code as well
+        # (FT1 (tile)). The original producer's persisted customer display,
+        # never the mutable row field, chooses which representation applies.
+        # Both parts must still agree with the sealed source semantic key.
+        source_display = producer_metadata.get("finish_system", parts[3])
         if (
-            type(row.get("finish_system")) is not str
-            or row["finish_system"] != parts[3]
+            type(source_display) is not str
+            or source_display not in (parts[3], f"{parts[2]} ({parts[3]})")
+            or type(row.get("finish_system")) is not str
+            or row["finish_system"] != source_display
         ):
             raise CustomerOutputVerificationError(
                 f"customer row {quantity_id!r} finish_system differs from signed original finish material"
