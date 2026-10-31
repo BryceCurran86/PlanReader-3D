@@ -12,7 +12,7 @@ Serialized untrusted legacy quantity → `PlanReaderJobHubQuantityRow.from_dict`
 
 ## PROPOSED negative-only correction
 
-Treat a serialized `is_publishable=True` claim as invalid unless both source fields are exact nonblank native strings, with no coercion. Unpublishable legacy snapshots missing either receipt remain hydratable but both source and authority are explicitly `blocked`. Already complete source-approved serialized records and real direct issuer rows behave identically. Do not change defaults of directly constructed dataclasses or any unrelated source/quantity family.
+Treat a serialized `is_publishable=True` claim as invalid unless both source fields are exact nonblank native strings, with no coercion. Unpublishable legacy snapshots missing either receipt remain hydratable but both source and authority are explicitly `blocked`. Already complete source-approved serialized records and real direct issuer rows behave identically. This initial deserializer-only scope was subsequently expanded by the independently observed direct-constructor default issue documented below; unrelated source/quantity families remain untouched.
 
 Focused synthetic test matrix: missing each/both receipts, empty, whitespace-only, None, bool/numeric/list object, complete valid positive, unpublished backward-compatible negative, raw and typed preflight equivalence, end-to-end builder result, determinism and caller immutability.
 
