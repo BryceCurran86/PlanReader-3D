@@ -180,6 +180,19 @@ def _original_doorway_ring_matches_reissued_native_graph(ring: dict, graph: dict
                 or cd_b == 0 and on_segment(c, d, b)
                 or ab_c * ab_d < 0 and cd_a * cd_b < 0)
 
+    # Independently veto backtracking between adjacent native strokes.
+    # An empty producer intersection census is not enough: two distinct
+    # collinear edges sharing a vertex can overlap along a nonzero ink span.
+    # A legitimate straight-through split has an opposite-ray direction and
+    # remains valid. This O(N) check is source-only, not W4 wall authority.
+    for i in range(1, len(chain) - 1):
+        shared, previous, following = chain[i], chain[i - 1], chain[i + 1]
+        if orient(shared, previous, following) == 0 and (
+            (previous[0] - shared[0]) * (following[0] - shared[0])
+            + (previous[1] - shared[1]) * (following[1] - shared[1])
+        ) > 0:
+            return False
+
     for index, (a, b) in enumerate(zip(chain, chain[1:])):
         if index in (0, len(chain) - 2):
             # The first and last native strokes are permitted to meet the
