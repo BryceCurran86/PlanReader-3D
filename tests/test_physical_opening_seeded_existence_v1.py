@@ -52,9 +52,11 @@ GLAZING = (((104.0, 102.0), (136.0, 102.0)), ((104.0, 108.0), (136.0, 108.0)))  
 SILL_STUB = (((112.0, 100.0), (128.0, 100.0)),)                                     # collinear with a face
 
 
-def _transform(point, *, angle_deg, scale, offset):
+def _transform(point, *, angle_deg, scale, offset, mirror=False):
     angle = math.radians(angle_deg)
     x, y = point
+    if mirror:
+        x = -x
     return (scale * (x * math.cos(angle) - y * math.sin(angle)) + offset[0],
             scale * (x * math.sin(angle) + y * math.cos(angle)) + offset[1])
 
@@ -222,14 +224,17 @@ def test_a_stub_on_one_outer_face_drops_only_the_layer_that_face_belongs_to():
     assert not set(kept.existence_record.source_observation_ids) & {members[6], members[7]}
 
 
-def test_lines_anchored_at_both_jambs_on_the_outer_faces_are_not_stubs_but_one_on_the_shared_face_must_be_named():
+def test_a_wall_face_that_runs_from_jamb_to_jamb_is_not_an_opening_whatever_the_caller_names():
+    """A visibly continuous three-face wall across the gap is not a through-opening (review of ab8087d4c): jamb-to-jamb
+    ink on any face, outer or shared, is refused even when the caller lists it as accounted."""
     physical, published, ids, kw = _fixture(LAYERED + FLUSH_OUTER + FLUSH_MIDDLE)
     members = _ids(ids, LAYERED, kw)
-    middle = _ids(ids, FLUSH_MIDDLE, kw)
+    flush = _ids(ids, FLUSH_OUTER + FLUSH_MIDDLE, kw)
     selector = _selector(published, members[6])
-    unnamed = physical.prove_seeded_existence(selector, members)
-    assert unnamed.status is ABST and unnamed.reason_codes == (SEEDED_OPENING_INK_UNACCOUNTED,)
-    assert physical.prove_seeded_existence(selector, members, middle).status is CORR
+    for accounted in ((), flush[2:], flush):
+        proof = physical.prove_seeded_existence(selector, members, accounted)
+        assert proof.status is ABST and proof.reason_codes == (SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,)
+        assert proof.existence_record is None
 
 
 def test_ink_outside_the_gap_or_outside_the_faces_is_not_inside_the_opening():

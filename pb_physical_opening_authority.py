@@ -628,6 +628,7 @@ class _StructureFrame:
     gap_start: float
     gap_end: float
     face_offsets: tuple[float, ...]
+    face_line_ids: tuple[tuple[str, ...], ...]      # the face lines on each offset, same order as face_offsets
 
 
 def _unit_direction(line: tuple[float, float, float, float]) -> tuple[float, float]:
@@ -681,25 +682,94 @@ def _structure_frame(
     stations = _clusters(
         [_projection(((by_line[i][0] + by_line[i][2]) / 2.0, (by_line[i][1] + by_line[i][3]) / 2.0), d) for i in jamb_ids],
         _FRAME_TOL)
-    offsets = _clusters(
-        [_projection(((by_line[i][0] + by_line[i][2]) / 2.0, (by_line[i][1] + by_line[i][3]) / 2.0), n) for i in face_ids],
-        _FRAME_TOL)
+    face_offset_of = {
+        i: _projection(((by_line[i][0] + by_line[i][2]) / 2.0, (by_line[i][1] + by_line[i][3]) / 2.0), n) for i in face_ids}
+    offsets = _clusters(list(face_offset_of.values()), _FRAME_TOL)
     if len(stations) != 2 or len(offsets) < 2:
         return None
-    return _StructureFrame(d, n, stations[0], stations[1], tuple(offsets))
+    on_offset = tuple(
+        tuple(sorted(i for i, value in face_offset_of.items() if abs(value - offset) <= _FRAME_TOL)) for offset in offsets)
+    return _StructureFrame(d, n, stations[0], stations[1], tuple(offsets), on_offset)
+
+
+def _in_axes_of(
+    frame: _StructureFrame,
+    other: _StructureFrame,
+) -> Optional[tuple[tuple[float, float], tuple[tuple[float, tuple[str, ...]], ...]]]:
+    """``other``'s gap stations and (face offset, face lines) along ``frame``'s axes, or None when not parallel."""
+    if abs(_cross(frame.direction, other.direction)) > _COORD_EQ_ABS_TOL:
+        return None
+    sign = 1.0 if frame.direction[0] * other.direction[0] + frame.direction[1] * other.direction[1] > 0.0 else -1.0
+    stations = tuple(sorted(sign * value for value in (other.gap_start, other.gap_end)))
+    faces = tuple(sorted(
+        (sign * offset, ids) for offset, ids in zip(other.face_offsets, other.face_line_ids)))
+    return (stations[0], stations[1]), faces
+
+
+def _shared_host_face(first: _StructureFrame, second: _StructureFrame) -> Optional[float]:
+    """The offset of the ONE wall face two jamb-bounded structures verifiably share, or None.
+
+    A shared jamb, a shared cap or any overlap of observation ids is not enough. Both structures must have the same
+    two jamb stations and two face offsets each; exactly one offset is common to both, the face lines on it are the
+    very same lines in both, and the two structures lie on opposite sides of it (so they are stacked layers of one wall
+    and not two readings of the depth of the same wall)."""
+    aligned = _in_axes_of(first, second)
+    if aligned is None:
+        return None
+    stations, faces = aligned
+    if (abs(first.gap_start - stations[0]) > _FRAME_TOL or abs(first.gap_end - stations[1]) > _FRAME_TOL
+            or len(first.face_offsets) != 2 or len(faces) != 2):
+        return None
+    common = [(i, j) for i, offset in enumerate(first.face_offsets) for j, (other, _) in enumerate(faces)
+              if abs(offset - other) <= _FRAME_TOL]
+    if len(common) != 1:
+        return None
+    i, j = common[0]
+    if not first.face_line_ids[i] or first.face_line_ids[i] != faces[j][1]:
+        return None
+    if (first.face_offsets[1 - i] - first.face_offsets[i]) * (faces[1 - j][0] - faces[j][0]) >= 0.0:
+        return None
+    return first.face_offsets[i]
+
+
+def _is_stack_of_layers(group: Sequence[CandidateSemanticOpening], frames: Mapping[str, _StructureFrame]) -> bool:
+    """True when the structures, ordered across the wall, each rest on the face the next one starts from."""
+    ordered = sorted(group, key=lambda c: c.candidate_id)
+    reference = frames[ordered[0].candidate_id]
+    spans = []
+    for candidate in ordered:
+        aligned = _in_axes_of(reference, frames[candidate.candidate_id])
+        if aligned is None or len(aligned[1]) != 2:
+            return False
+        spans.append((aligned[1][0][0], aligned[1][1][0], candidate))
+    spans.sort(key=lambda span: (span[0], span[1], span[2].candidate_id))
+    for (_, high, lower), (low, _, upper) in zip(spans, spans[1:]):
+        if (abs(high - low) > _FRAME_TOL
+                or _shared_host_face(frames[lower.candidate_id], frames[upper.candidate_id]) is None):
+            return False
+    return True
+
+
+def _same_source(first: CandidateSemanticOpening, second: CandidateSemanticOpening) -> bool:
+    return all(getattr(first, name) == getattr(second, name) for name in (
+        "document_id", "revision_id", "source_sha256", "snapshot_id", "page_id", "viewport_id", "structural_pattern"))
 
 
 def _merge_layered_structures(
     candidates: Sequence[CandidateSemanticOpening],
     records_by_id: Mapping[str, SourceObservationRecord],
 ) -> tuple[CandidateSemanticOpening, ...]:
-    """One opening per set of jamb-bounded structures that share a gap and a face line.
+    """One opening per stack of jamb-bounded structures that verifiably share a wall face across one gap.
 
     A wall drawn in layers (masonry, lining, return) gives one six-line structure per pair of adjacent layers, all
-    with the same two jambs' stations. Two such structures are layers of ONE opening when they have the same face
-    direction, the same gap (both stations equal within the coordinate tolerance) and share at least one member line,
-    so they cannot be two openings side by side. Structures that share nothing are left apart, and so are
-    structures whose frame cannot be read; transitive closure over the pairwise rule."""
+    with the same two jambs' stations. Two such structures are layers of ONE opening only when they come from the same
+    document, revision, snapshot, page and viewport, have the same gap and share one host face (the same face lines at
+    the same offset) with the structures on opposite sides of it (``_shared_host_face``). Sharing a jamb, a cap or any
+    other observation does not merge anything. The structures connected this way must also form a clean stack across
+    the wall (each starts where the previous one ends); a connected set that is not one, such as two readings of
+    the depth on the same side of a shared face bridged by a third, is NOT merged, so its structures stay as rivals
+    for the caller to see as a conflict. Structures that share nothing, and structures whose frame cannot be read,
+    are left apart."""
     frames = {c.candidate_id: _structure_frame(c.source_observation_ids, records_by_id) for c in candidates}
     parent = {c.candidate_id: c.candidate_id for c in candidates}
 
@@ -716,11 +786,7 @@ def _merge_layered_structures(
             continue
         for second in ordered[index + 1:]:
             b = frames[second.candidate_id]
-            if (b is None or first.structural_pattern != second.structural_pattern
-                    or first.page_id != second.page_id or first.snapshot_id != second.snapshot_id
-                    or abs(_cross(a.direction, b.direction)) > _COORD_EQ_ABS_TOL
-                    or abs(a.gap_start - b.gap_start) > _FRAME_TOL or abs(a.gap_end - b.gap_end) > _FRAME_TOL
-                    or not set(first.source_observation_ids) & set(second.source_observation_ids)):
+            if b is None or not _same_source(first, second) or _shared_host_face(a, b) is None:
                 continue
             parent[root(first.candidate_id)] = root(second.candidate_id)
     groups: dict[str, list[CandidateSemanticOpening]] = {}
@@ -728,8 +794,8 @@ def _merge_layered_structures(
         groups.setdefault(root(candidate.candidate_id), []).append(candidate)
     merged: list[CandidateSemanticOpening] = []
     for group in groups.values():
-        if len(group) == 1:
-            merged.append(group[0])
+        if len(group) == 1 or not _is_stack_of_layers(group, frames):
+            merged.extend(group)
             continue
         ids = tuple(sorted({i for c in group for i in c.source_observation_ids}))
         roots = tuple(sorted({i for c in group for i in c.source_lineage_root_ids}))
@@ -749,18 +815,22 @@ def _seeded_ink_checks(
     member_ids: frozenset,
     accounted_ids: frozenset,
     records: Sequence[SourceObservationRecord],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Visible lines the restricted universe never saw: (face stubs inside the gap, unaccounted interior ink).
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Visible lines the restricted universe never saw: (face stubs inside the gap, unaccounted interior ink, face
+    ink that continues into the gap).
 
     A stub is the six-line enumerator's own negative evidence, applied with its own definition: a line collinear with
     one of the structure's faces that lies strictly INSIDE the gap (both ends clear of the two jamb stations) proves the
-    two face pieces are not adjacent boundaries. A line anchored at a jamb is not a stub (the enumerator treats it as
-    a possible cap or decoration), and neither is one that runs through the whole gap. Any other visible line that
-    overlaps the gap and lies strictly between the outermost faces must be named by the caller."""
+    two face pieces are not adjacent boundaries. Face ink that is not a stub but still overlaps the gap (anchored at a
+    jamb, running jamb to jamb, or several segments that together do) is wall face continuing across the opening: the
+    enumerator keeps such a line as a possible cap for the annotation checks, but an existence proof for a named
+    opening cannot, so it is its own negative and, unlike interior ink, no naming by the caller excuses it. Any other
+    visible line that overlaps the gap and lies strictly between the outermost faces must be named by the caller."""
     low, high = frame.gap_start + _FRAME_TOL, frame.gap_end - _FRAME_TOL
     inner_low, inner_high = min(frame.face_offsets) + _FRAME_TOL, max(frame.face_offsets) - _FRAME_TOL
     stubs: list[str] = []
     unaccounted: list[str] = []
+    continuing: list[str] = []
     for record in records:
         observation_id = str(record.observation_id)
         if observation_id in member_ids or record.observation_kind not in {
@@ -775,13 +845,15 @@ def _seeded_ink_checks(
         offsets = (_projection((line[0], line[1]), frame.normal), _projection((line[2], line[3]), frame.normal))
         if (abs(_cross(frame.direction, _unit_direction(line))) <= _COORD_EQ_ABS_TOL
                 and abs(offsets[0] - offsets[1]) <= _FRAME_TOL
-                and any(abs(offsets[0] - face) <= _FRAME_TOL for face in frame.face_offsets)
-                and a[0] > frame.gap_start + _COORD_EQ_ABS_TOL and a[1] < frame.gap_end - _COORD_EQ_ABS_TOL):
-            stubs.append(observation_id)
+                and any(abs(offsets[0] - face) <= _FRAME_TOL for face in frame.face_offsets)):
+            if a[0] > frame.gap_start + _COORD_EQ_ABS_TOL and a[1] < frame.gap_end - _COORD_EQ_ABS_TOL:
+                stubs.append(observation_id)
+            else:
+                continuing.append(observation_id)
             continue
         if max(offsets) > inner_low and min(offsets) < inner_high and observation_id not in accounted_ids:
             unaccounted.append(observation_id)
-    return tuple(sorted(stubs)), tuple(sorted(unaccounted))
+    return tuple(sorted(stubs)), tuple(sorted(unaccounted)), tuple(sorted(continuing))
 
 
 def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
@@ -4195,9 +4267,10 @@ class PhysicalOpeningAuthority:
         Read-only diagnostic accessor for a structure proposed by another authority (the observations it says make
         up one whole opening). It runs the same exact predicates as page discovery on a universe restricted to
         those observations, so whether they form a jamb-bounded two-face interruption is decided by this
-        authority's own rules and not by the proposer; structures that are layers of one gap (same jamb stations,
-        same face direction, a shared member line) are returned as ONE candidate carrying
-        ``layered_faces_of_one_gap``. It is deliberately weaker than ``prove_existence``: it never returns
+        authority's own rules and not by the proposer; structures that are layers of one gap (same source, the same
+        jamb stations, and one verified shared host face with the structures on its opposite sides) are returned as
+        ONE candidate carrying ``layered_faces_of_one_gap``, and any connected set that is not a clean stack is left
+        as rivals. It is deliberately weaker than ``prove_existence``: it never returns
         CORROBORATED, issues no existence record, uses and writes none of the per-page candidate memos, and does not
         look at the evidence it was told to leave out, so the caller must account for that evidence itself (or use
         ``prove_seeded_existence``, which does). Every named observation must be a visible observation of the
@@ -4228,9 +4301,12 @@ class PhysicalOpeningAuthority:
         predicates, layered faces of one gap merged) and then to everything the restricted universe left out:
         a structure with a face stub strictly inside its gap is dropped before layers are merged (the six-line
         enumerator's own negative evidence, with its own definition of a stub), and any other visible line inside
-        the gap and between the outermost faces must be named in ``accounted_observation_ids`` or the proof abstains. Viewport scope, annotation opposition and
-        geometry identity are the ones ``prove_existence`` applies; a plain opening yields the identical
-        existence record. No memo is read or written. Nothing in the repository calls this method: wiring it to a
+        the gap and between the outermost faces must be named in ``accounted_observation_ids`` or the proof abstains. Wall-face
+        ink that continues into the gap (anchored at a jamb, jamb to jamb, or in several segments) is refused on any face
+        of the opening, outer or shared, and naming it does not excuse it: only ink that is not on a wall face (glazing,
+        mullions) can be accounted for, and only by an observation the producer authenticated on this snapshot and page.
+        Viewport scope, annotation opposition and geometry identity are the ones ``prove_existence`` applies; a plain
+        opening yields the identical existence record unless it has such ink, which this proof alone refuses. No memo is read or written. Nothing in the repository calls this method: wiring it to a
         consumer, and whether a caller may name members at all (the producer-owned authority is designed so that
         callers cannot inject candidate sets), is the separate authority-promotion decision."""
 
@@ -4278,7 +4354,10 @@ class PhysicalOpeningAuthority:
         frame = _structure_frame(candidate.source_observation_ids, by_id)
         if frame is None:
             return unresolved(source_result, (INVALID_STRUCTURAL_GEOMETRY,), candidate=candidate)
-        unaccounted = _seeded_ink_checks(frame, frozenset(candidate.source_observation_ids), accounted, records)[1]
+        stubs, unaccounted, continuing = _seeded_ink_checks(
+            frame, frozenset(candidate.source_observation_ids), accounted, records)
+        if stubs or continuing:
+            return unresolved(source_result, (SEEDED_WALL_FACE_CONTINUES_INSIDE_GAP,), candidate=candidate)
         if unaccounted:
             return unresolved(source_result, (SEEDED_OPENING_INK_UNACCOUNTED,), candidate=candidate)
         if self._source_visibility_producer is not None:
