@@ -24,7 +24,7 @@ WHITE_MASK = b"q\n140 90 m 170 90 l 155 110 l h W n\n1 g 145 92 40 16 re f\nQ\n"
 
 
 def _window_pdf(*, jamb_hi=True, jamb_fill=False, wall_right=True, jamb_opacity=None, hidden_line=False,
-                mask=None) -> bytes:
+                mask=None, knockout=None) -> bytes:
     """A three-panel window along x, 100..304, with two internal posts, heavy end jambs and continuing wall faces."""
     doc = fitz.open()
     page = doc.new_page(width=420, height=300)
@@ -32,6 +32,12 @@ def _window_pdf(*, jamb_hi=True, jamb_fill=False, wall_right=True, jamb_opacity=
     def line(a, b, width=0.48, **kw):
         page.draw_line(a, b, color=BLACK, width=width, **kw)
 
+    def knock_out():
+        # an unstroked white rectangle over the opening: its edges lie on the jambs and on the wall faces
+        page.draw_rect(fitz.Rect(100.0, 195.0, 304.0, 205.0), color=None, fill=(1, 1, 1))
+
+    if knockout == "before":
+        knock_out()
     for x0, x1 in ((100.0, 160.0), (162.0, 230.0), (232.0, 304.0)):
         line((x0, 200.0), (x1, 200.0))
         line((x0, 200.72), (x1, 200.72))
@@ -61,6 +67,8 @@ def _window_pdf(*, jamb_hi=True, jamb_fill=False, wall_right=True, jamb_opacity=
         doc.update_stream(contents[0], original)
         for xref in contents[1:]:
             doc.update_stream(xref, b"")
+    if knockout == "after":
+        knock_out()
     payload = doc.tobytes()
     doc.close()
     return payload
@@ -301,3 +309,65 @@ def test_every_grant_stays_false_on_a_real_run(clean):
     source, published, nom = clean
     out = _audit(source, published, nom)
     assert all(getattr(out, name) is False for name in shadow._GRANT_FLAGS)
+
+
+# ---- backdrop fills (opt-in, paint-order inference) ---------------------------------------------------------------------
+def _audit_with(source, published, nomination, *, withhold):
+    return shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True, withhold_backdrop_fills=withhold).audit(
+        revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nomination], coordinate_quantum_pt=Q)
+
+
+def test_a_white_knock_out_painted_before_the_ink_makes_the_authority_abstain_by_default():
+    source, published = _publish(_window_pdf(knockout="before"))
+    out = _audit_with(source, published, _nomination(source, published), withhold=False)
+    c = out.correspondences[0]
+    assert c.status is ABST and shadow.EQUAL_EXTENT_STRUCTURE_NOT_PROVEN in c.reason_codes
+    assert dict(out.stroke_counts)["fill_only"] == 4 and "backdrop_fill_edge_withheld" not in dict(out.stroke_counts)
+    assert out.input_provenance == shadow.PRODUCER_INPUT_PROVENANCE and shadow.BACKDROP_FILL_EDGES_WITHHELD not in out.page_reason_codes
+
+
+def test_the_same_knock_out_is_withheld_when_asked_because_every_stroke_it_touches_is_painted_after_it():
+    source, published = _publish(_window_pdf(knockout="before"))
+    out = _audit_with(source, published, _nomination(source, published), withhold=True)
+    c = out.correspondences[0]
+    assert c.status is CAND, (c.reason_codes, [(r.relation, r.authority_status.value) for r in c.relations])
+    assert dict(out.stroke_counts)["backdrop_fill_edge_withheld"] == 4
+    assert out.page_reason_codes == (shadow.BACKDROP_FILL_EDGES_WITHHELD,)
+    assert out.input_provenance == shadow.PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD
+
+
+def test_a_knock_out_painted_after_the_ink_is_never_withheld_because_it_could_cover_it():
+    source, published = _publish(_window_pdf(knockout="after"))
+    out = _audit_with(source, published, _nomination(source, published), withhold=True)
+    c = out.correspondences[0]
+    assert c.status is ABST and shadow.EQUAL_EXTENT_STRUCTURE_NOT_PROVEN in c.reason_codes
+    assert "backdrop_fill_edge_withheld" not in dict(out.stroke_counts)
+    assert out.page_reason_codes == ()
+
+
+def test_withholding_changes_nothing_when_there_is_no_fill():
+    source, published = _publish(_window_pdf())
+    nom = _nomination(source, published)
+    assert _audit_with(source, published, nom, withhold=True).correspondences == _audit_with(
+        source, published, nom, withhold=False).correspondences
+
+
+def test_the_withheld_fill_stays_in_the_inventory_the_receipt_reports(clean):
+    source, published = _publish(_window_pdf(knockout="before"))
+    out = _audit_with(source, published, _nomination(source, published), withhold=True)
+    counts = dict(out.stroke_counts)
+    assert counts["fill_only"] == 4 and counts["stroked"] == 18      # nothing was dropped from the count of what was seen
+
+
+def test_the_withhold_option_must_be_an_explicit_bool():
+    for flag in (1, "yes", None):
+        with pytest.raises(TypeError):
+            shadow.StripWholeApertureCorrespondenceShadow(object(), enabled=True, withhold_backdrop_fills=flag)
+
+
+def test_a_malformed_coordinate_quantum_is_refused_before_the_source_is_read(clean):
+    source, published, nom = clean
+    for quantum in (0.0, -1.0, float("nan"), True, None):
+        with pytest.raises(ValueError):
+            shadow.StripWholeApertureCorrespondenceShadow(source, enabled=True).audit(
+                revision_id=published.revision.revision_id, plan_page_id=1, nominations=[nom], coordinate_quantum_pt=quantum)

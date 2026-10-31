@@ -41,6 +41,9 @@ from pb_structural_whole_opening_aperture_authority import (
 WHOLE_APERTURE_CORRESPONDENCE_SCHEMA_VERSION = "1.0.0"
 WHOLE_APERTURE_CORRESPONDENCE_METHOD = "callout_strip_whole_aperture_correspondence_shadow"
 PRODUCER_INPUT_PROVENANCE = "producer_owned_source_visibility_authenticated_strokes"
+PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD = (
+    "producer_owned_source_visibility_authenticated_strokes_backdrop_fills_withheld_by_paint_order")
+BACKDROP_FILL_EDGES_WITHHELD = "backdrop_fill_edges_withheld_by_paint_order"
 
 # relations of an aperture record to a strip's whole frame extent
 RELATION_EQUAL = "equal_extent"
@@ -89,6 +92,7 @@ STANDING_LIMITS = (
     "aperture_authority_does_not_decide_whole_versus_nested_apertures",
     "aperture_authority_jamb_threshold_between_observed_stroke_widths_cannot_prove_a_jamb_alone",
     "opening_kind_host_wall_binding_and_quantity_not_established",
+    "withholding_backdrop_fills_is_a_paint_order_inference_the_aperture_authority_did_not_make",
 )
 
 _MAX_STRIPS = 512
@@ -577,6 +581,67 @@ def _finite_box(values) -> Optional[tuple[float, float, float, float]]:
     return box if all(math.isfinite(v) and abs(v) < 1e12 for v in box) else None
 
 
+@dataclass(frozen=True)
+class FillPath:
+    """One unstroked filled path whose every edge the producer admitted: its extent and its place in the paint order."""
+
+    path_index: int
+    sequence: Optional[int]
+    box: tuple[float, float, float, float]
+
+
+_GRID_CELL_PT = 64.0
+
+
+def _touches(a, b, eq: float) -> bool:
+    return (min(a[2], b[2]) - max(a[0], b[0]) >= -eq) and (min(a[3], b[3]) - max(a[1], b[1]) >= -eq)
+
+
+def backdrop_fill_paths(fills: Sequence[FillPath], strokes: Sequence[InkItem], eq: float) -> frozenset:
+    """Path indices of unstroked fills that no admitted stroke they could cover precedes in the paint order.
+
+    A filled path covers only what it overlaps and only what was painted before it. A fill is a backdrop when at
+    least one admitted stroke touches its extent and every admitted stroke that does is painted AFTER it
+    (a stroke with an unreadable position counts as before). A fill with no readable position is never a backdrop.
+    The result depends only on extents and positions: not on colour, size, page position or any drawing constant."""
+    grid: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for i, item in enumerate(strokes):
+        if not item.stroked:
+            continue
+        x0, y0, x1, y1 = item.box
+        position = item.sequence if type(item.sequence) is int else -1
+        for cx in range(int((x0 - eq) // _GRID_CELL_PT), int((x1 + eq) // _GRID_CELL_PT) + 1):
+            for cy in range(int((y0 - eq) // _GRID_CELL_PT), int((y1 + eq) // _GRID_CELL_PT) + 1):
+                grid.setdefault((cx, cy), []).append((position, i))
+    for cell in grid.values():
+        cell.sort()
+    result = set()
+    for fill in fills:
+        if type(fill.sequence) is not int:
+            continue
+        x0, y0, x1, y1 = fill.box
+        seen: set[int] = set()
+        earlier = later = False
+        for cx in range(int((x0 - eq) // _GRID_CELL_PT), int((x1 + eq) // _GRID_CELL_PT) + 1):
+            for cy in range(int((y0 - eq) // _GRID_CELL_PT), int((y1 + eq) // _GRID_CELL_PT) + 1):
+                for position, i in grid.get((cx, cy), ()):
+                    if i in seen or not _touches(strokes[i].box, fill.box, eq):
+                        continue
+                    seen.add(i)
+                    if position <= fill.sequence:
+                        earlier = True
+                        break
+                    later = True
+                    break                     # the rest of this position-sorted cell is later still
+                if earlier:
+                    break
+            if earlier:
+                break
+        if later and not earlier:
+            result.add(fill.path_index)
+    return frozenset(result)
+
+
 def _sequence(segment) -> Optional[int]:
     value = segment.get("sequence_number")
     return value if type(value) is int and not isinstance(value, bool) else None
@@ -585,11 +650,33 @@ def _sequence(segment) -> Optional[int]:
 class StripWholeApertureCorrespondenceShadow:
     """Opt-in census. `enabled` must be an explicit bool; the default is off and off touches nothing."""
 
-    def __init__(self, source, *, enabled: bool = False):
-        if type(enabled) is not bool:
-            raise TypeError("enabled must be an explicit bool")
+    def __init__(self, source, *, enabled: bool = False, withhold_backdrop_fills: bool = False):
+        if type(enabled) is not bool or type(withhold_backdrop_fills) is not bool:
+            raise TypeError("enabled and withhold_backdrop_fills must be explicit bools")
         self._source = source
         self._enabled = enabled
+        self._withhold = withhold_backdrop_fills
+
+    @staticmethod
+    def _backdrop_paths(segments, fill_edge_paths, admitted_segments, admitted_ink, eq: float) -> frozenset:
+        by_path: dict[int, list] = {}
+        for segment_id, segment in segments.items():
+            path_index = segment.get("path_index")
+            if type(path_index) is int:
+                by_path.setdefault(path_index, []).append((str(segment_id), segment))
+        fills = []
+        for path_index in sorted({p for p in fill_edge_paths if p is not None}):
+            edges = by_path.get(path_index, [])
+            boxes = [_finite_box([segment.get(k) for k in ("x1", "y1", "x2", "y2")]) for _, segment in edges]
+            positions = {_sequence(segment) for _, segment in edges}
+            if (not edges or any(box is None for box in boxes) or len(positions) != 1
+                    or any(segment_id not in admitted_segments for segment_id, _ in edges)
+                    or any(segment.get("stroke_present") for _, segment in edges)):
+                continue                  # a fill with an edge the producer did not admit has an unproven extent
+            fills.append(FillPath(path_index, next(iter(positions)), (
+                min(min(b[0], b[2]) for b in boxes), min(min(b[1], b[3]) for b in boxes),
+                max(max(b[0], b[2]) for b in boxes), max(max(b[1], b[3]) for b in boxes))))
+        return backdrop_fill_paths(fills, admitted_ink, eq)
 
     def _abstain(self, ownership, nominations, code) -> WholeApertureCorrespondenceShadow:
         empty = StrokeInventory(False, frozenset(), (), (), ())
@@ -608,6 +695,8 @@ class StripWholeApertureCorrespondenceShadow:
                 or isinstance(nominations, (str, bytes))):
             raise ValueError("revision id, integer page id and StripNomination records required")
         nominations = tuple(nominations)
+        if not _real(coordinate_quantum_pt) or coordinate_quantum_pt <= 0:
+            raise ValueError("a positive finite coordinate quantum is required")
 
         import fitz
 
@@ -639,6 +728,7 @@ class StripWholeApertureCorrespondenceShadow:
         visibility = source.authority()
         strokes: list[ApertureSourceStroke] = []
         admitted_ink: list[InkItem] = []
+        fill_edge_paths: list[Optional[int]] = []       # aligned with `strokes`: the path of an unstroked fill edge
         admitted_segments: set[str] = set()
         counts: dict[str, int] = {}
         reasons: list[str] = []
@@ -710,6 +800,7 @@ class StripWholeApertureCorrespondenceShadow:
                 else 0.0,
                 dashes=str(primitive.get("dashes", "")) if stroked else "[] 0",
                 is_fill_mask=not stroked, is_clipped=False))
+            fill_edge_paths.append(None if stroked else path_index)
 
         unadmitted: list[InkItem] = []
         for segment_id, segment in segments.items():
@@ -731,6 +822,15 @@ class StripWholeApertureCorrespondenceShadow:
 
         if seed is None or not strokes:
             return self._abstain(ownership, nominations, VISIBLE_SOURCE_AUTHORITY_REQUIRED)
+        page_reasons: list[str] = []
+        if self._withhold:
+            backdrop = self._backdrop_paths(segments, fill_edge_paths, admitted_segments, admitted_ink,
+                                            coordinate_quantum_pt / _EQ_FRACTION)
+            kept = [stroke for stroke, path in zip(strokes, fill_edge_paths) if path is None or path not in backdrop]
+            if len(kept) != len(strokes):
+                counts["backdrop_fill_edge_withheld"] = len(strokes) - len(kept)
+                page_reasons.append(BACKDROP_FILL_EDGES_WITHHELD)
+            strokes = kept
         inventory = StrokeInventory(
             complete, frozenset(s.observation_id for s in strokes), tuple(admitted_ink), tuple(unadmitted),
             tuple(sorted(counts.items())), tuple(reasons))
@@ -739,4 +839,5 @@ class StripWholeApertureCorrespondenceShadow:
         authority = producer.authority()
         return evaluate_whole_aperture_correspondence(
             ownership, nominations, discovered, authority.all_discriminated_subdivisions(), inventory,
-            coordinate_quantum_pt=coordinate_quantum_pt)
+            coordinate_quantum_pt=coordinate_quantum_pt, page_reason_codes=page_reasons,
+            input_provenance=PRODUCER_INPUT_PROVENANCE_BACKDROP_WITHHELD if self._withhold else PRODUCER_INPUT_PROVENANCE)
